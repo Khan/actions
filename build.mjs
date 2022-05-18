@@ -33,7 +33,7 @@ export const buildPackage = (name, packageJsons, monorepoName) => {
         Object.keys(packageJsons[name].dependencies).forEach((depName) => {
             replacements.push({
                 from: new RegExp(`\\buses: ${depName}\\b`, 'g'),
-                to: `uses: ${monorepoName}#${depName}-v${packageJsons[depName].version}`,
+                to: `uses: ${monorepoName}@${depName}-v${packageJsons[depName].version}`,
             });
         });
         const yml = `actions/${name}/dist/action.yml`;
