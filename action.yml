@@ -1,0 +1,27 @@
+name: 'Check for a changeset'
+description: 'Fail if no .changeset/*.md file is included in the PR.'
+runs:
+  using: "composite"
+  steps:
+    - name: "Get All Changed Files"
+      id: changed
+      uses: jaredly/get-changed-files@v1.0.1
+      with:
+        format: json
+    - uses: actions/github-script@v6
+      with:
+        script: |
+          const inputFiles = JSON.parse(`${{ steps.changed.outputs.added_modified }}`);
+          core.debug("Changed files: " + inputFiles);
+
+          const hasChangeset = inputFiles.some(name => {
+            return /^\.changeset\/.*\.md/.test(name);
+          });
+          if (!hasChangeset) {
+            core.setFailed(
+              "This PR does not have a changeset. You can add one by " +
+              "running `yarn changeset` and following the prompts.\n" +
+              "If this PR doesn't need a changeset, run `yarn changeset " +
+              "--empty` and commit results."
+            );
+          }
