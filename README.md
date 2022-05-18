@@ -6,9 +6,9 @@ Currently only composite actions are supported, although supporting nodejs actio
 
 ## How does the monorepo work?
 
-Github doesn't support putting actions in subdirectories, so we need to do some fancy work here. Inspired by [gitpkg](https://github.com/ramasilveyra/gitpkg), we "publish" versions of our actions to 'bare tags' in this repo. So the tag `filter-files-v0.0.1` would only contain the files for the `filter-files` action, and thus github is perfectly happy for us to reference it as `uses: @Khan/actions#filter-files-v0.0.1`.
+Github doesn't support putting actions in subdirectories, so we need to do some fancy work here. Inspired by [gitpkg](https://github.com/ramasilveyra/gitpkg), we "publish" versions of our actions to 'bare tags' in this repo. So the tag `filter-files-v0.0.1` would only contain the files for the `filter-files` action, and thus github is perfectly happy for us to reference it as `uses: Khan/actions@filter-files-v0.0.1`.
 
-Actions that depend on other actions within this repo (with e.g. `uses: filter-files`) will have the references automatically converted to the appropriated pinned reference (e.g. `Khan/actions#filter-files-v0.0.1`) as part of the publish process.
+Actions that depend on other actions within this repo (with e.g. `uses: filter-files`) will have the references automatically converted to the appropriated pinned reference (e.g. `Khan/actions@filter-files-v0.0.1`) as part of the publish process.
 
 ## How does changeset play in?
 
