@@ -1,0 +1,11 @@
+{
+    "version": "1.0.0",
+    "repository": "git@github.com:Khan/actions.git",
+    "private": true,
+    "workspaces": [
+        "actions/*"
+    ],
+    "devDependencies": {
+        "@changesets/cli": "^2.22.0"
+    }
+}
