@@ -9,6 +9,9 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: ./actions/gerald
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          admin-token: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
       # - name: Get All Changed Files
       #   uses: jaredly/get-changed-files@absolute
       #   id: changed
