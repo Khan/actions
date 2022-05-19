@@ -18,7 +18,13 @@ export const checkTag = (tag) => {
     return true;
 };
 
-export const publishDirectoryAsTags = (distPath, origin, tag, majorTag, dryRun) => {
+export const publishDirectoryAsTags = (
+    distPath,
+    origin,
+    tag,
+    majorTag,
+    dryRun,
+) => {
     const cmds = [
         `git init .`,
         `git add .`,
@@ -58,9 +64,9 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
 
     packageNames.forEach((name) => {
         const version = packageJsons[name].version;
-        const majorVersion = version.split('.')[0];
+        const majorVersion = version.split(".")[0];
         const tag = `${name}-v${version}`;
-        const majorTag = `${name}-v${majorVersion}`
+        const majorTag = `${name}-v${majorVersion}`;
         if (!checkTag(tag)) {
             const distPath = buildPackage(name, packageJsons, `Khan/actions`);
             publishDirectoryAsTags(distPath, origin, tag, majorTag, dryRun);
