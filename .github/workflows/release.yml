@@ -24,4 +24,4 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - name: Publish as git tags
-        run: node publish.mjs
+        run: node utils/publish.mjs
