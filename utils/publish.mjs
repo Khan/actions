@@ -5,9 +5,9 @@
  * for references to other actions in this repo and replacing them
  * with the appropriate pinned references.
  */
-import fs from 'fs';
-import { execSync } from 'child_process';
-import { buildPackage } from './build.mjs';
+import fs from "fs";
+import {execSync} from "child_process";
+import {buildPackage} from "./build.mjs";
 
 export const checkTag = (tag) => {
     try {
@@ -30,7 +30,7 @@ export const publishDirectoryAsTag = (distPath, origin, tag, dryRun) => {
         cmds.push(`git push origin ${tag}`);
     }
     cmds.forEach((cmd) => {
-        execSync(cmd, { cwd: distPath });
+        execSync(cmd, {cwd: distPath});
     });
 };
 
@@ -38,19 +38,19 @@ export const collectPackageJsons = (packageNames) => {
     const packageJsons = {};
     packageNames.forEach((name) => {
         const pkg = JSON.parse(
-            fs.readFileSync(`actions/${name}/package.json`, 'utf8'),
+            fs.readFileSync(`actions/${name}/package.json`, "utf8"),
         );
         packageJsons[pkg.name] = pkg;
     });
-    return packageJsons
-}
+    return packageJsons;
+};
 
 export const publishAsNeeded = (packageNames, dryRun = false) => {
     execSync(`git fetch --tags`);
     const origin = execSync(`git remote get-url origin`, {
-        encoding: 'utf8',
+        encoding: "utf8",
     }).trim();
-    const packageJsons = collectPackageJsons(packageNames)
+    const packageJsons = collectPackageJsons(packageNames);
 
     packageNames.forEach((name) => {
         const version = packageJsons[name].version;
@@ -60,4 +60,4 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
             publishDirectoryAsTag(distPath, origin, tag, dryRun);
         }
     });
-}
+};
