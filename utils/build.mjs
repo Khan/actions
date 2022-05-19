@@ -22,6 +22,21 @@ function copyDir(src, dest) {
     }
 }
 
+export const processActionYml = (name, packageJsons, actionYml) => {
+    const replacements = [];
+    Object.keys(packageJsons[name].dependencies).forEach((depName) => {
+        replacements.push({
+            from: new RegExp(`\\buses: ${depName}\\b`, 'g'),
+            to: `uses: ${monorepoName}#${depName}-v${packageJsons[depName].version}`,
+        });
+    });
+    replacements.forEach(({ from, to }) => {
+        actionYml = actionYml.replace(from, to);
+    });
+
+    return actionYml
+}
+
 export const buildPackage = (name, packageJsons, monorepoName) => {
     const dist = `actions/${name}/dist`;
     if (fs.existsSync(dist)) {
@@ -29,19 +44,9 @@ export const buildPackage = (name, packageJsons, monorepoName) => {
     }
     copyDir(`actions/${name}`, dist);
     if (packageJsons[name].dependencies) {
-        const replacements = [];
-        Object.keys(packageJsons[name].dependencies).forEach((depName) => {
-            replacements.push({
-                from: new RegExp(`\\buses: ${depName}\\b`, "g"),
-                to: `uses: ${monorepoName}#${depName}-v${packageJsons[depName].version}`,
-            });
-        });
         const yml = `actions/${name}/dist/action.yml`;
-        let original = fs.readFileSync(yml, "utf8");
-        replacements.forEach(({from, to}) => {
-            original = original.replace(from, to);
-        });
-        fs.writeFileSync(yml, original);
+        const actionYml = fs.readFileSync(yml, 'utf8');
+        fs.writeFileSync(yml, processActionYaml(name, packageJsons, actionYml));
     }
     return dist;
 };
