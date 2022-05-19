@@ -22,20 +22,25 @@ function copyDir(src, dest) {
     }
 }
 
-export const processActionYml = (name, packageJsons, actionYml) => {
+export const processActionYml = (
+    name,
+    packageJsons,
+    actionYml,
+    monorepoName,
+) => {
     const replacements = [];
     Object.keys(packageJsons[name].dependencies).forEach((depName) => {
         replacements.push({
-            from: new RegExp(`\\buses: ${depName}\\b`, 'g'),
+            from: new RegExp(`\\buses: ${depName}\\b`, "g"),
             to: `uses: ${monorepoName}#${depName}-v${packageJsons[depName].version}`,
         });
     });
-    replacements.forEach(({ from, to }) => {
+    replacements.forEach(({from, to}) => {
         actionYml = actionYml.replace(from, to);
     });
 
-    return actionYml
-}
+    return actionYml;
+};
 
 export const buildPackage = (name, packageJsons, monorepoName) => {
     const dist = `actions/${name}/dist`;
@@ -45,8 +50,8 @@ export const buildPackage = (name, packageJsons, monorepoName) => {
     copyDir(`actions/${name}`, dist);
     if (packageJsons[name].dependencies) {
         const yml = `actions/${name}/dist/action.yml`;
-        const actionYml = fs.readFileSync(yml, 'utf8');
-        fs.writeFileSync(yml, processActionYaml(name, packageJsons, actionYml));
+        const actionYml = fs.readFileSync(yml, "utf8");
+        fs.writeFileSync(yml, processActionYml(name, packageJsons, actionYml));
     }
     return dist;
 };
