@@ -6,14 +6,16 @@
     ],
     "scripts": {
         "lint": "eslint --ext .js,.mjs .",
-        "fix": "yarn lint --fix"
+        "fix": "yarn lint --fix",
+        "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testRegex '.*.test.mjs'"
     },
     "devDependencies": {
         "@changesets/cli": "^2.22.0",
+        "@khanacademy/eslint-config": "^0.1.0",
         "eslint": "^8.15.0",
         "eslint-config-prettier": "^8.5.0",
         "eslint-plugin-prettier": "^4.0.0",
-        "@khanacademy/eslint-config": "^0.1.0",
+        "jest": "^28.1.0",
         "prettier": "^2.6.2"
     }
 }
