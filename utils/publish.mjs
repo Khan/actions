@@ -18,16 +18,26 @@ export const checkTag = (tag) => {
     return true;
 };
 
-export const publishDirectoryAsTag = (distPath, origin, tag, dryRun) => {
+export const publishDirectoryAsTags = (
+    distPath,
+    origin,
+    tag,
+    majorTag,
+    dryRun,
+) => {
     const cmds = [
         `git init .`,
         `git add .`,
         `git commit -m publish`,
         `git remote add origin ${origin}`,
         `git tag ${tag}`,
+        `git tag ${majorTag}`,
     ];
     if (!dryRun) {
         cmds.push(`git push origin ${tag}`);
+        // This will succeed with a warning if the major tag doesn't exist
+        cmds.push(`git push origin :refs/tags/${majorTag}`);
+        cmds.push(`git push origin ${majorTag}`);
     }
     cmds.forEach((cmd) => {
         execSync(cmd, {cwd: distPath});
@@ -54,10 +64,12 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
 
     packageNames.forEach((name) => {
         const version = packageJsons[name].version;
+        const majorVersion = version.split(".")[0];
         const tag = `${name}-v${version}`;
+        const majorTag = `${name}-v${majorVersion}`;
         if (!checkTag(tag)) {
             const distPath = buildPackage(name, packageJsons, `Khan/actions`);
-            publishDirectoryAsTag(distPath, origin, tag, dryRun);
+            publishDirectoryAsTags(distPath, origin, tag, majorTag, dryRun);
         }
     });
 };
