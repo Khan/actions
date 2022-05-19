@@ -1,0 +1,12 @@
+name: Node CI
+
+on:
+  - pull_request
+
+jobs:
+  changeset:
+    name: Check for .changeset file
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: Khan/actions@check-for-changeset-v0.0.0
