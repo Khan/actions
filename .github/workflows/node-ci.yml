@@ -9,6 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: Khan/actions@check-for-changeset-v0.0.0
-      - uses: Khan/actions@shared-node-cache-v0.0.2
+      - uses: ./actions/check-for-changeset
+      - uses: ./actions/shared-node-cache
       - run: yarn lint

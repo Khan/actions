@@ -8,20 +8,9 @@ on:
 jobs:
   release:
     name: Release
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-        node-version: [16.x]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-        with:
-          fetch-depth: 0
-
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v2
-        with:
-          node-version: ${{ matrix.node-version }}
-
+      - uses: ./actions/shared-node-cache
       - name: Publish as git tags
         run: node utils/run-publish.mjs

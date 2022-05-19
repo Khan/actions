@@ -31,8 +31,8 @@ export const processActionYml = (
     const replacements = [];
     Object.keys(packageJsons[name].dependencies).forEach((depName) => {
         replacements.push({
-            from: new RegExp(`\\buses: ${depName}\\b`, "g"),
-            to: `uses: ${monorepoName}#${depName}-v${packageJsons[depName].version}`,
+            from: new RegExp(`\\buses: \\./actions/${depName}\\b`, "g"),
+            to: `uses: ${monorepoName}@${depName}-v${packageJsons[depName].version}`,
         });
     });
     replacements.forEach(({from, to}) => {

@@ -22,7 +22,7 @@ runs:
     - name: Limited run
       if: inputs.full-trigger == '[]' && inputs.limited-trigger != '[]'
       # Will be replaced with a pinned version by our build system
-      uses: json-args
+      uses: ./actions/json-args
       with:
         list: ${{ inputs.limited-trigger }}
         run: ${{ inputs.limited }}
