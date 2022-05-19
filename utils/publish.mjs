@@ -6,11 +6,10 @@
  * with the appropriate pinned references.
  */
 import fs from 'fs';
-import path from 'path';
 import { execSync } from 'child_process';
 import { buildPackage } from './build.mjs';
 
-const checkTag = (tag) => {
+export const checkTag = (tag) => {
     try {
         execSync(`git show-ref --tags ${tag}`);
     } catch (err) {
@@ -19,7 +18,7 @@ const checkTag = (tag) => {
     return true;
 };
 
-const publishDirectoryAsTag = (distPath, tag, dryRun) => {
+export const publishDirectoryAsTag = (distPath, origin, tag, dryRun) => {
     const cmds = [
         `git init .`,
         `git add .`,
@@ -35,29 +34,30 @@ const publishDirectoryAsTag = (distPath, tag, dryRun) => {
     });
 };
 
-const [_, __, ...args] = process.argv;
-const dryRun = args.includes('--dry-run');
+export const collectPackageJsons = (packageNames) => {
+    const packageJsons = {};
+    packageNames.forEach((name) => {
+        const pkg = JSON.parse(
+            fs.readFileSync(`actions/${name}/package.json`, 'utf8'),
+        );
+        packageJsons[pkg.name] = pkg;
+    });
+    return packageJsons
+}
 
-const packageNames = fs.readdirSync('actions');
+export const publishAsNeeded = (packageNames, dryRun = false) => {
+    execSync(`git fetch --tags`);
+    const origin = execSync(`git remote get-url origin`, {
+        encoding: 'utf8',
+    }).trim();
+    const packageJsons = collectPackageJsons(packageNames)
 
-const packageJsons = {};
-packageNames.forEach((name) => {
-    const pkg = JSON.parse(
-        fs.readFileSync(`actions/${name}/package.json`, 'utf8'),
-    );
-    packageJsons[pkg.name] = pkg;
-});
-
-execSync(`git fetch --tags`);
-const origin = execSync(`git remote get-url origin`, {
-    encoding: 'utf8',
-}).trim();
-
-packageNames.forEach((name) => {
-    const version = packageJsons[name].version;
-    const tag = `${name}-v${version}`;
-    if (!checkTag(tag)) {
-        const distPath = buildPackage(name, packageJsons, `Khan/actions`);
-        publishDirectoryAsTag(distPath, tag, dryRun);
-    }
-});
+    packageNames.forEach((name) => {
+        const version = packageJsons[name].version;
+        const tag = `${name}-v${version}`;
+        if (!checkTag(tag)) {
+            const distPath = buildPackage(name, packageJsons, `Khan/actions`);
+            publishDirectoryAsTag(distPath, origin, tag, dryRun);
+        }
+    });
+}
