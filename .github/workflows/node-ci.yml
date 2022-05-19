@@ -10,5 +10,5 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: Khan/actions@check-for-changeset-v0.0.0
-      - uses: Khan/actions@shared-node-cache-v0.0.0
+      - uses: Khan/actions@shared-node-cache-v0.0.2
       - run: yarn lint
