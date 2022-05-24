@@ -1,0 +1,14 @@
+name: Get Changed Files
+description: Get a list of the files that have change in this pull-request or push
+inputs:
+  token:
+    description: secrets.GITHUB_TOKEN
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/github-scripts@v6
+      id: result
+      with:
+        script: |
+          require('./index.js')({github, context, core})
