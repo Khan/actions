@@ -42,7 +42,7 @@ jobs:
               core.setFailed(fftest2)
             }
             const fftest3 = `${{ steps.fftest3.outputs.filtered }}`;
-            if (fftest3 !== `["one.ts", "three.js"]`) {
+            if (fftest3 !== `["one.ts","three.js"]`) {
               core.setFailed(fftest3)
             }
 
