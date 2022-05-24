@@ -31,6 +31,7 @@ jobs:
           extensions: .js,.ts
 
       - uses: actions/github-script@v6
+        name: Test the 'filter-files' action
         with:
           script: |
             const fftest1 = `${{ steps.fftest1.outputs.filtered }}`;
