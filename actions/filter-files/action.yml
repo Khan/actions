@@ -2,10 +2,10 @@ name: 'Filter files please'
 description: 'Filter the list of changed files'
 inputs:
   changed-files:
-    description: 'jsonified list of changed files from setup'
+    description: 'jsonified list of changed files'
     required: true
   files:
-    description: 'comma-separated list of files to check for'
+    description: 'comma-separated list of files to match against. names ending in "/" will be treated as a directory, and match as a prefix. Otherwise path names must be a full match.'
     required: false
   extensions:
     description: 'comma-separated list of extensions to check for'
@@ -26,11 +26,12 @@ runs:
           const inputFiles = JSON.parse(`${{ inputs.changed-files }}`);
           const extensions = extensionsRaw.trim() ? extensionsRaw.split(',') : [];
           const exactFiles = exactFilesRaw.trim() ? exactFilesRaw.split(',') : [];
+          const directories = exactFiles.filter(name => name.endsWith('/'));
 
           const result = inputFiles.filter(name => {
             return extensions.some(ext => name.endsWith(ext)) || (
               exactFiles.includes(name)
-            )
+            ) || directories.some(dir => name.startsWith(dir))
           })
           console.log(`Filtered Files: ${JSON.stringify(result)}`)
           return result;
