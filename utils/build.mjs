@@ -28,8 +28,8 @@ export const processActionYml = (
     actionYml,
     monorepoName,
 ) => {
-    const replacements = [];
-    Object.keys(packageJsons[name].dependencies).forEach((depName) => {
+    const replacements = [{from: new RegExp(`\\./actions/${name}/`), to: "./"}];
+    Object.keys(packageJsons[name].dependencies || {}).forEach((depName) => {
         replacements.push({
             from: new RegExp(`\\buses: \\./actions/${depName}\\b`, "g"),
             to: `uses: ${monorepoName}@${depName}-v${packageJsons[depName].version}`,
@@ -48,13 +48,13 @@ export const buildPackage = (name, packageJsons, monorepoName) => {
         fs.rmSync(dist, {recursive: true});
     }
     copyDir(`actions/${name}`, dist);
-    if (packageJsons[name].dependencies) {
-        const yml = `actions/${name}/dist/action.yml`;
-        const actionYml = fs.readFileSync(yml, "utf8");
-        fs.writeFileSync(
-            yml,
-            processActionYml(name, packageJsons, actionYml, monorepoName),
-        );
-    }
+    // if (packageJsons[name].dependencies) {
+    const yml = `actions/${name}/dist/action.yml`;
+    const actionYml = fs.readFileSync(yml, "utf8");
+    fs.writeFileSync(
+        yml,
+        processActionYml(name, packageJsons, actionYml, monorepoName),
+    );
+    // }
     return dist;
 };

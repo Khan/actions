@@ -34,7 +34,7 @@ module.exports = async ({github, context, core}) => {
 
     // Use GitHub's compare two commits API.
     // https://developer.github.com/v3/repos/commits/#compare-two-commits
-    const response = await github.repos.compareCommits({
+    const response = await github.rest.repos.compareCommits({
         base,
         head,
         owner: context.repo.owner,
