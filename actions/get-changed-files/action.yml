@@ -16,7 +16,7 @@ runs:
       with:
         script: |
           try {
-            require('./index.js')({github, context, core}).catch(err => core.setFailed(err.message))
+            require('./actions/get-changed-files/index.js')({github, context, core}).catch(err => core.setFailed(err.message))
           } catch (err) {
             core.setFailed(err.message)
           }
