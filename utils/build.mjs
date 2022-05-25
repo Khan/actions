@@ -48,13 +48,11 @@ export const buildPackage = (name, packageJsons, monorepoName) => {
         fs.rmSync(dist, {recursive: true});
     }
     copyDir(`actions/${name}`, dist);
-    // if (packageJsons[name].dependencies) {
     const yml = `actions/${name}/dist/action.yml`;
     const actionYml = fs.readFileSync(yml, "utf8");
     fs.writeFileSync(
         yml,
         processActionYml(name, packageJsons, actionYml, monorepoName),
     );
-    // }
     return dist;
 };
