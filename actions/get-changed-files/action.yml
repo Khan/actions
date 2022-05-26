@@ -4,6 +4,10 @@ inputs:
   token:
     description: secrets.GITHUB_TOKEN
     required: true
+outputs:
+  files:
+    description: A jsonified array of files that were added, modified, or renamed.
+    value: ${{ steps.result.outputs.files }}
 runs:
   using: "composite"
   steps:
@@ -11,4 +15,8 @@ runs:
       id: result
       with:
         script: |
-          require('./index.js')({github, context, core})
+          try {
+            require('./index.js')({github, context, core}).catch(err => core.setFailed(err.message))
+          } catch (err) {
+            core.setFailed(err.message)
+          }

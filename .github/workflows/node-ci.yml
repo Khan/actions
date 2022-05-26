@@ -12,3 +12,7 @@ jobs:
       - uses: ./actions/check-for-changeset
       - uses: ./actions/shared-node-cache
       - run: yarn lint
+      
+      - uses: ./actions/get-changed-files
+        id: changed
+      - run: echo '${{ steps.changed.outputs.files }}'
