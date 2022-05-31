@@ -11,7 +11,7 @@ runs:
   using: "composite"
   steps:
       - name: Get All Changed Files
-        uses: Khan/action@get-changed-files-v0.0.0-test
+        uses: Khan/actions@get-changed-files-v0.0.0-test
         id: changed
         with:
           format: 'json'
