@@ -10,6 +10,10 @@ runs:
   steps:
     - name: Limited run
       uses: ./actions/json-args
+    - uses: actions/github-script@v6
+      with:
+        script: |
+          require('./actions/full-or-limited/index.js')({github, core})
 `;
         expect(
             processActionYml(
@@ -39,6 +43,10 @@ runs:
               steps:
                 - name: Limited run
                   uses: Our/monorepo@json-args-v1.2.3
+                - uses: actions/github-script@v6
+                  with:
+                    script: |
+                      require('./index.js')({github, core})
             "
         `);
     });
