@@ -12,7 +12,50 @@ jobs:
       - uses: ./actions/check-for-changeset
       - uses: ./actions/shared-node-cache
       - run: yarn lint
-      
+
+      # Test filter-files
+      - uses: ./actions/filter-files
+        id: fftest1
+        with:
+          changed-files: '["one", "two/three"]'
+          files: 'one, two, three'
+      - uses: ./actions/filter-files
+        id: fftest2
+        with:
+          changed-files: '["one", "two/three"]'
+          files: 'two/'
+      - uses: ./actions/filter-files
+        id: fftest3
+        with:
+          changed-files: '["one.ts", "two", "three.js", "four.js.config"]'
+          extensions: .js,.ts
+      - uses: ./actions/filter-files
+        id: fftest4
+        with:
+          changed-files: '["one", "two/three", "two/three/four"]'
+          files: 'two/three'
+
+      - uses: actions/github-script@v6
+        name: Test the 'filter-files' action
+        with:
+          script: |
+            const fftest1 = `${{ steps.fftest1.outputs.filtered }}`;
+            if (fftest1 !== `["one"]`) {
+              core.setFailed(fftest1)
+            }
+            const fftest2 = `${{ steps.fftest2.outputs.filtered }}`;
+            if (fftest2 !== `["two/three"]`) {
+              core.setFailed(fftest2)
+            }
+            const fftest3 = `${{ steps.fftest3.outputs.filtered }}`;
+            if (fftest3 !== `["one.ts","three.js"]`) {
+              core.setFailed(fftest3)
+            }
+            const fftest4 = `${{ steps.fftest4.outputs.filtered }}`;
+            if (fftest4 !== `["two/three"]`) {
+              core.setFailed(fftest4)
+            }
+
       - uses: ./actions/get-changed-files
         id: changed
       - run: echo '${{ steps.changed.outputs.files }}'
