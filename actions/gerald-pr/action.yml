@@ -13,9 +13,6 @@ runs:
       - name: Get All Changed Files
         uses: Khan/actions@get-changed-files-v0.0.0-test
         id: changed
-      - uses: allenevans/set-env@v2.0.0
-        with:
-          ALL_CHANGED_FILES: '${{ steps.changed.outputs.files }}'
       - name: Check out base branch
         uses: actions/checkout@v2
         with:
@@ -27,6 +24,7 @@ runs:
       - name: Run Gerald
         uses: Khan/gerald@main
         env:
+          ALL_CHANGED_FILES: '${{ steps.changed.outputs.files }}'
           GITHUB_TOKEN: '${{ inputs.token }}'
           ADMIN_PERMISSION_TOKEN: '${{ inputs.admin-token }}'
           EVENT: 'pull_request'
