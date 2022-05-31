@@ -46,7 +46,7 @@ runs:
                 - uses: actions/github-script@v6
                   with:
                     script: |
-                      require('./index.js')({github, core})
+                      require('\${{ github.action_path }}/index.js')({github, core})
             "
         `);
     });
