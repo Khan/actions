@@ -29,11 +29,17 @@ export const processActionYml = (
     monorepoName,
 ) => {
     // This first replacement is to rewrite local requires, in the case where we have
-    // a github-script action with e.g. `require('./actions/my-action/index.js')`. Writing
-    // it this way means it will work in this repo without publishing (so our workflows can
-    // use it directly), and then we do this replacement when publishing so it will work there
-    // too.
-    const replacements = [{from: new RegExp(`\\./actions/${name}/`), to: "./"}];
+    // a github-script action with e.g. `require('./actions/my-action/index.js')`, and turning
+    // it into `require('${{ github.action_path }}/index.js')`. Writing it this way means it
+    // will work in this repo without publishing (so our workflows can use it directly), and
+    // then we do this replacement when publishing so it will work there too.
+    // See https://docs.github.com/en/actions/learn-github-actions/contexts#github-context
+    const replacements = [
+        {
+            from: new RegExp(`\\./actions/${name}/`),
+            to: "${{ github.action_path }}/",
+        },
+    ];
     Object.keys(packageJsons[name].dependencies ?? {}).forEach((depName) => {
         replacements.push({
             from: new RegExp(`\\buses: \\./actions/${depName}\\b`, "g"),
