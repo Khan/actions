@@ -56,6 +56,9 @@ export const collectPackageJsons = (packageNames) => {
 };
 
 export const publishAsNeeded = (packageNames, dryRun = false) => {
+    // Because we rewrite our major version tags (filter-files-v1 for example)
+    // on every patch & minor version publish, tags will move around, and -f
+    // is needed if you have different tags locally.
     execSync(`git fetch --tags -f`);
     const origin = execSync(`git remote get-url origin`, {
         encoding: "utf8",
