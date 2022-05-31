@@ -29,6 +29,11 @@ jobs:
         with:
           changed-files: '["one.ts", "two", "three.js", "four.js.config"]'
           extensions: .js,.ts
+      - uses: ./actions/filter-files
+        id: fftest4
+        with:
+          changed-files: '["one", "two/three", "two/three/four"]'
+          files: 'two/three'
 
       - uses: actions/github-script@v6
         name: Test the 'filter-files' action
@@ -45,5 +50,9 @@ jobs:
             const fftest3 = `${{ steps.fftest3.outputs.filtered }}`;
             if (fftest3 !== `["one.ts","three.js"]`) {
               core.setFailed(fftest3)
+            }
+            const fftest4 = `${{ steps.fftest4.outputs.filtered }}`;
+            if (fftest4 !== `["two/three"]`) {
+              core.setFailed(fftest4)
             }
 
