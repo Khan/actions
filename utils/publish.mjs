@@ -56,7 +56,7 @@ export const collectPackageJsons = (packageNames) => {
 };
 
 export const publishAsNeeded = (packageNames, dryRun = false) => {
-    execSync(`git fetch --tags`);
+    execSync(`git fetch --tags -f`);
     const origin = execSync(`git remote get-url origin`, {
         encoding: "utf8",
     }).trim();
