@@ -1,0 +1,22 @@
+name: Get Changed Files
+description: Get a list of the files that have change in this pull-request or push
+inputs:
+  token:
+    description: secrets.GITHUB_TOKEN
+    required: true
+outputs:
+  files:
+    description: A jsonified array of files that were added, modified, or renamed.
+    value: ${{ steps.result.outputs.files }}
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/github-script@v6
+      id: result
+      with:
+        script: |
+          try {
+            require('./index.js')({github, context, core}).catch(err => core.setFailed(err.message))
+          } catch (err) {
+            core.setFailed(err.message)
+          }
