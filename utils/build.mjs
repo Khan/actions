@@ -33,6 +33,7 @@ export const processActionYml = (
     // it into `require('${{ github.action_path }}/index.js')`. Writing it this way means it
     // will work in this repo without publishing (so our workflows can use it directly), and
     // then we do this replacement when publishing so it will work there too.
+    // See https://docs.github.com/en/actions/learn-github-actions/contexts#github-context
     const replacements = [
         {
             from: new RegExp(`\\./actions/${name}/`),
