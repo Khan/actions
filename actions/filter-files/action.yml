@@ -24,10 +24,10 @@ runs:
       id: result
       with:
         script: |
-          const extensionsRaw = "${{ inputs.extensions }}";
-          const exactFilesRaw = "${{ inputs.files }}";
+          const extensionsRaw = `${{ inputs.extensions }}`;
+          const exactFilesRaw = `${{ inputs.files }}`;
           const inputFiles = JSON.parse(`${{ inputs.changed-files }}`);
-          const invert = "${{ inputs.invert }}" == 'true';
+          const invert = `${{ inputs.invert }}` == 'true';
 
-          return require('./actions/filter-files/index.js')({extensionsRaw, exatFilesRaw, inputFiles, invert})
+          return require('./actions/filter-files/index.js')({extensionsRaw, exatFilesRaw, inputFiles, invert, core})
         result-encoding: json

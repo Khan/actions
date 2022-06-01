@@ -17,10 +17,7 @@ Object.keys(khan.rules).forEach((key) => {
 module.exports = {
     extends: ["eslint:recommended", "prettier"],
     plugins: ["prettier"],
-    rules: {
-        ...basicRules,
-        "no-console": 0,
-    },
+    rules: basicRules,
     env: {
         node: true,
         jest: true,

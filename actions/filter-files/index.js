@@ -11,7 +11,7 @@ const parseList = (raw) => {
     return raw.split("\n").map((item) => item.trim());
 };
 
-module.exports = ({extensionsRaw, exactFilesRaw, inputFiles, invert}) => {
+module.exports = ({extensionsRaw, exactFilesRaw, inputFiles, invert, core}) => {
     const extensions = parseList(extensionsRaw);
     const exactFiles = parseList(exactFilesRaw);
     const directories = exactFiles.filter((name) => name.endsWith("/"));
@@ -22,6 +22,6 @@ module.exports = ({extensionsRaw, exactFilesRaw, inputFiles, invert}) => {
             directories.some((dir) => name.startsWith(dir));
         return matched === !invert;
     });
-    console.log(`Filtered Files: ${JSON.stringify(result)}`);
+    core.info(`Filtered Files: ${JSON.stringify(result)}`);
     return result;
 };
