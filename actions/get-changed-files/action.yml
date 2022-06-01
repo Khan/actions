@@ -4,6 +4,9 @@ inputs:
   token:
     description: secrets.GITHUB_TOKEN
     required: true
+  directories:
+    description: Prefilter results to only the listed subdirectories (newline-separated)
+    required: false
 outputs:
   files:
     description: A jsonified array of files that were added, modified, or renamed.
@@ -16,7 +19,10 @@ runs:
       with:
         script: |
           try {
-            require('./actions/get-changed-files/index.js')({github, context, core}).catch(err => core.setFailed(err.message))
+            require('./actions/get-changed-files/index.js')({
+              github, context, core,
+              directoriesRaw: `${{ inputs.directories }}`,
+            }).catch(err => core.setFailed(err.message))
           } catch (err) {
             core.setFailed(err.message)
           }

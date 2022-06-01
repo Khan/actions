@@ -18,8 +18,12 @@ const getBaseAndHead = (context, core) => {
     }
 };
 
-module.exports = async ({github, context, core}) => {
-    const absolute = !!core.getInput("absolute", {required: false});
+module.exports = async ({github, context, core, directoriesRaw}) => {
+    const directories = directoriesRaw
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .map((item) => (item.endsWith("/") ? item : item + "/"));
 
     const [base, head] = getBaseAndHead(context, core);
     core.info(`Base: ${base}\nHead: ${head}`);
@@ -48,14 +52,15 @@ module.exports = async ({github, context, core}) => {
         );
     }
 
-    const files = response.data.files.filter((file) =>
+    let files = response.data.files.filter((file) =>
         ["added", "modified", "renamed"].includes(file.status),
     );
-    const fileNames = files.map((file) =>
-        absolute
-            ? join(process.env.GITHUB_WORKSPACE, file.filename)
-            : file.filename,
-    );
+    if (directories.length) {
+        files = files.filter((name) =>
+            directories.some((directory) => name.startsWith(directory)),
+        );
+    }
+    const fileNames = files.map((file) => file.filename);
     const serialized = JSON.stringify(fileNames);
 
     core.info(`Added or renamed or modified: ${serialized}`);

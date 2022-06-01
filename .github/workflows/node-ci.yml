@@ -69,6 +69,13 @@ jobs:
             }
 
       - uses: ./actions/get-changed-files
+        id: changed-limited
+        with:
+          directories: |
+            .github/
+            .changeset
+
+      - uses: ./actions/get-changed-files
         id: changed
       - run: echo '${{ steps.changed.outputs.files }}'
 
