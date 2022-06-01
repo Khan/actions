@@ -56,8 +56,10 @@ module.exports = async ({github, context, core, directoriesRaw}) => {
         ["added", "modified", "renamed"].includes(file.status),
     );
     if (directories.length) {
-        files = files.filter((name) =>
-            directories.some((directory) => name.startsWith(directory)),
+        files = files.filter((file) =>
+            directories.some((directory) =>
+                file.filename.startsWith(directory),
+            ),
         );
     }
     const fileNames = files.map((file) => file.filename);
