@@ -19,8 +19,8 @@ jobs:
       - uses: ./actions/filter-files
         id: fftest1
         with:
-          changed-files: '["one", "two/three"]'
-          files: 'one, two, three'
+          changed-files: '["one", "two", "two/three"]'
+          files: one, two, three'
       - uses: ./actions/filter-files
         id: fftest2
         with:
@@ -48,7 +48,7 @@ jobs:
         with:
           script: |
             const fftest1 = `${{ steps.fftest1.outputs.filtered }}`;
-            if (fftest1 !== `["one"]`) {
+            if (fftest1 !== `["one","two"]`) {
               core.setFailed(fftest1)
             }
             const fftest2 = `${{ steps.fftest2.outputs.filtered }}`;
