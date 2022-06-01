@@ -62,7 +62,7 @@ jobs:
               core.setFailed(fftest4)
             }
             const fftest5 = `${{ steps.fftest5.outputs.filtered }}`;
-            if (fftest5 !== `["one", "two/three/four"]`) {
+            if (fftest5 !== `["one","two/three/four"]`) {
               core.setFailed(fftest5)
             }
 
