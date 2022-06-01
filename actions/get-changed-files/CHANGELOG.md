@@ -1,5 +1,11 @@
 # get-changed-files
 
+## 1.0.1
+
+### Patch Changes
+
+-   e2384f1: Fix resolution of the index.js file
+
 ## 1.0.0
 
 ### Major Changes
