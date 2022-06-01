@@ -27,17 +27,7 @@ runs:
           const extensionsRaw = "${{ inputs.extensions }}";
           const exactFilesRaw = "${{ inputs.files }}";
           const inputFiles = JSON.parse(`${{ inputs.changed-files }}`);
-          const extensions = extensionsRaw.trim() ? extensionsRaw.split(',') : [];
-          const exactFiles = exactFilesRaw.trim() ? exactFilesRaw.split(',') : [];
-          const directories = exactFiles.filter(name => name.endsWith('/'));
           const invert = "${{ inputs.invert }}" == 'true';
 
-          const result = inputFiles.filter(name => {
-            const matched = extensions.some(ext => name.endsWith(ext)) || (
-              exactFiles.includes(name)
-            ) || directories.some(dir => name.startsWith(dir))
-            return matched === !invert
-          })
-          console.log(`Filtered Files: ${JSON.stringify(result)}`)
-          return result;
+          return require('./actions/filter-files/index.js')({extensionsRaw, exatFilesRaw, inputFiles, invert})
         result-encoding: json
