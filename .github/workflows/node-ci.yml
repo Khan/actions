@@ -9,9 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: ./actions/check-for-changeset
-        with:
-          exclude: .github/,utils,.eslintrc.js,.prettierrc.js
       - uses: ./actions/shared-node-cache
       - run: yarn lint
 
@@ -19,8 +16,11 @@ jobs:
       - uses: ./actions/filter-files
         id: fftest1
         with:
-          changed-files: '["one", "two/three"]'
-          files: 'one, two, three'
+          changed-files: '["one", "two", "two/three"]'
+          files: |
+            one
+            two
+            three
       - uses: ./actions/filter-files
         id: fftest2
         with:
@@ -30,7 +30,7 @@ jobs:
         id: fftest3
         with:
           changed-files: '["one.ts", "two", "three.js", "four.js.config"]'
-          extensions: .js,.ts
+          extensions: .js, .ts
       - uses: ./actions/filter-files
         id: fftest4
         with:
@@ -48,7 +48,7 @@ jobs:
         with:
           script: |
             const fftest1 = `${{ steps.fftest1.outputs.filtered }}`;
-            if (fftest1 !== `["one"]`) {
+            if (fftest1 !== `["one","two"]`) {
               core.setFailed(fftest1)
             }
             const fftest2 = `${{ steps.fftest2.outputs.filtered }}`;
@@ -71,3 +71,7 @@ jobs:
       - uses: ./actions/get-changed-files
         id: changed
       - run: echo '${{ steps.changed.outputs.files }}'
+
+      - uses: ./actions/check-for-changeset
+        with:
+          exclude: .github/,utils,.eslintrc.js,.prettierrc.js

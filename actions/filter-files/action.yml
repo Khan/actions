@@ -5,10 +5,10 @@ inputs:
     description: 'jsonified list of changed files'
     required: true
   files:
-    description: 'comma-separated list of files to match against. names ending in "/" will be treated as a directory path, and match as a prefix. Otherwise path names must be a full match.'
+    description: 'comma- or newline-separated list of files to match against. names ending in "/" will be treated as a directory path, and match as a prefix. Otherwise path names must be a full match.'
     required: false
   extensions:
-    description: 'comma-separated list of extensions to check for'
+    description: 'comma- or newline-separated list of extensions to check for'
     required: false
   invert:
     description: 'if true, return the non-matched paths instead of the matched ones.'
@@ -24,20 +24,10 @@ runs:
       id: result
       with:
         script: |
-          const extensionsRaw = "${{ inputs.extensions }}";
-          const exactFilesRaw = "${{ inputs.files }}";
+          const extensionsRaw = `${{ inputs.extensions }}`;
+          const exactFilesRaw = `${{ inputs.files }}`;
           const inputFiles = JSON.parse(`${{ inputs.changed-files }}`);
-          const extensions = extensionsRaw.trim() ? extensionsRaw.split(',') : [];
-          const exactFiles = exactFilesRaw.trim() ? exactFilesRaw.split(',') : [];
-          const directories = exactFiles.filter(name => name.endsWith('/'));
-          const invert = "${{ inputs.invert }}" == 'true';
+          const invert = `${{ inputs.invert }}` == 'true';
 
-          const result = inputFiles.filter(name => {
-            const matched = extensions.some(ext => name.endsWith(ext)) || (
-              exactFiles.includes(name)
-            ) || directories.some(dir => name.startsWith(dir))
-            return matched === !invert
-          })
-          console.log(`Filtered Files: ${JSON.stringify(result)}`)
-          return result;
+          return require('./actions/filter-files/index.js')({extensionsRaw, exactFilesRaw, inputFiles, invert, core})
         result-encoding: json
