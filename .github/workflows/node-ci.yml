@@ -34,6 +34,12 @@ jobs:
         with:
           changed-files: '["one", "two/three", "two/three/four"]'
           files: 'two/three'
+      - uses: ./actions/filter-files
+        id: fftest5
+        with:
+          changed-files: '["one", "two/three", "two/three/four"]'
+          files: 'two/three'
+          invert: true
 
       - uses: actions/github-script@v6
         name: Test the 'filter-files' action
@@ -54,6 +60,10 @@ jobs:
             const fftest4 = `${{ steps.fftest4.outputs.filtered }}`;
             if (fftest4 !== `["two/three"]`) {
               core.setFailed(fftest4)
+            }
+            const fftest5 = `${{ steps.fftest5.outputs.filtered }}`;
+            if (fftest5 !== `["one","two/three/four"]`) {
+              core.setFailed(fftest5)
             }
 
       - uses: ./actions/get-changed-files
