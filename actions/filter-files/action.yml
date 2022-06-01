@@ -29,5 +29,5 @@ runs:
           const inputFiles = JSON.parse(`${{ inputs.changed-files }}`);
           const invert = `${{ inputs.invert }}` == 'true';
 
-          return require('./actions/filter-files/index.js')({extensionsRaw, exatFilesRaw, inputFiles, invert, core})
+          return require('./actions/filter-files/index.js')({extensionsRaw, exactFilesRaw, inputFiles, invert, core})
         result-encoding: json
