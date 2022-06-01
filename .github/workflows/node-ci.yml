@@ -10,6 +10,8 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: ./actions/check-for-changeset
+        with:
+          exclude: .github/,utils,.eslintrc.js,.prettierrc.js
       - uses: ./actions/shared-node-cache
       - run: yarn lint
 
