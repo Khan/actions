@@ -10,6 +10,9 @@ inputs:
   extensions:
     description: 'comma-separated list of extensions to check for'
     required: false
+  invert:
+    description: 'if true, return the non-matched paths instead of the matched ones.'
+    required: false
 outputs:
   filtered:
     description: 'The jsonified list of files that match'
@@ -27,11 +30,13 @@ runs:
           const extensions = extensionsRaw.trim() ? extensionsRaw.split(',') : [];
           const exactFiles = exactFilesRaw.trim() ? exactFilesRaw.split(',') : [];
           const directories = exactFiles.filter(name => name.endsWith('/'));
+          const invert = "${{ inputs.invert }}" == 'true';
 
           const result = inputFiles.filter(name => {
-            return extensions.some(ext => name.endsWith(ext)) || (
+            const matched = extensions.some(ext => name.endsWith(ext)) || (
               exactFiles.includes(name)
             ) || directories.some(dir => name.startsWith(dir))
+            return matched === !invert
           })
           console.log(`Filtered Files: ${JSON.stringify(result)}`)
           return result;
