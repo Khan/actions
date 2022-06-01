@@ -66,13 +66,3 @@ module.exports = async ({github, context, core, directoriesRaw}) => {
     core.info(`Added or renamed or modified: ${serialized}`);
     core.setOutput("files", serialized);
 };
-
-const join = (base, name) => {
-    if (!base || !base.length) {
-        return name;
-    }
-    if (!base.endsWith("/")) {
-        base += "/";
-    }
-    return base + name;
-};
