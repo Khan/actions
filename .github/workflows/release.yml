@@ -12,5 +12,12 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: ./actions/shared-node-cache
-      - name: Publish as git tags
-        run: node utils/run-publish.mjs
+
+      - name: Create Release Pull Request or Publish as tags
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          publish: node utils/run-publish.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
