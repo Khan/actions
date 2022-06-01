@@ -1,6 +1,6 @@
 module.exports = ({context, core, inputFiles}) => {
     core.debug("Changed files: " + inputFiles);
-    core.debug(process.env.GITHUB_REF_NAME);
+    console.log(process.env.GITHUB_REF_NAME);
 
     if (process.env.GITHUB_REF_NAME === "changeset-release/main") {
         return; // release PRs don't need changesets.
