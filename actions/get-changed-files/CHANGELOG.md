@@ -1,5 +1,11 @@
 # get-changed-files
 
+## 1.1.0
+
+### Minor Changes
+
+-   ebeb804: Add a 'directories' option to get-changed-files, for prefiltering by directory
+
 ## 1.0.1
 
 ### Patch Changes
