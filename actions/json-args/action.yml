@@ -27,6 +27,10 @@ runs:
             cmd += ' ' + filesList;
           }
           console.log(`Running: ${cmd}`);
-          execSync(cmd, {
-            stdio: 'inherit',
-          })
+          try {
+            execSync(cmd, {
+              stdio: 'inherit',
+            })
+          } catch (err) {
+            core.setFailed(`Command ${cmd} failed: ${err}`)
+          }
