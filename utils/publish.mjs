@@ -34,7 +34,6 @@ export const publishDirectoryAsTags = (
         `git tag ${majorTag}`,
     ];
     if (!dryRun) {
-        cmds.push(`git push origin :refs/tags/${tag}`);
         cmds.push(`git push origin ${tag}`);
         // This will succeed with a warning if the major tag doesn't exist
         cmds.push(`git push origin :refs/tags/${majorTag}`);
@@ -71,7 +70,7 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
         const majorVersion = version.split(".")[0];
         const tag = `${name}-v${version}`;
         const majorTag = `${name}-v${majorVersion}`;
-        if (!checkTag(tag) || name === "check-for-changeset") {
+        if (!checkTag(tag)) {
             const distPath = buildPackage(name, packageJsons, `Khan/actions`);
             publishDirectoryAsTags(distPath, origin, tag, majorTag, dryRun);
         }
