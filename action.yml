@@ -1,0 +1,33 @@
+name: 'Filter files please'
+description: 'Filter the list of changed files'
+inputs:
+  changed-files:
+    description: 'jsonified list of changed files'
+    required: true
+  files:
+    description: 'comma- or newline-separated list of files to match against. names ending in "/" will be treated as a directory path, and match as a prefix. Otherwise path names must be a full match.'
+    required: false
+  extensions:
+    description: 'comma- or newline-separated list of extensions to check for'
+    required: false
+  invert:
+    description: 'if true, return the non-matched paths instead of the matched ones.'
+    required: false
+outputs:
+  filtered:
+    description: 'The jsonified list of files that match'
+    value: ${{ steps.result.outputs.result }}
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/github-script@v6
+      id: result
+      with:
+        script: |
+          const extensionsRaw = `${{ inputs.extensions }}`;
+          const exactFilesRaw = `${{ inputs.files }}`;
+          const inputFiles = JSON.parse(`${{ inputs.changed-files }}`);
+          const invert = `${{ inputs.invert }}` == 'true';
+
+          return require('${{ github.action_path }}/index.js')({extensionsRaw, exactFilesRaw, inputFiles, invert, core})
+        result-encoding: json
