@@ -40,7 +40,7 @@ export const processActionYml = (
             to: "${{ github.action_path }}/",
         },
     ];
-    Object.keys(packageJsons[name].dependencies ?? {}).forEach((depName) => {
+    Object.keys(packageJsons).forEach((depName) => {
         replacements.push({
             from: new RegExp(`\\buses: \\./actions/${depName}\\b`, "g"),
             to: `uses: ${monorepoName}@${depName}-v${packageJsons[depName].version}`,
