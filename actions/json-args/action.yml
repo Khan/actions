@@ -32,5 +32,5 @@ runs:
               stdio: 'inherit',
             })
           } catch (err) {
-            core.setFailed(`Command ${cmd} failed: ${err}`)
+            core.setFailed(err.toString())
           }
