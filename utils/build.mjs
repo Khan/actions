@@ -40,10 +40,13 @@ export const processActionYml = (
             to: "${{ github.action_path }}/",
         },
     ];
-    Object.keys(packageJsons).forEach((depName) => {
+    const allActionNames = Object.keys(packageJsons);
+    // For each of the other actions, replace any local-path references to it
+    // to a normal action reference, locked to the current latest version.
+    allActionNames.forEach((actionName) => {
         replacements.push({
-            from: new RegExp(`\\buses: \\./actions/${depName}\\b`, "g"),
-            to: `uses: ${monorepoName}@${depName}-v${packageJsons[depName].version}`,
+            from: new RegExp(`\\buses: \\./actions/${actionName}\\b`, "g"),
+            to: `uses: ${monorepoName}@${actionName}-v${packageJsons[actionName].version}`,
         });
     });
     replacements.forEach(({from, to}) => {
