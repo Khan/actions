@@ -83,7 +83,7 @@ jobs:
       - uses: ./actions/json-args
         continue-on-error: true
         with:
-          list: '["hi","folks with space"]'
+          list: '["one/arg/its/a/path/","another arg with spaces in it"]'
           run: node -e 'console.log(process.argv); process.exit(1)' {}
 
       - uses: ./actions/check-for-changeset
