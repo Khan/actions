@@ -79,6 +79,13 @@ jobs:
         id: changed
       - run: echo '${{ steps.changed.outputs.files }}'
 
+      # Test json-args with a failing command
+      - uses: ./actions/json-args
+        continue-on-error: true
+        with:
+          list: '["one/arg/its/a/path/","another arg with spaces in it"]'
+          run: node -e 'console.log(process.argv); process.exit(1)' {}
+
       - uses: ./actions/check-for-changeset
         with:
           exclude: .github/,utils,.eslintrc.js,.prettierrc.js
