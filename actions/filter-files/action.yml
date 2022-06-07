@@ -26,7 +26,11 @@ runs:
         script: |
           const extensionsRaw = `${{ inputs.extensions }}`;
           const exactFilesRaw = `${{ inputs.files }}`;
-          const inputFiles = JSON.parse(`${{ inputs.changed-files }}`);
+          const inputFilesRaw = `${{ inputs.changed-files }}`;
+          if (inputFilesRaw.trim() === '') {
+            throw new Error(`filter-files was called with an empty string as the "changed-files" parameter.`)
+          }
+          const inputFiles = JSON.parse(inputFilesRaw);
           const invert = `${{ inputs.invert }}` == 'true';
 
           return require('./actions/filter-files/index.js')({extensionsRaw, exactFilesRaw, inputFiles, invert, core})
