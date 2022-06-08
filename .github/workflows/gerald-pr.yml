@@ -5,6 +5,7 @@ name: Gerald - Notify and Request Reviewers On Pull Request
 
 jobs:
   gerald:
+    if: "github.event.action != 'edited' || github.event.changes.body.from != ''"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
