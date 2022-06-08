@@ -5,9 +5,13 @@ name: Gerald - Notify and Request Reviewers On Pull Request
 
 jobs:
   gerald:
+    # Don't re-run if only the title changes
     if: "github.event.action != 'edited' || github.event.changes.body.from != github.event.pull_request.body"
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/github-script@v6
+        with:
+          script: console.log(context.payload.action)
       - uses: actions/checkout@v2
       - uses: ./actions/gerald-pr
         name: Run Gerald Thanks
