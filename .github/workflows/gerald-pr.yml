@@ -9,7 +9,7 @@ jobs:
     steps:
       - uses: actions/github-script@v6
         with:
-          script: console.log(context.payload.action)
+          script: console.log(JSON.stringify(context.payload))
       - uses: actions/checkout@v2
       - uses: ./actions/gerald-pr
         name: Run Gerald Thanks
