@@ -5,7 +5,7 @@ name: Gerald - Notify and Request Reviewers On Pull Request
 
 jobs:
   gerald:
-    # Don't re-run if only the title changes
+    # Don't re-run if only the title or body changes
     if: "github.event.action != 'edited' || github.event.changes.base != null"
     runs-on: ubuntu-latest
     steps:
