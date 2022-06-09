@@ -15,20 +15,25 @@ runs:
         id: changed
         with:
           format: 'json'
+        if: ${{ github.event.pull_request.draft == false }}
       - uses: allenevans/set-env@v2.0.0
         with:
           ALL_CHANGED_FILES: '${{ steps.changed.outputs.added_modified }}'
+        if: ${{ github.event.pull_request.draft == false }}
       - name: Check out base branch
         uses: actions/checkout@v2
         with:
           ref: '${{ github.base_ref }}'
+        if: ${{ github.event.pull_request.draft == false }}
       - name: Check out head branch
         uses: actions/checkout@v2
         with:
           ref: '${{ github.head_ref }}'
+        if: ${{ github.event.pull_request.draft == false }}
       - name: Run Gerald
         uses: Khan/gerald@main
         env:
           GITHUB_TOKEN: '${{ inputs.token }}'
           ADMIN_PERMISSION_TOKEN: '${{ inputs.admin-token }}'
           EVENT: 'pull_request'
+        if: ${{ github.event.pull_request.draft == false }}
