@@ -1,0 +1,37 @@
+name: Setup Keeper
+description: Install keeper & set up authentication
+inputs:
+  config:
+    description: contents of the keeper config file
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: setup for linux
+      if: ${{ runner.os === "Linux" }}
+      shell: bash
+      run: |
+        sudo apt-get -y install python3-setuptools
+        pip3 install wheel
+        # On 2/26/2021, this step started failing, because keepercommander brings down cryptography
+        # which needs setuptools_rust, but wasn't finding it. Manually installing setuptools_rust
+        # fixes that problem, but perhaps once cryptography is updated, we will no longer need this
+        # extra step? So, maybe delete later
+        pip3 install setuptools_rust
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+        export PATH=$PATH:$HOME/.local/bin
+
+    - name: install keepercommander
+      shell: bash
+      run: pip3 install keepercommander==16.6.5
+
+    - name: Set up the keeper config file
+      shell: bash
+      run: |
+        cat << EOF > $HOME/.keeper-config.json
+        ${{ inputs.config }}
+        EOF
+        echo "KEEPER_CONFIG_FILE=$HOME/.keeper-config.json" >> $GITHUB_ENV
+
+    - name: Check that keeper is installed correctly
+      run: keeper whoami
