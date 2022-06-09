@@ -1,0 +1,17 @@
+name: Keeper
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/keeper.yml
+      - actions/setup-keeper/**
+
+jobs:
+  check:
+    name: Lints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: ./actions/setup-keeper
+        with:
+          config: ${{ secrets.KEEPER_CONFIG }}
