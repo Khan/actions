@@ -7,23 +7,9 @@ inputs:
 runs:
   using: "composite"
   steps:
-    # - name: setup for linux
-    #   if: ${{ runner.os == "Linux" }}
-    #   shell: bash
-    #   run: |
-    #     # sudo apt-get -y install python3-setuptools
-    #     # pip3 install wheel
-    #     # # On 2/26/2021, this step started failing, because keepercommander brings down cryptography
-    #     # # which needs setuptools_rust, but wasn't finding it. Manually installing setuptools_rust
-    #     # # fixes that problem, but perhaps once cryptography is updated, we will no longer need this
-    #     # # extra step? So, maybe delete later
-    #     # pip3 install setuptools_rust
-    #     echo "$HOME/.local/bin" >> $GITHUB_PATH
-    #     export PATH=$PATH:$HOME/.local/bin
-
     - name: install keepercommander
       shell: bash
-      run: pip3 install keepercommander==16.6.5
+      run: pip3 install cryptography==37.0.2 keepercommander==16.6.5
 
     - name: Set up the keeper config file
       shell: bash

@@ -8,7 +8,7 @@ on:
 
 jobs:
   check:
-    name: Lints
+    name: Verify keeper installation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
