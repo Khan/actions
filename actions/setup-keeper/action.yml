@@ -21,4 +21,4 @@ runs:
 
     - name: Check that keeper is installed correctly
       shell: bash
-      run: keeper whoami | grep notexistent
+      run: keeper whoami | grep '@khanacademy.org'
