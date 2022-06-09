@@ -1,0 +1,20 @@
+name: Keeper
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/keeper.yml
+      - actions/setup-keeper/**
+
+jobs:
+  check:
+    name: Verify keeper installation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: ./actions/setup-keeper
+        with:
+          config: ${{ secrets.KEEPER_CONFIG }}
+      - name: Ensure that the env vbl made its way out of that action
+        run: |
+          keeper whoami | grep '@khanacademy.org'
