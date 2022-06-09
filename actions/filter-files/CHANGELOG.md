@@ -1,5 +1,11 @@
 # filter-files
 
+## 0.2.1
+
+### Patch Changes
+
+-   7511dd2: Better error reporting for misconfigured arguments
+
 ## 0.2.0
 
 ### Minor Changes
