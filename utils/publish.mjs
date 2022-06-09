@@ -28,6 +28,8 @@ export const publishDirectoryAsTags = (
     const cmds = [
         `git init .`,
         `git add .`,
+        `git config user.email "khan-actions-bot@khanacademy.org"`,
+        `git config user.name "Khan Actions Bot"`,
         `git commit -m publish`,
         `git remote add origin ${origin}`,
         `git tag ${tag}`,
