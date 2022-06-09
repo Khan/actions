@@ -15,3 +15,6 @@ jobs:
       - uses: ./actions/setup-keeper
         with:
           config: ${{ secrets.KEEPER_CONFIG }}
+      - name: Ensure that the env vbl made its way out of that action
+        run: |
+          keeper whoami | grep '@khanacademy.org'
