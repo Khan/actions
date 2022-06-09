@@ -10,6 +10,7 @@ inputs:
 runs:
   using: "composite"
   steps:
+      # A Change
       - name: Get All Changed Files
         uses: jaredly/get-changed-files@absolute
         id: changed
