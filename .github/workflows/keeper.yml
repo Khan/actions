@@ -6,6 +6,7 @@ on:
       - .github/workflows/keeper.yml
       - actions/setup-keeper/**
 
+# Check it out
 jobs:
   check:
     name: Verify keeper installation
