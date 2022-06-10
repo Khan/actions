@@ -15,7 +15,7 @@ runs:
       with:
         script:
           const config = `${{ inputs.config }}`;
-          require('fs').writeFileSync('./.keeper-config.json', config)
+          require('fs').writeFileSync(process.env.HOME + '/.keeper-config.json', config)
 
     - name: Set up the keeper config file
       shell: bash
