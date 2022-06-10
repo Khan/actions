@@ -14,7 +14,7 @@ runs:
     - uses: actions/github-script@v6
       with:
         script:
-          const config = `${{ secrets.KEEPER_CONFIG }}`;
+          const config = `${{ inputs.config }}`;
           require('fs').writeFileSync('./.keeper-config.json', config)
 
     - name: Set up the keeper config file
