@@ -21,4 +21,6 @@ runs:
 
     - name: Check that keeper is installed correctly
       shell: bash
-      run: keeper whoami | grep '@khanacademy.org'
+      run: |
+        keeper this-device
+        keeper whoami
