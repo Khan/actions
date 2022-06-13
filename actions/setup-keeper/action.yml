@@ -11,14 +11,16 @@ runs:
       shell: bash
       run: pip3 install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
 
+    - uses: actions/github-script@v6
+      with:
+        script:
+          const config = `${{ inputs.config }}`;
+          require('fs').writeFileSync(process.env.HOME + '/.keeper-config.json', config)
+
     - name: Set up the keeper config file
       shell: bash
-      run: |
-        cat << EOF > $HOME/.keeper-config.json
-        ${{ inputs.config }}
-        EOF
-        echo "KEEPER_CONFIG_FILE=$HOME/.keeper-config.json" >> $GITHUB_ENV
+      run: echo "KEEPER_CONFIG_FILE=$HOME/.keeper-config.json" >> $GITHUB_ENV
 
     - name: Check that keeper is installed correctly
       shell: bash
-      run: keeper whoami | grep '@khanacademy.org'
+      run: keeper this-device
