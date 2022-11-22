@@ -30,5 +30,5 @@ runs:
           GITHUB_TOKEN: '${{ inputs.token }}'
           ADMIN_PERMISSION_TOKEN: '${{ inputs.admin-token }}'
           EVENT: 'pull_request'
-          ALL_CHANGED_FILES: '${{ steps.changed.outputs.all_changed_files }}'
+          ALL_CHANGED_FILES: '${{ steps.changed.outputs.files }}'
         if: ${{ github.event.pull_request.draft == false }}
