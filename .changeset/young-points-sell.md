@@ -1,5 +1,5 @@
 ---
-"gerald-pr": major
+"gerald-pr": minor
 ---
 
 Update to not need Node 12
