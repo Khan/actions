@@ -9,7 +9,9 @@ runs:
   steps:
     - name: install keepercommander
       shell: bash
-      run: python -m pip3 install pip==22.2.2 && pip3 install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
+      run: |
+        pip3 install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
+        keeper
 
     - uses: actions/github-script@v6
       with:
