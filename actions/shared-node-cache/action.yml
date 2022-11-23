@@ -10,12 +10,12 @@ runs:
   steps:
 
     - name: Use Node.js ${{ inputs.node-version }}
-      uses: actions/setup-node@v2
+      uses: actions/setup-node@v3
       with:
         node-version: ${{ inputs.node-version }}
 
     - name: Cache node_modules and cypress if it exists
-      uses: actions/cache@v2
+      uses: actions/cache@v3
       id: cache-node-modules
       with:
         path: |
