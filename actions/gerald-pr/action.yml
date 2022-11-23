@@ -11,22 +11,16 @@ runs:
   using: "composite"
   steps:
       - name: Get All Changed Files
-        uses: jaredly/get-changed-files@absolute
+        uses: Khan/actions@get-changed-files-v1
         id: changed
-        with:
-          format: 'json'
-        if: ${{ github.event.pull_request.draft == false }}
-      - uses: allenevans/set-env@v2.0.0
-        with:
-          ALL_CHANGED_FILES: '${{ steps.changed.outputs.added_modified }}'
         if: ${{ github.event.pull_request.draft == false }}
       - name: Check out base branch
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           ref: '${{ github.base_ref }}'
         if: ${{ github.event.pull_request.draft == false }}
       - name: Check out head branch
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           ref: '${{ github.head_ref }}'
         if: ${{ github.event.pull_request.draft == false }}
@@ -36,4 +30,5 @@ runs:
           GITHUB_TOKEN: '${{ inputs.token }}'
           ADMIN_PERMISSION_TOKEN: '${{ inputs.admin-token }}'
           EVENT: 'pull_request'
+          ALL_CHANGED_FILES: '${{ steps.changed.outputs.files }}'
         if: ${{ github.event.pull_request.draft == false }}
