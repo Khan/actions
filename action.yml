@@ -11,11 +11,6 @@ runs:
       shell: bash
       run: |
         pip3 install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
-        export PATH=\"`python3 -m site --user-base`/bin:\$PATH\"
-        export PATH="/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages:$PATH"
-        keeper shell --config $HOME/.keeper-config.json
-        keeper this-device
-        keeper whoami
 
     - uses: actions/github-script@v6
       with:
@@ -29,6 +24,9 @@ runs:
     - name: Check that keeper is installed correctly
       shell: bash
       run: |
+        pip3 install keepercommander==16.6.5
+        export PATH=\"`python3 -m site --user-base`/bin:\$PATH\"
+        export PATH="/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages:$PATH"
         keeper shell --config $HOME/.keeper-config.json
         keeper this-device
         keeper whoami
