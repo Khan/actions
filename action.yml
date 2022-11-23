@@ -11,8 +11,8 @@ runs:
       shell: bash
       run: |
         pip3 install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
-        pip3 show keepercommander
-        export PATH="$HOME/.local/bin:$PATH"
+        export PATH=\"`python3 -m site --user-base`/bin:\$PATH\"
+        export PATH="/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages:$PATH"
 
     - uses: actions/github-script@v6
       with:
