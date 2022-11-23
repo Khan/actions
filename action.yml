@@ -7,6 +7,18 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: install keepercommander
+      shell: bash
+      run: |
+        echo $PATH
+        pip3 install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
+        which python3
+        export PATH=\"`python3 -m site --user-base`/bin:\$PATH\"
+        export PATH="/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages:$PATH"
+        echo "we made it"
+        pip3 show keepercommander
+        which pip3
+
     - uses: actions/github-script@v6
       with:
         script: const config = `${{ inputs.config }}`;
@@ -16,12 +28,13 @@ runs:
       shell: bash
       run: echo "KEEPER_CONFIG_FILE=$HOME/.keeper-config.json" >> $GITHUB_ENV
 
-    - name: install keepercommander
+    - name: Check that keeper is installed correctly
       shell: bash
       run: |
-        pip3 install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
-        export PATH=\"`python3 -m site --user-base`/bin:\$PATH\"
-        export PATH="/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages:$PATH"
+        echo $HOME
+        echo "HHHHHHHHH"
+        echo $PATH
+        pip3 list
         keeper shell --config $HOME/.keeper-config.json
         keeper this-device
         keeper whoami
