@@ -1,5 +1,11 @@
 # gerald-pr
 
+## 0.2.0
+
+### Minor Changes
+
+-   80b026e: Update to not need Node 12
+
 ## 0.1.0
 
 ### Minor Changes
