@@ -11,9 +11,8 @@ runs:
       shell: bash
       run: |
         pip3 install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
-        pip3 install keepercommander
-        pip3 install --upgrade keepercommander
-        keeper shell
+        pip3 show keepercommander
+        export PATH="$HOME/.local/bin:$PATH"
 
     - uses: actions/github-script@v6
       with:
