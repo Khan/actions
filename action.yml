@@ -18,6 +18,8 @@ runs:
         echo "$PATH"
         which keeper
         pip3 show -f keepercommander
+        ls -al /Users/runner/Library/Python/3.11/bin
+        echo "HELLO"
 
     - uses: actions/github-script@v6
       with:
@@ -31,6 +33,6 @@ runs:
     - name: Check that keeper is installed correctly
       shell: bash
       run: |
-        keeper shell --config ./config.json
+        cp ./config.json /Users/runner/Library/Python/3.11/bin
         keeper this-device
         keeper whoami
