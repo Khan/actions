@@ -31,5 +31,6 @@ runs:
     - name: Check that keeper is installed correctly
       shell: bash
       run: |
+        keeper shell --config $HOME/.keeper-config.json
         keeper this-device
         keeper whoami
