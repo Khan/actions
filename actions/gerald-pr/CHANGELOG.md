@@ -1,5 +1,15 @@
 # gerald-pr
 
+## 1.0.0
+
+### Major Changes
+
+-   5afbb10: Pin gerald to a specific release so we can update gerald and not break actions until they've been udpated too
+
+### Minor Changes
+
+-   45cd426: Update to gerald 3.1
+
 ## 0.2.0
 
 ### Minor Changes
