@@ -22,15 +22,15 @@ runs:
     - uses: actions/github-script@v6
       with:
         script: const config = `${{ inputs.config }}`;
-          require('fs').writeFileSync('./.keeper-config.json', config)
+          require('fs').writeFileSync('./.keeper/config.json', config)
 
     - name: Set up the keeper config file
       shell: bash
-      run: echo "KEEPER_CONFIG_FILE=$HOME/.keeper-config.json" >> $GITHUB_ENV
+      run: echo "KEEPER_CONFIG_FILE=$HOME/.keeper/config.json" >> $GITHUB_ENV
 
     - name: Check that keeper is installed correctly
       shell: bash
       run: |
-        keeper shell --config ./.keeper-config.json
+        keeper shell --config ./.keeper/config.json
         keeper this-device
         keeper whoami
