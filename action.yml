@@ -11,13 +11,8 @@ runs:
       shell: bash
       run: |
         pip3 install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
-        echo "$HOME"
-        echo "$PATH"
         echo "export PATH=\"`python3 -m site --user-base`/bin:\$PATH\"" >> ~/.bashrc
         source ~/.bashrc
-        echo "$PATH"
-        which keeper
-        pip3 show -f keepercommander
         ls -al /Users/runner/Library/Python/3.11/bin
         echo "HELLO"
 
