@@ -21,19 +21,18 @@ runs:
         pyenv shell 3.10.8
         python3 --version
         python --version
+        pip3 -V
+        python3 -m pip3
         which pip
         which python3
-        type pip
-        type python
         pyenv versions
         pyenv which pip
         pyenv which python
         echo "export PATH=\"`python3 -m site --user-base`/bin:\$PATH\"" >> ~/.bashrc
         source ~/.bashrc
-        pip3 install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
+        python3 -m pip install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
         echo "$PATH"
         python3 -m site --user-base
-        pip show keepercommander
 
     - uses: actions/github-script@v6
       with:
