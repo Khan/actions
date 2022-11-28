@@ -22,7 +22,6 @@ runs:
         python3 --version
         python --version
         pip3 -V
-        python3 -m pip3
         which pip
         which python3
         pyenv versions
