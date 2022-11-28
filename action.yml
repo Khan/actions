@@ -21,7 +21,7 @@ runs:
         pyenv shell 3.10.8
         python3 --version
         python --version
-        whihc pip
+        which pip
         which python3
         type pip
         type python
