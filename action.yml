@@ -7,8 +7,8 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Install Python
-      uses: actions/setup-python@v4
+    - uses: actions/checkout@v3
+    - uses: actions/setup-python@v4
       with:
         python-version: "3.10"
     - name: install keepercommander
@@ -17,11 +17,10 @@ runs:
         python3 --version
         python --version
         pip3 -V
+        python3 -m pip -V
         which pip
         which python3
-        echo "export PATH=\"`python3 -m site --user-base`/bin:\$PATH\"" >> ~/.bashrc
-        source ~/.bashrc
-        pip3 install cryptography==38.0.4 pyOpenSSL==22.1.0 keepercommander==16.8.3
+        python3 -m pip install cryptography==38.0.4 pyOpenSSL==22.1.0 keepercommander==16.8.3
         echo "$PATH"
         python3 -m site --user-base
 
@@ -37,5 +36,6 @@ runs:
     - name: Check that keeper is installed correctly
       shell: bash
       run: |
+        keeper shell --config ./.keeper-config.json
         keeper this-device
         keeper whoami
