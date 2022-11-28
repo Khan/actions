@@ -13,21 +13,16 @@ runs:
     - name: install keepercommander
       shell: bash
       run: |
-        python3 --version
-        python --version
-        pip3 -V
-        python3 -m pip -V
-        which pip
-        which python3
+        python3 -m pip install --upgrade pip==22.2.2
         python3 -m pip install cryptography==38.0.4 pyOpenSSL==22.1.0 keepercommander==16.8.3
-        echo "$PATH"
-        python3 -m site --user-base
-        mkdir ./.keeper
+        echo "$HOME"
+        mkdir $HOME/.keeper
 
     - uses: actions/github-script@v6
       with:
         script: const config = `${{ inputs.config }}`;
-          require('fs').writeFileSync('./.keeper/config.json', config)
+          const home = process.env.HOME
+          require('fs').writeFileSync(`${home}/.keeper/config.json`, config)
 
     - name: Set up the keeper config file
       shell: bash
