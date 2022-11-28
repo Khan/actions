@@ -11,19 +11,25 @@ runs:
       shell: bash
       run: |
         brew install pyenv
-        echo "export PATH=\"`python3 -m site --user-base`/bin:\$PATH\"" >> ~/.bashrc
+        echo "export PATH=\"`pyenv init --path`/bin:\$PATH\"" >> ~/.bashrc
         echo 'eval "$(pyenv init --path)"' >> ~/.bash_profile
         source ~/.bashrc
-        pyenv install 3.10.8
+        pyenv install 3.8.6
         pyenv global 3.10.8
         python3 --version
-        pip3 install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
-        python3 -m site --user-base
+        python --version
+        type pip
+        type python
+        pyenv versions
+        pyenv which pip
+        pyenv which python
+        pip install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
+        python -m site --user-base
 
     - uses: actions/github-script@v6
       with:
         script: const config = `${{ inputs.config }}`;
-          require('fs').writeFileSync('$HOME/.keeper-config.json', config)
+          require('fs').writeFileSync('./.keeper-config.json', config)
 
     - name: Set up the keeper config file
       shell: bash
