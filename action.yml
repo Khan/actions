@@ -14,7 +14,7 @@ runs:
         echo "export PATH=\"`pyenv init --path`/bin:\$PATH\"" >> ~/.bashrc
         echo 'eval "$(pyenv init --path)"' >> ~/.bash_profile
         source ~/.bashrc
-        pyenv install 3.8.6
+        pyenv install 3.10.8
         pyenv global 3.10.8
         python3 --version
         python --version
