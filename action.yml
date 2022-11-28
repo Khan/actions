@@ -14,18 +14,21 @@ runs:
         echo "export PATH=\"`pyenv init --path`/bin:\$PATH\"" >> ~/.bashrc
         echo 'eval "$(pyenv init --path)"' >> ~/.bash_profile
         source ~/.bashrc
+        eval "$(pyenv init -)"
         pyenv install 3.10.8
         pyenv local 3.10.8
         pyenv global 3.10.8
+        pyenv shell 3.10.8
         python3 --version
         python --version
+        whihc pip
+        which python3
         type pip
         type python
         pyenv versions
         pyenv which pip
         pyenv which python
-        pyenv pip install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
-        pyenv python -m site --user-base
+        pip3 install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
         echo "$PATH"
         python3 -m site --user-base
 
