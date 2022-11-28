@@ -14,21 +14,18 @@ runs:
         echo "export PATH=\"`python3 -m site --user-base`/bin:\$PATH\"" >> ~/.bashrc
         source ~/.bashrc
         python3 -m site --user-base
-        echo "HELLO"
 
     - uses: actions/github-script@v6
       with:
         script: const config = `${{ inputs.config }}`;
-          require('fs').writeFileSync('./config.json', config)
+          require('fs').writeFileSync('$HOME/.keeper/config.json', config)
 
     - name: Set up the keeper config file
       shell: bash
-      run: echo "KEEPER_CONFIG_FILE=$HOME/config.json" >> $GITHUB_ENV
+      run: echo "KEEPER_CONFIG_FILE=$HOME/.keeper/config.json" >> $GITHUB_ENV
 
     - name: Check that keeper is installed correctly
       shell: bash
       run: |
-        location=$(python3 -m site --user-base)
-        cp ./config.json $location
         keeper this-device
         keeper whoami
