@@ -1,5 +1,7 @@
 # setup-keeper
 
+## 1.0.1
+- version lock python & pip version that works with keeper installation instead of relying on the python version of the github runner image.
 ## 1.0.0
 
 ### Major Changes
