@@ -7,14 +7,18 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - uses: actions/setup-python@v4
+      with:
+        python-version: "3.10.6"
     - name: install keepercommander
       shell: bash
-      run: pip3 install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
+      run: |
+        python3 -m pip install --upgrade pip==22.2.2
+        python3 -m pip install cryptography==37.0.2 pyOpenSSL==22.0.0 keepercommander==16.6.5
 
     - uses: actions/github-script@v6
       with:
-        script:
-          const config = `${{ inputs.config }}`;
+        script: const config = `${{ inputs.config }}`;
           require('fs').writeFileSync(process.env.HOME + '/.keeper-config.json', config)
 
     - name: Set up the keeper config file
