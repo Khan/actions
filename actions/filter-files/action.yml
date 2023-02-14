@@ -5,7 +5,7 @@ inputs:
     description: 'jsonified list of changed files'
     required: true
   files:
-    description: 'comma- or newline-separated list of files to match against. names ending in "/" will be treated as a directory path, and match as a prefix. Otherwise path names must be a full match.'
+    description: 'comma- or newline-separated list of files to match against. names ending in "/" will be treated as a directory path, and match as a prefix. Otherwise path names must be a full match. (do not prefix with ./)'
     required: false
   extensions:
     description: 'comma- or newline-separated list of extensions to check for'
