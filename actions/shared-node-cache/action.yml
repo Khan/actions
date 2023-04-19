@@ -5,6 +5,10 @@ inputs:
     description: 'Node version to use'
     required: false
     default: '16.x'
+  working-directory:
+    description: 'The directory containing the package.json. Should include "/" suffix.'
+    required: false
+    default: ''
 runs:
   using: "composite"
   steps:
@@ -19,7 +23,7 @@ runs:
       id: cache-node-modules
       with:
         path: |
-          node_modules
+          ${{ inputs.working-directory }}node_modules
           ~/.cache/Cypress
         key: ${{ runner.os }}-${{ inputs.node-version }}-v1-${{ hashFiles('**/yarn.lock') }}
         restore-keys: |
@@ -29,3 +33,4 @@ runs:
       if: steps.cache-node-modules.outputs.cache-hit != 'true'
       shell: bash
       run: yarn install --frozen-lockfile
+      working-directory: ${{ inputs.working-directory }}
