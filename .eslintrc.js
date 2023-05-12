@@ -26,4 +26,12 @@ module.exports = {
         sourceType: "module",
         ecmaVersion: 2022,
     },
+    overrides: [
+        {
+            files: "utils/*",
+            rules: {
+                "no-console": "off",
+            },
+        },
+    ],
 };

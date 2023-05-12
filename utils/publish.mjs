@@ -58,6 +58,8 @@ export const collectPackageJsons = (packageNames) => {
 };
 
 export const publishAsNeeded = (packageNames, dryRun = false) => {
+    console.log(`Publishing (${dryRun ? "dry run" : "for real"})...`);
+
     // Because we rewrite our major version tags (filter-files-v1 for example)
     // on every patch & minor version publish, tags will move around, and -f
     // is needed if you have different tags locally.
@@ -66,7 +68,6 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
         encoding: "utf8",
     }).trim();
     const packageJsons = collectPackageJsons(packageNames);
-
     packageNames.forEach((name) => {
         const version = packageJsons[name].version;
         const majorVersion = version.split(".")[0];

@@ -41,10 +41,15 @@ export const processActionYml = (
         },
     ];
     Object.keys(packageJsons[name].dependencies ?? {}).forEach((depName) => {
-        replacements.push({
-            from: new RegExp(`\\buses: \\./actions/${depName}\\b`, "g"),
-            to: `uses: ${monorepoName}@${depName}-v${packageJsons[depName].version}`,
-        });
+        console.log("Processing dependency:", depName);
+        if (depName in packageJsons) {
+            replacements.push({
+                from: new RegExp(`\\buses: \\./actions/${depName}\\b`, "g"),
+                to: `uses: ${monorepoName}@${depName}-v${packageJsons[depName].version}`,
+            });
+        } else {
+            console.log("   Skipping (external dependency)");
+        }
     });
     replacements.forEach(({from, to}) => {
         actionYml = actionYml.replace(from, to);
