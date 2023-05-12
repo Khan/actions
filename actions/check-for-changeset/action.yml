@@ -5,6 +5,10 @@ inputs:
     description: list of comma-separated paths (files or directories ending in /) that don't need a changeset when changed. Default .github/
     required: false
     default: .github/
+  exclude_extensions:
+    description: a list of comma-separated extensions that don't need a changeset when changed. Default <empty>
+    required: false
+    default: ''
 
 runs:
   using: "composite"
@@ -18,6 +22,8 @@ runs:
         changed-files: ${{ steps.changed.outputs.files }}
         invert: true
         files: ${{ inputs.exclude }}
+        extensions: $${{ inputs.exclude_extensions }}
+        file_globs: ${{ inputs.exclude_glob }}
 
     - uses: actions/github-script@v6
       with:
