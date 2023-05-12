@@ -9,6 +9,10 @@ inputs:
     description: a list of comma-separated extensions that don't need a changeset when changed. Default <empty>
     required: false
     default: ''
+  exclude_glob:
+    description: a list of comma-separated globs (using picomatch syntax) that don't need a changeset when changed. Default <empty>
+    required: false
+    default: ''
 
 runs:
   using: "composite"
@@ -23,7 +27,7 @@ runs:
         invert: true
         files: ${{ inputs.exclude }}
         extensions: $${{ inputs.exclude_extensions }}
-        file_globs: ${{ inputs.exclude_glob }}
+        globs: ${{ inputs.exclude_glob }}
 
     - uses: actions/github-script@v6
       with:
