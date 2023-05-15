@@ -12,6 +12,7 @@
     "devDependencies": {
         "@changesets/cli": "^2.22.0",
         "@khanacademy/eslint-config": "^0.1.0",
+        "@vercel/ncc": "^0.36.1",
         "eslint": "^8.15.0",
         "eslint-config-prettier": "^8.5.0",
         "eslint-plugin-prettier": "^4.0.0",

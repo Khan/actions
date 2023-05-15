@@ -5,6 +5,7 @@
  */
 import fs from "fs";
 import path from "path";
+import {execSync} from "child_process";
 
 function copyDir(src, dest) {
     const entries = fs.readdirSync(src, {withFileTypes: true});
@@ -41,10 +42,15 @@ export const processActionYml = (
         },
     ];
     Object.keys(packageJsons[name].dependencies ?? {}).forEach((depName) => {
-        replacements.push({
-            from: new RegExp(`\\buses: \\./actions/${depName}\\b`, "g"),
-            to: `uses: ${monorepoName}@${depName}-v${packageJsons[depName].version}`,
-        });
+        console.log("Processing dependency:", depName);
+        if (depName in packageJsons) {
+            replacements.push({
+                from: new RegExp(`\\buses: \\./actions/${depName}\\b`, "g"),
+                to: `uses: ${monorepoName}@${depName}-v${packageJsons[depName].version}`,
+            });
+        } else {
+            console.log("   Skipping (external dependency)");
+        }
     });
     replacements.forEach(({from, to}) => {
         actionYml = actionYml.replace(from, to);
@@ -65,5 +71,21 @@ export const buildPackage = (name, packageJsons, monorepoName) => {
         yml,
         processActionYml(name, packageJsons, actionYml, monorepoName),
     );
+
+    // Build the JS to the dist folder (so we can support using npm deps)
+    // We need to delete the index file first because `copyDir` would have
+    // copied it to the `dist` folder already but `ncc` won't overwrite an
+    // existing output file.
+    if (fs.existsSync(`${dist}/index.js`)) {
+        fs.rmSync(`${dist}/index.js`, {force: true});
+    }
+
+    if (fs.existsSync(`actions/${name}/index.js`)) {
+        console.log(`Building actions/${name}/index.js`);
+        execSync(
+            `yarn ncc build actions/${name}/index.js -o ${dist} --source-map`,
+        );
+    }
+
     return dist;
 };
