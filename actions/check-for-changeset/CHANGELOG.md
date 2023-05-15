@@ -1,5 +1,11 @@
 # check-for-changeset
 
+## 0.5.0
+
+### Minor Changes
+
+-   7efd7b8: Fix how extensions are parsed so that it doesn't break them
+
 ## 0.4.0
 
 ### Minor Changes
