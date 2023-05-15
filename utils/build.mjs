@@ -29,6 +29,7 @@ export const processActionYml = (
     actionYml,
     monorepoName,
 ) => {
+    console.log("Processing action.yml for", name);
     // This first replacement is to rewrite local requires, in the case where we have
     // a github-script action with e.g. `require('./actions/my-action/index.js')`, and turning
     // it into `require('${{ github.action_path }}/index.js')`. Writing it this way means it
@@ -42,14 +43,16 @@ export const processActionYml = (
         },
     ];
     Object.keys(packageJsons[name].dependencies ?? {}).forEach((depName) => {
-        console.log("Processing dependency:", depName);
+        console.log("  Processing dependency:", depName);
         if (depName in packageJsons) {
+            const target = `${monorepoName}@${depName}-v${packageJsons[depName].version}`;
+            console.log(`    Replacing with: ${target}`);
             replacements.push({
                 from: new RegExp(`\\buses: \\./actions/${depName}\\b`, "g"),
-                to: `uses: ${monorepoName}@${depName}-v${packageJsons[depName].version}`,
+                to: `uses: ${target}`,
             });
         } else {
-            console.log("   Skipping (external dependency)");
+            console.log("     Skipping (external dependency)");
         }
     });
     replacements.forEach(({from, to}) => {
