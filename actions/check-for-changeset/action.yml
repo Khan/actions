@@ -26,7 +26,7 @@ runs:
         changed-files: ${{ steps.changed.outputs.files }}
         invert: true
         files: ${{ inputs.exclude }}
-        extensions: $${{ inputs.exclude_extensions }}
+        extensions: ${{ inputs.exclude_extensions }}
         globs: ${{ inputs.exclude_globs }}
 
     - uses: actions/github-script@v6
