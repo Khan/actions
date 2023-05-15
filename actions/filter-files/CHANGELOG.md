@@ -1,5 +1,11 @@
 # filter-files
 
+## 0.3.0
+
+### Minor Changes
+
+-   4559c88: Add 'extensions' and 'globs' options to filter-files action for more flexibility
+
 ## 0.2.1
 
 ### Patch Changes
