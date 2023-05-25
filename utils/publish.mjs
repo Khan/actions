@@ -32,19 +32,25 @@ export const publishDirectoryAsTags = (
         `git config user.name "Khan Actions Bot"`,
         `git commit -m publish`,
         `git remote add origin ${origin}`,
+        `git fetch origin --tags`,
         `git tag ${tag}`,
-        `git tag ${majorTag}`,
+        `git tag -f ${majorTag}`,
     ];
     if (!dryRun) {
-        cmds.push(`git push origin ${tag}`);
         // This will succeed with a warning if the major tag doesn't exist
         cmds.push(`git push origin :refs/tags/${majorTag}`);
-        cmds.push(`git push origin ${majorTag}`);
         cmds.push(`git push origin --tags`);
     }
-    cmds.forEach((cmd) => {
-        execSync(cmd, {cwd: distPath});
-    });
+    for (let cmd of cmds) {
+        try {
+            console.log(`▶️ ${cmd}`);
+            execSync(cmd, {cwd: distPath});
+        } catch (err) {
+            console.log(`Command ${cmd} failed :(`);
+            return false;
+        }
+    }
+    return true;
 };
 
 export const collectPackageJsons = (packageNames) => {
@@ -64,11 +70,12 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
     // Because we rewrite our major version tags (filter-files-v1 for example)
     // on every patch & minor version publish, tags will move around, and -f
     // is needed if you have different tags locally.
-    execSync(`git fetch --tags -f`);
+    // execSync(`git fetch --tags -f`);
     const origin = execSync(`git remote get-url origin`, {
         encoding: "utf8",
     }).trim();
     const packageJsons = collectPackageJsons(packageNames);
+    let failed = false;
     packageNames.forEach((name) => {
         const version = packageJsons[name].version;
         const majorVersion = version.split(".")[0];
@@ -76,7 +83,23 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
         const majorTag = `${name}-v${majorVersion}`;
         if (!checkTag(tag)) {
             const distPath = buildPackage(name, packageJsons, `Khan/actions`);
-            publishDirectoryAsTags(distPath, origin, tag, majorTag, dryRun);
+            console.log(`Publishing ${tag} in ${distPath}`);
+            const success = publishDirectoryAsTags(
+                distPath,
+                origin,
+                tag,
+                majorTag,
+                dryRun,
+            );
+            if (success) {
+                console.log(`Finished publishing ${tag}`);
+            } else {
+                console.log(`Failed to publish ${tag}`);
+                failed = true;
+            }
         }
     });
+    if (failed) {
+        process.exit(1);
+    }
 };
