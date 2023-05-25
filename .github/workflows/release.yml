@@ -4,9 +4,7 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - manual-publish
+  pull_request: {}
 
 jobs:
   release:
