@@ -40,6 +40,7 @@ export const publishDirectoryAsTags = (
         // This will succeed with a warning if the major tag doesn't exist
         cmds.push(`git push origin :refs/tags/${majorTag}`);
         cmds.push(`git push origin ${majorTag}`);
+        cmds.push(`git push origin --tags`);
     }
     cmds.forEach((cmd) => {
         execSync(cmd, {cwd: distPath});
