@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull-request:
+    branches:
+      - manual-publish
 
 jobs:
   release:
@@ -13,11 +16,23 @@ jobs:
       - uses: actions/checkout@v3
       - uses: ./actions/shared-node-cache
 
+      - uses: actions/github-script@v6
+        id: has-changesets
+        with:
+          script: |
+            return require('fs')
+              .readdirSync('.changeset')
+              .some(x => x !== 'README.md' && !x.startsWith('.') && x.endsWith('.md'))
+          result-encoding: json
+
+      - run: node utils/run-publish.mjs
+        if: steps.has-changesets.outputs.result == false
+
       - name: Create Release Pull Request or Publish as tags
-        id: changesets
+        if: steps.has-changesets.outputs.result == true
         uses: changesets/action@v1
         with:
-          publish: node utils/run-publish.mjs
+          publish: exit 1
         env:
           GITHUB_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
