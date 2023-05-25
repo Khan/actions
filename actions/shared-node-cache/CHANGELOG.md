@@ -1,5 +1,11 @@
 # shared-node-cache
 
+## 0.2.4
+
+### Patch Changes
+
+-   3f9a9a8: Trivial release to test publishes
+
 ## 0.2.3
 
 ### Patch Changes
