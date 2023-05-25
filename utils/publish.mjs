@@ -24,18 +24,22 @@ export const publishDirectoryAsTags = (
     tag,
     majorTag,
     dryRun,
+    auth,
 ) => {
     const cmds = [
         `git init .`,
         `git add .`,
         `git config user.email "khan-actions-bot@khanacademy.org"`,
         `git config user.name "Khan Actions Bot"`,
+        auth
+            ? `git config --local http.https://github.com/.extraheader "${auth}"`
+            : null,
         `git commit -m publish`,
         `git remote add origin ${origin}`,
         `git fetch origin --tags`,
         `git tag ${tag}`,
         `git tag -f ${majorTag}`,
-    ];
+    ].filter(Boolean);
     if (!dryRun) {
         // This will succeed with a warning if the major tag doesn't exist
         cmds.push(`git push origin :refs/tags/${majorTag}`);
@@ -64,6 +68,17 @@ export const collectPackageJsons = (packageNames) => {
     return packageJsons;
 };
 
+const getAuth = () => {
+    try {
+        return execSync(
+            `git config --local http.https://github.com/.extraheader`,
+            {encoding: "utf-8"},
+        );
+    } catch (err) {
+        return null;
+    }
+};
+
 export const publishAsNeeded = (packageNames, dryRun = false) => {
     console.log(`Publishing (${dryRun ? "dry run" : "for real"})...`);
 
@@ -74,6 +89,7 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
     const origin = execSync(`git remote get-url origin`, {
         encoding: "utf8",
     }).trim();
+    const auth = getAuth();
     const packageJsons = collectPackageJsons(packageNames);
     let failed = false;
     packageNames.forEach((name) => {
@@ -90,6 +106,7 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
                 tag,
                 majorTag,
                 dryRun,
+                auth,
             );
             if (success) {
                 console.log(`Finished publishing ${tag}`);
