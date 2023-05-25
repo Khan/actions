@@ -1,5 +1,11 @@
 # shared-node-cache
 
+## 0.2.3
+
+### Patch Changes
+
+-   8eb3002: Trivial change, a third time, to test publishing
+
 ## 0.2.2
 
 ### Patch Changes
