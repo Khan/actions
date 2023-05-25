@@ -1,5 +1,11 @@
 # shared-node-cache
 
+## 0.2.2
+
+### Patch Changes
+
+-   b5dcd9a: Trying another trivial change, to get package publishing to be happy
+
 ## 0.2.1
 
 ### Patch Changes
