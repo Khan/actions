@@ -73,7 +73,7 @@ const getAuth = () => {
         return execSync(
             `git config --local http.https://github.com/.extraheader`,
             {encoding: "utf-8"},
-        );
+        ).trim();
     } catch (err) {
         return null;
     }
