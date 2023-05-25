@@ -8,6 +8,7 @@ inputs:
 runs:
   using: "composite"
   steps:
+
     - name: Use Node.js ${{ inputs.node-version }}
       uses: actions/setup-node@v3
       with:
