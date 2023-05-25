@@ -24,10 +24,10 @@ jobs:
           result-encoding: json
 
       - run: node utils/run-publish.mjs
-        if: steps.has-changesets.outputs.result == false
+        if: steps.has-changesets.outputs.result == 'false'
 
       - name: Create Release Pull Request or Publish as tags
-        if: steps.has-changesets.outputs.result == true
+        if: steps.has-changesets.outputs.result == 'true'
         uses: changesets/action@v1
         with:
           publish: exit 1
