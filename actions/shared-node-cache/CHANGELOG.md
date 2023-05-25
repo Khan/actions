@@ -1,5 +1,11 @@
 # shared-node-cache
 
+## 0.2.1
+
+### Patch Changes
+
+-   d700a2b: A trivial change to test our publishing
+
 ## 0.2.0
 
 ### Minor Changes
