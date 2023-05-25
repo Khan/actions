@@ -41,7 +41,7 @@ export const publishDirectoryAsTags = (
         cmds.push(`git push origin :refs/tags/${majorTag}`);
         cmds.push(`git push origin --tags`);
     }
-    for (let cmd of cmds) {
+    for (const cmd of cmds) {
         try {
             console.log(`▶️ ${cmd}`);
             execSync(cmd, {cwd: distPath});
