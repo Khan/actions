@@ -1,5 +1,11 @@
 # setup-keeper
 
+## 1.1.0
+
+### Minor Changes
+
+-   211a2f0: Downgrade keepercommander to 16.5.6 to fix throttling issue
+
 ## 1.0.1
 
 ### Patch Changes
