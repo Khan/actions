@@ -18,6 +18,18 @@ export const checkTag = (tag) => {
     return true;
 };
 
+/**
+ * Create a little git repo in the `actions/some-action/dist` directory,
+ * which contains the built version of a given action.
+ * We then push that bare commit as a tag to the `khan/actions` repo,
+ * e.g. https://github.com/Khan/actions/tree/shared-node-cache-v0.2.4
+ * which only contains the files for that one action.
+ *
+ * This is how we can have multiple actions in the same repo; normally
+ * github's actions infra expects 1 action = 1 repo.
+ * This way, when you do `uses: Khan/actions#shared-node-cachev0.2.4`
+ * it looks like there actually is only one action in the repo.
+ */
 export const publishDirectoryAsTags = (
     distPath,
     origin,
@@ -68,6 +80,12 @@ export const collectPackageJsons = (packageNames) => {
     return packageJsons;
 };
 
+/**
+ * Get the authentication information from the current git repo, if it exists.
+ * Github's `actions/checkout` uses this `http.xyz.extraheader` local config thing
+ * to store authentication info, and we need to grab it and add it to the
+ * little bare repo we set up in `publishDirectoryAsTags`.
+ */
 const getAuth = () => {
     try {
         return execSync(
