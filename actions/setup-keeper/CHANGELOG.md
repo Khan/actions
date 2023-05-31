@@ -1,5 +1,11 @@
 # setup-keeper
 
+## 1.2.0
+
+### Minor Changes
+
+-   5496ed4: Upgrade keepercommander to 16.5.16
+
 ## 1.1.0
 
 ### Minor Changes
