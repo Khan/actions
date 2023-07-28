@@ -1,5 +1,11 @@
 # setup-keeper
 
+## 1.2.1
+
+### Patch Changes
+
+-   7435fb8: Update the version of keeper to avoid a communication error
+
 ## 1.2.0
 
 ### Minor Changes
