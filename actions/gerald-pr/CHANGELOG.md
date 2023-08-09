@@ -1,5 +1,11 @@
 # gerald-pr
 
+## 1.1.0
+
+### Minor Changes
+
+-   3c8f354: Gerald bug fixes.
+
 ## 1.0.0
 
 ### Major Changes
