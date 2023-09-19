@@ -25,14 +25,11 @@ const parseList = (raw) => {
             throw err;
         }
         switch (char) {
-            case " ":
-                // ignore whitespace
-                continue;
             case ",":
                 // if we're not inside brackets, add the current string to the list
                 //   and reset the current string
                 if (bracketCount === 0) {
-                    list.push(current);
+                    list.push(current.trim());
                     current = "";
                     continue;
                 }
@@ -53,7 +50,7 @@ const parseList = (raw) => {
         current += char;
     }
     if (current) {
-        list.push(current);
+        list.push(current.trim());
     }
     if (bracketCount !== 0) {
         throw err;
