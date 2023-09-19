@@ -10,12 +10,13 @@ const parseList = (raw) => {
     let bracketCount = 0;
     const list = [];
     let current = "";
+    const err = new Error("Unbalanced brackets in input");
     // don't split on `,` inside brackets-- that breaks glob patterns
     // this builds an array of strings between commas and newlines,
     //   but not inside brackets
     for (const char of raw) {
         if (bracketCount < 0) {
-            throw new Error("Unbalanced brackets in input");
+            throw err;
         }
         switch (char) {
             case " ":
@@ -50,7 +51,7 @@ const parseList = (raw) => {
         list.push(current);
     }
     if (bracketCount !== 0) {
-        throw new Error("Unbalanced brackets");
+        throw err;
     }
     return list.map((item) => item.trim());
 };
