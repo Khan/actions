@@ -1,16 +1,61 @@
 const picomatch = require("picomatch");
 
-/**
- * Parse a list, that could be separated by commas or newlines.
- */
+const err = new Error("Unbalanced brackets in input");
+
 const parseList = (raw) => {
-    if (!raw.trim()) {
+    if (!raw || !raw.trim()) {
         return [];
     }
-    if (raw.includes(",")) {
-        return raw.split(",").map((item) => item.trim());
+    if (!raw.includes(",") && !raw.includes("\n")) {
+        return [raw];
     }
-    return raw.split("\n").map((item) => item.trim());
+    if (raw.includes("\n")) {
+        // if split on newlines, no need to parse for internal commas
+        return raw.split("\n").map((item) => item.trim());
+    }
+
+    let bracketCount = 0;
+    const list = [];
+    let current = "";
+    // don't split on `,` inside brackets-- that breaks glob patterns
+    // this builds an array of strings between commas and newlines,
+    //   but not inside brackets
+    for (const char of raw) {
+        if (bracketCount < 0) {
+            throw err;
+        }
+        switch (char) {
+            case ",":
+                // if we're not inside brackets, add the current string to the list
+                //   and reset the current string
+                if (bracketCount === 0) {
+                    list.push(current.trim());
+                    current = "";
+                    continue;
+                }
+                break;
+            case "(":
+            case "[":
+            case "{":
+                // increment the bracket count
+                bracketCount++;
+                break;
+            case ")":
+            case "]":
+            case "}":
+                // decrement the bracket count
+                bracketCount--;
+                break;
+        }
+        current += char;
+    }
+    if (current) {
+        list.push(current.trim());
+    }
+    if (bracketCount !== 0) {
+        throw err;
+    }
+    return list.map((item) => item.trim());
 };
 
 module.exports = ({
