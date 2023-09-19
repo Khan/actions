@@ -86,4 +86,22 @@ describe("filterFiles", () => {
         // Assert
         expect(result).toEqual(["not filtered"]);
     });
+
+    it("should allow whitespace", () => {
+        // Arrange
+        const exactFilesRaw = `sub dir/file1.txt, file 2.txt, file 3.txt`;
+
+        // Act
+        const result = filterFiles({
+            extensionsRaw: "",
+            exactFilesRaw,
+            globsRaw: "",
+            inputFiles: ["file 2.txt", "sub dir/file1.txt", "not filtered"],
+            invert,
+            core,
+        });
+
+        // Assert
+        expect(result).toEqual(["not filtered"]);
+    });
 });
