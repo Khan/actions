@@ -1,5 +1,11 @@
 # filter-files
 
+## 0.3.1
+
+### Patch Changes
+
+-   b65ce8c: Fixes a bug in parsing glob patterns
+
 ## 0.3.0
 
 ### Minor Changes
