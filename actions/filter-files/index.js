@@ -1,4 +1,4 @@
-const picomatch = require("picomatch");
+import picomatch from "picomatch";
 import parseList from "./utils/parse-list";
 
 module.exports = ({
