@@ -2,7 +2,7 @@
  * Parse a list, that could be separated by commas or newlines.
  */
 export default (raw) => {
-    if (!raw.trim()) {
+    if (!raw || !raw.trim()) {
         return [];
     }
     if (!raw.includes(",") && !raw.includes("\n")) {
@@ -16,7 +16,7 @@ export default (raw) => {
     //   but not inside brackets
     for (const char of raw) {
         if (bracketCount < 0) {
-            throw new Error("Unbalanced brackets");
+            throw new Error("Unbalanced brackets in input");
         }
         if (char === " ") {
             continue;

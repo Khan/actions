@@ -1,6 +1,10 @@
 import filterFiles from ".";
 
 describe("filterFiles", () => {
+    // eslint-disable-next-line no-console
+    const core = {info: console.info};
+    const invert = true;
+
     it("should return a new array files that are not filtered", () => {
         // Arrange
         const inputFiles = [
@@ -35,12 +39,29 @@ describe("filterFiles", () => {
             exactFilesRaw,
             globsRaw,
             inputFiles,
-            invert: true,
-            // eslint-disable-next-line no-console
-            core: {info: (output) => console.info({output})},
+            invert,
+            core,
         });
 
         // Assert
         expect(result).toEqual(expected);
+    });
+
+    it("should throw an error for unbalanced brackets", () => {
+        // Arrange
+        const globsRaw =
+            "!packages/**/*.{ts,tsx,js,jsx}}), packages/this-one.ts";
+
+        // Assert
+        expect(() =>
+            filterFiles({
+                extensionsRaw: "",
+                exactFilesRaw: "",
+                globsRaw,
+                inputFiles: [],
+                invert,
+                core,
+            }),
+        ).toThrow("Unbalanced brackets in input");
     });
 });
