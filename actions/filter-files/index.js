@@ -9,6 +9,11 @@ const parseList = (raw) => {
     if (!raw.includes(",") && !raw.includes("\n")) {
         return [raw];
     }
+    if (raw.includes("\n")) {
+        // if split on newlines, no need to parse for internal commas
+        return raw.split("\n").map((item) => item.trim());
+    }
+
     let bracketCount = 0;
     const list = [];
     let current = "";
@@ -24,7 +29,6 @@ const parseList = (raw) => {
                 // ignore whitespace
                 continue;
             case ",":
-            case "\n":
                 // if we're not inside brackets, add the current string to the list
                 //   and reset the current string
                 if (bracketCount === 0) {

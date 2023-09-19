@@ -64,4 +64,26 @@ describe("filterFiles", () => {
             }),
         ).toThrow("Unbalanced brackets in input");
     });
+
+    it("should skip char-by-char parsing if split on newlines", () => {
+        // Note: skipping the bracket validation isn't a "feature" per se,
+        //   but it's a good way to check that we have exited early
+
+        // Arrange
+        const globsRaw = `packages/**/*.ts,tsx,js,jsx}})
+            packages/this-one.ts`;
+
+        // Act
+        const result = filterFiles({
+            extensionsRaw: "",
+            exactFilesRaw: "",
+            globsRaw,
+            inputFiles: ["packages/this-one.ts", "not filtered"],
+            invert,
+            core,
+        });
+
+        // Assert
+        expect(result).toEqual(["not filtered"]);
+    });
 });
