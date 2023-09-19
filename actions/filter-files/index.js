@@ -1,17 +1,5 @@
 const picomatch = require("picomatch");
-
-/**
- * Parse a list, that could be separated by commas or newlines.
- */
-const parseList = (raw) => {
-    if (!raw.trim()) {
-        return [];
-    }
-    if (raw.includes(",")) {
-        return raw.split(",").map((item) => item.trim());
-    }
-    return raw.split("\n").map((item) => item.trim());
-};
+import parseList from "./utils/parse-list";
 
 module.exports = ({
     extensionsRaw,
