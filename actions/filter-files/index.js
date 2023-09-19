@@ -17,19 +17,32 @@ const parseList = (raw) => {
         if (bracketCount < 0) {
             throw new Error("Unbalanced brackets in input");
         }
-        if (char === " ") {
-            continue;
-        }
-        if ((char === "," || char === "\n") && bracketCount === 0) {
-            list.push(current);
-            current = "";
-            continue;
-        }
-        if (char === "(" || char === "[" || char === "{") {
-            bracketCount++;
-        }
-        if (char === ")" || char === "]" || char === "}") {
-            bracketCount--;
+        switch (char) {
+            case " ":
+                // ignore whitespace
+                continue;
+            case ",":
+            case "\n":
+                // if we're not inside brackets, add the current string to the list
+                //   and reset the current string
+                if (bracketCount === 0) {
+                    list.push(current);
+                    current = "";
+                    continue;
+                }
+                break;
+            case "(":
+            case "[":
+            case "{":
+                // increment the bracket count
+                bracketCount++;
+                break;
+            case ")":
+            case "]":
+            case "}":
+                // decrement the bracket count
+                bracketCount--;
+                break;
         }
         current += char;
     }
