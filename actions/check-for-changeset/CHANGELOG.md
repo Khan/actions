@@ -1,5 +1,12 @@
 # check-for-changeset
 
+## 0.5.2
+
+### Patch Changes
+
+-   Updated dependencies [1cd872b]
+    -   get-changed-files@1.2.0
+
 ## 0.5.1
 
 ### Patch Changes
