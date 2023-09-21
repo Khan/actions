@@ -1,5 +1,12 @@
 # check-for-changeset
 
+## 0.5.1
+
+### Patch Changes
+
+-   Updated dependencies [b65ce8c]
+    -   filter-files@0.3.1
+
 ## 0.5.0
 
 ### Minor Changes
