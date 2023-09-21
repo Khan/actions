@@ -1,5 +1,11 @@
 # get-changed-files
 
+## 1.2.0
+
+### Minor Changes
+
+-   1cd872b: Removed "required" token input. It is not used, and creates non-blocking parsing errors for consumers using Github Actions plugin.
+
 ## 1.1.0
 
 ### Minor Changes
