@@ -1,0 +1,36 @@
+name: 'Check for a changeset'
+description: 'Fail if no .changeset/*.md file is included in the PR.'
+inputs:
+  exclude:
+    description: list of comma-separated paths (files or directories ending in /) that don't need a changeset when changed. Default .github/
+    required: false
+    default: .github/
+  exclude_extensions:
+    description: a list of comma-separated extensions that don't need a changeset when changed. Default <empty>
+    required: false
+    default: ''
+  exclude_globs:
+    description: a list of comma-separated globs (using picomatch syntax) that don't need a changeset when changed. Default <empty>
+    required: false
+    default: ''
+
+runs:
+  using: "composite"
+  steps:
+    - uses: Khan/actions@get-changed-files-v1.1.0
+      id: changed
+
+    - uses: Khan/actions@filter-files-v0.3.1
+      id: match
+      with:
+        changed-files: ${{ steps.changed.outputs.files }}
+        invert: true
+        files: ${{ inputs.exclude }}
+        extensions: ${{ inputs.exclude_extensions }}
+        globs: ${{ inputs.exclude_globs }}
+
+    - uses: actions/github-script@v6
+      with:
+        script: |
+          const inputFiles = JSON.parse(`${{ steps.match.outputs.filtered }}`);
+          require('${{ github.action_path }}/index.js')({context, core, inputFiles})
