@@ -1,9 +1,6 @@
 name: Get Changed Files
 description: Get a list of the files that have change in this pull-request or push
 inputs:
-  token:
-    description: secrets.GITHUB_TOKEN
-    required: true
   directories:
     description: Prefilter results to only the listed subdirectories (newline-separated)
     required: false
