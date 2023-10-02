@@ -49,23 +49,23 @@ jobs:
           script: |
             const fftest1 = `${{ steps.fftest1.outputs.filtered }}`;
             if (fftest1 !== `["one","two"]`) {
-              core.setFailed(fftest1)
+              core.setFailed('fftest1: ' + fftest1)
             }
             const fftest2 = `${{ steps.fftest2.outputs.filtered }}`;
             if (fftest2 !== `["two/three"]`) {
-              core.setFailed(fftest2)
+              core.setFailed('fftest2: ' + fftest2)
             }
             const fftest3 = `${{ steps.fftest3.outputs.filtered }}`;
             if (fftest3 !== `["one.ts","three.js"]`) {
-              core.setFailed(fftest3)
+              core.setFailed('fftest3: ' + fftest3)
             }
             const fftest4 = `${{ steps.fftest4.outputs.filtered }}`;
             if (fftest4 !== `["two/three"]`) {
-              core.setFailed(fftest4)
+              core.setFailed('fftest4: ' + fftest4)
             }
             const fftest5 = `${{ steps.fftest5.outputs.filtered }}`;
             if (fftest5 !== `["one","two/three/four"]`) {
-              core.setFailed(fftest5)
+              core.setFailed('fftest5: ' + fftest5)
             }
 
       - uses: ./actions/get-changed-files

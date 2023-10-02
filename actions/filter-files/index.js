@@ -64,18 +64,41 @@ module.exports = ({
     globsRaw,
     inputFiles,
     invert,
+    conjunctive,
     core,
 }) => {
-    const extensions = parseList(extensionsRaw);
-    const exactFiles = parseList(exactFilesRaw);
-    const globMatcher = picomatch(parseList(globsRaw));
-    const directories = exactFiles.filter((name) => name.endsWith("/"));
+    const filters = [];
+    if (exactFilesRaw) {
+        const paths = parseList(exactFilesRaw);
+        const [directories, exactFiles] = paths.reduce(
+            ([directories, exactFiles], path) =>
+                path.endsWith("/")
+                    ? [[...directories, path], exactFiles]
+                    : [directories, [...exactFiles, path]],
+            [[], []],
+        );
+        if (directories.length) {
+            filters.push((path) =>
+                directories.some((dir) => path.startsWith(dir)),
+            );
+        }
+        if (exactFiles.length) {
+            filters.push((path) => exactFiles.includes(path));
+        }
+    }
+    if (extensionsRaw) {
+        const extensions = parseList(extensionsRaw);
+        filters.push((path) => extensions.some((ext) => path.endsWith(ext)));
+    }
+    if (globsRaw) {
+        const globMatcher = picomatch(parseList(globsRaw));
+        filters.push((path) => globMatcher(path));
+    }
     const result = inputFiles.filter((name) => {
-        const matched =
-            extensions.some((ext) => name.endsWith(ext)) ||
-            exactFiles.includes(name) ||
-            directories.some((dir) => name.startsWith(dir)) ||
-            globMatcher(name);
+        const bools = filters.map((conditional) => conditional(name));
+        const matched = conjunctive
+            ? bools.every(Boolean)
+            : bools.some(Boolean);
         return matched === !invert;
     });
     core.info(`Filtered Files: ${JSON.stringify(result)}`);
