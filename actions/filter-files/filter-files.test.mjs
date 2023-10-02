@@ -1,12 +1,11 @@
 import filterFiles from ".";
 
 describe("filterFiles", () => {
-    // eslint-disable-next-line no-console
-    const core = {info: console.info};
-    const invert = true;
+    const core = console;
 
     it("should return a new array files that are not filtered", () => {
         // Arrange
+        const invert = true;
         const inputFiles = [
             ".github/workflows/test.yml",
             ".changeset/README.md",
@@ -49,6 +48,7 @@ describe("filterFiles", () => {
 
     it("should throw an error for unbalanced brackets", () => {
         // Arrange
+        const invert = true;
         const globsRaw =
             "!packages/**/*.{ts,tsx,js,jsx}}), packages/this-one.ts";
 
@@ -70,6 +70,7 @@ describe("filterFiles", () => {
         //   but it's a good way to check that we have exited early
 
         // Arrange
+        const invert = true;
         const globsRaw = `packages/**/*.ts,tsx,js,jsx}})
             packages/this-one.ts`;
 
@@ -89,6 +90,7 @@ describe("filterFiles", () => {
 
     it("should allow whitespace", () => {
         // Arrange
+        const invert = true;
         const exactFilesRaw = `sub dir/file1.txt, file 2.txt, file 3.txt`;
 
         // Act
@@ -103,5 +105,82 @@ describe("filterFiles", () => {
 
         // Assert
         expect(result).toEqual(["not filtered"]);
+    });
+
+    it("inclusive disjunction (OR) by default", () => {
+        // Arrange
+        const inputFiles = [
+            ".github/workflows/test.yml",
+            ".changeset/README.md",
+            "other/thing.ts",
+            "packages/core/src/index.ts",
+            "packages/core/src/index.test.ts",
+            "packages/core/src/index.jsx",
+            "packages/core/src/index.test.jsx",
+            "packages/core/src/styles.css",
+            "packages/this-one.ts",
+            "anything.ts",
+        ];
+        const expected = [
+            "other/thing.ts",
+            "packages/core/src/index.ts",
+            "packages/core/src/index.test.ts",
+            "packages/core/src/index.jsx",
+            "packages/core/src/index.test.jsx",
+            "packages/core/src/styles.css",
+            "packages/this-one.ts",
+            "anything.ts",
+        ];
+        const extensionsRaw = `ts,js,jsx,tsx`;
+        const exactFilesRaw = "packages/";
+        const globsRaw = "!(packages/**/*.test.*), packages/this-one.ts";
+
+        // Act
+        const result = filterFiles({
+            extensionsRaw,
+            exactFilesRaw,
+            globsRaw,
+            inputFiles,
+            core,
+        });
+
+        // Assert
+        expect(result).toEqual(expected);
+    });
+
+    it("conjunction (AND) when specified", () => {
+        // Arrange
+        const inputFiles = [
+            ".github/workflows/test.yml",
+            ".changeset/README.md",
+            "other/thing.ts",
+            "packages/core/src/index.ts",
+            "packages/core/src/index.test.ts",
+            "packages/core/src/index.jsx",
+            "packages/core/src/index.test.jsx",
+            "packages/core/src/styles.css",
+            "packages/this-one.ts",
+        ];
+        const expected = [
+            "packages/core/src/index.ts",
+            "packages/core/src/index.jsx",
+            "packages/this-one.ts",
+        ];
+        const extensionsRaw = `ts,js,jsx,tsx`;
+        const exactFilesRaw = "packages/";
+        const globsRaw = "!(packages/**/*.test.*), packages/this-one.ts";
+
+        // Act
+        const result = filterFiles({
+            inputFiles,
+            extensionsRaw,
+            exactFilesRaw,
+            globsRaw,
+            conjunctive: true,
+            core,
+        });
+
+        // Assert
+        expect(result).toEqual(expected);
     });
 });
