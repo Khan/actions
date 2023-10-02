@@ -40,8 +40,8 @@ runs:
             throw new Error(`filter-files was called with an empty string as the "changed-files" parameter.`)
           }
           const inputFiles = JSON.parse(inputFilesRaw);
-          const invert = `${{ inputs.invert }}`;
-          const conjunctive = `${{ inputs.conjunctive }}`;
+          const invert = ${{ inputs.invert == 'true' }};
+          const conjunctive = ${{ inputs.conjunctive == 'true' }};
 
           return require('./actions/filter-files/index.js')({extensionsRaw, exactFilesRaw, globsRaw, inputFiles, invert, conjunctive, core})
         result-encoding: json
