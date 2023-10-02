@@ -1,5 +1,11 @@
 # filter-files
 
+## 0.4.0
+
+### Minor Changes
+
+-   0f71fde: Added optional parameter to assert that _every_ filter condition passes to include a file. This switches from an inclusive disjunction to conjunction.
+
 ## 0.3.1
 
 ### Patch Changes
