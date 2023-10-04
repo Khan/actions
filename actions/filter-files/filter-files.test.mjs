@@ -168,7 +168,7 @@ describe("filterFiles", () => {
         ];
         const extensionsRaw = `ts,js,jsx,tsx`;
         const exactFilesRaw = "packages/";
-        const globsRaw = "!(packages/**/*.test.*), packages/this-one.ts";
+        const globsRaw = "!(packages/**/*.test.*)";
 
         // Act
         const result = filterFiles({
@@ -182,5 +182,27 @@ describe("filterFiles", () => {
 
         // Assert
         expect(result).toEqual(expected);
+    });
+
+    it("in conjunctive mode, globs should not return match unless all match", () => {
+        // Arrange
+        const inputFiles = [
+            "packages/wonder-blocks-icon-button/src/__tests__/__snapshots__/custom-snapshot.test.tsx.snap",
+        ];
+
+        const exactFilesRaw = "packages/";
+        const globsRaw = "!(**/__tests__/**), !(**/dist/**)";
+
+        // Act
+        const result = filterFiles({
+            inputFiles,
+            exactFilesRaw,
+            globsRaw,
+            conjunctive: true,
+            core,
+        });
+
+        // Assert
+        expect(result).toEqual([]);
     });
 });
