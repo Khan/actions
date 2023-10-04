@@ -163,12 +163,14 @@ describe("filterFiles", () => {
         ];
         const expected = [
             "packages/core/src/index.ts",
+            "packages/core/src/index.test.ts",
             "packages/core/src/index.jsx",
             "packages/this-one.ts",
         ];
         const extensionsRaw = `ts,js,jsx,tsx`;
         const exactFilesRaw = "packages/";
-        const globsRaw = "!(packages/**/*.test.*)";
+        // globs is inclusive disjunction (OR) by default
+        const globsRaw = "!(packages/**/*.test.*), packages/**/*.test.ts";
 
         // Act
         const result = filterFiles({
@@ -184,7 +186,7 @@ describe("filterFiles", () => {
         expect(result).toEqual(expected);
     });
 
-    it("in conjunctive mode, globs should not return match unless all match", () => {
+    it("when matchAllGlobs is true, globs should not return match unless all match", () => {
         // Arrange
         const inputFiles = [
             "packages/wonder-blocks-icon-button/src/__tests__/__snapshots__/custom-snapshot.test.tsx.snap",
@@ -199,6 +201,7 @@ describe("filterFiles", () => {
             exactFilesRaw,
             globsRaw,
             conjunctive: true,
+            matchAllGlobs: true,
             core,
         });
 

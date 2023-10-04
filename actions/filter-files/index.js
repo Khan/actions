@@ -65,6 +65,7 @@ module.exports = ({
     inputFiles,
     invert,
     conjunctive,
+    matchAllGlobs,
     core,
 }) => {
     const filters = [];
@@ -97,11 +98,12 @@ module.exports = ({
         // note that we may want to add an option to enable this in the future;
         //   for example, if a developer wanted conjunctive filter matches but disjunctive glob matches
         // test this behavior here: https://codesandbox.io/s/picomatch-forked-qgqy2g
-        if (globsList.length > 1 && conjunctive) {
-            for (const glob of globsList) {
-                filters.push((path) => picomatch(glob)(path));
-            }
+        if (globsList.length > 1 && matchAllGlobs) {
+            // conjunctive glob match
+            const matchers = globsList.map((glob) => picomatch(glob));
+            filters.push((path) => matchers.every((matcher) => matcher(path)));
         } else {
+            // disjunctive glob match
             filters.push((path) => picomatch(globsList)(path));
         }
     }
