@@ -95,8 +95,6 @@ module.exports = ({
         const globsList = parseList(globsRaw);
         // picomatch does does inclusive disjunctions (ORs) by default,
         //   so we need to do some extra work to get conjunctive (AND) matches.
-        // note that we may want to add an option to enable this in the future;
-        //   for example, if a developer wanted conjunctive filter matches but disjunctive glob matches
         // test this behavior here: https://codesandbox.io/s/picomatch-forked-qgqy2g
         if (globsList.length > 1 && matchAllGlobs) {
             // conjunctive glob match
