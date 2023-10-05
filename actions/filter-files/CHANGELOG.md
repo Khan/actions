@@ -1,5 +1,11 @@
 # filter-files
 
+## 0.5.0
+
+### Minor Changes
+
+-   9b8a083: Globs match conjunctively (AND) when matchAllGlobs is true.
+
 ## 0.4.0
 
 ### Minor Changes
