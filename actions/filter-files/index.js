@@ -65,6 +65,7 @@ module.exports = ({
     inputFiles,
     invert,
     conjunctive,
+    matchAllGlobs,
     core,
 }) => {
     const filters = [];
@@ -91,8 +92,18 @@ module.exports = ({
         filters.push((path) => extensions.some((ext) => path.endsWith(ext)));
     }
     if (globsRaw) {
-        const globMatcher = picomatch(parseList(globsRaw));
-        filters.push((path) => globMatcher(path));
+        const globsList = parseList(globsRaw);
+        // picomatch does does inclusive disjunctions (ORs) by default,
+        //   so we need to do some extra work to get conjunctive (AND) matches.
+        // test this behavior here: https://codesandbox.io/s/picomatch-forked-qgqy2g
+        if (globsList.length > 1 && matchAllGlobs) {
+            // conjunctive glob match
+            const matchers = globsList.map((glob) => picomatch(glob));
+            filters.push((path) => matchers.every((matcher) => matcher(path)));
+        } else {
+            // disjunctive glob match
+            filters.push((path) => picomatch(globsList)(path));
+        }
     }
     const result = inputFiles.filter((name) => {
         const bools = filters.map((conditional) => conditional(name));
