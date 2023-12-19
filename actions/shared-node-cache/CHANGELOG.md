@@ -1,5 +1,11 @@
 # shared-node-cache
 
+## 1.0.0
+
+### Major Changes
+
+-   3c3f437: Default to Node 20 instead of 16
+
 ## 0.2.4
 
 ### Patch Changes
