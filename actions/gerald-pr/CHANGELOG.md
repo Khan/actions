@@ -1,5 +1,11 @@
 # gerald-pr
 
+## 1.1.1
+
+### Patch Changes
+
+-   62881e0: Fix a bug with regex matches including too many files.
+
 ## 1.1.0
 
 ### Minor Changes
