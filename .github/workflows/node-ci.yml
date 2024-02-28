@@ -8,7 +8,7 @@ jobs:
     name: Lints
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: ./actions/shared-node-cache
       - run: yarn lint
 
@@ -43,7 +43,7 @@ jobs:
           files: 'two/three'
           invert: true
 
-      - uses: actions/github-script@v6
+      - uses: actions/github-script@v7
         name: Test the 'filter-files' action
         with:
           script: |
