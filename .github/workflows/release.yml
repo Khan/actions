@@ -10,10 +10,10 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: ./actions/shared-node-cache
 
-      - uses: actions/github-script@v6
+      - uses: actions/github-script@v7
         id: has-changesets
         with:
           script: |

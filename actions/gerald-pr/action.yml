@@ -15,12 +15,12 @@ runs:
         id: changed
         if: ${{ github.event.pull_request.draft == false }}
       - name: Check out base branch
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: '${{ github.base_ref }}'
         if: ${{ github.event.pull_request.draft == false }}
       - name: Check out head branch
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: '${{ github.head_ref }}'
         if: ${{ github.event.pull_request.draft == false }}

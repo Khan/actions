@@ -29,7 +29,7 @@ runs:
         extensions: ${{ inputs.exclude_extensions }}
         globs: ${{ inputs.exclude_globs }}
 
-    - uses: actions/github-script@v6
+    - uses: actions/github-script@v7
       with:
         script: |
           const inputFiles = JSON.parse(`${{ steps.match.outputs.filtered }}`);

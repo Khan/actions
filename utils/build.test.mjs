@@ -10,7 +10,7 @@ runs:
   steps:
     - name: Limited run
       uses: ./actions/json-args
-    - uses: actions/github-script@v6
+    - uses: actions/github-script@v7
       with:
         script: |
           require('./actions/full-or-limited/index.js')({github, core})
@@ -43,7 +43,7 @@ runs:
               steps:
                 - name: Limited run
                   uses: Our/monorepo@json-args-v1.2.3
-                - uses: actions/github-script@v6
+                - uses: actions/github-script@v7
                   with:
                     script: |
                       require('\${{ github.action_path }}/index.js')({github, core})
