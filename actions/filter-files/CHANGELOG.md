@@ -1,5 +1,11 @@
 # filter-files
 
+## 1.0.0
+
+### Major Changes
+
+-   67d07a3: Update to actions that use Node 20
+
 ## 0.5.0
 
 ### Minor Changes

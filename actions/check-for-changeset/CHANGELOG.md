@@ -1,5 +1,17 @@
 # check-for-changeset
 
+## 1.0.0
+
+### Major Changes
+
+-   67d07a3: Update to actions that use Node 20
+
+### Patch Changes
+
+-   Updated dependencies [67d07a3]
+    -   filter-files@1.0.0
+    -   get-changed-files@2.0.0
+
 ## 0.5.4
 
 ### Patch Changes
