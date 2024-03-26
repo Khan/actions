@@ -9,7 +9,7 @@ jobs:
     if: "github.event.action != 'edited' || github.event.changes.base != null"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: ./actions/gerald-pr
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
