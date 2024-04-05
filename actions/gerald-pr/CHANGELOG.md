@@ -1,5 +1,11 @@
 # gerald-pr
 
+## 3.0.1
+
+### Patch Changes
+
+-   bd5f761: Fix the gerald-pr deps
+
 ## 3.0.0
 
 ### Major Changes
