@@ -1,0 +1,34 @@
+name: Gerald
+description: Auto assign reviewers
+inputs:
+  token:
+    description: secrets.GITHUB_TOKEN
+    required: true
+  admin-token:
+    description: A token that has admin permissions for this repo
+    required: true
+runs:
+  using: "composite"
+  steps:
+      - name: Get All Changed Files
+        uses: ./actions/get-changed-files
+        id: changed
+        if: ${{ github.event.pull_request.draft == false }}
+      - name: Check out base branch
+        uses: actions/checkout@v4
+        with:
+          ref: '${{ github.base_ref }}'
+        if: ${{ github.event.pull_request.draft == false }}
+      - name: Check out head branch
+        uses: actions/checkout@v4
+        with:
+          ref: '${{ github.head_ref }}'
+        if: ${{ github.event.pull_request.draft == false }}
+      - name: Run Gerald
+        uses: Khan/gerald@v4.0
+        env:
+          GITHUB_TOKEN: '${{ inputs.token }}'
+          ADMIN_PERMISSION_TOKEN: '${{ inputs.admin-token }}'
+          EVENT: 'pull_request'
+          ALL_CHANGED_FILES: '${{ steps.changed.outputs.files }}'
+        if: ${{ github.event.pull_request.draft == false }}
