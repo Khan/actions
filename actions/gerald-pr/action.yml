@@ -11,7 +11,7 @@ runs:
   using: "composite"
   steps:
       - name: Get All Changed Files
-        uses: Khan/actions@get-changed-files-v1
+        uses: ./actions/get-changed-files
         id: changed
         if: ${{ github.event.pull_request.draft == false }}
       - name: Check out base branch
@@ -25,7 +25,7 @@ runs:
           ref: '${{ github.head_ref }}'
         if: ${{ github.event.pull_request.draft == false }}
       - name: Run Gerald
-        uses: Khan/gerald@v3.4
+        uses: Khan/gerald@v4.0
         env:
           GITHUB_TOKEN: '${{ inputs.token }}'
           ADMIN_PERMISSION_TOKEN: '${{ inputs.admin-token }}'
