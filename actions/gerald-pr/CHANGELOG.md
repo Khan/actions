@@ -1,5 +1,11 @@
 # gerald-pr
 
+## 3.0.0
+
+### Major Changes
+
+-   c1c0d93: Update to use Node 20
+
 ## 2.0.0
 
 ### Major Changes
