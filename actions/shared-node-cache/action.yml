@@ -13,6 +13,10 @@ runs:
       with:
         node-version: ${{ inputs.node-version }}
 
+    - run: npm install -g yarn
+      shell: bash
+      name: Install Yarn
+
     - name: Cache node_modules and cypress if it exists
       uses: actions/cache@v4
       id: cache-node-modules
