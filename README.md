@@ -23,6 +23,7 @@ Here's what I did:
 1. Find the last tagged-and-published version of that action (e.g., `gerald-pr-v0.0.1`).
 2. Run `git checkout gerald-pr-v0.0.1` to create a detached HEAD.
 3. Run `git checkout -b <branch-name>` to create a new branch with just those files.
-4. Apply the changes to my development branch to this branch: ``
-5. Push the branch to the GitHub
-6. Point my other repo to this branch with `uses: @Khan/actions@<branch-name>`
+4. Apply the changes to my development branch to this branch. Sometimes `git cherry-pick` can figure out the file-structure differences across branches. You can also manually create and apply patches. Or just manually bring in the changes, if they're small enough and you're careful enough.
+5. Push the branch to the GitHub.
+6. Point my other repo to my test branch with `uses: @Khan/actions@<branch-name>`.
+
