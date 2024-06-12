@@ -1,5 +1,11 @@
 # gerald-pr
 
+## 3.1.0
+
+### Minor Changes
+
+-   52a237a: Bumping actions/gerald-pr to point to newer version of Khan/gerald
+
 ## 3.0.1
 
 ### Patch Changes
