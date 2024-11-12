@@ -1,23 +1,5 @@
 # gerald-pr
 
-## 5.0.0
-
-### Major Changes
-
--   4f836bc: Add support for labels to NOTIFIED and REVIEWERS rules
-
-## 4.1.0
-
--   Unknown
-
-## 4.0.0
-
--   Unknown
-
-### Minor Changes
-
--   52a237a: Bumping actions/gerald-pr to point to newer version of Khan/gerald
-
 ## 3.1.0
 
 ### Minor Changes
