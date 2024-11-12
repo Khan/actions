@@ -1,5 +1,11 @@
 # gerald-pr
 
+## 3.1.1
+
+### Patch Changes
+
+-   21f6f05: Add support for labels to NOTIFIED and REVIEWERS rules
+
 ## 3.1.0
 
 ### Minor Changes
