@@ -1,5 +1,11 @@
 # gerald-pr
 
+## 3.1.2
+
+### Patch Changes
+
+-   0ee9d97: Fixed the label fucntionality
+
 ## 3.1.1
 
 ### Patch Changes
