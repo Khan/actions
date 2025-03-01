@@ -5,26 +5,40 @@ inputs:
     description: 'Node version to use'
     required: false
     default: '20.x'
+  cache-cypress:
+    description: 'If true, caches and restore Cypress packages'
+    required: false
+    default: 'false'
+
 runs:
   using: "composite"
   steps:
-    - name: Use Node.js ${{ inputs.node-version }}
-      uses: actions/setup-node@v4
+    - uses: pnpm/action-setup@v4
+      with:
+        run_install: false
+
+    # MUST be before we install node_modules as that depends on finding
+    # Cypress binaries in this cache!
+    - uses: actions/cache@v4
+      if: inputs.cache-cypress == 'true'
+      with:
+        path: ~/.cache/Cypress
+        # Generate a new cache whenever the lock file changes
+        key: ${{ runner.os }}-cypress-${{ hashFiles('**/pnpm-lock.yaml') }}
+        # If source files changed, rebuild from a prior cache.
+        restore-keys: |
+          ${{ runner.os }}-cypress-
+
+    - uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
+        cache: pnpm
 
-    - name: Cache node_modules and cypress if it exists
-      uses: actions/cache@v4
-      id: cache-node-modules
-      with:
-        path: |
-          node_modules
-          ~/.cache/Cypress
-        key: ${{ runner.os }}-${{ inputs.node-version }}-v1-${{ hashFiles('**/yarn.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-${{ inputs.node-version }}-v1-
-
-    - name: Install Dependencies
-      if: steps.cache-node-modules.outputs.cache-hit != 'true'
-      shell: bash
-      run: yarn install --frozen-lockfile
+    # We want to always run install (ignore cache-hit) because some node
+    # packages have a post-install script that does final setup. Specifically,
+    # Cypress and @swc/core among others.
+    # In tests, even webapp runs this in about 500ms when node_modules are in
+    # place.
+    - name: pnpm install
+      shell: sh
+      run: pnpm install ---frozen-lockfile
