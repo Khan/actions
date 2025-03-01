@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./actions/shared-node-cache
-      - run: yarn lint
+      - run: pnpm run lint
 
       # Test filter-files
       - uses: ./actions/filter-files
