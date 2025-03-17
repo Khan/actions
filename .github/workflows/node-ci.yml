@@ -10,6 +10,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./actions/shared-node-cache
+        with:
+          cache-cypress: 'true'
       - run: pnpm run lint
 
       # Test filter-files
