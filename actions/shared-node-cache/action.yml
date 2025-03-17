@@ -9,6 +9,9 @@ inputs:
     description: 'If true, caches and restore Cypress packages'
     required: false
     default: 'false'
+  ssh-private-key:
+    description: 'A private SSH key so that we can obtain private dependencies like our event schema package'
+    required: true
 
 runs:
   using: "composite"
@@ -33,6 +36,10 @@ runs:
       with:
         node-version: ${{ inputs.node-version }}
         cache: pnpm
+
+    - uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ inputs.ssh-private-key }}
 
     # We want to always run install (ignore cache-hit) because some node
     # packages have a post-install script that does final setup. Specifically,
