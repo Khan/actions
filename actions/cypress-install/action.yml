@@ -1,0 +1,26 @@
+name: 'Cypress Install'
+description: >-
+  Install Cypress and cache the Cypress binary. Run this action _after_ setting
+  up pnpm and node_modules.
+
+runs:
+  using: "composite"
+  steps:
+      - name: Cache Cypress
+        id: cache-cypress
+        uses: actions/cache@v4
+        env:
+          cache-name: cypress
+        with:
+          path: ~/.cache/Cypress
+          # Generate a new cache whenever the lock file changes
+          key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          # We explicitly _do not_ have a `restore-keys` entry here. If we did
+          # that our cache would grow for each version of Cypress we ever used.
+          # If we have a cache-miss, that means we're on a different version of
+          # Cypress and want to install from Cypress and cache that!
+
+      - name: Install Cypress
+        shell: bash
+        working-directory: services/static
+        run: pnpm exec cypress install
