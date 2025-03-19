@@ -7,7 +7,8 @@ inputs:
     default: '20.x'
   ssh-private-key:
     description: 'A private SSH key so that we can obtain private dependencies like our event schema package'
-    required: true
+    required: false
+    default: ''
 
 runs:
   using: "composite"
@@ -24,6 +25,7 @@ runs:
     # Set up SSH key so that the install step can install packages from private
     # git repos.
     - uses: webfactory/ssh-agent@v0.9.0
+      if: ${{ inputs.ssh-private-key }} != ""
       with:
         ssh-private-key: ${{ inputs.ssh-private-key }}
 
