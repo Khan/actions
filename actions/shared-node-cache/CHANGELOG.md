@@ -1,5 +1,15 @@
 # shared-node-cache
 
+## 3.0.0
+
+### Major Changes
+
+-   136a81c: Update shared-node-cache to support [pnpm](pnpm.io)
+
+### Minor Changes
+
+-   ccd8398: Make `ssh-private-key` optional on the shared-node-cache action
+
 ## 2.0.0
 
 ### Major Changes
