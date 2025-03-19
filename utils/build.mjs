@@ -86,7 +86,7 @@ export const buildPackage = (name, packageJsons, monorepoName) => {
     if (fs.existsSync(`actions/${name}/index.js`)) {
         console.log(`Building actions/${name}/index.js`);
         execSync(
-            `yarn ncc build actions/${name}/index.js -o ${dist} --source-map`,
+            `pnpm ncc build actions/${name}/index.js -o ${dist} --source-map`,
         );
     }
 

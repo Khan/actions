@@ -15,8 +15,8 @@ module.exports = ({context, core, inputFiles}) => {
     if (!hasChangeset) {
         core.setFailed(
             "This PR does not have a changeset. You can add one by " +
-                "running `yarn changeset` and following the prompts.\n" +
-                "If this PR doesn't need a changeset, run `yarn changeset " +
+                "running `pnpm changeset` and following the prompts.\n" +
+                "If this PR doesn't need a changeset, run `pnpm changeset " +
                 "--empty` and commit results.",
         );
     }

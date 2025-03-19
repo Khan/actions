@@ -1,30 +1,33 @@
 name: 'Shared Node Cache'
-description: 'Install & cache our npm dependencies'
+description: 'Install & cache our npm dependencies (using pnpm)'
 inputs:
   node-version:
     description: 'Node version to use'
     required: false
     default: '20.x'
+  ssh-private-key:
+    description: 'A private SSH key so that we can obtain private dependencies like our event schema package'
+    required: true
+
 runs:
   using: "composite"
   steps:
-    - name: Use Node.js ${{ inputs.node-version }}
-      uses: actions/setup-node@v4
+    - uses: pnpm/action-setup@v4
+      with:
+        run_install: false
+
+    - uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
+        cache: pnpm
 
-    - name: Cache node_modules and cypress if it exists
-      uses: actions/cache@v4
-      id: cache-node-modules
+    # Set up SSH key so that the install step can install packages from private
+    # git repos.
+    - uses: webfactory/ssh-agent@v0.9.0
       with:
-        path: |
-          node_modules
-          ~/.cache/Cypress
-        key: ${{ runner.os }}-${{ inputs.node-version }}-v1-${{ hashFiles('**/yarn.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-${{ inputs.node-version }}-v1-
+        ssh-private-key: ${{ inputs.ssh-private-key }}
 
-    - name: Install Dependencies
-      if: steps.cache-node-modules.outputs.cache-hit != 'true'
-      shell: bash
-      run: yarn install --frozen-lockfile
+    # Now install node_modules (we cache the pnpm store above)
+    - name: pnpm install
+      shell: sh
+      run: pnpm install ---frozen-lockfile
