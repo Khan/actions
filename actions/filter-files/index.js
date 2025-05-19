@@ -112,7 +112,7 @@ module.exports = ({
                 const yeses = globsList.filter((glob) => !glob.startsWith("!"));
                 filters.push((path) => {
                     const yesesMatch =
-                        !yesses.length ||
+                        !yeses.length ||
                         yeses.some((glob) => picomatch(glob)(path));
                     const noesMatch = nots.every((glob) =>
                         picomatch(glob)(path),
