@@ -111,13 +111,12 @@ module.exports = ({
             if (nots.length) {
                 const yeses = globsList.filter((glob) => !glob.startsWith("!"));
                 filters.push((path) => {
-                    const yesesMatch = yeses.some((glob) =>
-                        picomatch(glob)(path),
-                    );
+                    const yesesMatch =
+                        !yesses.length ||
+                        yeses.some((glob) => picomatch(glob)(path));
                     const noesMatch = nots.every((glob) =>
                         picomatch(glob)(path),
                     );
-                    console.log("check", path, yesesMatch, noesMatch);
                     return yesesMatch && noesMatch;
                 });
             } else {
@@ -131,7 +130,6 @@ module.exports = ({
         const matched = conjunctive
             ? bools.every(Boolean)
             : bools.some(Boolean);
-        console.log("bools", bools, name, matched);
         return matched === !invert;
     });
     core.info(`Filtered Files: ${JSON.stringify(result)}`);
