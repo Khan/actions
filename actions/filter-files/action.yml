@@ -39,7 +39,6 @@ runs:
           const extensionsRaw = `${{ inputs.extensions }}`;
           const exactFilesRaw = `${{ inputs.files }}`;
           const globsRaw = `${{ inputs.globs }}`;
-          console.log('the glubs', globsRaw)
           const matchAllGlobs = ${{ inputs.matchAllGlobs == 'true' }};
           const inputFilesRaw = `${{ inputs.changed-files }}`;
           if (inputFilesRaw.trim() === '') {
