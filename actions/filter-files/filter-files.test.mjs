@@ -13,7 +13,6 @@ describe("filterFiles", () => {
         const result = filterFiles({
             globsRaw: `packages/*\n!packages/*.json`,
             inputFiles,
-            matchAllGlobs: true,
             core,
         });
 
@@ -50,8 +49,10 @@ describe("filterFiles", () => {
             "packages/this-one.ts",
         ];
         const expected = [
+            "other/thing.ts",
             "packages/core/src/index.ts",
             "packages/core/src/index.jsx",
+            "packages/core/src/styles.css",
         ];
         // splitting on newline
         const extensionsRaw = `test.ts
@@ -61,8 +62,7 @@ describe("filterFiles", () => {
         // splitting on comma and ignoring whitespace
         const exactFilesRaw = ".github/, .changeset/";
         // not splitting inside brackets
-        const globsRaw =
-            "!(packages/**/*.{ts,tsx,js,jsx}), packages/this-one.ts";
+        const globsRaw = "packages/this-one.ts, packages/**/*.test.ts";
 
         // Act
         const result = filterFiles({
@@ -165,7 +165,7 @@ describe("filterFiles", () => {
         ];
         const extensionsRaw = `ts,js,jsx,tsx`;
         const exactFilesRaw = "packages/";
-        const globsRaw = "!(packages/**/*.test.*), packages/this-one.ts";
+        const globsRaw = "packages/this-one.ts";
 
         // Act
         const result = filterFiles({
@@ -197,12 +197,13 @@ describe("filterFiles", () => {
             "packages/core/src/index.ts",
             "packages/core/src/index.test.ts",
             "packages/core/src/index.jsx",
+            "packages/core/src/index.test.jsx",
             "packages/this-one.ts",
         ];
         const extensionsRaw = `ts,js,jsx,tsx`;
         const exactFilesRaw = "packages/";
         // globs is inclusive disjunction (OR) by default
-        const globsRaw = "!(packages/**/*.test.*), packages/**/*.test.ts";
+        const globsRaw = "**/src/*, **/*-one.ts";
 
         // Act
         const result = filterFiles({
