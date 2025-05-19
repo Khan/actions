@@ -99,7 +99,7 @@ module.exports = ({
     }
     if (globsRaw) {
         const globsList = parseList(globsRaw);
-        console.log("parsed globs list", globsList);
+        core.info("parsed globs list", globsList);
         // picomatch does does inclusive disjunctions (ORs) by default,
         //   so we need to do some extra work to get conjunctive (AND) matches.
         // test this behavior here: https://codesandbox.io/s/picomatch-forked-qgqy2g
