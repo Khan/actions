@@ -45,12 +45,11 @@ jobs:
       - uses: ./actions/filter-files
         id: fftest6
         with:
-          changed-files: '["one/two", "one/three"]'
+          changed-files: '["one/two", "two/three"]'
           globs: |
             # Comment here
-            !*/three
-            # With comments
             one/*
+            # With comments
 
       - uses: actions/github-script@v7
         name: Test the 'filter-files' action
