@@ -47,7 +47,7 @@ jobs:
         with:
           changed-files: '["one", "two/three", "two/three/four"]'
           globs:
-            - !two
+            - '!two'
             - o*
 
       - uses: actions/github-script@v7
