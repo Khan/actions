@@ -16,7 +16,7 @@ const parseList = (raw) => {
                 .split("\n")
                 .map((item) => item.trim())
                 // Filter out comment lines
-                .filter((line) => !line.startsWith("#"))
+                .filter((line) => line.length && !line.startsWith("#"))
         );
     }
 
