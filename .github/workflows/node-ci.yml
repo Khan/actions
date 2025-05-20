@@ -79,6 +79,10 @@ jobs:
             if (fftest6 !== `["one/two"]`) {
               core.setFailed('fftest6: ' + fftest6)
             }
+            const sixMatched = ${{ steps.fftest6.outputs.matched_any }};
+            if (!sixMatched) {
+              core.setFailed('fftest6 matched_any: ' + fftest6)
+            }
 
       - uses: ./actions/get-changed-files
         id: changed-limited
