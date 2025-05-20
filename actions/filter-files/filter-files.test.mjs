@@ -3,6 +3,38 @@ import filterFiles from ".";
 describe("filterFiles", () => {
     const core = console;
 
+    it("should honor NOT globs", () => {
+        const inputFiles = [
+            "other/thing.ts",
+            "packages/this-one.ts",
+            "packages/some.json",
+        ];
+
+        const result = filterFiles({
+            globsRaw: `packages/*\n!packages/*.json`,
+            inputFiles,
+            matchAllGlobs: true,
+            core,
+        });
+
+        // Assert
+        expect(result).toEqual(["packages/this-one.ts"]);
+    });
+
+    it("should ignore comment lines", () => {
+        const inputFiles = ["other/thing.ts", "packages/this-one.ts"];
+
+        const result = filterFiles({
+            globsRaw: `# this is a comment\nother/*`,
+            inputFiles,
+            matchAllGlobs: true,
+            core,
+        });
+
+        // Assert
+        expect(result).toEqual(["other/thing.ts"]);
+    });
+
     it("should return a new array files that are not filtered", () => {
         // Arrange
         const invert = true;

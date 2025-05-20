@@ -11,7 +11,13 @@ const parseList = (raw) => {
     }
     if (raw.includes("\n")) {
         // if split on newlines, no need to parse for internal commas
-        return raw.split("\n").map((item) => item.trim());
+        return (
+            raw
+                .split("\n")
+                .map((item) => item.trim())
+                // Filter out comment lines
+                .filter((line) => line.length && !line.startsWith("#"))
+        );
     }
 
     let bracketCount = 0;
