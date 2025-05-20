@@ -29,6 +29,9 @@ outputs:
   filtered:
     description: 'The jsonified list of files that match'
     value: ${{ steps.result.outputs.result }}
+  matched_any:
+    description: 'True if any files were matched'
+    value: ${{ steps.result.outputs.result != '[]' }}
 runs:
   using: "composite"
   steps:
