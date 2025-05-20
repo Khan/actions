@@ -10,6 +10,11 @@ const getBaseAndHead = (context, core) => {
             ];
         case "push":
             return [context.payload.before, context.payload.after];
+        case "merge_group":
+            return [
+                context.payload.merge_group.base_sha,
+                context.payload.merge_group.head_sha,
+            ];
         default:
             core.setFailed(
                 `This action only supports pull requests and pushes, ${context.eventName} events are not supported. ` +
