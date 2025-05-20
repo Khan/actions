@@ -1,5 +1,13 @@
 # check-for-changeset
 
+## 1.0.1
+
+### Patch Changes
+
+-   Updated dependencies [319f6c4]
+-   Updated dependencies [22f9e6d]
+    -   filter-files@2.0.0
+
 ## 1.0.0
 
 ### Major Changes
