@@ -1,5 +1,11 @@
 # filter-files
 
+## 2.1.0
+
+### Minor Changes
+
+-   c17f036: Add a matched_any output to filter-files
+
 ## 2.0.0
 
 ### Major Changes

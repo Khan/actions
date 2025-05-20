@@ -1,5 +1,12 @@
 # gerald-pr
 
+## 3.1.3
+
+### Patch Changes
+
+-   Updated dependencies [d7e4c73]
+    -   get-changed-files@2.1.0
+
 ## 3.1.2
 
 ### Patch Changes
