@@ -107,8 +107,22 @@ module.exports = ({
             const matchers = globsList.map((glob) => picomatch(glob));
             filters.push((path) => matchers.every((matcher) => matcher(path)));
         } else {
-            // disjunctive glob match
-            filters.push((path) => picomatch(globsList)(path));
+            const nots = globsList.filter((glob) => glob.startsWith("!"));
+            if (nots.length) {
+                const yeses = globsList.filter((glob) => !glob.startsWith("!"));
+                filters.push((path) => {
+                    const yesesMatch =
+                        !yeses.length ||
+                        yeses.some((glob) => picomatch(glob)(path));
+                    const noesMatch = nots.every((glob) =>
+                        picomatch(glob)(path),
+                    );
+                    return yesesMatch && noesMatch;
+                });
+            } else {
+                // disjunctive glob match
+                filters.push((path) => picomatch(globsList)(path));
+            }
         }
     }
     const result = inputFiles.filter((name) => {
