@@ -1,5 +1,11 @@
 # get-changed-files
 
+## 2.1.0
+
+### Minor Changes
+
+-   d7e4c73: Add `merge_group` event support to the get-changed-files action
+
 ## 2.0.0
 
 ### Major Changes
