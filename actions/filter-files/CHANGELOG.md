@@ -1,5 +1,12 @@
 # filter-files
 
+## 2.0.0
+
+### Major Changes
+
+-   319f6c4: Filtering out #comments in multiline input lists
+-   22f9e6d: Change behavior of "negative globs" to match .gitignore
+
 ## 1.0.0
 
 ### Major Changes
