@@ -1,0 +1,55 @@
+name: 'Filter files please'
+description: 'Filter the list of changed files'
+inputs:
+  changed-files:
+    description: 'jsonified list of changed files'
+    required: true
+  files:
+    description: 'comma- or newline-separated list of files to match against. names ending in "/" will be treated as a directory path, and match as a prefix. Otherwise path names must be a full match.'
+    required: false
+  extensions:
+    description: 'comma- or newline-separated list of extensions to check for'
+    required: false
+  globs:
+    description: 'comma- or newline-separated list of globs (using picomatch syntax) to check for'
+    required: false
+  matchAllGlobs:
+    description: 'if true, all globs must match. Otherwise, any glob can match.'
+    required: false
+    default: false
+  invert:
+    description: 'if true, return the non-matched paths instead of the matched ones.'
+    required: false
+    default: false
+  conjunctive:
+    description: 'if true, return only the files that match all of the criteria. Otherwise, return files that match any of the criteria.'
+    required: false
+    default: false
+outputs:
+  filtered:
+    description: 'The jsonified list of files that match'
+    value: ${{ steps.result.outputs.result }}
+  matched_any:
+    description: 'True if any files were matched'
+    value: ${{ steps.result.outputs.result != '[]' }}
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/github-script@v7
+      id: result
+      with:
+        script: |
+          const extensionsRaw = `${{ inputs.extensions }}`;
+          const exactFilesRaw = `${{ inputs.files }}`;
+          const globsRaw = `${{ inputs.globs }}`;
+          const matchAllGlobs = ${{ inputs.matchAllGlobs == 'true' }};
+          const inputFilesRaw = `${{ inputs.changed-files }}`;
+          if (inputFilesRaw.trim() === '') {
+            throw new Error(`filter-files was called with an empty string as the "changed-files" parameter.`)
+          }
+          const inputFiles = JSON.parse(inputFilesRaw);
+          const invert = ${{ inputs.invert == 'true' }};
+          const conjunctive = ${{ inputs.conjunctive == 'true' }};
+
+          return require('${{ github.action_path }}/index.js')({extensionsRaw, exactFilesRaw, globsRaw, matchAllGlobs, inputFiles, invert, conjunctive, core})
+        result-encoding: json
