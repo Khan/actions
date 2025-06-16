@@ -12,6 +12,9 @@ function copyDir(src, dest) {
     fs.mkdirSync(dest, {recursive: true});
 
     for (const entry of entries) {
+        if (entry === "node_modules" || entry === "dist") {
+            continue;
+        }
         const srcPath = path.join(src, entry.name);
         const destPath = path.join(dest, entry.name);
 
