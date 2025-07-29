@@ -111,21 +111,38 @@ runs:
           git push
         fi
 
-    - name: Comment on PR (Success)
-      if: steps.apply.outcome == 'success'
+    - name: Find merged PR
+      if: steps.apply.outcome == 'success' || steps.apply.outcome == 'failure'
+      id: find_pr
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        # Find the PR that was merged to trigger this workflow
+        # Look for the PR associated with the current commit
+        CURRENT_COMMIT="${{ github.sha }}"
+        PR_NUMBER=$(gh api "repos/${{ github.repository }}/commits/$CURRENT_COMMIT/pulls" --jq '.[0].number' 2>/dev/null || echo "")
+        if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+        else
+          echo "pr_number=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Comment on PR (Success)
+      if: steps.apply.outcome == 'success' && steps.find_pr.outputs.pr_number != ''
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        PR_NUMBER: ${{ steps.find_pr.outputs.pr_number }}
       run: |
         gh pr comment "$PR_NUMBER" --body "The Terraform plan has been successfully applied. A new plan will be generated to verify the changes: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
     - name: Comment on PR (Failure)
-      if: steps.apply.outcome == 'failure'
+      if: steps.apply.outcome == 'failure' && steps.find_pr.outputs.pr_number != ''
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_NUMBER: ${{ steps.find_pr.outputs.pr_number }}
       run: |
         gh pr comment "$PR_NUMBER" --body "The Terraform apply failed. Please check the workflow logs for details: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
