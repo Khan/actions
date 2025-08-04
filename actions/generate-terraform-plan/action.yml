@@ -1,0 +1,199 @@
+# This workflow generates a Terraform plan and handles PR creation/comments.
+# It can be called from any repository. It handles:
+# - Checking for plan files
+# - Authenticating with GCP
+# - Generating a Terraform plan
+# - Handling PR creation/comments
+# - Commenting on PRs for success/failure
+# All environment variables starting with TF_VAR_ will be automatically picked up by Terraform
+# Example: TF_VAR_project_id, TF_VAR_region, etc.
+
+name: "Generate Terraform Plan"
+description: "Generates a Terraform plan and handles PR creation/comments"
+
+inputs:
+  terraform_path:
+    description: "Path to the Terraform directory"
+    required: true
+  plan_file_binary:
+    description: "Filename for the binary plan file"
+    required: false
+    default: "tfplan.binary"
+  plan_file_text:
+    description: "Filename for the text plan file"
+    required: false
+    default: "tfplan.txt"
+  workload_identity_provider:
+    description: "Workload Identity Provider for Google Cloud authentication"
+    required: true
+  service_account:
+    description: "Service account email for Google Cloud authentication"
+    required: true
+  terraform_version:
+    description: "Terraform version to use"
+    required: false
+    default: "1.9.2"
+  github_token:
+    description: "GitHub token for API operations"
+    required: true
+  pr_creation_branch:
+    description: "The base branch against which to open the plan PR"
+    required: false
+    default: "master"
+  enable_pr_comment:
+    description: "Whether to comment on an existing PR with the plan"
+    required: false
+    default: 'true'
+  enable_pr_creation:
+    description: "Whether to create a new PR with the plan on pushes to the base branch"
+    required: false
+    default: 'true'
+  apply_workflow_filename:
+    description: "The filename of the apply workflow, used to find the last successful deployment commit"
+    required: true
+  pr_title:
+    description: "The title for the pull request created with the plan"
+    required: false
+    default: "Terraform Plan Update"
+
+outputs:
+  has_changes:
+    description: "A flag indicating if the plan contains changes"
+    value: ${{ steps.plan.outputs.has_changes }}
+
+runs:
+  using: "composite"
+  steps:
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform_version }}
+
+    - name: Authenticate with Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ inputs.workload_identity_provider }}
+        service_account: ${{ inputs.service_account }}
+
+    - name: Terraform Init, Validate and Fmt Check
+      shell: bash
+      working-directory: ${{ inputs.terraform_path }}
+      run: |
+        terraform init -input=false
+        terraform validate
+        terraform fmt -check
+
+    - name: Generate Terraform Plan
+      id: plan
+      shell: bash
+      working-directory: ${{ inputs.terraform_path }}
+      run: |
+        # Handle backward compatibility with tf_vars_json
+        if [[ -n "$TF_VARS_JSON" && "$TF_VARS_JSON" != "{}" ]]; then
+          echo "Warning: tf_vars_json is deprecated. Use TF_VAR_* environment variables instead."
+          # Convert JSON to TF_VAR_ environment variables for backward compatibility
+          echo "$TF_VARS_JSON" | jq -r 'to_entries | .[] | "export TF_VAR_\(.key)=\(.value)"' | while read -r line; do
+            if [[ -n "$line" ]]; then
+              eval "$line"
+            fi
+          done
+        fi
+        
+        terraform plan -out=${{ inputs.plan_file_binary }}
+        terraform show -no-color ${{ inputs.plan_file_binary }} > ${{ inputs.plan_file_text }}
+        if grep -q "No changes" "${{ inputs.plan_file_text }}"; then
+          echo "has_changes=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Get Last Deployed Commit
+      if: steps.plan.outputs.has_changes == 'true' && github.ref_name == inputs.pr_creation_branch && inputs.enable_pr_creation == 'true'
+      id: last_deployed
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        LAST_SUCCESSFUL_RUN_SHA=$(gh api "repos/${{ github.repository }}/actions/workflows/${{ inputs.apply_workflow_filename }}/runs" \
+          --jq '.workflow_runs[] | select(.conclusion == "success") | {sha: .head_sha, created: .created_at}' \
+          --paginate \
+          | jq -s 'sort_by(.created) | reverse | .[0].sha' \
+          | tr -d '"')
+        if [ -n "$LAST_SUCCESSFUL_RUN_SHA" ] && [ "$LAST_SUCCESSFUL_RUN_SHA" != "null" ]; then
+          echo "last_deployed=$LAST_SUCCESSFUL_RUN_SHA" >> "$GITHUB_OUTPUT"
+        else
+          LAST_DEPLOYED=$(git rev-list --max-parents=0 HEAD)
+          echo "last_deployed=$LAST_DEPLOYED" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Close previous PRs created by this workflow
+      if: inputs.enable_pr_creation == 'true' && github.ref_name == inputs.pr_creation_branch && steps.plan.outputs.has_changes == 'true'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        gh pr list --state open --base ${{ inputs.pr_creation_branch }} --json number,title --jq '.[] | select(.title == "${{ inputs.pr_title }}") | .number' | while read -r pr; do
+          if [ -n "$pr" ]; then
+            echo "Closing PR #$pr..."
+            gh pr comment "$pr" --body "This PR has been superseded by a new plan PR. Closing in favor of the latest."
+            gh pr close "$pr"
+          fi
+        done
+
+    - name: Create PR with Plan
+      if: inputs.enable_pr_creation == 'true' && github.ref_name == inputs.pr_creation_branch && steps.plan.outputs.has_changes == 'true'
+      uses: peter-evans/create-pull-request@v7
+      with:
+        token: ${{ inputs.github_token }}
+        commit-message: 'chore(terraform): update plan'
+        branch: 'ci/terraform-plan-${{ github.run_id }}'
+        title: ${{ inputs.pr_title }}
+        body: |
+          This PR was automatically generated by the `${{ github.workflow }}` workflow.
+
+          This PR includes the latest Terraform plan. After this PR is merged, the plan will be applied. @${{ github.actor }}, please review the plan and approve the PR. When you are ready to deploy your changes, you can squash and merge this PR.
+
+          Note, this plan reflects the current state of the `${{ inputs.pr_creation_branch }}` branch and may include changes from multiple contributors.
+
+          Plan file: `${{ inputs.terraform_path }}/${{ inputs.plan_file_binary }}`
+          Plaintext plan file: `${{ inputs.terraform_path }}/${{ inputs.plan_file_text }}`
+
+          ## Changes Since Last Deployment
+          You can view all changes that have not yet been deployed [here](https://github.com/${{ github.repository }}/compare/${{ steps.last_deployed.outputs.last_deployed }}...${{ github.sha }}).
+        add-paths: |
+          ${{ inputs.terraform_path }}/${{ inputs.plan_file_binary }}
+          ${{ inputs.terraform_path }}/${{ inputs.plan_file_text }}
+        base: ${{ inputs.pr_creation_branch }}
+        reviewers: ${{ github.actor }}
+
+    - name: Comment on PR with Terraform plan
+      if: inputs.enable_pr_comment == 'true' && github.event_name == 'pull_request' && steps.plan.outputs.has_changes == 'true'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        PLAN_TEXT_PATH="${{ inputs.terraform_path }}/${{ inputs.plan_file_text }}"
+        PLAN=$(head -c 65000 "$PLAN_TEXT_PATH")
+        PR_COMMENTS=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments")
+        COMMENT_ID=$(echo "$PR_COMMENTS" | jq -r '.[] | select(.user.login == "github-actions[bot]") | select(.body | test("<!-- terraform-plan -->")) | .id')
+        COMMENT_BODY=$(cat <<EOF
+        <!-- terraform-plan -->
+        ### Terraform Plan Preview
+        This is a preview of the Terraform plan based on the current PR. Note that:
+        - The plan may change if other PRs are merged before this one
+        - The plan may differ if this PR is not up to date with ${{ inputs.pr_creation_branch }}
+        After this PR is merged, the plan will be regenerated to ensure it's up to date with the latest infrastructure state and a new PR will be automatically created with the updated plan.
+        \`\`\`terraform
+        $PLAN
+        \`\`\`
+        EOF
+        )
+        if [[ -n "$COMMENT_ID" ]]; then
+          echo "Updating existing comment $COMMENT_ID"
+          gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" -f body="$COMMENT_BODY"
+        else
+          echo "Creating new comment"
+          gh pr comment "$PR_NUMBER" --body "$COMMENT_BODY"
+        fi 
