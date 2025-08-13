@@ -100,7 +100,12 @@ runs:
           done
         fi
         
-        terraform plan -out=${{ inputs.plan_file_binary }}
+        # Only use locking when on master branch to avoid lock contention
+        if [[ "${{ github.ref_name }}" == "${{ inputs.pr_creation_branch }}" ]]; then
+          terraform plan -out=${{ inputs.plan_file_binary }}
+        else
+          terraform plan -lock=false -out=${{ inputs.plan_file_binary }}
+        fi
         terraform show -no-color ${{ inputs.plan_file_binary }} > ${{ inputs.plan_file_text }}
         if grep -q "No changes" "${{ inputs.plan_file_text }}"; then
           echo "has_changes=false" >> "$GITHUB_OUTPUT"
