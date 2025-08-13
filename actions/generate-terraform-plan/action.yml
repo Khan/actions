@@ -116,6 +116,9 @@ runs:
         #   * Plans on feature branches are read-only previews
         #   * Plans and applys on the main branch are run with locking
         #   * No state inconsistencies can occur since operations related to writes are locked
+        #
+        # Note, the following check is to ensure that the plan is run with locking on the main branch.
+        # We don't check for the branch name here because it's not always going to be `master`.
         if [[ "${{ github.ref_name }}" == "${{ inputs.pr_creation_branch }}" ]]; then
           terraform plan -out=${{ inputs.plan_file_binary }}
         else
