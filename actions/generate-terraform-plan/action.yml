@@ -100,7 +100,22 @@ runs:
           done
         fi
         
-        # Only use locking when on master branch to avoid lock contention
+        # Terraform locking strategy:
+        # - On master/main branch: Use normal locking for safety during apply and plan operations
+        #   - This is the default behavior of Terraform
+        #   - Action concurrency is handled by the workflows themselves
+        # - On all other branches: Disable locking to avoid contention with operations on master
+        #   - This is to prevent lock contention when multiple branches are running terraform 
+        #     operations concurrently
+        #
+        # Why this is safe:
+        # Lock contention occurs when terraform operations are being run on multiple branches at 
+        # the same time. For example, if a `terraform plan` is being run on a PR branch and a 
+        # `terraform apply` is triggered the main branch, the apply will fail and need a manual re-run.
+        # This change prevents lock contention while maintaining safety:
+        #   * Plans on feature branches are read-only previews
+        #   * Plans and applys on the main branch are run with locking
+        #   * No state inconsistencies can occur since operations related to writes are locked
         if [[ "${{ github.ref_name }}" == "${{ inputs.pr_creation_branch }}" ]]; then
           terraform plan -out=${{ inputs.plan_file_binary }}
         else
