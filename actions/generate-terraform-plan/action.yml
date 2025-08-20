@@ -99,8 +99,20 @@ runs:
             fi
           done
         fi
-        
-        terraform plan -out=${{ inputs.plan_file_binary }}
+
+        # Terraform locks state during `plan` by default for safety. In our workflow,
+        # only the plan produced on the configured base/apply branch (`pr_creation_branch`,
+        # usually `main`/`master`) is intended for a subsequent `apply`, and applies always
+        # run with a lock.
+        # To avoid lock contention from PR branch plans blocking applies on the base branch,
+        # we disable locking for non-base branches. The lock is shared across branches, so
+        # leaving it on everywhere causes frequent contention and failed applies or plans
+        # that require manual re-runs.
+        if [[ "${{ github.ref_name }}" == "${{ inputs.pr_creation_branch }}" ]]; then
+          terraform plan -out=${{ inputs.plan_file_binary }}
+        else
+          terraform plan -lock=false -out=${{ inputs.plan_file_binary }}
+        fi
         terraform show -no-color ${{ inputs.plan_file_binary }} > ${{ inputs.plan_file_text }}
         if grep -q "No changes" "${{ inputs.plan_file_text }}"; then
           echo "has_changes=false" >> "$GITHUB_OUTPUT"
