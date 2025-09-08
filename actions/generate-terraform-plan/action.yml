@@ -89,17 +89,6 @@ runs:
       shell: bash
       working-directory: ${{ inputs.terraform_path }}
       run: |
-        # Handle backward compatibility with tf_vars_json
-        if [[ -n "$TF_VARS_JSON" && "$TF_VARS_JSON" != "{}" ]]; then
-          echo "Warning: tf_vars_json is deprecated. Use TF_VAR_* environment variables instead."
-          # Convert JSON to TF_VAR_ environment variables for backward compatibility
-          echo "$TF_VARS_JSON" | jq -r 'to_entries | .[] | "export TF_VAR_\(.key)=\(.value)"' | while read -r line; do
-            if [[ -n "$line" ]]; then
-              eval "$line"
-            fi
-          done
-        fi
-
         # Terraform locks state during `plan` by default for safety. In our workflow,
         # only the plan produced on the configured base/apply branch (`pr_creation_branch`,
         # usually `main`/`master`) is intended for a subsequent `apply`, and applies always
