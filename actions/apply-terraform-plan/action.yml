@@ -94,7 +94,7 @@ runs:
     # This prevents stale plans from being applied and ensures that each
     # apply job has a fresh plan generated for it.
     - name: Delete Plan Files
-      if: steps.apply.outcome == 'success' && inputs.cleanup_plan_files == 'true'
+      if: inputs.cleanup_plan_files == 'true'
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
