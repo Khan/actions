@@ -165,8 +165,8 @@ runs:
         # Use fallback_reviewers only if github.actor is a bot or the event is scheduled
         if [[ "${{ github.actor }}" == *"[bot]"* ]] || [[ "${{ github.event_name }}" == "schedule" ]]; then
           if [[ -n "${{ inputs.fallback_reviewers }}" ]]; then
-            # Clean up comma-separated list by removing extra whitespace
-            CLEANED_REVIEWERS=$(echo "${{ inputs.fallback_reviewers }}" | sed 's/ *, */,/g' | sed 's/^ *//g' | sed 's/ *$//g')
+            # Clean up comma-separated list by removing spaces
+            CLEANED_REVIEWERS=$(echo "${{ inputs.fallback_reviewers }}" | sed 's/ //g')
             echo "reviewer=$CLEANED_REVIEWERS" >> "$GITHUB_OUTPUT"
           else
             echo "reviewer=" >> "$GITHUB_OUTPUT"
