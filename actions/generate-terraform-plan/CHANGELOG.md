@@ -1,5 +1,11 @@
 # generate-terraform-plan
 
+## 2.2.0
+
+### Minor Changes
+
+-   a6a1612: Add fallback reviewers to generate-terraform-plan
+
 ## 2.1.0
 
 ### Minor Changes
