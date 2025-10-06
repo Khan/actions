@@ -195,6 +195,19 @@ runs:
 
           ## Changes Since Last Deployment
           You can view all changes that have not yet been deployed [here](https://github.com/${{ github.repository }}/compare/${{ steps.last_deployed.outputs.last_deployed }}...${{ github.sha }}).
+
+          ${{ github.event_name == 'schedule' && '## Scheduled Build Context
+          This PR was triggered by a scheduled build, which typically occurs due to:
+          - Daily rebuilds of listener and runner images
+          - Upstream dependency changes (e.g., new base images, Debian package updates)
+          - New versions of secrets being pushed
+
+          To evaluate this change:
+          1. Check the plan output above to see what infrastructure changes are proposed
+          2. Review the changes in the diff link above to understand what code or configuration changed
+          3 If there are changes to a docker image not explained by the diff:
+            1. Look at the [Cloud Build logs](https://console.cloud.google.com/cloud-build/builds) for the build that was triggered by this plan. Look for a build that has a start time just before this PR was created. The logs will contain the digest of the docker image in the plan output.
+            2. In the build logs, the first step that shows changes will indicate what changed in the docker image, e.g. an updated base image or package updates' || '' }}
         add-paths: |
           ${{ inputs.terraform_path }}/${{ inputs.plan_file_binary }}
           ${{ inputs.terraform_path }}/${{ inputs.plan_file_text }}
