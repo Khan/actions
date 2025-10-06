@@ -1,5 +1,11 @@
 # generate-terraform-plan
 
+## 2.2.1
+
+### Patch Changes
+
+-   4621a63: Updates the PR description for scheduled terraform plan generation to help reviewers determine the cause of the change
+
 ## 2.2.0
 
 ### Minor Changes
