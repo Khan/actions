@@ -32,4 +32,3 @@ jobs:
           publish: exit 1
         env:
           GITHUB_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
