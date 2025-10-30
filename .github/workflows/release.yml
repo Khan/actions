@@ -32,3 +32,7 @@ jobs:
           publish: exit 1
         env:
           GITHUB_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
+          # We don't specify NPM_TOKEN here because we don't publish to npm. We
+          # only use the changesets action to prepare the Version Packages PR,
+          # but once we land that, we use our publish-to-github-tags approach
+          # which is implemented above in the utils/run-publish.mjs step.
