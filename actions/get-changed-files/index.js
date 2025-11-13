@@ -1,6 +1,6 @@
 // Get the changed files for a pull-request or push
 
-const getBaseAndHead = (context, core) => {
+const getBaseAndHead = async (github, context, core) => {
     switch (context.eventName) {
         case "pull_request_target":
         case "pull_request":
@@ -9,7 +9,43 @@ const getBaseAndHead = (context, core) => {
                 context.payload.pull_request?.head?.sha,
             ];
         case "push":
-            return [context.payload.before, context.payload.after];
+            // For push events, if this is a new branch, the base_ref will be
+            // null and before will be all zeros (courtesy
+            // https://stackoverflow.com/a/61861763)
+            if (context.payload.base_ref != null) {
+                return [context.payload.before, context.payload.after];
+            } else {
+                // If we're on a new branch, then we try to find an open PR
+                // associated that has the 'after' commit.
+                const {owner, repo} = github.context.repo;
+
+                // Search for pull requests that contain the specified commit SHA
+                const response =
+                    await github.repos.listPullRequestsAssociatedWithCommit({
+                        owner,
+                        repo,
+                        commit_sha: context.payload.after,
+                    });
+
+                const pullRequests = response.data.items;
+                if (pullRequests.length === 0) {
+                    core.setFailed(
+                        `Could not determine base ref for '${context.eventName}' event. ` +
+                            `No pull requests found associated with commit: ${context.payload.after}. ` +
+                            `context.payload.base_ref is null.`,
+                    );
+
+                    // STOPSHIP: or should we just throw here??
+                    return [null, context.payload.after];
+                } else if (pullRequests.length > 1) {
+                    core.warn(
+                        `Found ${pullRequests.length} PRs with the pushed commit (${context.payload.after}). ` +
+                            `Proceeding on a hunch with the first one (#${pullRequests[0].number} - ${pullRequests[0].title})`,
+                    );
+                }
+
+                return [pullRequests[0].base.sha, context.payload.after];
+            }
         case "merge_group":
             return [
                 context.payload.merge_group.base_sha,
@@ -30,7 +66,7 @@ module.exports = async ({github, context, core, directoriesRaw}) => {
         .filter(Boolean)
         .map((item) => (item.endsWith("/") ? item : item + "/"));
 
-    const [base, head] = getBaseAndHead(context, core);
+    const [base, head] = await getBaseAndHead(github, context, core);
     core.info(`Base: ${base}\nHead: ${head}`);
 
     // Ensure that the base and head properties are set on the payload.
