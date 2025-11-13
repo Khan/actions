@@ -1,0 +1,24 @@
+name: Jeremy - temp testing just for this PR
+
+on:
+    - push
+
+jobs:
+    check:
+        name: Lints
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: ./actions/shared-node-cache
+            - run: pnpm run lint
+
+            - uses: ./actions/get-changed-files
+              id: changed-limited
+              with:
+                  directories: |
+                      .github/
+                      .changeset
+
+            - uses: ./actions/get-changed-files
+              id: changed
+            - run: echo '${{ steps.changed.outputs.files }}'
