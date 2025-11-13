@@ -29,14 +29,11 @@ const getBaseAndHead = async (github, context, core) => {
 
                 const pullRequests = response.data.items;
                 if (pullRequests.length === 0) {
-                    core.setFailed(
+                    throw new Error(
                         `Could not determine base ref for '${context.eventName}' event. ` +
                             `No pull requests found associated with commit: ${context.payload.after}. ` +
                             `context.payload.base_ref is null.`,
                     );
-
-                    // STOPSHIP: or should we just throw here??
-                    return [null, context.payload.after];
                 } else if (pullRequests.length > 1) {
                     core.warn(
                         `Found ${pullRequests.length} PRs with the pushed commit (${context.payload.after}). ` +
