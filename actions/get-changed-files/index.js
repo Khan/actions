@@ -19,6 +19,8 @@ const getBaseAndHead = async (github, context, core) => {
                 // associated that has the 'after' commit.
                 const {owner, repo} = context;
 
+                console.log(JSON.stringify(github.repos, undefined, 2));
+
                 // Search for pull requests that contain the specified commit SHA
                 const response =
                     await github.repos.listPullRequestsAssociatedWithCommit({
