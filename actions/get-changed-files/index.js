@@ -17,7 +17,7 @@ const getBaseAndHead = async (github, context, core) => {
             } else {
                 // If we're on a new branch, then we try to find an open PR
                 // associated that has the 'after' commit.
-                const {owner, repo} = github.context.repo;
+                const {owner, repo} = context;
 
                 // Search for pull requests that contain the specified commit SHA
                 const response =
