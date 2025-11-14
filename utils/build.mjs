@@ -8,6 +8,7 @@
 import fs from "fs";
 import path from "path";
 import {execSync} from "child_process";
+import fg from "fast-glob";
 
 export const processActionYml = (
     name,
@@ -48,16 +49,22 @@ export const processActionYml = (
     return actionYml;
 };
 
+/**
+ * Copies all files matching the `sourcePath` to the output bundle folder
+ * (dist/). Globs are supported and expanded with fast-glob.
+ */
 const bundleIfExists = (sourcePath) => {
-    const targetPath = path.join(
-        path.dirname(sourcePath),
-        "dist",
-        path.basename(sourcePath),
-    );
+    for (const fp of fg.globSync(sourcePath)) {
+        const targetPath = path.join(
+            path.dirname(fp),
+            "dist",
+            path.basename(fp),
+        );
 
-    if (fs.existsSync(sourcePath)) {
-        console.log(`  Copying ${sourcePath} to ${targetPath}`);
-        fs.copyFileSync(sourcePath, targetPath);
+        if (fs.existsSync(fp)) {
+            console.log(`  Copying ${fp} to ${targetPath}`);
+            fs.copyFileSync(fp, targetPath);
+        }
     }
 };
 
@@ -65,23 +72,23 @@ export const buildPackage = (name, packageJsons, monorepoName) => {
     const base = `actions/${name}`;
     const dist = `${base}/dist`;
 
+    // Clean before starting the build
     if (fs.existsSync(dist)) {
         fs.rmSync(dist, {recursive: true});
     }
     fs.mkdirSync(dist);
 
     bundleIfExists(`${base}/package.json`);
-    bundleIfExists(`${base}/CHANGELOG.md`);
-    bundleIfExists(`${base}/package.json`);
+    bundleIfExists(`${base}/*.md`);
 
-    // action.yml
+    // action.yml needs special handling
     const actionYml = fs.readFileSync(`${base}/action.yml`, "utf8");
     fs.writeFileSync(
         `${base}/dist/action.yml`,
         processActionYml(name, packageJsons, actionYml, monorepoName),
     );
 
-    // JS code
+    // JS code - bundled into a single file using `ncc`
     if (fs.existsSync(`${base}/index.js`)) {
         console.log(`  Building ${base}/index.js`);
         execSync(`pnpm ncc build ${base}/index.js -o ${dist} --source-map`);
