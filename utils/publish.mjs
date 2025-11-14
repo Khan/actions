@@ -9,6 +9,12 @@ import fs from "fs";
 import {execSync} from "child_process";
 import {buildPackage} from "./build.mjs";
 
+/**
+ * Returns true if the given tag exists, false otherwise.
+ *
+ * The publish process uses this check to determine if an action needs to be
+ * built/published.
+ */
 export const checkTag = (tag) => {
     try {
         execSync(`git show-ref --tags ${tag}`);
@@ -111,13 +117,16 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
     const packageJsons = collectPackageJsons(packageNames);
     let failed = false;
     packageNames.forEach((name) => {
+        console.log(`Processing ${name}...`);
         const version = packageJsons[name].version;
         const majorVersion = version.split(".")[0];
         const tag = `${name}-v${version}`;
         const majorTag = `${name}-v${majorVersion}`;
-        if (!checkTag(tag)) {
+        if (checkTag(tag)) {
+            console.log(`  Version ${tag} already exists. Nothing to do.`);
+        } else {
             const distPath = buildPackage(name, packageJsons, `Khan/actions`);
-            console.log(`Publishing ${tag} in ${distPath}`);
+            console.log(`  Publishing ${tag} in ${distPath}`);
             const success = publishDirectoryAsTags(
                 distPath,
                 origin,
@@ -127,14 +136,14 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
                 auth,
             );
             if (success) {
-                console.log(`Finished publishing ${tag}`);
+                console.log(`🏁  Finished publishing ${tag}`);
             } else {
-                console.log(`Failed to publish ${tag}`);
+                console.log(`🚨  Failed to publish ${tag}`);
                 failed = true;
             }
-
-            console.log();
         }
+
+        console.log();
     });
     if (failed) {
         process.exit(1);

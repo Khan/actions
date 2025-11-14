@@ -6,6 +6,7 @@
  *   * bundling the index.js into the dist/ folder using ncc (if one exists)
  */
 import fs from "fs";
+import path from "path";
 import {execSync} from "child_process";
 
 export const processActionYml = (
@@ -14,7 +15,7 @@ export const processActionYml = (
     actionYml,
     monorepoName,
 ) => {
-    console.log("Processing action.yml for", name);
+    console.log("  Processing action.yml for", name);
     // This first replacement is to rewrite local requires, in the case where we have
     // a github-script action with e.g. `require('./actions/my-action/index.js')`, and turning
     // it into `require('${{ github.action_path }}/index.js')`. Writing it this way means it
@@ -28,16 +29,16 @@ export const processActionYml = (
         },
     ];
     Object.keys(packageJsons[name].dependencies ?? {}).forEach((depName) => {
-        console.log("  Processing dependency:", depName);
+        console.log("    Processing dependency:", depName);
         if (depName in packageJsons) {
             const target = `${monorepoName}@${depName}-v${packageJsons[depName].version}`;
-            console.log(`    Replacing with: ${target}`);
+            console.log(`      Replacing with: ${target}`);
             replacements.push({
                 from: new RegExp(`\\buses: \\./actions/${depName}\\b`, "g"),
                 to: `uses: ${target}`,
             });
         } else {
-            console.log("     Skipping (external dependency)");
+            console.log("       Skipping (external dependency)");
         }
     });
     replacements.forEach(({from, to}) => {
@@ -45,6 +46,19 @@ export const processActionYml = (
     });
 
     return actionYml;
+};
+
+const bundleIfExists = (sourcePath) => {
+    const targetPath = path.join(
+        path.dirname(sourcePath),
+        "dist",
+        path.basename(sourcePath),
+    );
+
+    if (fs.existsSync(sourcePath)) {
+        console.log(`  Copying ${sourcePath} to ${targetPath}`);
+        fs.copyFileSync(sourcePath, targetPath);
+    }
 };
 
 export const buildPackage = (name, packageJsons, monorepoName) => {
@@ -56,10 +70,9 @@ export const buildPackage = (name, packageJsons, monorepoName) => {
     }
     fs.mkdirSync(dist);
 
-    // package.json
-    if (fs.existsSync(`${base}/package.json`)) {
-        fs.copyFileSync(`${base}/package.json`, `${dist}/package.json`);
-    }
+    bundleIfExists(`${base}/package.json`);
+    bundleIfExists(`${base}/CHANGELOG.md`);
+    bundleIfExists(`${base}/package.json`);
 
     // action.yml
     const actionYml = fs.readFileSync(`${base}/action.yml`, "utf8");
@@ -70,7 +83,7 @@ export const buildPackage = (name, packageJsons, monorepoName) => {
 
     // JS code
     if (fs.existsSync(`${base}/index.js`)) {
-        console.log(`Building ${base}/index.js`);
+        console.log(`  Building ${base}/index.js`);
         execSync(`pnpm ncc build ${base}/index.js -o ${dist} --source-map`);
     }
 
