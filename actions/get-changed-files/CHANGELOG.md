@@ -1,5 +1,11 @@
 # get-changed-files
 
+## 2.1.1
+
+### Patch Changes
+
+-   d265422: [Bugfix] Resolve base commit for comparing during 'push' events when this is the first push for a new PR
+
 ## 2.1.0
 
 ### Minor Changes
