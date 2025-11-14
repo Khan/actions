@@ -1,0 +1,23 @@
+name: Node CI Push
+
+on:
+    - push
+
+jobs:
+    check:
+        name: Testing with 'push' events
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: ./actions/shared-node-cache
+            - run: pnpm run lint
+
+            - uses: ./actions/get-changed-files
+              id: changed-limited
+              with:
+                  directories: |
+                      .github/
+                      .changeset
+
+            - uses: ./actions/get-changed-files
+              id: changed
