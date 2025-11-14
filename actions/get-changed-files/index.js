@@ -41,6 +41,7 @@ const getBaseAndHead = async (github, context, core) => {
                     );
                 }
 
+                // Comparing to the owning PR's base ref
                 return [pullRequests[0].base.sha, context.payload.after];
             }
         case "merge_group":
