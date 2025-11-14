@@ -28,10 +28,7 @@ const getBaseAndHead = async (github, context, core) => {
                         },
                     );
 
-                // eslint-disable-next-line no-console
-                console.log("Response:", JSON.stringify(response.data));
-
-                const pullRequests = response.data.items;
+                const pullRequests = response.data;
                 if (pullRequests.length === 0) {
                     throw new Error(
                         `Could not determine base ref for '${context.eventName}' event. ` +
