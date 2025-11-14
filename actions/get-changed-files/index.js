@@ -29,7 +29,7 @@ const getBaseAndHead = async (github, context, core) => {
                     );
 
                 // eslint-disable-next-line no-console
-                console.log("Response:", JSON.stringify(response));
+                console.log("Response:", JSON.stringify(response.data));
 
                 const pullRequests = response.data.items;
                 if (pullRequests.length === 0) {
