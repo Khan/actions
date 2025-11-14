@@ -12,7 +12,7 @@ jobs:
       - uses: ./actions/shared-node-cache
       - run: pnpm run lint
 
-      # Test filter-files
+      # Test filter-files 
       - uses: ./actions/filter-files
         id: fftest1
         with:
@@ -84,6 +84,7 @@ jobs:
               core.setFailed('fftest6 matched_any: ' + fftest6)
             }
 
+      # Test get-changed-files
       - uses: ./actions/get-changed-files
         id: changed-limited
         with:

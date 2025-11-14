@@ -5,7 +5,7 @@ on:
 
 jobs:
     check:
-        name: Lints
+        name: Testing with 'push' events
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -18,8 +18,6 @@ jobs:
                   directories: |
                       .github/
                       .changeset
-            - run: echo '${{ steps.changed-limited.outputs.files }}'
-            #
+
             - uses: ./actions/get-changed-files
               id: changed
-            - run: echo '${{ steps.changed.outputs.files }}'
