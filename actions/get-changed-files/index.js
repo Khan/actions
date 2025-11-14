@@ -24,8 +24,8 @@ const getBaseAndHead = async (github, context, core) => {
                 console.log(JSON.stringify(context, undefined, 2));
 
                 const params = {
-                    owner: context.repository.owner.name,
-                    repo: context.repository.name,
+                    owner: context.payload.repository.owner.name,
+                    repo: context.payload.repository.name,
                     commit_sha: context.payload.after,
                 };
                 // eslint-disable-next-line no-console
