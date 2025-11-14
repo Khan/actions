@@ -1,30 +1,12 @@
 /**
- * Building a package currently only consists of processing
- * the action.yml to handle any references to other actions in
- * this repo.
+ * Building a package consists of:
+ *   * processing the action.ym l to handle any references to other actions in
+ *     this repo.
+ *   * copying the package.json file into the dist/ folder (if one exists)
+ *   * bundling the index.js into the dist/ folder using ncc (if one exists)
  */
 import fs from "fs";
-import path from "path";
 import {execSync} from "child_process";
-
-function copyDir(src, dest) {
-    const entries = fs.readdirSync(src, {withFileTypes: true});
-    fs.mkdirSync(dest, {recursive: true});
-
-    for (const entry of entries) {
-        if (entry === "node_modules" || entry === "dist") {
-            continue;
-        }
-        const srcPath = path.join(src, entry.name);
-        const destPath = path.join(dest, entry.name);
-
-        if (entry.isDirectory()) {
-            copyDir(srcPath, destPath);
-        } else {
-            fs.copyFileSync(srcPath, destPath);
-        }
-    }
-}
 
 export const processActionYml = (
     name,
@@ -66,31 +48,30 @@ export const processActionYml = (
 };
 
 export const buildPackage = (name, packageJsons, monorepoName) => {
-    const dist = `actions/${name}/dist`;
+    const base = `actions/${name}`;
+    const dist = `${base}/dist`;
+
     if (fs.existsSync(dist)) {
         fs.rmSync(dist, {recursive: true});
     }
-    copyDir(`actions/${name}`, dist);
-    const yml = `actions/${name}/dist/action.yml`;
-    const actionYml = fs.readFileSync(yml, "utf8");
+    fs.mkdirSync(dist);
+
+    // package.json
+    if (fs.existsSync(`${base}/package.json`)) {
+        fs.copyFileSync(`${base}/package.json`, `${dist}/package.json`);
+    }
+
+    // action.yml
+    const actionYml = fs.readFileSync(`${base}/action.yml`, "utf8");
     fs.writeFileSync(
-        yml,
+        `${base}/dist/action.yml`,
         processActionYml(name, packageJsons, actionYml, monorepoName),
     );
 
-    // Build the JS to the dist folder (so we can support using npm deps)
-    // We need to delete the index file first because `copyDir` would have
-    // copied it to the `dist` folder already but `ncc` won't overwrite an
-    // existing output file.
-    if (fs.existsSync(`${dist}/index.js`)) {
-        fs.rmSync(`${dist}/index.js`, {force: true});
-    }
-
-    if (fs.existsSync(`actions/${name}/index.js`)) {
-        console.log(`Building actions/${name}/index.js`);
-        execSync(
-            `pnpm ncc build actions/${name}/index.js -o ${dist} --source-map`,
-        );
+    // JS code
+    if (fs.existsSync(`${base}/index.js`)) {
+        console.log(`Building ${base}/index.js`);
+        execSync(`pnpm ncc build ${base}/index.js -o ${dist} --source-map`);
     }
 
     return dist;

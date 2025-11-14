@@ -59,7 +59,7 @@ export const publishDirectoryAsTags = (
     }
     for (const cmd of cmds) {
         try {
-            console.log(`▶️ ${cmd}`);
+            console.log(`  >> ${cmd}`);
             execSync(cmd, {cwd: distPath});
         } catch (err) {
             console.log(`Command ${cmd} failed :(`);
@@ -132,6 +132,8 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
                 console.log(`Failed to publish ${tag}`);
                 failed = true;
             }
+
+            console.log();
         }
     });
     if (failed) {
