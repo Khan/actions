@@ -18,7 +18,8 @@ jobs:
                   directories: |
                       .github/
                       .changeset
-
+            - run: echo '${{ steps.changed-limited.outputs.files }}'
+            #
             - uses: ./actions/get-changed-files
               id: changed
             - run: echo '${{ steps.changed.outputs.files }}'
