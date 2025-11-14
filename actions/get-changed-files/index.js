@@ -18,24 +18,18 @@ const getBaseAndHead = async (github, context, core) => {
                 // If we're on a new branch, then we try to find an open PR
                 // associated that has the 'after' commit.
 
-                // eslint-disable-next-line no-console
-                console.log(JSON.stringify(github, undefined, 2));
-                // eslint-disable-next-line no-console
-                console.log(JSON.stringify(context, undefined, 2));
-
-                const params = {
-                    owner: context.payload.repository.owner.name,
-                    repo: context.payload.repository.name,
-                    commit_sha: context.payload.after,
-                };
-                // eslint-disable-next-line no-console
-                console.log(`Params: ${JSON.stringify(params, undefined, 2)}`);
-
                 // Search for pull requests that contain the specified commit SHA
                 const response =
                     await github.rest.repos.listPullRequestsAssociatedWithCommit(
-                        params,
+                        {
+                            owner: context.payload.repository.owner.name,
+                            repo: context.payload.repository.name,
+                            commit_sha: context.payload.after,
+                        },
                     );
+
+                // eslint-disable-next-line no-console
+                console.log("Response:", JSON.stringify(response));
 
                 const pullRequests = response.data.items;
                 if (pullRequests.length === 0) {
