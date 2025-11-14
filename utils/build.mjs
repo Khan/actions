@@ -1,30 +1,14 @@
 /**
- * Building a package currently only consists of processing
- * the action.yml to handle any references to other actions in
- * this repo.
+ * Building a package consists of:
+ *   * processing the action.ym l to handle any references to other actions in
+ *     this repo.
+ *   * copying the package.json file into the dist/ folder (if one exists)
+ *   * bundling the index.js into the dist/ folder using ncc (if one exists)
  */
 import fs from "fs";
 import path from "path";
 import {execSync} from "child_process";
-
-function copyDir(src, dest) {
-    const entries = fs.readdirSync(src, {withFileTypes: true});
-    fs.mkdirSync(dest, {recursive: true});
-
-    for (const entry of entries) {
-        if (entry === "node_modules" || entry === "dist") {
-            continue;
-        }
-        const srcPath = path.join(src, entry.name);
-        const destPath = path.join(dest, entry.name);
-
-        if (entry.isDirectory()) {
-            copyDir(srcPath, destPath);
-        } else {
-            fs.copyFileSync(srcPath, destPath);
-        }
-    }
-}
+import fg from "fast-glob";
 
 export const processActionYml = (
     name,
@@ -32,7 +16,7 @@ export const processActionYml = (
     actionYml,
     monorepoName,
 ) => {
-    console.log("Processing action.yml for", name);
+    console.log("  Processing action.yml for", name);
     // This first replacement is to rewrite local requires, in the case where we have
     // a github-script action with e.g. `require('./actions/my-action/index.js')`, and turning
     // it into `require('${{ github.action_path }}/index.js')`. Writing it this way means it
@@ -46,16 +30,16 @@ export const processActionYml = (
         },
     ];
     Object.keys(packageJsons[name].dependencies ?? {}).forEach((depName) => {
-        console.log("  Processing dependency:", depName);
+        console.log("    Processing dependency:", depName);
         if (depName in packageJsons) {
             const target = `${monorepoName}@${depName}-v${packageJsons[depName].version}`;
-            console.log(`    Replacing with: ${target}`);
+            console.log(`      Replacing with: ${target}`);
             replacements.push({
                 from: new RegExp(`\\buses: \\./actions/${depName}\\b`, "g"),
                 to: `uses: ${target}`,
             });
         } else {
-            console.log("     Skipping (external dependency)");
+            console.log("       Skipping (external dependency)");
         }
     });
     replacements.forEach(({from, to}) => {
@@ -65,32 +49,49 @@ export const processActionYml = (
     return actionYml;
 };
 
+/**
+ * Copies all files matching the `sourcePath` to the output bundle folder
+ * (dist/). Globs are supported and expanded with fast-glob.
+ */
+const bundleIfExists = (sourcePath) => {
+    for (const fp of fg.globSync(sourcePath)) {
+        const targetPath = path.join(
+            path.dirname(fp),
+            "dist",
+            path.basename(fp),
+        );
+
+        if (fs.existsSync(fp)) {
+            console.log(`  Copying ${fp} to ${targetPath}`);
+            fs.copyFileSync(fp, targetPath);
+        }
+    }
+};
+
 export const buildPackage = (name, packageJsons, monorepoName) => {
-    const dist = `actions/${name}/dist`;
+    const base = `actions/${name}`;
+    const dist = `${base}/dist`;
+
+    // Clean before starting the build
     if (fs.existsSync(dist)) {
         fs.rmSync(dist, {recursive: true});
     }
-    copyDir(`actions/${name}`, dist);
-    const yml = `actions/${name}/dist/action.yml`;
-    const actionYml = fs.readFileSync(yml, "utf8");
+    fs.mkdirSync(dist);
+
+    bundleIfExists(`${base}/package.json`);
+    bundleIfExists(`${base}/*.md`);
+
+    // action.yml needs special handling
+    const actionYml = fs.readFileSync(`${base}/action.yml`, "utf8");
     fs.writeFileSync(
-        yml,
+        `${base}/dist/action.yml`,
         processActionYml(name, packageJsons, actionYml, monorepoName),
     );
 
-    // Build the JS to the dist folder (so we can support using npm deps)
-    // We need to delete the index file first because `copyDir` would have
-    // copied it to the `dist` folder already but `ncc` won't overwrite an
-    // existing output file.
-    if (fs.existsSync(`${dist}/index.js`)) {
-        fs.rmSync(`${dist}/index.js`, {force: true});
-    }
-
-    if (fs.existsSync(`actions/${name}/index.js`)) {
-        console.log(`Building actions/${name}/index.js`);
-        execSync(
-            `pnpm ncc build actions/${name}/index.js -o ${dist} --source-map`,
-        );
+    // JS code - bundled into a single file using `ncc`
+    if (fs.existsSync(`${base}/index.js`)) {
+        console.log(`  Building ${base}/index.js`);
+        execSync(`pnpm ncc build ${base}/index.js -o ${dist} --source-map`);
     }
 
     return dist;
