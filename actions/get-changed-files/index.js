@@ -21,7 +21,9 @@ const getBaseAndHead = async (github, context, core) => {
 
                 // eslint-disable-next-line no-console
                 console.log(JSON.stringify(github, undefined, 2));
+                // eslint-disable-next-line no-console
                 console.log(JSON.stringify(context, undefined, 2));
+                // eslint-disable-next-line no-console
                 console.log(JSON.stringify(core, undefined, 2));
 
                 // Search for pull requests that contain the specified commit SHA
