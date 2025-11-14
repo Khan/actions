@@ -11,7 +11,11 @@ const getBaseAndHead = async (github, context, core) => {
         case "push":
             // eslint-disable-next-line no-console
             console.log(
-                `Before: ${context.payload.base_ref} (SHA: ${context.payload.before})`,
+                `Before: ${JSON.stringify(
+                    context.payload,
+                    undefined,
+                    2,
+                )} (SHA: ${context.payload.before})`,
             );
 
             // For push events, if this is a new branch, the base_ref will be
