@@ -23,16 +23,16 @@ const getBaseAndHead = async (github, context, core) => {
                 console.log(JSON.stringify(github, undefined, 2));
                 // eslint-disable-next-line no-console
                 console.log(JSON.stringify(context, undefined, 2));
-                // eslint-disable-next-line no-console
-                console.log(JSON.stringify(core, undefined, 2));
 
                 // Search for pull requests that contain the specified commit SHA
                 const response =
-                    await github.repos.listPullRequestsAssociatedWithCommit({
-                        owner,
-                        repo,
-                        commit_sha: context.payload.after,
-                    });
+                    await github.rest.repos.listPullRequestsAssociatedWithCommit(
+                        {
+                            owner,
+                            repo,
+                            commit_sha: context.payload.after,
+                        },
+                    );
 
                 const pullRequests = response.data.items;
                 if (pullRequests.length === 0) {
