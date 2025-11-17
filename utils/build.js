@@ -54,7 +54,9 @@ export const processActionYml = (
  * (dist/). Globs are supported and expanded with fast-glob.
  */
 const bundleIfExists = (sourcePath) => {
-    for (const fp of fg.globSync(sourcePath)) {
+    // We pass 'fs' here explicitly to support our unit tests. This way we can
+    // mock 'fs' with 'memfs' and have fast-glob see that same set of files!
+    for (const fp of fg.globSync(sourcePath, {fs})) {
         const targetPath = path.join(
             path.dirname(fp),
             "dist",
@@ -74,9 +76,9 @@ export const buildPackage = (name, packageJsons, monorepoName) => {
 
     // Clean before starting the build
     if (fs.existsSync(dist)) {
-        fs.rmSync(dist, {recursive: true});
+        fs.rmdirSync(dist, {recursive: true});
     }
-    fs.mkdirSync(dist);
+    fs.mkdirSync(dist, {recursive: true});
 
     bundleIfExists(`${base}/package.json`);
     bundleIfExists(`${base}/*.md`);

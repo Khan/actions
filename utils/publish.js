@@ -7,7 +7,7 @@
  */
 import fs from "fs";
 import {execSync} from "child_process";
-import {buildPackage} from "./build.mjs";
+import {buildPackage} from "./build.js";
 
 /**
  * Returns true if the given tag exists, false otherwise.

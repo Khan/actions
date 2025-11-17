@@ -22,7 +22,7 @@ jobs:
               .some(x => x !== 'README.md' && !x.startsWith('.') && x.endsWith('.md'))
           result-encoding: json
 
-      - run: node utils/run-publish.mjs
+      - run: node utils/run-publish.js
         if: steps.has-changesets.outputs.result == 'false'
 
       - name: Create Release Pull Request or Publish as tags
@@ -35,4 +35,4 @@ jobs:
           # We don't specify NPM_TOKEN here because we don't publish to npm. We
           # only use the changesets action to prepare the Version Packages PR,
           # but once we land that, we use our publish-to-github-tags approach
-          # which is implemented above in the utils/run-publish.mjs step.
+          # which is implemented above in the utils/run-publish.js step.

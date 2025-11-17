@@ -20,7 +20,6 @@ module.exports = {
     rules: basicRules,
     env: {
         node: true,
-        jest: true,
     },
     parserOptions: {
         sourceType: "module",
