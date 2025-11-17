@@ -2,4 +2,4 @@
 "get-changed-files": patch
 ---
 
-Fixed build
+Fixed build to properly copy necessary files
