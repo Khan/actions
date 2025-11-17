@@ -25,6 +25,7 @@ module.exports = {
         sourceType: "module",
         ecmaVersion: 2022,
     },
+    ignorePatterns: ["**/dist/"],
     overrides: [
         {
             files: "utils/*",
