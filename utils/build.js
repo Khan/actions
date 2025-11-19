@@ -1,6 +1,6 @@
 /**
  * Building a package consists of:
- *   * processing the action.ym l to handle any references to other actions in
+ *   * processing the action.yml to handle any references to other actions in
  *     this repo.
  *   * copying the package.json file into the dist/ folder (if one exists)
  *   * bundling the index.js into the dist/ folder using ncc (if one exists)
