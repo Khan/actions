@@ -20,12 +20,12 @@ module.exports = {
     rules: basicRules,
     env: {
         node: true,
-        jest: true,
     },
     parserOptions: {
         sourceType: "module",
         ecmaVersion: 2022,
     },
+    ignorePatterns: ["**/dist/"],
     overrides: [
         {
             files: "utils/*",

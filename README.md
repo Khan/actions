@@ -27,3 +27,12 @@ Here's what I did:
 5. Push the branch to the GitHub.
 6. Point my other repo to my test branch with `uses: @Khan/actions@<branch-name>`.
 
+## Testing the build and publish process
+
+All actions are built and "published" using the `utils/run-publish.js` script. You can test almost all of it by running it and passing `--dry-run`. The only part that will be skipped is pushing each action's release git tags to Github.
+
+Example:
+
+```
+$ node ./utils/run-publish.js --dry-run
+```

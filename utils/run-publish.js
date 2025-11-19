@@ -3,7 +3,7 @@
  * publishing any new versions of actions that are needed.
  */
 import fs from "fs";
-import {publishAsNeeded} from "./publish.mjs";
+import {publishAsNeeded} from "./publish.js";
 
 const [_, __, ...args] = process.argv;
 const dryRun = args.includes("--dry-run");
