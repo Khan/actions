@@ -1,5 +1,12 @@
 # check-for-changeset
 
+## 1.0.4
+
+### Patch Changes
+
+-   Updated dependencies [824a4fe]
+    -   get-changed-files@2.1.2
+
 ## 1.0.3
 
 ### Patch Changes
