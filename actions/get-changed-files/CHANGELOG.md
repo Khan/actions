@@ -1,5 +1,11 @@
 # get-changed-files
 
+## 2.1.2
+
+### Patch Changes
+
+-   824a4fe: Fixed build to properly copy necessary files
+
 ## 2.1.1
 
 ### Patch Changes
