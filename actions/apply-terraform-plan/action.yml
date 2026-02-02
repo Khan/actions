@@ -1,8 +1,8 @@
 # This workflow applies checked-in Terraform plans created by the `terraform-plan` workflow
 # and can be called from any repository. It handles:
-# - Checking for plan files
+# - Checking for plan files (unless auto_approve is enabled)
 # - Authenticating with GCP
-# - Applying the Terraform plan
+# - Applying the Terraform plan (or running a blind apply with -auto-approve)
 # - Cleaning up plan files
 # - Commenting on PRs for success/failure
 
@@ -40,6 +40,10 @@ inputs:
   github_token:
     description: "GitHub token for commenting on PRs"
     required: true
+  auto_approve:
+    description: "Skip plan files and run terraform apply with -auto-approve (blind apply)"
+    required: false
+    default: 'false'
 
 outputs:
   skip_apply:
@@ -57,7 +61,10 @@ runs:
       id: check_files
       shell: bash
       run: |
-        if [ ! -f "${{ inputs.terraform_path }}/${{ inputs.plan_file_path }}" ] || [ ! -f "${{ inputs.terraform_path }}/${{ inputs.plan_text_path }}" ]; then
+        if [ "${{ inputs.auto_approve }}" == "true" ]; then
+          echo "Auto-approve mode enabled, skipping plan file check"
+          echo "skip_apply=false" >> "$GITHUB_OUTPUT"
+        elif [ ! -f "${{ inputs.terraform_path }}/${{ inputs.plan_file_path }}" ] || [ ! -f "${{ inputs.terraform_path }}/${{ inputs.plan_text_path }}" ]; then
           echo "Plan files not found, skipping apply steps"
           echo "skip_apply=true" >> "$GITHUB_OUTPUT"
         else
@@ -87,14 +94,20 @@ runs:
       id: apply
       shell: bash
       working-directory: ${{ inputs.terraform_path }}
-      run: terraform apply -input=false "${{ inputs.plan_file_path }}"
+      run: |
+        if [ "${{ inputs.auto_approve }}" == "true" ]; then
+          terraform apply -input=false -auto-approve
+        else
+          terraform apply -input=false "${{ inputs.plan_file_path }}"
+        fi
       continue-on-error: true
 
     # Once the plan is applied, we can delete the plan files to clean up.
     # This prevents stale plans from being applied and ensures that each
     # apply job has a fresh plan generated for it.
+    # Skip cleanup when using auto_approve since there are no plan files.
     - name: Delete Plan Files
-      if: inputs.cleanup_plan_files == 'true'
+      if: inputs.cleanup_plan_files == 'true' && inputs.auto_approve != 'true'
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
