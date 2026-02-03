@@ -1,11 +1,5 @@
 # apply-terraform-plan
 
-## 2.2.0
-
-### Minor Changes
-
-- Add support for blind applies via the auto_approve input.
-
 ## 2.1.0
 
 ### Minor Changes
