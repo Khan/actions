@@ -1,0 +1,165 @@
+# This workflow applies checked-in Terraform plans created by the `terraform-plan` workflow
+# and can be called from any repository. It handles:
+# - Checking for plan files (unless auto_approve is enabled)
+# - Authenticating with GCP
+# - Applying the Terraform plan (or running a blind apply with -auto-approve)
+# - Cleaning up plan files
+# - Commenting on PRs for success/failure
+
+name: 'Terraform Apply'
+description: 'Applies a Terraform plan'
+inputs:
+  terraform_path:
+    description: "Path to the Terraform directory"
+    required: true
+  plan_file_path:
+    description: "Path to the plan file (relative to terraform_path)"
+    required: false
+    default: "tfplan.binary"
+  plan_text_path:
+    description: "Path to the plan text file (relative to terraform_path)"
+    required: false
+    default: "tfplan.txt"
+  gcloud_project:
+    description: "Google Cloud project ID"
+    required: true
+  workload_identity_provider:
+    description: "Workload Identity Provider for Google Cloud authentication"
+    required: true
+  service_account:
+    description: "Service account email for Google Cloud authentication"
+    required: true
+  terraform_version:
+    description: "Terraform version to use"
+    required: false
+    default: "1.9.2"
+  cleanup_plan_files:
+    description: "Whether to delete plan files after successful apply"
+    required: false
+    default: 'true'
+  github_token:
+    description: "GitHub token for commenting on PRs"
+    required: true
+  auto_approve:
+    description: "Skip plan files and run terraform apply with -auto-approve (blind apply)"
+    required: false
+    default: 'false'
+
+outputs:
+  skip_apply:
+    description: "Whether the apply was skipped because plan files were not found"
+    value: ${{ steps.check_files.outputs.skip_apply }}
+  apply_failed:
+    description: "Whether the terraform apply step failed"
+    value: ${{ steps.apply.outcome == 'failure' }}
+
+runs:
+  using: "composite"
+  steps:
+
+    - name: Check for required plan files
+      id: check_files
+      shell: bash
+      run: |
+        if [ "${{ inputs.auto_approve }}" == "true" ]; then
+          echo "Auto-approve mode enabled, skipping plan file check"
+          echo "skip_apply=false" >> "$GITHUB_OUTPUT"
+        elif [ ! -f "${{ inputs.terraform_path }}/${{ inputs.plan_file_path }}" ] || [ ! -f "${{ inputs.terraform_path }}/${{ inputs.plan_text_path }}" ]; then
+          echo "Plan files not found, skipping apply steps"
+          echo "skip_apply=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "skip_apply=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform_version }}
+
+    - name: Authenticate with Google Cloud
+      if: steps.check_files.outputs.skip_apply != 'true'
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ inputs.workload_identity_provider }}
+        service_account: ${{ inputs.service_account }}
+
+    - name: Terraform Init
+      if: steps.check_files.outputs.skip_apply != 'true'
+      shell: bash
+      working-directory: ${{ inputs.terraform_path }}
+      run: terraform init -input=false
+
+    - name: Apply Terraform Plan
+      if: steps.check_files.outputs.skip_apply != 'true'
+      id: apply
+      shell: bash
+      working-directory: ${{ inputs.terraform_path }}
+      run: |
+        if [ "${{ inputs.auto_approve }}" == "true" ]; then
+          terraform apply -input=false -auto-approve
+        else
+          terraform apply -input=false "${{ inputs.plan_file_path }}"
+        fi
+      continue-on-error: true
+
+    # Once the plan is applied, we can delete the plan files to clean up.
+    # This prevents stale plans from being applied and ensures that each
+    # apply job has a fresh plan generated for it.
+    # Skip cleanup when using auto_approve since there are no plan files.
+    - name: Delete Plan Files
+      if: inputs.cleanup_plan_files == 'true' && inputs.auto_approve != 'true'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        git config user.name "github-actions"
+        git config user.email "github-actions@github.com"
+        git checkout master
+        git pull --ff-only
+        git rm -f "${{ inputs.terraform_path }}/${{ inputs.plan_file_path }}" "${{ inputs.terraform_path }}/${{ inputs.plan_text_path }}" || true
+        if git diff --cached --quiet; then
+          echo "No plan files to remove"
+        else
+          git commit -m "chore(terraform): cleanup plan files"
+          git push
+        fi
+
+    - name: Find merged PR
+      if: steps.apply.outcome == 'success' || steps.apply.outcome == 'failure'
+      id: find_pr
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        # Find the PR that was merged to trigger this workflow
+        # Look for the PR associated with the current commit
+        CURRENT_COMMIT="${{ github.sha }}"
+        PR_NUMBER=$(gh api "repos/${{ github.repository }}/commits/$CURRENT_COMMIT/pulls" --jq '.[0].number' 2>/dev/null || echo "")
+        if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+        else
+          echo "pr_number=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Comment on PR (Success)
+      if: steps.apply.outcome == 'success' && steps.find_pr.outputs.pr_number != ''
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        PR_NUMBER: ${{ steps.find_pr.outputs.pr_number }}
+      run: |
+        gh pr comment "$PR_NUMBER" --body "The Terraform plan has been successfully applied. A new plan will be generated to verify the changes: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+    - name: Comment on PR (Failure)
+      if: steps.apply.outcome == 'failure' && steps.find_pr.outputs.pr_number != ''
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        PR_NUMBER: ${{ steps.find_pr.outputs.pr_number }}
+      run: |
+        gh pr comment "$PR_NUMBER" --body "The Terraform apply failed. Please check the workflow logs for details: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+    - name: Mark job as failed
+      if: steps.apply.outcome == 'failure'
+      shell: bash
+      run: exit 1 
