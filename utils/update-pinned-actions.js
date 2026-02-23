@@ -56,8 +56,10 @@ const resolveRef = (action, ref) => {
 const files = fg.sync([
     ".github/workflows/*.yml",
     ".github/workflows/*.yaml",
-    "actions/*/action.yml",
-    "actions/*/action.yaml",
+    ".github/actions/**/*.yml",
+    ".github/actions/**/*.yaml",
+    "actions/**/action.yml",
+    "actions/**/action.yaml",
 ]);
 
 // Collect unique action+ref pairs across all files
