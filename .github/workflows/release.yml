@@ -10,10 +10,10 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: ./actions/shared-node-cache
 
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         id: has-changesets
         with:
           script: |
@@ -27,7 +27,7 @@ jobs:
 
       - name: Create Release Pull Request or Publish as tags
         if: steps.has-changesets.outputs.result == 'true'
-        uses: changesets/action@v1
+        uses: changesets/action@6a0a831ff30acef54f2c6aa1cbbc1096b066edaf # v1
         with:
           publish: exit 1
         env:
