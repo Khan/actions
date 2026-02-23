@@ -13,18 +13,18 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: pnpm/action-setup@v4
+    - uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
       with:
         run_install: false
 
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       with:
         node-version: ${{ inputs.node-version }}
         cache: pnpm
 
     # Set up SSH key so that the install step can install packages from private
     # git repos.
-    - uses: webfactory/ssh-agent@v0.9.0
+    - uses: webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387 # v0.9.0
       if: ${{ inputs.ssh-private-key != '' }}
       with:
         ssh-private-key: ${{ inputs.ssh-private-key }}

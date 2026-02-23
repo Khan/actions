@@ -70,12 +70,12 @@ runs:
   steps:
 
     - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
+      uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
       with:
         terraform_version: ${{ inputs.terraform_version }}
 
     - name: Authenticate with Google Cloud
-      uses: google-github-actions/auth@v2
+      uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
       with:
         workload_identity_provider: ${{ inputs.workload_identity_provider }}
         service_account: ${{ inputs.service_account }}
@@ -177,7 +177,7 @@ runs:
 
     - name: Create PR with Plan
       if: inputs.enable_pr_creation == 'true' && github.ref_name == inputs.pr_creation_branch && steps.plan.outputs.has_changes == 'true'
-      uses: peter-evans/create-pull-request@v7
+      uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
       with:
         token: ${{ inputs.github_token }}
         commit-message: 'chore(terraform): update plan'

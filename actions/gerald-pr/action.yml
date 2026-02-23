@@ -15,17 +15,17 @@ runs:
         id: changed
         if: ${{ github.event.pull_request.draft == false }}
       - name: Check out base branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: '${{ github.base_ref }}'
         if: ${{ github.event.pull_request.draft == false }}
       - name: Check out head branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: '${{ github.head_ref }}'
         if: ${{ github.event.pull_request.draft == false }}
       - name: Run Gerald
-        uses: Khan/gerald@v4.3
+        uses: Khan/gerald@24a71c0501324a2453fbc489b7ebabea217e31f7 # v4.3
         env:
           GITHUB_TOKEN: '${{ inputs.token }}'
           ADMIN_PERMISSION_TOKEN: '${{ inputs.admin-token }}'
