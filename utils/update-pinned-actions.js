@@ -1,7 +1,8 @@
 /**
- * Scan all workflow and action YAML files for pinned GitHub Action references
- * (format: `uses: owner/repo@<sha> # <tag>`) and update any stale SHAs by
- * resolving the tag/branch via `git ls-remote`.
+ * Scan all workflow and action YAML files for GitHub Action references and
+ * ensure they are pinned to commit SHAs. Handles two cases:
+ *   1. Already pinned (`uses: owner/repo@<sha> # <tag>`) — updates stale SHAs
+ *   2. Unpinned (`uses: owner/repo@<tag>`) — replaces with `@<sha> # <tag>`
  *
  * Usage: node utils/update-pinned-actions.js
  */
@@ -9,7 +10,12 @@ import fs from "fs";
 import {execSync} from "child_process";
 import fg from "fast-glob";
 
+// Matches already-pinned: `owner/repo@<sha> # <tag>`
 const PINNED_RE = /(?<=uses:\s+)([^@\s]+)@([a-f0-9]{40})\s+#\s*(\S+)/g;
+
+// Matches unpinned: `owner/repo@<tag>` (where tag is NOT a 40-char hex SHA)
+// Excludes local actions (starting with ./)
+const UNPINNED_RE = /(?<=uses:\s+)((?!\.\/).+\/.+)@(?!([a-f0-9]{40})\s)(\S+)/g;
 
 /**
  * Resolve a tag or branch to its commit SHA via git ls-remote.
@@ -61,19 +67,28 @@ const seen = new Map(); // key: "action@ref" → resolved SHA (filled later)
 for (const file of files) {
     const content = fs.readFileSync(file, "utf-8");
     let m;
+
+    // Collect already-pinned refs
     PINNED_RE.lastIndex = 0;
     while ((m = PINNED_RE.exec(content)) !== null) {
+        const [, action, , ref] = m;
+        seen.set(`${action}@${ref}`, null);
+    }
+
+    // Collect unpinned refs (tag/branch directly after @)
+    UNPINNED_RE.lastIndex = 0;
+    while ((m = UNPINNED_RE.exec(content)) !== null) {
         const [, action, , ref] = m;
         seen.set(`${action}@${ref}`, null);
     }
 }
 
 if (seen.size === 0) {
-    console.log("No pinned action references found.");
+    console.log("No action references found.");
     process.exit(0);
 }
 
-console.log(`Found ${seen.size} unique pinned action(s). Resolving…\n`);
+console.log(`Found ${seen.size} unique action reference(s). Resolving…\n`);
 
 // Resolve each unique action+ref
 let failures = 0;
@@ -106,6 +121,7 @@ for (const file of files) {
     let content = fs.readFileSync(file, "utf-8");
     let fileChanged = false;
 
+    // Update already-pinned refs with stale SHAs
     PINNED_RE.lastIndex = 0;
     content = content.replace(PINNED_RE, (match, action, oldSha, ref) => {
         const newSha = seen.get(`${action}@${ref}`);
@@ -117,6 +133,20 @@ for (const file of files) {
         }
         console.log(`  ${file}: ${action}@${ref}`);
         console.log(`    ${oldSha} → ${newSha}`);
+        fileChanged = true;
+        updatedRefs++;
+        return `${action}@${newSha} # ${ref}`;
+    });
+
+    // Pin unpinned refs (tag/branch → sha # tag)
+    UNPINNED_RE.lastIndex = 0;
+    content = content.replace(UNPINNED_RE, (match, action, _unused, ref) => {
+        const newSha = seen.get(`${action}@${ref}`);
+        if (!newSha) {
+            return match;
+        }
+        console.log(`  ${file}: ${action}@${ref} (unpinned)`);
+        console.log(`    → ${newSha} # ${ref}`);
         fileChanged = true;
         updatedRefs++;
         return `${action}@${newSha} # ${ref}`;
