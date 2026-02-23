@@ -1,5 +1,14 @@
 # check-for-changeset
 
+## 1.0.5
+
+### Patch Changes
+
+-   bfd85f2: Pin all packages to the latest sha.
+-   Updated dependencies [bfd85f2]
+    -   filter-files@2.1.1
+    -   get-changed-files@2.1.3
+
 ## 1.0.4
 
 ### Patch Changes

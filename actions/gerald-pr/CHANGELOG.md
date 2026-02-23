@@ -1,5 +1,13 @@
 # gerald-pr
 
+## 3.1.6
+
+### Patch Changes
+
+-   bfd85f2: Pin all packages to the latest sha.
+-   Updated dependencies [bfd85f2]
+    -   get-changed-files@2.1.3
+
 ## 3.1.5
 
 ### Patch Changes
