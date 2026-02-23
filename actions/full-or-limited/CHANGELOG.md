@@ -1,5 +1,12 @@
 # full-or-limited
 
+## 0.0.3
+
+### Patch Changes
+
+-   Updated dependencies [bfd85f2]
+    -   json-args@1.0.1
+
 ## 0.0.2
 
 ### Patch Changes

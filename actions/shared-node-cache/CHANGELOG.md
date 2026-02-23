@@ -1,5 +1,11 @@
 # shared-node-cache
 
+## 3.0.1
+
+### Patch Changes
+
+-   bfd85f2: Pin all packages to the latest sha.
+
 ## 3.0.0
 
 ### Major Changes

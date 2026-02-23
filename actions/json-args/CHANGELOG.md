@@ -1,5 +1,11 @@
 # json-args
 
+## 1.0.1
+
+### Patch Changes
+
+-   bfd85f2: Pin all packages to the latest sha.
+
 ## 1.0.0
 
 ### Major Changes

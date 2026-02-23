@@ -1,5 +1,11 @@
 # generate-terraform-plan
 
+## 2.2.2
+
+### Patch Changes
+
+-   bfd85f2: Pin all packages to the latest sha.
+
 ## 2.2.1
 
 ### Patch Changes
