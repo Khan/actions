@@ -9,8 +9,7 @@ import fs from "fs";
 import {execSync} from "child_process";
 import fg from "fast-glob";
 
-const PINNED_RE =
-    /(?<=uses:\s+)([^@\s]+)@([a-f0-9]{40})\s+#\s*(\S+)/g;
+const PINNED_RE = /(?<=uses:\s+)([^@\s]+)@([a-f0-9]{40})\s+#\s*(\S+)/g;
 
 /**
  * Resolve a tag or branch to its commit SHA via git ls-remote.
@@ -20,10 +19,9 @@ const resolveRef = (action, ref) => {
     const url = `https://github.com/${action}.git`;
 
     // Try tags first (covers both lightweight and annotated)
-    const tagOutput = execSync(
-        `git ls-remote --tags ${url} ${ref} ${ref}^{}`,
-        {encoding: "utf-8"},
-    ).trim();
+    const tagOutput = execSync(`git ls-remote --tags ${url} ${ref} ${ref}^{}`, {
+        encoding: "utf-8",
+    }).trim();
 
     if (tagOutput) {
         const lines = tagOutput.split("\n");
@@ -36,10 +34,9 @@ const resolveRef = (action, ref) => {
     }
 
     // Fall back to branches
-    const branchOutput = execSync(
-        `git ls-remote --heads ${url} ${ref}`,
-        {encoding: "utf-8"},
-    ).trim();
+    const branchOutput = execSync(`git ls-remote --heads ${url} ${ref}`, {
+        encoding: "utf-8",
+    }).trim();
 
     if (branchOutput) {
         return branchOutput.split(/\s+/)[0];
@@ -58,6 +55,7 @@ const files = fg.sync([
 ]);
 
 // Collect unique action+ref pairs across all files
+// eslint-disable-next-line no-undef
 const seen = new Map(); // key: "action@ref" → resolved SHA (filled later)
 
 for (const file of files) {
