@@ -53,8 +53,7 @@ runs:
                 },
             ),
         ).toMatchInlineSnapshot(`
-          "# action-version: full-or-limited-v0.1.2
-
+          "
           name: Example
           description: Do a thing
           runs:
