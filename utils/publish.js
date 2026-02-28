@@ -189,26 +189,6 @@ const parseMonorepoName = (origin) => {
     throw new Error(`Unable to determine monorepo name from origin: ${origin}`);
 };
 
-const parseSemver = (version) => {
-    const match = version.match(/^(\d+)\.(\d+)\.(\d+)$/);
-    if (!match) {
-        return null;
-    }
-    return match.slice(1).map((x) => Number(x));
-};
-
-const compareSemver = (a, b) => {
-    for (let i = 0; i < a.length; i++) {
-        if (a[i] > b[i]) {
-            return 1;
-        }
-        if (a[i] < b[i]) {
-            return -1;
-        }
-    }
-    return 0;
-};
-
 const fetchJson = (url, githubToken) => {
     const args = [
         "-sSfL",
@@ -225,62 +205,56 @@ const fetchJson = (url, githubToken) => {
     return JSON.parse(output);
 };
 
-export const lookupLatestPublishedActionRef = (
+const resolveGitObjectToCommitSha = (monorepoName, object, githubToken) => {
+    let current = object;
+    let depth = 0;
+    while (current?.type === "tag" && depth < 5) {
+        const tagObj = fetchJson(
+            `https://api.github.com/repos/${monorepoName}/git/tags/${current.sha}`,
+            githubToken,
+        );
+        current = tagObj.object;
+        depth += 1;
+    }
+    if (current?.type !== "commit" || !current?.sha) {
+        throw new Error(`Could not resolve tag object to commit SHA`);
+    }
+    return current.sha;
+};
+
+export const lookupPublishedActionRef = (
     monorepoName,
     actionName,
+    version,
     githubToken,
     cache,
 ) => {
-    if (cache[actionName]) {
-        return cache[actionName];
+    const cacheKey = `${actionName}@${version}`;
+    if (cache[cacheKey]) {
+        return cache[cacheKey];
     }
 
-    const prefix = `${actionName}-v`;
-    let page = 1;
-    let best = null;
-
-    while (true) {
-        const tags = fetchJson(
-            `https://api.github.com/repos/${monorepoName}/tags?per_page=100&page=${page}`,
-            githubToken,
-        );
-        if (!Array.isArray(tags) || tags.length === 0) {
-            break;
-        }
-
-        tags.forEach((tagObj) => {
-            const tagName = tagObj.name ?? "";
-            if (!tagName.startsWith(prefix)) {
-                return;
-            }
-            const version = tagName.slice(prefix.length);
-            const parsed = parseSemver(version);
-            if (!parsed) {
-                return;
-            }
-            if (!best || compareSemver(parsed, best.parsed) > 0) {
-                best = {
-                    sha: tagObj.commit.sha,
-                    version,
-                    parsed,
-                };
-            }
-        });
-
-        if (tags.length < 100) {
-            break;
-        }
-        page += 1;
-    }
-
-    if (!best?.sha) {
+    const tag = `${actionName}-v${version}`;
+    const refs = fetchJson(
+        `https://api.github.com/repos/${monorepoName}/git/matching-refs/tags/${tag}`,
+        githubToken,
+    );
+    const exactRef = (Array.isArray(refs) ? refs : []).find(
+        (ref) => ref.ref === `refs/tags/${tag}`,
+    );
+    if (!exactRef?.object) {
         throw new Error(
-            `Could not find an existing published SHA for dependency "${actionName}"`,
+            `Could not find published tag "${tag}" for dependency "${actionName}"`,
         );
     }
 
-    const ref = {sha: best.sha, version: best.version};
-    cache[actionName] = ref;
+    const sha = resolveGitObjectToCommitSha(
+        monorepoName,
+        exactRef.object,
+        githubToken,
+    );
+    const ref = {sha, version};
+    cache[cacheKey] = ref;
     return ref;
 };
 
@@ -343,11 +317,13 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
         const dependencyRefs = {};
 
         (graph[name] ?? []).forEach((depName) => {
+            const depVersion = packageJsons[depName].version;
             dependencyRefs[depName] =
                 publishedRefs[depName] ??
-                lookupLatestPublishedActionRef(
+                lookupPublishedActionRef(
                     monorepoName,
                     depName,
+                    depVersion,
                     githubToken,
                     knownPublishedRefs,
                 );
