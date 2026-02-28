@@ -7,5 +7,7 @@ import {publishAsNeeded} from "./publish.js";
 
 const [_, __, ...args] = process.argv;
 const dryRun = args.includes("--dry-run");
-const packageNames = fs.readdirSync("actions");
+const packageNames = fs
+    .readdirSync("actions")
+    .filter((name) => fs.statSync(`actions/${name}`).isDirectory());
 publishAsNeeded(packageNames, dryRun);

@@ -6,7 +6,11 @@ import {execSync} from "child_process";
 vi.mock("fs", () => vi.importActual("memfs"));
 vi.mock("child_process", () => ({execSync: vi.fn().mockName("execSync")}));
 
-import {buildPackage, processActionYml} from "./build.js";
+import {
+    buildPackage,
+    extractIntraRepoDependencies,
+    processActionYml,
+} from "./build.js";
 
 describe("processActionYml", () => {
     it("should work", () => {
@@ -41,22 +45,44 @@ runs:
 
                 before,
                 "Our/monorepo",
+                {
+                    "json-args": {
+                        sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        version: "1.2.3",
+                    },
+                },
             ),
         ).toMatchInlineSnapshot(`
-            "
-            name: Example
-            description: Do a thing
-            runs:
-              using: "composite"
-              steps:
-                - name: Limited run
-                  uses: Our/monorepo@json-args-v1.2.3
-                - uses: actions/github-script@v7
-                  with:
-                    script: |
-                      require('\${{ github.action_path }}/index.js')({github, core})
-            "
+          "# action-version: full-or-limited-v0.1.2
+
+          name: Example
+          description: Do a thing
+          runs:
+            using: "composite"
+            steps:
+              - name: Limited run
+                uses: Our/monorepo@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # json-args-v1.2.3
+              - uses: actions/github-script@v7
+                with:
+                  script: |
+                    require('\${{ github.action_path }}/index.js')({github, core})
+          "
         `);
+    });
+});
+
+describe("extractIntraRepoDependencies", () => {
+    it("finds all local action references", () => {
+        const actionYml = `
+runs:
+  using: composite
+  steps:
+    - uses: ./actions/a
+    - uses: ./actions/b
+    - uses: ./actions/a
+    - uses: actions/github-script@v7
+`;
+        expect(extractIntraRepoDependencies(actionYml)).toEqual(["a", "b"]);
     });
 });
 
@@ -132,9 +158,6 @@ describe("buildPackage", () => {
         const packageJsons = {
             "test-action": {
                 version: "1.0.0",
-                dependencies: {
-                    "dependency-action": "*",
-                },
             },
             "dependency-action": {
                 version: "2.0.0",
@@ -142,13 +165,20 @@ describe("buildPackage", () => {
         };
 
         // Act
-        buildPackage("test-action", packageJsons, "Khan/actions");
+        buildPackage("test-action", packageJsons, "Khan/actions", {
+            "dependency-action": {
+                sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                version: "2.0.0",
+            },
+        });
 
         const result = vol.readFileSync(
             "./actions/test-action/dist/action.yml",
             "utf8",
         );
-        expect(result).toContain("Khan/actions@dependency-action-v2.0.0");
+        expect(result).toContain(
+            "Khan/actions@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # dependency-action-v2.0.0",
+        );
     });
 
     it("bundles index.js using ncc when present", () => {
@@ -262,11 +292,6 @@ describe("buildPackage", () => {
         const packageJsons = {
             "test-action": {
                 version: "1.0.0",
-                dependencies: {
-                    "dep-1": "*",
-                    "dep-2": "*",
-                    "external-dep": "*",
-                },
             },
             "dep-1": {version: "1.0.0"},
             "dep-2": {version: "2.0.0"},
@@ -274,15 +299,51 @@ describe("buildPackage", () => {
         };
 
         // Act
-        buildPackage("test-action", packageJsons, "Khan/actions");
+        buildPackage("test-action", packageJsons, "Khan/actions", {
+            "dep-1": {
+                sha: "1111111111111111111111111111111111111111",
+                version: "1.0.0",
+            },
+            "dep-2": {
+                sha: "2222222222222222222222222222222222222222",
+                version: "2.0.0",
+            },
+        });
 
         const result = vol.readFileSync(
             "./actions/test-action/dist/action.yml",
             "utf8",
         );
-        expect(result).toContain("Khan/actions@dep-1-v1.0.0");
-        expect(result).toContain("Khan/actions@dep-2-v2.0.0");
+        expect(result).toContain(
+            "Khan/actions@1111111111111111111111111111111111111111 # dep-1-v1.0.0",
+        );
+        expect(result).toContain(
+            "Khan/actions@2222222222222222222222222222222222222222 # dep-2-v2.0.0",
+        );
         // External dependency should remain unchanged
         expect(result).toContain("./actions/external-dep");
+    });
+
+    it("throws when a local dependency sha is missing", () => {
+        const actionYml = `name: Test Action
+runs:
+  using: "composite"
+  steps:
+    - uses: ./actions/dependency-action`;
+
+        vol.fromJSON({
+            "./actions/test-action/action.yml": actionYml,
+        });
+
+        expect(() =>
+            buildPackage(
+                "test-action",
+                {
+                    "test-action": {version: "1.0.0"},
+                    "dependency-action": {version: "2.0.0"},
+                },
+                "Khan/actions",
+            ),
+        ).toThrow(/Missing published SHA/);
     });
 });

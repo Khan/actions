@@ -6,8 +6,8 @@
  * with the appropriate pinned references.
  */
 import fs from "fs";
-import {execSync} from "child_process";
-import {buildPackage} from "./build.js";
+import {execFileSync, execSync} from "child_process";
+import {buildPackage, extractIntraRepoDependencies} from "./build.js";
 
 /**
  * Returns true if the given tag exists, false otherwise.
@@ -36,14 +36,8 @@ export const checkTag = (tag) => {
  * This way, when you do `uses: Khan/actions#shared-node-cachev0.2.4`
  * it looks like there actually is only one action in the repo.
  */
-export const publishDirectoryAsTags = (
-    distPath,
-    origin,
-    tag,
-    majorTag,
-    dryRun,
-    auth,
-) => {
+export const publishDirectoryAsTags = (distPath, origin, tag, dryRun, auth) => {
+    let publishSha = null;
     const cmds = [
         `git init .`,
         `git add .`,
@@ -56,23 +50,26 @@ export const publishDirectoryAsTags = (
         `git remote add origin ${origin}`,
         `git fetch origin --tags`,
         `git tag ${tag}`,
-        `git tag -f ${majorTag}`,
     ].filter(Boolean);
     if (!dryRun) {
-        // This will succeed with a warning if the major tag doesn't exist
-        cmds.push(`git push origin :refs/tags/${majorTag}`);
         cmds.push(`git push origin --tags`);
     }
     for (const cmd of cmds) {
         try {
             console.log(`  >> ${cmd}`);
             execSync(cmd, {cwd: distPath});
+            if (cmd === `git commit -m publish`) {
+                publishSha = execSync(`git rev-parse HEAD`, {
+                    cwd: distPath,
+                    encoding: "utf8",
+                }).trim();
+            }
         } catch (err) {
             console.log(`Command ${cmd} failed :(`);
-            return false;
+            return null;
         }
     }
-    return true;
+    return {sha: publishSha};
 };
 
 export const collectPackageJsons = (packageNames) => {
@@ -84,6 +81,207 @@ export const collectPackageJsons = (packageNames) => {
         packageJsons[pkg.name] = pkg;
     });
     return packageJsons;
+};
+
+export const collectIntraRepoDependencyGraph = (packageNames) => {
+    const packageSet = new Set(packageNames);
+    const graph = {};
+    packageNames.forEach((name) => {
+        const actionYml = fs.readFileSync(`actions/${name}/action.yml`, "utf8");
+        const deps = extractIntraRepoDependencies(actionYml).filter((depName) =>
+            packageSet.has(depName),
+        );
+        graph[name] = deps.sort();
+    });
+    return graph;
+};
+
+export const findDependencyCycle = (graph) => {
+    const visited = new Set();
+    const visiting = new Set();
+    const indexByNode = new Map();
+    const stack = [];
+
+    const dfs = (name) => {
+        visiting.add(name);
+        indexByNode.set(name, stack.length);
+        stack.push(name);
+
+        for (const depName of graph[name] ?? []) {
+            if (visiting.has(depName)) {
+                const idx = indexByNode.get(depName);
+                return [...stack.slice(idx), depName];
+            }
+            if (!visited.has(depName)) {
+                const cycle = dfs(depName);
+                if (cycle) {
+                    return cycle;
+                }
+            }
+        }
+
+        stack.pop();
+        indexByNode.delete(name);
+        visiting.delete(name);
+        visited.add(name);
+        return null;
+    };
+
+    const names = Object.keys(graph).sort();
+    for (const name of names) {
+        if (visited.has(name)) {
+            continue;
+        }
+        const cycle = dfs(name);
+        if (cycle) {
+            return cycle;
+        }
+    }
+    return null;
+};
+
+export const topologicallySortActions = (graph) => {
+    const inDegree = {};
+    const dependents = {};
+    const names = Object.keys(graph).sort();
+    names.forEach((name) => {
+        inDegree[name] = graph[name].length;
+        dependents[name] = [];
+    });
+
+    names.forEach((name) => {
+        graph[name].forEach((depName) => {
+            dependents[depName].push(name);
+        });
+    });
+    names.forEach((name) => dependents[name].sort());
+
+    const queue = names.filter((name) => inDegree[name] === 0).sort();
+    const sorted = [];
+
+    while (queue.length > 0) {
+        const name = queue.shift();
+        sorted.push(name);
+        dependents[name].forEach((dependent) => {
+            inDegree[dependent] -= 1;
+            if (inDegree[dependent] === 0) {
+                queue.push(dependent);
+                queue.sort();
+            }
+        });
+    }
+
+    if (sorted.length !== names.length) {
+        throw new Error(`Failed topological sort; graph is not a DAG`);
+    }
+    return sorted;
+};
+
+const parseMonorepoName = (origin) => {
+    const scpMatch = origin.match(/github\.com:([^/]+\/[^/.]+)(?:\.git)?$/i);
+    if (scpMatch) {
+        return scpMatch[1];
+    }
+    const httpsMatch = origin.match(/github\.com\/([^/]+\/[^/.]+)(?:\.git)?$/i);
+    if (httpsMatch) {
+        return httpsMatch[1];
+    }
+    throw new Error(`Unable to determine monorepo name from origin: ${origin}`);
+};
+
+const parseSemver = (version) => {
+    const match = version.match(/^(\d+)\.(\d+)\.(\d+)$/);
+    if (!match) {
+        return null;
+    }
+    return match.slice(1).map((x) => Number(x));
+};
+
+const compareSemver = (a, b) => {
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] > b[i]) {
+            return 1;
+        }
+        if (a[i] < b[i]) {
+            return -1;
+        }
+    }
+    return 0;
+};
+
+const fetchJson = (url, githubToken) => {
+    const args = [
+        "-sSfL",
+        "-H",
+        "Accept: application/vnd.github+json",
+        "-H",
+        "User-Agent: khan-actions-publisher",
+    ];
+    if (githubToken) {
+        args.push("-H", `Authorization: Bearer ${githubToken}`);
+    }
+    args.push(url);
+    const output = execFileSync("curl", args, {encoding: "utf8"});
+    return JSON.parse(output);
+};
+
+export const lookupLatestPublishedActionRef = (
+    monorepoName,
+    actionName,
+    githubToken,
+    cache,
+) => {
+    if (cache[actionName]) {
+        return cache[actionName];
+    }
+
+    const prefix = `${actionName}-v`;
+    let page = 1;
+    let best = null;
+
+    while (true) {
+        const tags = fetchJson(
+            `https://api.github.com/repos/${monorepoName}/tags?per_page=100&page=${page}`,
+            githubToken,
+        );
+        if (!Array.isArray(tags) || tags.length === 0) {
+            break;
+        }
+
+        tags.forEach((tagObj) => {
+            const tagName = tagObj.name ?? "";
+            if (!tagName.startsWith(prefix)) {
+                return;
+            }
+            const version = tagName.slice(prefix.length);
+            const parsed = parseSemver(version);
+            if (!parsed) {
+                return;
+            }
+            if (!best || compareSemver(parsed, best.parsed) > 0) {
+                best = {
+                    sha: tagObj.commit.sha,
+                    version,
+                    parsed,
+                };
+            }
+        });
+
+        if (tags.length < 100) {
+            break;
+        }
+        page += 1;
+    }
+
+    if (!best?.sha) {
+        throw new Error(
+            `Could not find an existing published SHA for dependency "${actionName}"`,
+        );
+    }
+
+    const ref = {sha: best.sha, version: best.version};
+    cache[actionName] = ref;
+    return ref;
 };
 
 /**
@@ -113,29 +311,68 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
     const origin = execSync(`git remote get-url origin`, {
         encoding: "utf8",
     }).trim();
+    const monorepoName = parseMonorepoName(origin);
+    const githubToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
     const auth = getAuth();
-    const packageJsons = collectPackageJsons(packageNames);
+    const allPackageNames = fs
+        .readdirSync("actions")
+        .filter((name) => fs.statSync(`actions/${name}`).isDirectory());
+    const packageJsons = collectPackageJsons(allPackageNames);
+    const graph = collectIntraRepoDependencyGraph(allPackageNames);
+    const cycle = findDependencyCycle(graph);
+    if (cycle) {
+        throw new Error(
+            `Detected intra-repo action dependency cycle: ${cycle.join(
+                " -> ",
+            )}`,
+        );
+    }
+
+    const publishOrder = topologicallySortActions(graph);
+    const selectedSet = new Set(packageNames);
+    const publishedRefs = {};
+    const knownPublishedRefs = {};
     let failed = false;
-    packageNames.forEach((name) => {
+    publishOrder.forEach((name) => {
+        if (!selectedSet.has(name)) {
+            return;
+        }
         console.log(`Processing ${name}...`);
         const version = packageJsons[name].version;
-        const majorVersion = version.split(".")[0];
         const tag = `${name}-v${version}`;
-        const majorTag = `${name}-v${majorVersion}`;
+        const dependencyRefs = {};
+
+        (graph[name] ?? []).forEach((depName) => {
+            dependencyRefs[depName] =
+                publishedRefs[depName] ??
+                lookupLatestPublishedActionRef(
+                    monorepoName,
+                    depName,
+                    githubToken,
+                    knownPublishedRefs,
+                );
+        });
+
         if (checkTag(tag)) {
             console.log(`  Version ${tag} already exists. Nothing to do.`);
         } else {
-            const distPath = buildPackage(name, packageJsons, `Khan/actions`);
+            const distPath = buildPackage(
+                name,
+                packageJsons,
+                monorepoName,
+                dependencyRefs,
+            );
             console.log(`  Publishing ${tag} in ${distPath}`);
-            const success = publishDirectoryAsTags(
+            const publishResult = publishDirectoryAsTags(
                 distPath,
                 origin,
                 tag,
-                majorTag,
                 dryRun,
                 auth,
             );
-            if (success) {
+            if (publishResult?.sha) {
+                publishedRefs[name] = {sha: publishResult.sha, version};
+                knownPublishedRefs[name] = publishedRefs[name];
                 console.log(`🏁  Finished publishing ${tag}`);
             } else {
                 console.log(`🚨  Failed to publish ${tag}`);

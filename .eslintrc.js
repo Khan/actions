@@ -20,6 +20,7 @@ module.exports = {
     rules: basicRules,
     env: {
         node: true,
+        es6: true,
     },
     parserOptions: {
         sourceType: "module",

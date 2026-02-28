@@ -10,11 +10,36 @@ import path from "path";
 import {execSync} from "child_process";
 import fg from "fast-glob";
 
+const LOCAL_ACTION_USES_RE = /(?<=\buses:\s*)\.\/actions\/([A-Za-z0-9._-]+)/g;
+
+export const extractIntraRepoDependencies = (actionYml) => {
+    const deps = new Set();
+    let match;
+    LOCAL_ACTION_USES_RE.lastIndex = 0;
+    while ((match = LOCAL_ACTION_USES_RE.exec(actionYml)) !== null) {
+        deps.add(match[1]);
+    }
+    return [...deps].sort();
+};
+
+const ensurePublishedMetadata = (actionYml, name, version) => {
+    let next = actionYml;
+    if (!/^name:\s+/m.test(next)) {
+        next = `name: ${name}\n${next}`;
+    }
+    const metadataComment = `# action-version: ${name}-v${version}`;
+    if (!next.includes(metadataComment)) {
+        next = `${metadataComment}\n${next}`;
+    }
+    return next;
+};
+
 export const processActionYml = (
     name,
     packageJsons,
     actionYml,
     monorepoName,
+    dependencyRefs = {},
 ) => {
     console.log("  Processing action.yml for", name);
     // This first replacement is to rewrite local requires, in the case where we have
@@ -29,10 +54,17 @@ export const processActionYml = (
             to: "${{ github.action_path }}/",
         },
     ];
-    Object.keys(packageJsons[name].dependencies ?? {}).forEach((depName) => {
+
+    extractIntraRepoDependencies(actionYml).forEach((depName) => {
         console.log("    Processing dependency:", depName);
         if (depName in packageJsons) {
-            const target = `${monorepoName}@${depName}-v${packageJsons[depName].version}`;
+            const depRef = dependencyRefs[depName];
+            if (!depRef?.sha) {
+                throw new Error(
+                    `Missing published SHA for dependency "${depName}" used by "${name}"`,
+                );
+            }
+            const target = `${monorepoName}@${depRef.sha} # ${depName}-v${depRef.version}`;
             console.log(`      Replacing with: ${target}`);
             replacements.push({
                 from: new RegExp(`\\buses: \\./actions/${depName}\\b`, "g"),
@@ -46,7 +78,7 @@ export const processActionYml = (
         actionYml = actionYml.replace(from, to);
     });
 
-    return actionYml;
+    return ensurePublishedMetadata(actionYml, name, packageJsons[name].version);
 };
 
 /**
@@ -70,7 +102,12 @@ const bundleIfExists = (sourcePath) => {
     }
 };
 
-export const buildPackage = (name, packageJsons, monorepoName) => {
+export const buildPackage = (
+    name,
+    packageJsons,
+    monorepoName,
+    dependencyRefs = {},
+) => {
     const base = `actions/${name}`;
     const dist = `${base}/dist`;
 
@@ -87,7 +124,13 @@ export const buildPackage = (name, packageJsons, monorepoName) => {
     const actionYml = fs.readFileSync(`${base}/action.yml`, "utf8");
     fs.writeFileSync(
         `${base}/dist/action.yml`,
-        processActionYml(name, packageJsons, actionYml, monorepoName),
+        processActionYml(
+            name,
+            packageJsons,
+            actionYml,
+            monorepoName,
+            dependencyRefs,
+        ),
     );
 
     // JS code - bundled into a single file using `ncc`
