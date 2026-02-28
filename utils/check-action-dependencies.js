@@ -20,5 +20,7 @@ if (cycle) {
 
 const order = topologicallySortActions(graph);
 console.log(
-    `Action dependency graph is acyclic. Topological order: ${order.join(", ")}`,
+    `Action dependency graph is acyclic. Topological order: ${order.join(
+        ", ",
+    )}`,
 );
