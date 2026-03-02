@@ -21,6 +21,9 @@ importers:
       '@khanacademy/eslint-config':
         specifier: ^0.1.0
         version: 0.1.0(eslint-config-prettier@8.5.0(eslint@8.15.0))(eslint-plugin-babel@5.3.1(eslint@8.15.0))(eslint-plugin-eslint-comments@3.2.0(eslint@8.15.0))(eslint-plugin-flowtype@5.10.0(eslint@8.15.0))(eslint-plugin-graphql@4.0.0(@types/node@25.3.3)(graphql@15.10.1)(typescript@5.9.3))(eslint-plugin-import@2.31.0(eslint@8.15.0))(eslint-plugin-jsx-a11y@6.10.2(eslint@8.15.0))(eslint-plugin-prettier@4.0.0(eslint-config-prettier@8.5.0(eslint@8.15.0))(eslint@8.15.0)(prettier@2.6.2))(eslint-plugin-react-hooks@4.6.2(eslint@8.15.0))(eslint-plugin-react-native-animation-linter@0.1.2(eslint@8.15.0))(eslint-plugin-react-native@3.11.0(eslint@8.15.0))(eslint-plugin-react@7.37.4(eslint@8.15.0))(eslint@8.15.0)
+      '@types/node':
+        specifier: ^25.3.3
+        version: 25.3.3
       '@vercel/ncc':
         specifier: ^0.36.1
         version: 0.36.1
