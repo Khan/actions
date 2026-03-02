@@ -13,7 +13,7 @@ const packageNames = fs
 
 try {
     await publishAsNeeded(packageNames, dryRun);
-} catch (err: unknown) {
+} catch (err) {
     console.error(err);
     process.exit(1);
 }

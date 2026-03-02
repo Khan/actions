@@ -23,7 +23,7 @@ jobs:
           result-encoding: json
 
       - run: pnpm run build
-      - run: node utils/run-publish.ts
+      - run: node -r @swc-node/register utils/run-publish.ts
         if: steps.has-changesets.outputs.result == 'false'
 
       - name: Create Release Pull Request or Publish as tags

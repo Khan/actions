@@ -48,5 +48,5 @@ All actions are built and "published" using the `utils/run-publish.ts` script. Y
 Example:
 
 ```
-$ node ./utils/run-publish.ts --dry-run
+$ node -r @swc-node/register ./utils/run-publish.ts --dry-run
 ```

@@ -12,7 +12,7 @@ jobs:
       - uses: ./actions/shared-node-cache
       - run: pnpm run lint
       - run: pnpm run build
-      - run: node utils/check-action-dependencies.ts
+      - run: node -r @swc-node/register utils/check-action-dependencies.ts
 
       # Test filter-files 
       - uses: ./actions/filter-files
