@@ -5,7 +5,7 @@
  *   * copying the package.json file into the dist/ folder (if one exists)
  *   * bundling the action entrypoint into the dist/ folder using ncc
  */
-import fs from "fs";
+import * as fs from "fs";
 import path from "path";
 import {execSync} from "child_process";
 import fg from "fast-glob";

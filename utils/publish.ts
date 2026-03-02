@@ -5,7 +5,7 @@
  * for references to other actions in this repo and replacing them
  * with the appropriate pinned references.
  */
-import fs from "fs";
+import * as fs from "fs";
 import {execSync} from "child_process";
 import {
     buildPackage,
