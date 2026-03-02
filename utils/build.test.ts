@@ -91,6 +91,7 @@ describe("buildPackage", () => {
             "./actions/test-action/action.yml": "name: Test",
         });
 
+        // Act
         buildPackage(
             "test-action",
             {"test-action": {version: "1.0.0", dependencies: {}}},
@@ -107,6 +108,7 @@ describe("buildPackage", () => {
             "./actions/test-action/action.yml": "name: Test",
         });
 
+        // Act
         buildPackage(
             "test-action",
             {"test-action": {version: "1.0.0", dependencies: {}}},
@@ -125,6 +127,7 @@ describe("buildPackage", () => {
             "./actions/test-action/CHANGELOG.md": "# Changelog",
         });
 
+        // Act
         buildPackage(
             "test-action",
             {"test-action": {version: "1.0.0", dependencies: {}}},
@@ -161,6 +164,7 @@ runs:
             },
         };
 
+        // Act
         buildPackage("test-action", packageJsons, "Khan/actions", {
             "dependency-action": {
                 sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -183,6 +187,7 @@ runs:
             "./actions/test-action/index.js": "console.log('test');",
         });
 
+        // Act
         buildPackage(
             "test-action",
             {"test-action": {version: "1.0.0", dependencies: {}}},
@@ -201,6 +206,7 @@ runs:
             "./actions/test-action/index.js": "console.log('fallback');",
         });
 
+        // Act
         buildPackage(
             "test-action",
             {"test-action": {version: "1.0.0", dependencies: {}}},
@@ -217,6 +223,7 @@ runs:
             "./actions/test-action/action.yml": "name: Test",
         });
 
+        // Act
         buildPackage(
             "test-action",
             {"test-action": {version: "1.0.0", dependencies: {}}},
@@ -249,6 +256,7 @@ runs:
             "./actions/test-action/action.yml": "name: Test",
         });
 
+        // Act
         const result = buildPackage(
             "test-action",
             {"test-action": {version: "1.0.0", dependencies: {}}},
@@ -273,6 +281,7 @@ runs:
             "./actions/test-action/action.yml": actionYml,
         });
 
+        // Act
         buildPackage(
             "test-action",
             {"test-action": {version: "1.0.0", dependencies: {}}},
@@ -307,8 +316,10 @@ runs:
             },
             "dep-1": {version: "1.0.0"},
             "dep-2": {version: "2.0.0"},
+            // external-dep is not in packageJsons, simulating external dependency
         };
 
+        // Act
         buildPackage("test-action", packageJsons, "Khan/actions", {
             "dep-1": {
                 sha: "1111111111111111111111111111111111111111",
