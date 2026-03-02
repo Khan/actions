@@ -13,6 +13,7 @@
         "@khanacademy/eslint-config": "^0.1.0",
         "@swc-node/register": "^1.11.1",
         "@types/node": "^25.3.3",
+        "@types/picomatch": "^4.0.2",
         "@vercel/ncc": "^0.36.1",
         "eslint": "^8.15.0",
         "eslint-config-prettier": "^8.5.0",
