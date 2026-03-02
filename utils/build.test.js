@@ -27,46 +27,38 @@ runs:
         script: |
           require('./actions/full-or-limited/index.js')({github, core})
 `;
-        expect(
-            processActionYml(
-                `full-or-limited`,
-                {
-                    "full-or-limited": {
-                        version: "0.1.2",
-                        dependencies: {
-                            "json-args": "*",
-                        },
-                    },
-
-                    "json-args": {
-                        version: "1.2.3",
+        const result = processActionYml(
+            `full-or-limited`,
+            {
+                "full-or-limited": {
+                    version: "0.1.2",
+                    dependencies: {
+                        "json-args": "*",
                     },
                 },
 
-                before,
-                "Our/monorepo",
-                {
-                    "json-args": {
-                        sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                        version: "1.2.3",
-                    },
+                "json-args": {
+                    version: "1.2.3",
                 },
-            ),
-        ).toMatchInlineSnapshot(`
-          "
-          name: Example
-          description: Do a thing
-          runs:
-            using: "composite"
-            steps:
-              - name: Limited run
-                uses: Our/monorepo@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # json-args-v1.2.3
-              - uses: actions/github-script@v7
-                with:
-                  script: |
-                    require('\${{ github.action_path }}/index.js')({github, core})
-          "
-        `);
+            },
+
+            before,
+            "Our/monorepo",
+            {
+                "json-args": {
+                    sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    version: "1.2.3",
+                },
+            },
+        );
+
+        expect(result).toContain("name: Limited run (json-args-v1.2.3)");
+        expect(result).toContain(
+            "uses: Our/monorepo@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        );
+        expect(result).toContain(
+            "require('${{ github.action_path }}/index.js')({github, core})",
+        );
     });
 });
 
@@ -176,8 +168,9 @@ describe("buildPackage", () => {
             "utf8",
         );
         expect(result).toContain(
-            "Khan/actions@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # dependency-action-v2.0.0",
+            "Khan/actions@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         );
+        expect(result).toContain("name: dependency-action-v2.0.0");
     });
 
     it("bundles index.js using ncc when present", () => {
@@ -314,11 +307,13 @@ describe("buildPackage", () => {
             "utf8",
         );
         expect(result).toContain(
-            "Khan/actions@1111111111111111111111111111111111111111 # dep-1-v1.0.0",
+            "Khan/actions@1111111111111111111111111111111111111111",
         );
         expect(result).toContain(
-            "Khan/actions@2222222222222222222222222222222222222222 # dep-2-v2.0.0",
+            "Khan/actions@2222222222222222222222222222222222222222",
         );
+        expect(result).toContain("name: dep-1-v1.0.0");
+        expect(result).toContain("name: dep-2-v2.0.0");
         // External dependency should remain unchanged
         expect(result).toContain("./actions/external-dep");
     });

@@ -9,23 +9,114 @@ import fs from "fs";
 import path from "path";
 import {execSync} from "child_process";
 import fg from "fast-glob";
+import yaml from "js-yaml";
 
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const localActionUsesRegex = (actionNamePattern) =>
-    // matches `uses: ./actions/some-action`
-    new RegExp(`\\buses:\\s*\\.\\/actions\\/${actionNamePattern}\\b`, "g");
-
 const localActionRequirePathRegex = (name) =>
     new RegExp(`\\./actions/${escapeRegExp(name)}/`);
+const localActionUsesValueRegex = /^\.\/actions\/([A-Za-z0-9._-]+)$/;
+
+const appendDependencyTagToName = (nameValue, depTag) => {
+    if (nameValue.includes(depTag)) {
+        return nameValue;
+    }
+    const quoted = nameValue.match(/^(['"])(.*)\1$/);
+    if (quoted) {
+        const [, quote, inner] = quoted;
+        return `${quote}${inner} (${depTag})${quote}`;
+    }
+    return `${nameValue} (${depTag})`;
+};
+
+const transformStrings = (value, replacer) => {
+    if (typeof value === "string") {
+        return replacer(value);
+    }
+    if (Array.isArray(value)) {
+        return value.map((item) => transformStrings(item, replacer));
+    }
+    if (value && typeof value === "object") {
+        const next = {};
+        Object.entries(value).forEach(([key, entryValue]) => {
+            next[key] = transformStrings(entryValue, replacer);
+        });
+        return next;
+    }
+    return value;
+};
+
+const rewriteIntraRepoUsesAndStepNames = (
+    actionDoc,
+    actionName,
+    packageJsons,
+    monorepoName,
+    dependencyRefs,
+) => {
+    const steps = actionDoc?.runs?.steps;
+    if (!Array.isArray(steps)) {
+        return;
+    }
+
+    steps.forEach((step) => {
+        if (
+            !step ||
+            typeof step !== "object" ||
+            typeof step.uses !== "string"
+        ) {
+            return;
+        }
+        const match = step.uses.match(localActionUsesValueRegex);
+        if (!match) {
+            return;
+        }
+        const depName = match[1];
+        console.log("    Processing dependency:", depName);
+
+        if (!(depName in packageJsons)) {
+            console.log("       Skipping (external dependency)");
+            return;
+        }
+
+        const depRef = dependencyRefs[depName];
+        if (!depRef?.sha) {
+            throw new Error(
+                `Missing published SHA for dependency "${depName}" used by "${actionName}"`,
+            );
+        }
+
+        const target = `${monorepoName}@${depRef.sha}`;
+        console.log(`      Replacing with: ${target}`);
+        step.uses = target;
+
+        const depTag = `${depName}-v${depRef.version}`;
+        if (typeof step.name === "string") {
+            step.name = appendDependencyTagToName(step.name, depTag);
+        } else {
+            step.name = depTag;
+        }
+    });
+};
 
 export const extractIntraRepoDependencies = (actionYml) => {
     const deps = new Set();
-    let match;
-    const usesRegex = localActionUsesRegex(`([A-Za-z0-9._-]+)`);
-    while ((match = usesRegex.exec(actionYml)) !== null) {
-        deps.add(match[1]);
+    const actionDoc = yaml.load(actionYml);
+    const steps = actionDoc?.runs?.steps;
+    if (!Array.isArray(steps)) {
+        return [];
     }
+    steps.forEach((step) => {
+        if (
+            !step ||
+            typeof step !== "object" ||
+            typeof step.uses !== "string"
+        ) {
+            return;
+        }
+        const match = step.uses.match(localActionUsesValueRegex);
+        if (match) {
+            deps.add(match[1]);
+        }
+    });
     return [...deps].sort();
 };
 
@@ -37,43 +128,26 @@ export const processActionYml = (
     dependencyRefs = {},
 ) => {
     console.log("  Processing action.yml for", name);
-    // This first replacement is to rewrite local requires, in the case where we have
-    // a github-script action with e.g. `require('./actions/my-action/index.js')`, and turning
-    // it into `require('${{ github.action_path }}/index.js')`. Writing it this way means it
-    // will work in this repo without publishing (so our workflows can use it directly), and
-    // then we do this replacement when publishing so it will work there too.
-    // See https://docs.github.com/en/actions/learn-github-actions/contexts#github-context
-    const replacements = [
-        {
-            from: localActionRequirePathRegex(name),
-            to: "${{ github.action_path }}/",
-        },
-    ];
+    let actionDoc = yaml.load(actionYml);
+    actionDoc = transformStrings(actionDoc, (str) =>
+        str.replace(
+            localActionRequirePathRegex(name),
+            "${{ github.action_path }}/",
+        ),
+    );
 
-    extractIntraRepoDependencies(actionYml).forEach((depName) => {
-        console.log("    Processing dependency:", depName);
-        if (depName in packageJsons) {
-            const depRef = dependencyRefs[depName];
-            if (!depRef?.sha) {
-                throw new Error(
-                    `Missing published SHA for dependency "${depName}" used by "${name}"`,
-                );
-            }
-            const target = `${monorepoName}@${depRef.sha} # ${depName}-v${depRef.version}`;
-            console.log(`      Replacing with: ${target}`);
-            replacements.push({
-                from: localActionUsesRegex(escapeRegExp(depName)),
-                to: `uses: ${target}`,
-            });
-        } else {
-            console.log("       Skipping (external dependency)");
-        }
-    });
-    replacements.forEach(({from, to}) => {
-        actionYml = actionYml.replace(from, to);
-    });
+    rewriteIntraRepoUsesAndStepNames(
+        actionDoc,
+        name,
+        packageJsons,
+        monorepoName,
+        dependencyRefs,
+    );
 
-    return actionYml;
+    return yaml.dump(actionDoc, {
+        lineWidth: -1,
+        noRefs: true,
+    });
 };
 
 /**
