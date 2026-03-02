@@ -12,9 +12,10 @@ jobs:
       - uses: ./actions/shared-node-cache
       - run: pnpm run lint
       - run: pnpm run build
+      - run: cat ./actions/filter-files/index.js
       - run: node -r @swc-node/register utils/check-action-dependencies.ts
 
-      # Test filter-files 
+      # Test filter-files
       - uses: ./actions/filter-files
         id: fftest1
         with:
