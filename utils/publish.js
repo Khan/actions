@@ -6,7 +6,7 @@
  * with the appropriate pinned references.
  */
 import fs from "fs";
-import {execFileSync, execSync} from "child_process";
+import {execSync} from "child_process";
 import {buildPackage, extractIntraRepoDependencies} from "./build.js";
 
 /**
@@ -189,27 +189,35 @@ const parseMonorepoName = (origin) => {
     throw new Error(`Unable to determine monorepo name from origin: ${origin}`);
 };
 
-const fetchJson = (url, githubToken) => {
-    const args = [
-        "-sSfL",
-        "-H",
-        "Accept: application/vnd.github+json",
-        "-H",
-        "User-Agent: khan-actions-publisher",
-    ];
+const fetchJson = async (url, githubToken) => {
+    const headers = {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "khan-actions-publisher",
+    };
     if (githubToken) {
-        args.push("-H", `Authorization: Bearer ${githubToken}`);
+        headers.Authorization = `Bearer ${githubToken}`;
     }
-    args.push(url);
-    const output = execFileSync("curl", args, {encoding: "utf8"});
-    return JSON.parse(output);
+
+    const response = await fetch(url, {headers});
+    if (!response.ok) {
+        const body = await response.text();
+        throw new Error(
+            `GitHub API request failed (${response.status} ${response.statusText}) for ${url}: ${body}`,
+        );
+    }
+
+    return response.json();
 };
 
-const resolveGitObjectToCommitSha = (monorepoName, object, githubToken) => {
+const resolveGitObjectToCommitSha = async (
+    monorepoName,
+    object,
+    githubToken,
+) => {
     let current = object;
     let depth = 0;
     while (current?.type === "tag" && depth < 5) {
-        const tagObj = fetchJson(
+        const tagObj = await fetchJson(
             `https://api.github.com/repos/${monorepoName}/git/tags/${current.sha}`,
             githubToken,
         );
@@ -222,7 +230,7 @@ const resolveGitObjectToCommitSha = (monorepoName, object, githubToken) => {
     return current.sha;
 };
 
-export const lookupPublishedActionRef = (
+export const lookupPublishedActionRef = async (
     monorepoName,
     actionName,
     version,
@@ -235,7 +243,7 @@ export const lookupPublishedActionRef = (
     }
 
     const tag = `${actionName}-v${version}`;
-    const refs = fetchJson(
+    const refs = await fetchJson(
         `https://api.github.com/repos/${monorepoName}/git/matching-refs/tags/${tag}`,
         githubToken,
     );
@@ -248,7 +256,7 @@ export const lookupPublishedActionRef = (
         );
     }
 
-    const sha = resolveGitObjectToCommitSha(
+    const sha = await resolveGitObjectToCommitSha(
         monorepoName,
         exactRef.object,
         githubToken,
@@ -275,7 +283,7 @@ const getAuth = () => {
     }
 };
 
-export const publishAsNeeded = (packageNames, dryRun = false) => {
+export const publishAsNeeded = async (packageNames, dryRun = false) => {
     console.log(`Publishing (${dryRun ? "dry run" : "for real"})...`);
 
     // Because we rewrite our major version tags (filter-files-v1 for example)
@@ -307,27 +315,27 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
     const publishedRefs = {};
     const knownPublishedRefs = {};
     let failed = false;
-    publishOrder.forEach((name) => {
+    for (const name of publishOrder) {
         if (!selectedSet.has(name)) {
-            return;
+            continue;
         }
         console.log(`Processing ${name}...`);
         const version = packageJsons[name].version;
         const tag = `${name}-v${version}`;
         const dependencyRefs = {};
 
-        (graph[name] ?? []).forEach((depName) => {
+        for (const depName of graph[name] ?? []) {
             const depVersion = packageJsons[depName].version;
             dependencyRefs[depName] =
                 publishedRefs[depName] ??
-                lookupPublishedActionRef(
+                (await lookupPublishedActionRef(
                     monorepoName,
                     depName,
                     depVersion,
                     githubToken,
                     knownPublishedRefs,
-                );
-        });
+                ));
+        }
 
         if (checkTag(tag)) {
             console.log(`  Version ${tag} already exists. Nothing to do.`);
@@ -357,7 +365,7 @@ export const publishAsNeeded = (packageNames, dryRun = false) => {
         }
 
         console.log();
-    });
+    }
     if (failed) {
         process.exit(1);
     }

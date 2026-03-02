@@ -10,4 +10,10 @@ const dryRun = args.includes("--dry-run");
 const packageNames = fs
     .readdirSync("actions")
     .filter((name) => fs.statSync(`actions/${name}`).isDirectory());
-publishAsNeeded(packageNames, dryRun);
+
+try {
+    await publishAsNeeded(packageNames, dryRun);
+} catch (err) {
+    console.error(err);
+    process.exit(1);
+}
