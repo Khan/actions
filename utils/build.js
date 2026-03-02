@@ -10,11 +10,10 @@ import path from "path";
 import {execSync} from "child_process";
 import fg from "fast-glob";
 
-const LOCAL_ACTION_NAME_PATTERN = "[A-Za-z0-9._-]+";
-
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const localActionUsesRegex = (actionNamePattern) =>
+    // matches `uses: ./actions/some-action`
     new RegExp(`\\buses:\\s*\\.\\/actions\\/${actionNamePattern}\\b`, "g");
 
 const localActionRequirePathRegex = (name) =>
@@ -23,7 +22,7 @@ const localActionRequirePathRegex = (name) =>
 export const extractIntraRepoDependencies = (actionYml) => {
     const deps = new Set();
     let match;
-    const usesRegex = localActionUsesRegex(`(${LOCAL_ACTION_NAME_PATTERN})`);
+    const usesRegex = localActionUsesRegex(`([A-Za-z0-9._-]+)`);
     while ((match = usesRegex.exec(actionYml)) !== null) {
         deps.add(match[1]);
     }

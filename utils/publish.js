@@ -256,6 +256,7 @@ export const lookupPublishedActionRef = async (
         );
     }
 
+    // We fetch from github, because local git data might not have the tag present
     const sha = await resolveGitObjectToCommitSha(
         monorepoName,
         exactRef.object,
