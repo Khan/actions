@@ -65,8 +65,8 @@ importers:
   actions/filter-files:
     dependencies:
       picomatch:
-        specifier: '2'
-        version: 2.3.1
+        specifier: '4'
+        version: 4.0.3
 
   actions/full-or-limited:
     dependencies:
