@@ -7,7 +7,7 @@
         "test": "vitest"
     },
     "devDependencies": {
-        "@changesets/cli": "^2.22.0",
+        "@changesets/cli": "^2.29.8",
         "@khanacademy/eslint-config": "^0.1.0",
         "@vercel/ncc": "^0.36.1",
         "eslint": "^8.15.0",
