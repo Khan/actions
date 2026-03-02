@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "rootDir": ".",
+    "outDir": ".",
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "actions/filter-files/index.ts",
+    "actions/check-for-changeset/index.ts",
+    "actions/get-changed-files/index.ts",
+    "types/**/*.d.ts"
+  ],
+  "exclude": ["node_modules", "**/dist/**"]
+}

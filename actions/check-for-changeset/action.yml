@@ -33,4 +33,4 @@ runs:
       with:
         script: |
           const inputFiles = JSON.parse(`${{ steps.match.outputs.filtered }}`);
-          require('./actions/check-for-changeset/index.js')({context, core, inputFiles})
+          require('./actions/check-for-changeset/index.js').default({context, core, inputFiles})

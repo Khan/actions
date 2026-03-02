@@ -1,5 +1,5 @@
 import {describe, it, expect} from "vitest";
-import filterFiles from "./index.js";
+import filterFiles from "./index.ts";
 
 describe("filterFiles", () => {
     const core = console;

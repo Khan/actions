@@ -5,7 +5,8 @@
         "lint": "eslint --ext .js,.mjs .",
         "fix": "pnpm run lint --fix",
         "test": "vitest",
-        "typecheck": "tsc --noEmit"
+        "typecheck": "tsc --noEmit",
+        "build": "tsc -p tsconfig.actions.json"
     },
     "devDependencies": {
         "@changesets/cli": "^2.29.8",
