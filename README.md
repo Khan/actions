@@ -43,10 +43,10 @@ Here's what I did:
 
 ## Testing the build and publish process
 
-All actions are built and "published" using the `utils/run-publish.js` script. You can test almost all of it by running it and passing `--dry-run`. The only part that will be skipped is pushing each action's release git tags to Github.
+All actions are built and "published" using the `utils/run-publish.ts` script. You can test almost all of it by running it and passing `--dry-run`. The only part that will be skipped is pushing each action's release git tags to Github.
 
 Example:
 
 ```
-$ node ./utils/run-publish.js --dry-run
+$ node ./utils/run-publish.ts --dry-run
 ```

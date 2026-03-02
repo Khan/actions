@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "es2022",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "allowJs": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "types": ["node", "vitest/globals"],
+    "noEmit": true
+  },
+  "include": [
+    "actions/**/*.ts",
+    "actions/**/*.d.ts",
+    "utils/**/*.ts",
+    "types/**/*.d.ts",
+    "config/**/*.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": ["**/dist/**", "node_modules"]
+}

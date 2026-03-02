@@ -4,7 +4,8 @@
     "scripts": {
         "lint": "eslint --ext .js,.mjs .",
         "fix": "pnpm run lint --fix",
-        "test": "vitest"
+        "test": "vitest",
+        "typecheck": "tsc --noEmit"
     },
     "devDependencies": {
         "@changesets/cli": "^2.29.8",

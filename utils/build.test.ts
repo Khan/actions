@@ -10,7 +10,7 @@ import {
     buildPackage,
     extractIntraRepoDependencies,
     processActionYml,
-} from "./build.js";
+} from "./build.ts";
 
 describe("processActionYml", () => {
     it("should work", () => {
@@ -91,10 +91,9 @@ describe("buildPackage", () => {
             "./actions/test-action/action.yml": "name: Test",
         });
 
-        // Act
         buildPackage(
             "test-action",
-            {"test-action": {dependencies: {}}},
+            {"test-action": {version: "1.0.0", dependencies: {}}},
             "Khan/actions",
         );
 
@@ -108,10 +107,9 @@ describe("buildPackage", () => {
             "./actions/test-action/action.yml": "name: Test",
         });
 
-        // Act
         buildPackage(
             "test-action",
-            {"test-action": {dependencies: {}}},
+            {"test-action": {version: "1.0.0", dependencies: {}}},
             "Khan/actions",
         );
 
@@ -127,10 +125,9 @@ describe("buildPackage", () => {
             "./actions/test-action/CHANGELOG.md": "# Changelog",
         });
 
-        // Act
         buildPackage(
             "test-action",
-            {"test-action": {dependencies: {}}},
+            {"test-action": {version: "1.0.0", dependencies: {}}},
             "Khan/actions",
         );
 
@@ -143,12 +140,13 @@ describe("buildPackage", () => {
     });
 
     it("processes action.yml and writes to dist", () => {
-        const actionYml = `name: Test Action
-    description: Test
-    runs:
-      using: "composite"
-      steps:
-        - uses: ./actions/dependency-action`;
+        const actionYml = `
+name: Test Action
+description: Test
+runs:
+  using: "composite"
+  steps:
+    - uses: ./actions/dependency-action`;
 
         vol.fromJSON({
             "./actions/test-action/action.yml": actionYml,
@@ -163,7 +161,6 @@ describe("buildPackage", () => {
             },
         };
 
-        // Act
         buildPackage("test-action", packageJsons, "Khan/actions", {
             "dependency-action": {
                 sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -186,10 +183,9 @@ describe("buildPackage", () => {
             "./actions/test-action/index.js": "console.log('test');",
         });
 
-        // Act
         buildPackage(
             "test-action",
-            {"test-action": {dependencies: {}}},
+            {"test-action": {version: "1.0.0", dependencies: {}}},
             "Khan/actions",
         );
 
@@ -198,15 +194,32 @@ describe("buildPackage", () => {
         );
     });
 
-    it("skips bundling when index.js does not exist", () => {
+    it("prefers index.ts over index.js when both exist", () => {
+        vol.fromJSON({
+            "./actions/test-action/action.yml": "name: Test",
+            "./actions/test-action/index.ts": "export const value = 1;",
+            "./actions/test-action/index.js": "console.log('fallback');",
+        });
+
+        buildPackage(
+            "test-action",
+            {"test-action": {version: "1.0.0", dependencies: {}}},
+            "Khan/actions",
+        );
+
+        expect(execSync).toHaveBeenCalledWith(
+            "pnpm ncc build actions/test-action/index.ts -o actions/test-action/dist --source-map",
+        );
+    });
+
+    it("skips bundling when no entrypoint exists", () => {
         vol.fromJSON({
             "./actions/test-action/action.yml": "name: Test",
         });
 
-        // Act
         buildPackage(
             "test-action",
-            {"test-action": {dependencies: {}}},
+            {"test-action": {version: "1.0.0", dependencies: {}}},
             "Khan/actions",
         );
 
@@ -221,7 +234,7 @@ describe("buildPackage", () => {
         expect(() =>
             buildPackage(
                 "test-action",
-                {"test-action": {dependencies: {}}},
+                {"test-action": {version: "1.0.0", dependencies: {}}},
                 "Khan/actions",
             ),
         ).not.toThrow();
@@ -236,10 +249,9 @@ describe("buildPackage", () => {
             "./actions/test-action/action.yml": "name: Test",
         });
 
-        // Act
         const result = buildPackage(
             "test-action",
-            {"test-action": {dependencies: {}}},
+            {"test-action": {version: "1.0.0", dependencies: {}}},
             "Khan/actions",
         );
 
@@ -247,23 +259,23 @@ describe("buildPackage", () => {
     });
 
     it("handles action.yml with local path replacement", () => {
-        const actionYml = `name: Test
-    runs:
-      using: "composite"
-      steps:
-        - uses: actions/github-script@v7
-          with:
-            script: |
-              require('./actions/test-action/index.js')({github, core})`;
+        const actionYml = `
+name: Test
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/github-script@v7
+      with:
+        script: |
+          require('./actions/test-action/index.js')({github, core})`;
 
         vol.fromJSON({
             "./actions/test-action/action.yml": actionYml,
         });
 
-        // Act
         buildPackage(
             "test-action",
-            {"test-action": {dependencies: {}}},
+            {"test-action": {version: "1.0.0", dependencies: {}}},
             "Khan/actions",
         );
 
@@ -276,13 +288,14 @@ describe("buildPackage", () => {
     });
 
     it("handles multiple dependencies in action.yml", () => {
-        const actionYml = `name: Test
-    runs:
-      using: "composite"
-      steps:
-        - uses: ./actions/dep-1
-        - uses: ./actions/dep-2
-        - uses: ./actions/external-dep`;
+        const actionYml = `
+name: Test
+runs:
+  using: "composite"
+  steps:
+    - uses: ./actions/dep-1
+    - uses: ./actions/dep-2
+    - uses: ./actions/external-dep`;
 
         vol.fromJSON({
             "./actions/test-action/action.yml": actionYml,
@@ -294,10 +307,8 @@ describe("buildPackage", () => {
             },
             "dep-1": {version: "1.0.0"},
             "dep-2": {version: "2.0.0"},
-            // external-dep is not in packageJsons, simulating external dependency
         };
 
-        // Act
         buildPackage("test-action", packageJsons, "Khan/actions", {
             "dep-1": {
                 sha: "1111111111111111111111111111111111111111",

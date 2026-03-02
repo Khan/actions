@@ -3,9 +3,9 @@
  * publishing any new versions of actions that are needed.
  */
 import fs from "fs";
-import {publishAsNeeded} from "./publish.js";
+import {publishAsNeeded} from "./publish.ts";
 
-const [_, __, ...args] = process.argv;
+const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const packageNames = fs
     .readdirSync("actions")
@@ -13,7 +13,7 @@ const packageNames = fs
 
 try {
     await publishAsNeeded(packageNames, dryRun);
-} catch (err) {
+} catch (err: unknown) {
     console.error(err);
     process.exit(1);
 }
