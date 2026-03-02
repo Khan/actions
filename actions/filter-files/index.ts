@@ -1,4 +1,4 @@
-import * as picomatch from "picomatch";
+import picomatch from "picomatch";
 
 type CoreLike = {
     info: (message: string) => void;
