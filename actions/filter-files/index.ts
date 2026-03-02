@@ -25,22 +25,30 @@ const parseList = (raw: string): string[] => {
         return [raw];
     }
     if (raw.includes("\n")) {
-        return raw
-            .split("\n")
-            .map((item) => item.trim())
-            .filter((line) => line.length > 0 && !line.startsWith("#"));
+        // if split on newlines, no need to parse for internal commas
+        return (
+            raw
+                .split("\n")
+                .map((item) => item.trim())
+                // Filter out comment lines
+                .filter((line) => line.length > 0 && !line.startsWith("#"))
+        );
     }
 
     let bracketCount = 0;
     const list: string[] = [];
     let current = "";
-
+    // don't split on `,` inside brackets-- that breaks glob patterns
+    // this builds an array of strings between commas and newlines,
+    //   but not inside brackets
     for (const char of raw) {
         if (bracketCount < 0) {
             throw err;
         }
         switch (char) {
             case ",":
+                // if we're not inside brackets, add the current string to the list
+                //   and reset the current string
                 if (bracketCount === 0) {
                     list.push(current.trim());
                     current = "";
@@ -50,11 +58,13 @@ const parseList = (raw: string): string[] => {
             case "(":
             case "[":
             case "{":
+                // increment the bracket count
                 bracketCount += 1;
                 break;
             case ")":
             case "]":
             case "}":
+                // decrement the bracket count
                 bracketCount -= 1;
                 break;
         }
@@ -109,8 +119,11 @@ const filterFiles = ({
 
     if (globsRaw) {
         const globsList = parseList(globsRaw);
-
+        // picomatch does does inclusive disjunctions (ORs) by default,
+        //   so we need to do some extra work to get conjunctive (AND) matches.
+        // test this behavior here: https://codesandbox.io/s/picomatch-forked-qgqy2g
         if (globsList.length > 1 && matchAllGlobs) {
+            // conjunctive glob match
             const matchers = globsList.map((glob) => picomatch(glob));
             filters.push((path) => matchers.every((matcher) => matcher(path)));
         } else {
@@ -127,6 +140,7 @@ const filterFiles = ({
                     return yesesMatch && noesMatch;
                 });
             } else {
+                // disjunctive glob match
                 filters.push((path) => picomatch(globsList)(path));
             }
         }

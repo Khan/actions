@@ -60,6 +60,7 @@ type CoreLike = {
     setOutput: (name: string, value: string) => void;
 };
 
+// Get the changed files for a pull-request or push
 const getBaseAndHead = async (
     github: GithubLike,
     context: ContextLike,
@@ -74,6 +75,8 @@ const getBaseAndHead = async (
             ];
 
         case "push": {
+            // For push events, if this is a new branch, the before may be all
+            // zeros (courtesy https://stackoverflow.com/a/61861763).
             if ((context.payload.before?.replaceAll("0", "").length ?? 0) > 0) {
                 return [context.payload.before, context.payload.after];
             }
@@ -85,6 +88,9 @@ const getBaseAndHead = async (
                 );
             }
 
+            // If we're on a new branch, then we try to find an open PR
+            // associated that has the 'after' commit.
+            // Search for pull requests that contain the specified commit SHA
             const response =
                 await github.rest.repos.listPullRequestsAssociatedWithCommit({
                     owner: context.payload.repository.owner.name,
@@ -113,6 +119,7 @@ const getBaseAndHead = async (
                 );
             }
 
+            // Comparing to the owning PR's base ref
             return [pullRequests[0]?.base.sha, afterSha];
         }
 
@@ -152,12 +159,15 @@ const getChangedFiles = async ({
     core.info(`Base: ${base}\nHead: ${head}`);
 
     if (!base || !head) {
+        // Ensure that the base and head properties are set on the payload.
         core.setFailed(
             `The base and head commits are missing from the payload for this ${context.eventName} event.`,
         );
         return;
     }
 
+    // Use GitHub's compare two commits API.
+    // https://developer.github.com/v3/repos/commits/#compare-two-commits
     const response = await github.rest.repos.compareCommits({
         base,
         head,
@@ -165,6 +175,7 @@ const getChangedFiles = async ({
         repo: context.repo.repo,
     });
 
+    // Ensure that the request was successful.
     if (response.status !== 200) {
         core.setFailed(
             `The GitHub API for comparing the base and head commits for this ${context.eventName} event returned ${response.status}, expected 200.`,

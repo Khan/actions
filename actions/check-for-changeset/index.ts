@@ -25,13 +25,13 @@ const checkForChangeset = ({
     inputFiles,
 }: CheckForChangesetInput): void => {
     if (!inputFiles.length) {
-        return;
+        return; // no relevant files changed, ignore
     }
     core.debug("Changed files: " + inputFiles);
 
     const branchName = context.payload.pull_request.head.ref;
     if (branchName === "changeset-release/main") {
-        return;
+        return; // release PRs don't need changesets.
     }
 
     const hasChangeset = inputFiles.some((name) =>
