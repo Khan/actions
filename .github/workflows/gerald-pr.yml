@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: ./actions/shared-node-cache
+      - run: pnpm run build
       - uses: ./actions/gerald-pr
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
