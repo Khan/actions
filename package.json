@@ -15,6 +15,7 @@
         "@types/node": "^25.3.3",
         "@types/picomatch": "^4.0.2",
         "@vercel/ncc": "^0.36.1",
+        "@vitest/coverage-v8": "^4.0.18",
         "eslint": "^8.15.0",
         "eslint-config-prettier": "^8.5.0",
         "eslint-plugin-prettier": "^4.0.0",
