@@ -70,17 +70,16 @@ describe("getChangedFiles", () => {
         });
         expect(core.setOutput).toHaveBeenCalledWith(
             "files",
-            JSON.stringify([
-                "packages/a/src/index.ts",
-                "packages/b/README.md",
-            ]),
+            JSON.stringify(["packages/a/src/index.ts", "packages/b/README.md"]),
         );
     });
 
     it("uses before/after SHAs for normal push events", async () => {
         const core = makeCore();
         const github = makeGithub({
-            compareFiles: [{filename: "actions/a/index.ts", status: "modified"}],
+            compareFiles: [
+                {filename: "actions/a/index.ts", status: "modified"},
+            ],
         });
 
         await getChangedFiles({
@@ -98,7 +97,9 @@ describe("getChangedFiles", () => {
             },
         });
 
-        expect(github.rest.repos.listPullRequestsAssociatedWithCommit).not.toHaveBeenCalled();
+        expect(
+            github.rest.repos.listPullRequestsAssociatedWithCommit,
+        ).not.toHaveBeenCalled();
         expect(github.rest.repos.compareCommits).toHaveBeenCalledWith({
             base: "1234567890abcdef",
             head: "fedcba0987654321",
@@ -114,7 +115,9 @@ describe("getChangedFiles", () => {
                 {number: 100, title: "A", base: {sha: "basesha-1"}},
                 {number: 101, title: "B", base: {sha: "basesha-2"}},
             ],
-            compareFiles: [{filename: "actions/a/index.ts", status: "modified"}],
+            compareFiles: [
+                {filename: "actions/a/index.ts", status: "modified"},
+            ],
         });
 
         await getChangedFiles({
@@ -132,17 +135,69 @@ describe("getChangedFiles", () => {
             },
         });
 
-        expect(github.rest.repos.listPullRequestsAssociatedWithCommit).toHaveBeenCalledWith(
-            {
-                owner: "Khan",
-                repo: "actions",
-                commit_sha: "newheadsha",
-            },
-        );
+        expect(
+            github.rest.repos.listPullRequestsAssociatedWithCommit,
+        ).toHaveBeenCalledWith({
+            owner: "Khan",
+            repo: "actions",
+            commit_sha: "newheadsha",
+        });
         expect(core.warn).toHaveBeenCalledTimes(1);
         expect(github.rest.repos.compareCommits).toHaveBeenCalledWith({
             base: "basesha-1",
             head: "newheadsha",
+            owner: "Khan",
+            repo: "actions",
+        });
+    });
+
+    it("throws for new-branch push when no associated PRs are found", async () => {
+        const core = makeCore();
+        const github = makeGithub({pullRequests: []});
+
+        await expect(
+            getChangedFiles({
+                github,
+                core,
+                directoriesRaw: "",
+                context: {
+                    eventName: "push",
+                    payload: {
+                        before: "0000000000000000000000000000000000000000",
+                        after: "newheadsha",
+                        repository: {owner: {name: "Khan"}, name: "actions"},
+                    },
+                    repo: {owner: "Khan", repo: "actions"},
+                },
+            }),
+        ).rejects.toThrow("No pull requests found associated with commit");
+    });
+
+    it("uses merge_group base/head shas", async () => {
+        const core = makeCore();
+        const github = makeGithub({
+            compareFiles: [
+                {filename: "actions/a/index.ts", status: "modified"},
+            ],
+        });
+
+        await getChangedFiles({
+            github,
+            core,
+            directoriesRaw: "",
+            context: {
+                eventName: "merge_group",
+                payload: {
+                    merge_group: {base_sha: "base-sha", head_sha: "head-sha"},
+                    repository: {owner: {name: "Khan"}, name: "actions"},
+                },
+                repo: {owner: "Khan", repo: "actions"},
+            },
+        });
+
+        expect(github.rest.repos.compareCommits).toHaveBeenCalledWith({
+            base: "base-sha",
+            head: "head-sha",
             owner: "Khan",
             repo: "actions",
         });

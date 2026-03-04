@@ -103,6 +103,34 @@ runs:
           "
         `);
     });
+
+    it("does not duplicate dependency tag in step name", () => {
+        const before = `
+runs:
+  using: "composite"
+  steps:
+    - name: Already tagged dep-v1.2.3
+      uses: ./actions/dep
+`;
+        const result = processActionYml(
+            "host",
+            {
+                host: {version: "1.0.0"},
+                dep: {version: "1.2.3"},
+            },
+            before,
+            "Khan/actions",
+            {
+                dep: {
+                    sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    version: "1.2.3",
+                },
+            },
+        );
+
+        expect(result).toContain("name: Already tagged dep-v1.2.3");
+        expect(result).not.toContain("dep-v1.2.3 (dep-v1.2.3)");
+    });
 });
 
 describe("extractIntraRepoDependencies", () => {
@@ -117,6 +145,19 @@ runs:
     - uses: actions/github-script@v7
 `;
         expect(extractIntraRepoDependencies(actionYml)).toEqual(["a", "b"]);
+    });
+
+    it("ignores non-step and non-string uses values", () => {
+        const actionYml = `
+runs:
+  using: composite
+  steps:
+    - run: echo hi
+    - uses:
+        ref: ./actions/not-valid
+    - uses: ./actions/ok
+`;
+        expect(extractIntraRepoDependencies(actionYml)).toEqual(["ok"]);
     });
 });
 
@@ -299,6 +340,27 @@ runs:
         );
 
         expect(result).toBe("actions/test-action/dist");
+    });
+
+    it("cleans existing dist output before copying", () => {
+        vol.fromJSON({
+            "./actions/test-action/action.yml": "name: Test",
+            "./actions/test-action/dist/old.txt": "stale",
+            "./actions/test-action/README.md": "# README",
+        });
+
+        buildPackage(
+            "test-action",
+            {"test-action": {version: "1.0.0", dependencies: {}}},
+            "Khan/actions",
+        );
+
+        expect(vol.existsSync("./actions/test-action/dist/old.txt")).toBe(
+            false,
+        );
+        expect(
+            vol.readFileSync("./actions/test-action/dist/README.md", "utf8"),
+        ).toBe("# README");
     });
 
     it("handles action.yml with local path replacement", () => {
