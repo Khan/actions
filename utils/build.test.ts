@@ -1,9 +1,20 @@
-import {vi, describe, it, expect} from "vitest";
+import {vi, describe, it, expect, beforeEach} from "vitest";
 import {vol} from "memfs";
+import * as fs from "fs";
+import path from "path";
 import {execSync} from "child_process";
+
+const {globSyncMock} = vi.hoisted(() => ({
+    globSyncMock: vi.fn(),
+}));
 
 // Mock fs to use memfs
 vi.mock("fs", () => vi.importActual("memfs"));
+vi.mock("fast-glob", () => ({
+    default: {
+        globSync: globSyncMock,
+    },
+}));
 vi.mock("child_process", () => ({execSync: vi.fn().mockName("execSync")}));
 
 import {
@@ -11,6 +22,30 @@ import {
     extractIntraRepoDependencies,
     processActionYml,
 } from "./build.ts";
+
+beforeEach(() => {
+    globSyncMock.mockReset();
+    globSyncMock.mockImplementation(
+        (sourcePath: string, options?: {fs?: typeof fs}): string[] => {
+            const fsImpl = options?.fs ?? fs;
+            const hasGlob = /[*?[\]{}]/.test(sourcePath);
+            if (!hasGlob) {
+                return fsImpl.existsSync(sourcePath) ? [sourcePath] : [];
+            }
+
+            const baseDir = path.dirname(sourcePath);
+            const pattern = path.basename(sourcePath);
+            if (pattern === "*.md" && fsImpl.existsSync(baseDir)) {
+                return fsImpl
+                    .readdirSync(baseDir)
+                    .filter((name) => name.endsWith(".md"))
+                    .map((name) => path.join(baseDir, name));
+            }
+
+            return [];
+        },
+    );
+});
 
 describe("processActionYml", () => {
     it("should work", () => {
