@@ -1,16 +1,51 @@
-import {vi, describe, it, expect} from "vitest";
+import {vi, describe, it, expect, beforeEach} from "vitest";
 import {vol} from "memfs";
+import * as fs from "fs";
+import path from "path";
 import {execSync} from "child_process";
+
+const {globSyncMock} = vi.hoisted(() => ({
+    globSyncMock: vi.fn(),
+}));
 
 // Mock fs to use memfs
 vi.mock("fs", () => vi.importActual("memfs"));
+vi.mock("fast-glob", () => ({
+    default: {
+        globSync: globSyncMock,
+    },
+}));
 vi.mock("child_process", () => ({execSync: vi.fn().mockName("execSync")}));
 
 import {
     buildPackage,
     extractIntraRepoDependencies,
     processActionYml,
-} from "./build.js";
+} from "./build.ts";
+
+beforeEach(() => {
+    globSyncMock.mockReset();
+    globSyncMock.mockImplementation(
+        (sourcePath: string, options?: {fs?: typeof fs}): string[] => {
+            const fsImpl = options?.fs ?? fs;
+            const hasGlob = /[*?[\]{}]/.test(sourcePath);
+            if (!hasGlob) {
+                return fsImpl.existsSync(sourcePath) ? [sourcePath] : [];
+            }
+
+            const baseDir = path.dirname(sourcePath);
+            const pattern = path.basename(sourcePath);
+            if (pattern === "*.md" && fsImpl.existsSync(baseDir)) {
+                return fsImpl
+                    .readdirSync(baseDir)
+                    .filter((name) => name.endsWith(".md"))
+                    .map((name) => path.join(baseDir, name));
+            }
+
+            return [];
+        },
+    );
+});
 
 describe("processActionYml", () => {
     it("should work", () => {
@@ -94,7 +129,7 @@ describe("buildPackage", () => {
         // Act
         buildPackage(
             "test-action",
-            {"test-action": {dependencies: {}}},
+            {"test-action": {version: "1.0.0", dependencies: {}}},
             "Khan/actions",
         );
 
@@ -111,7 +146,7 @@ describe("buildPackage", () => {
         // Act
         buildPackage(
             "test-action",
-            {"test-action": {dependencies: {}}},
+            {"test-action": {version: "1.0.0", dependencies: {}}},
             "Khan/actions",
         );
 
@@ -130,7 +165,7 @@ describe("buildPackage", () => {
         // Act
         buildPackage(
             "test-action",
-            {"test-action": {dependencies: {}}},
+            {"test-action": {version: "1.0.0", dependencies: {}}},
             "Khan/actions",
         );
 
@@ -143,12 +178,13 @@ describe("buildPackage", () => {
     });
 
     it("processes action.yml and writes to dist", () => {
-        const actionYml = `name: Test Action
-    description: Test
-    runs:
-      using: "composite"
-      steps:
-        - uses: ./actions/dependency-action`;
+        const actionYml = `
+name: Test Action
+description: Test
+runs:
+  using: "composite"
+  steps:
+    - uses: ./actions/dependency-action`;
 
         vol.fromJSON({
             "./actions/test-action/action.yml": actionYml,
@@ -189,7 +225,7 @@ describe("buildPackage", () => {
         // Act
         buildPackage(
             "test-action",
-            {"test-action": {dependencies: {}}},
+            {"test-action": {version: "1.0.0", dependencies: {}}},
             "Khan/actions",
         );
 
@@ -198,7 +234,26 @@ describe("buildPackage", () => {
         );
     });
 
-    it("skips bundling when index.js does not exist", () => {
+    it("prefers index.ts over index.js when both exist", () => {
+        vol.fromJSON({
+            "./actions/test-action/action.yml": "name: Test",
+            "./actions/test-action/index.ts": "export const value = 1;",
+            "./actions/test-action/index.js": "console.log('fallback');",
+        });
+
+        // Act
+        buildPackage(
+            "test-action",
+            {"test-action": {version: "1.0.0", dependencies: {}}},
+            "Khan/actions",
+        );
+
+        expect(execSync).toHaveBeenCalledWith(
+            "pnpm ncc build actions/test-action/index.ts -o actions/test-action/dist --source-map",
+        );
+    });
+
+    it("skips bundling when no entrypoint exists", () => {
         vol.fromJSON({
             "./actions/test-action/action.yml": "name: Test",
         });
@@ -206,7 +261,7 @@ describe("buildPackage", () => {
         // Act
         buildPackage(
             "test-action",
-            {"test-action": {dependencies: {}}},
+            {"test-action": {version: "1.0.0", dependencies: {}}},
             "Khan/actions",
         );
 
@@ -221,7 +276,7 @@ describe("buildPackage", () => {
         expect(() =>
             buildPackage(
                 "test-action",
-                {"test-action": {dependencies: {}}},
+                {"test-action": {version: "1.0.0", dependencies: {}}},
                 "Khan/actions",
             ),
         ).not.toThrow();
@@ -239,7 +294,7 @@ describe("buildPackage", () => {
         // Act
         const result = buildPackage(
             "test-action",
-            {"test-action": {dependencies: {}}},
+            {"test-action": {version: "1.0.0", dependencies: {}}},
             "Khan/actions",
         );
 
@@ -247,14 +302,15 @@ describe("buildPackage", () => {
     });
 
     it("handles action.yml with local path replacement", () => {
-        const actionYml = `name: Test
-    runs:
-      using: "composite"
-      steps:
-        - uses: actions/github-script@v7
-          with:
-            script: |
-              require('./actions/test-action/index.js')({github, core})`;
+        const actionYml = `
+name: Test
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/github-script@v7
+      with:
+        script: |
+          require('./actions/test-action/index.js')({github, core})`;
 
         vol.fromJSON({
             "./actions/test-action/action.yml": actionYml,
@@ -263,7 +319,7 @@ describe("buildPackage", () => {
         // Act
         buildPackage(
             "test-action",
-            {"test-action": {dependencies: {}}},
+            {"test-action": {version: "1.0.0", dependencies: {}}},
             "Khan/actions",
         );
 
@@ -276,13 +332,14 @@ describe("buildPackage", () => {
     });
 
     it("handles multiple dependencies in action.yml", () => {
-        const actionYml = `name: Test
-    runs:
-      using: "composite"
-      steps:
-        - uses: ./actions/dep-1
-        - uses: ./actions/dep-2
-        - uses: ./actions/external-dep`;
+        const actionYml = `
+name: Test
+runs:
+  using: "composite"
+  steps:
+    - uses: ./actions/dep-1
+    - uses: ./actions/dep-2
+    - uses: ./actions/external-dep`;
 
         vol.fromJSON({
             "./actions/test-action/action.yml": actionYml,

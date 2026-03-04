@@ -4,7 +4,7 @@
  *   1. Already pinned (`uses: owner/repo@<sha> # <tag>`) — updates stale SHAs
  *   2. Unpinned (`uses: owner/repo@<tag>`) — replaces with `@<sha> # <tag>`
  *
- * Usage: node utils/update-pinned-actions.js
+ * Usage: node utils/update-pinned-actions.ts
  */
 import fs from "fs";
 import {execSync} from "child_process";
@@ -21,7 +21,7 @@ const UNPINNED_RE = /(?<=uses:\s+)((?!\.\/).+\/.+)@(?!([a-f0-9]{40})\s)(\S+)/g;
  * Resolve a tag or branch to its commit SHA via git ls-remote.
  * For annotated tags the dereferenced (^{}) commit SHA is returned.
  */
-const resolveRef = (action, ref) => {
+const resolveRef = (action: string, ref: string): string | null => {
     const url = `https://github.com/${action}.git`;
 
     // Try tags first (covers both lightweight and annotated)
@@ -32,11 +32,11 @@ const resolveRef = (action, ref) => {
     if (tagOutput) {
         const lines = tagOutput.split("\n");
         // If there's a ^{} line it's an annotated tag — use the deref SHA
-        const deref = lines.find((l) => l.includes("^{}"));
+        const deref = lines.find((line) => line.includes("^{}"));
         if (deref) {
-            return deref.split(/\s+/)[0];
+            return deref.split(/\s+/)[0] ?? null;
         }
-        return lines[0].split(/\s+/)[0];
+        return lines[0]?.split(/\s+/)[0] ?? null;
     }
 
     // Fall back to branches
@@ -45,13 +45,11 @@ const resolveRef = (action, ref) => {
     }).trim();
 
     if (branchOutput) {
-        return branchOutput.split(/\s+/)[0];
+        return branchOutput.split(/\s+/)[0] ?? null;
     }
 
     return null;
 };
-
-// -- main -------------------------------------------------------------------
 
 const files = fg.sync([
     ".github/workflows/*.yml",
@@ -62,25 +60,22 @@ const files = fg.sync([
     "actions/**/action.yaml",
 ]);
 
-// Collect unique action+ref pairs across all files
-// eslint-disable-next-line no-undef
-const seen = new Map(); // key: "action@ref" → resolved SHA (filled later)
+// key: "action@ref" -> resolved SHA (filled later)
+const seen = new Map<string, string | null>();
 
 for (const file of files) {
     const content = fs.readFileSync(file, "utf-8");
-    let m;
+    let match: RegExpExecArray | null;
 
-    // Collect already-pinned refs
     PINNED_RE.lastIndex = 0;
-    while ((m = PINNED_RE.exec(content)) !== null) {
-        const [, action, , ref] = m;
+    while ((match = PINNED_RE.exec(content)) !== null) {
+        const [, action, , ref] = match;
         seen.set(`${action}@${ref}`, null);
     }
 
-    // Collect unpinned refs (tag/branch directly after @)
     UNPINNED_RE.lastIndex = 0;
-    while ((m = UNPINNED_RE.exec(content)) !== null) {
-        const [, action, , ref] = m;
+    while ((match = UNPINNED_RE.exec(content)) !== null) {
+        const [, action, , ref] = match;
         seen.set(`${action}@${ref}`, null);
     }
 }
@@ -90,31 +85,34 @@ if (seen.size === 0) {
     process.exit(0);
 }
 
-console.log(`Found ${seen.size} unique action reference(s). Resolving…\n`);
+console.log(`Found ${seen.size} unique action reference(s). Resolving...\n`);
 
-// Resolve each unique action+ref
 let failures = 0;
 for (const key of seen.keys()) {
     const [action, ref] = key.split("@");
+    if (!action || !ref) {
+        continue;
+    }
+
     console.log(`  Resolving ${action} @ ${ref}`);
     try {
         const sha = resolveRef(action, ref);
         if (!sha) {
-            console.log(`    ⚠  Could not resolve ref "${ref}" for ${action}`);
-            failures++;
+            console.log(`    Could not resolve ref "${ref}" for ${action}`);
+            failures += 1;
         } else {
             seen.set(key, sha);
-            console.log(`    → ${sha}`);
+            console.log(`    -> ${sha}`);
         }
-    } catch (err) {
-        console.log(`    ⚠  Error resolving ${action}@${ref}: ${err.message}`);
-        failures++;
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.log(`    Error resolving ${action}@${ref}: ${message}`);
+        failures += 1;
     }
 }
 
 console.log("");
 
-// Update files in-place
 let updatedFiles = 0;
 let updatedRefs = 0;
 let alreadyCurrent = 0;
@@ -123,56 +121,64 @@ for (const file of files) {
     let content = fs.readFileSync(file, "utf-8");
     let fileChanged = false;
 
-    // Update already-pinned refs with stale SHAs
     PINNED_RE.lastIndex = 0;
-    content = content.replace(PINNED_RE, (match, action, oldSha, ref) => {
-        const newSha = seen.get(`${action}@${ref}`);
-        if (!newSha || newSha === oldSha) {
-            if (newSha === oldSha) {
-                alreadyCurrent++;
+    content = content.replace(
+        PINNED_RE,
+        (full: string, action: string, oldSha: string, ref: string): string => {
+            const newSha = seen.get(`${action}@${ref}`);
+            if (!newSha || newSha === oldSha) {
+                if (newSha === oldSha) {
+                    alreadyCurrent += 1;
+                }
+                return full;
             }
-            return match;
-        }
-        console.log(`  ${file}: ${action}@${ref}`);
-        console.log(`    ${oldSha} → ${newSha}`);
-        fileChanged = true;
-        updatedRefs++;
-        return `${action}@${newSha} # ${ref}`;
-    });
+            console.log(`  ${file}: ${action}@${ref}`);
+            console.log(`    ${oldSha} -> ${newSha}`);
+            fileChanged = true;
+            updatedRefs += 1;
+            return `${action}@${newSha} # ${ref}`;
+        },
+    );
 
-    // Pin unpinned refs (tag/branch → sha # tag)
     UNPINNED_RE.lastIndex = 0;
-    content = content.replace(UNPINNED_RE, (match, action, _unused, ref) => {
-        const newSha = seen.get(`${action}@${ref}`);
-        if (!newSha) {
-            return match;
-        }
-        console.log(`  ${file}: ${action}@${ref} (unpinned)`);
-        console.log(`    → ${newSha} # ${ref}`);
-        fileChanged = true;
-        updatedRefs++;
-        return `${action}@${newSha} # ${ref}`;
-    });
+    content = content.replace(
+        UNPINNED_RE,
+        (
+            full: string,
+            action: string,
+            _unused: string,
+            ref: string,
+        ): string => {
+            const newSha = seen.get(`${action}@${ref}`);
+            if (!newSha) {
+                return full;
+            }
+            console.log(`  ${file}: ${action}@${ref} (unpinned)`);
+            console.log(`    -> ${newSha} # ${ref}`);
+            fileChanged = true;
+            updatedRefs += 1;
+            return `${action}@${newSha} # ${ref}`;
+        },
+    );
 
     if (fileChanged) {
         fs.writeFileSync(file, content);
-        updatedFiles++;
+        updatedFiles += 1;
     }
 }
 
-// Summary
 console.log("");
 if (updatedRefs > 0) {
     console.log(
-        `🏁 Updated ${updatedRefs} reference(s) across ${updatedFiles} file(s).`,
+        `Updated ${updatedRefs} reference(s) across ${updatedFiles} file(s).`,
     );
 } else {
-    console.log("🏁 All pinned actions are already up-to-date.");
+    console.log("All pinned actions are already up-to-date.");
 }
 if (alreadyCurrent > 0) {
     console.log(`   ${alreadyCurrent} reference(s) already current.`);
 }
 if (failures > 0) {
-    console.log(`   ⚠  ${failures} reference(s) could not be resolved.`);
+    console.log(`   ${failures} reference(s) could not be resolved.`);
     process.exit(1);
 }

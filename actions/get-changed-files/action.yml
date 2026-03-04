@@ -16,7 +16,7 @@ runs:
       with:
         script: |
           try {
-            require('./actions/get-changed-files/index.js')({
+            require('./actions/get-changed-files/index.js').default({
               github, context, core,
               directoriesRaw: `${{ inputs.directories }}`,
             }).catch(err => core.setFailed(err.message))

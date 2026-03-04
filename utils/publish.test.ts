@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import {findDependencyCycle, topologicallySortActions} from "./publish.js";
+import {findDependencyCycle, topologicallySortActions} from "./publish.ts";
 
 describe("findDependencyCycle", () => {
     it("returns null for a dag", () => {

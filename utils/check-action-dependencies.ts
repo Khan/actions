@@ -1,9 +1,9 @@
-import fs from "fs";
+import * as fs from "fs";
 import {
     collectIntraRepoDependencyGraph,
     findDependencyCycle,
     topologicallySortActions,
-} from "./publish.js";
+} from "./publish.ts";
 
 const actionNames = fs
     .readdirSync("actions")

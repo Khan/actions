@@ -1,4 +1,29 @@
-module.exports = ({context, core, inputFiles}) => {
+type ContextLike = {
+    payload: {
+        pull_request: {
+            head: {
+                ref: string;
+            };
+        };
+    };
+};
+
+type CoreLike = {
+    debug: (message: string) => void;
+    setFailed: (message: string) => void;
+};
+
+type CheckForChangesetInput = {
+    context: ContextLike;
+    core: CoreLike;
+    inputFiles: string[];
+};
+
+const checkForChangeset = ({
+    context,
+    core,
+    inputFiles,
+}: CheckForChangesetInput): void => {
     if (!inputFiles.length) {
         return; // no relevant files changed, ignore
     }
@@ -9,9 +34,9 @@ module.exports = ({context, core, inputFiles}) => {
         return; // release PRs don't need changesets.
     }
 
-    const hasChangeset = inputFiles.some((name) => {
-        return /^\.changeset\/.*\.md/.test(name);
-    });
+    const hasChangeset = inputFiles.some((name) =>
+        /^\.changeset\/.*\.md/.test(name),
+    );
     if (!hasChangeset) {
         core.setFailed(
             "This PR does not have a changeset. You can add one by " +
@@ -21,3 +46,5 @@ module.exports = ({context, core, inputFiles}) => {
         );
     }
 };
+
+export default checkForChangeset;

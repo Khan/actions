@@ -3,39 +3,55 @@
  *   * processing the action.yml to handle any references to other actions in
  *     this repo.
  *   * copying the package.json file into the dist/ folder (if one exists)
- *   * bundling the index.js into the dist/ folder using ncc (if one exists)
+ *   * bundling the action entrypoint into the dist/ folder using ncc
  */
-import fs from "fs";
+import * as fs from "fs";
 import path from "path";
 import {execSync} from "child_process";
 import fg from "fast-glob";
 
-const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegExp = (text: string) =>
+    text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const localActionUsesRegex = (actionNamePattern) =>
+export type DependencyRef = {
+    sha: string;
+    version: string;
+};
+
+export type DependencyRefs = Record<string, DependencyRef>;
+
+export type PackageJsonLike = {
+    name?: string;
+    version: string;
+    dependencies?: Record<string, string>;
+};
+
+export type PackageJsonMap = Record<string, PackageJsonLike>;
+
+const localActionUsesRegex = (actionNamePattern: string) =>
     // matches `uses: ./actions/some-action`
     new RegExp(`\\buses:\\s*\\.\\/actions\\/${actionNamePattern}\\b`, "g");
 
-const localActionRequirePathRegex = (name) =>
+const localActionRequirePathRegex = (name: string) =>
     new RegExp(`\\./actions/${escapeRegExp(name)}/`);
 
-export const extractIntraRepoDependencies = (actionYml) => {
-    const deps = new Set();
+export const extractIntraRepoDependencies = (actionYml: string): string[] => {
+    const deps = new Set<string>();
     let match;
     const usesRegex = localActionUsesRegex(`([A-Za-z0-9._-]+)`);
     while ((match = usesRegex.exec(actionYml)) !== null) {
-        deps.add(match[1]);
+        deps.add(match[1]!);
     }
     return [...deps].sort();
 };
 
 export const processActionYml = (
-    name,
-    packageJsons,
-    actionYml,
-    monorepoName,
-    dependencyRefs = {},
-) => {
+    name: string,
+    packageJsons: PackageJsonMap,
+    actionYml: string,
+    monorepoName: string,
+    dependencyRefs: DependencyRefs = {},
+): string => {
     console.log("  Processing action.yml for", name);
     // This first replacement is to rewrite local requires, in the case where we have
     // a github-script action with e.g. `require('./actions/my-action/index.js')`, and turning
@@ -80,9 +96,9 @@ export const processActionYml = (
  * Copies all files matching the `sourcePath` to the output bundle folder
  * (dist/). Globs are supported and expanded with fast-glob.
  */
-const bundleIfExists = (sourcePath) => {
+const bundleIfExists = (sourcePath: string): void => {
     // We pass 'fs' here explicitly to support our unit tests. This way we can
-    // mock 'fs' with 'memfs' and have fast-glob see that same set of files!
+    // mock 'fs' with 'memfs' and have fast-glob see that same set of files.
     for (const fp of fg.globSync(sourcePath, {fs})) {
         const targetPath = path.join(
             path.dirname(fp),
@@ -97,18 +113,32 @@ const bundleIfExists = (sourcePath) => {
     }
 };
 
+const findActionEntrypoint = (base: string): string | null => {
+    const tsEntrypoint = `${base}/index.ts`;
+    if (fs.existsSync(tsEntrypoint)) {
+        return tsEntrypoint;
+    }
+
+    const jsEntrypoint = `${base}/index.js`;
+    if (fs.existsSync(jsEntrypoint)) {
+        return jsEntrypoint;
+    }
+
+    return null;
+};
+
 export const buildPackage = (
-    name,
-    packageJsons,
-    monorepoName,
-    dependencyRefs = {},
-) => {
+    name: string,
+    packageJsons: PackageJsonMap,
+    monorepoName: string,
+    dependencyRefs: DependencyRefs = {},
+): string => {
     const base = `actions/${name}`;
     const dist = `${base}/dist`;
 
     // Clean before starting the build
     if (fs.existsSync(dist)) {
-        fs.rmdirSync(dist, {recursive: true});
+        fs.rmSync(dist, {recursive: true, force: true});
     }
     fs.mkdirSync(dist, {recursive: true});
 
@@ -128,10 +158,10 @@ export const buildPackage = (
         ),
     );
 
-    // JS code - bundled into a single file using `ncc`
-    if (fs.existsSync(`${base}/index.js`)) {
-        console.log(`  Building ${base}/index.js`);
-        execSync(`pnpm ncc build ${base}/index.js -o ${dist} --source-map`);
+    const entrypoint = findActionEntrypoint(base);
+    if (entrypoint) {
+        console.log(`  Building ${entrypoint}`);
+        execSync(`pnpm ncc build ${entrypoint} -o ${dist} --source-map`);
     }
 
     return dist;
