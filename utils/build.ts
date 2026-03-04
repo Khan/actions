@@ -10,21 +10,37 @@ import path from "path";
 import {execSync} from "child_process";
 import fg from "fast-glob";
 
-const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegExp = (text: string) =>
+    text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const localActionUsesRegex = (actionNamePattern) =>
+export type DependencyRef = {
+    sha: string;
+    version: string;
+};
+
+export type DependencyRefs = Record<string, DependencyRef>;
+
+export type PackageJsonLike = {
+    name?: string;
+    version: string;
+    dependencies?: Record<string, string>;
+};
+
+export type PackageJsonMap = Record<string, PackageJsonLike>;
+
+const localActionUsesRegex = (actionNamePattern: string) =>
     // matches `uses: ./actions/some-action`
     new RegExp(`\\buses:\\s*\\.\\/actions\\/${actionNamePattern}\\b`, "g");
 
-const localActionRequirePathRegex = (name) =>
+const localActionRequirePathRegex = (name: string) =>
     new RegExp(`\\./actions/${escapeRegExp(name)}/`);
 
-export const extractIntraRepoDependencies = (actionYml) => {
-    const deps = new Set();
+export const extractIntraRepoDependencies = (actionYml: string): string[] => {
+    const deps = new Set<string>();
     let match;
     const usesRegex = localActionUsesRegex(`([A-Za-z0-9._-]+)`);
     while ((match = usesRegex.exec(actionYml)) !== null) {
-        deps.add(match[1]);
+        deps.add(match[1]!);
     }
     return [...deps].sort();
 };
