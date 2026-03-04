@@ -97,28 +97,9 @@ export const processActionYml = (
  * (dist/). Globs are supported and expanded with fast-glob.
  */
 const bundleIfExists = (sourcePath: string): void => {
-    const hasGlob = /[*?[\]{}]/.test(sourcePath);
-    let files: string[] = [];
-
-    if (!hasGlob) {
-        files = fs.existsSync(sourcePath) ? [sourcePath] : [];
-    } else {
-        // Keep the common markdown wildcard path deterministic for memfs.
-        const baseDir = path.dirname(sourcePath);
-        const pattern = path.basename(sourcePath);
-        if (pattern === "*.md") {
-            files = fs.existsSync(baseDir)
-                ? fs
-                      .readdirSync(baseDir)
-                      .filter((name) => name.endsWith(".md"))
-                      .map((name) => path.join(baseDir, name))
-                : [];
-        } else {
-            files = fg.globSync(sourcePath);
-        }
-    }
-
-    for (const fp of files) {
+    // We pass 'fs' here explicitly to support our unit tests. This way we can
+    // mock 'fs' with 'memfs' and have fast-glob see that same set of files.
+    for (const fp of fg.globSync(sourcePath, {fs})) {
         const targetPath = path.join(
             path.dirname(fp),
             "dist",

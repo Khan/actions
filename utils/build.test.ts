@@ -4,15 +4,15 @@ import * as fs from "fs";
 import path from "path";
 import {execSync} from "child_process";
 
-const {globSyncMock} = vi.hoisted(() => ({
-    globSyncMock: vi.fn(),
+const {fgGlobSyncMock} = vi.hoisted(() => ({
+    fgGlobSyncMock: vi.fn(),
 }));
 
 // Mock fs to use memfs
 vi.mock("fs", () => vi.importActual("memfs"));
 vi.mock("fast-glob", () => ({
     default: {
-        globSync: globSyncMock,
+        globSync: fgGlobSyncMock,
     },
 }));
 vi.mock("child_process", () => ({execSync: vi.fn().mockName("execSync")}));
@@ -24,27 +24,24 @@ import {
 } from "./build.ts";
 
 beforeEach(() => {
-    globSyncMock.mockReset();
-    globSyncMock.mockImplementation(
-        (sourcePath: string, options?: {fs?: typeof fs}): string[] => {
-            const fsImpl = options?.fs ?? fs;
-            const hasGlob = /[*?[\]{}]/.test(sourcePath);
-            if (!hasGlob) {
-                return fsImpl.existsSync(sourcePath) ? [sourcePath] : [];
-            }
+    fgGlobSyncMock.mockReset();
+    fgGlobSyncMock.mockImplementation((sourcePath: string) => {
+        const hasGlob = /[*?[\]{}]/.test(sourcePath);
+        if (!hasGlob) {
+            return fs.existsSync(sourcePath) ? [sourcePath] : [];
+        }
 
-            const baseDir = path.dirname(sourcePath);
-            const pattern = path.basename(sourcePath);
-            if (pattern === "*.md" && fsImpl.existsSync(baseDir)) {
-                return fsImpl
-                    .readdirSync(baseDir)
-                    .filter((name) => name.endsWith(".md"))
-                    .map((name) => path.join(baseDir, name));
-            }
+        const baseDir = path.dirname(sourcePath);
+        const pattern = path.basename(sourcePath);
+        if (pattern === "*.md" && fs.existsSync(baseDir)) {
+            return fs
+                .readdirSync(baseDir)
+                .filter((name) => name.endsWith(".md"))
+                .map((name) => path.join(baseDir, name));
+        }
 
-            return [];
-        },
-    );
+        return [];
+    });
 });
 
 describe("processActionYml", () => {
@@ -194,6 +191,10 @@ describe("buildPackage", () => {
         expect(
             vol.readFileSync("./actions/test-action/dist/package.json", "utf8"),
         ).toBe('{"name": "@khanacademy/test-action", "version": "1.0.0"}');
+        expect(fgGlobSyncMock).toHaveBeenCalledWith(
+            "actions/test-action/package.json",
+            {fs},
+        );
     });
 
     it("copies markdown files to dist", () => {
@@ -201,6 +202,7 @@ describe("buildPackage", () => {
             "./actions/test-action/action.yml": "name: Test",
             "./actions/test-action/README.md": "# README",
             "./actions/test-action/CHANGELOG.md": "# Changelog",
+            "./actions/test-action/NOTES.txt": "plain text",
         });
 
         // Act
@@ -216,6 +218,9 @@ describe("buildPackage", () => {
         expect(
             vol.readFileSync("./actions/test-action/dist/CHANGELOG.md", "utf8"),
         ).toBe("# Changelog");
+        expect(vol.existsSync("./actions/test-action/dist/NOTES.txt")).toBe(
+            false,
+        );
     });
 
     it("processes action.yml and writes to dist", () => {
