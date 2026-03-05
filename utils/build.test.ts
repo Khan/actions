@@ -4,15 +4,15 @@ import * as fs from "fs";
 import path from "path";
 import {execSync} from "child_process";
 
-const {globSyncMock} = vi.hoisted(() => ({
-    globSyncMock: vi.fn(),
+const {fgGlobSyncMock} = vi.hoisted(() => ({
+    fgGlobSyncMock: vi.fn(),
 }));
 
 // Mock fs to use memfs
 vi.mock("fs", () => vi.importActual("memfs"));
 vi.mock("fast-glob", () => ({
     default: {
-        globSync: globSyncMock,
+        globSync: fgGlobSyncMock,
     },
 }));
 vi.mock("child_process", () => ({execSync: vi.fn().mockName("execSync")}));
@@ -24,27 +24,24 @@ import {
 } from "./build.ts";
 
 beforeEach(() => {
-    globSyncMock.mockReset();
-    globSyncMock.mockImplementation(
-        (sourcePath: string, options?: {fs?: typeof fs}): string[] => {
-            const fsImpl = options?.fs ?? fs;
-            const hasGlob = /[*?[\]{}]/.test(sourcePath);
-            if (!hasGlob) {
-                return fsImpl.existsSync(sourcePath) ? [sourcePath] : [];
-            }
+    fgGlobSyncMock.mockReset();
+    fgGlobSyncMock.mockImplementation((sourcePath: string) => {
+        const hasGlob = /[*?[\]{}]/.test(sourcePath);
+        if (!hasGlob) {
+            return fs.existsSync(sourcePath) ? [sourcePath] : [];
+        }
 
-            const baseDir = path.dirname(sourcePath);
-            const pattern = path.basename(sourcePath);
-            if (pattern === "*.md" && fsImpl.existsSync(baseDir)) {
-                return fsImpl
-                    .readdirSync(baseDir)
-                    .filter((name) => name.endsWith(".md"))
-                    .map((name) => path.join(baseDir, name));
-            }
+        const baseDir = path.dirname(sourcePath);
+        const pattern = path.basename(sourcePath);
+        if (pattern === "*.md" && fs.existsSync(baseDir)) {
+            return fs
+                .readdirSync(baseDir)
+                .filter((name) => name.endsWith(".md"))
+                .map((name) => path.join(baseDir, name));
+        }
 
-            return [];
-        },
-    );
+        return [];
+    });
 });
 
 describe("processActionYml", () => {
@@ -103,6 +100,36 @@ runs:
           "
         `);
     });
+
+    it("does not duplicate dependency tag in step name", () => {
+        const before = `
+runs:
+  using: "composite"
+  steps:
+    - name: Already tagged dep-v1.2.3
+      uses: ./actions/dep
+`;
+        const result = processActionYml(
+            "host",
+            {
+                host: {version: "1.0.0"},
+                dep: {version: "1.2.3"},
+            },
+            before,
+            "Khan/actions",
+            {
+                dep: {
+                    sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    version: "1.2.3",
+                },
+            },
+        );
+
+        expect({
+            hasTag: result.includes("name: Already tagged dep-v1.2.3"),
+            hasDuplicateTag: result.includes("dep-v1.2.3 (dep-v1.2.3)"),
+        }).toEqual({hasTag: true, hasDuplicateTag: false});
+    });
 });
 
 describe("extractIntraRepoDependencies", () => {
@@ -117,6 +144,19 @@ runs:
     - uses: actions/github-script@v7
 `;
         expect(extractIntraRepoDependencies(actionYml)).toEqual(["a", "b"]);
+    });
+
+    it("ignores non-step and non-string uses values", () => {
+        const actionYml = `
+runs:
+  using: composite
+  steps:
+    - run: echo hi
+    - uses:
+        ref: ./actions/not-valid
+    - uses: ./actions/ok
+`;
+        expect(extractIntraRepoDependencies(actionYml)).toEqual(["ok"]);
     });
 });
 
@@ -150,9 +190,21 @@ describe("buildPackage", () => {
             "Khan/actions",
         );
 
-        expect(
-            vol.readFileSync("./actions/test-action/dist/package.json", "utf8"),
-        ).toBe('{"name": "@khanacademy/test-action", "version": "1.0.0"}');
+        expect({
+            packageJson: vol.readFileSync(
+                "./actions/test-action/dist/package.json",
+                "utf8",
+            ),
+            usedFsOption: fgGlobSyncMock.mock.calls.some(
+                ([sourcePath, options]) =>
+                    sourcePath === "actions/test-action/package.json" &&
+                    options?.fs === fs,
+            ),
+        }).toEqual({
+            packageJson:
+                '{"name": "@khanacademy/test-action", "version": "1.0.0"}',
+            usedFsOption: true,
+        });
     });
 
     it("copies markdown files to dist", () => {
@@ -160,6 +212,7 @@ describe("buildPackage", () => {
             "./actions/test-action/action.yml": "name: Test",
             "./actions/test-action/README.md": "# README",
             "./actions/test-action/CHANGELOG.md": "# Changelog",
+            "./actions/test-action/NOTES.txt": "plain text",
         });
 
         // Act
@@ -169,12 +222,21 @@ describe("buildPackage", () => {
             "Khan/actions",
         );
 
-        expect(
-            vol.readFileSync("./actions/test-action/dist/README.md", "utf8"),
-        ).toBe("# README");
-        expect(
-            vol.readFileSync("./actions/test-action/dist/CHANGELOG.md", "utf8"),
-        ).toBe("# Changelog");
+        expect({
+            readme: vol.readFileSync(
+                "./actions/test-action/dist/README.md",
+                "utf8",
+            ),
+            changelog: vol.readFileSync(
+                "./actions/test-action/dist/CHANGELOG.md",
+                "utf8",
+            ),
+            notesExists: vol.existsSync("./actions/test-action/dist/NOTES.txt"),
+        }).toEqual({
+            readme: "# README",
+            changelog: "# Changelog",
+            notesExists: false,
+        });
     });
 
     it("processes action.yml and writes to dist", () => {
@@ -273,13 +335,11 @@ runs:
             "./actions/test-action/action.yml": "name: Test",
         });
 
-        expect(() =>
-            buildPackage(
-                "test-action",
-                {"test-action": {version: "1.0.0", dependencies: {}}},
-                "Khan/actions",
-            ),
-        ).not.toThrow();
+        buildPackage(
+            "test-action",
+            {"test-action": {version: "1.0.0", dependencies: {}}},
+            "Khan/actions",
+        );
 
         expect(vol.existsSync("./actions/test-action/dist/package.json")).toBe(
             false,
@@ -299,6 +359,28 @@ runs:
         );
 
         expect(result).toBe("actions/test-action/dist");
+    });
+
+    it("cleans existing dist output before copying", () => {
+        vol.fromJSON({
+            "./actions/test-action/action.yml": "name: Test",
+            "./actions/test-action/dist/old.txt": "stale",
+            "./actions/test-action/README.md": "# README",
+        });
+
+        buildPackage(
+            "test-action",
+            {"test-action": {version: "1.0.0", dependencies: {}}},
+            "Khan/actions",
+        );
+
+        expect({
+            oldExists: vol.existsSync("./actions/test-action/dist/old.txt"),
+            readme: vol.readFileSync(
+                "./actions/test-action/dist/README.md",
+                "utf8",
+            ),
+        }).toEqual({oldExists: false, readme: "# README"});
     });
 
     it("handles action.yml with local path replacement", () => {
@@ -327,8 +409,12 @@ runs:
             "./actions/test-action/dist/action.yml",
             "utf8",
         );
-        expect(result).toContain("${{ github.action_path }}/index.js");
-        expect(result).not.toContain("./actions/test-action/");
+        expect({
+            hasActionPath: result.includes(
+                "${{ github.action_path }}/index.js",
+            ),
+            stillHasLocalPath: result.includes("./actions/test-action/"),
+        }).toEqual({hasActionPath: true, stillHasLocalPath: false});
     });
 
     it("handles multiple dependencies in action.yml", () => {
@@ -370,14 +456,15 @@ runs:
             "./actions/test-action/dist/action.yml",
             "utf8",
         );
-        expect(result).toContain(
-            "Khan/actions@1111111111111111111111111111111111111111 # dep-1-v1.0.0",
-        );
-        expect(result).toContain(
-            "Khan/actions@2222222222222222222222222222222222222222 # dep-2-v2.0.0",
-        );
-        // External dependency should remain unchanged
-        expect(result).toContain("./actions/external-dep");
+        expect({
+            hasDep1: result.includes(
+                "Khan/actions@1111111111111111111111111111111111111111 # dep-1-v1.0.0",
+            ),
+            hasDep2: result.includes(
+                "Khan/actions@2222222222222222222222222222222222222222 # dep-2-v2.0.0",
+            ),
+            hasExternal: result.includes("./actions/external-dep"),
+        }).toEqual({hasDep1: true, hasDep2: true, hasExternal: true});
     });
 
     it("throws when a local dependency sha is missing", () => {
