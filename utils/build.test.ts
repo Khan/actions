@@ -125,8 +125,10 @@ runs:
             },
         );
 
-        expect(result).toContain("name: Already tagged dep-v1.2.3");
-        expect(result).not.toContain("dep-v1.2.3 (dep-v1.2.3)");
+        expect({
+            hasTag: result.includes("name: Already tagged dep-v1.2.3"),
+            hasDuplicateTag: result.includes("dep-v1.2.3 (dep-v1.2.3)"),
+        }).toEqual({hasTag: true, hasDuplicateTag: false});
     });
 });
 
@@ -188,13 +190,21 @@ describe("buildPackage", () => {
             "Khan/actions",
         );
 
-        expect(
-            vol.readFileSync("./actions/test-action/dist/package.json", "utf8"),
-        ).toBe('{"name": "@khanacademy/test-action", "version": "1.0.0"}');
-        expect(fgGlobSyncMock).toHaveBeenCalledWith(
-            "actions/test-action/package.json",
-            {fs},
-        );
+        expect({
+            packageJson: vol.readFileSync(
+                "./actions/test-action/dist/package.json",
+                "utf8",
+            ),
+            usedFsOption: fgGlobSyncMock.mock.calls.some(
+                ([sourcePath, options]) =>
+                    sourcePath === "actions/test-action/package.json" &&
+                    options?.fs === fs,
+            ),
+        }).toEqual({
+            packageJson:
+                '{"name": "@khanacademy/test-action", "version": "1.0.0"}',
+            usedFsOption: true,
+        });
     });
 
     it("copies markdown files to dist", () => {
@@ -212,15 +222,21 @@ describe("buildPackage", () => {
             "Khan/actions",
         );
 
-        expect(
-            vol.readFileSync("./actions/test-action/dist/README.md", "utf8"),
-        ).toBe("# README");
-        expect(
-            vol.readFileSync("./actions/test-action/dist/CHANGELOG.md", "utf8"),
-        ).toBe("# Changelog");
-        expect(vol.existsSync("./actions/test-action/dist/NOTES.txt")).toBe(
-            false,
-        );
+        expect({
+            readme: vol.readFileSync(
+                "./actions/test-action/dist/README.md",
+                "utf8",
+            ),
+            changelog: vol.readFileSync(
+                "./actions/test-action/dist/CHANGELOG.md",
+                "utf8",
+            ),
+            notesExists: vol.existsSync("./actions/test-action/dist/NOTES.txt"),
+        }).toEqual({
+            readme: "# README",
+            changelog: "# Changelog",
+            notesExists: false,
+        });
     });
 
     it("processes action.yml and writes to dist", () => {
@@ -319,13 +335,11 @@ runs:
             "./actions/test-action/action.yml": "name: Test",
         });
 
-        expect(() =>
-            buildPackage(
-                "test-action",
-                {"test-action": {version: "1.0.0", dependencies: {}}},
-                "Khan/actions",
-            ),
-        ).not.toThrow();
+        buildPackage(
+            "test-action",
+            {"test-action": {version: "1.0.0", dependencies: {}}},
+            "Khan/actions",
+        );
 
         expect(vol.existsSync("./actions/test-action/dist/package.json")).toBe(
             false,
@@ -360,12 +374,13 @@ runs:
             "Khan/actions",
         );
 
-        expect(vol.existsSync("./actions/test-action/dist/old.txt")).toBe(
-            false,
-        );
-        expect(
-            vol.readFileSync("./actions/test-action/dist/README.md", "utf8"),
-        ).toBe("# README");
+        expect({
+            oldExists: vol.existsSync("./actions/test-action/dist/old.txt"),
+            readme: vol.readFileSync(
+                "./actions/test-action/dist/README.md",
+                "utf8",
+            ),
+        }).toEqual({oldExists: false, readme: "# README"});
     });
 
     it("handles action.yml with local path replacement", () => {
@@ -394,8 +409,12 @@ runs:
             "./actions/test-action/dist/action.yml",
             "utf8",
         );
-        expect(result).toContain("${{ github.action_path }}/index.js");
-        expect(result).not.toContain("./actions/test-action/");
+        expect({
+            hasActionPath: result.includes(
+                "${{ github.action_path }}/index.js",
+            ),
+            stillHasLocalPath: result.includes("./actions/test-action/"),
+        }).toEqual({hasActionPath: true, stillHasLocalPath: false});
     });
 
     it("handles multiple dependencies in action.yml", () => {
@@ -437,14 +456,15 @@ runs:
             "./actions/test-action/dist/action.yml",
             "utf8",
         );
-        expect(result).toContain(
-            "Khan/actions@1111111111111111111111111111111111111111 # dep-1-v1.0.0",
-        );
-        expect(result).toContain(
-            "Khan/actions@2222222222222222222222222222222222222222 # dep-2-v2.0.0",
-        );
-        // External dependency should remain unchanged
-        expect(result).toContain("./actions/external-dep");
+        expect({
+            hasDep1: result.includes(
+                "Khan/actions@1111111111111111111111111111111111111111 # dep-1-v1.0.0",
+            ),
+            hasDep2: result.includes(
+                "Khan/actions@2222222222222222222222222222222222222222 # dep-2-v2.0.0",
+            ),
+            hasExternal: result.includes("./actions/external-dep"),
+        }).toEqual({hasDep1: true, hasDep2: true, hasExternal: true});
     });
 
     it("throws when a local dependency sha is missing", () => {

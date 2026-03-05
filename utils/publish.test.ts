@@ -79,11 +79,20 @@ describe("publish", () => {
 
     describe("checkTag", () => {
         it("returns true when tag exists", () => {
+            // Arrange
             execSyncMock.mockReturnValueOnce("");
-            expect(checkTag("my-tag")).toBe(true);
-            expect(execSyncMock).toHaveBeenCalledWith(
-                "git show-ref --tags my-tag",
-            );
+
+            // Act
+            const result = checkTag("my-tag");
+
+            // Assert
+            expect({
+                result,
+                showRefCommand: execSyncMock.mock.calls[0]?.[0],
+            }).toEqual({
+                result: true,
+                showRefCommand: "git show-ref --tags my-tag",
+            });
         });
 
         it("returns false when git show-ref throws", () => {
@@ -96,6 +105,7 @@ describe("publish", () => {
 
     describe("publishDirectoryAsTags", () => {
         it("runs the git publish sequence and returns commit sha", () => {
+            // Arrange
             execSyncMock.mockImplementation(
                 (cmd: string, options?: {encoding?: string}) => {
                     if (
@@ -108,6 +118,7 @@ describe("publish", () => {
                 },
             );
 
+            // Act
             const result = publishDirectoryAsTags(
                 "actions/a/dist",
                 "git@github.com:Khan/actions.git",
@@ -116,20 +127,29 @@ describe("publish", () => {
                 "AUTH",
             );
 
-            expect(result).toEqual({sha: "published-sha"});
-            expect(execSyncMock).toHaveBeenCalledWith(
-                "git push origin --tags",
-                {
-                    cwd: "actions/a/dist",
-                },
-            );
-            expect(execSyncMock).toHaveBeenCalledWith(
-                'git config --local http.https://github.com/.extraheader "AUTH"',
-                {cwd: "actions/a/dist"},
-            );
+            // Assert
+            expect({
+                result,
+                hasPush: execSyncMock.mock.calls.some(
+                    ([cmd, options]) =>
+                        cmd === "git push origin --tags" &&
+                        options?.cwd === "actions/a/dist",
+                ),
+                hasAuthConfig: execSyncMock.mock.calls.some(
+                    ([cmd, options]) =>
+                        cmd ===
+                            'git config --local http.https://github.com/.extraheader "AUTH"' &&
+                        options?.cwd === "actions/a/dist",
+                ),
+            }).toEqual({
+                result: {sha: "published-sha"},
+                hasPush: true,
+                hasAuthConfig: true,
+            });
         });
 
         it("omits push command on dry run", () => {
+            // Arrange
             execSyncMock.mockImplementation(
                 (cmd: string, options?: {encoding?: string}) => {
                     if (
@@ -142,6 +162,7 @@ describe("publish", () => {
                 },
             );
 
+            // Act
             const result = publishDirectoryAsTags(
                 "actions/a/dist",
                 "git@github.com:Khan/actions.git",
@@ -150,13 +171,16 @@ describe("publish", () => {
                 null,
             );
 
-            expect(result).toEqual({sha: "dry-sha"});
-            expect(execSyncMock).not.toHaveBeenCalledWith(
-                "git push origin --tags",
-                {
-                    cwd: "actions/a/dist",
-                },
-            );
+            // Assert
+            expect({
+                result,
+                hasPush: execSyncMock.mock.calls.some(
+                    ([cmd]) => cmd === "git push origin --tags",
+                ),
+            }).toEqual({
+                result: {sha: "dry-sha"},
+                hasPush: false,
+            });
         });
 
         it("returns null when a command fails", () => {
@@ -230,25 +254,34 @@ describe("publish", () => {
 
     describe("lookupPublishedActionRef", () => {
         it("returns cached value without calling fetch", async () => {
+            // Arrange
             const cache = {
                 "dep@1.2.3": {sha: "cached-sha", version: "1.2.3"},
             };
             const fetchSpy = vi.fn();
             vi.stubGlobal("fetch", fetchSpy);
 
-            await expect(
-                lookupPublishedActionRef(
-                    "Khan/actions",
-                    "dep",
-                    "1.2.3",
-                    undefined,
-                    cache,
-                ),
-            ).resolves.toEqual({sha: "cached-sha", version: "1.2.3"});
-            expect(fetchSpy).not.toHaveBeenCalled();
+            // Act
+            const result = await lookupPublishedActionRef(
+                "Khan/actions",
+                "dep",
+                "1.2.3",
+                undefined,
+                cache,
+            );
+
+            // Assert
+            expect({
+                result,
+                fetchCalls: fetchSpy.mock.calls.length,
+            }).toEqual({
+                result: {sha: "cached-sha", version: "1.2.3"},
+                fetchCalls: 0,
+            });
         });
 
         it("resolves annotated tags to commit sha and caches result", async () => {
+            // Arrange
             const fetchSpy = vi
                 .fn()
                 .mockResolvedValueOnce({
@@ -269,18 +302,23 @@ describe("publish", () => {
             vi.stubGlobal("fetch", fetchSpy);
 
             const cache: Record<string, {sha: string; version: string}> = {};
-            await expect(
-                lookupPublishedActionRef(
-                    "Khan/actions",
-                    "dep",
-                    "1.2.3",
-                    "token",
-                    cache,
-                ),
-            ).resolves.toEqual({sha: "commit-sha", version: "1.2.3"});
-            expect(cache["dep@1.2.3"]).toEqual({
-                sha: "commit-sha",
-                version: "1.2.3",
+
+            // Act
+            const result = await lookupPublishedActionRef(
+                "Khan/actions",
+                "dep",
+                "1.2.3",
+                "token",
+                cache,
+            );
+
+            // Assert
+            expect({
+                result,
+                cacheValue: cache["dep@1.2.3"],
+            }).toEqual({
+                result: {sha: "commit-sha", version: "1.2.3"},
+                cacheValue: {sha: "commit-sha", version: "1.2.3"},
             });
         });
 
@@ -326,6 +364,7 @@ describe("publish", () => {
 
     describe("publishAsNeeded", () => {
         it("builds and publishes selected actions in topo order and reuses newly published dep SHAs", async () => {
+            // Arrange
             vol.fromJSON({
                 "actions/a/package.json": JSON.stringify({
                     name: "a",
@@ -377,17 +416,27 @@ describe("publish", () => {
                 },
             );
 
+            // Act
             await publishAsNeeded(["a", "b"], true);
 
-            expect(buildPackageMock.mock.calls[0]?.[0]).toBe("b");
-            expect(buildPackageMock.mock.calls[0]?.[3]).toEqual({});
-            expect(buildPackageMock.mock.calls[1]?.[0]).toBe("a");
-            expect(buildPackageMock.mock.calls[1]?.[3]).toEqual({
-                b: {sha: "commit-1", version: "2.0.0"},
+            // Assert
+            expect({
+                firstBuildName: buildPackageMock.mock.calls[0]?.[0],
+                firstDeps: buildPackageMock.mock.calls[0]?.[3],
+                secondBuildName: buildPackageMock.mock.calls[1]?.[0],
+                secondDeps: buildPackageMock.mock.calls[1]?.[3],
+            }).toEqual({
+                firstBuildName: "b",
+                firstDeps: {},
+                secondBuildName: "a",
+                secondDeps: {
+                    b: {sha: "commit-1", version: "2.0.0"},
+                },
             });
         });
 
         it("looks up already-published dependency refs for unselected deps", async () => {
+            // Arrange
             vol.fromJSON({
                 "actions/a/package.json": JSON.stringify({
                     name: "a",
@@ -446,15 +495,23 @@ describe("publish", () => {
                 },
             );
 
+            // Act
             await publishAsNeeded(["a"], true);
 
-            expect(buildPackageMock).toHaveBeenCalledWith(
-                "a",
-                expect.any(Object),
-                "Khan/actions",
-                {b: {sha: "published-b-sha", version: "2.0.0"}},
-            );
-            expect(fetchSpy).toHaveBeenCalledTimes(1);
+            // Assert
+            expect({
+                buildName: buildPackageMock.mock.calls[0]?.[0],
+                monorepo: buildPackageMock.mock.calls[0]?.[2],
+                dependencyRefs: buildPackageMock.mock.calls[0]?.[3],
+                fetchCalls: fetchSpy.mock.calls.length,
+            }).toEqual({
+                buildName: "a",
+                monorepo: "Khan/actions",
+                dependencyRefs: {
+                    b: {sha: "published-b-sha", version: "2.0.0"},
+                },
+                fetchCalls: 1,
+            });
         });
 
         it("throws when origin cannot be parsed as a github repo", async () => {
@@ -485,6 +542,7 @@ describe("publish", () => {
         });
 
         it("calls process.exit(1) when publishing fails", async () => {
+            // Arrange
             vol.fromJSON({
                 "actions/a/package.json": JSON.stringify({
                     name: "a",
@@ -526,16 +584,15 @@ describe("publish", () => {
                 },
             );
 
-            const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-                code?: number,
-            ) => {
+            vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
                 throw new Error(`exit:${code}`);
             }) as never);
 
-            await expect(publishAsNeeded(["a"], false)).rejects.toThrow(
-                "exit:1",
-            );
-            expect(exitSpy).toHaveBeenCalledWith(1);
+            // Act
+            const underTest = publishAsNeeded(["a"], false);
+
+            // Assert
+            await expect(underTest).rejects.toThrow("exit:1");
         });
     });
 });

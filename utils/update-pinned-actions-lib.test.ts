@@ -3,6 +3,7 @@ import {resolveRef, updatePinnedActions} from "./update-pinned-actions-lib.ts";
 
 describe("resolveRef", () => {
     it("prefers annotated-tag dereferenced SHA", () => {
+        // Arrange
         const execSyncImpl = vi
             .fn()
             .mockReturnValueOnce(
@@ -12,12 +13,15 @@ describe("resolveRef", () => {
                 ].join("\n"),
             );
 
-        expect(resolveRef("owner/repo", "v1", execSyncImpl as never)).toBe(
-            "2222222222222222222222222222222222222222",
-        );
+        // Act
+        const result = resolveRef("owner/repo", "v1", execSyncImpl as never);
+
+        // Assert
+        expect(result).toBe("2222222222222222222222222222222222222222");
     });
 
     it("falls back to branch lookup when tag lookup is empty", () => {
+        // Arrange
         const execSyncImpl = vi
             .fn()
             .mockReturnValueOnce("")
@@ -25,26 +29,42 @@ describe("resolveRef", () => {
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/main",
             );
 
-        expect(resolveRef("owner/repo", "main", execSyncImpl as never)).toBe(
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        );
+        // Act
+        const result = resolveRef("owner/repo", "main", execSyncImpl as never);
+
+        // Assert
+        expect(result).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     });
 
     it("returns null when no tag or branch matches", () => {
-        const execSyncImpl = vi.fn().mockReturnValueOnce("").mockReturnValueOnce("");
+        // Arrange
+        const execSyncImpl = vi
+            .fn()
+            .mockReturnValueOnce("")
+            .mockReturnValueOnce("");
 
-        expect(resolveRef("owner/repo", "missing", execSyncImpl as never)).toBe(null);
+        // Act
+        const result = resolveRef(
+            "owner/repo",
+            "missing",
+            execSyncImpl as never,
+        );
+
+        // Assert
+        expect(result).toBe(null);
     });
 });
 
 describe("updatePinnedActions", () => {
     it("exits with 0 when no references are found", () => {
+        // Arrange
         const logs: string[] = [];
         const exit = vi.fn((code: number) => {
             throw new Error(`exit:${code}`);
         });
 
-        expect(() =>
+        // Act
+        const underTest = () =>
             updatePinnedActions({
                 globSyncImpl: vi.fn().mockReturnValue(["workflow.yml"]),
                 readFileSyncImpl: vi.fn().mockReturnValue("name: CI\n"),
@@ -52,14 +72,31 @@ describe("updatePinnedActions", () => {
                 execSyncImpl: vi.fn(),
                 log: (msg) => logs.push(msg),
                 exit: exit as never,
-            }),
-        ).toThrow("exit:0");
+            });
 
-        expect(logs).toContain("No action references found.");
-        expect(exit).toHaveBeenCalledWith(0);
+        // Assert
+        expect({
+            thrown: (() => {
+                try {
+                    underTest();
+                    return null;
+                } catch (error) {
+                    return error instanceof Error
+                        ? error.message
+                        : String(error);
+                }
+            })(),
+            logs,
+            exitArg: exit.mock.calls[0]?.[0],
+        }).toEqual({
+            thrown: "exit:0",
+            logs: ["No action references found."],
+            exitArg: 0,
+        });
     });
 
     it("updates stale pinned and unpinned references", () => {
+        // Arrange
         const files = {
             "workflow.yml": [
                 "steps:",
@@ -83,6 +120,7 @@ describe("updatePinnedActions", () => {
             return "";
         });
 
+        // Act
         const result = updatePinnedActions({
             globSyncImpl: vi.fn().mockReturnValue(["workflow.yml"]),
             readFileSyncImpl: readFileSyncImpl as never,
@@ -94,52 +132,66 @@ describe("updatePinnedActions", () => {
             }) as never,
         });
 
-        expect(result).toEqual({
-            filesScanned: 1,
-            uniqueRefs: 2,
-            updatedFiles: 1,
-            updatedRefs: 2,
-            alreadyCurrent: 0,
-            failures: 0,
+        // Assert
+        expect({
+            result,
+            content: files["workflow.yml"],
+        }).toEqual({
+            result: {
+                filesScanned: 1,
+                uniqueRefs: 2,
+                updatedFiles: 1,
+                updatedRefs: 2,
+                alreadyCurrent: 0,
+                failures: 0,
+            },
+            content: [
+                "steps:",
+                "  - uses: owner/repo@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v1",
+                "  - uses: other/action@cccccccccccccccccccccccccccccccccccccccc # v2",
+                "  - uses: ./actions/local-action",
+            ].join("\n"),
         });
-        expect(files["workflow.yml"]).toContain(
-            "owner/repo@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v1",
-        );
-        expect(files["workflow.yml"]).toContain(
-            "other/action@cccccccccccccccccccccccccccccccccccccccc # v2",
-        );
-        expect(files["workflow.yml"]).toContain("./actions/local-action");
     });
 
     it("counts already-current references without rewriting", () => {
+        // Arrange
         const content =
             "uses: owner/repo@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # v1\n";
         const writeFileSyncImpl = vi.fn();
 
+        // Act
         const result = updatePinnedActions({
             globSyncImpl: vi.fn().mockReturnValue(["workflow.yml"]),
             readFileSyncImpl: vi.fn().mockReturnValue(content),
             writeFileSyncImpl: writeFileSyncImpl as never,
             execSyncImpl: vi
                 .fn()
-                .mockReturnValue("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/tags/v1") as never,
+                .mockReturnValue(
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/tags/v1",
+                ) as never,
             log: () => {},
             exit: (() => {
                 throw new Error("unexpected exit");
             }) as never,
         });
 
-        expect(result.alreadyCurrent).toBe(1);
-        expect(result.updatedRefs).toBe(0);
-        expect(writeFileSyncImpl).not.toHaveBeenCalled();
+        // Assert
+        expect({
+            alreadyCurrent: result.alreadyCurrent,
+            updatedRefs: result.updatedRefs,
+            writeCalls: writeFileSyncImpl.mock.calls.length,
+        }).toEqual({alreadyCurrent: 1, updatedRefs: 0, writeCalls: 0});
     });
 
     it("exits with 1 when resolution fails", () => {
+        // Arrange
         const exit = vi.fn((code: number) => {
             throw new Error(`exit:${code}`);
         });
 
-        expect(() =>
+        // Act
+        const underTest = () =>
             updatePinnedActions({
                 globSyncImpl: vi.fn().mockReturnValue(["workflow.yml"]),
                 readFileSyncImpl: vi
@@ -149,9 +201,21 @@ describe("updatePinnedActions", () => {
                 execSyncImpl: vi.fn().mockReturnValue(""),
                 log: () => {},
                 exit: exit as never,
-            }),
-        ).toThrow("exit:1");
+            });
 
-        expect(exit).toHaveBeenCalledWith(1);
+        // Assert
+        expect({
+            thrown: (() => {
+                try {
+                    underTest();
+                    return null;
+                } catch (error) {
+                    return error instanceof Error
+                        ? error.message
+                        : String(error);
+                }
+            })(),
+            exitArg: exit.mock.calls[0]?.[0],
+        }).toEqual({thrown: "exit:1", exitArg: 1});
     });
 });

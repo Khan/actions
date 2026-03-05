@@ -38,6 +38,7 @@ const makeGithub = ({
 
 describe("getChangedFiles", () => {
     it("filters to added/modified/renamed files and directory prefixes on pull_request", async () => {
+        // Arrange
         const core = makeCore();
         const github = makeGithub({
             compareFiles: [
@@ -48,6 +49,7 @@ describe("getChangedFiles", () => {
             ],
         });
 
+        // Act
         await getChangedFiles({
             github,
             core,
@@ -62,19 +64,29 @@ describe("getChangedFiles", () => {
             },
         });
 
-        expect(github.rest.repos.compareCommits).toHaveBeenCalledWith({
-            base: "main",
-            head: "headsha",
-            owner: "Khan",
-            repo: "actions",
+        // Assert
+        expect({
+            compareArgs: github.rest.repos.compareCommits.mock.calls[0]?.[0],
+            outputArgs: core.setOutput.mock.calls[0],
+        }).toEqual({
+            compareArgs: {
+                base: "main",
+                head: "headsha",
+                owner: "Khan",
+                repo: "actions",
+            },
+            outputArgs: [
+                "files",
+                JSON.stringify([
+                    "packages/a/src/index.ts",
+                    "packages/b/README.md",
+                ]),
+            ],
         });
-        expect(core.setOutput).toHaveBeenCalledWith(
-            "files",
-            JSON.stringify(["packages/a/src/index.ts", "packages/b/README.md"]),
-        );
     });
 
     it("uses before/after SHAs for normal push events", async () => {
+        // Arrange
         const core = makeCore();
         const github = makeGithub({
             compareFiles: [
@@ -82,6 +94,7 @@ describe("getChangedFiles", () => {
             ],
         });
 
+        // Act
         await getChangedFiles({
             github,
             core,
@@ -97,18 +110,25 @@ describe("getChangedFiles", () => {
             },
         });
 
-        expect(
-            github.rest.repos.listPullRequestsAssociatedWithCommit,
-        ).not.toHaveBeenCalled();
-        expect(github.rest.repos.compareCommits).toHaveBeenCalledWith({
-            base: "1234567890abcdef",
-            head: "fedcba0987654321",
-            owner: "Khan",
-            repo: "actions",
+        // Assert
+        expect({
+            prLookupCalls:
+                github.rest.repos.listPullRequestsAssociatedWithCommit.mock
+                    .calls.length,
+            compareArgs: github.rest.repos.compareCommits.mock.calls[0]?.[0],
+        }).toEqual({
+            prLookupCalls: 0,
+            compareArgs: {
+                base: "1234567890abcdef",
+                head: "fedcba0987654321",
+                owner: "Khan",
+                repo: "actions",
+            },
         });
     });
 
     it("resolves base from associated PR for new-branch push events and warns for multiple PRs", async () => {
+        // Arrange
         const core = makeCore();
         const github = makeGithub({
             pullRequests: [
@@ -120,6 +140,7 @@ describe("getChangedFiles", () => {
             ],
         });
 
+        // Act
         await getChangedFiles({
             github,
             core,
@@ -135,45 +156,58 @@ describe("getChangedFiles", () => {
             },
         });
 
-        expect(
-            github.rest.repos.listPullRequestsAssociatedWithCommit,
-        ).toHaveBeenCalledWith({
-            owner: "Khan",
-            repo: "actions",
-            commit_sha: "newheadsha",
-        });
-        expect(core.warn).toHaveBeenCalledTimes(1);
-        expect(github.rest.repos.compareCommits).toHaveBeenCalledWith({
-            base: "basesha-1",
-            head: "newheadsha",
-            owner: "Khan",
-            repo: "actions",
+        // Assert
+        expect({
+            prLookupArgs:
+                github.rest.repos.listPullRequestsAssociatedWithCommit.mock
+                    .calls[0]?.[0],
+            warnCalls: core.warn.mock.calls.length,
+            compareArgs: github.rest.repos.compareCommits.mock.calls[0]?.[0],
+        }).toEqual({
+            prLookupArgs: {
+                owner: "Khan",
+                repo: "actions",
+                commit_sha: "newheadsha",
+            },
+            warnCalls: 1,
+            compareArgs: {
+                base: "basesha-1",
+                head: "newheadsha",
+                owner: "Khan",
+                repo: "actions",
+            },
         });
     });
 
     it("throws for new-branch push when no associated PRs are found", async () => {
+        // Arrange
         const core = makeCore();
         const github = makeGithub({pullRequests: []});
 
-        await expect(
-            getChangedFiles({
-                github,
-                core,
-                directoriesRaw: "",
-                context: {
-                    eventName: "push",
-                    payload: {
-                        before: "0000000000000000000000000000000000000000",
-                        after: "newheadsha",
-                        repository: {owner: {name: "Khan"}, name: "actions"},
-                    },
-                    repo: {owner: "Khan", repo: "actions"},
+        // Act
+        const underTest = getChangedFiles({
+            github,
+            core,
+            directoriesRaw: "",
+            context: {
+                eventName: "push",
+                payload: {
+                    before: "0000000000000000000000000000000000000000",
+                    after: "newheadsha",
+                    repository: {owner: {name: "Khan"}, name: "actions"},
                 },
-            }),
-        ).rejects.toThrow("No pull requests found associated with commit");
+                repo: {owner: "Khan", repo: "actions"},
+            },
+        });
+
+        // Assert
+        await expect(underTest).rejects.toThrow(
+            "No pull requests found associated with commit",
+        );
     });
 
     it("uses merge_group base/head shas", async () => {
+        // Arrange
         const core = makeCore();
         const github = makeGithub({
             compareFiles: [
@@ -181,6 +215,7 @@ describe("getChangedFiles", () => {
             ],
         });
 
+        // Act
         await getChangedFiles({
             github,
             core,
@@ -195,6 +230,7 @@ describe("getChangedFiles", () => {
             },
         });
 
+        // Assert
         expect(github.rest.repos.compareCommits).toHaveBeenCalledWith({
             base: "base-sha",
             head: "head-sha",
@@ -204,12 +240,14 @@ describe("getChangedFiles", () => {
     });
 
     it("fails gracefully when compareCommits response is not 200", async () => {
+        // Arrange
         const core = makeCore();
         const github = makeGithub({
             compareStatus: 500,
             compareFiles: [],
         });
 
+        // Act
         await getChangedFiles({
             github,
             core,
@@ -224,16 +262,23 @@ describe("getChangedFiles", () => {
             },
         });
 
-        expect(core.setFailed).toHaveBeenCalledWith(
-            "The GitHub API for comparing the base and head commits for this pull_request event returned 500, expected 200.",
-        );
-        expect(core.setOutput).not.toHaveBeenCalled();
+        // Assert
+        expect({
+            failedMessage: core.setFailed.mock.calls[0]?.[0],
+            outputCalls: core.setOutput.mock.calls.length,
+        }).toEqual({
+            failedMessage:
+                "The GitHub API for comparing the base and head commits for this pull_request event returned 500, expected 200.",
+            outputCalls: 0,
+        });
     });
 
     it("sets failure for unsupported event names", async () => {
+        // Arrange
         const core = makeCore();
         const github = makeGithub({});
 
+        // Act
         await getChangedFiles({
             github,
             core,
@@ -247,31 +292,40 @@ describe("getChangedFiles", () => {
             },
         });
 
-        expect(core.setFailed).toHaveBeenCalledTimes(2);
-        expect(core.setFailed.mock.calls[0]?.[0]).toContain(
-            "schedule events are not supported",
-        );
-        expect(github.rest.repos.compareCommits).not.toHaveBeenCalled();
+        // Assert
+        expect({
+            failedCalls: core.setFailed.mock.calls.length,
+            firstFailedMessage: core.setFailed.mock.calls[0]?.[0],
+            compareCalls: github.rest.repos.compareCommits.mock.calls.length,
+        }).toEqual({
+            failedCalls: 2,
+            firstFailedMessage:
+                "This action only supports pull requests and pushes, schedule events are not supported. Please submit an issue on this action's GitHub repo if you believe this in correct.",
+            compareCalls: 0,
+        });
     });
 
     it("throws for new-branch push when payload.after is missing", async () => {
+        // Arrange
         const core = makeCore();
         const github = makeGithub({});
 
-        await expect(
-            getChangedFiles({
-                github,
-                core,
-                directoriesRaw: "",
-                context: {
-                    eventName: "push",
-                    payload: {
-                        before: "0000000000000000000000000000000000000000",
-                        repository: {owner: {name: "Khan"}, name: "actions"},
-                    },
-                    repo: {owner: "Khan", repo: "actions"},
+        // Act
+        const underTest = getChangedFiles({
+            github,
+            core,
+            directoriesRaw: "",
+            context: {
+                eventName: "push",
+                payload: {
+                    before: "0000000000000000000000000000000000000000",
+                    repository: {owner: {name: "Khan"}, name: "actions"},
                 },
-            }),
-        ).rejects.toThrow("Missing payload.after.");
+                repo: {owner: "Khan", repo: "actions"},
+            },
+        });
+
+        // Assert
+        await expect(underTest).rejects.toThrow("Missing payload.after.");
     });
 });
