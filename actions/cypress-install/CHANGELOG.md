@@ -1,5 +1,11 @@
 # cypres-install
 
+## 0.0.3
+
+### Patch Changes
+
+-   408974b: Bumping all packages to lock down references to SHAs instead of tags
+
 ## 0.0.2
 
 ### Patch Changes
