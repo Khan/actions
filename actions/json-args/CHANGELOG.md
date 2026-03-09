@@ -1,5 +1,11 @@
 # json-args
 
+## 1.0.2
+
+### Patch Changes
+
+-   d988136: Bumping all packages to lock down references to SHAs instead of tags
+
 ## 1.0.1
 
 ### Patch Changes
