@@ -1,14 +1,5 @@
 # check-for-changeset
 
-## 1.0.6
-
-### Patch Changes
-
--   b0b3884: Bumping all packages to lock down references to SHAs instead of tags
--   Updated dependencies [b0b3884]
-    -   filter-files@2.1.2
-    -   get-changed-files@2.1.4
-
 ## 1.0.5
 
 ### Patch Changes

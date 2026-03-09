@@ -1,13 +1,5 @@
 # full-or-limited
 
-## 0.0.4
-
-### Patch Changes
-
--   b0b3884: Bumping all packages to lock down references to SHAs instead of tags
--   Updated dependencies [b0b3884]
-    -   json-args@1.0.2
-
 ## 0.0.3
 
 ### Patch Changes

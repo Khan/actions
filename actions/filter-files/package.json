@@ -1,6 +1,6 @@
 {
     "name": "filter-files",
-    "version": "2.1.2",
+    "version": "2.1.1",
     "dependencies": {
         "picomatch": "4"
     }
