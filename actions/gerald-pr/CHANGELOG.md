@@ -1,5 +1,13 @@
 # gerald-pr
 
+## 3.1.7
+
+### Patch Changes
+
+-   b0b3884: Bumping all packages to lock down references to SHAs instead of tags
+-   Updated dependencies [b0b3884]
+    -   get-changed-files@2.1.4
+
 ## 3.1.6
 
 ### Patch Changes
