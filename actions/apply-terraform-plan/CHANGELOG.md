@@ -1,11 +1,5 @@
 # apply-terraform-plan
 
-## 2.2.2
-
-### Patch Changes
-
--   1fbd996: Bumping all packages to lock down references to SHAs instead of tags
-
 ## 2.2.1
 
 ### Patch Changes
