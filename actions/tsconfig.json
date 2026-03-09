@@ -15,10 +15,10 @@
     "sourceMap": false
   },
   "include": [
-    "actions/filter-files/index.ts",
-    "actions/check-for-changeset/index.ts",
-    "actions/get-changed-files/index.ts",
-    "types/**/*.d.ts"
+    "filter-files/index.ts",
+    "check-for-changeset/index.ts",
+    "get-changed-files/index.ts",
+    "../types/**/*.d.ts"
   ],
   "exclude": ["node_modules", "**/dist/**"]
 }

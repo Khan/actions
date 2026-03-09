@@ -50,3 +50,6 @@ Example:
 ```
 $ node -r @swc-node/register ./utils/run-publish.ts --dry-run
 ```
+
+NOTE: The `--force` option can be used with `--dry-run` to simulate building and publishing
+even when there's no new tags to publish.

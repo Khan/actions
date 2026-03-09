@@ -6,7 +6,7 @@
         "fix": "pnpm run lint --fix",
         "test": "vitest",
         "typecheck": "tsc --noEmit",
-        "build": "tsc -p tsconfig.actions.json"
+        "build": "tsc -p actions/tsconfig.json"
     },
     "devDependencies": {
         "@changesets/cli": "^2.29.8",
