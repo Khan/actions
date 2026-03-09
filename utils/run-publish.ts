@@ -8,11 +8,12 @@ import {publishAsNeeded} from "./publish.ts";
 async function main() {
     const args = process.argv.slice(2);
     const dryRun = args.includes("--dry-run");
+    const force = args.includes("--force");
     const packageNames = fs
         .readdirSync("actions")
         .filter((name) => fs.statSync(`actions/${name}`).isDirectory());
 
-    await publishAsNeeded(packageNames, dryRun);
+    await publishAsNeeded(packageNames, dryRun, force);
 }
 
 main().catch((err) => {
