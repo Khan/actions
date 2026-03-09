@@ -1,11 +1,5 @@
 # generate-terraform-plan
 
-## 2.2.3
-
-### Patch Changes
-
--   fd1c848: Bumping all packages to lock down references to SHAs instead of tags
-
 ## 2.2.2
 
 ### Patch Changes
