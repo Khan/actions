@@ -1,5 +1,11 @@
 # get-changed-files
 
+## 2.1.4
+
+### Patch Changes
+
+-   1fbd996: Bumping all packages to lock down references to SHAs instead of tags
+
 ## 2.1.3
 
 ### Patch Changes
