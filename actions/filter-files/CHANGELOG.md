@@ -1,5 +1,11 @@
 # filter-files
 
+## 2.1.2
+
+### Patch Changes
+
+-   fd1c848: Bumping all packages to lock down references to SHAs instead of tags
+
 ## 2.1.1
 
 ### Patch Changes
