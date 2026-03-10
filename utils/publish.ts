@@ -64,6 +64,7 @@ export const publishDirectoryAsTags = (
     distPath: string,
     origin: string,
     tag: string,
+    majorTag: string | null,
     dryRun: boolean,
     auth: string | null,
 ): {sha: string | null} | null => {
@@ -80,7 +81,9 @@ export const publishDirectoryAsTags = (
         `git remote add origin ${origin}`,
         `git fetch origin --tags`,
         `git tag ${tag}`,
-        `git push origin --tags`,
+        majorTag ? `git tag -f ${majorTag}` : null,
+        `git push origin refs/tags/${tag}`,
+        majorTag ? `git push origin refs/tags/${majorTag} --force` : null,
     ].filter((value): value is string => Boolean(value));
 
     for (const cmd of cmds) {
@@ -412,6 +415,8 @@ export const publishAsNeeded = async (
 
         const version = actionPkg.version;
         const tag = `${name}-v${version}`;
+        const majorVersion = version.split(".")[0];
+        const majorTag = majorVersion ? `${name}-v${majorVersion}` : null;
         const dependencyRefs: Record<string, DependencyRef> = {};
 
         for (const depName of graph[name] ?? []) {
@@ -446,6 +451,7 @@ export const publishAsNeeded = async (
                 distPath,
                 origin,
                 tag,
+                majorTag,
                 dryRun,
                 auth,
             );
