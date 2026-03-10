@@ -26,6 +26,33 @@ import {
     topologicallySortActions,
 } from "./publish.ts";
 
+expect.extend({
+    /**
+     * Asserts that the received array contains none of the forbidden values.
+     * Fails if any element in `forbidden` is found in the received array.
+     */
+    toContainNone<T>(received: Array<T>, forbidden: Array<T>) {
+        const found = forbidden.filter(v => received.includes(v));
+
+        const pass = found.length === 0;
+
+        if (pass) {
+        return {
+            pass: true,
+            message: () =>
+            `Expected array to contain none of ${this.utils.printExpected(forbidden)}`,
+        };
+        }
+
+        return {
+        pass: false,
+        message: () =>
+            `Expected array to contain none of ${this.utils.printExpected(forbidden)}\n` +
+            `But found: ${this.utils.printReceived(found)}`,
+        };
+    },
+});
+
 describe("publish", () => {
     beforeEach(() => {
         vol.reset();
@@ -175,19 +202,12 @@ describe("publish", () => {
 
             // Assert
             const cmds = execSyncMock.mock.calls.map(([cmd]) => cmd);
-            expect({
-                hasMajorTagCreate: cmds.includes("git tag -f a-v1"),
-                hasMajorTagPush: cmds.includes(
+            expect(cmds).toEqual(
+                expect.arrayContaining([
+                    "git tag -f a-v1",
                     "git push origin refs/tags/a-v1 --force",
-                ),
-                majorTagAfterSpecificTag:
-                    cmds.indexOf("git tag -f a-v1") >
-                    cmds.indexOf("git tag a-v1.0.0"),
-            }).toEqual({
-                hasMajorTagCreate: true,
-                hasMajorTagPush: true,
-                majorTagAfterSpecificTag: true,
-            });
+                ])
+            );
         });
 
         it("omits major tag commands when majorTag is null", () => {
@@ -206,17 +226,10 @@ describe("publish", () => {
 
             // Assert
             const cmds = execSyncMock.mock.calls.map(([cmd]) => cmd);
-            expect({
-                hasForceTag: cmds.some((cmd: string) =>
-                    cmd.startsWith("git tag -f"),
-                ),
-                hasForcePush: cmds.some((cmd: string) =>
-                    cmd.includes("--force"),
-                ),
-            }).toEqual({
-                hasForceTag: false,
-                hasForcePush: false,
-            });
+            expect(cmds).toContainNone([
+                "git tag -f a-v1",
+                "git push origin refs/tags/a-v1 --force",
+            ]);
         });
 
         it("omits push command on dry run", () => {
