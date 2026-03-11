@@ -1,5 +1,13 @@
 # full-or-limited
 
+## 0.0.5
+
+### Patch Changes
+
+-   372548e: Force all actions to be published so publish script can update major tag
+-   Updated dependencies [372548e]
+    -   json-args@1.0.3
+
 ## 0.0.4
 
 ### Patch Changes
