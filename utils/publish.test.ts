@@ -26,6 +26,33 @@ import {
     topologicallySortActions,
 } from "./publish.ts";
 
+expect.extend({
+    /**
+     * Asserts that the received array contains none of the forbidden values.
+     * Fails if any element in `forbidden` is found in the received array.
+     */
+    toContainNone<T>(received: Array<T>, forbidden: Array<T>) {
+        const found = forbidden.filter(v => received.includes(v));
+
+        const pass = found.length === 0;
+
+        if (pass) {
+        return {
+            pass: true,
+            message: () =>
+            `Expected array to contain none of ${this.utils.printExpected(forbidden)}`,
+        };
+        }
+
+        return {
+        pass: false,
+        message: () =>
+            `Expected array to contain none of ${this.utils.printExpected(forbidden)}\n` +
+            `But found: ${this.utils.printReceived(found)}`,
+        };
+    },
+});
+
 describe("publish", () => {
     beforeEach(() => {
         vol.reset();
@@ -123,6 +150,7 @@ describe("publish", () => {
                 "actions/a/dist",
                 "git@github.com:Khan/actions.git",
                 "a-v1.0.0",
+                null,
                 false,
                 "AUTH",
             );
@@ -132,7 +160,7 @@ describe("publish", () => {
                 result,
                 hasPush: execSyncMock.mock.calls.some(
                     ([cmd, options]) =>
-                        cmd === "git push origin --tags" &&
+                        cmd === "git push origin refs/tags/a-v1.0.0" &&
                         options?.cwd === "actions/a/dist",
                 ),
                 hasAuthConfig: execSyncMock.mock.calls.some(
@@ -148,7 +176,7 @@ describe("publish", () => {
             });
         });
 
-        it("omits push command on dry run", () => {
+        it("creates and force-pushes major version tag when majorTag is provided", () => {
             // Arrange
             execSyncMock.mockImplementation(
                 (cmd: string, options?: {encoding?: string}) => {
@@ -156,31 +184,77 @@ describe("publish", () => {
                         cmd === "git rev-parse HEAD" &&
                         options?.encoding === "utf8"
                     ) {
-                        return "dry-sha\n";
+                        return "published-sha\n";
                     }
                     return "";
                 },
             );
 
             // Act
-            const result = publishDirectoryAsTags(
+            publishDirectoryAsTags(
                 "actions/a/dist",
                 "git@github.com:Khan/actions.git",
                 "a-v1.0.0",
-                true,
+                "a-v1",
+                false,
                 null,
             );
 
             // Assert
-            expect({
-                result,
-                hasPush: execSyncMock.mock.calls.some(
-                    ([cmd]) => cmd === "git push origin --tags",
+            const cmds = execSyncMock.mock.calls.map(([cmd]) => cmd);
+            expect(cmds).toEqual(
+                expect.arrayContaining([
+                    "git tag -f a-v1",
+                    "git push origin refs/tags/a-v1 --force",
+                ])
+            );
+        });
+
+        it("omits major tag commands when majorTag is null", () => {
+            // Arrange
+            execSyncMock.mockReturnValue("");
+
+            // Act
+            publishDirectoryAsTags(
+                "actions/a/dist",
+                "git@github.com:Khan/actions.git",
+                "a-v1.0.0",
+                null,
+                false,
+                null,
+            );
+
+            // Assert
+            const cmds = execSyncMock.mock.calls.map(([cmd]) => cmd);
+            expect(cmds).toContainNone([
+                "git tag -f a-v1",
+                "git push origin refs/tags/a-v1 --force",
+            ]);
+        });
+
+        it("omits push command on dry run", () => {
+            // Act
+            const result = publishDirectoryAsTags(
+                "actions/a/dist",
+                "git@github.com:Khan/actions.git",
+                "a-v1.0.0",
+                null,
+                true,
+                null,
+            );
+
+            // Assert: sha is a non-null string (generated from randomBytes in dry run)
+            expect(typeof result?.sha).toBe("string");
+            expect(result?.sha).not.toBeNull();
+
+            // No push commands should have been executed
+            const executedCmds = execSyncMock.mock.calls.map(([cmd]) => cmd);
+            expect(
+                executedCmds.some(
+                    (cmd: string) =>
+                        cmd.startsWith("git push") || cmd.includes("--force"),
                 ),
-            }).toEqual({
-                result: {sha: "dry-sha"},
-                hasPush: false,
-            });
+            ).toBe(false);
         });
 
         it("returns null when a command fails", () => {
@@ -195,6 +269,7 @@ describe("publish", () => {
                 "actions/a/dist",
                 "git@github.com:Khan/actions.git",
                 "a-v1.0.0",
+                null,
                 false,
                 null,
             );
@@ -417,7 +492,7 @@ describe("publish", () => {
             );
 
             // Act
-            await publishAsNeeded(["a", "b"], true);
+            await publishAsNeeded(["a", "b"], false);
 
             // Assert
             expect({
@@ -571,7 +646,7 @@ describe("publish", () => {
                     if (cmd.startsWith("git show-ref --tags ")) {
                         throw new Error("missing tag");
                     }
-                    if (cmd === "git push origin --tags") {
+                    if (cmd === "git push origin refs/tags/a-v1.0.0") {
                         throw new Error("push failed");
                     }
                     if (
