@@ -1,5 +1,13 @@
 # gerald-pr
 
+## 3.1.8
+
+### Patch Changes
+
+-   372548e: Force all actions to be published so publish script can update major tag
+-   Updated dependencies [372548e]
+    -   get-changed-files@2.1.5
+
 ## 3.1.7
 
 ### Patch Changes

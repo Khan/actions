@@ -1,5 +1,11 @@
 # shared-node-cache
 
+## 3.0.3
+
+### Patch Changes
+
+-   372548e: Force all actions to be published so publish script can update major tag
+
 ## 3.0.2
 
 ### Patch Changes

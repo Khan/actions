@@ -1,6 +1,6 @@
 {
     "name": "check-for-changeset",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "dependencies": {
         "get-changed-files": "*",
         "filter-files": "*"

@@ -1,5 +1,11 @@
 # apply-terraform-plan
 
+## 2.2.3
+
+### Patch Changes
+
+-   372548e: Force all actions to be published so publish script can update major tag
+
 ## 2.2.2
 
 ### Patch Changes

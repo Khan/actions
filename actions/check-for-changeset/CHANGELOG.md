@@ -1,5 +1,14 @@
 # check-for-changeset
 
+## 1.0.7
+
+### Patch Changes
+
+-   372548e: Force all actions to be published so publish script can update major tag
+-   Updated dependencies [372548e]
+    -   filter-files@2.1.3
+    -   get-changed-files@2.1.5
+
 ## 1.0.6
 
 ### Patch Changes
