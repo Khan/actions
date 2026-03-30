@@ -1,5 +1,11 @@
 # shared-node-cache
 
+## 4.0.0
+
+### Major Changes
+
+-   9f22a31: Update third-party action deps to use versions that use Node v24
+
 ## 3.0.3
 
 ### Patch Changes
