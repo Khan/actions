@@ -1,12 +1,5 @@
 # gerald-pr
 
-## 3.1.9
-
-### Patch Changes
-
--   Updated dependencies [6d0061f]
-    -   get-changed-files@3.0.0
-
 ## 3.1.8
 
 ### Patch Changes
