@@ -90,7 +90,7 @@ export const publishDirectoryAsTags = (
         console.log(`  >> ${cmd}`);
         if (dryRun) {
             if (cmd === `git commit -m publish`) {
-                // We generate a fake SHA here just so that the output of a dry run is 
+                // We generate a fake SHA here just so that the output of a dry run is
                 // more realistic, and we can see what the published refs would be.
                 publishSha = randomBytes(20).toString("hex");
             }

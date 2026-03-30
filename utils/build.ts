@@ -144,6 +144,8 @@ export const buildPackage = (
 
     bundleIfExists(`${base}/package.json`);
     bundleIfExists(`${base}/*.md`);
+    bundleIfExists(`${base}/*.js`);
+    bundleIfExists(`${base}/*.conf`);
 
     // action.yml needs special handling
     const actionYml = fs.readFileSync(`${base}/action.yml`, "utf8");

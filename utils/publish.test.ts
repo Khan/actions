@@ -32,23 +32,26 @@ expect.extend({
      * Fails if any element in `forbidden` is found in the received array.
      */
     toContainNone<T>(received: Array<T>, forbidden: Array<T>) {
-        const found = forbidden.filter(v => received.includes(v));
+        const found = forbidden.filter((v) => received.includes(v));
 
         const pass = found.length === 0;
 
         if (pass) {
-        return {
-            pass: true,
-            message: () =>
-            `Expected array to contain none of ${this.utils.printExpected(forbidden)}`,
-        };
+            return {
+                pass: true,
+                message: () =>
+                    `Expected array to contain none of ${this.utils.printExpected(
+                        forbidden,
+                    )}`,
+            };
         }
 
         return {
-        pass: false,
-        message: () =>
-            `Expected array to contain none of ${this.utils.printExpected(forbidden)}\n` +
-            `But found: ${this.utils.printReceived(found)}`,
+            pass: false,
+            message: () =>
+                `Expected array to contain none of ${this.utils.printExpected(
+                    forbidden,
+                )}\n` + `But found: ${this.utils.printReceived(found)}`,
         };
     },
 });
@@ -206,7 +209,7 @@ describe("publish", () => {
                 expect.arrayContaining([
                     "git tag -f a-v1",
                     "git push origin refs/tags/a-v1 --force",
-                ])
+                ]),
             );
         });
 
