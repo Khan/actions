@@ -1,5 +1,17 @@
 # check-for-changeset
 
+## 2.0.0
+
+### Major Changes
+
+-   9f22a31: Update third-party action deps to use versions that use Node v24
+
+### Patch Changes
+
+-   Updated dependencies [9f22a31]
+    -   get-changed-files@3.0.0
+    -   filter-files@3.0.0
+
 ## 1.0.7
 
 ### Patch Changes
