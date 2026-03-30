@@ -1,5 +1,16 @@
 # gerald-pr
 
+## 4.0.0
+
+### Major Changes
+
+-   e64a6b5: Switch from using actions/checkout v6 to v5
+
+### Patch Changes
+
+-   Updated dependencies [d77c362]
+    -   get-changed-files@3.0.0
+
 ## 3.1.8
 
 ### Patch Changes
