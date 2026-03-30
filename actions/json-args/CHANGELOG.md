@@ -1,5 +1,11 @@
 # json-args
 
+## 2.0.0
+
+### Major Changes
+
+-   6d0061f: Update third-party action deps to use versions that use Node v24
+
 ## 1.0.3
 
 ### Patch Changes
