@@ -1,5 +1,11 @@
 # get-changed-files
 
+## 3.0.0
+
+### Major Changes
+
+-   d77c362: Update third-party action deps to use versions that use Node v24
+
 ## 2.1.5
 
 ### Patch Changes
