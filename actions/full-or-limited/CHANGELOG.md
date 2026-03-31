@@ -1,5 +1,12 @@
 # full-or-limited
 
+## 0.0.6
+
+### Patch Changes
+
+-   Updated dependencies [d77c362]
+    -   json-args@2.0.0
+
 ## 0.0.5
 
 ### Patch Changes
