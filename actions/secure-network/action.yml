@@ -32,6 +32,5 @@ runs:
               # large, security-critical script with its own bundled dependencies
               # (github.conf, github-meta.json). The actions/github-script approach
               # is designed for small inline scripts, not multi-file bundles like this.
-              sudo env "PATH=$PATH" node "${{ github.action_path }}/secure-network.js" \
-                --conf-files="$CONF_FILES" \
-                --extra-domains="$EXTRA_DOMAINS"
+              sudo env "PATH=$PATH" "CONF_FILES=$CONF_FILES" "EXTRA_DOMAINS=$EXTRA_DOMAINS" \
+                node "${{ github.action_path }}/secure-network.js"
