@@ -121,6 +121,31 @@ describe("parseArgs", () => {
         // Assert
         expect(result.confFiles).toEqual([]);
     });
+
+    it("should parse --conf-files with a newline-separated value (multiline env var from GH Actions)", () => {
+        // Arrange — simulates CONF_FILES env var with blank lines from false conditionals
+        const argv = ["--conf-files=\npath/to/foo.conf\n\npath/to/bar.conf\n"];
+
+        // Act
+        const result = parseArgs(argv);
+
+        // Assert
+        expect(result.confFiles).toEqual([
+            "path/to/foo.conf",
+            "path/to/bar.conf",
+        ]);
+    });
+
+    it("should parse --conf-files when value starts with a newline (first conditional was false)", () => {
+        // Arrange — first conditional resolves to empty, so value starts with \n
+        const argv = ["--conf-files=\npath/to/gcloud.conf\n\n"];
+
+        // Act
+        const result = parseArgs(argv);
+
+        // Assert
+        expect(result.confFiles).toEqual(["path/to/gcloud.conf"]);
+    });
 });
 
 // ---------------------------------------------------------------------------

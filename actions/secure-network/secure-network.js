@@ -65,7 +65,7 @@ function parseArgs(argv) {
     const domains = [];
 
     for (const arg of argv) {
-        const match = arg.match(/^--([^=]+)=(.*)$/);
+        const match = arg.match(/^--([^=]+)=([\s\S]*)$/);
         if (match) {
             const [, key, value] = match;
             if (key === "conf-files") {
@@ -340,8 +340,19 @@ process.on("exit", (code) => {
 async function main() {
     console.log("Starting Unbound DNS firewall setup...");
 
-    // --- Parse args ---
-    const {confFiles, domains: extraDomains} = parseArgs(process.argv.slice(2));
+    // --- Read inputs from env vars ---
+    // action.yml sets CONF_FILES and EXTRA_DOMAINS in the step env: block and
+    // passes them explicitly through sudo env. Reading from the environment
+    // avoids shell quoting/newline issues that arise when multiline block-scalar
+    // inputs are forwarded via CLI args.
+    const confFiles = (process.env.CONF_FILES || "")
+        .split(/[\s,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    const extraDomains = (process.env.EXTRA_DOMAINS || "")
+        .split(/\s+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
 
     // --- Step 0: Install dependencies ---
     console.log(
