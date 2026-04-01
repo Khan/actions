@@ -1,5 +1,11 @@
 # secure-network
 
+## 1.0.1
+
+### Patch Changes
+
+-   38786a6: A bug fix to handle multi-line inputs better.
+
 ## 1.0.0
 
 ### Major Changes
