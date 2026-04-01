@@ -144,8 +144,22 @@ export const buildPackage = (
 
     bundleIfExists(`${base}/package.json`);
     bundleIfExists(`${base}/*.md`);
-    bundleIfExists(`${base}/*.js`);
     bundleIfExists(`${base}/*.conf`);
+
+    // Bundle .js and other extra files only if explicitly listed in the action's
+    // package.json `files` field (opt-in). This prevents accidentally publishing
+    // stray generated or leftover .js files from other actions.
+    const pkgJsonPath = `${base}/package.json`;
+    if (fs.existsSync(pkgJsonPath)) {
+        const pkg = JSON.parse(
+            fs.readFileSync(pkgJsonPath, "utf8"),
+        ) as PackageJsonLike & {files?: string[]};
+        if (pkg.files) {
+            for (const f of pkg.files) {
+                bundleIfExists(`${base}/${f}`);
+            }
+        }
+    }
 
     // action.yml needs special handling
     const actionYml = fs.readFileSync(`${base}/action.yml`, "utf8");

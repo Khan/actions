@@ -28,8 +28,11 @@ runs:
               CONF_FILES: ${{ inputs.conf-files }}
               EXTRA_DOMAINS: ${{ inputs.extra-domains }}
           run: |
-              # Convert newline/space-separated conf files to comma-separated
-              CONF_LIST=$(echo "$CONF_FILES" | tr '\n' ',' | tr ' ' ',' | sed 's/,\+/,/g; s/^,//; s/,$//')
+              # Note: secure-network.js is invoked with node directly rather than via
+              # actions/github-script or a TypeScript entrypoint because it is a
+              # large, security-critical script with its own bundled dependencies
+              # (github.conf, github-meta.json). The actions/github-script approach
+              # is designed for small inline scripts, not multi-file bundles like this.
               sudo env "PATH=$PATH" node "${{ github.action_path }}/secure-network.js" \
-                --conf-files="$CONF_LIST" \
-                $EXTRA_DOMAINS
+                --conf-files="$CONF_FILES" \
+                --extra-domains="$EXTRA_DOMAINS"

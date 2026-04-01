@@ -18,22 +18,38 @@
  * NOTE: This script needs to run as root in order to set up everything it needs.
  *
  * Usage:
- *   sudo node secure-network.js [options] [extra-domain ...]
+ *   sudo node secure-network.js [options]
  *
  * Options:
- *   --conf-files=path1,path2,...   Comma-separated paths to .conf allowlist files to load.
- *                                  Blank/empty entries are silently ignored (useful when
- *                                  callers construct the list with conditional expressions).
+ *   --conf-files=<paths>     Newline-, space-, or comma-separated paths to .conf allowlist
+ *                            files to load. Blank/empty entries are silently ignored (useful
+ *                            when callers construct the list with conditional expressions).
+ *   --extra-domains=<list>   Space-separated list of additional domains to allow.
  *
  * github.conf (bundled alongside this script) is always loaded automatically.
- *
- * Extra domains can be supplied as positional arguments.
  */
 
 /* eslint-disable no-console */
 const {execSync} = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+
+// Cloudflare DNS IPs used both as unbound forward fallbacks and for DoH blocking.
+const CLOUDFLARE_DNS_IPS = ["1.1.1.1", "1.0.0.1"];
+
+// DoH provider IPs to block via iptables.
+const DOH_PROVIDER_IPV4 = {
+    Cloudflare: [...CLOUDFLARE_DNS_IPS, "104.16.248.249", "104.16.249.249"],
+    Google: ["8.8.8.8", "8.8.4.4"],
+    Quad9: ["9.9.9.9"],
+    OpenDNS: ["208.67.222.222", "208.67.220.220"],
+};
+const DOH_PROVIDER_IPV6 = {
+    Cloudflare: ["2606:4700:4700::1111", "2606:4700:4700::1001"],
+    Google: ["2001:4860:4860::8888", "2001:4860:4860::8844"],
+    Quad9: ["2620:fe::fe"],
+    OpenDNS: ["2620:119:35::35", "2620:119:53::53"],
+};
 
 // ---------------------------------------------------------------------------
 // Pure helper functions (exported for unit testing)
@@ -53,11 +69,20 @@ function parseArgs(argv) {
         if (match) {
             const [, key, value] = match;
             if (key === "conf-files") {
-                // Split by comma, filter empty strings (handles blank lines from
-                // GH Actions conditional expressions resolving to '')
+                // Split by comma, newline, or whitespace; filter empty strings
+                // (handles blank lines from GH Actions conditional expressions
+                // resolving to '').
                 confFiles.push(
                     ...value
-                        .split(",")
+                        .split(/[\s,]+/)
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                );
+            } else if (key === "extra-domains") {
+                // Space-separated list of additional domains to allow.
+                domains.push(
+                    ...value
+                        .split(/\s+/)
                         .map((s) => s.trim())
                         .filter(Boolean),
                 );
@@ -179,12 +204,12 @@ function buildAllowlistLines(searchDomains, extraDomains, githubDomainLines) {
 
 /**
  * Return a complete unbound.conf string for the given upstream IPs.
- * Cloudflare (1.1.1.1 / 1.0.0.1) is always appended as a fallback.
+ * Cloudflare (CLOUDFLARE_DNS_IPS) is always appended as a fallback.
  * @param {string[]} upstreamIps
  * @returns {string}
  */
 function buildUnboundConf(upstreamIps) {
-    const forwardAddrs = [...upstreamIps, "1.1.1.1", "1.0.0.1"]
+    const forwardAddrs = [...upstreamIps, ...CLOUDFLARE_DNS_IPS]
         .map((ip) => `    forward-addr: ${ip}`)
         .join("\n");
 
@@ -243,6 +268,12 @@ function run(cmd) {
 
 function runQuiet(cmd) {
     return execSync(cmd, {stdio: "pipe", encoding: "utf8"}).trim();
+}
+
+function blockDoH(table, action, ips) {
+    for (const ip of ips) {
+        run(`${table} -A OUTPUT -d ${ip} -p tcp --dport 443 -j ${action}`);
+    }
 }
 
 async function fetchWithRetry(
@@ -559,44 +590,15 @@ async function main() {
 
     // --- Step 10: Block DNS-over-HTTPS providers ---
     console.log("Blocking known DNS-over-HTTPS providers...");
-    // Cloudflare DoH (IPv4)
-    run("iptables -A OUTPUT -d 1.1.1.1 -p tcp --dport 443 -j REJECT");
-    run("iptables -A OUTPUT -d 1.0.0.1 -p tcp --dport 443 -j REJECT");
-    run("iptables -A OUTPUT -d 104.16.248.249 -p tcp --dport 443 -j REJECT");
-    run("iptables -A OUTPUT -d 104.16.249.249 -p tcp --dport 443 -j REJECT");
-    // Google DoH (IPv4)
-    run("iptables -A OUTPUT -d 8.8.8.8 -p tcp --dport 443 -j REJECT");
-    run("iptables -A OUTPUT -d 8.8.4.4 -p tcp --dport 443 -j REJECT");
-    // Quad9 DoH (IPv4)
-    run("iptables -A OUTPUT -d 9.9.9.9 -p tcp --dport 443 -j REJECT");
-    // OpenDNS DoH (IPv4)
-    run("iptables -A OUTPUT -d 208.67.222.222 -p tcp --dport 443 -j REJECT");
-    run("iptables -A OUTPUT -d 208.67.220.220 -p tcp --dport 443 -j REJECT");
-
+    for (const [provider, ips] of Object.entries(DOH_PROVIDER_IPV4)) {
+        console.log(`  Blocking ${provider} DoH (IPv4)...`);
+        blockDoH("iptables", "REJECT", ips);
+    }
     if (hasIpv6) {
-        // Cloudflare DoH (IPv6)
-        run(
-            "ip6tables -A OUTPUT -d 2606:4700:4700::1111 -p tcp --dport 443 -j DROP",
-        );
-        run(
-            "ip6tables -A OUTPUT -d 2606:4700:4700::1001 -p tcp --dport 443 -j DROP",
-        );
-        // Google DoH (IPv6)
-        run(
-            "ip6tables -A OUTPUT -d 2001:4860:4860::8888 -p tcp --dport 443 -j DROP",
-        );
-        run(
-            "ip6tables -A OUTPUT -d 2001:4860:4860::8844 -p tcp --dport 443 -j DROP",
-        );
-        // Quad9 DoH (IPv6)
-        run("ip6tables -A OUTPUT -d 2620:fe::fe -p tcp --dport 443 -j DROP");
-        // OpenDNS DoH (IPv6)
-        run(
-            "ip6tables -A OUTPUT -d 2620:119:35::35 -p tcp --dport 443 -j DROP",
-        );
-        run(
-            "ip6tables -A OUTPUT -d 2620:119:53::53 -p tcp --dport 443 -j DROP",
-        );
+        for (const [provider, ips] of Object.entries(DOH_PROVIDER_IPV6)) {
+            console.log(`  Blocking ${provider} DoH (IPv6)...`);
+            blockDoH("ip6tables", "DROP", ips);
+        }
     }
     console.log("DNS-over-HTTPS/TLS blocking complete.");
 
@@ -676,7 +678,7 @@ module.exports = {
 // Only run main when executed directly (not when require()'d by tests).
 if (require.main === module) {
     main().catch((err) => {
-        console.error(err.message);
+        console.error(err.stack ?? err.message);
         process.exit(1);
     });
 }
