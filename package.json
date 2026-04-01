@@ -1,0 +1,7 @@
+{
+    "name": "gerald-pr",
+    "version": "6.0.0",
+    "dependencies": {
+        "get-changed-files": "*"
+    }
+}
