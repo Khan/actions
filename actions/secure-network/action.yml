@@ -9,9 +9,8 @@ inputs:
         description: >-
             Newline- or space-separated paths to .conf domain allowlist files
             (relative to workspace root or absolute). Blank lines are silently
-            ignored, which enables inline conditional expressions, e.g.:
-              conf-files: |
-                ${{ inputs.foo == 'true' && 'path/to/foo.conf' || '' }}
+            ignored, which enables inline GitHub Actions expressions in the calling
+            workflow (e.g. a ternary expression that resolves to a path or empty string).
         required: false
         default: ""
     extra-domains:
