@@ -1,5 +1,11 @@
 # gerald-pr
 
+## 6.0.0
+
+### Major Changes
+
+-   d8f230d: Bump to v6 since v5 was previously published two years ago
+
 ## 5.0.0
 
 ### Major Changes
