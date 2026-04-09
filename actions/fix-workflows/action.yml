@@ -38,6 +38,5 @@ runs:
         - name: Format YAML files with oxfmt
           shell: bash
           run: |
-              npx --yes oxfmt@0.44.0 --write \
-                --config "${{ github.action_path }}/.oxfmtrc.json" \
+              npx --yes oxfmt@0.44.0 --write --tab-width 4 \
                 .github/workflows/*.yml .github/workflows/*.yaml
