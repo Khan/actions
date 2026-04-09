@@ -1,8 +1,8 @@
 name: "Secure Network"
 description: >-
-  Set up a DNS firewall that restricts outbound DNS to an explicit allowlist.
-  Core GitHub domains are always included. Pass additional .conf files and/or
-  extra domains for any other hosts your workflow needs to reach.
+    Set up a DNS firewall that restricts outbound DNS to an explicit allowlist.
+    Core GitHub domains are always included. Pass additional .conf files and/or
+    extra domains for any other hosts your workflow needs to reach.
 
 inputs:
     conf-files:
@@ -19,7 +19,7 @@ inputs:
         default: ""
 
 runs:
-    using: "node20"
+    using: "node24"
     main: "main.js"
     post: "post.js"
     post-if: "always()"
