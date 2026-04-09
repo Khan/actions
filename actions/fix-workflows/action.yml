@@ -40,4 +40,4 @@ runs:
           run: |
               npx --yes oxfmt@0.44.0 --write \
                 --config "${{ github.action_path }}/.oxfmtrc.json" \
-                ".github/**/*.yml"
+                .github/workflows/*.yml .github/workflows/*.yaml
