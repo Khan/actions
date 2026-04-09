@@ -1,0 +1,10 @@
+{
+    "name": "fix-workflows",
+    "version": "3.0.0",
+    "dependencies": {
+        "yaml": "^2.7.0"
+    },
+    "files": [
+        ".oxfmtrc.json"
+    ]
+}

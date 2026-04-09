@@ -1,0 +1,56 @@
+name: Fix Workflows
+description: >-
+    Validates and auto-fixes GitHub Actions workflow YAML files
+    (checkout-followed-by-setup and optionally runs-on patterns), then
+    formats them with oxfmt.
+inputs:
+    fix-runs-on:
+        description: >-
+            Whether to fix runs-on values to use the conditional
+            ephemeral-runner expression. Off by default.
+        required: false
+        default: "false"
+    setup-action:
+        description: >-
+            The action that must immediately follow every checkout step.
+            Can be a remote action name (e.g. Khan/actions@secure-network-v1)
+            or a local path (e.g. ./.github/actions/setup). When a local path
+            is given, that action's own file is excluded from validation.
+        required: false
+        default: Khan/actions@secure-network-v1
+runs:
+    using: "composite"
+    steps:
+        - name: Fix workflow violations
+          uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+          with:
+              script: |
+                  try {
+                      require('${{ github.action_path }}/index.js').default({
+                          core,
+                          fixRunsOn: ${{ inputs.fix-runs-on == 'true' }},
+                          setupAction: `${{ inputs.setup-action }}`,
+                      }).catch(err => core.setFailed(err.message))
+                  } catch (err) {
+                      core.setFailed(err.message)
+                  }
+
+        - name: Format YAML files with oxfmt
+          shell: bash
+          run: |
+              npx --yes oxfmt@0.44.0 --write \
+                --config "${{ github.action_path }}/.oxfmtrc.json" \
+                ".github/workflows/**/*.yml"
+
+        - name: Commit changes
+          shell: bash
+          run: |
+              git config user.name "github-actions"
+              git config user.email "github-actions@github.com"
+              git add .github/workflows/
+              if git diff --cached --quiet; then
+                echo "No changes to commit"
+              else
+                git commit -m "chore: fix workflow violations"
+                git push
+              fi
