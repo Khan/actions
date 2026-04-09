@@ -38,5 +38,13 @@ runs:
         - name: Format YAML files with oxfmt
           shell: bash
           run: |
-              npx --yes oxfmt@0.44.0 --write --tab-width 4 \
-                .github/workflows/*.yml .github/workflows/*.yaml
+              shopt -s nullglob
+              files=(.github/workflows/*.yml .github/workflows/*.yaml)
+              if [[ ${#files[@]} -eq 0 ]]; then
+                  echo "::warning::No .yml/.yaml files found in .github/workflows/"
+              else
+                  npx --yes oxfmt@0.44.0 --write \
+                    --config "${{ github.action_path }}/.oxfmtrc.json" \
+                    --ignore-path /dev/null \
+                    "${files[@]}"
+              fi
