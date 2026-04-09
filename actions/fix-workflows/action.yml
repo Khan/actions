@@ -40,4 +40,17 @@ runs:
           run: |
               npx --yes oxfmt@0.44.0 --write \
                 --config "${{ github.action_path }}/.oxfmtrc.json" \
-                ".github/**/*.yml"
+                ".github/workflows/**/*.yml"
+
+        - name: Commit changes
+          shell: bash
+          run: |
+              git config user.name "github-actions"
+              git config user.email "github-actions@github.com"
+              git add .github/workflows/
+              if git diff --cached --quiet; then
+                echo "No changes to commit"
+              else
+                git commit -m "chore: fix workflow violations"
+                git push
+              fi

@@ -37,23 +37,9 @@ const VALID_RUNS_ON_RE =
 // File discovery
 // ---------------------------------------------------------------------------
 
-/**
- * Returns the local file path to exclude from validation when the setup action
- * is a relative path (e.g. "./.github/actions/setup" → ".github/actions/setup/action.yml").
- * Returns null for remote actions.
- */
-function getExcludedFile(setupAction: string): string | null {
-    if (!setupAction.startsWith("./") && !setupAction.startsWith("/")) {
-        return null;
-    }
-    const rel = setupAction.replace(/^\.\//, "");
-    return `${rel}/action.yml`;
-}
-
-function getFilesToCheck(setupAction: string): string[] {
+function getFilesToCheck(): string[] {
     const files: string[] = [];
 
-    // Workflow files
     const workflowDir = path.join(repoRoot, ".github", "workflows");
     for (const entry of fs.readdirSync(workflowDir, {withFileTypes: true})) {
         if (
@@ -64,32 +50,7 @@ function getFilesToCheck(setupAction: string): string[] {
         }
     }
 
-    // Action files — recurse into .github/actions/**/action.yml
-    const actionDir = path.join(repoRoot, ".github", "actions");
-    if (fs.existsSync(actionDir)) {
-        collectActionFiles(actionDir, ".github/actions", files);
-    }
-
-    const excluded = getExcludedFile(setupAction);
-    return excluded !== null ? files.filter((f) => f !== excluded) : files;
-}
-
-function collectActionFiles(
-    absDir: string,
-    relDir: string,
-    out: string[],
-): void {
-    for (const entry of fs.readdirSync(absDir, {withFileTypes: true})) {
-        const relPath = path.join(relDir, entry.name);
-        if (entry.isDirectory()) {
-            collectActionFiles(path.join(absDir, entry.name), relPath, out);
-        } else if (
-            entry.isFile() &&
-            (entry.name === "action.yml" || entry.name === "action.yaml")
-        ) {
-            out.push(relPath);
-        }
-    }
+    return files;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,15 +220,6 @@ export function processFile(
         }
     }
 
-    // Composite action files: runs.steps
-    const runs = doc.get("runs");
-    if (isMap(runs) && runs.get("using") === "composite") {
-        const steps = (runs as any).get("steps");
-        if (isSeq(steps)) {
-            changed = fixSteps(doc, steps, setupAction) || changed;
-        }
-    }
-
     if (changed) {
         console.log(`  Fixed ${filePath}`); // eslint-disable-line no-console
         fs.writeFileSync(absPath, doc.toString(YAML_WRITE_OPTIONS), "utf8");
@@ -293,7 +245,7 @@ export default async function fixWorkflows({
     fixRunsOn?: boolean;
     setupAction?: string;
 }): Promise<void> {
-    const files = getFilesToCheck(setupAction);
+    const files = getFilesToCheck();
     let fixedCount = 0;
 
     for (const file of files) {
@@ -325,12 +277,6 @@ export default async function fixWorkflows({
                         break;
                     }
                 }
-            }
-        }
-        const runs = doc.get("runs");
-        if (isMap(runs) && runs.get("using") === "composite") {
-            if (hasStepsViolation((runs as any).get("steps"))) {
-                broken = true;
             }
         }
         if (broken) {
