@@ -505,6 +505,11 @@ async function main() {
         process.exit(1);
     }
     console.log("Unbound is running and responding to queries.");
+    try {
+        console.log(`Unbound PID: ${runQuiet("pgrep -n unbound")}`);
+    } catch (_) {
+        /* pgrep not available — non-fatal */
+    }
 
     // Pre-warm the cache for all allowed domains before iptables goes up.
     // With cache-min-ttl=3600 these entries will stay cached for the entire
@@ -560,6 +565,12 @@ async function main() {
     run("iptables -A OUTPUT -p udp --dport 53 -j REJECT");
     run("iptables -A OUTPUT -p tcp --dport 53 -j REJECT");
     console.log("iptables configuration complete.");
+    try {
+        console.log("iptables OUTPUT chain:");
+        console.log(runQuiet("iptables -L OUTPUT -n --line-numbers"));
+    } catch (_) {
+        /* best-effort */
+    }
 
     // --- Step 8: Configure ip6tables for IPv6 DNS (best-effort) ---
     let hasIpv6 = false;
@@ -612,6 +623,22 @@ async function main() {
         }
     }
     console.log("DNS-over-HTTPS/TLS blocking complete.");
+
+    // --- Step 10b: Verify Unbound is still alive after iptables lockdown ---
+    // If Unbound died during lockdown, DNS is now completely broken (resolv.conf
+    // points to 127.0.0.1 but nothing is listening there, and iptables blocks
+    // all external DNS). Fail fast here rather than leaving the runner in a
+    // broken state that produces confusing downstream errors.
+    console.log("Verifying Unbound is still alive after iptables lockdown...");
+    try {
+        const pid = runQuiet("pgrep -n unbound");
+        console.log(`  Unbound still running (PID ${pid}). OK.`);
+    } catch (_) {
+        console.error(
+            "ERROR: Unbound process has died after iptables lockdown — DNS is now broken.",
+        );
+        process.exit(1);
+    }
 
     // --- Step 11: Lock down configuration files (best-effort) ---
     console.log("Locking down configuration files...");
