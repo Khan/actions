@@ -2,6 +2,8 @@ node_modules
 dist
 actions/**/*.js
 !actions/secure-network/secure-network.js
+!actions/secure-network/main.js
+!actions/secure-network/post.js
 coverage
 
 .claude

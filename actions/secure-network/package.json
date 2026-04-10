@@ -2,6 +2,8 @@
   "name": "secure-network",
   "version": "1.0.1",
   "files": [
+    "main.js",
+    "post.js",
     "secure-network.js",
     "github-meta.json"
   ]
