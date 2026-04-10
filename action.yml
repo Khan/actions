@@ -1,0 +1,24 @@
+name: "Secure Network"
+description: >-
+    Set up a DNS firewall that restricts outbound DNS to an explicit allowlist.
+    Core GitHub domains are always included. Pass additional .conf files and/or
+    extra domains for any other hosts your workflow needs to reach.
+
+inputs:
+    conf-files:
+        description: >-
+            Newline- or space-separated paths to .conf domain allowlist files
+            (relative to workspace root or absolute). Blank lines are silently
+            ignored, which enables inline GitHub Actions expressions in the calling
+            workflow (e.g. a ternary expression that resolves to a path or empty string).
+        required: false
+        default: ""
+    extra-domains:
+        description: "Space-separated list of additional domains to allow."
+        required: false
+        default: ""
+
+runs:
+    using: "node24"
+    main: "main.js"
+    post: "post.js"

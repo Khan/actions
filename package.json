@@ -1,0 +1,10 @@
+{
+  "name": "secure-network",
+  "version": "1.0.2",
+  "files": [
+    "main.js",
+    "post.js",
+    "secure-network.js",
+    "github-meta.json"
+  ]
+}
