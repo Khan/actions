@@ -1,5 +1,11 @@
 # secure-network
 
+## 1.0.2
+
+### Patch Changes
+
+-   de6a3cb: Improve secure-network logging.
+
 ## 1.0.1
 
 ### Patch Changes
