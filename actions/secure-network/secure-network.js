@@ -546,6 +546,21 @@ async function main() {
     }
 
     console.log("Redirecting DNS to local Unbound resolver...");
+    // On Ubuntu with systemd-resolved, /etc/resolv.conf is a symlink to
+    // /run/systemd/resolve/stub-resolv.conf on tmpfs. Writing through the symlink
+    // lets systemd-resolved silently overwrite our change, and chattr +i is a
+    // no-op on tmpfs (unsupported filesystem). Remove any existing symlink/file
+    // first so we create a real file on /etc (ext4), where chattr can lock it.
+    try {
+        if (fs.lstatSync("/etc/resolv.conf").isSymbolicLink()) {
+            fs.unlinkSync("/etc/resolv.conf");
+            console.log(
+                "  Removed /etc/resolv.conf symlink (was managed by systemd-resolved).",
+            );
+        }
+    } catch (_) {
+        /* not a symlink or doesn't exist — proceed */
+    }
     fs.writeFileSync("/etc/resolv.conf", "nameserver 127.0.0.1\n");
     // resolv.conf.bak is kept until process exit; the exit handler restores it on error.
 
