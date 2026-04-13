@@ -3,10 +3,13 @@ import {isMap, isSeq, parseDocument} from "yaml";
 
 import {
     DEFAULT_SETUP_ACTION,
+    checkJob,
     checkRunsOn,
     checkSteps,
     fixRunsOn,
     fixSteps,
+    isExemptRunner,
+    processJob,
 } from "./index.ts";
 
 // ---------------------------------------------------------------------------
@@ -451,6 +454,42 @@ function parseWorkflowJob(yaml: string) {
     return job;
 }
 
+/** Parse a YAML string and return the document and first job's map node. */
+function parseWorkflowJobWithDoc(yaml: string) {
+    const doc = parseDocument(yaml);
+    const jobs = doc.get("jobs") as any;
+    const job = jobs.items[0].value;
+    if (!isMap(job)) {
+        throw new Error("Expected a job map");
+    }
+    return {doc, job};
+}
+
+// ---------------------------------------------------------------------------
+// isExemptRunner
+// ---------------------------------------------------------------------------
+
+describe("isExemptRunner", () => {
+    it.each([
+        ["returns true for macos-latest", "macos-latest", true],
+        ["returns true for macos-15", "macos-15", true],
+        ["returns false for ubuntu-latest", "ubuntu-latest", false],
+        [
+            "returns false for the conditional expression",
+            "${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}",
+            false,
+        ],
+    ])("%s", (_name, runsOn, expected) => {
+        const job = parseWorkflowJob(`
+jobs:
+  build:
+    runs-on: "${runsOn}"
+    steps: []
+`);
+        expect(isExemptRunner(job)).toBe(expected);
+    });
+});
+
 // ---------------------------------------------------------------------------
 // checkRunsOn
 // ---------------------------------------------------------------------------
@@ -496,6 +535,26 @@ jobs:
     steps: []
 `,
             true,
+        ],
+        [
+            "returns false for a macos- runner",
+            `
+jobs:
+  build:
+    runs-on: macos-latest
+    steps: []
+`,
+            false,
+        ],
+        [
+            "returns false for a versioned macos- runner",
+            `
+jobs:
+  build:
+    runs-on: macos-15
+    steps: []
+`,
+            false,
         ],
     ])("%s", (_name, yaml, expected) => {
         // Arrange
@@ -552,6 +611,23 @@ jobs:
         );
     });
 
+    it("returns false and leaves runs-on unchanged for a macos- runner", () => {
+        // Arrange
+        const job = parseWorkflowJob(`
+jobs:
+  build:
+    runs-on: macos-latest
+    steps: []
+`);
+
+        // Act
+        const result = fixRunsOn(job);
+
+        // Assert
+        expect(result).toBe(false);
+        expect(job.get("runs-on")).toBe("macos-latest");
+    });
+
     it("replaces ubuntu-latest-l with the large-runner conditional expression", () => {
         // Arrange
         const job = parseWorkflowJob(`
@@ -569,5 +645,179 @@ jobs:
         expect(job.get("runs-on")).toBe(
             "${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest-l' || 'ephemeral-runner' }}",
         );
+    });
+});
+
+// ---------------------------------------------------------------------------
+// processJob
+// ---------------------------------------------------------------------------
+
+describe("processJob", () => {
+    it("returns false and makes no changes for a macos- runner even when checkout lacks setup", () => {
+        // Arrange
+        const {doc, job} = parseWorkflowJobWithDoc(`
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build
+        run: pnpm build
+`);
+        const stepsBefore = JSON.stringify(job.toJSON());
+
+        // Act
+        const result = processJob(doc, job);
+
+        // Assert
+        expect(result).toBe(false);
+        expect(JSON.stringify(job.toJSON())).toBe(stepsBefore);
+    });
+
+    it("inserts a secure-network step for a non-exempt runner", () => {
+        // Arrange
+        const {doc, job} = parseWorkflowJobWithDoc(`
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build
+        run: pnpm build
+`);
+
+        // Act
+        const result = processJob(doc, job);
+
+        // Assert
+        expect(result).toBe(true);
+        const steps = job.toJSON().steps;
+        expect(steps[1]).toMatchObject({
+            name: "Secure Network",
+            uses: DEFAULT_SETUP_ACTION,
+            "timeout-minutes": 5,
+        });
+    });
+
+    it("fixes runs-on when shouldFixRunsOn is true and runner is non-exempt", () => {
+        // Arrange
+        const {doc, job} = parseWorkflowJobWithDoc(`
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps: []
+`);
+
+        // Act
+        const result = processJob(doc, job, {shouldFixRunsOn: true});
+
+        // Assert
+        expect(result).toBe(true);
+        expect(job.get("runs-on")).toBe(
+            "${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}",
+        );
+    });
+
+    it("does not fix runs-on for a macos- runner even when shouldFixRunsOn is true", () => {
+        // Arrange
+        const {doc, job} = parseWorkflowJobWithDoc(`
+jobs:
+  build:
+    runs-on: macos-latest
+    steps: []
+`);
+
+        // Act
+        const result = processJob(doc, job, {shouldFixRunsOn: true});
+
+        // Assert
+        expect(result).toBe(false);
+        expect(job.get("runs-on")).toBe("macos-latest");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// checkJob
+// ---------------------------------------------------------------------------
+
+describe("checkJob", () => {
+    it("returns false for a macos- runner even when checkout lacks setup", () => {
+        // Arrange
+        const job = parseWorkflowJob(`
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build
+        run: pnpm build
+`);
+
+        // Act & Assert
+        expect(checkJob(job)).toBe(false);
+    });
+
+    it("returns false for a macos- runner even when shouldFixRunsOn is true", () => {
+        // Arrange
+        const job = parseWorkflowJob(`
+jobs:
+  build:
+    runs-on: macos-latest
+    steps: []
+`);
+
+        // Act & Assert
+        expect(checkJob(job, {shouldFixRunsOn: true})).toBe(false);
+    });
+
+    it("returns true for a non-exempt runner missing the secure-network step", () => {
+        // Arrange
+        const job = parseWorkflowJob(`
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build
+        run: pnpm build
+`);
+
+        // Act & Assert
+        expect(checkJob(job)).toBe(true);
+    });
+
+    it("returns true for a non-exempt runner with a plain runs-on when shouldFixRunsOn is true", () => {
+        // Arrange
+        const job = parseWorkflowJob(`
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps: []
+`);
+
+        // Act & Assert
+        expect(checkJob(job, {shouldFixRunsOn: true})).toBe(true);
+    });
+
+    it("returns false when there are no violations", () => {
+        // Arrange
+        const job = parseWorkflowJob(`
+jobs:
+  build:
+    runs-on: "\${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Secure Network
+        uses: ${DEFAULT_SETUP_ACTION}
+        timeout-minutes: 5
+`);
+
+        // Act & Assert
+        expect(checkJob(job, {shouldFixRunsOn: true})).toBe(false);
     });
 });
