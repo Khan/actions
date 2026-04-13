@@ -160,12 +160,24 @@ export function checkSteps(
 }
 
 /**
+ * Return true if the job's runner is exempt from all fixups.
+ * macOS runners are GitHub-hosted and don't use our secure network setup.
+ */
+export function isExemptRunner(job: YAMLMap): boolean {
+    const runsOn = job.get("runs-on");
+    return typeof runsOn === "string" && runsOn.startsWith("macos-");
+}
+
+/**
  * Return true if the job's `runs-on` value is non-compliant (i.e., it is a
  * plain runner name rather than the required conditional expression).
  */
 export function checkRunsOn(job: YAMLMap): boolean {
     const runsOn = job.get("runs-on");
     if (typeof runsOn !== "string") {
+        return false;
+    }
+    if (isExemptRunner(job)) {
         return false;
     }
     return !VALID_RUNS_ON_RE.test(runsOn);
@@ -185,38 +197,72 @@ export function fixRunsOn(job: YAMLMap): boolean {
     return true;
 }
 
+type JobOptions = {
+    shouldFixRunsOn?: boolean;
+    setupAction?: string;
+};
+
+/**
+ * Apply all fixes to a single job map. Skips exempt runners entirely.
+ * Returns true if any changes were made.
+ */
+export function processJob(
+    doc: Document,
+    job: YAMLMap,
+    {shouldFixRunsOn = false, setupAction = DEFAULT_SETUP_ACTION}: JobOptions = {},
+): boolean {
+    if (isExemptRunner(job)) {
+        return false;
+    }
+    let changed = false;
+    if (shouldFixRunsOn) {
+        changed = fixRunsOn(job) || changed;
+    }
+    const steps = (job as any).get("steps");
+    if (isSeq(steps)) {
+        changed = fixSteps(doc, steps, setupAction) || changed;
+    }
+    return changed;
+}
+
+/**
+ * Return true if a single job map has any remaining violations.
+ * Always returns false for exempt runners.
+ */
+export function checkJob(
+    job: YAMLMap,
+    {shouldFixRunsOn = false, setupAction = DEFAULT_SETUP_ACTION}: JobOptions = {},
+): boolean {
+    if (isExemptRunner(job)) {
+        return false;
+    }
+    const steps = (job as any).get("steps");
+    return (
+        (shouldFixRunsOn && checkRunsOn(job)) ||
+        (isSeq(steps) && checkSteps(steps, setupAction))
+    );
+}
+
 /**
  * Parse the file, fix any violations, and write it back if changed.
  * Returns true if the file was modified.
  */
 export function processFile(
     filePath: string,
-    options: {
-        shouldFixRunsOn?: boolean;
-        setupAction?: string;
-    } = {},
+    options: JobOptions = {},
 ): boolean {
-    const {shouldFixRunsOn = false, setupAction = DEFAULT_SETUP_ACTION} =
-        options;
     const absPath = path.join(repoRoot, filePath);
     const content = fs.readFileSync(absPath, "utf8");
     const doc = parseDocument(content);
     let changed = false;
 
-    // Workflow files: jobs.<id>.runs-on and jobs.<id>.steps
     const jobs = doc.get("jobs");
     if (isMap(jobs)) {
         for (const item of jobs.items) {
             if (!isMap(item.value)) {
                 continue;
             }
-            if (shouldFixRunsOn) {
-                changed = fixRunsOn(item.value as YAMLMap) || changed;
-            }
-            const steps = (item.value as any).get("steps");
-            if (isSeq(steps)) {
-                changed = fixSteps(doc, steps, setupAction) || changed;
-            }
+            changed = processJob(doc, item.value as YAMLMap, options) || changed;
         }
     }
 
@@ -260,22 +306,16 @@ export default async function fixWorkflows({
         const content = fs.readFileSync(path.join(repoRoot, file), "utf8");
         const doc = parseDocument(content);
 
-        const hasStepsViolation = (steps: any) =>
-            isSeq(steps) && checkSteps(steps, setupAction);
-
         let broken = false;
         const jobs = doc.get("jobs");
         if (isMap(jobs)) {
             for (const item of jobs.items) {
-                if (isMap(item.value)) {
-                    if (
-                        (shouldFixRunsOn &&
-                            checkRunsOn(item.value as YAMLMap)) ||
-                        hasStepsViolation((item.value as any).get("steps"))
-                    ) {
-                        broken = true;
-                        break;
-                    }
+                if (
+                    isMap(item.value) &&
+                    checkJob(item.value as YAMLMap, {shouldFixRunsOn, setupAction})
+                ) {
+                    broken = true;
+                    break;
                 }
             }
         }
