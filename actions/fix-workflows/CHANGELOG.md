@@ -1,5 +1,11 @@
 # fix-workflows
 
+## 3.0.1
+
+### Patch Changes
+
+-   71916cc: Exclude fixing up macos runners.
+
 ## 3.0.0
 
 ### Major Changes
