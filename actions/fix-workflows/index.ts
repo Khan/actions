@@ -209,7 +209,10 @@ type JobOptions = {
 export function processJob(
     doc: Document,
     job: YAMLMap,
-    {shouldFixRunsOn = false, setupAction = DEFAULT_SETUP_ACTION}: JobOptions = {},
+    {
+        shouldFixRunsOn = false,
+        setupAction = DEFAULT_SETUP_ACTION,
+    }: JobOptions = {},
 ): boolean {
     if (isExemptRunner(job)) {
         return false;
@@ -231,7 +234,10 @@ export function processJob(
  */
 export function checkJob(
     job: YAMLMap,
-    {shouldFixRunsOn = false, setupAction = DEFAULT_SETUP_ACTION}: JobOptions = {},
+    {
+        shouldFixRunsOn = false,
+        setupAction = DEFAULT_SETUP_ACTION,
+    }: JobOptions = {},
 ): boolean {
     if (isExemptRunner(job)) {
         return false;
@@ -262,7 +268,8 @@ export function processFile(
             if (!isMap(item.value)) {
                 continue;
             }
-            changed = processJob(doc, item.value as YAMLMap, options) || changed;
+            changed =
+                processJob(doc, item.value as YAMLMap, options) || changed;
         }
     }
 
@@ -312,7 +319,10 @@ export default async function fixWorkflows({
             for (const item of jobs.items) {
                 if (
                     isMap(item.value) &&
-                    checkJob(item.value as YAMLMap, {shouldFixRunsOn, setupAction})
+                    checkJob(item.value as YAMLMap, {
+                        shouldFixRunsOn,
+                        setupAction,
+                    })
                 ) {
                     broken = true;
                     break;
