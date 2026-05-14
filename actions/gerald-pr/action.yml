@@ -25,7 +25,7 @@ runs:
           ref: '${{ github.head_ref }}'
         if: ${{ github.event.pull_request.draft == false }}
       - name: Run Gerald
-        uses: Khan/gerald@0a9a99fe8c226708c01ef3bf5c85562a250bd851 # v5.1
+        uses: Khan/gerald@c3a58fd3c28007603557651b1079e3ab3362ec86 # v5.2
         env:
           GITHUB_TOKEN: '${{ inputs.token }}'
           ADMIN_PERMISSION_TOKEN: '${{ inputs.admin-token }}'
