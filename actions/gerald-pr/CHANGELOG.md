@@ -1,5 +1,11 @@
 # gerald-pr
 
+## 6.1.0
+
+### Minor Changes
+
+-   4e36fea: Update to v5.2 of Khan/gerald action
+
 ## 6.0.0
 
 ### Major Changes
