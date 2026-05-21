@@ -369,6 +369,7 @@ async function main() {
     if (pkgsNeeded.length > 0) {
         console.log(`Installing: ${pkgsNeeded.join(" ")}`);
         process.env.DEBIAN_FRONTEND = "noninteractive";
+        run("apt-get -y update");
         run(
             `apt-get install -y --no-install-recommends ${pkgsNeeded.join(
                 " ",
