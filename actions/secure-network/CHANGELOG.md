@@ -1,5 +1,11 @@
 # secure-network
 
+## 1.0.3
+
+### Patch Changes
+
+-   907b1aa: Run apt-get update before installing packages to ensure package lists are current.
+
 ## 1.0.2
 
 ### Patch Changes
