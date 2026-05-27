@@ -44,6 +44,10 @@ inputs:
     description: "Whether to comment on an existing PR with the plan"
     required: false
     default: 'true'
+  comment_extra_text:
+    description: "Additional Markdown text to append to the Terraform plan PR comment"
+    required: false
+    default: ""
   enable_pr_creation:
     description: "Whether to create a new PR with the plan on pushes to the base branch"
     required: false
@@ -55,6 +59,10 @@ inputs:
     description: "The title for the pull request created with the plan"
     required: false
     default: "Terraform Plan Update"
+  pr_extra_text:
+    description: "Additional Markdown text to append to the generated plan pull request body"
+    required: false
+    default: ""
   fallback_reviewers:
     description: "Username(s) to assign as reviewer when github.actor is not appropriate (e.g., for scheduled jobs or bot-triggered runs). Supports comma-separated list: 'user1,user2,user3'"
     required: false
@@ -208,6 +216,8 @@ runs:
           3 If there are changes to a docker image not explained by the diff:
             1. Look at the [Cloud Build logs](https://console.cloud.google.com/cloud-build/builds) for the build that was triggered by this plan. Look for a build that has a start time just before this PR was created. The logs will contain the digest of the docker image in the plan output.
             2. In the build logs, the first step that shows changes will indicate what changed in the docker image, e.g. an updated base image or package updates' || '' }}
+
+          ${{ inputs.pr_extra_text }}
         add-paths: |
           ${{ inputs.terraform_path }}/${{ inputs.plan_file_binary }}
           ${{ inputs.terraform_path }}/${{ inputs.plan_file_text }}
@@ -235,6 +245,7 @@ runs:
         \`\`\`terraform
         $PLAN
         \`\`\`
+        ${{ inputs.comment_extra_text }}
         EOF
         )
         if [[ -n "$COMMENT_ID" ]]; then
