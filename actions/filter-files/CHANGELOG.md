@@ -1,5 +1,23 @@
 # filter-files
 
+## 3.0.0
+
+### Major Changes
+
+-   d77c362: Update third-party action deps to use versions that use Node v24
+
+## 2.1.3
+
+### Patch Changes
+
+-   372548e: Force all actions to be published so publish script can update major tag
+
+## 2.1.2
+
+### Patch Changes
+
+-   408974b: Bumping all packages to lock down references to SHAs instead of tags
+
 ## 2.1.1
 
 ### Patch Changes

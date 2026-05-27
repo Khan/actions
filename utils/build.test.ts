@@ -54,7 +54,7 @@ runs:
   steps:
     - name: Limited run
       uses: ./actions/json-args
-    - uses: actions/github-script@v7
+    - uses: actions/github-script@v8
       with:
         script: |
           require('./actions/full-or-limited/index.js')({github, core})
@@ -93,7 +93,7 @@ runs:
             steps:
               - name: Limited run
                 uses: Our/monorepo@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # json-args-v1.2.3
-              - uses: actions/github-script@v7
+              - uses: actions/github-script@v8
                 with:
                   script: |
                     require('\${{ github.action_path }}/index.js')({github, core})
@@ -141,7 +141,7 @@ runs:
     - uses: ./actions/a
     - uses: ./actions/b
     - uses: ./actions/a
-    - uses: actions/github-script@v7
+    - uses: actions/github-script@v8
 `;
         expect(extractIntraRepoDependencies(actionYml)).toEqual(["a", "b"]);
     });
@@ -389,7 +389,7 @@ name: Test
 runs:
   using: "composite"
   steps:
-    - uses: actions/github-script@v7
+    - uses: actions/github-script@v8
       with:
         script: |
           require('./actions/test-action/index.js')({github, core})`;

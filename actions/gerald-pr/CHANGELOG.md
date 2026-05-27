@@ -1,5 +1,50 @@
 # gerald-pr
 
+## 6.1.0
+
+### Minor Changes
+
+-   4e36fea: Update to v5.2 of Khan/gerald action
+
+## 6.0.0
+
+### Major Changes
+
+-   d8f230d: Bump to v6 since v5 was previously published two years ago
+
+## 5.0.0
+
+### Major Changes
+
+-   b5f0c28: Update to v5 of Khan/gerald action
+
+## 4.0.0
+
+### Major Changes
+
+-   e64a6b5: Switch from using actions/checkout v6 to v5
+
+### Patch Changes
+
+-   Updated dependencies [d77c362]
+    -   get-changed-files@3.0.0
+
+## 3.1.8
+
+### Patch Changes
+
+-   372548e: Force all actions to be published so publish script can update major tag
+-   Updated dependencies [372548e]
+    -   get-changed-files@2.1.5
+
+## 3.1.7
+
+### Patch Changes
+
+-   408974b: Bumping all packages to lock down references to SHAs instead of tags
+-   Updated dependencies [408974b]
+    -   get-changed-files@2.1.4
+
 ## 3.1.6
 
 ### Patch Changes

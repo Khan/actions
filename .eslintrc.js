@@ -26,8 +26,22 @@ module.exports = {
         sourceType: "module",
         ecmaVersion: 2022,
     },
-    ignorePatterns: ["**/dist/"],
+    ignorePatterns: ["**/dist/", "actions/**/index.js"],
     overrides: [
+        {
+            files: "**/*.ts",
+            parser: "@typescript-eslint/parser",
+            parserOptions: {
+                sourceType: "module",
+                ecmaVersion: 2022,
+            },
+        },
+        {
+            files: "**/*.d.ts",
+            rules: {
+                "no-unused-vars": "off",
+            },
+        },
         {
             files: "utils/*",
             rules: {

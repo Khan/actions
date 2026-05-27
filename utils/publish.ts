@@ -6,6 +6,7 @@
  * with the appropriate pinned references.
  */
 import * as fs from "fs";
+import {randomBytes} from "crypto";
 import {execSync} from "child_process";
 import {
     buildPackage,
@@ -63,6 +64,7 @@ export const publishDirectoryAsTags = (
     distPath: string,
     origin: string,
     tag: string,
+    majorTag: string | null,
     dryRun: boolean,
     auth: string | null,
 ): {sha: string | null} | null => {
@@ -79,15 +81,22 @@ export const publishDirectoryAsTags = (
         `git remote add origin ${origin}`,
         `git fetch origin --tags`,
         `git tag ${tag}`,
+        majorTag ? `git tag -f ${majorTag}` : null,
+        `git push origin refs/tags/${tag}`,
+        majorTag ? `git push origin refs/tags/${majorTag} --force` : null,
     ].filter((value): value is string => Boolean(value));
 
-    if (!dryRun) {
-        cmds.push(`git push origin --tags`);
-    }
-
     for (const cmd of cmds) {
+        console.log(`  >> ${cmd}`);
+        if (dryRun) {
+            if (cmd === `git commit -m publish`) {
+                // We generate a fake SHA here just so that the output of a dry run is
+                // more realistic, and we can see what the published refs would be.
+                publishSha = randomBytes(20).toString("hex");
+            }
+            continue;
+        }
         try {
-            console.log(`  >> ${cmd}`);
             execSync(cmd, {cwd: distPath});
             if (cmd === `git commit -m publish`) {
                 publishSha = execSync(`git rev-parse HEAD`, {
@@ -356,6 +365,7 @@ const getAuth = (): string | null => {
 export const publishAsNeeded = async (
     packageNames: string[],
     dryRun = false,
+    force = false,
 ): Promise<void> => {
     console.log(`Publishing (${dryRun ? "dry run" : "for real"})...`);
 
@@ -405,6 +415,8 @@ export const publishAsNeeded = async (
 
         const version = actionPkg.version;
         const tag = `${name}-v${version}`;
+        const majorVersion = version.split(".")[0];
+        const majorTag = majorVersion ? `${name}-v${majorVersion}` : null;
         const dependencyRefs: Record<string, DependencyRef> = {};
 
         for (const depName of graph[name] ?? []) {
@@ -425,7 +437,7 @@ export const publishAsNeeded = async (
                 ));
         }
 
-        if (checkTag(tag)) {
+        if (checkTag(tag) && !force) {
             console.log(`  Version ${tag} already exists. Nothing to do.`);
         } else {
             const distPath = buildPackage(
@@ -439,6 +451,7 @@ export const publishAsNeeded = async (
                 distPath,
                 origin,
                 tag,
+                majorTag,
                 dryRun,
                 auth,
             );

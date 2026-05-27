@@ -1,5 +1,35 @@
 # check-for-changeset
 
+## 2.0.0
+
+### Major Changes
+
+-   d77c362: Update third-party action deps to use versions that use Node v24
+
+### Patch Changes
+
+-   Updated dependencies [d77c362]
+    -   get-changed-files@3.0.0
+    -   filter-files@3.0.0
+
+## 1.0.7
+
+### Patch Changes
+
+-   372548e: Force all actions to be published so publish script can update major tag
+-   Updated dependencies [372548e]
+    -   filter-files@2.1.3
+    -   get-changed-files@2.1.5
+
+## 1.0.6
+
+### Patch Changes
+
+-   408974b: Bumping all packages to lock down references to SHAs instead of tags
+-   Updated dependencies [408974b]
+    -   filter-files@2.1.2
+    -   get-changed-files@2.1.4
+
 ## 1.0.5
 
 ### Patch Changes
