@@ -25,7 +25,7 @@ function parseArgs(argv: string[]): {
         if (argv[i] === "--fix-runs-on") {
             fixRunsOn = true;
         } else if (argv[i] === "--setup-action" && i + 1 < argv.length) {
-            setupAction = argv[++i];
+            setupAction = argv[++i]!;
         }
     }
 
