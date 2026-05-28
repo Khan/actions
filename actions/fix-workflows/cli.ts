@@ -48,7 +48,9 @@ fixWorkflows({core, fixRunsOn, setupAction})
         const configPath = path.join(__dirname, ".oxfmtrc.json");
         console.log("Formatting workflow files with oxfmt..."); // eslint-disable-line no-console
         execSync(
-            `npx --yes oxfmt@0.44.0 --write --config ${JSON.stringify(configPath)} ".github/workflows/**/*.yml"`,
+            `npx --yes oxfmt@0.44.0 --write --config ${JSON.stringify(
+                configPath,
+            )} ".github/workflows/**/*.yml"`,
             {stdio: "inherit"},
         );
     })
