@@ -31,7 +31,7 @@ const YAML_WRITE_OPTIONS = {indent: 4, lineWidth: 0} as const;
 
 /** Matches the required conditional runs-on expression (any runner name). */
 const VALID_RUNS_ON_RE =
-    /^\$\{\{\s*vars\.USE_GITHUB_RUNNERS\s*==\s*'true'\s*&&\s*'[^']+'\s*\|\|\s*'ephemeral-runner'\s*\}\}$/;
+    /vars\.USE_GITHUB_RUNNERS\s*==\s*'true'\s*&&\s*'[^']+'\s*\|\|\s*'ephemeral-runner[\w-]*'\s*\}\}$/;
 
 // ---------------------------------------------------------------------------
 // File discovery

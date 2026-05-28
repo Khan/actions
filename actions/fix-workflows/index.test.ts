@@ -517,6 +517,16 @@ jobs:
             false,
         ],
         [
+            "returns false for a matrix-specific runner conditional expression",
+            `
+jobs:
+  build:
+    runs-on: "\${{ (matrix.language == 'go' && matrix.type == 'tests') && 'ubuntu-latest' || vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}"
+    steps: []
+`,
+            false,
+        ],
+        [
             "returns true for a plain ubuntu-latest string",
             `
 jobs:
