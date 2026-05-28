@@ -1,5 +1,11 @@
 # fix-workflows
 
+## 3.1.0
+
+### Minor Changes
+
+-   d68907b: Make the 'runs-on' check more permissive, only checking a suffix instead of the whole line
+
 ## 3.0.1
 
 ### Patch Changes
