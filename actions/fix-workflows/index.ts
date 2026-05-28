@@ -44,7 +44,8 @@ function getFilesToCheck(): string[] {
     for (const entry of fs.readdirSync(workflowDir, {withFileTypes: true})) {
         if (
             entry.isFile() &&
-            (entry.name.endsWith(".yml") || entry.name.endsWith(".yaml"))
+            (entry.name.endsWith(".yml") || entry.name.endsWith(".yaml")) &&
+            !entry.name.endsWith(".lock.yml")
         ) {
             files.push(path.join(".github", "workflows", entry.name));
         }

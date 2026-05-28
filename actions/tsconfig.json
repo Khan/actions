@@ -19,6 +19,7 @@
     "check-for-changeset/index.ts",
     "get-changed-files/index.ts",
     "fix-workflows/index.ts",
+    "fix-workflows/cli.ts",
     "../types/**/*.d.ts"
   ],
   "exclude": ["node_modules", "**/dist/**"]
