@@ -51,11 +51,8 @@ runs:
                 MAJOR_VERSION=$(node -p "require('${{ github.action_path }}/package.json').version.split('.')[0]")
                 TAG="fix-workflows-v${MAJOR_VERSION}"
                 ARGS="${{ inputs.fix-runs-on == 'true' && ' --fix-runs-on' || '' }} --setup-action '${{ inputs.setup-action }}'"
-                echo ""
-                echo "::warning::Workflow files need updating. Run the following command locally to fix and format them:"
-                echo ""
-                echo "  pnpm dlx github:Khan/actions#${TAG}${ARGS}"
-                echo ""
-                echo "Files that need to be updated:"
-                git diff --name-only .github/workflows/
+                CMD="pnpm dlx github:Khan/actions#${TAG}${ARGS}"
+                for file in $(git diff --name-only .github/workflows/); do
+                  echo "::warning file=${file}::This file needs updating. Run: ${CMD}"
+                done
               fi
