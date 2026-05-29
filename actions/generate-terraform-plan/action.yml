@@ -44,6 +44,10 @@ inputs:
     description: "Whether to comment on an existing PR with the plan"
     required: false
     default: 'true'
+  comment_extra_text:
+    description: "Additional Markdown text to append to the Terraform plan PR comment"
+    required: false
+    default: ""
   enable_pr_creation:
     description: "Whether to create a new PR with the plan on pushes to the base branch"
     required: false
@@ -55,6 +59,10 @@ inputs:
     description: "The title for the pull request created with the plan"
     required: false
     default: "Terraform Plan Update"
+  pr_extra_text:
+    description: "Additional Markdown text to append to the generated plan pull request body"
+    required: false
+    default: ""
   fallback_reviewers:
     description: "Username(s) to assign as reviewer when github.actor is not appropriate (e.g., for scheduled jobs or bot-triggered runs). Supports comma-separated list: 'user1,user2,user3'"
     required: false
@@ -206,6 +214,8 @@ runs:
           1. Check the plan output above to see what infrastructure changes are proposed
           2. Review the changes in the diff link above to understand what code or configuration changed
           3. If the diff shows no code changes but a Docker image digest changed in the plan, the rebuild was triggered by an upstream update — typically a new version of the base image being republished, or new versions of OS packages installed via the Dockerfile. The daily scheduled rebuild picks these up automatically so the deployed image stays on patched bases. This is expected and safe to merge.' || '' }}
+
+          ${{ inputs.pr_extra_text }}
         add-paths: |
           ${{ inputs.terraform_path }}/${{ inputs.plan_file_binary }}
           ${{ inputs.terraform_path }}/${{ inputs.plan_file_text }}
@@ -233,6 +243,7 @@ runs:
         \`\`\`terraform
         $PLAN
         \`\`\`
+        ${{ inputs.comment_extra_text }}
         EOF
         )
         if [[ -n "$COMMENT_ID" ]]; then
@@ -241,4 +252,4 @@ runs:
         else
           echo "Creating new comment"
           gh pr comment "$PR_NUMBER" --body "$COMMENT_BODY"
-        fi 
+        fi
