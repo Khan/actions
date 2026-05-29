@@ -1,10 +1,14 @@
 {
     "name": "fix-workflows",
     "version": "3.1.0",
+    "bin": {
+        "fix-workflows": "./cli.js"
+    },
     "dependencies": {
         "yaml": "^2.7.0"
     },
     "files": [
-        ".oxfmtrc.json"
+        ".oxfmtrc.json",
+        "cli.js"
     ]
 }
