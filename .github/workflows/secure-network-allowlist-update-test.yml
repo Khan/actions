@@ -1,0 +1,27 @@
+name: Secure Network Allowlist Update Test
+
+on:
+    workflow_dispatch:
+    pull_request:
+
+permissions:
+    contents: read
+
+jobs:
+    test:
+        name: Add allowlist entry after lockdown
+        runs-on: ubuntu-latest
+        steps:
+            - name: Secure network
+              uses: Khan/actions@secure-network-v1
+
+            - name: Add example.com after allowlist lockdown
+              run: |
+                  sudo chattr -i /etc/unbound/allowlist.conf
+                  sudo sh -c 'echo "local-zone: \"example.com\" transparent" >> /etc/unbound/allowlist.conf'
+                  sudo unbound-checkconf /etc/unbound/unbound.conf
+                  sudo pkill -HUP unbound
+                  dig example.com A +short +timeout=5 +retry=1
+
+            - name: Curl example.com
+              run: curl --fail --show-error --location --max-time 20 http://example.com
