@@ -12,8 +12,9 @@ jobs:
         name: Add allowlist entry after lockdown
         runs-on: ubuntu-latest
         steps:
+            - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
             - name: Secure network
-              uses: Khan/actions@secure-network-v1
+              uses: ./actions/secure-network
 
             - name: Add example.com after allowlist lockdown
               run: |
