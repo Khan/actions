@@ -16,6 +16,8 @@ jobs:
             - name: Secure network
               uses: ./actions/secure-network
 
+            - run: curl --show-error --location --max-time 20 http://example.com || echo "rejected"
+
             - name: Add example.com after allowlist lockdown
               run: |
                   sudo chattr -i /etc/unbound/allowlist.conf
