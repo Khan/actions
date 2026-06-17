@@ -23,18 +23,14 @@ on:
   # `if:` condition in the installed copy of this workflow.
   roles: all
 
-# Compile-time frontmatter imports:
-#   - .github/aw/review/config.md (consuming repo) — the consumer's `add-reviewer`
-#     safe output: its repo-specific `allowed-team-reviewers` allowlist and bot token.
-#     This lives ONLY in that file and is intentionally NOT defined here, because gh-aw
-#     lets the main workflow override an imported safe-output of the same type, which
-#     would silently discard the consumer's allowlist.
-#   - Khan/actions/shared/otel.md (this repo) — shared OpenTelemetry (OTLP -> Datadog)
-#     wiring, reused across workflows. NOTE: pinned to a branch ref for now; switch it to
-#     a released ref (e.g. @main) before this lands so consumers resolve a stable commit.
+# Consumer-specific frontmatter is merged in at compile time from the consuming repo via
+# this import: the consumer's `add-reviewer` safe output, with its repo-specific
+# `allowed-team-reviewers` allowlist and bot token. That safe output lives ONLY in that
+# file and is intentionally NOT defined here, because gh-aw lets the main workflow override
+# an imported safe-output of the same type, which would silently discard the consumer's
+# allowlist.
 imports:
   - .github/aw/review/config.md
-  - Khan/actions/shared/otel.md@jeresig/review-workflow
 
 permissions:
   contents: read
@@ -94,6 +90,17 @@ network:
   allowed:
     - defaults
     - github
+    - "otlp.us5.datadoghq.com"
+
+# OpenTelemetry: export the agent's logs/traces to Datadog over OTLP. The Authorization
+# header reads the GH_AW_OTEL_DATADOG_AUTHORIZATION secret/variable, which the consuming
+# repo must provide.
+observability:
+  otlp:
+    endpoint:
+      - url: "https://otlp.us5.datadoghq.com/v1/logs"
+        headers:
+          Authorization: ${{ GH_AW_OTEL_DATADOG_AUTHORIZATION }}
 
 engine: claude
 timeout-minutes: 20
