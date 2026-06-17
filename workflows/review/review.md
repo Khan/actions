@@ -23,14 +23,18 @@ on:
   # `if:` condition in the installed copy of this workflow.
   roles: all
 
-# Consumer-specific frontmatter is merged in at compile time from the
-# consuming repo via this import. In particular the `add-reviewer` safe output —
-# with its repo-specific `allowed-team-reviewers` allowlist and bot token — lives
-# ONLY in that file. It is intentionally NOT defined here: gh-aw lets the main
-# workflow override an imported safe-output of the same type, so defining
-# `add-reviewer` here would silently discard the consumer's team allowlist.
+# Compile-time frontmatter imports:
+#   - .github/aw/review/config.md (consuming repo) — the consumer's `add-reviewer`
+#     safe output: its repo-specific `allowed-team-reviewers` allowlist and bot token.
+#     This lives ONLY in that file and is intentionally NOT defined here, because gh-aw
+#     lets the main workflow override an imported safe-output of the same type, which
+#     would silently discard the consumer's allowlist.
+#   - Khan/actions/shared/otel.md (this repo) — shared OpenTelemetry (OTLP -> Datadog)
+#     wiring, reused across workflows. NOTE: pinned to a branch ref for now; switch it to
+#     a released ref (e.g. @main) before this lands so consumers resolve a stable commit.
 imports:
   - .github/aw/review/config.md
+  - Khan/actions/shared/otel.md@jeresig/review-workflow
 
 permissions:
   contents: read
@@ -46,8 +50,8 @@ tools:
 safe-outputs:
   # Custom footer appended to every posted comment and review, replacing gh-aw's
   # default attribution. Each handler's `footer` field toggles it (default: true),
-  # so the review comments and replies inherit it automatically; `if-body` on the
-  # review keeps a bare approval empty.
+  # so the review comments inherit it automatically; `if-body` on the review keeps a
+  # bare approval empty.
   messages:
     footer: "<sub>Add 👍 or 👎 to help us train our reviewer!</sub>"
   create-pull-request-review-comment:
@@ -60,7 +64,9 @@ safe-outputs:
     # bare approval (empty body, see Step 10) stays completely empty, while a
     # REQUEST_CHANGES review gets the footer.
     footer: "if-body"
-  reply-to-pull-request-review-comment:
+  # Resolve this workflow's own earlier review threads once the issue they raised has
+  # been addressed (Step 7) — we resolve rather than reply, to keep the PR uncluttered.
+  resolve-pull-request-review-thread:
     max: 20
   # On approval, post the high-risk file list and common patterns as a single
   # standalone PR comment (Step 11), separate from the review — the PR body is
@@ -231,33 +237,29 @@ On approval these patterns are posted in a separate PR comment (Step 11) — not
 the review body or the PR description — so human reviewers can understand the bulk
 of the changes without reading every file individually.
 
-## Step 7: Review Previous Comments
+## Step 7: Reconcile This Workflow's Earlier Threads
 
 Before leaving new comments, fetch all existing review threads on this PR using
 `pull_request_read` with method `get_review_comments`.
 
-### Filter to this workflow's threads
+### Only touch this workflow's own threads
 
-Only process threads whose first comment was authored by `github-actions[bot]`.
-Skip every other thread — do not resolve, reply to, or treat them as duplicates
-of issues you might raise this run.
+Only process threads whose first comment was authored by `github-actions[bot]`, and
+only those that are **not already resolved**. Leave every other thread completely
+untouched — do not reply to it, resolve it, or treat it as a duplicate.
 
-### For each matching thread:
+### For each such thread
 
-1. **Check if the issue has been fixed** in the current diff. Compare the
-   comment's file path and line against the current changes.
-2. **If the issue is fixed:** reply to the thread using
-   `reply-to-pull-request-review-comment` with a short message confirming the
-   fix (e.g., "Fixed in the latest push."). Do NOT create a duplicate new
-   comment on the same issue.
-3. **If the issue is partially fixed or still present but the code has changed:**
-   reply to the existing comment using `reply-to-pull-request-review-comment`
-   explaining what changed and what still needs attention. Do NOT create a
-   duplicate new comment on the same issue.
-4. **If the code hasn't changed at all:** leave the existing thread as-is. Do
-   not re-comment on the same issue.
+- **If the issue it raised has been addressed** in the current diff (the flagged code
+  is fixed, removed, or no longer applies), **resolve the thread** with the
+  `resolve-pull-request-review-thread` safe output. Do NOT post a reply — resolving the
+  thread is the only signal you give.
+- **If the issue is still present**, leave the thread as-is. Do NOT reply, and do NOT
+  open a duplicate comment for the same issue in Step 9.
 
-Only create new comments (in Step 9) for issues that have no existing thread.
+Never reply to threads: this workflow communicates only by creating new comments
+(Step 9) and resolving its own threads once they're addressed. Only create new comments
+in Step 9 for issues that have no existing thread.
 
 ## Step 8: Determine the Review Verdict
 
@@ -297,6 +299,11 @@ Use when:
 All review comments MUST use Conventional Comments format
 (https://conventionalcomments.org/). Every comment starts with a label that
 signals intent and urgency.
+
+**Be concise.** Keep every comment as short as it can be while staying clear —
+ideally one or two sentences. State the problem and, when useful, the fix; do not
+restate the code, recap the diff, add preambles or pleasantries, or over-explain. A
+terse, specific comment is far more likely to be read and acted on than a verbose one.
 
 ### Conventional Comments format
 
@@ -375,7 +382,8 @@ Maximum 20 comments. If you would exceed that, prioritize:
 
 ### Formatting rules
 
-- Keep each comment concise — a few sentences maximum
+- Keep each comment concise — one or two sentences; trim anything that isn't the
+  problem or the fix
 - Use code blocks for suggested fixes
 - Do NOT comment on Trivial or Low risk files unless they have an actual issue
 
@@ -390,8 +398,11 @@ The review body is NOT a status update — never say a review is "under way" or
 "completed". All specific feedback lives in the inline comments, and on approval
 the risk summary and common patterns live in a separate PR comment (Step 11).
 
-**If APPROVE:** leave the review body empty. Never write "LGTM" or a summary when
-approving; just approve. Any non-blocking suggestions are already inline.
+**If APPROVE:** the review body MUST be completely empty. Never write "LGTM", a
+summary, a greeting, or any other text, and do not attach a footer — an approving
+review carries no message at all. (Non-blocking inline comments, if any, were already
+left in Step 9; the risk/patterns summary, if any, goes in the separate Step 11
+comment.) Submit the APPROVE event with an empty body.
 
 **If REQUEST_CHANGES:** keep the body to a single line that points at the inline
 comments:
