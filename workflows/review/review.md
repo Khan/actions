@@ -23,7 +23,7 @@ on:
   # `if:` condition in the installed copy of this workflow.
   roles: all
 
-# Frontend/consumer-specific frontmatter is merged in at compile time from the
+# Consumer-specific frontmatter is merged in at compile time from the
 # consuming repo via this import. In particular the `add-reviewer` safe output —
 # with its repo-specific `allowed-team-reviewers` allowlist and bot token — lives
 # ONLY in that file. It is intentionally NOT defined here: gh-aw lets the main
@@ -88,7 +88,6 @@ network:
   allowed:
     - defaults
     - github
-    - node
 
 engine: claude
 timeout-minutes: 20
@@ -184,10 +183,11 @@ Check for:
 
 1. **Logic errors** — off-by-one, wrong conditions, null/undefined access, race
    conditions, incorrect types that pass the type checker.
-2. **Security** — XSS vectors, `dangerouslySetInnerHTML` without sanitization,
-   secrets in code, command injection.
+2. **Security** — injection (SQL/NoSQL, command, or markup/XSS), unsafe
+   deserialization, missing authentication/authorization or input validation,
+   SSRF or path traversal, and secrets committed in code.
 3. **Missing tests** — if the PR adds or modifies behavior but has no test
-   changes, flag it. Exception: pure styling or documentation.
+   changes, flag it. Exception: pure documentation or formatting.
 
 ### What NOT to flag
 
@@ -215,11 +215,11 @@ used to create inline review comments in Step 8.
 Look across all changed files for repetitive patterns — changes that follow the
 same structure across multiple files. Common examples:
 
-- Switching from one component or API to another (e.g., replacing a deprecated
+- Switching from one API or helper to another (e.g., replacing a deprecated
   helper with its modern replacement across many call sites)
 - Bulk import path updates after a file move
-- Adding the same wrapper, prop, or attribute to many components
-- Applying the same styling change across files
+- Adding the same wrapper, parameter, or annotation across many call sites
+- Applying the same mechanical edit across files
 
 For each pattern found:
 1. Count how many files follow this pattern
@@ -329,20 +329,20 @@ Blocking issue:
 ```
 **issue (blocking):** This condition is inverted — `isEnabled` should be
 `!isEnabled` here. The type checker won't catch this because both branches
-return valid JSX.
+are valid.
 ```
 
 Best practice violation:
 ```
-**issue (blocking, best-practice):** State management — subscribing to the whole
-store instead of selecting the slice you read causes unnecessary re-renders. Use a
-selector that returns only the field you need.
+**issue (blocking, best-practice):** Error handling — a failing call here is
+swallowed and treated as success, so callers can't react to the failure. Surface
+the error (return or rethrow it) instead of defaulting silently.
 ```
 
 Non-blocking suggestion:
 ```
-**suggestion (non-blocking):** Consider extracting this into a named selector
-hook for reuse across components.
+**suggestion (non-blocking):** Consider extracting this into a shared helper so
+the other call sites can reuse it.
 ```
 
 ### What to comment on
@@ -449,11 +449,11 @@ common-patterns section. Omit whichever is empty.
 ## Review Guidance
 
 <details>
-<summary><strong>platform-web</strong> (2 files)</summary>
+<summary><strong>platform</strong> (2 files)</summary>
 
 | File | Reason |
 | --- | --- |
-| [`button.tsx`](https://github.com/your-org/your-repo/pull/123/changes#diff-<sha256-of-the-file-path>) | Shared button imported by many apps; the changed click handling affects every consumer. |
+| [`auth-client.ts`](https://github.com/your-org/your-repo/pull/123/changes#diff-<sha256-of-the-file-path>) | Shared client used by many services; the changed retry logic affects every caller. |
 | [`config.ts`](https://github.com/your-org/your-repo/pull/123/changes#diff-<sha256-of-the-file-path>) | Adds an exported config value other packages read at startup. |
 
 </details>
@@ -463,7 +463,7 @@ common-patterns section. Omit whichever is empty.
 
 | File | Reason |
 | --- | --- |
-| [`scorer.ts`](https://github.com/your-org/your-repo/pull/123/changes#diff-<sha256-of-the-file-path>) | Scoring logic changed without an accompanying test update. |
+| [`scorer.py`](https://github.com/your-org/your-repo/pull/123/changes#diff-<sha256-of-the-file-path>) | Scoring logic changed without an accompanying test update. |
 
 </details>
 
@@ -472,8 +472,8 @@ common-patterns section. Omit whichever is empty.
 **8 files:** Replaced the deprecated `formatLegacy()` helper with `formatModern()`.
 
 ```diff
-- const label = formatLegacy(value);
-+ const label = formatModern(value, {style: "short"});
+- label = formatLegacy(value)
++ label = formatModern(value, {style: "short"})
 ```
 ````
 
@@ -482,7 +482,7 @@ common-patterns section. Omit whichever is empty.
   `<details>` block. The `<summary>` must use literal HTML — Markdown is not
   processed inside `<summary>` — and contains the team's bare slug wrapped in
   `<strong>…</strong>` followed by a plain file count, e.g.
-  `<summary><strong>platform-web</strong> (2 files)</summary>` (use
+  `<summary><strong>platform</strong> (2 files)</summary>` (use
   `(1 file)` for a single file). Use the bare slug only (the part after the org
   prefix, lowercased) with no leading `@` and no backticks: a leading `@` makes
   GitHub autolink it as a team mention and re-ping the team on every repost, and
@@ -495,7 +495,7 @@ common-patterns section. Omit whichever is empty.
 - Inside each block, render that team's risky files as a two-column Markdown table
   with the header row `| File | Reason |`. The first column is a Markdown link to
   the file whose text is the file's base name (the part after the last `/`, in
-  backticks, e.g. `button.tsx`); the second column is a single short sentence on why
+  backticks, e.g. `config.ts`); the second column is a single short sentence on why
   that file is risky. Do not use any emoji or risk icons anywhere in the table.
   Point each link at the file in the PR's "Files changed" (review) view:
   `https://github.com/<repo>/pull/<number>/changes#diff-<hash>`, using the repository
