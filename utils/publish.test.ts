@@ -23,6 +23,7 @@ import {
     lookupPublishedActionRef,
     publishAsNeeded,
     publishDirectoryAsTags,
+    publishWorkflowsAsNeeded,
     topologicallySortActions,
 } from "./publish.ts";
 
@@ -671,6 +672,143 @@ describe("publish", () => {
 
             // Assert
             await expect(underTest).rejects.toThrow("exit:1");
+        });
+    });
+
+    describe("publishWorkflowsAsNeeded", () => {
+        it("tags the current commit and force-moves the major tag for a new version", () => {
+            // Arrange
+            vol.fromJSON({
+                "workflows/review/package.json": JSON.stringify({
+                    name: "review",
+                    version: "1.2.3",
+                }),
+            });
+            execSyncMock.mockImplementation((cmd: string) => {
+                if (cmd.startsWith("git show-ref --tags ")) {
+                    throw new Error("missing tag");
+                }
+                return "";
+            });
+
+            // Act
+            publishWorkflowsAsNeeded(["review"], false);
+
+            // Assert
+            const cmds = execSyncMock.mock.calls.map(([cmd]) => cmd);
+            expect(cmds).toEqual(
+                expect.arrayContaining([
+                    "git tag review-v1.2.3",
+                    "git tag -f review-v1",
+                    "git push origin refs/tags/review-v1.2.3",
+                    "git push origin refs/tags/review-v1 --force",
+                ]),
+            );
+        });
+
+        it("skips publishing when the exact-version tag already exists", () => {
+            // Arrange
+            vol.fromJSON({
+                "workflows/review/package.json": JSON.stringify({
+                    name: "review",
+                    version: "1.2.3",
+                }),
+            });
+            // show-ref succeeds (returns ""), so the tag is considered to exist.
+            execSyncMock.mockReturnValue("");
+
+            // Act
+            publishWorkflowsAsNeeded(["review"], false);
+
+            // Assert
+            const cmds = execSyncMock.mock.calls.map(([cmd]) => cmd);
+            expect(cmds).toContainNone([
+                "git tag review-v1.2.3",
+                "git push origin refs/tags/review-v1.2.3",
+            ]);
+        });
+
+        it("does not tag or push on a dry run", () => {
+            // Arrange
+            vol.fromJSON({
+                "workflows/review/package.json": JSON.stringify({
+                    name: "review",
+                    version: "1.2.3",
+                }),
+            });
+            execSyncMock.mockImplementation((cmd: string) => {
+                if (cmd.startsWith("git show-ref --tags ")) {
+                    throw new Error("missing tag");
+                }
+                return "";
+            });
+
+            // Act
+            publishWorkflowsAsNeeded(["review"], true);
+
+            // Assert
+            const cmds = execSyncMock.mock.calls.map(([cmd]) => cmd);
+            expect(
+                cmds.some(
+                    (cmd: string) =>
+                        cmd.startsWith("git push") || cmd.startsWith("git tag"),
+                ),
+            ).toBe(false);
+        });
+
+        it("calls process.exit(1) when a tag push fails", () => {
+            // Arrange
+            vol.fromJSON({
+                "workflows/review/package.json": JSON.stringify({
+                    name: "review",
+                    version: "1.2.3",
+                }),
+            });
+            execSyncMock.mockImplementation((cmd: string) => {
+                if (cmd.startsWith("git show-ref --tags ")) {
+                    throw new Error("missing tag");
+                }
+                if (cmd === "git push origin refs/tags/review-v1.2.3") {
+                    throw new Error("push failed");
+                }
+                return "";
+            });
+            vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+                throw new Error(`exit:${code}`);
+            }) as never);
+
+            // Act / Assert
+            expect(() => publishWorkflowsAsNeeded(["review"], false)).toThrow(
+                "exit:1",
+            );
+        });
+
+        it("is a no-op when there are no workflow packages", () => {
+            // Act
+            publishWorkflowsAsNeeded([], false);
+
+            // Assert
+            expect(execSyncMock.mock.calls.length).toBe(0);
+        });
+
+        it("throws when the package.json has no version", () => {
+            // Arrange
+            vol.fromJSON({
+                "workflows/review/package.json": JSON.stringify({
+                    name: "review",
+                }),
+            });
+            execSyncMock.mockImplementation((cmd: string) => {
+                if (cmd.startsWith("git show-ref --tags ")) {
+                    throw new Error("missing tag");
+                }
+                return "";
+            });
+
+            // Act / Assert
+            expect(() => publishWorkflowsAsNeeded(["review"], false)).toThrow(
+                /No version found/,
+            );
         });
     });
 });
