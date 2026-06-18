@@ -19,9 +19,16 @@ on:
   # collaborator pushing to a PR they didn't open still triggers the review (the
   # gate otherwise blocks `synchronize` when the pusher != the PR author). This is
   # safe in a private repo where "all" is effectively any trusted collaborator;
-  # exclude forks (and any automated branches you don't want reviewed) with an
-  # `if:` condition in the installed copy of this workflow.
+  # forks and automated branches are excluded by the `if:` condition below.
   roles: all
+
+# Skip automated deploy PRs (`deploy/*`) and the changeset release PR — branch conventions
+# shared across the repos this workflow runs in. Everything else is reviewed, including
+# pushes from our bots (`khan-actions-bot` and `github-actions[bot]`), since even automated
+# commits can carry real code changes worth reviewing.
+if: >-
+  !startsWith(github.event.pull_request.head.ref, 'deploy/') &&
+  github.event.pull_request.head.ref != 'changeset-release/main'
 
 # Consumer-specific frontmatter is merged in at compile time from the consuming repo via
 # this import: the consumer's `add-reviewer` safe output, with its repo-specific
@@ -60,6 +67,12 @@ safe-outputs:
     # bare approval (empty body, see Step 10) stays completely empty, while a
     # REQUEST_CHANGES review gets the footer.
     footer: "if-body"
+  # Resolve this workflow's own earlier review threads once their issue is addressed
+  # (Step 7), instead of replying. Uses the bot token because the default GITHUB_TOKEN
+  # can return "Resource not accessible by integration" resolving bot-authored threads.
+  resolve-pull-request-review-thread:
+    max: 20
+    github-token: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
   # On approval, post the high-risk file list and common patterns as a single
   # standalone PR comment (Step 11), separate from the review — the PR body is
   # never touched. Because this workflow runs on every push, it must stay
@@ -78,12 +91,10 @@ safe-outputs:
     discussions: false
     hide-older-comments: true
     footer: true
-  # NOTE: `add-reviewer` and `resolve-pull-request-review-thread` are intentionally
-  # defined only in the imported .github/aw/review/config.md (see the `imports:` note
-  # above): both write to PRs using the consuming repo's bot token — the default
-  # GITHUB_TOKEN can't request org-team reviewers, and can return "Resource not
-  # accessible by integration" when resolving bot-authored threads. Defining either here
-  # would override the import and drop that config (allowlist / token).
+  # NOTE: `add-reviewer` is intentionally defined only in the imported
+  # .github/aw/review/config.md (see the `imports:` note above), because its
+  # `allowed-team-reviewers` allowlist is repo-specific. Defining it here would override
+  # the import and drop the consumer's allowlist.
 
 network:
   allowed:
