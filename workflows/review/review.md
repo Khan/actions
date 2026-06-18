@@ -103,14 +103,14 @@ network:
     - "otlp.us5.datadoghq.com"
 
 # OpenTelemetry: export the agent's logs/traces to Datadog over OTLP. The Authorization
-# header reads the GH_AW_OTEL_DATADOG_AUTHORIZATION secret/variable, which the consuming
-# repo must provide.
+# header reads the GH_AW_OTEL_DATADOG_AUTHORIZATION secret, which the consuming repo must
+# provide (Settings → Secrets and variables → Actions).
 observability:
   otlp:
     endpoint:
       - url: "https://otlp.us5.datadoghq.com/v1/logs"
         headers:
-          Authorization: ${{ GH_AW_OTEL_DATADOG_AUTHORIZATION }}
+          Authorization: ${{ secrets.GH_AW_OTEL_DATADOG_AUTHORIZATION }}
 
 engine: claude
 timeout-minutes: 20
