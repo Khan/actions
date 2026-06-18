@@ -185,7 +185,7 @@ Assign exactly one risk level to every file in the diff. The repository-specific
 file patterns for each level are provided below; if no patterns are provided, use
 your judgment based on the four-tier model (High, Medium, Low, Trivial).
 
-{{#runtime-import? aw/review/risk-classification.md}}
+{{#runtime-import? .github/aw/review/risk-classification.md}}
 
 ### Disambiguation
 
@@ -217,7 +217,7 @@ Check for:
 Do not flag issues that this repository's CI and tooling already catch. The
 repository-specific list of these is provided below:
 
-{{#runtime-import? aw/review/ci-tooling.md}}
+{{#runtime-import? .github/aw/review/ci-tooling.md}}
 
 ## Step 5: Review Against Best Practice Skills
 
@@ -231,7 +231,7 @@ reading the file entirely.
 For each relevant skill, note any violations found. These violations will be
 used to create inline review comments in Step 8.
 
-{{#runtime-import? aw/review/skills.md}}
+{{#runtime-import? .github/aw/review/skills.md}}
 
 ## Step 6: Identify Common Patterns
 
