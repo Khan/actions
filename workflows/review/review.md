@@ -51,14 +51,13 @@ tools:
     toolsets: [pull_requests, repos]
 
 safe-outputs:
-  # No auto-footer on posted comments: every comment/review handler sets
-  # `footer: false`, which drops gh-aw's attribution block — including the
-  # "Add this agentic workflow to your repo" install snippet (built from the `source:`
-  # field in installed copies). The hidden workflow-id markers are still emitted.
+  # gh-aw's comment footer — its attribution block, including the "Add this agentic
+  # workflow to your repo" install snippet (built from `source:`) — is disabled via
+  # `footer: false` on the review and the risk/patterns comment below. Inline review
+  # comments have no footer. The hidden workflow-id markers are still emitted.
   create-pull-request-review-comment:
     max: 20
     side: "RIGHT"
-    footer: false
   submit-pull-request-review:
     max: 1
     allowed-events: [APPROVE, REQUEST_CHANGES]
