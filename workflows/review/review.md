@@ -60,10 +60,6 @@ safe-outputs:
     # bare approval (empty body, see Step 10) stays completely empty, while a
     # REQUEST_CHANGES review gets the footer.
     footer: "if-body"
-  # Resolve this workflow's own earlier review threads once the issue they raised has
-  # been addressed (Step 7) — we resolve rather than reply, to keep the PR uncluttered.
-  resolve-pull-request-review-thread:
-    max: 20
   # On approval, post the high-risk file list and common patterns as a single
   # standalone PR comment (Step 11), separate from the review — the PR body is
   # never touched. Because this workflow runs on every push, it must stay
@@ -82,9 +78,12 @@ safe-outputs:
     discussions: false
     hide-older-comments: true
     footer: true
-  # NOTE: `add-reviewer` is intentionally defined only in the imported
-  # .github/aw/review/config.md (see the `imports:` note above), so the consuming
-  # repo owns its team allowlist and bot token.
+  # NOTE: `add-reviewer` and `resolve-pull-request-review-thread` are intentionally
+  # defined only in the imported .github/aw/review/config.md (see the `imports:` note
+  # above): both write to PRs using the consuming repo's bot token — the default
+  # GITHUB_TOKEN can't request org-team reviewers, and can return "Resource not
+  # accessible by integration" when resolving bot-authored threads. Defining either here
+  # would override the import and drop that config (allowlist / token).
 
 network:
   allowed:
