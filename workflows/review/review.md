@@ -51,22 +51,18 @@ tools:
     toolsets: [pull_requests, repos]
 
 safe-outputs:
-  # Custom footer appended to every posted comment and review, replacing gh-aw's
-  # default attribution. Each handler's `footer` field toggles it (default: true),
-  # so the review comments inherit it automatically; `if-body` on the review keeps a
-  # bare approval empty.
-  messages:
-    footer: "<sub>Add 👍 or 👎 to help us train our reviewer!</sub>"
+  # No auto-footer on posted comments: every comment/review handler sets
+  # `footer: false`, which drops gh-aw's attribution block — including the
+  # "Add this agentic workflow to your repo" install snippet (built from the `source:`
+  # field in installed copies). The hidden workflow-id markers are still emitted.
   create-pull-request-review-comment:
     max: 20
     side: "RIGHT"
+    footer: false
   submit-pull-request-review:
     max: 1
     allowed-events: [APPROVE, REQUEST_CHANGES]
-    # `if-body` appends the global footer only when the review has body text, so a
-    # bare approval (empty body, see Step 10) stays completely empty, while a
-    # REQUEST_CHANGES review gets the footer.
-    footer: "if-body"
+    footer: false
   # Resolve this workflow's own earlier review threads once their issue is addressed
   # (Step 7), instead of replying. Uses the bot token because the default GITHUB_TOKEN
   # can return "Resource not accessible by integration" resolving bot-authored threads.
@@ -81,16 +77,15 @@ safe-outputs:
   # latest stays visible. The agent posts only when there are risks/patterns and
   # skips reposting when they are unchanged (Step 11), so the comment is
   # effectively created or refreshed in place. `discussions: false` keeps this
-  # least-privilege (PRs only — no discussions:write needed). `footer: true` shows
-  # the global feedback footer (`messages.footer` replaces gh-aw's default
-  # attribution); the hidden XML marker is emitted regardless, so
+  # least-privilege (PRs only — no discussions:write needed). `footer: false` drops
+  # gh-aw's attribution footer; the hidden XML marker is emitted regardless, so
   # `hide-older-comments` can still find and collapse this workflow's prior comment.
   add-comment:
     target: "triggering"
     max: 1
     discussions: false
     hide-older-comments: true
-    footer: true
+    footer: false
   # NOTE: `add-reviewer` is intentionally defined only in the imported
   # .github/aw/review/config.md (see the `imports:` note above), because its
   # `allowed-team-reviewers` allowlist is repo-specific. Defining it here would override
@@ -632,6 +627,5 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
 - When summarizing risk in the risks/patterns comment, be informative: "this file
   is imported by N apps, so changes need careful testing" — not alarming.
 - No sarcasm, condescension, or excessive praise.
-- No emoji in comments. (A 👍/👎 feedback footer is appended automatically to every
-  posted comment — do not add it yourself.)
+- No emoji in comments.
 - Comment on code, not people. Critique the work, not the author.
