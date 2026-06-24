@@ -97,14 +97,15 @@ network:
     - "otlp.us5.datadoghq.com"
 
 # OpenTelemetry: export the agent's run traces to Datadog over OTLP. Datadog's OTLP intake
-# authenticates with the `DD-API-KEY` header (a plain `Authorization` header returns 403),
-# and OTLP spans go to the `/v1/traces` signal endpoint (`/v1/logs` rejects span payloads).
-# The key is the GH_AW_OTEL_DATADOG_AUTHORIZATION secret, which the consuming repo must
-# provide (Settings → Secrets and variables → Actions).
+# authenticates with the `DD-API-KEY` header (a plain `Authorization` header returns 403).
+# The endpoint URL must be the bare host with NO signal path: gh-aw's exporter appends
+# `/v1/traces` itself, so a URL already ending in `/v1/traces` POSTs to the doubled path
+# `/v1/traces/v1/traces` and returns 404. The key is the GH_AW_OTEL_DATADOG_AUTHORIZATION
+# secret, which the consuming repo must provide (Settings → Secrets and variables → Actions).
 observability:
   otlp:
     endpoint:
-      - url: "https://otlp.us5.datadoghq.com/v1/traces"
+      - url: "https://otlp.us5.datadoghq.com"
         headers:
           DD-API-KEY: ${{ secrets.GH_AW_OTEL_DATADOG_AUTHORIZATION }}
 
