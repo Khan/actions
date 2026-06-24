@@ -777,13 +777,16 @@ describe("publish", () => {
                 throw new Error(`exit:${code}`);
             }) as never);
 
-            // Act / Assert
-            expect(() => publishWorkflowsAsNeeded(["review"], false)).toThrow(
-                "exit:1",
-            );
+            // Act
+            const act = () => publishWorkflowsAsNeeded(["review"], false);
+
+            // Assert
+            expect(act).toThrow("exit:1");
         });
 
         it("is a no-op when there are no workflow packages", () => {
+            // Arrange
+
             // Act
             publishWorkflowsAsNeeded([], false);
 
@@ -805,10 +808,11 @@ describe("publish", () => {
                 return "";
             });
 
-            // Act / Assert
-            expect(() => publishWorkflowsAsNeeded(["review"], false)).toThrow(
-                /No version found/,
-            );
+            // Act
+            const act = () => publishWorkflowsAsNeeded(["review"], false);
+
+            // Assert
+            expect(act).toThrow(/No version found/);
         });
     });
 });

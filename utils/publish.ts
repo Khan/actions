@@ -474,6 +474,88 @@ export const publishAsNeeded = async (
 };
 
 /**
+ * Run a sequence of shell commands in order, stopping at the first failure.
+ *
+ * Each command is echoed, skipped when `dryRun` is set, and executed otherwise.
+ * Lives at module scope so the caller can bind its result to a `const` instead
+ * of mutating a success flag inside the loop.
+ *
+ * @param cmds The commands to run, in order.
+ * @param dryRun When true, log each command without executing it.
+ * @returns True if every command succeeded (or was skipped in a dry run); false
+ * as soon as one throws.
+ */
+const runCommands = (cmds: string[], dryRun: boolean): boolean => {
+    for (const cmd of cmds) {
+        console.log(`  >> ${cmd}`);
+        if (dryRun) {
+            continue;
+        }
+        try {
+            execSync(cmd);
+        } catch {
+            console.log(`Command ${cmd} failed :(`);
+            return false;
+        }
+    }
+    return true;
+};
+
+/**
+ * Publish a single workflow package as git tags on the current commit, if needed.
+ *
+ * @param name Directory name under `workflows/`.
+ * @param dryRun When true, log the git commands without running them.
+ * @param force When true, (re)publish even if the exact-version tag already exists.
+ * @returns True if the workflow was published or already up to date; false if a
+ * publish command failed.
+ * @throws If the workflow's `package.json` has no version.
+ */
+const publishWorkflow = (
+    name: string,
+    dryRun: boolean,
+    force: boolean,
+): boolean => {
+    console.log(`Processing workflow ${name}...`);
+    const pkgPath = `workflows/${name}/package.json`;
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as PackageJsonLike;
+    if (!pkg.version) {
+        throw new Error(`No version found in ${pkgPath}`);
+    }
+
+    const version = pkg.version;
+    const tag = `${name}-v${version}`;
+    const majorVersion = version.split(".")[0];
+    const majorTag = majorVersion ? `${name}-v${majorVersion}` : null;
+
+    if (checkTag(tag) && !force) {
+        console.log(`  Version ${tag} already exists. Nothing to do.`);
+        console.log();
+        return true;
+    }
+
+    console.log(`  Publishing ${tag}`);
+    // Tag the current commit (the real repo tree), so that
+    // `gh aw add .../workflows/${name}/...@${tag}` resolves the nested path.
+    const cmds = [
+        `git tag ${tag}`,
+        majorTag ? `git tag -f ${majorTag}` : null,
+        `git push origin refs/tags/${tag}`,
+        majorTag ? `git push origin refs/tags/${majorTag} --force` : null,
+    ].filter((value): value is string => Boolean(value));
+
+    const published = runCommands(cmds, dryRun);
+
+    if (published) {
+        console.log(`🏁  Finished publishing ${tag}`);
+    } else {
+        console.log(`🚨  Failed to publish ${tag}`);
+    }
+    console.log();
+    return published;
+};
+
+/**
  * Publish workflow packages (under `workflows/`) as git tags on the current commit.
  *
  * Unlike actions — which are republished as tree-rewritten bare commits so their
@@ -500,62 +582,10 @@ export const publishWorkflowsAsNeeded = (
     // Refresh tags so `checkTag` (which reads local tags) sees what's published.
     execSync(`git fetch --tags -f`);
 
-    let failed = false;
-
-    for (const name of workflowNames) {
-        console.log(`Processing workflow ${name}...`);
-        const pkgPath = `workflows/${name}/package.json`;
-        const pkg = JSON.parse(
-            fs.readFileSync(pkgPath, "utf8"),
-        ) as PackageJsonLike;
-        if (!pkg.version) {
-            throw new Error(`No version found in ${pkgPath}`);
-        }
-
-        const version = pkg.version;
-        const tag = `${name}-v${version}`;
-        const majorVersion = version.split(".")[0];
-        const majorTag = majorVersion ? `${name}-v${majorVersion}` : null;
-
-        if (checkTag(tag) && !force) {
-            console.log(`  Version ${tag} already exists. Nothing to do.`);
-            console.log();
-            continue;
-        }
-
-        console.log(`  Publishing ${tag}`);
-        // Tag the current commit (the real repo tree), so that
-        // `gh aw add .../workflows/${name}/...@${tag}` resolves the nested path.
-        const cmds = [
-            `git tag ${tag}`,
-            majorTag ? `git tag -f ${majorTag}` : null,
-            `git push origin refs/tags/${tag}`,
-            majorTag ? `git push origin refs/tags/${majorTag} --force` : null,
-        ].filter((value): value is string => Boolean(value));
-
-        let published = true;
-        for (const cmd of cmds) {
-            console.log(`  >> ${cmd}`);
-            if (dryRun) {
-                continue;
-            }
-            try {
-                execSync(cmd);
-            } catch {
-                console.log(`Command ${cmd} failed :(`);
-                published = false;
-                break;
-            }
-        }
-
-        if (published) {
-            console.log(`🏁  Finished publishing ${tag}`);
-        } else {
-            console.log(`🚨  Failed to publish ${tag}`);
-            failed = true;
-        }
-        console.log();
-    }
+    const results = workflowNames.map((name) =>
+        publishWorkflow(name, dryRun, force),
+    );
+    const failed = results.some((published) => !published);
 
     if (failed) {
         process.exit(1);
