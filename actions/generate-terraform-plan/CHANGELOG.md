@@ -1,5 +1,11 @@
 # generate-terraform-plan
 
+## 2.3.0
+
+### Minor Changes
+
+-   0ff5a32: Add optional extra Markdown inputs to the Terraform plan action comment & pr description
+
 ## 2.2.5
 
 ### Patch Changes
