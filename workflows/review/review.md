@@ -94,20 +94,22 @@ network:
   allowed:
     - defaults
     - github
-    - "otlp.us5.datadoghq.com"
+    - "*.sentry.io"
 
-# OpenTelemetry: export the agent's run traces to Datadog over OTLP. Datadog's OTLP intake
-# authenticates with the `DD-API-KEY` header (a plain `Authorization` header returns 403).
-# The endpoint URL must be the bare host with NO signal path: gh-aw's exporter appends
-# `/v1/traces` itself, so a URL already ending in `/v1/traces` POSTs to the doubled path
-# `/v1/traces/v1/traces` and returns 404. The key is the GH_AW_OTEL_DATADOG_AUTHORIZATION
-# secret, which the consuming repo must provide (Settings → Secrets and variables → Actions).
+# OpenTelemetry: export the agent's run traces to Sentry over OTLP. Sentry's OTLP intake
+# authenticates with the `x-sentry-auth` header (value `sentry sentry_key=<public-key>`).
+# The endpoint URL must omit the `/v1/traces` signal path: gh-aw's exporter appends it
+# itself, so a URL already ending in `/v1/traces` POSTs to the doubled path
+# `/v1/traces/v1/traces` and returns 404. The consuming repo provides two secrets
+# (Settings → Secrets and variables → Actions): GH_AW_OTEL_SENTRY_ENDPOINT — the Sentry
+# OTLP traces endpoint with `/v1/traces` stripped (…/api/<project>/integration/otlp) — and
+# GH_AW_OTEL_SENTRY_AUTHORIZATION — the `sentry sentry_key=<public-key>` header value.
 observability:
   otlp:
     endpoint:
-      - url: "https://otlp.us5.datadoghq.com"
+      - url: ${{ secrets.GH_AW_OTEL_SENTRY_ENDPOINT }}
         headers:
-          DD-API-KEY: ${{ secrets.GH_AW_OTEL_DATADOG_AUTHORIZATION }}
+          x-sentry-auth: ${{ secrets.GH_AW_OTEL_SENTRY_AUTHORIZATION }}
 
 engine: claude
 timeout-minutes: 20
