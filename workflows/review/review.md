@@ -608,6 +608,9 @@ Read from disk:
 - The diff: `/tmp/gh-aw/review/pr.diff`. The file list: `/tmp/gh-aw/review/review-files.json`.
 - For surrounding context, read any changed or related file directly from the checkout.
 
+Read **every line** of the diff you are given — this review must be comprehensive; do
+not skim or sample.
+
 Do two things in one pass over the files in the list:
 1. **Risk** — assign exactly one level (High, Medium, Low, Trivial) to every file,
    using the risk tiers below. Highest applicable level wins; if the PR description
@@ -649,6 +652,9 @@ access** — read the diff from disk and return JSON only.
 Read from disk:
 - The diff: `/tmp/gh-aw/review/pr.diff`; the file list: `/tmp/gh-aw/review/review-files.json`.
 
+Read **every line** of the diff you are given — this review must be comprehensive; do
+not skim or sample.
+
 Using the skills index below (each entry names a skill, its file path, and its
 relevance criteria):
 1. Decide which skills are relevant to the files. Skip the rest entirely.
@@ -682,6 +688,10 @@ Read from disk:
 - The diff: `/tmp/gh-aw/review/full.diff`. The changed-file list:
   `/tmp/gh-aw/review/files.json` (each file's `path` and `status`).
 - `.gitattributes`, to identify generated files.
+
+Read **every line** of the diff you are given — this review must be comprehensive; do
+not skim or sample. Your triage decides what the other reviewers see, so any file you
+wrongly classify (or skip) is never reviewed at all.
 
 Do two things:
 1. **Patterns** — find repetitive patterns: the same structural change repeated
