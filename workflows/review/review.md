@@ -193,11 +193,13 @@ GitHub call and every safe-output write. Run them in two phases.
 **Phase 1 — triage (first, alone).** Dispatch **`pattern-triage`**. It returns
 `patterns[]` (common cross-file change patterns; on approval they go in the
 risk/patterns comment, Step 7) and `reviewFiles` (the files that need a real review —
-it has already dropped generated, formatting-only, and pattern-only files). Then write
-`/tmp/gh-aw/review/pr.diff` (the patches of the `reviewFiles`) and
-`/tmp/gh-aw/review/review-files.json` (the `reviewFiles` list) — that is what the
-Phase 2 sub-agents read. If `reviewFiles` is empty, skip the correctness and skills
-work below but still report any patterns (Step 7).
+it has already dropped generated, formatting-only, and pattern-only files). Then write,
+under `/tmp/gh-aw/review/`: `pr.diff` (the patches of the `reviewFiles`) and
+`review-files.json` (the `reviewFiles` list), which the correctness and skills reviewers
+read; and `owned-files.json` — the `reviewFiles` **plus** every file covered by a
+pattern (i.e. all substantive changes, with generated and formatting-only files
+excluded) — which `reviewer-mapper` reads. If `reviewFiles` is empty, skip the
+correctness and skills work below but still report any patterns (Step 7).
 
 **Phase 2 — review (in parallel).** First fetch existing review threads
 (`pull_request_read` `get_review_comments`) and write the unresolved
@@ -211,10 +213,10 @@ these in parallel** (one turn) and wait for all:
   and the inline comments (Step 5).
 - **`skill-auditor`** — returns `violations[]` (best-practice skill breaches, all
   blocking). Use them for the verdict (Step 4) and the inline comments (Step 5).
-- **`reviewer-mapper`** — maps every changed file to its owning team(s) and returns
-  `owners` (`{path: [team, …]}`) plus `fallbackTeams` (teams ranked by how much of the
-  change they own). Step 7 and Step 8's risk routing use `owners`; Step 8's fallback
-  uses `fallbackTeams`.
+- **`reviewer-mapper`** — maps the substantive changes (`owned-files.json`) to their
+  owning team(s) and returns `owners` (`{path: [team, …]}`) plus `fallbackTeams` (those
+  teams ranked by how many of those files they own). Step 7 and Step 8's risk routing
+  use `owners`; Step 8's fallback uses `fallbackTeams`.
 - **`thread-reconciler`** — returns `{resolve: [...], keep: [...]}` over the threads
   you staged. Resolve each `thread_id` in `resolve` with the
   `resolve-pull-request-review-thread` safe output (yours to do — sub-agents cannot);
@@ -224,9 +226,8 @@ these in parallel** (one turn) and wait for all:
 Parse each sub-agent's JSON and keep only the compact result. If a sub-agent's output
 is missing or unparseable, do **not** try to reproduce its analysis yourself — you no
 longer hold its repo-specific config (risk tiers, the CI-tooling list, the skills
-index). Skip that dimension and add a one-line note to the review flagging that it was
-not assessed this run (allowed even on an otherwise-empty approving review), so the
-gap is visible to a human.
+index). Skip that dimension and surface the gap with the skipped-dimension note
+defined in Step 6, so a human can see it was not assessed this run.
 
 ## Step 4: Determine the Review Verdict
 
@@ -381,6 +382,11 @@ depends on whether you left any inline comments:
   returns 422 for a contentless review), so an empty body is valid only when inline
   comments exist. Do **not** invent an inline comment just to satisfy this rule, and
   do **not** substitute any other wording.
+- **If a dimension was skipped this run** because a sub-agent's output was unavailable
+  (Step 3), set the body to `Approved — no blocking issues found.` followed by one line
+  per skipped dimension in the exact form `Note: <dimension> not assessed this run
+  (<sub-agent> output unavailable).` — even when you also left inline comments. This
+  skipped-dimension note is the only text permitted beyond the two cases above.
 
 **If REQUEST_CHANGES:** keep the body to a single line that points at the inline
 comments:
@@ -547,8 +553,9 @@ non-bot reviews submitted), pull in one team from `reviewer-mapper`'s `fallbackT
 (Step 3) — the teams owning the largest share of the **whole** change (not just the
 reviewed subset), already ranked most-first. Request the first entry that survives the
 same do-not-request filters as above (already requested, already reviewed, or in
-`requestedTeams`). This guarantees at least one human is pulled in for an additional
-review. If the PR already has a human or team reviewer, request no one.
+`requestedTeams`) **and** appears in the `allowed-team-reviewers` allowlist. This pulls
+in a human from the team owning most of the change whenever an eligible team exists. If
+the PR already has a human or team reviewer, request no one.
 
 Only request teams that appear in the `allowed-team-reviewers` allowlist in this
 workflow's frontmatter; skip any relevant team that is not on that list.
@@ -725,8 +732,8 @@ You map files to their owning teams. You have **no GitHub access**; read from di
 and return JSON only.
 
 Read from disk:
-- The full changed-file list: `/tmp/gh-aw/review/files.json` (every changed file, not
-  just the reviewed subset).
+- The substantive changed files: `/tmp/gh-aw/review/owned-files.json` (the files that
+  represent real change — generated and formatting-only files are already excluded).
 - The ownership rules: `.github/REVIEWERS`.
 
 For each file in the list, find its owning team(s) by matching its path against the
@@ -736,8 +743,8 @@ ignored. A team slug is the part after the org prefix, lowercased (e.g.
 `@Khan/Teacher-Experience` → `teacher-experience`). A file with no matching pattern
 gets an empty list.
 
-Then rank the teams by how many of the changed files each owns, most first — this is
-the fallback order for pulling in a reviewer when nothing else qualifies.
+Then rank the teams by how many of these files each owns, most first — this is the
+fallback order for pulling in a reviewer when nothing else qualifies.
 
 Return ONLY this JSON object (no prose, no code fence):
 {

@@ -18,10 +18,10 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
 1. **`pattern-triage`** finds common cross-file patterns and narrows the diff to the
    files that need a real review — dropping generated, formatting-only, and
    pattern-only changes.
-2. Then, in parallel, **`correctness-reviewer`** (risk level + correctness),
-   **`skill-auditor`** (best-practice skills), and **`reviewer-mapper`** (file → owning
-   team) review that narrowed set, plus a reconciler that resolves earlier bot threads
-   the changes have addressed.
+2. Then, in parallel, **`correctness-reviewer`** (risk level + correctness) and
+   **`skill-auditor`** (best-practice skills) review that narrowed set, while
+   **`reviewer-mapper`** maps the substantive changes to their owning teams for reviewer
+   routing, plus a reconciler that resolves earlier bot threads the changes have addressed.
 
 The workflow then posts per-line Conventional Comments, submits an approve /
 request-changes review, and on approval posts the risk/patterns summary and requests
