@@ -222,7 +222,11 @@ these in parallel** (one turn) and wait for all:
   Step 5.
 
 Parse each sub-agent's JSON and keep only the compact result. If a sub-agent's output
-is missing or unparseable, do that step's analysis yourself.
+is missing or unparseable, do **not** try to reproduce its analysis yourself — you no
+longer hold its repo-specific config (risk tiers, the CI-tooling list, the skills
+index). Skip that dimension and add a one-line note to the review flagging that it was
+not assessed this run (allowed even on an otherwise-empty approving review), so the
+gap is visible to a human.
 
 ## Step 4: Determine the Review Verdict
 
@@ -595,7 +599,7 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
 ## agent: `correctness-reviewer`
 ---
 description: Classifies each changed file's risk and reviews the diff for correctness defects; returns JSON.
-model: large
+model: opus
 ---
 You are a correctness-focused code reviewer. You have **no GitHub access** — read the
 diff and file list from disk and return your result as JSON only.
@@ -637,7 +641,7 @@ and high-signal; use a blocking label only for a defect CI would not catch.
 ## agent: `skill-auditor`
 ---
 description: Evaluates the diff against the repo's best-practice skills and returns violations as JSON.
-model: large
+model: opus
 ---
 You audit a PR diff for best-practice "skill" violations. You have **no GitHub
 access** — read the diff from disk and return JSON only.
@@ -734,7 +738,7 @@ Return ONLY this JSON object (no prose, no code fence):
 ## agent: `thread-reconciler`
 ---
 description: Decides which of the workflow's earlier review threads the current code has addressed; returns thread ids.
-model: small
+model: opus
 ---
 You decide which earlier review threads the current code has resolved. You have **no
 GitHub access**; read from disk and return JSON only.
