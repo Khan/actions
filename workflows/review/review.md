@@ -211,8 +211,10 @@ these in parallel** (one turn) and wait for all:
   and the inline comments (Step 5).
 - **`skill-auditor`** — returns `violations[]` (best-practice skill breaches, all
   blocking). Use them for the verdict (Step 4) and the inline comments (Step 5).
-- **`reviewer-mapper`** — returns `owners` (`{path: [team, …]}`). Steps 7 and 8 use
-  this mapping directly.
+- **`reviewer-mapper`** — maps every changed file to its owning team(s) and returns
+  `owners` (`{path: [team, …]}`) plus `fallbackTeams` (teams ranked by how much of the
+  change they own). Step 7 and Step 8's risk routing use `owners`; Step 8's fallback
+  uses `fallbackTeams`.
 - **`thread-reconciler`** — returns `{resolve: [...], keep: [...]}` over the threads
   you staged. Resolve each `thread_id` in `resolve` with the
   `resolve-pull-request-review-thread` safe output (yours to do — sub-agents cannot);
@@ -537,11 +539,12 @@ changes, so a human from each area can take a closer look.
 
 If after step 2 there are **no** Medium/High-risk teams to add AND the PR has
 **no** human reviewers yet (no non-bot users or teams currently requested and no
-non-bot reviews submitted), request the single most relevant team instead — the
-team that owns the largest share of the reviewed files, per the `reviewer-mapper`
-mapping (Step 3). This guarantees at least one human is pulled in for an additional review.
-If the PR already has a human or team reviewer, or that team is already requested
-(in the PR's current `requested_teams`) or in `requestedTeams`, request no one.
+non-bot reviews submitted), pull in one team from `reviewer-mapper`'s `fallbackTeams`
+(Step 3) — the teams owning the largest share of the **whole** change (not just the
+reviewed subset), already ranked most-first. Request the first entry that survives the
+same do-not-request filters as above (already requested, already reviewed, or in
+`requestedTeams`). This guarantees at least one human is pulled in for an additional
+review. If the PR already has a human or team reviewer, request no one.
 
 Only request teams that appear in the `allowed-team-reviewers` allowlist in this
 workflow's frontmatter; skip any relevant team that is not on that list.
@@ -701,14 +704,15 @@ Return ONLY this JSON object (no prose, no code fence):
 
 ## agent: `reviewer-mapper`
 ---
-description: Maps each reviewed file to its owning team(s) using .github/REVIEWERS.
+description: Maps changed files to owning team(s) via .github/REVIEWERS and ranks teams by how much of the change they own.
 model: small
 ---
 You map files to their owning teams. You have **no GitHub access**; read from disk
 and return JSON only.
 
 Read from disk:
-- The file list: `/tmp/gh-aw/review/review-files.json`.
+- The full changed-file list: `/tmp/gh-aw/review/files.json` (every changed file, not
+  just the reviewed subset).
 - The ownership rules: `.github/REVIEWERS`.
 
 For each file in the list, find its owning team(s) by matching its path against the
@@ -718,9 +722,13 @@ ignored. A team slug is the part after the org prefix, lowercased (e.g.
 `@Khan/Teacher-Experience` → `teacher-experience`). A file with no matching pattern
 gets an empty list.
 
+Then rank the teams by how many of the changed files each owns, most first — this is
+the fallback order for pulling in a reviewer when nothing else qualifies.
+
 Return ONLY this JSON object (no prose, no code fence):
 {
-  "owners": {"path/to/file": ["team-a", "team-b"], "path/with/no/owner": []}
+  "owners": {"path/to/file": ["team-a", "team-b"], "path/with/no/owner": []},
+  "fallbackTeams": [{"team": "team-a", "files": 50}, {"team": "team-b", "files": 2}]
 }
 
 ## agent: `thread-reconciler`

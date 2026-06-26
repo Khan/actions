@@ -10,6 +10,23 @@ best-practice skill catalog, the CI-tooling exclusions, and the reviewer team
 allowlist) is supplied by the consuming repo through imports — see
 [Consumer configuration](#consumer-configuration) below.
 
+## How it works
+
+On each run the workflow gathers the PR diff, then delegates the analysis to a set of
+read-only **sub-agents** (it makes every GitHub and comment call itself):
+
+1. **`pattern-triage`** finds common cross-file patterns and narrows the diff to the
+   files that need a real review — dropping generated, formatting-only, and
+   pattern-only changes.
+2. Then, in parallel, **`correctness-reviewer`** (risk level + correctness),
+   **`skill-auditor`** (best-practice skills), and **`reviewer-mapper`** (file → owning
+   team) review that narrowed set, plus a reconciler that resolves earlier bot threads
+   the changes have addressed.
+
+The workflow then posts per-line Conventional Comments, submits an approve /
+request-changes review, and on approval posts the risk/patterns summary and requests
+the owning teams. The config files below feed these sub-agents.
+
 ## Install
 
 ```sh
@@ -34,10 +51,15 @@ locally at compile/run time, not from this repo). Create them under
 
 | File | Required? | What it provides |
 | --- | --- | --- |
-| `config.md` | **Required** | Frontmatter only. Defines the `add-reviewer` safe output — your `allowed-team-reviewers` allowlist and the bot token used to request teams. Compilation fails without it (by design — a reviewer with no allowlist would silently request no one). |
-| `risk-classification.md` | Optional | Body snippet injected into Step 3: your High/Medium/Low/Trivial file patterns. Without it the reviewer falls back to judgment on the four-tier model. |
-| `skills.md` | Optional | Body snippet injected into Step 5: the catalog of best-practice skill files (and when each applies) to evaluate the diff against. Without it Step 5 is a no-op. |
-| `ci-tooling.md` | Optional | Body snippet injected into Step 4: the lint/format/type/test issues your CI already catches, so the reviewer doesn't flag them. |
+| `config.md` | **Required** | Frontmatter only. Defines the `add-reviewer` safe output — your `allowed-team-reviewers` allowlist and the bot token used to request teams. |
+| `risk-classification.md` | **Required** | Your High/Medium/Low/Trivial file patterns, imported into the `correctness-reviewer` sub-agent, which assigns each reviewed file a risk level. |
+| `ci-tooling.md` | **Required** | The lint/format/type/test issues your CI already catches, imported into the `correctness-reviewer` sub-agent so it doesn't flag them. |
+| `skills.md` | **Required** | The catalog of best-practice skill files (and when each applies), imported into the `skill-auditor` sub-agent to evaluate the diff against. |
+
+All four are **required** — `gh aw compile` fails if any is missing. (`config.md` is a
+frontmatter import; the other three are body imports inside the sub-agent prompts. The
+optional `{{#runtime-import? … }}` form was dropped, so a missing config fails loudly at
+compile time instead of silently degrading the review.)
 
 These imported snippets are plain Markdown — they must not contain
 `${{ }}` expressions (gh-aw rejects those inside imports). `add-reviewer` lives
