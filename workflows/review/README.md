@@ -22,10 +22,14 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
    **`skill-auditor`** (best-practice skills) review that narrowed set, while
    **`reviewer-mapper`** maps the substantive changes to their owning teams for reviewer
    routing, plus a reconciler that resolves earlier bot threads the changes have addressed.
+3. If those reviewers proposed any comments, **`claim-validator`** re-checks each one
+   against the actual code — and, for best-practice claims, against the relevant skill's
+   real rule — and drops the false positives or corrects inaccurate ones before anything
+   is posted, so a wrong claim never reaches the PR or forces a change request.
 
-The workflow then posts per-line Conventional Comments, submits an approve /
-request-changes review, and on approval posts the risk/patterns summary and requests
-the owning teams. The config files below feed these sub-agents.
+The workflow then posts the per-line Conventional Comments that survived validation,
+submits an approve / request-changes review, and on approval posts the risk/patterns
+summary and requests the owning teams. The config files below feed these sub-agents.
 
 ## Install
 
@@ -53,8 +57,8 @@ locally at compile/run time, not from this repo). Create them under
 | --- | --- | --- |
 | `config.md` | **Required** | Frontmatter only. Defines the `add-reviewer` safe output — your `allowed-team-reviewers` allowlist and the bot token used to request teams. |
 | `risk-classification.md` | **Required** | Your High/Medium/Low/Trivial file patterns, imported into the `correctness-reviewer` sub-agent, which assigns each reviewed file a risk level. |
-| `ci-tooling.md` | **Required** | The lint/format/type/test issues your CI already catches, imported into the `correctness-reviewer` sub-agent so it doesn't flag them. |
-| `skills.md` | **Required** | The catalog of best-practice skill files (and when each applies), imported into the `skill-auditor` sub-agent to evaluate the diff against. |
+| `ci-tooling.md` | **Required** | The lint/format/type/test issues your CI already catches. Imported into `correctness-reviewer` so it doesn't flag them, and into `claim-validator` so it drops any correctness claim that flags a CI-caught issue. |
+| `skills.md` | **Required** | The catalog of best-practice skill files (and when each applies). Imported into `skill-auditor` to evaluate the diff against, and into `claim-validator` so it can verify a flagged skill violation against the skill's actual rule. |
 
 All four are **required**, but validated at different times. `config.md` is a
 frontmatter import, embedded and checked at **compile time** — `gh aw compile` fails if

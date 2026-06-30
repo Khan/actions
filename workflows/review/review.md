@@ -188,7 +188,8 @@ Otherwise continue to Step 3.
 The review is done by read-only **sub-agents**. Each
 has **no GitHub access and cannot post anything** — it reads what it needs from the
 checkout on disk and returns structured JSON. **You**, the orchestrator, make every
-GitHub call and every safe-output write. Run them in two phases.
+GitHub call and every safe-output write. Run them in three phases (the third runs
+only when there are candidate comments to validate).
 
 **Phase 1 — triage (first, alone).** Dispatch **`pattern-triage`**. It returns
 `patterns[]` (common cross-file change patterns; on approval they go in the
@@ -229,10 +230,37 @@ longer hold its repo-specific config (risk tiers, the CI-tooling list, the skill
 index). Skip that dimension and surface the gap with the skipped-dimension note
 defined in Step 6, so a human can see it was not assessed this run.
 
+**Phase 3 — validate the claims (only when there are candidate comments).** The
+candidate inline comments are the `correctness-reviewer`'s `findings[]` and the
+`skill-auditor`'s `violations[]` from Phase 2. If both are empty, skip this phase
+entirely — there is nothing to post, so nothing to validate. Otherwise give each
+candidate a short stable `id` and write the combined list to
+`/tmp/gh-aw/review/claims.json` — each entry: `id`, `source` (`correctness` or
+`skill`), `path`, `line`, `label`, `subject`, `discussion`, and any `suggestion` (for a
+`skill` claim, set `label` to `issue (blocking, best-practice)` and include its
+`skill`). Then dispatch **`claim-validator`**, which re-checks each claim against the
+actual code and returns, per `id`, a `verdict` of `keep` or `drop` with optional
+`corrected` fields. Apply its result before Step 4:
+
+- **`drop`** — discard the claim. It is a false positive, unsupported, or misleading;
+  it is not posted and does not count toward the verdict.
+- **`keep`** — retain the claim. If it carries a `corrected` object, overwrite the
+  claim's `line`, `label`, `subject`, `discussion`, and/or `suggestion` with the
+  corrected values (a fixed line number, a more accurate description, or a severity the
+  reviewer overstated) before posting.
+
+The findings and violations that survive this phase — with any corrections applied —
+are the set Step 4 (verdict) and Step 5 (comments) act on. If `claim-validator`'s
+output is missing or unparseable, do **not** drop the comments: post the unvalidated
+claims and surface the gap with the skipped-dimension note in Step 6 (dimension:
+`claim validation`), so a human knows they were not double-checked this run.
+
 ## Step 4: Determine the Review Verdict
 
 Decide the verdict BEFORE writing any comments, because it affects which
-comments you post.
+comments you post. Decide it from the **validated** findings and violations (Step 3
+Phase 3) — a claim the validator dropped, or downgraded to non-blocking, never makes
+the verdict REQUEST_CHANGES.
 
 ### REQUEST_CHANGES
 
@@ -321,10 +349,11 @@ the other call sites can reuse it.
 
 ### What to comment on
 
-Build comments from the `correctness-reviewer` and `skill-auditor` findings (Step 3) —
-you format each into the label syntax below and post it (the sub-agents cannot). Only
-create NEW comments for issues that don't already have a thread from a previous run
-(handled in Step 3).
+Build comments from the `correctness-reviewer` and `skill-auditor` findings that
+survived validation (Step 3 Phase 3) — post each with the validated label, wording, and
+line (apply any corrections the validator returned), formatting it into the label syntax
+below (the sub-agents cannot post). Only create NEW comments for issues that don't
+already have a thread from a previous run (handled in Step 3).
 
 **Correctness defects** (from the `correctness-reviewer`):
 - Use `issue (blocking)` or `todo (blocking)` for problems that must be fixed
@@ -367,20 +396,12 @@ The review body is NOT a status update — never say a review is "under way" or
 "completed". All specific feedback lives in the inline comments, and on approval
 the risk summary and common patterns live in a separate PR comment (Step 7).
 
-**If APPROVE:** the review body carries no summary, "LGTM", greeting, or footer —
-all specific feedback already lives in the inline comments (Step 5), and the
-risk/patterns summary goes in the separate Step 7 comment. Which body you send
-depends on whether you left any inline comments:
+**If APPROVE:** Which body you send depends on whether you left any inline comments:
 
 - **If you left at least one inline comment in Step 5**, submit the APPROVE event
   with an **empty** body. The inline comments already make the review non-empty.
 - **If you left no inline comments**, submit the APPROVE event with the body set to
-  exactly `Approved — no blocking issues found.` and nothing else. The
-  `submit-pull-request-review` safe output **rejects** a review that has both an
-  empty body and no inline comments (it errors with `ERR_VALIDATION` because GitHub
-  returns 422 for a contentless review), so an empty body is valid only when inline
-  comments exist. Do **not** invent an inline comment just to satisfy this rule, and
-  do **not** substitute any other wording.
+  exactly `Approved — no blocking issues found.` and nothing else.
 
 **If REQUEST_CHANGES:** keep the body to a single line that points at the inline
 comments:
@@ -775,3 +796,74 @@ longer applies; otherwise keep it. When in doubt, keep it.
 Return ONLY this JSON object (no prose, no code fence):
 {"resolve": ["thread_id", "..."], "keep": ["thread_id", "..."]}
 Every input `thread_id` must appear in exactly one of the two lists.
+
+## agent: `claim-validator`
+---
+description: Re-checks each candidate review comment against the actual code and the repo's best-practice skills, and drops or corrects the ones that are wrong; returns JSON.
+model: opus
+---
+You are a skeptical validator. Other reviewers proposed the comments in
+`/tmp/gh-aw/review/claims.json`; your job is to catch the ones that are **wrong** —
+false positives, unsupported assertions, or misleading descriptions — before they reach
+the PR, and to correct ones that are right in substance but inaccurate in detail. You
+have **no GitHub access**; read from disk and return JSON only.
+
+Read from disk:
+- The candidate comments: `/tmp/gh-aw/review/claims.json` — each has `id`, `source`
+  (`correctness` or `skill`), `path`, `line`, `label`, `subject`, `discussion`, an
+  optional `suggestion`, and for a `skill` claim its `skill` name.
+- The diff: `/tmp/gh-aw/review/pr.diff`.
+- The actual code: for each claim, read the file at its `path` from the checkout, plus
+  enough surrounding context (callers, definitions, related code) to judge it.
+
+Validate each claim **independently** — do not assume the proposing reviewer was right.
+Read the cited lines and the context around them thoroughly; do not skim. How you
+validate depends on the claim's `source`:
+
+- **`correctness` claims** — confirm the cited defect actually exists in the code. Treat
+  it as wrong if the code does not do what the claim says, the concern is already
+  handled nearby, the claim is too speculative to support, or the "issue" is something
+  this repo's CI already catches (the CI-tooling list below — those are never valid
+  review comments).
+- **`skill` claims** — these assert a best-practice violation, so validate them against
+  the **actual rule**, not the claim's paraphrase. Find the named `skill` in the skills
+  index below, read that skill's file from disk (path from the index), and confirm the
+  rule it states is real, applies to this code, and is genuinely violated here. Treat
+  the claim as wrong if the skill says nothing like what the comment implies, the rule
+  does not apply to this code, or the code does not actually break it.
+
+For each claim decide:
+- **drop** — the claim is incorrect per the check for its source above. When you
+  genuinely cannot confirm a claim is right, prefer to drop it — a missed nitpick is
+  cheaper than a confidently wrong comment.
+- **keep** — the claim is correct and accurately described; keep it unchanged.
+- **keep with corrections** — the underlying issue is real but a detail is wrong: the
+  line number is off, the wording overstates or misstates it (including misciting the
+  skill rule), or the severity is wrong (e.g. labeled blocking but actually
+  non-blocking). Keep it and return the corrected fields.
+
+Do not invent new claims — validate only the ones given. Never "upgrade" a non-blocking
+claim to blocking or otherwise raise its severity; you may only downgrade an overstated
+one.
+
+What this repo's CI and tooling already catch — a `correctness` claim about any of
+these is a false positive, so drop it:
+{{#runtime-import .github/aw/review/ci-tooling.md}}
+
+Skills index for this repo (each entry names a skill, its file path, and its relevance
+criteria) — use it to locate and read the skill file that a `skill` claim refers to, so
+you can check the claim against the real rule:
+{{#runtime-import .github/aw/review/skills.md}}
+
+Return ONLY this JSON object (no prose, no code fence):
+{
+  "claims": [{
+    "id": "...",
+    "verdict": "keep|drop",
+    "reason": "one line: why it is correct, or why it is wrong",
+    "corrected": {"line": 0, "label": "...", "subject": "...", "discussion": "...", "suggestion": "..."}
+  }]
+}
+Include `corrected` only when keeping a claim that needs a fix, and inside it only the
+fields that change; omit it entirely for a clean keep or for a drop. Every input `id`
+must appear exactly once.
