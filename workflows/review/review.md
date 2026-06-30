@@ -382,17 +382,19 @@ depends on whether you left any inline comments:
   returns 422 for a contentless review), so an empty body is valid only when inline
   comments exist. Do **not** invent an inline comment just to satisfy this rule, and
   do **not** substitute any other wording.
-- **If a dimension was skipped this run** because a sub-agent's output was unavailable
-  (Step 3), set the body to `Approved — no blocking issues found.` followed by one line
-  per skipped dimension in the exact form `Note: <dimension> not assessed this run
-  (<sub-agent> output unavailable).` — even when you also left inline comments. This
-  skipped-dimension note is the only text permitted beyond the two cases above.
 
 **If REQUEST_CHANGES:** keep the body to a single line that points at the inline
 comments:
 ```
 Changes requested — see inline comments.
 ```
+
+**Skipped dimensions (either verdict).** If a sub-agent's output was unavailable this
+run so a dimension could not be assessed (Step 3), append to the review body — after
+any verdict-specific text above — one line per skipped dimension, exactly:
+`Note: <dimension> not assessed this run (<sub-agent> output unavailable).` This is the
+only text permitted beyond the verdict bodies above, and it applies to both APPROVE
+(including the empty-body case) and REQUEST_CHANGES.
 
 Do NOT put the risk summary or common patterns in the review body. On approval
 they go in a separate PR comment (Step 7).
@@ -550,8 +552,9 @@ changes, so a human from each area can take a closer look.
 If after step 2 there are **no** Medium/High-risk teams to add AND the PR has
 **no** human reviewers yet (no non-bot users or teams currently requested and no
 non-bot reviews submitted), pull in one team from `reviewer-mapper`'s `fallbackTeams`
-(Step 3) — the teams owning the largest share of the **whole** change (not just the
-reviewed subset), already ranked most-first. Request the first entry that survives the
+(Step 3) — the teams owning the largest share of the **substantive** change
+(`reviewFiles` plus pattern-covered files; generated and formatting-only files are
+excluded), already ranked most-first. Request the first entry that survives the
 same do-not-request filters as above (already requested, already reviewed, or in
 `requestedTeams`) **and** appears in the `allowed-team-reviewers` allowlist. This pulls
 in a human from the team owning most of the change whenever an eligible team exists. If

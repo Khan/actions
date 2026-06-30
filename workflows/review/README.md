@@ -56,10 +56,13 @@ locally at compile/run time, not from this repo). Create them under
 | `ci-tooling.md` | **Required** | The lint/format/type/test issues your CI already catches, imported into the `correctness-reviewer` sub-agent so it doesn't flag them. |
 | `skills.md` | **Required** | The catalog of best-practice skill files (and when each applies), imported into the `skill-auditor` sub-agent to evaluate the diff against. |
 
-All four are **required** — `gh aw compile` fails if any is missing. (`config.md` is a
-frontmatter import; the other three are body imports inside the sub-agent prompts. The
-optional `{{#runtime-import? … }}` form was dropped, so a missing config fails loudly at
-compile time instead of silently degrading the review.)
+All four are **required**, but validated at different times. `config.md` is a
+frontmatter import, embedded and checked at **compile time** — `gh aw compile` fails if
+it's missing. The other three are `{{#runtime-import}}` body imports inside the
+sub-agent prompts; they resolve when the workflow **runs**, so a missing one surfaces as
+a `Runtime import file not found` failure on the next PR — not at compile time. The
+optional `{{#runtime-import? … }}` form was dropped either way, so a missing config
+fails loudly rather than silently degrading the review.
 
 These imported snippets are plain Markdown — they must not contain
 `${{ }}` expressions (gh-aw rejects those inside imports). `add-reviewer` lives
