@@ -294,7 +294,6 @@ Use these labels to categorize each comment:
 - **`nitpick (non-blocking)`** — a trivial preference. Never blocking.
 - **`question (non-blocking)`** — seeking clarification from the author.
 - **`thought (non-blocking)`** — an idea for the author to consider.
-- **`praise`** — something done well. Use sparingly and sincerely.
 - **`todo (blocking)`** — a small required change (e.g., a missing required field).
 - **`note (non-blocking)`** — context for the author or future readers.
 
@@ -644,7 +643,7 @@ Return ONLY this JSON object (no prose, no code fence):
   "files": [{"path": "...", "risk": "High|Medium|Low|Trivial", "riskReason": "one sentence; required for High/Medium, else empty"}],
   "findings": [{
     "path": "...", "line": 0,
-    "label": "issue (blocking)|todo (blocking)|suggestion (non-blocking)|nitpick (non-blocking)|question (non-blocking)|thought (non-blocking)|note (non-blocking)|praise",
+    "label": "issue (blocking)|todo (blocking)|suggestion (non-blocking)|nitpick (non-blocking)|question (non-blocking)|thought (non-blocking)|note (non-blocking)",
     "subject": "one line", "discussion": "1-2 sentences, optional", "suggestion": "optional fix code"
   }]
 }
