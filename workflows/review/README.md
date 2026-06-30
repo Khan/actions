@@ -10,6 +10,27 @@ best-practice skill catalog, the CI-tooling exclusions, and the reviewer team
 allowlist) is supplied by the consuming repo through imports — see
 [Consumer configuration](#consumer-configuration) below.
 
+## How it works
+
+On each run the workflow gathers the PR diff, then delegates the analysis to a set of
+read-only **sub-agents** (it makes every GitHub and comment call itself):
+
+1. **`pattern-triage`** finds common cross-file patterns and narrows the diff to the
+   files that need a real review — dropping generated, formatting-only, and
+   pattern-only changes.
+2. Then, in parallel, **`correctness-reviewer`** (risk level + correctness) and
+   **`skill-auditor`** (best-practice skills) review that narrowed set, while
+   **`reviewer-mapper`** maps the substantive changes to their owning teams for reviewer
+   routing, plus a reconciler that resolves earlier bot threads the changes have addressed.
+3. If those reviewers proposed any comments, **`claim-validator`** re-checks each one
+   against the actual code — and, for best-practice claims, against the relevant skill's
+   real rule — and drops the false positives or corrects inaccurate ones before anything
+   is posted, so a wrong claim never reaches the PR or forces a change request.
+
+The workflow then posts the per-line Conventional Comments that survived validation,
+submits an approve / request-changes review, and on approval posts the risk/patterns
+summary and requests the owning teams. The config files below feed these sub-agents.
+
 ## Install
 
 ```sh
@@ -34,10 +55,18 @@ locally at compile/run time, not from this repo). Create them under
 
 | File | Required? | What it provides |
 | --- | --- | --- |
-| `config.md` | **Required** | Frontmatter only. Defines the `add-reviewer` safe output — your `allowed-team-reviewers` allowlist and the bot token used to request teams. Compilation fails without it (by design — a reviewer with no allowlist would silently request no one). |
-| `risk-classification.md` | Optional | Body snippet injected into Step 3: your High/Medium/Low/Trivial file patterns. Without it the reviewer falls back to judgment on the four-tier model. |
-| `skills.md` | Optional | Body snippet injected into Step 5: the catalog of best-practice skill files (and when each applies) to evaluate the diff against. Without it Step 5 is a no-op. |
-| `ci-tooling.md` | Optional | Body snippet injected into Step 4: the lint/format/type/test issues your CI already catches, so the reviewer doesn't flag them. |
+| `config.md` | **Required** | Frontmatter only. Defines the `add-reviewer` safe output — your `allowed-team-reviewers` allowlist and the bot token used to request teams. |
+| `risk-classification.md` | **Required** | Your High/Medium/Low/Trivial file patterns, imported into the `correctness-reviewer` sub-agent, which assigns each reviewed file a risk level. |
+| `ci-tooling.md` | **Required** | The lint/format/type/test issues your CI already catches. Imported into `correctness-reviewer` so it doesn't flag them, and into `claim-validator` so it drops any correctness claim that flags a CI-caught issue. |
+| `skills.md` | **Required** | The catalog of best-practice skill files (and when each applies). Imported into `skill-auditor` to evaluate the diff against, and into `claim-validator` so it can verify a flagged skill violation against the skill's actual rule. |
+
+All four are **required**, but validated at different times. `config.md` is a
+frontmatter import, embedded and checked at **compile time** — `gh aw compile` fails if
+it's missing. The other three are `{{#runtime-import}}` body imports inside the
+sub-agent prompts; they resolve when the workflow **runs**, so a missing one surfaces as
+a `Runtime import file not found` failure on the next PR — not at compile time. The
+optional `{{#runtime-import? … }}` form was dropped either way, so a missing config
+fails loudly rather than silently degrading the review.
 
 These imported snippets are plain Markdown — they must not contain
 `${{ }}` expressions (gh-aw rejects those inside imports). `add-reviewer` lives
