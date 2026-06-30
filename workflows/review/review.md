@@ -628,6 +628,7 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
 
 ## agent: `correctness-reviewer`
 ---
+name: correctness-reviewer
 description: Classifies each changed file's risk and reviews the diff for correctness defects; returns JSON.
 model: opus
 ---
@@ -673,6 +674,7 @@ and high-signal; use a blocking label only for a defect CI would not catch.
 
 ## agent: `skill-auditor`
 ---
+name: skill-auditor
 description: Evaluates the diff against the repo's best-practice skills and returns violations as JSON.
 model: opus
 ---
@@ -707,6 +709,7 @@ return {"violations": []}.
 
 ## agent: `pattern-triage`
 ---
+name: pattern-triage
 description: Finds common cross-file patterns and returns the files that still need a real review.
 model: large
 ---
@@ -748,6 +751,7 @@ Return ONLY this JSON object (no prose, no code fence):
 
 ## agent: `reviewer-mapper`
 ---
+name: reviewer-mapper
 description: Maps changed files to owning team(s) via .github/REVIEWERS and ranks teams by how much of the change they own.
 model: small
 ---
@@ -777,6 +781,7 @@ Return ONLY this JSON object (no prose, no code fence):
 
 ## agent: `thread-reconciler`
 ---
+name: thread-reconciler
 description: Decides which of the workflow's earlier review threads the current code has addressed; returns thread ids.
 model: opus
 ---
@@ -799,6 +804,7 @@ Every input `thread_id` must appear in exactly one of the two lists.
 
 ## agent: `claim-validator`
 ---
+name: claim-validator
 description: Re-checks each candidate review comment against the actual code and the repo's best-practice skills, and drops or corrects the ones that are wrong; returns JSON.
 model: opus
 ---
