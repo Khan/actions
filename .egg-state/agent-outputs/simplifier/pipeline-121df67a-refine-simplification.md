@@ -3,6 +3,17 @@
 Role: simplifier · Phase: refine · Repo: Khan/actions · Base: main
 Grounding: full contract `task_description` (read in full), `git log` (#194 = 4e7d82f7, merged), `workflows/review/review.md` (1024 lines, all sub-agent prompts inline).
 
+> **Revision 2 (2026-07-02, post-HITL-gate).** The operator approved this
+> assessment's eight scope controls at the refine phase gate — they are now
+> operator-ratified constraints, not simplifier claims. HITL decision **cq-1 is
+> resolved**: the top-4 specialist lenses are the **incident-mapped set** —
+> security & auth, AI safety & moderation, mass-comms & COPPA, caching &
+> resource (the four lenses matching the documented incidents the must-catch
+> set reproduces). Section 3 below is updated accordingly. No new decisions are
+> induced by this resolution from the simplifier's perspective: it narrows
+> scope (names the four) rather than widening it, and the remaining lenses stay
+> benchmark-gated per the proposal.
+
 This is the simplifier's producer artifact for the refine phase: scope-reduction and
 complexity-avoidance directives the refined spec must honor. Each item cites the
 operator directive or the proposal's own text — none of this is new opinion.
@@ -47,6 +58,16 @@ their cost"). Simplification directives for the spec:
   over-build). Specify: (a) the deterministic router, (b) the lens *mechanism*
   (one pattern, parameterized per lens), (c) the top-4 lenses only, (d) the
   always-on reviewers as prompt additions (wave-3 edit 14 supplies their mandates).
+- **Top-4 lenses resolved by operator (cq-1, 2026-07-02): security & auth,
+  AI safety & moderation, mass-comms & COPPA, caching & resource** — the
+  incident-mapped set (each corresponds to a documented incident class the
+  must-catch eval set reproduces: the OpenAccess-class authz miss, the
+  universal-modifier drop, the ~36K-email misfires, the cacheable-404).
+  This supersedes any list-order reading ("first four listed"); data &
+  migrations, concurrency & async, API & federation compat, and the rest are
+  benchmark-gated later additions. The advisory security-lens split seam
+  (authz vs web/platform) noted in the refiner's R10 remains advisory, not a
+  fifth lens.
 - Remaining lenses: a documented extension pattern + benchmark gate, not tasks.
 - Every added blocking voter compounds false-block rate — the spec should carry
   that as an acceptance criterion (new lens = benchmark-justified), not as a to-do.
