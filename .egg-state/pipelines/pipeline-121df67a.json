@@ -121,10 +121,29 @@
       "resolution": "{\"action\": \"approve\", \"context\": \"Operator approves the spec including all eight scope controls (notably: do not re-implement #194 — 13 prompt edits remain; roster as hypothesis inventory with router + top-4 lenses only; smoke set gates wave 2; zero model changes in Phase 1; the four Open Questions surface as HITL decisions rather than implementation tasks). Answer to cq-1 follows via its own decision resolution.\"}",
       "phase": "refine",
       "content_changed": null
+    },
+    {
+      "id": "decision-2",
+      "question": "The roster restructure says to build the top four path-gated specialist lenses first (\"highest frequency and severity\") but never names which four. Which four should this pipeline build first? (The remaining lenses land later, gated on eval-suite evidence, per the proposal.)",
+      "context": "Open contract question cq-1, registered by an agent during the refine phase.",
+      "options": [
+        "Roster order: security & auth, data & migrations, concurrency & async, API & federation compat — the first four listed, incl. the named 'top Khan risk with no dedicated owner'",
+        "Incident-mapped: security & auth, AI safety & moderation, mass-comms & COPPA, caching & resource — the four lenses matching the documented incidents the must-catch set reproduces",
+        "Defer to plan/eval evidence: ship router + always-on reviewers first, and gate every specialist lens on a measured miss in its area before building it",
+        "Other (explain in reply)"
+      ],
+      "decision_type": "choice",
+      "questions": [],
+      "status": "pending",
+      "created_at": "2026-07-02T23:37:39.817838Z",
+      "resolved_at": null,
+      "resolution": null,
+      "phase": "refine",
+      "content_changed": null
     }
   ],
   "created_at": "2026-07-02T23:16:08.458189Z",
-  "updated_at": "2026-07-02T23:37:35.835126Z",
+  "updated_at": "2026-07-02T23:37:39.821920Z",
   "contract_synced": true,
   "network_mode": null,
   "mode": "issue",
@@ -137,7 +156,7 @@
   "source_branch": null,
   "source_artifact_prefix": null,
   "run_epoch": "2026-07-02T23:21:16.087243Z",
-  "version": 15,
+  "version": 16,
   "jira_ticket": null,
   "is_epic": false,
   "pipeline_mode": null,
