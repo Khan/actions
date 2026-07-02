@@ -330,14 +330,33 @@ claims anyway.
 
 ## Step 4: Determine the Review Verdict
 
-Decide the verdict BEFORE writing any comments, because it affects which
-comments you post. Decide it from the **validated** findings and violations (Step 3
-Phase 3) — a claim the validator dropped, or downgraded to non-blocking, never makes
-the verdict REQUEST_CHANGES.
+Decide the verdict BEFORE writing any comments, because it affects which comments you
+post. The verdict is a **mechanical function of the labels on the comments you will
+actually post** — the `correctness-reviewer` findings and `skill-auditor` violations that
+survived validation (Step 3 Phase 3), after any corrections and after the
+newly-changed-code scope filter. A claim the validator dropped or downgraded to
+non-blocking, or that the scope filter removed, is not in that set and cannot affect the
+verdict.
 
-### REQUEST_CHANGES
+**Blocking labels:** `issue (blocking)`, `issue (blocking, best-practice)`, and
+`todo (blocking)`. Every other label is non-blocking: `suggestion (non-blocking)`,
+`nitpick (non-blocking)`, `question (non-blocking)`, `thought (non-blocking)`, and
+`note (non-blocking)`.
 
-Use when there are ANY blocking issues. This includes:
+**The rule:**
+- **REQUEST_CHANGES** if and only if at least one comment you are going to post carries a
+  blocking label.
+- **APPROVE** otherwise — including when the posted set contains only non-blocking
+  comments. **Never REQUEST_CHANGES when every comment you are posting is non-blocking.**
+
+There is no separate judgment: if a finding is a real defect it should carry a blocking
+label (see below), but the verdict follows the labels on the actual posted comments, not
+a category call. Count the blocking labels in your final comment set; zero blocking
+labels means APPROVE.
+
+### What should carry a blocking label
+
+Label a finding blocking (which is what then drives REQUEST_CHANGES) when it is:
 
 **Correctness defects** (that CI would NOT catch):
 - Logic errors that pass type checks (wrong condition, off-by-one, etc.)
@@ -349,19 +368,16 @@ Use when there are ANY blocking issues. This includes:
 - Public API type unsafety that downstream consumers would hit at runtime
 
 **Best practice violations** (from the `skill-auditor`):
-- Any violation of the rules defined in the skill files is blocking. If a
-  relevant skill's rules are not followed, that is grounds for REQUEST_CHANGES.
+- Any violation of the rules defined in the skill files is blocking, labeled
+  `issue (blocking, best-practice)`.
 
-NOT valid reasons (CI catches these):
+Do NOT label these blocking (CI catches them), and do not let them drive the verdict:
 - Type errors, lint violations, test failures
 - Import ordering, formatting issues
 - Missing semicolons, unused variables
 
-### APPROVE
-
-Use when:
-- No blocking issues found (no correctness defects, no best practice violations)
-- You can still leave non-blocking inline comments with an approval
+If none of the posted comments qualifies for a blocking label, the verdict is APPROVE —
+you can still approve with non-blocking inline comments.
 
 ## Step 5: Leave Per-Line Review Comments
 
