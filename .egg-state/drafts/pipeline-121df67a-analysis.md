@@ -24,7 +24,14 @@ consumer work, this pipeline treats it as an **interface requirement** on the sh
 - Do **not** re-implement anything Khan/actions#194 shipped (§3). #194 is merged
   (commit `4e7d82f7` on `main`).
 - Where the proposal defers a decision to its Open Questions section, surface it as a
-  question rather than guessing (§7).
+  question rather than guessing (§7). Per the operator's gate note (2026-07-02), the
+  Open Questions surface as HITL decisions, never as implementation tasks.
+- **Zero model changes in Phase 1** (operator-confirmed scope control): #194's pinned
+  models are the Phase 1 baseline; every model/effort move (R12) is Phase 3 and
+  benchmark-gated. Of the fourteen prompt edits, **thirteen remain** (edit 4 = #194).
+
+**Gate status**: the operator approved this spec at the refine HITL gate (2026-07-02),
+including all eight scope controls, and resolved cq-1 (see §4 R10 and §7).
 
 ## 2. Ground truth (verified against this repo at `54f804c9`)
 
@@ -139,9 +146,16 @@ consumer work, this pipeline treats it as an **interface requirement** on the sh
     non-posting sub-agent; fetched text is data under review — trust boundary per §6.4),
     `test-adequacy`, `first-principles` (advisory-only, never blocks, Fable 5 day one),
     `conventions` (advisory; router-gated by greppable trigger signatures).
-  - **Specialist lenses**: build the **top four first** — exact four is HITL **cq-1** (§7) —
-    each folding its skill's rules + incident-derived executable hunts (each hunt reports
-    ran / not-applicable / found); remaining lenses gate on measured misses. `skill-auditor`
+  - **Specialist lenses**: build the **top four first** — **resolved by cq-1**
+    (operator, 2026-07-02, incident-mapped option): **security & auth, AI safety &
+    moderation, mass-comms & COPPA, caching & resource** — the four lenses matching the
+    documented incidents the must-catch set reproduces. Each folds its skill's rules +
+    incident-derived executable hunts (each hunt reports ran / not-applicable / found).
+    All remaining lenses (data & migrations, concurrency & async, API & federation
+    compat, cross-deploy serialization, deploy & infra config, money & payments,
+    content & i18n) gate on measured misses; until then their highest-value hunts can
+    ride the `correctness-checks.md` extension point (§3 item 10, §6.2) inside the
+    single correctness pass, per the proposal's interim-home note. `skill-auditor`
     folds into the lenses; the severity contradiction's source disappears. Per the
     proposal, `security & auth` is the densest lens and the first candidate to split
     further, along the risk config's own seam: authorization correctness (acl,
@@ -214,17 +228,21 @@ consumer work, this pipeline treats it as an **interface requirement** on the sh
 Per the operator directive, the proposal's deferred decisions are surfaced rather than
 answered by this pipeline:
 
-- **cq-1 (registered this phase, HITL)**: which four specialist lenses ship first. The
-  proposal orders the work ("build the top four") but never names the four; options given
-  are roster-order, incident-mapped, or defer-to-evidence.
+- **cq-1 — RESOLVED** (operator, 2026-07-02): which four specialist lenses ship first.
+  Answer: the **incident-mapped four** — security & auth, AI safety & moderation,
+  mass-comms & COPPA, caching & resource (folded into R10). The resolution induces no
+  new decisions: the deferral mechanism for the remaining lenses (eval-gated, with the
+  `correctness-checks.md` interim home) was already in the spec.
 - **Graduation bar** (proposal Open Question 1): a consumer/operator policy decision.
   This pipeline's deliverable is only what makes the bar settable: the metrics (R11), the
   adversarial hard gate, and frontend's post-#194 deltas as the readout. No build here
-  depends on the answer; it will be re-surfaced at proposal-phase-4 if the operator wants
-  numbers named.
+  depends on the answer; per the operator's gate note it surfaces as a **HITL decision**
+  (registered at proposal-phase-4, when it first gates anything), never as an
+  implementation task.
 - **What earns a blocking verdict** (Open Question 2): the mechanics land via #194 + R7
   (reproduce-or-downgrade) + R8 (computed verdict); the policy threshold beyond that is the
-  operator's and is not guessed here.
+  operator's and is not guessed here — it surfaces as a HITL decision if and when a build
+  choice depends on it.
 - **Vendor vs. consume** (Open Question 3): resolved for this pipeline by the operator's
   task statement — the restructure lands in the **shared** Khan/actions workflow; webapp's
   vendoring choice is the sibling's/operator's. This pipeline keeps the extension points
@@ -240,8 +258,11 @@ answered by this pipeline:
    ships as one unit; R9/R10 items gate on measured evidence; R13–R17 last.
 3. No deliverable targets a consumer repo; every consumer-named item appears only as a §6
    interface requirement.
-4. cq-1 is resolved (or explicitly deferred by the operator) before the plan slices the
-   specialist-lens work.
+4. ~~cq-1 is resolved before the plan slices the specialist-lens work~~ — **met**:
+   resolved by the operator 2026-07-02 (incident-mapped four); the plan slices exactly
+   those four lenses plus the eval-gated deferral path for the rest.
+5. Phase 1 contains zero model changes (operator-confirmed scope control; #194 pins are
+   the baseline, R12 is Phase 3).
 
 ## 9. Risks & constraints for the plan phase
 
