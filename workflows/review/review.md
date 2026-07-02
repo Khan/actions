@@ -181,6 +181,33 @@ too-large file), since the GitHub MCP exposes no content blob `sha`. Hash from t
 `get_files` output on disk without loading every patch into the conversation. Step 2
 compares this against the cache; you save it in Step 9.
 
+**Compute the newly-changed-code scope.** So that Step 3 only comments on code this
+workflow has not already reviewed, work out which parts of the diff are *new since the
+last review* — by **content**, not by commit, so it survives force-pushes and rebases.
+For every changed file, split its `patch` into hunks and compute one hash per hunk: the
+SHA-256 of just that hunk's **added (`+`) lines**, each with the leading `+` stripped and
+trailing whitespace trimmed, concatenated in order. Deliberately ignore context lines,
+removed lines, and line numbers — a rebase, squash, or base-branch merge rewrites commit
+SHAs and shifts line numbers but does **not** change the text the author added, so a
+content hash of the added lines stays stable across all of those. Call this map
+`path → [hunkHash, …]` the **hunk signature**; you always compute it and save it as
+`reviewedHunks` in Step 9.
+
+Then recall `reviewedHunks` from cache memory (the hunk signature the previous review
+saved) and derive the scope:
+- **No prior review** of this PR (no `reviewedHunks` in cache) → the whole diff is new.
+  Do not scope anything this run; Step 3 reviews everything.
+- **Otherwise** a hunk is **in scope** (newly-changed) when its hash is **not** present
+  in `reviewedHunks[path]`. A file absent from `reviewedHunks` is entirely in scope
+  (newly touched). A hunk whose hash matches one the previous run already saw is **out of
+  scope** — already reviewed and unchanged since, even if a force-push or rebase rewrote
+  the commits around it.
+
+Write the result to `/tmp/gh-aw/review/new-scope.json` as
+`{"priorReview": true|false, "inScope": {path: [line, …]}}`, where the lines are the
+RIGHT-side line numbers of the added lines inside in-scope hunks. Step 3 uses this to
+filter candidate comments.
+
 ## Step 2: Early-Exit Check
 
 This workflow runs on every push. Decide here — using the context gathered in Step 1 —
@@ -255,10 +282,32 @@ tiers, the CI-tooling list, the skills index). Skip that dimension for this run,
 write whatever raw text you did get (or a short `{"error": "..."}` note) to its
 `out/` file so the gap is visible in the artifact.
 
+**Scope the candidate comments to newly-changed code.** Now filter the
+`correctness-reviewer`'s `findings[]` and the `skill-auditor`'s `violations[]` against
+the new-code scope from Step 1 (`/tmp/gh-aw/review/new-scope.json`). This is what stops
+the reviewer from re-commenting on code a previous review already covered:
+- If `priorReview` is `false` (first review of this PR), keep everything — nothing has
+  been reviewed yet.
+- Otherwise **drop** any finding or violation whose (`path`, `line`) is not an in-scope
+  line in `inScope` — that code is unchanged since the last review, so it was already
+  covered (this holds across force-pushes and rebases because the scope is content-based).
+  **One exception:** keep a dropped candidate when it is a `correctness-reviewer` finding
+  whose `label` is `issue (blocking)` — a genuine blocking bug is worth surfacing even if
+  a change elsewhere introduced it on previously-reviewed lines. Nits, suggestions,
+  questions, notes, todos, and **all** `skill-auditor` violations are scoped strictly to
+  new code (re-flagging best-practice or style points on unchanged code is exactly the
+  noise being removed here).
+
+This filter applies **only** to the inline-comment candidates. `files[]` risk levels,
+patterns, and ownership still reflect the whole PR, so Steps 7 and 8 are unaffected. The
+findings and violations that survive this filter are the candidate set the rest of Step 3
+acts on. (The existing `thread-reconciler` dedup remains a second layer: even an in-scope
+line that duplicates a still-open thread must not open a duplicate comment, Step 5.)
+
 **Phase 3 — validate the claims (only when there are candidate comments).** The
-candidate inline comments are the `correctness-reviewer`'s `findings[]` and the
-`skill-auditor`'s `violations[]` from Phase 2. If both are empty, skip this phase
-entirely — there is nothing to post, so nothing to validate. Otherwise give each
+candidate inline comments are the surviving `correctness-reviewer` `findings[]` and
+`skill-auditor` `violations[]` from Phase 2 (after the scope filter above). If both are
+empty, skip this phase entirely — there is nothing to post, so nothing to validate. Otherwise give each
 candidate a short stable `id` and write the combined list to
 `/tmp/gh-aw/review/claims.json` — each entry: `id`, `source` (`correctness` or
 `skill`), `path`, `line`, `label`, `subject`, `discussion`, and any `suggestion` (for a
@@ -644,6 +693,12 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
   Step 1 (the SHA-256 of the file's `patch`, since the GitHub MCP exposes no blob
   `sha`). Always record this, on every review, so Step 2 can later tell whether a
   merge commit changed anything reviewable.
+- `reviewedHunks`: the **hunk signature** of the diff you reviewed this run — the
+  `path → [hunkHash, …]` map defined in Step 1 (one SHA-256 per hunk over its added
+  lines only). Always record this, on every review, so the next run can scope its
+  comments to hunks whose content is new since this review (Step 1 → Step 3). Record
+  the full current signature, not just the hunks you commented on — "already reviewed"
+  means every hunk you looked at this run.
 - `wasDraft`: whether the PR was a draft at this review (its `draft` field).
   Record it on every review so Step 2 can compare it against the current draft
   status to detect the draft→ready transition and bypass the early-exit check
