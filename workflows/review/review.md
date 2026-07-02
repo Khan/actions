@@ -284,9 +284,10 @@ also write its raw JSON verbatim to `/tmp/gh-aw/review/out/<agent>.json` (create
 as a run-scoped artifact at the end (Step 9) so a human can inspect exactly what each
 reviewer produced. If a sub-agent's output is missing or unparseable, do **not** try to
 reproduce its analysis yourself — you no longer hold its repo-specific config (risk
-tiers, the CI-tooling list, the skills index). Skip that dimension for this run, and
-write whatever raw text you did get (or a short `{"error": "..."}` note) to its
-`out/` file so the gap is visible in the artifact.
+tiers, the CI-tooling list, the skills index). Skip that dimension for this run: track it
+as a skipped dimension and surface the gap with the skipped-dimension note in Step 6 so
+the author can see it was not assessed, and write whatever raw text you did get (or a
+short `{"error": "..."}` note) to its `out/` file so the gap is visible in the artifact.
 
 **Scope the candidate comments to newly-changed code.** Now filter the
 `correctness-reviewer`'s `findings[]` and the `skill-auditor`'s `violations[]` against
@@ -334,7 +335,8 @@ re-checks each claim against the actual code and returns, per `id`, a `verdict` 
 The findings and violations that survive this phase — with any corrections applied —
 are the set Step 4 (verdict) and Step 5 (comments) act on. If `claim-validator`'s
 output is missing or unparseable, do **not** drop the comments: post the unvalidated
-claims anyway.
+claims anyway, and surface the gap as a skipped dimension (`claim validation`) with the
+note in Step 6, so the author knows they were not double-checked this run.
 
 ## Step 4: Determine the Review Verdict
 
@@ -495,10 +497,10 @@ Maximum 20 comments. If you would exceed that, prioritize:
 ### Skip a redundant no-comment approval
 
 Before submitting, check whether this review would be a no-op repeat of the PR's
-current state: the verdict (Step 4) is APPROVE and you left **no** inline comments in
-Step 5 — i.e. the review body would be exactly the plain
-`Approved — no blocking issues found.` text with nothing else. Only when both of
-those hold, fetch the PR's existing reviews
+current state: the verdict (Step 4) is APPROVE, you left **no** inline comments in
+Step 5, and there are **no** skipped-dimension notes to add (below) — i.e. the review
+body would be exactly the plain `Approved — no blocking issues found.` text with nothing
+else. Only when all of those hold, fetch the PR's existing reviews
 (`pull_requests` `get_pull_request_reviews`) and find the most recent one authored by
 `github-actions[bot]`. If its `state` is `APPROVED`, the PR is already sitting at an
 approved, no-comment state and posting an identical approval again adds nothing —
@@ -506,8 +508,9 @@ approved, no-comment state and posting an identical approval again adds nothing 
 Step 8 as normal (they still run on the verdict from Step 4); only the review
 submission itself is skipped.
 
-If there is no prior `github-actions[bot]` review, its state is not `APPROVED`, or you
-left any inline comments in Step 5, submit the review as below instead.
+If there is no prior `github-actions[bot]` review, its state is not `APPROVED`, you
+left any inline comments in Step 5, or a dimension was skipped this run, submit the
+review as below instead.
 
 Submit a single review using the `submit-pull-request-review` safe output. Set
 the `event` field to APPROVE or REQUEST_CHANGES as determined in Step 4.
@@ -530,6 +533,13 @@ comments:
 ```
 Changes requested — see inline comments.
 ```
+
+**Skipped dimensions (either verdict).** If a sub-agent's output was unavailable this
+run so a dimension could not be assessed (Step 3), append to the review body — after
+any verdict-specific text above — one line per skipped dimension, exactly:
+`Note: <dimension> not assessed this run (<sub-agent> output unavailable).` This is the
+only text permitted beyond the verdict bodies above, and it applies to both APPROVE
+(including the empty-body case) and REQUEST_CHANGES.
 
 Do NOT put the risk summary or common patterns in the review body. On approval
 they go in a separate PR comment (Step 7).
