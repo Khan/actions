@@ -130,7 +130,12 @@ observability:
         headers:
           x-sentry-auth: ${{ secrets.GH_AW_OTEL_SENTRY_AUTHORIZATION }}
 
-engine: claude
+# Pin the orchestrator to a specific model version rather than a floating tier alias, so
+# the review doesn't silently change behavior when a new Opus ships. If we use Opus, we
+# use Opus 4.8. Sub-agents pin their own versions in their frontmatter below.
+engine:
+  id: claude
+  model: claude-opus-4-8
 timeout-minutes: 20
 
 # Cost guardrails (AI credits; 1 credit = $0.01). gh-aw >= v0.79 bakes in
@@ -741,7 +746,7 @@ ran and the directory is empty.
 ---
 name: correctness-reviewer
 description: Classifies each changed file's risk and reviews the diff for correctness defects; returns JSON.
-model: opus
+model: claude-opus-4-8
 ---
 You are a correctness-focused code reviewer. You have **no GitHub access** — read the
 diff and file list from disk and return your result as JSON only.
@@ -791,7 +796,7 @@ and high-signal; use a blocking label only for a defect CI would not catch.
 ---
 name: skill-auditor
 description: Evaluates the diff against the repo's best-practice skills and returns violations as JSON.
-model: opus
+model: claude-opus-4-8
 ---
 You audit a PR diff for best-practice "skill" violations. You have **no GitHub
 access** — read the diff from disk and return JSON only.
@@ -826,7 +831,7 @@ return {"violations": []}.
 ---
 name: pattern-triage
 description: Finds common cross-file patterns and returns the files that still need a real review.
-model: large
+model: claude-sonnet-4-6
 ---
 You triage a PR diff: find repetitive cross-file patterns, and decide which files
 still need a real review. You have **no GitHub access**; read from disk and return
@@ -868,7 +873,7 @@ Return ONLY this JSON object (no prose, no code fence):
 ---
 name: reviewer-mapper
 description: Maps changed files to owning team(s) via .github/REVIEWERS and ranks teams by how much of the change they own.
-model: small
+model: claude-haiku-4-5
 ---
 You map files to their owning teams. You have **no GitHub access**; read from disk
 and return JSON only.
@@ -898,7 +903,7 @@ Return ONLY this JSON object (no prose, no code fence):
 ---
 name: thread-reconciler
 description: Decides which of the workflow's earlier review threads the current code has addressed; returns thread ids.
-model: opus
+model: claude-opus-4-8
 ---
 You decide which earlier review threads the current code has resolved. You have **no
 GitHub access**; read from disk and return JSON only.
@@ -921,7 +926,7 @@ Every input `thread_id` must appear in exactly one of the two lists.
 ---
 name: claim-validator
 description: Re-checks each candidate review comment against the actual code and the repo's best-practice skills, and drops or corrects the ones that are wrong; returns JSON.
-model: opus
+model: claude-opus-4-8
 ---
 You are a skeptical validator. Other reviewers proposed the comments in
 `/tmp/gh-aw/review/claims.json`; your job is to catch the ones that are **wrong** —
