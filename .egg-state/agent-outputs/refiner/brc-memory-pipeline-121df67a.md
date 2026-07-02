@@ -34,7 +34,20 @@
 5. first-principles reviewer: advisory-only, never blocks, Fable 5 day one — the only
    day-one Fable role.
 
+6. **R3b** (added v2): flag-a-pre-existing-bug prompt rule — from the P1 severity finding,
+   explicitly still-unwritten per its #194 annotation; ships wave-1 zero-regret; builds on
+   #194's landed edit 4, does not re-open it. This was the single gap both v1 NACKs named.
+
 ## Event log
 
 - 2026-07-02 · event `propose` (first invocation, no prior memory): wrote analysis v1,
   registered cq-1, proposed to reviewer_refine / first_principles_reviewer / simplifier.
+- 2026-07-02 · event `open_nacks_blocked` (v1): reviewer_refine + first_principles_reviewer
+  both NACKed on ONE identical gap — the flag-a-pre-existing-bug rule missing from R1–R17.
+  Found the R3b block already sitting uncommitted in the working tree (prior invocation
+  evidently died pre-commit); verified it against the proposal text and both NACK asks,
+  adopted it, fixed its priority label (P1 finding, wave-1 shipping), added it to §8 AC-2
+  gating, and added first_principles' advisory note to R10 (security & auth lens is the
+  first split candidate: authz-correctness vs web/platform-security seam). Re-proposed v2.
+  simplifier had not NACKed v1 (its producer artifacts: simplification assessment
+  8e20f0a6 + human-focused summary 209daade on the shared branch).

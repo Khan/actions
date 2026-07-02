@@ -83,6 +83,13 @@ consumer work, this pipeline treats it as an **interface requirement** on the sh
     concede-and-resolve or keep open; never re-raise a conceded point; keep the existing
     never-reply rule.
   - **E7** Skip any candidate comment whose line already has an open human thread.
+- **R3b (P1 finding · ships wave-1, zero-regret)** Flag-a-pre-existing-bug rule (from the
+  P1 severity finding "Make severity a property of the finding", named
+  still-unwritten in its #194 annotation): a real bug in the lines the PR touches is fair
+  to flag even if it predates the change — "it is not a regression" is not a reason to stay
+  silent about code under review. A prompt rule in `review.md`'s finder/severity area; it
+  **builds on** #194's landed severity model (edit 4, §3 items 2–4) and does not re-open
+  it. Not one of the fourteen numbered edits, so tracked here as its own zero-regret item.
 - **R4 (P1)** Thumbs feedback sweep — **deterministic code, no model**: invite 👍/👎 at two
   grains (per inline comment; per review/guidance comment); a polling sweep (cron or
   piggybacked on the next run) collects new reactions; for each new 👎, exactly one
@@ -135,7 +142,11 @@ consumer work, this pipeline treats it as an **interface requirement** on the sh
   - **Specialist lenses**: build the **top four first** — exact four is HITL **cq-1** (§7) —
     each folding its skill's rules + incident-derived executable hunts (each hunt reports
     ran / not-applicable / found); remaining lenses gate on measured misses. `skill-auditor`
-    folds into the lenses; the severity contradiction's source disappears.
+    folds into the lenses; the severity contradiction's source disappears. Per the
+    proposal, `security & auth` is the densest lens and the first candidate to split
+    further, along the risk config's own seam: authorization correctness (acl,
+    capabilities, resolver permission checks) vs. web/platform security (sessions,
+    cookies, CSRF/SSRF/redirects, headers).
   - **Gates kept**: `pattern-triage` (exclusions listed in the guidance comment; eval scores
     its false-exclusion rate), `claim-validator` + refuter panel (batched/parallel so it
     doesn't become the new overloaded single agent), deterministic **dedup + verdict**
@@ -225,7 +236,7 @@ answered by this pipeline:
 
 1. Every requirement above traces to a specific proposal finding, prompt edit, roster item,
    or bet — and none re-implements a §3 item.
-2. Phase ordering in §4 is preserved by the plan: R1–R4 gate on nothing; R7 gates on R5 and
+2. Phase ordering in §4 is preserved by the plan: R1–R4 (incl. R3b) gate on nothing; R7 gates on R5 and
    ships as one unit; R9/R10 items gate on measured evidence; R13–R17 last.
 3. No deliverable targets a consumer repo; every consumer-named item appears only as a §6
    interface requirement.
