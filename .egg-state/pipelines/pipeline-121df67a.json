@@ -214,7 +214,7 @@
     }
   ],
   "created_at": "2026-07-02T23:16:08.458189Z",
-  "updated_at": "2026-07-02T23:43:52.706653Z",
+  "updated_at": "2026-07-02T23:43:52.740036Z",
   "contract_synced": true,
   "network_mode": null,
   "mode": "issue",
@@ -227,7 +227,7 @@
   "source_branch": null,
   "source_artifact_prefix": null,
   "run_epoch": "2026-07-02T23:43:50.663853Z",
-  "version": 29,
+  "version": 30,
   "jira_ticket": null,
   "is_epic": false,
   "pipeline_mode": null,
