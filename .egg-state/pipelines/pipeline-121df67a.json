@@ -104,9 +104,27 @@
       "agent_exits": []
     }
   },
-  "decisions": [],
+  "decisions": [
+    {
+      "id": "decision-1",
+      "question": "The refine phase has completed. Please review the analysis and approve to continue, or provide feedback to request changes.\n\nDecision ledger: 1 decision(s) registered this phase (cq-1), 0 resolved.",
+      "context": "# Simplification analysis — human summary (refine phase)\n\n**Pipeline:** pipeline-121df67a · **Role:** simplifier · **Repo:** Khan/actions\n**Full assessment:** `.egg-state/agent-outputs/simplifier/pipeline-121df67a-refine-simplification.md`\n\n## What this pipeline should build (and what it shouldn't)\n\nThe task is to implement the \"Improving the Khan PR review agent\" proposal for the\nshared workflow in this repo. The proposal is disciplined about its own scope; the\nmain risk is a spec that *over-builds while sounding faithful*. My assessment gives\nthe refiner eight scope controls, all cited to the proposal's own text or the\noperator directive:\n\n1. **#194 is done — don't redo it.** Verified locally merged (4e7d82f7). Pinned\n   models, per-violation severity + suggestion label, mechanical label-driven\n   verdict, hunk-signature re-review scoping, per-run sub-agent JSON artifacts,\n   skip-ai-review label, correctness-checks import, and prompt edit 4 are all\n   shipped. 13 prompt edits remain, not 14.\n2. **Consumer repos are context, not targets.** webapp/frontend work is the sibling\n   pipeline's; here it appears only as interface requirements on the shared\n   workflow (severity declarations readable, extension point honored, thumbs sweep\n   capable of covering both repos).\n3. **The 15-role roster is a hypothesis inventory, not a build order** (the\n   proposal says so verbatim). Spec the deterministic router, one parameterized\n   lens mechanism, and the top-4 lenses; the rest is a benchmark-gated extension\n   pattern, not tasks.\n4. **Eval suite: smoke set first.** A dozen cases + a never-posts run mode gate\n   wave 2; the four full datasets grow with Phase 3 and never block Phase 1's\n   zero-regret fixes. Cheapest test first: rerun #40536 with edits 8+10.\n5. **Determinism boundary stays small and incremental** — schema → computed\n   verdict → templated rendering; \"a few hundred lines, never a framework.\" The\n   whole workflow is today one 1024-line prompt with inline sub-agents; don't\n   mandate a restructure beyond what the boundary needs.\n6. **Phase 1 has zero model changes.** All per-role model/effort recommendations\n   and Fable-5 arms are benchmark-gated (first-principles' day-one Fable is a\n   Phase-3 role anyway).\n7. **The four Open Questions (graduation bar, blocking policy, vendor-vs-consume,\n   ownership) become HITL decisions** — surfaced to the operator, no\n   implementation tasks attached, per the operator directive.\n8. **Smallest honest Phase-1 slice:** submission standardization + hold-for-human\n   when correctness/skills is missing; wave-1 prompt edits 1, 2, 3, 5, 6, 7; the\n   deterministic thumbs sweep. Anything more in Phase 1 is scope creep.\n\n## Bottom line\n\nThe proposal already contains its own scope controls; the refined spec is correct\nexactly insofar as it converts them into enforceable structure — phase gates,\nbenchmark gates, and HITL decisions. I will review the refiner's spec against the\neight sections above.\n\n\n[View the full detailed analysis draft](https://github.com/Khan/actions/blob/egg/pipeline-121df67a/work/.egg-state/drafts/pipeline-121df67a-analysis.md)",
+      "options": [
+        "approve",
+        "request changes"
+      ],
+      "decision_type": "phase_gate",
+      "questions": [],
+      "status": "pending",
+      "created_at": "2026-07-02T23:35:49.551922Z",
+      "resolved_at": null,
+      "resolution": null,
+      "phase": "refine",
+      "content_changed": null
+    }
+  ],
   "created_at": "2026-07-02T23:16:08.458189Z",
-  "updated_at": "2026-07-02T23:35:46.447726Z",
+  "updated_at": "2026-07-02T23:35:49.556019Z",
   "contract_synced": true,
   "network_mode": null,
   "mode": "issue",
@@ -119,7 +137,7 @@
   "source_branch": null,
   "source_artifact_prefix": null,
   "run_epoch": "2026-07-02T23:21:16.087243Z",
-  "version": 12,
+  "version": 13,
   "jira_ticket": null,
   "is_epic": false,
   "pipeline_mode": null,
