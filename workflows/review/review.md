@@ -85,6 +85,18 @@ safe-outputs:
     discussions: false
     hide-older-comments: true
     footer: false
+  # Persist each sub-agent's structured JSON output as a run-scoped artifact so a
+  # human can inspect exactly what each reviewer produced when diagnosing or tuning
+  # the reviewer after the fact — this is the only place that reasoning is captured
+  # as clean structured data (the Actions logs and OTLP traces are harder to mine).
+  # The orchestrator writes each result to `/tmp/gh-aw/review/out/` (Step 3) and
+  # uploads only that directory (`allowed-paths`); 30-day retention gives a useful
+  # window for post-hoc review.
+  upload-artifact:
+    max-uploads: 1
+    retention-days: 30
+    allowed-paths:
+      - "/tmp/gh-aw/review/out/**"
   # NOTE: `add-reviewer` is intentionally defined only in the imported
   # .github/aw/review/config.md (see the `imports:` note above), because its
   # `allowed-team-reviewers` allowlist is repo-specific. Defining it here would override
@@ -224,11 +236,17 @@ these in parallel** (one turn) and wait for all:
   never reply to a thread, and for a `keep` thread do not open a duplicate comment in
   Step 5.
 
-Parse each sub-agent's JSON and keep only the compact result. If a sub-agent's output
-is missing or unparseable, do **not** try to reproduce its analysis yourself — you no
-longer hold its repo-specific config (risk tiers, the CI-tooling list, the skills
-index). Skip that dimension and surface the gap with the skipped-dimension note
-defined in Step 6, so a human can see it was not assessed this run.
+Parse each sub-agent's JSON and keep only the compact result. As you parse each one,
+also write its raw JSON verbatim to `/tmp/gh-aw/review/out/<agent>.json` (create the
+`out/` directory if needed), naming the file after the sub-agent — `pattern-triage.json`,
+`correctness-reviewer.json`, `skill-auditor.json`, `reviewer-mapper.json`,
+`thread-reconciler.json`, and (Phase 3) `claim-validator.json`. These files are uploaded
+as a run-scoped artifact at the end (Step 9) so a human can inspect exactly what each
+reviewer produced. If a sub-agent's output is missing or unparseable, do **not** try to
+reproduce its analysis yourself — you no longer hold its repo-specific config (risk
+tiers, the CI-tooling list, the skills index). Skip that dimension for this run, and
+write whatever raw text you did get (or a short `{"error": "..."}` note) to its
+`out/` file so the gap is visible in the artifact.
 
 **Phase 3 — validate the claims (only when there are candidate comments).** The
 candidate inline comments are the `correctness-reviewer`'s `findings[]` and the
@@ -252,8 +270,7 @@ actual code and returns, per `id`, a `verdict` of `keep` or `drop` with optional
 The findings and violations that survive this phase — with any corrections applied —
 are the set Step 4 (verdict) and Step 5 (comments) act on. If `claim-validator`'s
 output is missing or unparseable, do **not** drop the comments: post the unvalidated
-claims and surface the gap with the skipped-dimension note in Step 6 (dimension:
-`claim validation`), so a human knows they were not double-checked this run.
+claims anyway.
 
 ## Step 4: Determine the Review Verdict
 
@@ -387,6 +404,23 @@ Maximum 20 comments. If you would exceed that, prioritize:
 
 ## Step 6: Submit the Review
 
+### Skip a redundant no-comment approval
+
+Before submitting, check whether this review would be a no-op repeat of the PR's
+current state: the verdict (Step 4) is APPROVE and you left **no** inline comments in
+Step 5 — i.e. the review body would be exactly the plain
+`Approved — no blocking issues found.` text with nothing else. Only when both of
+those hold, fetch the PR's existing reviews
+(`pull_requests` `get_pull_request_reviews`) and find the most recent one authored by
+`github-actions[bot]`. If its `state` is `APPROVED`, the PR is already sitting at an
+approved, no-comment state and posting an identical approval again adds nothing —
+**do not call `submit-pull-request-review` this run.** Continue on to Step 7 and
+Step 8 as normal (they still run on the verdict from Step 4); only the review
+submission itself is skipped.
+
+If there is no prior `github-actions[bot]` review, its state is not `APPROVED`, or you
+left any inline comments in Step 5, submit the review as below instead.
+
 Submit a single review using the `submit-pull-request-review` safe output. Set
 the `event` field to APPROVE or REQUEST_CHANGES as determined in Step 4.
 
@@ -408,13 +442,6 @@ comments:
 ```
 Changes requested — see inline comments.
 ```
-
-**Skipped dimensions (either verdict).** If a sub-agent's output was unavailable this
-run so a dimension could not be assessed (Step 3), append to the review body — after
-any verdict-specific text above — one line per skipped dimension, exactly:
-`Note: <dimension> not assessed this run (<sub-agent> output unavailable).` This is the
-only text permitted beyond the verdict bodies above, and it applies to both APPROVE
-(including the empty-body case) and REQUEST_CHANGES.
 
 Do NOT put the risk summary or common patterns in the review body. On approval
 they go in a separate PR comment (Step 7).
@@ -614,6 +641,12 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
   Record it on every review so Step 2 can compare it against the current draft
   status to detect the draft→ready transition and bypass the early-exit check
   for that one run.
+
+Finally, if you wrote any sub-agent outputs to `/tmp/gh-aw/review/out/` this run
+(Step 3), upload that directory as a run-scoped artifact with the `upload-artifact`
+safe output (`path: /tmp/gh-aw/review/out/`). This captures each reviewer's structured
+result for later inspection. Skip it only on an early exit (Step 2) where no sub-agents
+ran and the directory is empty.
 
 ## Tone Guidelines
 
