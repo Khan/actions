@@ -693,6 +693,10 @@ Risk tiers for this repo:
 What this repo's CI and tooling already catch — do NOT flag these:
 {{#runtime-import .github/aw/review/ci-tooling.md}}
 
+Additional correctness checks for this repo (optional — present only when the host repo
+provides them; ignore this section if it is empty):
+{{#runtime-import? .github/aw/review/correctness-checks.md}}
+
 Return ONLY this JSON object (no prose, no code fence):
 {
   "files": [{"path": "...", "risk": "High|Medium|Low|Trivial", "riskReason": "one sentence; required for High/Medium, else empty"}],
