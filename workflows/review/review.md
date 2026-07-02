@@ -26,9 +26,16 @@ on:
 # shared across the repos this workflow runs in. Everything else is reviewed, including
 # pushes from our bots (`khan-actions-bot` and `github-actions[bot]`), since even automated
 # commits can carry real code changes worth reviewing.
+#
+# Also skip any PR carrying the `skip-ai-review` label, so a human can opt a specific PR
+# out of automated review. This is a job-level gate: a labeled PR never starts the agent
+# (zero AI credits) and posts nothing. The label is evaluated on each trigger event
+# (open/synchronize/reopen/ready), so adding it prevents the *next* run — it does not
+# retroactively dismiss a review already left on an earlier push.
 if: >-
   !startsWith(github.event.pull_request.head.ref, 'deploy/') &&
-  github.event.pull_request.head.ref != 'changeset-release/main'
+  github.event.pull_request.head.ref != 'changeset-release/main' &&
+  !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
 
 # Consumer-specific frontmatter is merged in at compile time from the consuming repo via
 # this import: the consumer's `add-reviewer` safe output, with its repo-specific
