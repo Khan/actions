@@ -6,9 +6,87 @@
   "current_phase": "refine",
   "acceptance_criteria": [],
   "slices": [],
-  "decisions": [],
+  "decisions": [
+    {
+      "id": "cq-1",
+      "question": "The roster restructure says to build the top four path-gated specialist lenses first (\"highest frequency and severity\") but never names which four. Which four should this pipeline build first? (The remaining lenses land later, gated on eval-suite evidence, per the proposal.)",
+      "type": "hitl",
+      "phase": "refine",
+      "options": [
+        {
+          "id": "opt-1",
+          "label": "Roster order: security & auth, data & migrations, concurrency & async, API & federation compat \u2014 the first four listed, incl. the named 'top Khan risk with no dedicated owner'",
+          "description": null
+        },
+        {
+          "id": "opt-2",
+          "label": "Incident-mapped: security & auth, AI safety & moderation, mass-comms & COPPA, caching & resource \u2014 the four lenses matching the documented incidents the must-catch set reproduces",
+          "description": null
+        },
+        {
+          "id": "opt-3",
+          "label": "Defer to plan/eval evidence: ship router + always-on reviewers first, and gate every specialist lens on a measured miss in its area before building it",
+          "description": null
+        },
+        {
+          "id": "opt-4",
+          "label": "Other (explain in reply)",
+          "description": null
+        }
+      ],
+      "resolved": false,
+      "resolution": null,
+      "resolved_by": null,
+      "resolved_at": null,
+      "debounce_until": null
+    }
+  ],
   "workflow_owner": null,
-  "audit_log": [],
+  "audit_log": [
+    {
+      "timestamp": "2026-07-02T23:25:01.018648Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "decisions.0",
+      "old_value": null,
+      "new_value": {
+        "id": "cq-1",
+        "question": "The roster restructure says to build the top four path-gated specialist lenses first (\"highest frequency and severity\") but never names which four. Which four should this pipeline build first? (The remaining lenses land later, gated on eval-suite evidence, per the proposal.)",
+        "type": "hitl",
+        "phase": "refine",
+        "options": [
+          {
+            "id": "opt-1",
+            "label": "Roster order: security & auth, data & migrations, concurrency & async, API & federation compat \u2014 the first four listed, incl. the named 'top Khan risk with no dedicated owner'",
+            "description": null
+          },
+          {
+            "id": "opt-2",
+            "label": "Incident-mapped: security & auth, AI safety & moderation, mass-comms & COPPA, caching & resource \u2014 the four lenses matching the documented incidents the must-catch set reproduces",
+            "description": null
+          },
+          {
+            "id": "opt-3",
+            "label": "Defer to plan/eval evidence: ship router + always-on reviewers first, and gate every specialist lens on a measured miss in its area before building it",
+            "description": null
+          },
+          {
+            "id": "opt-4",
+            "label": "Other (explain in reply)",
+            "description": null
+          }
+        ],
+        "resolved": false,
+        "resolution": null,
+        "resolved_by": null,
+        "resolved_at": null,
+        "debounce_until": null
+      },
+      "reason": "Created HITL decision: The roster restructure says to build the top four ...",
+      "checkpoint_id": null
+    }
+  ],
   "refine_review_cycles": 0,
   "refine_review_feedback": "",
   "plan_review_cycles": 0,
