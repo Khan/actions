@@ -329,7 +329,7 @@ re-checks each claim against the actual code and returns, per `id`, a `verdict` 
   claim's `line`, `label`, `subject`, `discussion`, and/or `suggestion` with the
   corrected values before posting. This includes severity: the validator may correct an
   overstated skill claim by changing its `label` from `issue (blocking, best-practice)`
-  to `suggestion (non-blocking, best-practice)` (or the reverse for an understated one).
+  to `suggestion (non-blocking, best-practice)`.
 
 The findings and violations that survive this phase — with any corrections applied —
 are the set Step 4 (verdict) and Step 5 (comments) act on. If `claim-validator`'s
