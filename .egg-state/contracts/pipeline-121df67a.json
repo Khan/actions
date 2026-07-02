@@ -16,29 +16,34 @@
         {
           "id": "opt-1",
           "label": "Roster order: security & auth, data & migrations, concurrency & async, API & federation compat \u2014 the first four listed, incl. the named 'top Khan risk with no dedicated owner'",
-          "description": null
+          "description": null,
+          "adds_task": null
         },
         {
           "id": "opt-2",
           "label": "Incident-mapped: security & auth, AI safety & moderation, mass-comms & COPPA, caching & resource \u2014 the four lenses matching the documented incidents the must-catch set reproduces",
-          "description": null
+          "description": null,
+          "adds_task": null
         },
         {
           "id": "opt-3",
           "label": "Defer to plan/eval evidence: ship router + always-on reviewers first, and gate every specialist lens on a measured miss in its area before building it",
-          "description": null
+          "description": null,
+          "adds_task": null
         },
         {
           "id": "opt-4",
           "label": "Other (explain in reply)",
-          "description": null
+          "description": null,
+          "adds_task": null
         }
       ],
-      "resolved": false,
-      "resolution": null,
-      "resolved_by": null,
-      "resolved_at": null,
-      "debounce_until": null
+      "resolved": true,
+      "resolution": "{\"action\": \"select\", \"selected\": \"Incident-mapped: security & auth, AI safety & moderation, mass-comms & COPPA, caching & resource \u2014 the four lenses matching the documented incidents the must-catch set reproduces\"}",
+      "resolved_by": "human",
+      "resolved_at": "2026-07-02T23:37:54.883453Z",
+      "debounce_until": null,
+      "redirect_seed": null
     }
   ],
   "workflow_owner": null,
