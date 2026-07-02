@@ -279,3 +279,10 @@ answered by this pipeline:
   benchmark-gated (first-principles excepted, advisory-only).
 - **Suite cost**: full-suite runs spend real inference budget; smoke set is the CI gate,
   full suite is scheduled.
+
+
+## HITL Resolution
+
+The following was approved by a human reviewer at the refine phase gate:
+
+Converged draft correctly incorporates the resolved cq-1 (incident-mapped top-4 lenses); eight scope controls ratified; no new questions induced. Proceed to plan.

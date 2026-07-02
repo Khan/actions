@@ -44,6 +44,32 @@
       "resolved_at": "2026-07-02T23:37:54.883453Z",
       "debounce_until": null,
       "redirect_seed": null
+    },
+    {
+      "id": "decision-2",
+      "question": "[Phase gate: refine] The refine phase has completed. Please review the analysis and approve to continue, or provide feedback to request changes.\n\nDecision ledger: 1 decision(s) registered this phase (cq-1), 1 resolved.",
+      "type": "hitl",
+      "phase": null,
+      "options": [
+        {
+          "id": "opt-1",
+          "label": "approve",
+          "description": null,
+          "adds_task": null
+        },
+        {
+          "id": "opt-2",
+          "label": "request changes",
+          "description": null,
+          "adds_task": null
+        }
+      ],
+      "resolved": true,
+      "resolution": "Converged draft correctly incorporates the resolved cq-1 (incident-mapped top-4 lenses); eight scope controls ratified; no new questions induced. Proceed to plan.",
+      "resolved_by": "human",
+      "resolved_at": "2026-07-02T23:43:43.777987Z",
+      "debounce_until": null,
+      "redirect_seed": null
     }
   ],
   "workflow_owner": null,
