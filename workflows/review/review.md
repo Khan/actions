@@ -26,9 +26,16 @@ on:
 # shared across the repos this workflow runs in. Everything else is reviewed, including
 # pushes from our bots (`khan-actions-bot` and `github-actions[bot]`), since even automated
 # commits can carry real code changes worth reviewing.
+#
+# Also skip any PR carrying the `skip-ai-review` label, so a human can opt a specific PR
+# out of automated review. This is a job-level gate: a labeled PR never starts the agent
+# (zero AI credits) and posts nothing. The label is evaluated on each trigger event
+# (open/synchronize/reopen/ready), so adding it prevents the *next* run — it does not
+# retroactively dismiss a review already left on an earlier push.
 if: >-
   !startsWith(github.event.pull_request.head.ref, 'deploy/') &&
-  github.event.pull_request.head.ref != 'changeset-release/main'
+  github.event.pull_request.head.ref != 'changeset-release/main' &&
+  !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
 
 # Consumer-specific frontmatter is merged in at compile time from the consuming repo via
 # this import: the consumer's `add-reviewer` safe output, with its repo-specific
@@ -85,6 +92,18 @@ safe-outputs:
     discussions: false
     hide-older-comments: true
     footer: false
+  # Persist each sub-agent's structured JSON output as a run-scoped artifact so a
+  # human can inspect exactly what each reviewer produced when diagnosing or tuning
+  # the reviewer after the fact — this is the only place that reasoning is captured
+  # as clean structured data (the Actions logs and OTLP traces are harder to mine).
+  # The orchestrator writes each result to `/tmp/gh-aw/review/out/` (Step 3) and
+  # uploads only that directory (`allowed-paths`); 30-day retention gives a useful
+  # window for post-hoc review.
+  upload-artifact:
+    max-uploads: 1
+    retention-days: 30
+    allowed-paths:
+      - "/tmp/gh-aw/review/out/**"
   # NOTE: `add-reviewer` is intentionally defined only in the imported
   # .github/aw/review/config.md (see the `imports:` note above), because its
   # `allowed-team-reviewers` allowlist is repo-specific. Defining it here would override
@@ -111,7 +130,12 @@ observability:
         headers:
           x-sentry-auth: ${{ secrets.GH_AW_OTEL_SENTRY_AUTHORIZATION }}
 
-engine: claude
+# Pin the orchestrator to a specific model version rather than a floating tier alias, so
+# the review doesn't silently change behavior when a new Opus ships. If we use Opus, we
+# use Opus 4.8. Sub-agents pin their own versions in their frontmatter below.
+engine:
+  id: claude
+  model: claude-opus-4-8
 timeout-minutes: 20
 
 # Cost guardrails (AI credits; 1 credit = $0.01). gh-aw >= v0.79 bakes in
@@ -161,6 +185,33 @@ its `status`/`additions`/`deletions` when no patch is present, e.g. a binary or
 too-large file), since the GitHub MCP exposes no content blob `sha`. Hash from the
 `get_files` output on disk without loading every patch into the conversation. Step 2
 compares this against the cache; you save it in Step 9.
+
+**Compute the newly-changed-code scope.** So that Step 3 only comments on code this
+workflow has not already reviewed, work out which parts of the diff are *new since the
+last review* — by **content**, not by commit, so it survives force-pushes and rebases.
+For every changed file, split its `patch` into hunks and compute one hash per hunk: the
+SHA-256 of just that hunk's **added (`+`) lines**, each with the leading `+` stripped and
+trailing whitespace trimmed, concatenated in order. Deliberately ignore context lines,
+removed lines, and line numbers — a rebase, squash, or base-branch merge rewrites commit
+SHAs and shifts line numbers but does **not** change the text the author added, so a
+content hash of the added lines stays stable across all of those. Call this map
+`path → [hunkHash, …]` the **hunk signature**; you always compute it and save it as
+`reviewedHunks` in Step 9.
+
+Then recall `reviewedHunks` from cache memory (the hunk signature the previous review
+saved) and derive the scope:
+- **No prior review** of this PR (no `reviewedHunks` in cache) → the whole diff is new.
+  Do not scope anything this run; Step 3 reviews everything.
+- **Otherwise** a hunk is **in scope** (newly-changed) when its hash is **not** present
+  in `reviewedHunks[path]`. A file absent from `reviewedHunks` is entirely in scope
+  (newly touched). A hunk whose hash matches one the previous run already saw is **out of
+  scope** — already reviewed and unchanged since, even if a force-push or rebase rewrote
+  the commits around it.
+
+Write the result to `/tmp/gh-aw/review/new-scope.json` as
+`{"priorReview": true|false, "inScope": {path: [line, …]}}`, where the lines are the
+RIGHT-side line numbers of the added lines inside in-scope hunks. Step 3 uses this to
+filter candidate comments.
 
 ## Step 2: Early-Exit Check
 
@@ -212,8 +263,9 @@ these in parallel** (one turn) and wait for all:
   `findings[]` (correctness issues). Use `files[]` for the risk/patterns comment
   (Step 7) and reviewer routing (Step 8); use `findings[]` for the verdict (Step 4)
   and the inline comments (Step 5).
-- **`skill-auditor`** — returns `violations[]` (best-practice skill breaches, all
-  blocking). Use them for the verdict (Step 4) and the inline comments (Step 5).
+- **`skill-auditor`** — returns `violations[]` (best-practice skill breaches), each
+  with a `severity` of `blocking` or `advisory`. Use them for the verdict (Step 4) and
+  the inline comments (Step 5); only `blocking` violations can drive REQUEST_CHANGES.
 - **`reviewer-mapper`** — maps the substantive changes (`owned-files.json`) to their
   owning team(s) and returns `owners` (`{path: [team, …]}`) plus `fallbackTeams` (those
   teams ranked by how many of those files they own). Step 7 and Step 8's risk routing
@@ -224,47 +276,97 @@ these in parallel** (one turn) and wait for all:
   never reply to a thread, and for a `keep` thread do not open a duplicate comment in
   Step 5.
 
-Parse each sub-agent's JSON and keep only the compact result. If a sub-agent's output
-is missing or unparseable, do **not** try to reproduce its analysis yourself — you no
-longer hold its repo-specific config (risk tiers, the CI-tooling list, the skills
-index). Skip that dimension and surface the gap with the skipped-dimension note
-defined in Step 6, so a human can see it was not assessed this run.
+Parse each sub-agent's JSON and keep only the compact result. As you parse each one,
+also write its raw JSON verbatim to `/tmp/gh-aw/review/out/<agent>.json` (create the
+`out/` directory if needed), naming the file after the sub-agent — `pattern-triage.json`,
+`correctness-reviewer.json`, `skill-auditor.json`, `reviewer-mapper.json`,
+`thread-reconciler.json`, and (Phase 3) `claim-validator.json`. These files are uploaded
+as a run-scoped artifact at the end (Step 9) so a human can inspect exactly what each
+reviewer produced. If a sub-agent's output is missing or unparseable, do **not** try to
+reproduce its analysis yourself — you no longer hold its repo-specific config (risk
+tiers, the CI-tooling list, the skills index). Skip that dimension for this run: track it
+as a skipped dimension and surface the gap with the skipped-dimension note in Step 6 so
+the author can see it was not assessed, and write whatever raw text you did get (or a
+short `{"error": "..."}` note) to its `out/` file so the gap is visible in the artifact.
+
+**Scope the candidate comments to newly-changed code.** Now filter the
+`correctness-reviewer`'s `findings[]` and the `skill-auditor`'s `violations[]` against
+the new-code scope from Step 1 (`/tmp/gh-aw/review/new-scope.json`). This is what stops
+the reviewer from re-commenting on code a previous review already covered:
+- If `priorReview` is `false` (first review of this PR), keep everything — nothing has
+  been reviewed yet.
+- Otherwise **drop** any finding or violation whose (`path`, `line`) is not an in-scope
+  line in `inScope` — that code is unchanged since the last review, so it was already
+  covered (this holds across force-pushes and rebases because the scope is content-based).
+  **One exception:** keep a dropped candidate when it is a `correctness-reviewer` finding
+  whose `label` is `issue (blocking)` — a genuine blocking bug is worth surfacing even if
+  a change elsewhere introduced it on previously-reviewed lines. Nits, suggestions,
+  questions, notes, todos, and **all** `skill-auditor` violations are scoped strictly to
+  new code (re-flagging best-practice or style points on unchanged code is exactly the
+  noise being removed here).
+
+This filter applies **only** to the inline-comment candidates. `files[]` risk levels,
+patterns, and ownership still reflect the whole PR, so Steps 7 and 8 are unaffected. The
+findings and violations that survive this filter are the candidate set the rest of Step 3
+acts on. (The existing `thread-reconciler` dedup remains a second layer: even an in-scope
+line that duplicates a still-open thread must not open a duplicate comment, Step 5.)
 
 **Phase 3 — validate the claims (only when there are candidate comments).** The
-candidate inline comments are the `correctness-reviewer`'s `findings[]` and the
-`skill-auditor`'s `violations[]` from Phase 2. If both are empty, skip this phase
-entirely — there is nothing to post, so nothing to validate. Otherwise give each
+candidate inline comments are the surviving `correctness-reviewer` `findings[]` and
+`skill-auditor` `violations[]` from Phase 2 (after the scope filter above). If both are
+empty, skip this phase entirely — there is nothing to post, so nothing to validate. Otherwise give each
 candidate a short stable `id` and write the combined list to
 `/tmp/gh-aw/review/claims.json` — each entry: `id`, `source` (`correctness` or
-`skill`), `path`, `line`, `label`, `subject`, `discussion`, and any `suggestion` (for a
-`skill` claim, set `label` to `issue (blocking, best-practice)` and include its
-`skill`). Then dispatch **`claim-validator`**, which re-checks each claim against the
-actual code and returns, per `id`, a `verdict` of `keep` or `drop` with optional
-`corrected` fields. Apply its result before Step 4:
+`skill`), `path`, `line`, `label`, `subject`, `discussion`, and any `suggestion`. For a
+`skill` claim, include its `skill` and set `label` from the violation's `severity`:
+`blocking` → `issue (blocking, best-practice)`, `advisory` →
+`suggestion (non-blocking, best-practice)`. Then dispatch **`claim-validator`**, which
+re-checks each claim against the actual code and returns, per `id`, a `verdict` of
+`keep` or `drop` with optional `corrected` fields. Apply its result before Step 4:
 
 - **`drop`** — discard the claim. It is a false positive, unsupported, or misleading;
   it is not posted and does not count toward the verdict.
 - **`keep`** — retain the claim. If it carries a `corrected` object, overwrite the
   claim's `line`, `label`, `subject`, `discussion`, and/or `suggestion` with the
-  corrected values (a fixed line number, a more accurate description, or a severity the
-  reviewer overstated) before posting.
+  corrected values before posting. This includes severity: the validator may correct an
+  overstated skill claim by changing its `label` from `issue (blocking, best-practice)`
+  to `suggestion (non-blocking, best-practice)`.
 
 The findings and violations that survive this phase — with any corrections applied —
 are the set Step 4 (verdict) and Step 5 (comments) act on. If `claim-validator`'s
 output is missing or unparseable, do **not** drop the comments: post the unvalidated
-claims and surface the gap with the skipped-dimension note in Step 6 (dimension:
-`claim validation`), so a human knows they were not double-checked this run.
+claims anyway, and surface the gap as a skipped dimension (`claim validation`) with the
+note in Step 6, so the author knows they were not double-checked this run.
 
 ## Step 4: Determine the Review Verdict
 
-Decide the verdict BEFORE writing any comments, because it affects which
-comments you post. Decide it from the **validated** findings and violations (Step 3
-Phase 3) — a claim the validator dropped, or downgraded to non-blocking, never makes
-the verdict REQUEST_CHANGES.
+Decide the verdict BEFORE writing any comments, because it affects which comments you
+post. The verdict is a **mechanical function of the labels on the comments you will
+actually post** — the `correctness-reviewer` findings and `skill-auditor` violations that
+survived validation (Step 3 Phase 3), after any corrections and after the
+newly-changed-code scope filter. A claim the validator dropped or downgraded to
+non-blocking, or that the scope filter removed, is not in that set and cannot affect the
+verdict.
 
-### REQUEST_CHANGES
+**Blocking labels:** `issue (blocking)`, `issue (blocking, best-practice)`, and
+`todo (blocking)`. Every other label is non-blocking: `suggestion (non-blocking)`,
+`suggestion (non-blocking, best-practice)`, `nitpick (non-blocking)`,
+`question (non-blocking)`, `thought (non-blocking)`, and `note (non-blocking)`.
 
-Use when there are ANY blocking issues. This includes:
+**The rule:**
+- **REQUEST_CHANGES** if and only if at least one comment you are going to post carries a
+  blocking label.
+- **APPROVE** otherwise — including when the posted set contains only non-blocking
+  comments. **Never REQUEST_CHANGES when every comment you are posting is non-blocking.**
+
+There is no separate judgment: if a finding is a real defect it should carry a blocking
+label (see below), but the verdict follows the labels on the actual posted comments, not
+a category call. Count the blocking labels in your final comment set; zero blocking
+labels means APPROVE.
+
+### What should carry a blocking label
+
+Label a finding blocking (which is what then drives REQUEST_CHANGES) when it is:
 
 **Correctness defects** (that CI would NOT catch):
 - Logic errors that pass type checks (wrong condition, off-by-one, etc.)
@@ -275,20 +377,21 @@ Use when there are ANY blocking issues. This includes:
   breaks because a required identifier field is missing from a query)
 - Public API type unsafety that downstream consumers would hit at runtime
 
-**Best practice violations** (from the `skill-auditor`):
-- Any violation of the rules defined in the skill files is blocking. If a
-  relevant skill's rules are not followed, that is grounds for REQUEST_CHANGES.
+**Best practice violations** (from the `skill-auditor`) — only when the violation's
+`severity` is `blocking`:
+- A `blocking` skill violation is labeled `issue (blocking, best-practice)` and drives
+  the verdict. An `advisory` skill violation is labeled
+  `suggestion (non-blocking, best-practice)` and does **not** block — it rides along
+  with an APPROVE. Severity comes from the skill file's declaration, or the auditor's
+  impact judgment when the skill doesn't declare one (Step 3).
 
-NOT valid reasons (CI catches these):
+Do NOT label these blocking (CI catches them), and do not let them drive the verdict:
 - Type errors, lint violations, test failures
 - Import ordering, formatting issues
 - Missing semicolons, unused variables
 
-### APPROVE
-
-Use when:
-- No blocking issues found (no correctness defects, no best practice violations)
-- You can still leave non-blocking inline comments with an approval
+If none of the posted comments qualifies for a blocking label, the verdict is APPROVE —
+you can still approve with non-blocking inline comments.
 
 ## Step 5: Leave Per-Line Review Comments
 
@@ -315,8 +418,11 @@ Use these labels to categorize each comment:
 
 - **`issue (blocking)`** — a correctness defect that must be fixed before
   approval. Only use for problems CI would NOT catch.
-- **`issue (blocking, best-practice)`** — a best practice skill violation that
-  must be fixed before approval.
+- **`issue (blocking, best-practice)`** — a `blocking`-severity best-practice skill
+  violation that must be fixed before approval.
+- **`suggestion (non-blocking, best-practice)`** — an `advisory`-severity best-practice
+  skill violation. Names the skill area but does not block; the author can take it or
+  leave it.
 - **`suggestion (non-blocking)`** — a proposed improvement. The author can
   take it or leave it.
 - **`nitpick (non-blocking)`** — a trivial preference. Never blocking.
@@ -360,8 +466,9 @@ already have a thread from a previous run (handled in Step 3).
 - Suggest a fix with a code block when possible
 
 **Best practice violations** (from the `skill-auditor`):
-- Use `issue (blocking, best-practice)` for skill violations — these are
-  blocking. Name the skill area in the subject.
+- Label by the violation's `severity`: `issue (blocking, best-practice)` for
+  `blocking`, `suggestion (non-blocking, best-practice)` for `advisory`. Name the skill
+  area in the subject either way.
 - Suggest a fix with a code block when possible
 
 **Non-blocking feedback:**
@@ -386,6 +493,24 @@ Maximum 20 comments. If you would exceed that, prioritize:
 - Do NOT comment on Trivial or Low risk files unless they have an actual issue
 
 ## Step 6: Submit the Review
+
+### Skip a redundant no-comment approval
+
+Before submitting, check whether this review would be a no-op repeat of the PR's
+current state: the verdict (Step 4) is APPROVE, you left **no** inline comments in
+Step 5, and there are **no** skipped-dimension notes to add (below) — i.e. the review
+body would be exactly the plain `Approved — no blocking issues found.` text with nothing
+else. Only when all of those hold, fetch the PR's existing reviews
+(`pull_requests` `get_pull_request_reviews`) and find the most recent one authored by
+`github-actions[bot]`. If its `state` is `APPROVED`, the PR is already sitting at an
+approved, no-comment state and posting an identical approval again adds nothing —
+**do not call `submit-pull-request-review` this run.** Continue on to Step 7 and
+Step 8 as normal (they still run on the verdict from Step 4); only the review
+submission itself is skipped.
+
+If there is no prior `github-actions[bot]` review, its state is not `APPROVED`, you
+left any inline comments in Step 5, or a dimension was skipped this run, submit the
+review as below instead.
 
 Submit a single review using the `submit-pull-request-review` safe output. Set
 the `event` field to APPROVE or REQUEST_CHANGES as determined in Step 4.
@@ -610,10 +735,22 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
   Step 1 (the SHA-256 of the file's `patch`, since the GitHub MCP exposes no blob
   `sha`). Always record this, on every review, so Step 2 can later tell whether a
   merge commit changed anything reviewable.
+- `reviewedHunks`: the **hunk signature** of the diff you reviewed this run — the
+  `path → [hunkHash, …]` map defined in Step 1 (one SHA-256 per hunk over its added
+  lines only). Always record this, on every review, so the next run can scope its
+  comments to hunks whose content is new since this review (Step 1 → Step 3). Record
+  the full current signature, not just the hunks you commented on — "already reviewed"
+  means every hunk you looked at this run.
 - `wasDraft`: whether the PR was a draft at this review (its `draft` field).
   Record it on every review so Step 2 can compare it against the current draft
   status to detect the draft→ready transition and bypass the early-exit check
   for that one run.
+
+Finally, if you wrote any sub-agent outputs to `/tmp/gh-aw/review/out/` this run
+(Step 3), upload that directory as a run-scoped artifact with the `upload-artifact`
+safe output (`path: /tmp/gh-aw/review/out/`). This captures each reviewer's structured
+result for later inspection. Skip it only on an early exit (Step 2) where no sub-agents
+ran and the directory is empty.
 
 ## Tone Guidelines
 
@@ -630,7 +767,7 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
 ---
 name: correctness-reviewer
 description: Classifies each changed file's risk and reviews the diff for correctness defects; returns JSON.
-model: opus
+model: claude-opus-4-8
 ---
 You are a correctness-focused code reviewer. You have **no GitHub access** — read the
 diff and file list from disk and return your result as JSON only.
@@ -660,6 +797,10 @@ Risk tiers for this repo:
 What this repo's CI and tooling already catch — do NOT flag these:
 {{#runtime-import .github/aw/review/ci-tooling.md}}
 
+Additional correctness checks for this repo (optional — present only when the host repo
+provides them; ignore this section if it is empty):
+{{#runtime-import? .github/aw/review/correctness-checks.md}}
+
 Return ONLY this JSON object (no prose, no code fence):
 {
   "files": [{"path": "...", "risk": "High|Medium|Low|Trivial", "riskReason": "one sentence; required for High/Medium, else empty"}],
@@ -676,7 +817,7 @@ and high-signal; use a blocking label only for a defect CI would not catch.
 ---
 name: skill-auditor
 description: Evaluates the diff against the repo's best-practice skills and returns violations as JSON.
-model: opus
+model: claude-opus-4-8
 ---
 You audit a PR diff for best-practice "skill" violations. You have **no GitHub
 access** — read the diff from disk and return JSON only.
@@ -692,7 +833,15 @@ relevance criteria):
 1. Decide which skills are relevant to the files. Skip the rest entirely.
 2. For each relevant skill, read its skill file from disk (path from the index) and
    evaluate the files against its rules.
-3. Report every violation — skill violations are blocking.
+3. Report every violation, and assign each a `severity` of `blocking` or `advisory`:
+   - **If the skill file declares a severity** — a skill-level default or a per-rule
+     annotation (e.g. a rule marked `blocking`/`advisory`, or `must`/`should`) — use
+     what it declares. A per-rule severity overrides the skill-level default.
+   - **Otherwise judge by impact.** `blocking` when the rule is a hard requirement
+     (phrased with "must"/"never"/"always") or the breach carries correctness,
+     security, data-integrity, or compatibility risk. `advisory` when the convention is
+     stylistic, organizational, or a preference the author can reasonably decline.
+   When unsure, prefer `advisory` — a human still sees the comment, it just doesn't block.
 
 Skills index for this repo:
 {{#runtime-import .github/aw/review/skills.md}}
@@ -700,7 +849,7 @@ Skills index for this repo:
 Return ONLY this JSON object (no prose, no code fence):
 {
   "violations": [{
-    "skill": "skill name", "path": "...", "line": 0,
+    "skill": "skill name", "path": "...", "line": 0, "severity": "blocking|advisory",
     "subject": "one line naming the skill area", "discussion": "the rule violated and the fix", "suggestion": "optional fix code"
   }]
 }
@@ -711,7 +860,7 @@ return {"violations": []}.
 ---
 name: pattern-triage
 description: Finds common cross-file patterns and returns the files that still need a real review.
-model: large
+model: claude-sonnet-4-6
 ---
 You triage a PR diff: find repetitive cross-file patterns, and decide which files
 still need a real review. You have **no GitHub access**; read from disk and return
@@ -753,7 +902,7 @@ Return ONLY this JSON object (no prose, no code fence):
 ---
 name: reviewer-mapper
 description: Maps changed files to owning team(s) via .github/REVIEWERS and ranks teams by how much of the change they own.
-model: small
+model: claude-haiku-4-5
 ---
 You map files to their owning teams. You have **no GitHub access**; read from disk
 and return JSON only.
@@ -783,7 +932,7 @@ Return ONLY this JSON object (no prose, no code fence):
 ---
 name: thread-reconciler
 description: Decides which of the workflow's earlier review threads the current code has addressed; returns thread ids.
-model: opus
+model: claude-opus-4-8
 ---
 You decide which earlier review threads the current code has resolved. You have **no
 GitHub access**; read from disk and return JSON only.
@@ -806,7 +955,7 @@ Every input `thread_id` must appear in exactly one of the two lists.
 ---
 name: claim-validator
 description: Re-checks each candidate review comment against the actual code and the repo's best-practice skills, and drops or corrects the ones that are wrong; returns JSON.
-model: opus
+model: claude-opus-4-8
 ---
 You are a skeptical validator. Other reviewers proposed the comments in
 `/tmp/gh-aw/review/claims.json`; your job is to catch the ones that are **wrong** —
