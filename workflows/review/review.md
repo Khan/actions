@@ -263,8 +263,9 @@ these in parallel** (one turn) and wait for all:
   `findings[]` (correctness issues). Use `files[]` for the risk/patterns comment
   (Step 7) and reviewer routing (Step 8); use `findings[]` for the verdict (Step 4)
   and the inline comments (Step 5).
-- **`skill-auditor`** — returns `violations[]` (best-practice skill breaches, all
-  blocking). Use them for the verdict (Step 4) and the inline comments (Step 5).
+- **`skill-auditor`** — returns `violations[]` (best-practice skill breaches), each
+  with a `severity` of `blocking` or `advisory`. Use them for the verdict (Step 4) and
+  the inline comments (Step 5); only `blocking` violations can drive REQUEST_CHANGES.
 - **`reviewer-mapper`** — maps the substantive changes (`owned-files.json`) to their
   owning team(s) and returns `owners` (`{path: [team, …]}`) plus `fallbackTeams` (those
   teams ranked by how many of those files they own). Step 7 and Step 8's risk routing
@@ -315,18 +316,20 @@ candidate inline comments are the surviving `correctness-reviewer` `findings[]` 
 empty, skip this phase entirely — there is nothing to post, so nothing to validate. Otherwise give each
 candidate a short stable `id` and write the combined list to
 `/tmp/gh-aw/review/claims.json` — each entry: `id`, `source` (`correctness` or
-`skill`), `path`, `line`, `label`, `subject`, `discussion`, and any `suggestion` (for a
-`skill` claim, set `label` to `issue (blocking, best-practice)` and include its
-`skill`). Then dispatch **`claim-validator`**, which re-checks each claim against the
-actual code and returns, per `id`, a `verdict` of `keep` or `drop` with optional
-`corrected` fields. Apply its result before Step 4:
+`skill`), `path`, `line`, `label`, `subject`, `discussion`, and any `suggestion`. For a
+`skill` claim, include its `skill` and set `label` from the violation's `severity`:
+`blocking` → `issue (blocking, best-practice)`, `advisory` →
+`suggestion (non-blocking, best-practice)`. Then dispatch **`claim-validator`**, which
+re-checks each claim against the actual code and returns, per `id`, a `verdict` of
+`keep` or `drop` with optional `corrected` fields. Apply its result before Step 4:
 
 - **`drop`** — discard the claim. It is a false positive, unsupported, or misleading;
   it is not posted and does not count toward the verdict.
 - **`keep`** — retain the claim. If it carries a `corrected` object, overwrite the
   claim's `line`, `label`, `subject`, `discussion`, and/or `suggestion` with the
-  corrected values (a fixed line number, a more accurate description, or a severity the
-  reviewer overstated) before posting.
+  corrected values before posting. This includes severity: the validator may correct an
+  overstated skill claim by changing its `label` from `issue (blocking, best-practice)`
+  to `suggestion (non-blocking, best-practice)` (or the reverse for an understated one).
 
 The findings and violations that survive this phase — with any corrections applied —
 are the set Step 4 (verdict) and Step 5 (comments) act on. If `claim-validator`'s
@@ -345,8 +348,8 @@ verdict.
 
 **Blocking labels:** `issue (blocking)`, `issue (blocking, best-practice)`, and
 `todo (blocking)`. Every other label is non-blocking: `suggestion (non-blocking)`,
-`nitpick (non-blocking)`, `question (non-blocking)`, `thought (non-blocking)`, and
-`note (non-blocking)`.
+`suggestion (non-blocking, best-practice)`, `nitpick (non-blocking)`,
+`question (non-blocking)`, `thought (non-blocking)`, and `note (non-blocking)`.
 
 **The rule:**
 - **REQUEST_CHANGES** if and only if at least one comment you are going to post carries a
@@ -372,9 +375,13 @@ Label a finding blocking (which is what then drives REQUEST_CHANGES) when it is:
   breaks because a required identifier field is missing from a query)
 - Public API type unsafety that downstream consumers would hit at runtime
 
-**Best practice violations** (from the `skill-auditor`):
-- Any violation of the rules defined in the skill files is blocking, labeled
-  `issue (blocking, best-practice)`.
+**Best practice violations** (from the `skill-auditor`) — only when the violation's
+`severity` is `blocking`:
+- A `blocking` skill violation is labeled `issue (blocking, best-practice)` and drives
+  the verdict. An `advisory` skill violation is labeled
+  `suggestion (non-blocking, best-practice)` and does **not** block — it rides along
+  with an APPROVE. Severity comes from the skill file's declaration, or the auditor's
+  impact judgment when the skill doesn't declare one (Step 3).
 
 Do NOT label these blocking (CI catches them), and do not let them drive the verdict:
 - Type errors, lint violations, test failures
@@ -409,8 +416,11 @@ Use these labels to categorize each comment:
 
 - **`issue (blocking)`** — a correctness defect that must be fixed before
   approval. Only use for problems CI would NOT catch.
-- **`issue (blocking, best-practice)`** — a best practice skill violation that
-  must be fixed before approval.
+- **`issue (blocking, best-practice)`** — a `blocking`-severity best-practice skill
+  violation that must be fixed before approval.
+- **`suggestion (non-blocking, best-practice)`** — an `advisory`-severity best-practice
+  skill violation. Names the skill area but does not block; the author can take it or
+  leave it.
 - **`suggestion (non-blocking)`** — a proposed improvement. The author can
   take it or leave it.
 - **`nitpick (non-blocking)`** — a trivial preference. Never blocking.
@@ -454,8 +464,9 @@ already have a thread from a previous run (handled in Step 3).
 - Suggest a fix with a code block when possible
 
 **Best practice violations** (from the `skill-auditor`):
-- Use `issue (blocking, best-practice)` for skill violations — these are
-  blocking. Name the skill area in the subject.
+- Label by the violation's `severity`: `issue (blocking, best-practice)` for
+  `blocking`, `suggestion (non-blocking, best-practice)` for `advisory`. Name the skill
+  area in the subject either way.
 - Suggest a fix with a code block when possible
 
 **Non-blocking feedback:**
@@ -812,7 +823,15 @@ relevance criteria):
 1. Decide which skills are relevant to the files. Skip the rest entirely.
 2. For each relevant skill, read its skill file from disk (path from the index) and
    evaluate the files against its rules.
-3. Report every violation — skill violations are blocking.
+3. Report every violation, and assign each a `severity` of `blocking` or `advisory`:
+   - **If the skill file declares a severity** — a skill-level default or a per-rule
+     annotation (e.g. a rule marked `blocking`/`advisory`, or `must`/`should`) — use
+     what it declares. A per-rule severity overrides the skill-level default.
+   - **Otherwise judge by impact.** `blocking` when the rule is a hard requirement
+     (phrased with "must"/"never"/"always") or the breach carries correctness,
+     security, data-integrity, or compatibility risk. `advisory` when the convention is
+     stylistic, organizational, or a preference the author can reasonably decline.
+   When unsure, prefer `advisory` — a human still sees the comment, it just doesn't block.
 
 Skills index for this repo:
 {{#runtime-import .github/aw/review/skills.md}}
@@ -820,7 +839,7 @@ Skills index for this repo:
 Return ONLY this JSON object (no prose, no code fence):
 {
   "violations": [{
-    "skill": "skill name", "path": "...", "line": 0,
+    "skill": "skill name", "path": "...", "line": 0, "severity": "blocking|advisory",
     "subject": "one line naming the skill area", "discussion": "the rule violated and the fix", "suggestion": "optional fix code"
   }]
 }
