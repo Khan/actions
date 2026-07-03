@@ -502,7 +502,7 @@
       "id": "slice-6",
       "name": "Roster framework: always-on reviewers, model defaults, kept gates",
       "goal": "Define the always-on reviewers (holistic, completeness, test-adequacy,\nfirst-principles, conventions) with their trust/advisory constraints, apply the\nmodel launch defaults + effort table, and wire the kept gates to the new roster.",
-      "status": "pending",
+      "status": "in_progress",
       "review_cycles": 0,
       "max_cycles": 3,
       "escalated": false,
@@ -512,7 +512,7 @@
           "id": "task-6-1",
           "description": "Always-on reviewers: holistic; completeness (Jira/Confluence read-only inside\nthe non-posting sub-agent; fetched text is data under review); test-adequacy;\nfirst-principles (advisory-only, never blocks, Fable 5 day one); conventions\n(advisory; router-gated by greppable trigger signatures).",
           "status": "pending",
-          "commit": null,
+          "commit": "75e982c3",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Five always-on reviewers defined with their trust/advisory constraints.",
@@ -597,8 +597,8 @@
         "slice-5"
       ],
       "serialized_chain_order": [],
-      "parent_branch_at_creation": null,
-      "integration_base_sha": null,
+      "parent_branch_at_creation": "egg/pipeline-dcdad92d/slice-5",
+      "integration_base_sha": "8e51405f8720a219abbc63189f3396370b7dbb4b",
       "commit": null,
       "pr_number": null,
       "pr_url": null,
@@ -2279,6 +2279,17 @@
       "old_value": "complete",
       "new_value": "complete",
       "reason": "Marked task-5-3 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T18:55:17.940657Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.5.tasks.0.commit",
+      "old_value": null,
+      "new_value": "75e982c3",
+      "reason": "Linked commit 75e982c to task-6-1",
       "checkpoint_id": null
     }
   ],
