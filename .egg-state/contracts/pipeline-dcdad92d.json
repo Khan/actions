@@ -1394,7 +1394,7 @@
           "id": "task-12-3",
           "description": "R15 live counters mined from run logs + #194 per-run JSON artifacts: validator\ndrop rate per lens, comments/PR, verdict mix, thumbs agree rate, cost/run.",
           "status": "pending",
-          "commit": null,
+          "commit": "67f9340e",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Counters computed from existing artifacts; no new logging mechanism required.",
@@ -3164,6 +3164,17 @@
       "old_value": "9866cb10",
       "new_value": "a258a03b",
       "reason": "Linked commit a258a03 to task-12-2",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:50:46.306085Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.11.tasks.2.commit",
+      "old_value": null,
+      "new_value": "67f9340e",
+      "reason": "Linked commit 67f9340 to task-12-3",
       "checkpoint_id": null
     }
   ],
