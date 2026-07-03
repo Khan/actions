@@ -12,8 +12,11 @@ import {
     patternSpecificity,
     RISK_TIERS,
     route,
+    runCli,
     SPECIALIST_LENSES,
     teamSlug,
+    tierFromDisplay,
+    toRoutingJson,
     type ChangedFile,
     type RouterConfig,
     type RunBudget,
@@ -425,5 +428,145 @@ describe("route: determinism", () => {
         const a = route({files}, baseConfig);
         const b = route({files}, baseConfig);
         expect(a).toEqual(b);
+    });
+});
+
+/* -------------------------------------------------------------------------- */
+/* tierFromDisplay (I/O casing bridge)                                        */
+/* -------------------------------------------------------------------------- */
+
+describe("tierFromDisplay", () => {
+    it("accepts both the display and lowercase casings", () => {
+        expect(tierFromDisplay("High")).toBe("high");
+        expect(tierFromDisplay("high")).toBe("high");
+        expect(tierFromDisplay("Trivial")).toBe("trivial");
+        expect(tierFromDisplay("medium")).toBe("medium");
+    });
+
+    it("falls back to low for an unknown value", () => {
+        expect(tierFromDisplay("bogus")).toBe("low");
+        expect(tierFromDisplay("")).toBe("low");
+    });
+});
+
+/* -------------------------------------------------------------------------- */
+/* toRoutingJson (adapt RoutingResult -> the review.md routing.json contract) */
+/* -------------------------------------------------------------------------- */
+
+describe("toRoutingJson", () => {
+    it("bridges to the routing.json contract shape", () => {
+        const reviewerRules = parseReviewers("src/auth/ @Khan/Security");
+        const result = route(
+            {files: [file("src/auth/login.ts"), file("dist/bundle.js")]},
+            {...baseConfig, generatedPatterns: ["dist/**"], reviewerRules},
+        );
+        const json = toRoutingJson(result);
+        // Every tier is emitted in the display casing review.md consumes.
+        expect(json.perFileTier).toEqual({
+            "src/auth/login.ts": "High",
+            "dist/bundle.js": "Trivial",
+        });
+        // owners covers source files only -- the generated file is excluded.
+        expect(json.teams.owners).toEqual({"src/auth/login.ts": ["security"]});
+        expect(json.teams.fallback).toEqual(result.fallbackTeams);
+        // The bounded question rides along for the orchestrator's second pass.
+        expect(json.pendingRiskQuestions).toEqual(result.pendingRiskQuestions);
+        expect(json.pendingRiskQuestions).toHaveLength(1);
+    });
+});
+
+/* -------------------------------------------------------------------------- */
+/* runCli (Surface A entrypoint; fs injected so it is testable, no real I/O)  */
+/* -------------------------------------------------------------------------- */
+
+// runCli reads/writes these staging paths (module-private in router.ts; they
+// are the review.md Step 3 on-disk contract, pinned here by literal).
+const REVIEW_DIR = "/tmp/gh-aw/review";
+const FILES_PATH = `${REVIEW_DIR}/files.json`;
+const ROUTING_OUT = `${REVIEW_DIR}/routing.json`;
+const RESOLVED_TIERS_PATH = `${REVIEW_DIR}/resolved-tiers.json`;
+const GITATTRIBUTES_PATH = ".gitattributes";
+const REVIEWERS_PATH = ".github/REVIEWERS";
+
+// A structural stand-in for the node:fs subset runCli injects: existsSync +
+// readFileSync answer from the supplied map, writes are recorded, and mkdir
+// calls are captured -- no real filesystem is touched.
+const fakeFs = (inputs: Record<string, string>) => {
+    const written: Record<string, string> = {};
+    const mkdirCalls: string[] = [];
+    const fs = {
+        readFileSync: (p: string, _enc: "utf8"): string => {
+            const content = inputs[p];
+            if (content === undefined) {
+                throw new Error(`unexpected read: ${p}`);
+            }
+            return content;
+        },
+        writeFileSync: (p: string, data: string): void => {
+            written[p] = data;
+        },
+        existsSync: (p: string): boolean => p in inputs,
+        mkdirSync: (p: string, _opts: {recursive: boolean}): void => {
+            mkdirCalls.push(p);
+        },
+    };
+    return {fs, written, mkdirCalls};
+};
+
+describe("runCli", () => {
+    it("routes a bare-array files.json and writes routing.json", () => {
+        const {fs, written, mkdirCalls} = fakeFs({
+            [FILES_PATH]: JSON.stringify([
+                {path: "db/migrations/0001.sql", status: "added"},
+            ]),
+        });
+        const json = runCli(fs);
+        expect(json.lensesToSpawn).toEqual(["data-migrations"]);
+        expect(json.perFileTier).toEqual({"db/migrations/0001.sql": "High"});
+        expect(json.runBudget.tier).toBe("high");
+        // No REVIEWERS staged -> the source file is owned by nobody.
+        expect(json.teams.owners).toEqual({"db/migrations/0001.sql": []});
+        expect(json.teams.fallback).toEqual([]);
+        // The output dir is created and the written JSON round-trips.
+        expect(mkdirCalls).toEqual([REVIEW_DIR]);
+        expect(JSON.parse(written[ROUTING_OUT])).toEqual(json);
+    });
+
+    it("accepts the {files:[...]} wrapper and applies the misrouted floor", () => {
+        const {fs, written} = fakeFs({
+            [FILES_PATH]: JSON.stringify({
+                files: [{path: "README.md", status: "modified"}],
+            }),
+        });
+        const json = runCli(fs);
+        expect(json.lensesToSpawn).toEqual([]);
+        expect(json.perFileTier).toEqual({"README.md": "Trivial"});
+        // Source touched but no specialist lens matched -> floored to low.
+        expect(json.runBudget.tier).toBe("low");
+        expect(json.runBudget.floored).toBe(true);
+        expect(JSON.parse(written[ROUTING_OUT])).toEqual(json);
+    });
+
+    it("parses .gitattributes/REVIEWERS and honours the resolved-tiers pass", () => {
+        const {fs} = fakeFs({
+            [FILES_PATH]: JSON.stringify([
+                {path: "src/auth/login.ts", status: "modified"},
+                {path: "dist/bundle.js", status: "modified"},
+            ]),
+            [GITATTRIBUTES_PATH]: "dist/** linguist-generated=true",
+            [REVIEWERS_PATH]: "src/auth/ @Khan/Security",
+            [RESOLVED_TIERS_PATH]: JSON.stringify({"src/auth/login.ts": "Low"}),
+        });
+        const json = runCli(fs);
+        // Generated file: excluded from ownership, trivial tier.
+        expect(json.perFileTier).toEqual({
+            "src/auth/login.ts": "Low",
+            "dist/bundle.js": "Trivial",
+        });
+        expect(json.teams.owners).toEqual({"src/auth/login.ts": ["security"]});
+        // The second pass resolved the auth tier -> no pending question remains.
+        expect(json.pendingRiskQuestions).toEqual([]);
+        expect(json.lensesToSpawn).toEqual(["security-auth"]);
+        expect(json.runBudget.tier).toBe("low");
     });
 });
