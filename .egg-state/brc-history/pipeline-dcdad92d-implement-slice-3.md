@@ -1,0 +1,3139 @@
+# BRC Consensus History — implement phase, slice-3
+
+Generated: 2026-07-03T08:53:40Z
+Pipeline: pipeline-dcdad92d
+Slice: slice-3
+
+### [2026-07-03T08:23:25Z] coder (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=propose (slice=slice-3)
+
+````yaml
+id: 79629631-4cbc-45
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:23:25Z] tester (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=propose (slice=slice-3)
+
+````yaml
+id: 22020190-af7c-47
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:23:26Z] documenter (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=propose (slice=slice-3)
+
+````yaml
+id: b3610e6d-c56c-4f
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:23:30Z] tester (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: d503ae4b-926b-4a
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:23:33Z] documenter (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 2553c594-8bef-46
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:23:37Z] coder (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 273a14c8-a1af-47
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:25:18Z] tester (HEARTBEAT): heartbeat: WAITING_ON_ROLE
+
+tester task-3-4 (router unit tests) is blocked on coder landing workflows/review/lib/router.ts (task-3-1/3-2). router.ts does not exist on any branch yet; my tests import its real interface. Following the slice-1/2 coder-first pattern rather than TDD-guessing exports. Will write and propose tests once the router module lands.
+
+````yaml
+id: 3dcab27d-c00d-44
+phase: implement
+metadata:
+  state: WAITING_ON_ROLE
+  waiting_on: coder
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:25:29Z] tester (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=63816 util=0.06 cache_hit=0.99 decision=no_warm_session
+
+````yaml
+id: 5a43bbd4-808e-47
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:25:40Z] tester (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=propose (slice=slice-3)
+
+````yaml
+id: 10d481e2-7a64-4f
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:25:48Z] tester (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 1220cd35-a244-4a
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:26:17Z] coder (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: e515694a-3e53-44
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:26:22Z] tester (HEARTBEAT): heartbeat: WAITING_ON_ROLE
+
+tester task-3-4 (router unit tests) still blocked: workflows/review/lib/router.ts not yet landed by coder (task-3-1/3-2) on any branch. State unchanged since last cycle. No actionable producer work for tester until the router module exists; will author + propose tests immediately once it lands.
+
+````yaml
+id: bb07ad08-850f-49
+phase: implement
+metadata:
+  state: WAITING_ON_ROLE
+  waiting_on: coder
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:26:26Z] tester (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=71230 util=0.07 cache_hit=0.97 decision=below_threshold
+
+````yaml
+id: f10a2f13-9f17-47
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:26:33Z] tester (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=propose (slice=slice-3)
+
+````yaml
+id: 78b6d1fc-646b-4d
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:26:41Z] tester (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: abfff3ac-fa19-42
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:26:41Z] documenter (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 14f36e0d-080f-49
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:27:10Z] tester (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=75015 util=0.08 cache_hit=0.99 decision=below_threshold
+
+````yaml
+id: 3235a655-044e-42
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:28:48Z] documenter (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 52e52822-438c-42
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:29:56Z] coder (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: ea96358e-32e1-43
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:30:12Z] documenter (CONSENSUS_PROPOSE): Proposal from documenter
+
+task-3-3 (slice-3): Wire the orchestrator (review.md Step 3) to consume the deterministic router's routing.json for lens + team routing, and drop the reviewer-mapper sub-agent dispatch/parse. Added a "Route first — the deterministic router (no model)" step invoking the in-session CLI `node -r @swc-node/register workflows/review/lib/cli/router.ts` over the Step-1-staged full.diff/files.json + .gitattributes/.github/REVIEWERS, writing /tmp/gh-aw/review/routing.json = {lensesToSpawn[], teams{owners,fallback}, perFileTier, runBudget}, per architect design §8.4/§8.6 (incl. the one-model-touch two-invocation protocol for diff-direction-dependent tiers). Removed reviewer-mapper completely: its Phase-2 dispatch bullet, its out/ artifact entry, its owned-files.json staging, and its agent definition. Repointed Step 7 (risks/patterns grouping) and Step 8 (reviewer request + fallback) to routing.json teams.owners/teams.fallback. Documented teams.owners==former `owners` and teams.fallback==former `fallbackTeams` so the coder's router.ts has an unambiguous shape target. AC met: only the router feeds lens/team routing in review.md.
+
+````yaml
+id: d74143b7-3154-4e
+phase: implement
+metadata:
+  payload:
+    summary: "task-3-3 (slice-3): Wire the orchestrator (review.md Step 3) to consume\
+      \ the deterministic router's routing.json for lens + team routing, and drop\
+      \ the reviewer-mapper sub-agent dispatch/parse. Added a \"Route first \u2014\
+      \ the deterministic router (no model)\" step invoking the in-session CLI `node\
+      \ -r @swc-node/register workflows/review/lib/cli/router.ts` over the Step-1-staged\
+      \ full.diff/files.json + .gitattributes/.github/REVIEWERS, writing /tmp/gh-aw/review/routing.json\
+      \ = {lensesToSpawn[], teams{owners,fallback}, perFileTier, runBudget}, per architect\
+      \ design \xA78.4/\xA78.6 (incl. the one-model-touch two-invocation protocol\
+      \ for diff-direction-dependent tiers). Removed reviewer-mapper completely: its\
+      \ Phase-2 dispatch bullet, its out/ artifact entry, its owned-files.json staging,\
+      \ and its agent definition. Repointed Step 7 (risks/patterns grouping) and Step\
+      \ 8 (reviewer request + fallback) to routing.json teams.owners/teams.fallback.\
+      \ Documented teams.owners==former `owners` and teams.fallback==former `fallbackTeams`\
+      \ so the coder's router.ts has an unambiguous shape target. AC met: only the\
+      \ router feeds lens/team routing in review.md."
+    attestation:
+      sections_updated:
+      - "Step 3: Review the Changes \u2014 new 'Route first \u2014 the deterministic\
+        \ router (no model)' subsection + 'The router's one model touch' subsection"
+      - "Step 3 Phase 1 \u2014 removed owned-files.json staging"
+      - "Step 3 Phase 2 \u2014 router-driven dispatch intro + removed reviewer-mapper\
+        \ bullet"
+      - "Step 3 out/ artifact list \u2014 removed reviewer-mapper.json"
+      - "Step 7 \u2014 risks/patterns grouping repointed to routing.json teams.owners"
+      - "Step 8 \u2014 reviewer request + fallback repointed to routing.json teams.owners/teams.fallback"
+      - "agent: reviewer-mapper \u2014 definition removed"
+      no_decisions_rationale: "task-3-3 is a mechanical prompt-wiring task with an\
+        \ unambiguous interface fixed by the architect design (\xA78.4 routing.json\
+        \ shape, \xA78.6 model-touch protocol) and the plan; no new architectural\
+        \ judgment call or open question arose, so no HITL decision was registered\
+        \ this phase."
+    artifacts:
+    - workflows/review/review.md
+    risk_considered: "Cross-producer interface risk: teams shape (owners/fallback),\
+      \ the CLI path, and output field names must match the coder's router.ts (task-3-1/3-2).\
+      \ Mitigated by pinning both to the architect design \xA78.3/\xA78.4 and documenting\
+      \ the field mapping to the former reviewer-mapper output. Lens dispatch is forward-looking\
+      \ (lensesToSpawn empty until slice-7) \u2014 kept behavior-preserving for the\
+      \ current correctness-reviewer/skill-auditor roster. Left correctness-reviewer\
+      \ per-file risk classification untouched (risk classification, not routing \u2014\
+      \ out of scope). Could not run prettier (node_modules absent; config resolves\
+      \ to workspace module); markdown prose-wrap is preserve and same-file edit passed\
+      \ last slice."
+    commit_sha: b81b1702
+    files_changed:
+    - workflows/review/review.md
+    tests_run: []
+    tasks_satisfied:
+    - task-3-3
+    no_changes_needed: false
+    no_changes_reason: ''
+  version: 1
+  commit_sha: b81b1702
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:30:18Z] tester (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=propose (slice=slice-3)
+
+````yaml
+id: bf46d6bb-26c2-43
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:30:18Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: f010f4ec-dbfa-4c
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:30:19Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: cd596c68-5a5a-45
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:30:25Z] tester (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 5be9bf72-9afb-4a
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:30:27Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 63346cff-e934-42
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:30:29Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 8aeddd27-ee02-49
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:30:52Z] documenter (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=148242 util=0.15 cache_hit=1.00 decision=no_warm_session
+
+````yaml
+id: 0d0f036e-616e-4c
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:31:06Z] tester (HEARTBEAT): heartbeat: WAITING_ON_ROLE
+
+tester task-3-4 still blocked on coder's router.ts. Progress: documenter landed task-3-3 (b81b1702) wiring review.md to the router CLI and pinning the interface (core workflows/review/lib/router.ts, CLI cli/router.ts, routing.json = {lensesToSpawn[], teams{owners,fallback}, perFileTier, runBudget}). But coder has NOT committed router.ts yet — no module to import. Interface now captured in durable memory; will author + propose router tests as soon as coder lands the module.
+
+````yaml
+id: b5f60397-9d28-46
+phase: implement
+metadata:
+  state: WAITING_ON_ROLE
+  waiting_on: coder
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:31:12Z] tester (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=83922 util=0.08 cache_hit=0.99 decision=below_threshold
+
+````yaml
+id: fb4cebaf-2b31-4e
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:32:04Z] reviewer_contract → documenter (CONSENSUS_ACK): ACK from reviewer_contract for documenter
+
+task-3-3 (documenter) verified against contract. AC 'Only the router feeds lens/team routing in review.md' is met: the reviewer-mapper sub-agent is fully removed (Phase-2 dispatch bullet, out/ artifact entry, owned-files.json Phase-1 staging, and the ## agent: reviewer-mapper definition block all deleted), and Steps 7 (risk/patterns grouping) and 8 (reviewer request + fallback) now read routing.json teams.owners/teams.fallback. A 'Route first — deterministic router (no model)' step is added at the top of Step 3 documenting the routing.json shape ({lensesToSpawn, teams, perFileTier, runBudget}) and the one-model-touch two-invocation protocol, per the architect integration design (§8.4/§8.6). The three residual 'reviewer-mapper' mentions (lines 286/291/294) are explanatory prose describing what the router replaces ('there is no reviewer-mapper dispatch or parse anymore'), not stranded dispatch — appropriate documentation, not an AC breach. Scope is clean: only review.md touched (matches files_affected); router.ts itself correctly left to coder tasks 3-1/3-2 (still pending); no other slice or #194 item disturbed (correctness-reviewer's per-file risk classification left untouched per the notes). Phase-2 lensesToSpawn dispatch is forward-compatible (populated in slice 7), honoring the plan's dependency ordering. Operator directive #4 (reviewer-mapper replaced by deterministic code) is directly satisfied. NON-BLOCKING coordination note for the coder: the prompt invokes workflows/review/lib/cli/router.ts whereas coder tasks 3-1/3-2 name workflows/review/lib/router.ts — the coder must land the CLI entry at the path this prompt invokes (or a cli/ wrapper that re-exports lib/router.ts). This is a forward-reference the coder owns; it does not affect task-3-3's review.md-scoped AC.
+
+````yaml
+id: 807c92bf-48ea-49
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/review.md
+    reason: "task-3-3 (documenter) verified against contract. AC 'Only the router\
+      \ feeds lens/team routing in review.md' is met: the reviewer-mapper sub-agent\
+      \ is fully removed (Phase-2 dispatch bullet, out/ artifact entry, owned-files.json\
+      \ Phase-1 staging, and the ## agent: reviewer-mapper definition block all deleted),\
+      \ and Steps 7 (risk/patterns grouping) and 8 (reviewer request + fallback) now\
+      \ read routing.json teams.owners/teams.fallback. A 'Route first \u2014 deterministic\
+      \ router (no model)' step is added at the top of Step 3 documenting the routing.json\
+      \ shape ({lensesToSpawn, teams, perFileTier, runBudget}) and the one-model-touch\
+      \ two-invocation protocol, per the architect integration design (\xA78.4/\xA7\
+      8.6). The three residual 'reviewer-mapper' mentions (lines 286/291/294) are\
+      \ explanatory prose describing what the router replaces ('there is no reviewer-mapper\
+      \ dispatch or parse anymore'), not stranded dispatch \u2014 appropriate documentation,\
+      \ not an AC breach. Scope is clean: only review.md touched (matches files_affected);\
+      \ router.ts itself correctly left to coder tasks 3-1/3-2 (still pending); no\
+      \ other slice or #194 item disturbed (correctness-reviewer's per-file risk classification\
+      \ left untouched per the notes). Phase-2 lensesToSpawn dispatch is forward-compatible\
+      \ (populated in slice 7), honoring the plan's dependency ordering. Operator\
+      \ directive #4 (reviewer-mapper replaced by deterministic code) is directly\
+      \ satisfied. NON-BLOCKING coordination note for the coder: the prompt invokes\
+      \ workflows/review/lib/cli/router.ts whereas coder tasks 3-1/3-2 name workflows/review/lib/router.ts\
+      \ \u2014 the coder must land the CLI entry at the path this prompt invokes (or\
+      \ a cli/ wrapper that re-exports lib/router.ts). This is a forward-reference\
+      \ the coder owns; it does not affect task-3-3's review.md-scoped AC."
+    ack_version: 1
+    attestation:
+      tasks_verified:
+      - task-3-3
+  version: 1
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:32:07Z] tester (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=propose (slice=slice-3)
+
+````yaml
+id: 430eb5f4-88be-40
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:32:10Z] coder (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: d5cf1e8d-8d18-4b
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:32:14Z] tester (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 9a4cd997-7e9e-44
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:32:16Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=85874 util=0.09 cache_hit=0.96 decision=no_warm_session
+
+````yaml
+id: d4479aab-d737-4f
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:32:33Z] tester (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=88350 util=0.09 cache_hit=0.99 decision=below_threshold
+
+````yaml
+id: 84a7d22b-d5ad-46
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:32:34Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: c16d73c7-e990-46
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:33:11Z] reviewer_code → documenter (CONSENSUS_NACK): NACK from reviewer_code for documenter
+
+Blocking (correctness): the router invocation path in review.md Step 3 is wrong and will not resolve at runtime.
+
+Line 271 instructs the orchestrator to run:
+  node -r @swc-node/register workflows/review/lib/cli/router.ts
+but the router will be built at workflows/review/lib/router.ts (NO cli/ subdir). Evidence:
+- Plan task-3-1 and task-3-2 file-lists both site the file at `workflows/review/lib/router.ts`; the coder is bound to that path.
+- Every already-shipped lib CLI lives directly under workflows/review/lib/ (finding-schema.ts, verdict.ts, render-comment.ts) — there is no lib/cli/ directory in the tree.
+- `lib/cli/` appears in exactly two places repo-wide: architect design §8.4's generic phrasing and this doc line 271 (copied from it). It contradicts §8.3's own file tree, which shows `router.ts` at lib/router.ts.
+
+Since task-3-3's whole AC is making the router invocable ("only the router feeds lens/team routing"), an invocation path that points at a nonexistent file breaks the router integration at runtime — the orchestrator's bash call will fail. This defeats the task.
+
+Fix: change the invocation on line 271 to `node -r @swc-node/register workflows/review/lib/router.ts` (matching the plan file-list, the shipped sibling CLIs, and where the coder will place it). Note for the team: architect design §8.4's `lib/cli/<tool>.ts` phrasing is the upstream source of this drift and should be corrected to `lib/<tool>.ts` as well, but the operative artifact (review.md) must match the real file location regardless.
+
+Rest of the delta is clean: reviewer-mapper dispatch/artifact/owned-files.json staging/agent-def removed with no dangling live references (remaining mentions are intentional historical prose), and Step 7 (teams.owners) / Step 8 (teams.owners + teams.fallback) repoints are consistent with the routing.json shape declared at lines 277-282.
+
+````yaml
+id: 9f9aaf26-0bde-4d
+phase: implement
+metadata:
+  payload:
+    reason: "Blocking (correctness): the router invocation path in review.md Step\
+      \ 3 is wrong and will not resolve at runtime.\n\nLine 271 instructs the orchestrator\
+      \ to run:\n  node -r @swc-node/register workflows/review/lib/cli/router.ts\n\
+      but the router will be built at workflows/review/lib/router.ts (NO cli/ subdir).\
+      \ Evidence:\n- Plan task-3-1 and task-3-2 file-lists both site the file at `workflows/review/lib/router.ts`;\
+      \ the coder is bound to that path.\n- Every already-shipped lib CLI lives directly\
+      \ under workflows/review/lib/ (finding-schema.ts, verdict.ts, render-comment.ts)\
+      \ \u2014 there is no lib/cli/ directory in the tree.\n- `lib/cli/` appears in\
+      \ exactly two places repo-wide: architect design \xA78.4's generic phrasing\
+      \ and this doc line 271 (copied from it). It contradicts \xA78.3's own file\
+      \ tree, which shows `router.ts` at lib/router.ts.\n\nSince task-3-3's whole\
+      \ AC is making the router invocable (\"only the router feeds lens/team routing\"\
+      ), an invocation path that points at a nonexistent file breaks the router integration\
+      \ at runtime \u2014 the orchestrator's bash call will fail. This defeats the\
+      \ task.\n\nFix: change the invocation on line 271 to `node -r @swc-node/register\
+      \ workflows/review/lib/router.ts` (matching the plan file-list, the shipped\
+      \ sibling CLIs, and where the coder will place it). Note for the team: architect\
+      \ design \xA78.4's `lib/cli/<tool>.ts` phrasing is the upstream source of this\
+      \ drift and should be corrected to `lib/<tool>.ts` as well, but the operative\
+      \ artifact (review.md) must match the real file location regardless.\n\nRest\
+      \ of the delta is clean: reviewer-mapper dispatch/artifact/owned-files.json\
+      \ staging/agent-def removed with no dangling live references (remaining mentions\
+      \ are intentional historical prose), and Step 7 (teams.owners) / Step 8 (teams.owners\
+      \ + teams.fallback) repoints are consistent with the routing.json shape declared\
+      \ at lines 277-282."
+    artifact_references:
+    - workflows/review/review.md
+    nack_version: 1
+  reason: "Blocking (correctness): the router invocation path in review.md Step 3\
+    \ is wrong and will not resolve at runtime.\n\nLine 271 instructs the orchestrator\
+    \ to run:\n  node -r @swc-node/register workflows/review/lib/cli/router.ts\nbut\
+    \ the router will be built at workflows/review/lib/router.ts (NO cli/ subdir).\
+    \ Evidence:\n- Plan task-3-1 and task-3-2 file-lists both site the file at `workflows/review/lib/router.ts`;\
+    \ the coder is bound to that path.\n- Every already-shipped lib CLI lives directly\
+    \ under workflows/review/lib/ (finding-schema.ts, verdict.ts, render-comment.ts)\
+    \ \u2014 there is no lib/cli/ directory in the tree.\n- `lib/cli/` appears in\
+    \ exactly two places repo-wide: architect design \xA78.4's generic phrasing and\
+    \ this doc line 271 (copied from it). It contradicts \xA78.3's own file tree,\
+    \ which shows `router.ts` at lib/router.ts.\n\nSince task-3-3's whole AC is making\
+    \ the router invocable (\"only the router feeds lens/team routing\"), an invocation\
+    \ path that points at a nonexistent file breaks the router integration at runtime\
+    \ \u2014 the orchestrator's bash call will fail. This defeats the task.\n\nFix:\
+    \ change the invocation on line 271 to `node -r @swc-node/register workflows/review/lib/router.ts`\
+    \ (matching the plan file-list, the shipped sibling CLIs, and where the coder\
+    \ will place it). Note for the team: architect design \xA78.4's `lib/cli/<tool>.ts`\
+    \ phrasing is the upstream source of this drift and should be corrected to `lib/<tool>.ts`\
+    \ as well, but the operative artifact (review.md) must match the real file location\
+    \ regardless.\n\nRest of the delta is clean: reviewer-mapper dispatch/artifact/owned-files.json\
+    \ staging/agent-def removed with no dangling live references (remaining mentions\
+    \ are intentional historical prose), and Step 7 (teams.owners) / Step 8 (teams.owners\
+    \ + teams.fallback) repoints are consistent with the routing.json shape declared\
+    \ at lines 277-282."
+  revision_count: 1
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:33:16Z] tester (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=propose (slice=slice-3)
+
+````yaml
+id: dc596544-07b2-4f
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:33:17Z] documenter (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=propose (slice=slice-3)
+
+````yaml
+id: 6578fac6-b91c-45
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:33:23Z] tester (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 2b5495da-eca6-40
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:33:37Z] documenter (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 37b501c9-599b-4b
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:33:46Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=83177 util=0.08 cache_hit=0.98 decision=no_warm_session
+
+````yaml
+id: e1fb84d7-1616-48
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:34:11Z] documenter (CONSENSUS_PROPOSE): Proposal from documenter
+
+Re-propose v2 resolving reviewer_code v1 NACK (blocking/correctness): the router CLI invocation in review.md Step 3 pointed at workflows/review/lib/cli/router.ts, a nonexistent path. Fixed to `node -r @swc-node/register workflows/review/lib/router.ts`, matching the plan task-3-1/3-2 file-lists (workflows/review/lib/router.ts) and every shipped sibling CLI (finding-schema.ts, verdict.ts, render-comment.ts) which all live directly under lib/ with no lib/cli/ subdir. Confirmed no other lib/cli references remain in review.md. This was the sole blocker — reviewer_code explicitly noted the rest of the delta is clean (reviewer-mapper dispatch/artifact/owned-files.json/agent-def all removed with no dangling live references; Step 7 teams.owners and Step 8 teams.owners+teams.fallback repoints consistent with the routing.json shape at lines 277-282). Commit 9df58d9b.
+
+**Adversarial re-review**
+
+**Your v2 review has TWO equal-weight mandates:**
+
+1. **Verify named v1 blockers were addressed** — confirm the producer fixed what you NACK'd.
+2. **Audit the delta since your last review (per REVIEWER-SYNC.md: `git log {last_reviewed_commit}..HEAD --not origin/{base_branch} -p` — the commits landed since the version you last verdicted, NOT the whole accumulated proposal surface) as a fresh reviewer** — ignore your v1 NACK history. Read that diff as if you'd never seen the prior version. Apply your lens (security threat-model, concurrency races, contract AC, line-by-line bugs, silent-fallback shapes — whichever your role owns) to the delta itself, not to whether your previous concerns were satisfied. **Mandate 2 is bounded to this delta** — it does NOT ask you to re-traverse the whole accumulated surface from earlier cycles; that work was amortized when you first reviewed those commits.
+
+Both mandates have equal weight. If (1) passes but (2) finds new issues, you NACK. ACK requires both pass.
+
+**The named-blockers anchor is a known trap. Every reviewer lens has a mandate-2 in its own territory** — security has newly-introduced threat surfaces, concurrency has newly-introduced races, contract has newly-introduced AC drift, code has newly-introduced line-by-line bugs. The four issues that escaped PR #2724 to the GitHub bot were all of code-lens shape (`${ANSWER}` as bare Python, deprecated `datetime.utcnow()`, non-atomic write, bare `except: pass`) — the persistent reviewer correctly answered mandate 1 ("did prior issues get fixed? yes") and skipped mandate 2 ("does this delta introduce new issues? actually yes"). The shape generalizes: whatever your lens, this delta can introduce issues your prior NACK didn't name. Watching the producer deliver a targeted fix pulls strongly toward "verify my fix-request landed → ACK." Recognize the pull and do mandate 2 anyway.
+
+**How to execute mandate 2:**
+
+- Read each new hunk as an operator who's about to copy-paste / run / integrate it. Would this code execute as written? Would these docs send a copy-paster down a working path?
+- Apply every rubric pass to the new hunks. New issues outside the scope of your prior NACK are blocking; your prior NACK does not bound this re-review.
+- **Fresh-reviewer simulation.** Before issuing your v2 verdict, ask: would a reviewer who has only seen this delta (the commits since your last review) with no NACK history ACK this? If you can't argue yes from that diff alone, NACK.
+- **External-bot anchor.** Imagine `egg-reviewer[bot]` reads only this delta (the commits since your last review) with no NACK context. What would it flag? Anything it'd flag, you should NACK first.
+
+**Your v2 verdict must enumerate both halves** so mandate 2 doesn't silently disappear from the record:
+
+- (a) Which v1 blockers you verified-fixed (mandate 1).
+- (b) What new issues you audited-and-did-not-find (mandate 2). Name the specific shapes you checked — not "reviewed thoroughly," but "checked for silent fallbacks, doc-snippet executability, API-deprecation, atomicity of file writes." If you can't enumerate (b), you haven't done mandate 2.
+
+**Re-reviews are cheap by design.** Your amortized context means the work is "read the delta, apply your rubric, decide" — minutes, not hours. NACK without hesitance; the orchestrator absorbs cycles. Two NACKs on the same producer where the second names new findings is the correct trajectory, not goalpost-moving. The downstream GitHub reviewer should find nothing in this delta. Anything it catches that lives in this cycle's diff is a miss attributable to this re-review.
+
+````yaml
+id: 2422481a-8690-4a
+phase: implement
+metadata:
+  payload:
+    summary: "Re-propose v2 resolving reviewer_code v1 NACK (blocking/correctness):\
+      \ the router CLI invocation in review.md Step 3 pointed at workflows/review/lib/cli/router.ts,\
+      \ a nonexistent path. Fixed to `node -r @swc-node/register workflows/review/lib/router.ts`,\
+      \ matching the plan task-3-1/3-2 file-lists (workflows/review/lib/router.ts)\
+      \ and every shipped sibling CLI (finding-schema.ts, verdict.ts, render-comment.ts)\
+      \ which all live directly under lib/ with no lib/cli/ subdir. Confirmed no other\
+      \ lib/cli references remain in review.md. This was the sole blocker \u2014 reviewer_code\
+      \ explicitly noted the rest of the delta is clean (reviewer-mapper dispatch/artifact/owned-files.json/agent-def\
+      \ all removed with no dangling live references; Step 7 teams.owners and Step\
+      \ 8 teams.owners+teams.fallback repoints consistent with the routing.json shape\
+      \ at lines 277-282). Commit 9df58d9b."
+    attestation:
+      sections_updated:
+      - "Step 3: Review the Changes \u2014 'Route first \u2014 the deterministic router\
+        \ (no model)' subsection: corrected the router CLI invocation path from workflows/review/lib/cli/router.ts\
+        \ to workflows/review/lib/router.ts"
+      no_decisions_rationale: task-3-3 is a mechanical prompt-wiring fix; the NACK
+        identified a wrong file path with an unambiguous correct target (the plan
+        file-list + shipped sibling CLIs). No new architectural judgment call or open
+        question arose, so no HITL decision was registered.
+    artifacts:
+    - workflows/review/review.md
+    risk_considered: "Note for the team (flagged by reviewer_code, not fixed here\
+      \ as it is outside review.md): architect design \xA78.4's `lib/cli/<tool>.ts`\
+      \ phrasing is the upstream source of this path drift and contradicts \xA78.3's\
+      \ own file tree (router.ts at lib/router.ts); it should be corrected too, but\
+      \ the operative artifact (review.md) must and now does match the real file location\
+      \ the coder is bound to. Interface risk on the `teams` shape remains coordinated\
+      \ with coder's router.ts via the documented owners/fallback == former reviewer-mapper\
+      \ owners/fallbackTeams mapping."
+    commit_sha: 9df58d9b
+    files_changed:
+    - workflows/review/review.md
+    tests_run: []
+    tasks_satisfied:
+    - task-3-3
+    no_changes_needed: false
+    no_changes_reason: ''
+  version: 2
+  commit_sha: 9df58d9b
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:34:15Z] tester (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=95787 util=0.10 cache_hit=0.98 decision=below_threshold
+
+````yaml
+id: 2d0e2f8b-0886-45
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:34:16Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: 527a33da-7f0e-40
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:34:16Z] coder (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 37985cc0-23aa-41
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:34:16Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: d6cdc2f8-13e5-45
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:34:23Z] tester (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=propose (slice=slice-3)
+
+````yaml
+id: f6133430-0b39-41
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:34:23Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: bc815846-483b-48
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:34:23Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 01461685-58c6-4e
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:34:28Z] documenter (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=155762 util=0.16 cache_hit=0.99 decision=below_threshold
+
+````yaml
+id: 3195529f-5c9a-4e
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:34:30Z] tester (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 8f9d87ac-ca5b-41
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:34:35Z] reviewer_code → documenter (CONSENSUS_ACK): ACK from reviewer_code for documenter
+
+ACK v2 (sha 9df58d9b). My v1 blocking NACK is fully resolved: review.md Step 3 line 271 now invokes `node -r @swc-node/register workflows/review/lib/router.ts`, matching the plan task-3-1/3-2 file-lists, §8.3's file tree, and the shipped sibling CLIs (finding-schema.ts / verdict.ts / render-comment.ts all under lib/, no cli/ subdir). The delta is exactly that one-line correction — no lib/cli/ path remains. Rest of the task-3-3 wiring was already clean in v1: reviewer-mapper dispatch/artifact/owned-files.json staging/agent-def removed with no dangling live refs (remaining mentions are intentional historical prose), and Step 7/8 repoints to teams.owners/teams.fallback are consistent with the routing.json shape (lines 277-282). Router integration will resolve correctly at runtime once the coder's router.ts lands at workflows/review/lib/router.ts (its planned path).
+
+````yaml
+id: 67d77969-c01b-48
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/review.md
+    reason: "ACK v2 (sha 9df58d9b). My v1 blocking NACK is fully resolved: review.md\
+      \ Step 3 line 271 now invokes `node -r @swc-node/register workflows/review/lib/router.ts`,\
+      \ matching the plan task-3-1/3-2 file-lists, \xA78.3's file tree, and the shipped\
+      \ sibling CLIs (finding-schema.ts / verdict.ts / render-comment.ts all under\
+      \ lib/, no cli/ subdir). The delta is exactly that one-line correction \u2014\
+      \ no lib/cli/ path remains. Rest of the task-3-3 wiring was already clean in\
+      \ v1: reviewer-mapper dispatch/artifact/owned-files.json staging/agent-def removed\
+      \ with no dangling live refs (remaining mentions are intentional historical\
+      \ prose), and Step 7/8 repoints to teams.owners/teams.fallback are consistent\
+      \ with the routing.json shape (lines 277-282). Router integration will resolve\
+      \ correctly at runtime once the coder's router.ts lands at workflows/review/lib/router.ts\
+      \ (its planned path)."
+    ack_version: 2
+    attestation:
+      files_reviewed:
+      - workflows/review/review.md
+      issues_found: 0
+      prior_nack_resolved: router invocation path corrected from lib/cli/router.ts
+        to lib/router.ts
+  version: 2
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:34:37Z] reviewer_contract → documenter (CONSENSUS_ACK): ACK from reviewer_contract for documenter
+
+v2 delta (b81b1702..9df58d9b) is a single-line fix correcting the router CLI invocation path in Step 3 from workflows/review/lib/cli/router.ts to workflows/review/lib/router.ts. This resolves exactly the coordination concern I noted (non-blocking) in my v1 ACK and that reviewer_code NACK'd: the prompt now invokes the path where the coder's task-3-1/3-2 build the router (files_affected = workflows/review/lib/router.ts), matching every shipped sibling CLI (finding-schema.ts, verdict.ts, render-comment.ts, all directly under lib/, no lib/cli/ dir). Without the fix the orchestrator's bash call would have failed at runtime, defeating task-3-3's own AC. Scope remains clean (single line in review.md only; no other file, slice, or #194 item touched), and AC 'Only the router feeds lens/team routing in review.md' stays satisfied. No residual concerns.
+
+````yaml
+id: 545de872-a2e6-45
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/review.md
+    reason: 'v2 delta (b81b1702..9df58d9b) is a single-line fix correcting the router
+      CLI invocation path in Step 3 from workflows/review/lib/cli/router.ts to workflows/review/lib/router.ts.
+      This resolves exactly the coordination concern I noted (non-blocking) in my
+      v1 ACK and that reviewer_code NACK''d: the prompt now invokes the path where
+      the coder''s task-3-1/3-2 build the router (files_affected = workflows/review/lib/router.ts),
+      matching every shipped sibling CLI (finding-schema.ts, verdict.ts, render-comment.ts,
+      all directly under lib/, no lib/cli/ dir). Without the fix the orchestrator''s
+      bash call would have failed at runtime, defeating task-3-3''s own AC. Scope
+      remains clean (single line in review.md only; no other file, slice, or #194
+      item touched), and AC ''Only the router feeds lens/team routing in review.md''
+      stays satisfied. No residual concerns.'
+    ack_version: 2
+    attestation:
+      tasks_verified:
+      - task-3-3
+  version: 2
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:34:43Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=91333 util=0.09 cache_hit=0.99 decision=below_threshold
+
+````yaml
+id: e75be203-b75a-4a
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:34:43Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=88695 util=0.09 cache_hit=0.99 decision=below_threshold
+
+````yaml
+id: 88a371bd-b623-40
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:35:10Z] tester (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=102203 util=0.10 cache_hit=0.99 decision=below_threshold
+
+````yaml
+id: 6f050047-3a28-49
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:35:22Z] tester (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=propose (slice=slice-3)
+
+````yaml
+id: e352d826-a226-49
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:35:30Z] tester (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 21b7a808-ae59-4d
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:36:18Z] coder (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 62704450-2664-42
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:36:53Z] coder (CONSENSUS_PROPOSE): Proposal from coder
+
+slice-3 R10 deterministic router (workflows/review/lib/router.ts), subsuming the Haiku reviewer-mapper (R12) with pure, unit-testable TypeScript. task-3-1: file classification from .gitattributes linguist-generated globs; path->lens mapping over the 11 specialist lenses (canonical KNOWN_LENSES order, deduped); team mapping from REVIEWERS with most-specific-pattern-wins + fallback ranking (reviewer-mapper behaviour now in code); per-file risk tier. The one diff-direction-dependent judgement is externalised as pendingRiskQuestions for the orchestrator's single small-model call and read back via resolvedTiers on a second invocation (plan §8.6), so the core stays deterministic and I/O-free. task-3-2: ONE budget rule scaling monotonically by the highest touched tier + ONE floor lifting misrouted PRs (source touched, no specialist lens) to a documented low-tier baseline; no per-lens knobs. Default caps in DEFAULT_TIER_BUDGETS (20min/$10 ceiling, tunable, not a HITL gate); maxToolCallsPerFinding lives inside the run budget for slice-5 (R9). Zero-dependency self-contained glob matcher (picomatch not resolvable from the review package). No human-read prose authored in code (R8 tripwire §8.7); every emitted string is a code/path/team-slug/config value. Parsers are pure content-in/structure-out so the CLI owns file reads. Rebased cleanly onto documenter's Step-3 wiring (b81b1702/9df58d9b), disjoint files.
+
+````yaml
+id: 2e3f78a4-f8d7-4a
+phase: implement
+metadata:
+  payload:
+    summary: "slice-3 R10 deterministic router (workflows/review/lib/router.ts), subsuming\
+      \ the Haiku reviewer-mapper (R12) with pure, unit-testable TypeScript. task-3-1:\
+      \ file classification from .gitattributes linguist-generated globs; path->lens\
+      \ mapping over the 11 specialist lenses (canonical KNOWN_LENSES order, deduped);\
+      \ team mapping from REVIEWERS with most-specific-pattern-wins + fallback ranking\
+      \ (reviewer-mapper behaviour now in code); per-file risk tier. The one diff-direction-dependent\
+      \ judgement is externalised as pendingRiskQuestions for the orchestrator's single\
+      \ small-model call and read back via resolvedTiers on a second invocation (plan\
+      \ \xA78.6), so the core stays deterministic and I/O-free. task-3-2: ONE budget\
+      \ rule scaling monotonically by the highest touched tier + ONE floor lifting\
+      \ misrouted PRs (source touched, no specialist lens) to a documented low-tier\
+      \ baseline; no per-lens knobs. Default caps in DEFAULT_TIER_BUDGETS (20min/$10\
+      \ ceiling, tunable, not a HITL gate); maxToolCallsPerFinding lives inside the\
+      \ run budget for slice-5 (R9). Zero-dependency self-contained glob matcher (picomatch\
+      \ not resolvable from the review package). No human-read prose authored in code\
+      \ (R8 tripwire \xA78.7); every emitted string is a code/path/team-slug/config\
+      \ value. Parsers are pure content-in/structure-out so the CLI owns file reads.\
+      \ Rebased cleanly onto documenter's Step-3 wiring (b81b1702/9df58d9b), disjoint\
+      \ files."
+    attestation:
+      commit_shas:
+      - 7f4d8b4cfce17939578f61fe94f328b944427145
+      files_changed:
+      - workflows/review/lib/router.ts
+      test_summary: 'No vitest run: node_modules cannot be installed offline (no network).
+        Logic validated via a full plain-JS port of globToRegExp/matchesGlob, parseGitattributesGenerated/parseReviewers,
+        route(), and computeRunBudget: all glob cases pass, aggregation (dedup/canonical
+        order, most-specific-team, misrouted floor, fallback ranking) correct, budget
+        strictly monotonic across all fields. router.test.ts is the tester''s task
+        (task-3-4).'
+      risk_considered: Pure/deterministic router keeps the determinism boundary intact;
+        the sole model touch is externalised via pendingRiskQuestions rather than
+        guessed in code.
+    artifacts:
+    - workflows/review/lib/router.ts
+    risk_considered: Router core is pure/deterministic (no model, no I/O), unit-testable,
+      inside the determinism boundary; sole model touch externalised via pendingRiskQuestions.
+      Default lens/risk tables are generic consumer-overridable starters, not a guess
+      at consumer layout. Could not run vitest/tsc offline (no node_modules, no network);
+      mitigated by a full JS port validating glob/parse/route/budget + strict budget
+      monotonicity, and hand-application of prettier's 80-col wrapping to avoid the
+      lint gate.
+    commit_sha: 7f4d8b4cfce17939578f61fe94f328b944427145
+    files_changed:
+    - workflows/review/lib/router.ts
+    tests_run: []
+    tasks_satisfied:
+    - task-3-1
+    - task-3-2
+    no_changes_needed: false
+    no_changes_reason: ''
+  version: 1
+  commit_sha: 7f4d8b4cfce17939578f61fe94f328b944427145
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:36:58Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: c10152c7-7f04-45
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:36:59Z] reviewer_code_holistic (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: df4672db-97c8-4f
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:37:00Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: 6dd29329-0904-48
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:37:00Z] reviewer_security (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: feb55f63-0291-49
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:37:01Z] reviewer_concurrency (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: 0d0bfa76-9156-4f
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:37:06Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: b3d0926f-eb53-45
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:37:08Z] reviewer_security (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 87a35bbf-dcaf-4a
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:37:08Z] coder (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=147068 util=0.15 cache_hit=0.99 decision=no_warm_session
+
+````yaml
+id: 64dbdb89-7bf3-4c
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:37:09Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 5fc4ed08-af0b-4a
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:37:10Z] reviewer_concurrency (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 76e9e5df-d416-49
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:37:16Z] reviewer_code_holistic (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: dfe526cc-66de-42
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:37:33Z] tester (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 8e1ed8ca-fec6-43
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:38:31Z] reviewer_concurrency → coder (CONSENSUS_ACK): ACK from reviewer_concurrency for coder
+
+Reviewed through the concurrency & async lens. router.ts is purely synchronous and deterministic — no async/await, Promises, I/O, timers, or event emitters, so there is no async control flow to review. The only shared mutable state is the module-level regexpCache Map; compile()'s get-then-set is fully synchronous with no await anywhere in the route() call graph, so interleaved calls cannot race under Node's single-threaded event loop, Worker threads get per-isolate module instances (no cross-thread shared memory), and the memoization is idempotent so any hypothetical race is correctness-neutral. RegExps are built without the g/y flag, so cached-regex .test() carries no lastIndex state (classic stateful-regex reuse trap avoided). Output ordering is deterministic — teams/fallbackTeams are sorted and lensesToSpawn is filtered in canonical KNOWN_LENSES order — so no Map/Set-iteration nondeterminism leaks into results. No concurrency defects.
+
+````yaml
+id: 2f4fdcfd-979d-44
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/lib/router.ts
+    reason: "Reviewed through the concurrency & async lens. router.ts is purely synchronous\
+      \ and deterministic \u2014 no async/await, Promises, I/O, timers, or event emitters,\
+      \ so there is no async control flow to review. The only shared mutable state\
+      \ is the module-level regexpCache Map; compile()'s get-then-set is fully synchronous\
+      \ with no await anywhere in the route() call graph, so interleaved calls cannot\
+      \ race under Node's single-threaded event loop, Worker threads get per-isolate\
+      \ module instances (no cross-thread shared memory), and the memoization is idempotent\
+      \ so any hypothetical race is correctness-neutral. RegExps are built without\
+      \ the g/y flag, so cached-regex .test() carries no lastIndex state (classic\
+      \ stateful-regex reuse trap avoided). Output ordering is deterministic \u2014\
+      \ teams/fallbackTeams are sorted and lensesToSpawn is filtered in canonical\
+      \ KNOWN_LENSES order \u2014 so no Map/Set-iteration nondeterminism leaks into\
+      \ results. No concurrency defects."
+    ack_version: 1
+  version: 1
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:38:41Z] reviewer_concurrency (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=65249 util=0.07 cache_hit=0.99 decision=no_warm_session
+
+````yaml
+id: c2503fdf-aaf2-45
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:38:45Z] reviewer_security → coder (CONSENSUS_ACK): ACK from reviewer_security for coder
+
+Security lens: ACK. router.ts is pure/deterministic — no I/O, no eval, no dynamic code execution. glob->RegExp compilation escapes all regex metacharacters (`[.*+?^${}()|[\]\\]`) so attacker-supplied config is bounded to `*`/`**`/`?` glob semantics; no regex-injection or anchor-escape. security-auth lens exists in KNOWN_LENSES and is dispatched by DEFAULT_LENS_RULES (`**/auth/**`); all 4 always-on + 11 specialist lenses are consistent with the schema (no drift). Two advisory observations for the later CLI-wiring slice, NOT blocking this pure module: (1) generated-file review-evasion — a linguist-generated-matched file gets no lenses/no teams/trivial tier, so if config is sourced from PR HEAD a contributor could self-mark malicious source as generated to skip the security lens; mitigation is to read .gitattributes/REVIEWERS/config from the BASE branch in the CLI. (2) ReDoS is low risk — emitted patterns have no nested quantifiers (polynomial, not exponential backtracking) and config is semi-trusted.
+
+````yaml
+id: 3f9b767d-08ca-40
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/lib/router.ts
+    reason: "Security lens: ACK. router.ts is pure/deterministic \u2014 no I/O, no\
+      \ eval, no dynamic code execution. glob->RegExp compilation escapes all regex\
+      \ metacharacters (`[.*+?^${}()|[\\]\\\\]`) so attacker-supplied config is bounded\
+      \ to `*`/`**`/`?` glob semantics; no regex-injection or anchor-escape. security-auth\
+      \ lens exists in KNOWN_LENSES and is dispatched by DEFAULT_LENS_RULES (`**/auth/**`);\
+      \ all 4 always-on + 11 specialist lenses are consistent with the schema (no\
+      \ drift). Two advisory observations for the later CLI-wiring slice, NOT blocking\
+      \ this pure module: (1) generated-file review-evasion \u2014 a linguist-generated-matched\
+      \ file gets no lenses/no teams/trivial tier, so if config is sourced from PR\
+      \ HEAD a contributor could self-mark malicious source as generated to skip the\
+      \ security lens; mitigation is to read .gitattributes/REVIEWERS/config from\
+      \ the BASE branch in the CLI. (2) ReDoS is low risk \u2014 emitted patterns\
+      \ have no nested quantifiers (polynomial, not exponential backtracking) and\
+      \ config is semi-trusted."
+    ack_version: 1
+  version: 1
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:38:49Z] reviewer_contract → coder (CONSENSUS_NACK): NACK from reviewer_contract for coder
+
+ARTIFACT IS CORRECT — this NACK is purely a contract-state gap, not a code defect. router.ts at 7f4d8b4c fully satisfies task-3-1 (deterministic pure route() emitting lensesToSpawn/teams/fallbackTeams/perFileTier, reviewer-mapper subsumed, diff-direction judgement externalized via pendingRiskQuestions per §8.6) and task-3-2 (ONE budget rule scaling monotonically by highest touched tier + ONE misrouted floor, documented caps), stays in scope (single file), honors operator directives #1/#2/#4/#5, and holds the R8 no-prose tripwire. I am blocked from ACKing only because both owned task rows are still status=pending: task-3-1 (pending) and task-3-2 (pending) in slice-3. ACTION: mark both complete via mcp__task__complete (task='task-3-1' and task='task-3-2', commit='7f4d8b4c') so the contract row state matches the delivered work, then re-propose. I will ACK immediately on re-propose once the rows read complete — no code change is required or requested. (Non-blocking note carried forward for slice-7, not part of this NACK: DEFAULT_LENS_RULES currently supply starter path rules for only 5 of the 11 specialist lenses; intentional starter defaults, mechanism covers all 11.)
+
+````yaml
+id: 49b97e87-b130-4c
+phase: implement
+metadata:
+  payload:
+    reason: "ARTIFACT IS CORRECT \u2014 this NACK is purely a contract-state gap,\
+      \ not a code defect. router.ts at 7f4d8b4c fully satisfies task-3-1 (deterministic\
+      \ pure route() emitting lensesToSpawn/teams/fallbackTeams/perFileTier, reviewer-mapper\
+      \ subsumed, diff-direction judgement externalized via pendingRiskQuestions per\
+      \ \xA78.6) and task-3-2 (ONE budget rule scaling monotonically by highest touched\
+      \ tier + ONE misrouted floor, documented caps), stays in scope (single file),\
+      \ honors operator directives #1/#2/#4/#5, and holds the R8 no-prose tripwire.\
+      \ I am blocked from ACKing only because both owned task rows are still status=pending:\
+      \ task-3-1 (pending) and task-3-2 (pending) in slice-3. ACTION: mark both complete\
+      \ via mcp__task__complete (task='task-3-1' and task='task-3-2', commit='7f4d8b4c')\
+      \ so the contract row state matches the delivered work, then re-propose. I will\
+      \ ACK immediately on re-propose once the rows read complete \u2014 no code change\
+      \ is required or requested. (Non-blocking note carried forward for slice-7,\
+      \ not part of this NACK: DEFAULT_LENS_RULES currently supply starter path rules\
+      \ for only 5 of the 11 specialist lenses; intentional starter defaults, mechanism\
+      \ covers all 11.)"
+    artifact_references:
+    - workflows/review/lib/router.ts
+    - workflows/review/lib/finding-schema.ts
+    nack_version: 1
+  reason: "ARTIFACT IS CORRECT \u2014 this NACK is purely a contract-state gap, not\
+    \ a code defect. router.ts at 7f4d8b4c fully satisfies task-3-1 (deterministic\
+    \ pure route() emitting lensesToSpawn/teams/fallbackTeams/perFileTier, reviewer-mapper\
+    \ subsumed, diff-direction judgement externalized via pendingRiskQuestions per\
+    \ \xA78.6) and task-3-2 (ONE budget rule scaling monotonically by highest touched\
+    \ tier + ONE misrouted floor, documented caps), stays in scope (single file),\
+    \ honors operator directives #1/#2/#4/#5, and holds the R8 no-prose tripwire.\
+    \ I am blocked from ACKing only because both owned task rows are still status=pending:\
+    \ task-3-1 (pending) and task-3-2 (pending) in slice-3. ACTION: mark both complete\
+    \ via mcp__task__complete (task='task-3-1' and task='task-3-2', commit='7f4d8b4c')\
+    \ so the contract row state matches the delivered work, then re-propose. I will\
+    \ ACK immediately on re-propose once the rows read complete \u2014 no code change\
+    \ is required or requested. (Non-blocking note carried forward for slice-7, not\
+    \ part of this NACK: DEFAULT_LENS_RULES currently supply starter path rules for\
+    \ only 5 of the 11 specialist lenses; intentional starter defaults, mechanism\
+    \ covers all 11.)"
+  revision_count: 1
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:38:53Z] coder (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=propose (slice=slice-3)
+
+````yaml
+id: f8456129-316c-45
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:38:54Z] reviewer_security (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=69456 util=0.07 cache_hit=0.97 decision=no_warm_session
+
+````yaml
+id: 5c4ef072-7721-49
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:38:58Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=116706 util=0.12 cache_hit=0.98 decision=below_threshold
+
+````yaml
+id: ec467476-4efb-4f
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:39:02Z] coder (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: a49a7681-fc8f-4e
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:39:29Z] reviewer_code_holistic (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 3389a4e6-fb03-47
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:39:38Z] tester (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 3cfd6470-b47f-40
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:39:43Z] reviewer_code → coder (CONSENSUS_ACK): ACK from reviewer_code for coder
+
+ACK v1 (sha 7f4d8b4c) — router.ts, task-3-1/3-2. Thorough static review; code is pure, deterministic, and AC-satisfying.
+
+Correctness verified statically:
+- Lens taxonomy: SPECIALIST_LENSES = KNOWN_LENSES minus ALWAYS_ON_LENSES; confirmed against finding-schema.ts KNOWN_LENSES (11 specialists + exactly the 4 always-on entries listed), so SPECIALIST_LENSES = precisely the 11 specialists and every default-rule lens literal is a valid Lens. Cannot drift by construction.
+- task-3-1: parseGitattributesGenerated honors negation (-linguist-generated / =false); lensesForFile unions matching rules in canonical order; teamsForFile uses most-specific-pattern-wins (patternSpecificity), teamSlug reproduces reviewer-mapper's slug rule exactly (strip @, drop org prefix, strip trailing !, lowercase); fallbackTeams ranked by owned-file count, tie-broken alphabetically for determinism — subsumes reviewer-mapper faithfully. tierForFile takes the highest matching tier and defers diff-direction-dependent rules as pendingRiskQuestions (conservative tier meanwhile so budget is never understated), resolved via resolvedTiers on a 2nd pass — exactly plan §8.6. Core never calls a model.
+- task-3-2: computeRunBudget scales by highest touched tier over a monotonic DEFAULT_TIER_BUDGETS table with ONE misrouted floor (low) and no per-lens knobs. Monotonicity + floor AC holds. maxToolCallsPerFinding parked for slice-5 R9.
+- R8 tripwire (§8.7): no human-read prose emitted — every string is a code/path/slug/config value.
+- globToRegExp: correct **/*/?/dir-prefix/basename semantics with compile cache.
+
+Advisory (non-blocking, for slice-6): `conventions` is in ALWAYS_ON_LENSES, excluding it from lensesToSpawn — but slice-6 task-6-1 calls conventions "router-gated by greppable trigger signatures". Slice-6 must reconcile (reclassify conventions out of ALWAYS_ON so the router can gate it, or accept always-on). ALWAYS_ON_LENSES is exported/editable, so this is a future roster decision, not a slice-3 defect.
+
+Environment limit (disclosed): node_modules absent + no network, so I could not run `tsc`/`vitest`. Review is static only; code is self-contained (imports only verified ./finding-schema symbols) and I found no type inconsistency. The tester's router.test.ts (task-3-4) is reviewed under its own event.
+
+````yaml
+id: ebfcb94f-b2e6-42
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/lib/router.ts
+    reason: "ACK v1 (sha 7f4d8b4c) \u2014 router.ts, task-3-1/3-2. Thorough static\
+      \ review; code is pure, deterministic, and AC-satisfying.\n\nCorrectness verified\
+      \ statically:\n- Lens taxonomy: SPECIALIST_LENSES = KNOWN_LENSES minus ALWAYS_ON_LENSES;\
+      \ confirmed against finding-schema.ts KNOWN_LENSES (11 specialists + exactly\
+      \ the 4 always-on entries listed), so SPECIALIST_LENSES = precisely the 11 specialists\
+      \ and every default-rule lens literal is a valid Lens. Cannot drift by construction.\n\
+      - task-3-1: parseGitattributesGenerated honors negation (-linguist-generated\
+      \ / =false); lensesForFile unions matching rules in canonical order; teamsForFile\
+      \ uses most-specific-pattern-wins (patternSpecificity), teamSlug reproduces\
+      \ reviewer-mapper's slug rule exactly (strip @, drop org prefix, strip trailing\
+      \ !, lowercase); fallbackTeams ranked by owned-file count, tie-broken alphabetically\
+      \ for determinism \u2014 subsumes reviewer-mapper faithfully. tierForFile takes\
+      \ the highest matching tier and defers diff-direction-dependent rules as pendingRiskQuestions\
+      \ (conservative tier meanwhile so budget is never understated), resolved via\
+      \ resolvedTiers on a 2nd pass \u2014 exactly plan \xA78.6. Core never calls\
+      \ a model.\n- task-3-2: computeRunBudget scales by highest touched tier over\
+      \ a monotonic DEFAULT_TIER_BUDGETS table with ONE misrouted floor (low) and\
+      \ no per-lens knobs. Monotonicity + floor AC holds. maxToolCallsPerFinding parked\
+      \ for slice-5 R9.\n- R8 tripwire (\xA78.7): no human-read prose emitted \u2014\
+      \ every string is a code/path/slug/config value.\n- globToRegExp: correct **/*/?/dir-prefix/basename\
+      \ semantics with compile cache.\n\nAdvisory (non-blocking, for slice-6): `conventions`\
+      \ is in ALWAYS_ON_LENSES, excluding it from lensesToSpawn \u2014 but slice-6\
+      \ task-6-1 calls conventions \"router-gated by greppable trigger signatures\"\
+      . Slice-6 must reconcile (reclassify conventions out of ALWAYS_ON so the router\
+      \ can gate it, or accept always-on). ALWAYS_ON_LENSES is exported/editable,\
+      \ so this is a future roster decision, not a slice-3 defect.\n\nEnvironment\
+      \ limit (disclosed): node_modules absent + no network, so I could not run `tsc`/`vitest`.\
+      \ Review is static only; code is self-contained (imports only verified ./finding-schema\
+      \ symbols) and I found no type inconsistency. The tester's router.test.ts (task-3-4)\
+      \ is reviewed under its own event."
+    ack_version: 1
+    attestation:
+      files_reviewed:
+      - workflows/review/lib/router.ts
+      issues_found: 0
+      checks_passed:
+      - static-review
+      - type-consistency-vs-finding-schema
+      - ac-coverage-3-1
+      - ac-coverage-3-2
+      - r8-tripwire
+      checks_blocked:
+      - tsc
+      - vitest
+      checks_blocked_reason: node_modules not installed and no network in sandbox;
+        could not execute typecheck/tests. Static review only. router.test.ts (tester
+        task-3-4) reviewed under its own event.
+  version: 1
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:39:44Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 4418b83e-6550-4e
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:39:57Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=117692 util=0.12 cache_hit=0.96 decision=below_threshold
+
+````yaml
+id: 9adf1847-e903-44
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:40:19Z] coder (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=155766 util=0.16 cache_hit=1.00 decision=below_threshold
+
+````yaml
+id: 22296ea9-d4ea-41
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:40:28Z] coder (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=propose (slice=slice-3)
+
+````yaml
+id: c6e836ae-9d40-4f
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:40:49Z] coder (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 58f8b4ee-54fe-4d
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:28Z] reviewer_code_holistic → coder (CONSENSUS_NACK): NACK from reviewer_code_holistic for coder
+
+The pure route() logic is well-built and I have no correctness objection to it (glob→regex subset, tier monotonicity via TIER_RANK, misrouted floor that only lifts, conservative-highest-candidate tier for diff-direction-dependent files + pendingRiskQuestions, generated-file handling, most-specific-pattern-wins team resolution). But as delivered the artifact cannot fulfill the runtime contract review.md wires it into — two blocking holistic/integration gaps:
+
+BLOCKING-1 — router.ts has no CLI/executable entrypoint. review.md Step 3 invokes `node -r @swc-node/register workflows/review/lib/router.ts` and documents that it "reads the diff and file list (/tmp/gh-aw/review/full.diff, files.json) plus .gitattributes and .github/REVIEWERS ... and writes /tmp/gh-aw/review/routing.json". The plan §8 integration design (line ~230: "router reads them → writes routing.json") sites this in router.ts, and task-3-3 already repointed review.md at lib/router.ts on the premise that router.ts *is* the CLI. But router.ts exports only pure functions/types and runs no top-level code (verified: no require.main/process.argv/fs/readFile/writeFile, file ends at the `route` export). Running it produces no routing.json, so every downstream step that reads routing.json (Phase-2 lens dispatch, Step 7 risk grouping, Step 8 reviewer request) fails at runtime — this is exactly the runtime-break class reviewer_code's v1 path NACK was trying to prevent, still open. The comment "CLI does the file read" points at a CLI layer that does not exist in the tree (no lib/cli/, no other invocable entry).
+
+BLOCKING-2 — RoutingResult shape does not match the consumed routing.json contract, so even adding a bare JSON.stringify(route(...)) wouldn't work. review.md consumes `routing.json.teams.owners` (per-file {path:[team,…]} map — Step 7 grouping and Step 8 reviewer mapping) and `routing.json.teams.fallback` ([{team,files}] ranked list — Step 8 fallback). route() instead returns top-level `teams: string[]` (flat sorted union), a separate `fallbackTeams`, and puts the per-file owner map only inside `perFile[].teams`. So `routing.json.teams.owners`/`.fallback` would be undefined and Step 7/8 break. Additionally perFileTier values are lowercase ("trivial|low|medium|high") while review.md's documented routing.json spec writes "High|Medium|Low|Trivial" — a casing mismatch Step 7/8 tier reads would trip on.
+
+Fix (producer's call on placement, but the router side must at minimum be runnable and emit the consumed shape): add the CLI entrypoint to router.ts that (a) reads the Step-1-staged full.diff/files.json + .gitattributes/.github/REVIEWERS, (b) parses them via the existing pure parsers + calls route(), (c) serializes to routing.json in the shape review.md consumes — nest teams as {owners:{path:[team,…]}, fallback:[{team,files}]} (owners derivable from perFile[].teams, fallback from fallbackTeams) and reconcile perFileTier casing with review.md (or update review.md's spec to match — but the two must agree). Keep the two-invocation resolvedTiers protocol intact. The pure core can stay exactly as is; this is purely the missing I/O+serialization shell and the contract reconciliation with the wiring.
+
+````yaml
+id: 26a3912a-6a7a-4d
+phase: implement
+metadata:
+  payload:
+    reason: "The pure route() logic is well-built and I have no correctness objection\
+      \ to it (glob\u2192regex subset, tier monotonicity via TIER_RANK, misrouted\
+      \ floor that only lifts, conservative-highest-candidate tier for diff-direction-dependent\
+      \ files + pendingRiskQuestions, generated-file handling, most-specific-pattern-wins\
+      \ team resolution). But as delivered the artifact cannot fulfill the runtime\
+      \ contract review.md wires it into \u2014 two blocking holistic/integration\
+      \ gaps:\n\nBLOCKING-1 \u2014 router.ts has no CLI/executable entrypoint. review.md\
+      \ Step 3 invokes `node -r @swc-node/register workflows/review/lib/router.ts`\
+      \ and documents that it \"reads the diff and file list (/tmp/gh-aw/review/full.diff,\
+      \ files.json) plus .gitattributes and .github/REVIEWERS ... and writes /tmp/gh-aw/review/routing.json\"\
+      . The plan \xA78 integration design (line ~230: \"router reads them \u2192 writes\
+      \ routing.json\") sites this in router.ts, and task-3-3 already repointed review.md\
+      \ at lib/router.ts on the premise that router.ts *is* the CLI. But router.ts\
+      \ exports only pure functions/types and runs no top-level code (verified: no\
+      \ require.main/process.argv/fs/readFile/writeFile, file ends at the `route`\
+      \ export). Running it produces no routing.json, so every downstream step that\
+      \ reads routing.json (Phase-2 lens dispatch, Step 7 risk grouping, Step 8 reviewer\
+      \ request) fails at runtime \u2014 this is exactly the runtime-break class reviewer_code's\
+      \ v1 path NACK was trying to prevent, still open. The comment \"CLI does the\
+      \ file read\" points at a CLI layer that does not exist in the tree (no lib/cli/,\
+      \ no other invocable entry).\n\nBLOCKING-2 \u2014 RoutingResult shape does not\
+      \ match the consumed routing.json contract, so even adding a bare JSON.stringify(route(...))\
+      \ wouldn't work. review.md consumes `routing.json.teams.owners` (per-file {path:[team,\u2026\
+      ]} map \u2014 Step 7 grouping and Step 8 reviewer mapping) and `routing.json.teams.fallback`\
+      \ ([{team,files}] ranked list \u2014 Step 8 fallback). route() instead returns\
+      \ top-level `teams: string[]` (flat sorted union), a separate `fallbackTeams`,\
+      \ and puts the per-file owner map only inside `perFile[].teams`. So `routing.json.teams.owners`/`.fallback`\
+      \ would be undefined and Step 7/8 break. Additionally perFileTier values are\
+      \ lowercase (\"trivial|low|medium|high\") while review.md's documented routing.json\
+      \ spec writes \"High|Medium|Low|Trivial\" \u2014 a casing mismatch Step 7/8\
+      \ tier reads would trip on.\n\nFix (producer's call on placement, but the router\
+      \ side must at minimum be runnable and emit the consumed shape): add the CLI\
+      \ entrypoint to router.ts that (a) reads the Step-1-staged full.diff/files.json\
+      \ + .gitattributes/.github/REVIEWERS, (b) parses them via the existing pure\
+      \ parsers + calls route(), (c) serializes to routing.json in the shape review.md\
+      \ consumes \u2014 nest teams as {owners:{path:[team,\u2026]}, fallback:[{team,files}]}\
+      \ (owners derivable from perFile[].teams, fallback from fallbackTeams) and reconcile\
+      \ perFileTier casing with review.md (or update review.md's spec to match \u2014\
+      \ but the two must agree). Keep the two-invocation resolvedTiers protocol intact.\
+      \ The pure core can stay exactly as is; this is purely the missing I/O+serialization\
+      \ shell and the contract reconciliation with the wiring."
+    artifact_references:
+    - workflows/review/lib/router.ts
+    - workflows/review/review.md
+    nack_version: 1
+  reason: "The pure route() logic is well-built and I have no correctness objection\
+    \ to it (glob\u2192regex subset, tier monotonicity via TIER_RANK, misrouted floor\
+    \ that only lifts, conservative-highest-candidate tier for diff-direction-dependent\
+    \ files + pendingRiskQuestions, generated-file handling, most-specific-pattern-wins\
+    \ team resolution). But as delivered the artifact cannot fulfill the runtime contract\
+    \ review.md wires it into \u2014 two blocking holistic/integration gaps:\n\nBLOCKING-1\
+    \ \u2014 router.ts has no CLI/executable entrypoint. review.md Step 3 invokes\
+    \ `node -r @swc-node/register workflows/review/lib/router.ts` and documents that\
+    \ it \"reads the diff and file list (/tmp/gh-aw/review/full.diff, files.json)\
+    \ plus .gitattributes and .github/REVIEWERS ... and writes /tmp/gh-aw/review/routing.json\"\
+    . The plan \xA78 integration design (line ~230: \"router reads them \u2192 writes\
+    \ routing.json\") sites this in router.ts, and task-3-3 already repointed review.md\
+    \ at lib/router.ts on the premise that router.ts *is* the CLI. But router.ts exports\
+    \ only pure functions/types and runs no top-level code (verified: no require.main/process.argv/fs/readFile/writeFile,\
+    \ file ends at the `route` export). Running it produces no routing.json, so every\
+    \ downstream step that reads routing.json (Phase-2 lens dispatch, Step 7 risk\
+    \ grouping, Step 8 reviewer request) fails at runtime \u2014 this is exactly the\
+    \ runtime-break class reviewer_code's v1 path NACK was trying to prevent, still\
+    \ open. The comment \"CLI does the file read\" points at a CLI layer that does\
+    \ not exist in the tree (no lib/cli/, no other invocable entry).\n\nBLOCKING-2\
+    \ \u2014 RoutingResult shape does not match the consumed routing.json contract,\
+    \ so even adding a bare JSON.stringify(route(...)) wouldn't work. review.md consumes\
+    \ `routing.json.teams.owners` (per-file {path:[team,\u2026]} map \u2014 Step 7\
+    \ grouping and Step 8 reviewer mapping) and `routing.json.teams.fallback` ([{team,files}]\
+    \ ranked list \u2014 Step 8 fallback). route() instead returns top-level `teams:\
+    \ string[]` (flat sorted union), a separate `fallbackTeams`, and puts the per-file\
+    \ owner map only inside `perFile[].teams`. So `routing.json.teams.owners`/`.fallback`\
+    \ would be undefined and Step 7/8 break. Additionally perFileTier values are lowercase\
+    \ (\"trivial|low|medium|high\") while review.md's documented routing.json spec\
+    \ writes \"High|Medium|Low|Trivial\" \u2014 a casing mismatch Step 7/8 tier reads\
+    \ would trip on.\n\nFix (producer's call on placement, but the router side must\
+    \ at minimum be runnable and emit the consumed shape): add the CLI entrypoint\
+    \ to router.ts that (a) reads the Step-1-staged full.diff/files.json + .gitattributes/.github/REVIEWERS,\
+    \ (b) parses them via the existing pure parsers + calls route(), (c) serializes\
+    \ to routing.json in the shape review.md consumes \u2014 nest teams as {owners:{path:[team,\u2026\
+    ]}, fallback:[{team,files}]} (owners derivable from perFile[].teams, fallback\
+    \ from fallbackTeams) and reconcile perFileTier casing with review.md (or update\
+    \ review.md's spec to match \u2014 but the two must agree). Keep the two-invocation\
+    \ resolvedTiers protocol intact. The pure core can stay exactly as is; this is\
+    \ purely the missing I/O+serialization shell and the contract reconciliation with\
+    \ the wiring."
+  revision_count: 1
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:32Z] coder (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=propose (slice=slice-3)
+
+````yaml
+id: fcc0f702-0425-40
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:33Z] tester (CONSENSUS_PROPOSE): Proposal from tester
+
+task-3-4 (slice-3): Router unit tests in workflows/review/lib/router.test.ts, committed a7b4bee2. Covers all five task-3-4 AC axes over fixtures against the coder's router.ts (7f4d8b4c): (1) classification — parseGitattributesGenerated + isGenerated + route mark linguist-generated files generated (no lenses/teams, trivial tier, not misrouted); (2) path->lens — per-file union of matching DEFAULT_LENS_RULES, lensesToSpawn deduped in canonical KNOWN_LENSES order, and always-on lenses never emitted as specialists; (3) tier — default tier, highest-of-matching, diff-direction-dependent deferral (conservative high tier now + pendingRiskQuestions), and resolvedTiers second-pass override clearing pending; (4) budget scaling — computeRunBudget monotonic across all numeric fields for every RISK_TIERS step, run budget selects the highest touched tier; (5) misrouted floor — docs-only PR flagged misrouted and floored to 'low', an already-higher touched tier not lowered, empty/all-generated PRs not misrouted. Also pins the reviewer-mapper subsumption (R12): most-specific REVIEWERS rule wins, sorted team union + file-count fallback ranking with alpha tie-break; plus matchesGlob/patternSpecificity and the config parsers, and a determinism (deep-equal) check. Prose-free structural assertions only.
+
+````yaml
+id: 23293caa-47a4-46
+phase: implement
+metadata:
+  payload:
+    summary: "task-3-4 (slice-3): Router unit tests in workflows/review/lib/router.test.ts,\
+      \ committed a7b4bee2. Covers all five task-3-4 AC axes over fixtures against\
+      \ the coder's router.ts (7f4d8b4c): (1) classification \u2014 parseGitattributesGenerated\
+      \ + isGenerated + route mark linguist-generated files generated (no lenses/teams,\
+      \ trivial tier, not misrouted); (2) path->lens \u2014 per-file union of matching\
+      \ DEFAULT_LENS_RULES, lensesToSpawn deduped in canonical KNOWN_LENSES order,\
+      \ and always-on lenses never emitted as specialists; (3) tier \u2014 default\
+      \ tier, highest-of-matching, diff-direction-dependent deferral (conservative\
+      \ high tier now + pendingRiskQuestions), and resolvedTiers second-pass override\
+      \ clearing pending; (4) budget scaling \u2014 computeRunBudget monotonic across\
+      \ all numeric fields for every RISK_TIERS step, run budget selects the highest\
+      \ touched tier; (5) misrouted floor \u2014 docs-only PR flagged misrouted and\
+      \ floored to 'low', an already-higher touched tier not lowered, empty/all-generated\
+      \ PRs not misrouted. Also pins the reviewer-mapper subsumption (R12): most-specific\
+      \ REVIEWERS rule wins, sorted team union + file-count fallback ranking with\
+      \ alpha tie-break; plus matchesGlob/patternSpecificity and the config parsers,\
+      \ and a determinism (deep-equal) check. Prose-free structural assertions only."
+    attestation:
+      tests_execution_blocked: true
+      tests_execution_blocked_reason: node_modules absent and network unreachable
+        (ENETUNREACH on pnpm install --prefer-offline); vitest cannot run in this
+        offline sandbox. Tests were authored against the coder's committed router.ts
+        exports and hand-verified against the pure-function logic. CI (pnpm test)
+        is the execution gate; matches the same offline constraint the coder and documenter
+        noted this slice.
+      tasks_verified:
+      - task-3-4
+    artifacts:
+    - workflows/review/lib/router.test.ts
+    risk_considered: "Tests target the coder's committed router.ts interface (7f4d8b4c)\
+      \ directly, so no interface-guess risk. Offline environment: node_modules absent\
+      \ and network unreachable, so vitest could not be run locally \u2014 assertions\
+      \ were hand-verified against the pure functions (glob semantics, canonical lens\
+      \ ordering, tier max/pending logic, DEFAULT_TIER_BUDGETS monotonicity, floor\
+      \ rank comparison, REVIEWERS specificity + fallback sort). Residual risk is\
+      \ prettier/eslint formatting only (a prior slice needed a format fixup); matched\
+      \ the repo's 4-space/double-quote/trailing-comma style and wrapped all non-string\
+      \ lines under 80 cols, but CI lint is the authoritative check \u2014 will fix\
+      \ formatting on a NACK if the eslint-config prettier rule flags anything."
+    commit_sha: a7b4bee2
+    files_changed:
+    - workflows/review/lib/router.test.ts
+    tests_run: []
+    tasks_satisfied:
+    - task-3-4
+    no_changes_needed: false
+    no_changes_reason: ''
+  version: 1
+  commit_sha: a7b4bee2
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:33Z] orchestrator → documenter (STATUS): Ready to confirm — all confirm preconditions satisfied
+
+Your proposal (version 2) is ready to confirm — all blocking reviews are clear and global confirm preconditions are met. Run `egg-orch consensus confirmed` to confirm.
+
+````yaml
+id: 885eee6d-388c-46
+phase: implement
+metadata:
+  ready_to_confirm: true
+  version: 2
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:37Z] documenter (CONSENSUS_CONFIRMED): Consensus confirmed by documenter
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: b3c0b6cf-9010-41
+phase: implement
+metadata:
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:39Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: f69616f9-7b4e-42
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:40Z] reviewer_code_holistic (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: 2e464e4e-57c6-47
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:41Z] coder (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=167374 util=0.17 cache_hit=0.97 decision=below_threshold
+
+````yaml
+id: 2913a1cf-7bc5-40
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:41Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: 11718511-d86c-48
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:42Z] reviewer_security (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: ce4897e1-53cf-44
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:43Z] reviewer_concurrency (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: 27fbdbe2-8ece-45
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:43Z] reviewer_code_holistic (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 2ff46dc0-1137-4a
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:45Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: ef86687b-28c5-46
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:49Z] tester (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 585e795d-aa58-4d
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:49Z] reviewer_code_holistic (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 246c7eb2-a375-47
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:49Z] reviewer_concurrency (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 40deb28e-9a3a-40
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:49Z] reviewer_security (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 73217821-3e99-40
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:51Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: fbf82b30-2082-4d
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:52Z] coder (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 27a9c8a8-feac-43
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:41:56Z] reviewer_code_holistic (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=92524 util=0.09 cache_hit=0.99 decision=no_warm_session
+
+````yaml
+id: 4fac6b93-fcf2-43
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:42:05Z] tester (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=148370 util=0.15 cache_hit=1.00 decision=below_threshold
+
+````yaml
+id: c1a7e5f9-5857-4f
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:42:34Z] reviewer_concurrency → tester (CONSENSUS_ACK): ACK from reviewer_concurrency for tester
+
+Reviewed through the concurrency & async lens. router.test.ts is entirely synchronous — no async test bodies, Promises, await, fake timers, or it.concurrent declarations — matching the pure/synchronous router it exercises; there is no async surface to under-cover. Shared fixtures (baseConfig, reviewerRules) are read-only and tests spread them into fresh configs, so no cross-test mutation; vitest's per-file worker isolation plus sequential in-file execution means the module-level regexpCache is never accessed by parallel threads. The one concurrency-relevant property is explicitly pinned: the "route: determinism" test asserts two successive route() calls return deep-equal results, exercising the shared regexpCache reuse path and confirming no cross-call corruption, with varied-glob tests across the file further exercising cache reuse. No concurrency defects or coverage gaps.
+
+````yaml
+id: f04cff3f-6198-4d
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/lib/router.test.ts
+    reason: "Reviewed through the concurrency & async lens. router.test.ts is entirely\
+      \ synchronous \u2014 no async test bodies, Promises, await, fake timers, or\
+      \ it.concurrent declarations \u2014 matching the pure/synchronous router it\
+      \ exercises; there is no async surface to under-cover. Shared fixtures (baseConfig,\
+      \ reviewerRules) are read-only and tests spread them into fresh configs, so\
+      \ no cross-test mutation; vitest's per-file worker isolation plus sequential\
+      \ in-file execution means the module-level regexpCache is never accessed by\
+      \ parallel threads. The one concurrency-relevant property is explicitly pinned:\
+      \ the \"route: determinism\" test asserts two successive route() calls return\
+      \ deep-equal results, exercising the shared regexpCache reuse path and confirming\
+      \ no cross-call corruption, with varied-glob tests across the file further exercising\
+      \ cache reuse. No concurrency defects or coverage gaps."
+    ack_version: 1
+  version: 1
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:42:34Z] reviewer_concurrency (CONSENSUS_CONFIRMED): Consensus confirmed by reviewer_concurrency
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: 59515fdc-1bf9-48
+phase: implement
+metadata:
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:42:40Z] reviewer_concurrency (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=77883 util=0.08 cache_hit=0.99 decision=below_threshold
+
+````yaml
+id: e1e10e7a-f91e-42
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:42:50Z] reviewer_security → tester (CONSENSUS_ACK): ACK from reviewer_security for tester
+
+Security lens: ACK. The security-critical router invariant — a linguist-generated file is classified generated with no lenses / no teams / trivial tier (the review-evasion surface I flagged on router.ts) — is well pinned (route: classification test + misrouted-floor tests), so it is regression-protected. Diff-direction-dependent auth deferral is covered: tierPending=true with a conservative "high" tier while awaiting resolution, and the resolvedTiers second-pass clears the pending question and wins. Advisory recommendation, NOT blocking (router.ts escaping is verified-correct and route is deterministic): the matchesGlob suite exercises `*`/`**`/`?`/trailing-slash/basename but never asserts regex-metacharacter ESCAPING — e.g. that a pattern containing a literal `.` does not match arbitrary characters. Without that test, a future refactor of globToRegExp could silently drop escaping and reintroduce regex-injection from semi-trusted (.gitattributes/REVIEWERS) config with no failing test. Suggest adding one metacharacter-escaping test and one large/pathological-pattern bound test as defense-in-depth for the injection-safety property.
+
+````yaml
+id: f5e4a727-8af4-41
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/lib/router.test.ts
+    reason: "Security lens: ACK. The security-critical router invariant \u2014 a linguist-generated\
+      \ file is classified generated with no lenses / no teams / trivial tier (the\
+      \ review-evasion surface I flagged on router.ts) \u2014 is well pinned (route:\
+      \ classification test + misrouted-floor tests), so it is regression-protected.\
+      \ Diff-direction-dependent auth deferral is covered: tierPending=true with a\
+      \ conservative \"high\" tier while awaiting resolution, and the resolvedTiers\
+      \ second-pass clears the pending question and wins. Advisory recommendation,\
+      \ NOT blocking (router.ts escaping is verified-correct and route is deterministic):\
+      \ the matchesGlob suite exercises `*`/`**`/`?`/trailing-slash/basename but never\
+      \ asserts regex-metacharacter ESCAPING \u2014 e.g. that a pattern containing\
+      \ a literal `.` does not match arbitrary characters. Without that test, a future\
+      \ refactor of globToRegExp could silently drop escaping and reintroduce regex-injection\
+      \ from semi-trusted (.gitattributes/REVIEWERS) config with no failing test.\
+      \ Suggest adding one metacharacter-escaping test and one large/pathological-pattern\
+      \ bound test as defense-in-depth for the injection-safety property."
+    ack_version: 1
+  version: 1
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:42:54Z] reviewer_security (CONSENSUS_CONFIRMED): Consensus confirmed by reviewer_security
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: 6a8d2c8e-b208-4e
+phase: implement
+metadata:
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:42:59Z] reviewer_security (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=87589 util=0.09 cache_hit=0.97 decision=below_threshold
+
+````yaml
+id: 1eae4751-cfc7-4c
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:43:33Z] reviewer_code → tester (CONSENSUS_ACK): ACK from reviewer_code for tester
+
+ACK v1 (sha a7b4bee2) — router.test.ts, task-3-4. Traced every assertion against the router.ts implementation I reviewed (sha 7f4d8b4c); all expected values are correct.
+
+Coverage across the five task-3-4 AC axes + extras:
+- classification: generated (dist/** via gitattributes) -> trivial/no-lenses/no-teams; source otherwise; all-generated PR not misrouted.
+- path->lens: per-file union (proto -> [api-federation-compat, cross-deploy-serialization] in canonical KNOWN_LENSES order), cross-file dedup order (security-auth < data-migrations < deploy-infra-config), and the invariant that SPECIALIST_LENSES has length 11 and no always-on lens is ever spawned as a specialist.
+- tier: default low, defaultTier override, highest-of-matching (sql migration -> high), diff-direction deferral (auth -> tierPending + conservative high + pendingRiskQuestions candidateTiers [high]), resolvedTiers second pass wins and clears the question.
+- budget scaling: monotonic across all RISK_TIERS on every numeric field; run budget = highest touched tier across files.
+- misrouted floor: computeRunBudget floors trivial->low (floored true), does not lower high; route flags docs-only README.md misrouted and applies the floor; a lens-matched PR and an empty file list are not misrouted.
+- reviewer-mapper subsumption (R12): most-specific REVIEWERS rule wins (src/auth/ over src/), sorted team union [infra, security, web], file-count fallback rank web(2)/infra(1)/security(1) with alphabetical tiebreak, no-match -> [].
+- determinism: same input+config -> deep-equal.
+
+Import convention correct: test imports with explicit `.ts` (matching shipped sibling test files verdict.test.ts / finding-schema.test.ts / render-comment.test.ts) and tsconfig sets allowImportingTsExtensions:true + moduleResolution bundler — no inconsistency, no lint-gate risk.
+
+Environment limit (disclosed, same as tester): node_modules absent + no network, so I could not execute vitest. Review is a static trace-through; every expected value matches the router implementation and the tests would catch a regression. No defects found.
+
+````yaml
+id: 9fdbf1e6-a08b-40
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/lib/router.test.ts
+    reason: "ACK v1 (sha a7b4bee2) \u2014 router.test.ts, task-3-4. Traced every assertion\
+      \ against the router.ts implementation I reviewed (sha 7f4d8b4c); all expected\
+      \ values are correct.\n\nCoverage across the five task-3-4 AC axes + extras:\n\
+      - classification: generated (dist/** via gitattributes) -> trivial/no-lenses/no-teams;\
+      \ source otherwise; all-generated PR not misrouted.\n- path->lens: per-file\
+      \ union (proto -> [api-federation-compat, cross-deploy-serialization] in canonical\
+      \ KNOWN_LENSES order), cross-file dedup order (security-auth < data-migrations\
+      \ < deploy-infra-config), and the invariant that SPECIALIST_LENSES has length\
+      \ 11 and no always-on lens is ever spawned as a specialist.\n- tier: default\
+      \ low, defaultTier override, highest-of-matching (sql migration -> high), diff-direction\
+      \ deferral (auth -> tierPending + conservative high + pendingRiskQuestions candidateTiers\
+      \ [high]), resolvedTiers second pass wins and clears the question.\n- budget\
+      \ scaling: monotonic across all RISK_TIERS on every numeric field; run budget\
+      \ = highest touched tier across files.\n- misrouted floor: computeRunBudget\
+      \ floors trivial->low (floored true), does not lower high; route flags docs-only\
+      \ README.md misrouted and applies the floor; a lens-matched PR and an empty\
+      \ file list are not misrouted.\n- reviewer-mapper subsumption (R12): most-specific\
+      \ REVIEWERS rule wins (src/auth/ over src/), sorted team union [infra, security,\
+      \ web], file-count fallback rank web(2)/infra(1)/security(1) with alphabetical\
+      \ tiebreak, no-match -> [].\n- determinism: same input+config -> deep-equal.\n\
+      \nImport convention correct: test imports with explicit `.ts` (matching shipped\
+      \ sibling test files verdict.test.ts / finding-schema.test.ts / render-comment.test.ts)\
+      \ and tsconfig sets allowImportingTsExtensions:true + moduleResolution bundler\
+      \ \u2014 no inconsistency, no lint-gate risk.\n\nEnvironment limit (disclosed,\
+      \ same as tester): node_modules absent + no network, so I could not execute\
+      \ vitest. Review is a static trace-through; every expected value matches the\
+      \ router implementation and the tests would catch a regression. No defects found."
+    ack_version: 1
+    attestation:
+      files_reviewed:
+      - workflows/review/lib/router.test.ts
+      issues_found: 0
+      checks_passed:
+      - assertion-trace-vs-router-impl
+      - import-convention-consistency
+      - ac-axis-coverage-3-4
+      checks_blocked:
+      - vitest-execution
+      checks_blocked_reason: node_modules absent + no network in sandbox; could not
+        run vitest. Static trace-through of every assertion against router.ts confirmed
+        correctness.
+  version: 1
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:43:39Z] reviewer_code (CONSENSUS_CONFIRMED): Consensus confirmed by reviewer_code
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: 2798e4de-40ca-49
+phase: implement
+metadata:
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:43:41Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=137296 util=0.14 cache_hit=0.98 decision=below_threshold
+
+````yaml
+id: a9a1f571-4649-45
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:43:45Z] reviewer_contract → tester (CONSENSUS_ACK): ACK from reviewer_contract for tester
+
+task-3-4 (tester) verified against contract. Scope clean: single file workflows/review/lib/router.test.ts (429 insertions), matching files_affected; task row is status=complete at commit a7b4bee2. AC 'Router tests green over fixtures' substantively met: the suite covers all five mandated axes over fixtures — classification (linguist-generated vs source; generated files get no lenses/teams and trivial tier), path->lens (per-file union, deduped lensesToSpawn in canonical KNOWN_LENSES order, always-on lenses never spawned as specialists + SPECIALIST_LENSES length asserted =11), tier (default, override, highest-of-matching, diff-direction-dependent deferral with conservative tier + pendingRiskQuestions, resolvedTiers second pass clearing pending), budget scaling (monotonic across every RunBudget field, run budget = highest touched tier), and misrouted floor (docs-only PR floored to 'low' + floored flag; already-higher tier not lowered; not-misrouted when a lens matched or file list empty) — plus reviewer-mapper subsumption (most-specific REVIEWERS rule wins, sorted union + file-count fallback rank), the glob/config parsers, and a determinism deep-equal check. I statically verified representative assertions against router.ts and they are consistent with the implementation (glob semantics for Dockerfile/**-migrations/single-star-no-cross; auth = high+diffDirectionDependent -> pending candidate ['high']; DEFAULT_MISROUTED_FLOOR_TIER='low'; canonical lens indices 0/4/8; fallback tie-break web(2)/infra(1)/security(1)). Literal vitest execution could not be performed in this handler (ENETUNREACH: node_modules absent and network unreachable; no offline store) — the identical environmental constraint the tester documented and that prior slices in this pipeline accepted; it is not a producer defect. reviewer_code owns any deeper runtime/lint green-ness confirmation. No scope, directive, or #194 concerns.
+
+````yaml
+id: e5576e25-e80d-43
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/lib/router.test.ts
+    - workflows/review/lib/router.ts
+    reason: "task-3-4 (tester) verified against contract. Scope clean: single file\
+      \ workflows/review/lib/router.test.ts (429 insertions), matching files_affected;\
+      \ task row is status=complete at commit a7b4bee2. AC 'Router tests green over\
+      \ fixtures' substantively met: the suite covers all five mandated axes over\
+      \ fixtures \u2014 classification (linguist-generated vs source; generated files\
+      \ get no lenses/teams and trivial tier), path->lens (per-file union, deduped\
+      \ lensesToSpawn in canonical KNOWN_LENSES order, always-on lenses never spawned\
+      \ as specialists + SPECIALIST_LENSES length asserted =11), tier (default, override,\
+      \ highest-of-matching, diff-direction-dependent deferral with conservative tier\
+      \ + pendingRiskQuestions, resolvedTiers second pass clearing pending), budget\
+      \ scaling (monotonic across every RunBudget field, run budget = highest touched\
+      \ tier), and misrouted floor (docs-only PR floored to 'low' + floored flag;\
+      \ already-higher tier not lowered; not-misrouted when a lens matched or file\
+      \ list empty) \u2014 plus reviewer-mapper subsumption (most-specific REVIEWERS\
+      \ rule wins, sorted union + file-count fallback rank), the glob/config parsers,\
+      \ and a determinism deep-equal check. I statically verified representative assertions\
+      \ against router.ts and they are consistent with the implementation (glob semantics\
+      \ for Dockerfile/**-migrations/single-star-no-cross; auth = high+diffDirectionDependent\
+      \ -> pending candidate ['high']; DEFAULT_MISROUTED_FLOOR_TIER='low'; canonical\
+      \ lens indices 0/4/8; fallback tie-break web(2)/infra(1)/security(1)). Literal\
+      \ vitest execution could not be performed in this handler (ENETUNREACH: node_modules\
+      \ absent and network unreachable; no offline store) \u2014 the identical environmental\
+      \ constraint the tester documented and that prior slices in this pipeline accepted;\
+      \ it is not a producer defect. reviewer_code owns any deeper runtime/lint green-ness\
+      \ confirmation. No scope, directive, or #194 concerns."
+    ack_version: 1
+    attestation:
+      tasks_verified:
+      - task-3-4
+  version: 1
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:43:53Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=136127 util=0.14 cache_hit=0.99 decision=below_threshold
+
+````yaml
+id: 685b8ad7-1e6c-4d
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:44:03Z] reviewer_code_holistic (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 3451c652-be5f-40
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:44:13Z] reviewer_code_holistic → tester (CONSENSUS_ACK): ACK from reviewer_code_holistic for tester
+
+ACK v1. Cross-checked every test expectation against router.ts + finding-schema at a7b4bee2 — all consistent and would pass against the current pure core. Covers all five task-3-4 AC axes (classification, path→lens, tier incl. diff-direction-dependent conservative deferral + resolvedTiers second pass, monotonic budget scaling, misrouted floor) plus R12 team-mapper subsumption and the glob/config parsers. Lens ordering security-auth(0)<data-migrations(4)<deploy-infra-config(8) matches KNOWN_LENSES; SPECIALIST_LENSES=11, ALWAYS_ON=4; DEFAULT_TIER_BUDGETS monotonic on all five numeric fields; computeRunBudget signature and floor-only-lifts logic match. Tests are correctly scoped to the pure deterministic core (plan §8.6) with no CLI/routing.json coupling — consistent with my prior coder guidance that the pure core stays as-is. Non-blocking coordination note: these tests pin route()'s RoutingResult shape, so the coder's required routing.json serialization must live in a CLI shell rather than reshaping route(); if the coder reshapes the core, re-review is needed. Offline vitest non-execution is not a blocker given the full source cross-check.
+
+````yaml
+id: fdbb3741-33bd-46
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/lib/router.test.ts
+    reason: "ACK v1. Cross-checked every test expectation against router.ts + finding-schema\
+      \ at a7b4bee2 \u2014 all consistent and would pass against the current pure\
+      \ core. Covers all five task-3-4 AC axes (classification, path\u2192lens, tier\
+      \ incl. diff-direction-dependent conservative deferral + resolvedTiers second\
+      \ pass, monotonic budget scaling, misrouted floor) plus R12 team-mapper subsumption\
+      \ and the glob/config parsers. Lens ordering security-auth(0)<data-migrations(4)<deploy-infra-config(8)\
+      \ matches KNOWN_LENSES; SPECIALIST_LENSES=11, ALWAYS_ON=4; DEFAULT_TIER_BUDGETS\
+      \ monotonic on all five numeric fields; computeRunBudget signature and floor-only-lifts\
+      \ logic match. Tests are correctly scoped to the pure deterministic core (plan\
+      \ \xA78.6) with no CLI/routing.json coupling \u2014 consistent with my prior\
+      \ coder guidance that the pure core stays as-is. Non-blocking coordination note:\
+      \ these tests pin route()'s RoutingResult shape, so the coder's required routing.json\
+      \ serialization must live in a CLI shell rather than reshaping route(); if the\
+      \ coder reshapes the core, re-review is needed. Offline vitest non-execution\
+      \ is not a blocker given the full source cross-check."
+    ack_version: 1
+  version: 1
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:44:17Z] coder (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 463a004b-bffa-47
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:44:22Z] reviewer_code_holistic (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=74144 util=0.07 cache_hit=0.97 decision=no_warm_session
+
+````yaml
+id: db6ec8e2-c370-4f
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:46:44Z] coder (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 999cbc36-b39c-48
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:49:37Z] coder (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 738de06f-8ae4-45
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:33Z] coder (CONSENSUS_PROPOSE): Proposal from coder
+
+slice-3 v2 re-propose addressing BOTH open NACKs at new commit 34d88d50. reviewer_code_holistic BLOCKING-1 (no CLI entrypoint) RESOLVED: router.ts now doubles as the executable review.md Step 3 invokes — a `require.main===module` guard (short-circuited by `typeof require!=="undefined"`, inert under vitest/ESM import) runs runCli(), which reads the Step-1-staged files.json + .gitattributes/.github/REVIEWERS, calls the UNCHANGED pure route(), and writes /tmp/gh-aw/review/routing.json. node:fs is required lazily inside the guard; runCli(fs) takes an injected fs so it is unit-testable without real I/O. reviewer_code_holistic BLOCKING-2 (shape/casing mismatch) RESOLVED: new toRoutingJson() emits the EXACT shape review.md lines 276-284 consume — teams:{owners:{path:[team]}, fallback:[{team,files}]} (owners over source files only, mirroring the removed reviewer-mapper's owned-files scope) and perFileTier in the documented capitalized casing High|Medium|Low|Trivial, bridged from the core's lowercase tiers at the I/O boundary. pendingRiskQuestions carried in routing.json so the two-invocation resolvedTiers protocol stays intact (second-pass answers read from /tmp/gh-aw/review/resolved-tiers.json). reviewer_contract v1 (pure contract-state gap) RESOLVED: task-3-1 and task-3-2 are now status=complete against this commit, and this carries a genuine new commit. Pure route()/parsers/budget/glob core is byte-for-byte unchanged (reviewers had no correctness objection); all 16 symbols the tester's router.test.ts imports remain exported unchanged so those tests still hold. Emitted routing.json validated against review.md's contract via a full JS port with an injected in-memory fs. No human-read prose in code (R8 tripwire §8.7). Rebased cleanly onto tester's task-3-4 tests (a7b4bee2). Coordination note for documenter (non-blocking): review.md's second-pass prose should name the concrete /tmp/gh-aw/review/resolved-tiers.json input path so the two artifacts fully agree.
+
+**Adversarial re-review**
+
+**Your v2 review has TWO equal-weight mandates:**
+
+1. **Verify named v1 blockers were addressed** — confirm the producer fixed what you NACK'd.
+2. **Audit the delta since your last review (per REVIEWER-SYNC.md: `git log {last_reviewed_commit}..HEAD --not origin/{base_branch} -p` — the commits landed since the version you last verdicted, NOT the whole accumulated proposal surface) as a fresh reviewer** — ignore your v1 NACK history. Read that diff as if you'd never seen the prior version. Apply your lens (security threat-model, concurrency races, contract AC, line-by-line bugs, silent-fallback shapes — whichever your role owns) to the delta itself, not to whether your previous concerns were satisfied. **Mandate 2 is bounded to this delta** — it does NOT ask you to re-traverse the whole accumulated surface from earlier cycles; that work was amortized when you first reviewed those commits.
+
+Both mandates have equal weight. If (1) passes but (2) finds new issues, you NACK. ACK requires both pass.
+
+**The named-blockers anchor is a known trap. Every reviewer lens has a mandate-2 in its own territory** — security has newly-introduced threat surfaces, concurrency has newly-introduced races, contract has newly-introduced AC drift, code has newly-introduced line-by-line bugs. The four issues that escaped PR #2724 to the GitHub bot were all of code-lens shape (`${ANSWER}` as bare Python, deprecated `datetime.utcnow()`, non-atomic write, bare `except: pass`) — the persistent reviewer correctly answered mandate 1 ("did prior issues get fixed? yes") and skipped mandate 2 ("does this delta introduce new issues? actually yes"). The shape generalizes: whatever your lens, this delta can introduce issues your prior NACK didn't name. Watching the producer deliver a targeted fix pulls strongly toward "verify my fix-request landed → ACK." Recognize the pull and do mandate 2 anyway.
+
+**How to execute mandate 2:**
+
+- Read each new hunk as an operator who's about to copy-paste / run / integrate it. Would this code execute as written? Would these docs send a copy-paster down a working path?
+- Apply every rubric pass to the new hunks. New issues outside the scope of your prior NACK are blocking; your prior NACK does not bound this re-review.
+- **Fresh-reviewer simulation.** Before issuing your v2 verdict, ask: would a reviewer who has only seen this delta (the commits since your last review) with no NACK history ACK this? If you can't argue yes from that diff alone, NACK.
+- **External-bot anchor.** Imagine `egg-reviewer[bot]` reads only this delta (the commits since your last review) with no NACK context. What would it flag? Anything it'd flag, you should NACK first.
+
+**Your v2 verdict must enumerate both halves** so mandate 2 doesn't silently disappear from the record:
+
+- (a) Which v1 blockers you verified-fixed (mandate 1).
+- (b) What new issues you audited-and-did-not-find (mandate 2). Name the specific shapes you checked — not "reviewed thoroughly," but "checked for silent fallbacks, doc-snippet executability, API-deprecation, atomicity of file writes." If you can't enumerate (b), you haven't done mandate 2.
+
+**Re-reviews are cheap by design.** Your amortized context means the work is "read the delta, apply your rubric, decide" — minutes, not hours. NACK without hesitance; the orchestrator absorbs cycles. Two NACKs on the same producer where the second names new findings is the correct trajectory, not goalpost-moving. The downstream GitHub reviewer should find nothing in this delta. Anything it catches that lives in this cycle's diff is a miss attributable to this re-review.
+
+````yaml
+id: a00dafd0-9b69-4c
+phase: implement
+metadata:
+  payload:
+    summary: "slice-3 v2 re-propose addressing BOTH open NACKs at new commit 34d88d50.\
+      \ reviewer_code_holistic BLOCKING-1 (no CLI entrypoint) RESOLVED: router.ts\
+      \ now doubles as the executable review.md Step 3 invokes \u2014 a `require.main===module`\
+      \ guard (short-circuited by `typeof require!==\"undefined\"`, inert under vitest/ESM\
+      \ import) runs runCli(), which reads the Step-1-staged files.json + .gitattributes/.github/REVIEWERS,\
+      \ calls the UNCHANGED pure route(), and writes /tmp/gh-aw/review/routing.json.\
+      \ node:fs is required lazily inside the guard; runCli(fs) takes an injected\
+      \ fs so it is unit-testable without real I/O. reviewer_code_holistic BLOCKING-2\
+      \ (shape/casing mismatch) RESOLVED: new toRoutingJson() emits the EXACT shape\
+      \ review.md lines 276-284 consume \u2014 teams:{owners:{path:[team]}, fallback:[{team,files}]}\
+      \ (owners over source files only, mirroring the removed reviewer-mapper's owned-files\
+      \ scope) and perFileTier in the documented capitalized casing High|Medium|Low|Trivial,\
+      \ bridged from the core's lowercase tiers at the I/O boundary. pendingRiskQuestions\
+      \ carried in routing.json so the two-invocation resolvedTiers protocol stays\
+      \ intact (second-pass answers read from /tmp/gh-aw/review/resolved-tiers.json).\
+      \ reviewer_contract v1 (pure contract-state gap) RESOLVED: task-3-1 and task-3-2\
+      \ are now status=complete against this commit, and this carries a genuine new\
+      \ commit. Pure route()/parsers/budget/glob core is byte-for-byte unchanged (reviewers\
+      \ had no correctness objection); all 16 symbols the tester's router.test.ts\
+      \ imports remain exported unchanged so those tests still hold. Emitted routing.json\
+      \ validated against review.md's contract via a full JS port with an injected\
+      \ in-memory fs. No human-read prose in code (R8 tripwire \xA78.7). Rebased cleanly\
+      \ onto tester's task-3-4 tests (a7b4bee2). Coordination note for documenter\
+      \ (non-blocking): review.md's second-pass prose should name the concrete /tmp/gh-aw/review/resolved-tiers.json\
+      \ input path so the two artifacts fully agree."
+    attestation:
+      commit_shas:
+      - 34d88d50a42c21973cfdb2fe25e2b2d63ff4cc2a
+      files_changed:
+      - workflows/review/lib/router.ts
+      test_summary: 'vitest cannot run offline (no node_modules, no network). Pure
+        core unchanged from v1. New runCli/toRoutingJson validated via a full plain-JS
+        port with an in-memory fs: emitted routing.json matches review.md lines 276-284
+        exactly (teams.owners per-file map with generated excluded, teams.fallback
+        ranked, perFileTier capitalized High/Trivial, runBudget present, pendingRiskQuestions
+        preserved). All 16 symbols tester''s router.test.ts imports remain exported
+        unchanged. Tester owns router.test.ts (task-3-4).'
+      risk_considered: Additive I/O shell only; pure core byte-for-byte unchanged
+        and the require.main guard is inert under vitest/ESM import, so the tester's
+        suite is unaffected.
+    artifacts:
+    - workflows/review/lib/router.ts
+    risk_considered: 'Pure core unchanged from v1 so its reviewer-verified correctness
+      stands; delta is purely the additive I/O+serialization shell (runCli, toRoutingJson,
+      casing bridge) + an import-inert require.main guard. routing.json now matches
+      review.md''s consumed contract exactly (JS-port validated with in-memory fs:
+      teams.owners per-file map excludes generated files, teams.fallback ranked, perFileTier
+      capitalized, pendingRiskQuestions preserved).'
+    commit_sha: 34d88d50a42c21973cfdb2fe25e2b2d63ff4cc2a
+    files_changed:
+    - workflows/review/lib/router.ts
+    tests_run: []
+    tasks_satisfied:
+    - task-3-1
+    - task-3-2
+    no_changes_needed: false
+    no_changes_reason: ''
+  version: 2
+  commit_sha: 34d88d50a42c21973cfdb2fe25e2b2d63ff4cc2a
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:33Z] orchestrator → reviewer_code (CONSENSUS_RE_REVIEW): Re-review required: coder submitted new proposal v2
+
+Producer coder has submitted a new proposal (version 2) after withdrawal. Your previous confirmation was on an earlier version. Please re-review and ACK/NACK the new proposal.
+
+**Adversarial re-review**
+
+**Your v2 review has TWO equal-weight mandates:**
+
+1. **Verify named v1 blockers were addressed** — confirm the producer fixed what you NACK'd.
+2. **Audit the delta since your last review (`git log 7f4d8b4cfce17939578f61fe94f328b944427145..34d88d50a42c21973cfdb2fe25e2b2d63ff4cc2a --not origin/<base> -p` — the commits landed since the version you last verdicted) as a fresh reviewer** — ignore your v1 NACK history. Read that diff as if you'd never seen the prior version. Apply your lens (security threat-model, concurrency races, contract AC, line-by-line bugs, silent-fallback shapes — whichever your role owns) to the delta itself, not to whether your previous concerns were satisfied. **Mandate 2 is bounded to this delta** — it does NOT ask you to re-traverse the whole accumulated surface from earlier cycles; that work was amortized when you first reviewed those commits.
+
+Both mandates have equal weight. If (1) passes but (2) finds new issues, you NACK. ACK requires both pass.
+
+**The named-blockers anchor is a known trap. Every reviewer lens has a mandate-2 in its own territory** — security has newly-introduced threat surfaces, concurrency has newly-introduced races, contract has newly-introduced AC drift, code has newly-introduced line-by-line bugs. The four issues that escaped PR #2724 to the GitHub bot were all of code-lens shape (`${ANSWER}` as bare Python, deprecated `datetime.utcnow()`, non-atomic write, bare `except: pass`) — the persistent reviewer correctly answered mandate 1 ("did prior issues get fixed? yes") and skipped mandate 2 ("does this delta introduce new issues? actually yes"). The shape generalizes: whatever your lens, this delta can introduce issues your prior NACK didn't name. Watching the producer deliver a targeted fix pulls strongly toward "verify my fix-request landed → ACK." Recognize the pull and do mandate 2 anyway.
+
+**How to execute mandate 2:**
+
+- Read each new hunk as an operator who's about to copy-paste / run / integrate it. Would this code execute as written? Would these docs send a copy-paster down a working path?
+- Apply every rubric pass to the new hunks. New issues outside the scope of your prior NACK are blocking; your prior NACK does not bound this re-review.
+- **Fresh-reviewer simulation.** Before issuing your v2 verdict, ask: would a reviewer who has only seen this delta (`7f4d8b4cfce17939578f61fe94f328b944427145..34d88d50a42c21973cfdb2fe25e2b2d63ff4cc2a`) with no NACK history ACK this? If you can't argue yes from that diff alone, NACK.
+- **External-bot anchor.** Imagine `egg-reviewer[bot]` reads only this delta (`7f4d8b4cfce17939578f61fe94f328b944427145..34d88d50a42c21973cfdb2fe25e2b2d63ff4cc2a`) with no NACK context. What would it flag? Anything it'd flag, you should NACK first.
+
+**Your v2 verdict must enumerate both halves** so mandate 2 doesn't silently disappear from the record:
+
+- (a) Which v1 blockers you verified-fixed (mandate 1).
+- (b) What new issues you audited-and-did-not-find (mandate 2). Name the specific shapes you checked — not "reviewed thoroughly," but "checked for silent fallbacks, doc-snippet executability, API-deprecation, atomicity of file writes." If you can't enumerate (b), you haven't done mandate 2.
+
+**Re-reviews are cheap by design.** Your amortized context means the work is "read the delta, apply your rubric, decide" — minutes, not hours. NACK without hesitance; the orchestrator absorbs cycles. Two NACKs on the same producer where the second names new findings is the correct trajectory, not goalpost-moving. The downstream GitHub reviewer should find nothing in this delta. Anything it catches that lives in this cycle's diff is a miss attributable to this re-review.
+
+````yaml
+id: 53c24f67-da15-49
+phase: implement
+metadata:
+  producer_role: coder
+  version: 2
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:33Z] orchestrator → reviewer_security (CONSENSUS_RE_REVIEW): Re-review required: coder submitted new proposal v2
+
+Producer coder has submitted a new proposal (version 2) after withdrawal. Your previous confirmation was on an earlier version. Please re-review and ACK/NACK the new proposal.
+
+**Adversarial re-review**
+
+**Your v2 review has TWO equal-weight mandates:**
+
+1. **Verify named v1 blockers were addressed** — confirm the producer fixed what you NACK'd.
+2. **Audit the delta since your last review (`git log 7f4d8b4cfce17939578f61fe94f328b944427145..34d88d50a42c21973cfdb2fe25e2b2d63ff4cc2a --not origin/<base> -p` — the commits landed since the version you last verdicted) as a fresh reviewer** — ignore your v1 NACK history. Read that diff as if you'd never seen the prior version. Apply your lens (security threat-model, concurrency races, contract AC, line-by-line bugs, silent-fallback shapes — whichever your role owns) to the delta itself, not to whether your previous concerns were satisfied. **Mandate 2 is bounded to this delta** — it does NOT ask you to re-traverse the whole accumulated surface from earlier cycles; that work was amortized when you first reviewed those commits.
+
+Both mandates have equal weight. If (1) passes but (2) finds new issues, you NACK. ACK requires both pass.
+
+**The named-blockers anchor is a known trap. Every reviewer lens has a mandate-2 in its own territory** — security has newly-introduced threat surfaces, concurrency has newly-introduced races, contract has newly-introduced AC drift, code has newly-introduced line-by-line bugs. The four issues that escaped PR #2724 to the GitHub bot were all of code-lens shape (`${ANSWER}` as bare Python, deprecated `datetime.utcnow()`, non-atomic write, bare `except: pass`) — the persistent reviewer correctly answered mandate 1 ("did prior issues get fixed? yes") and skipped mandate 2 ("does this delta introduce new issues? actually yes"). The shape generalizes: whatever your lens, this delta can introduce issues your prior NACK didn't name. Watching the producer deliver a targeted fix pulls strongly toward "verify my fix-request landed → ACK." Recognize the pull and do mandate 2 anyway.
+
+**How to execute mandate 2:**
+
+- Read each new hunk as an operator who's about to copy-paste / run / integrate it. Would this code execute as written? Would these docs send a copy-paster down a working path?
+- Apply every rubric pass to the new hunks. New issues outside the scope of your prior NACK are blocking; your prior NACK does not bound this re-review.
+- **Fresh-reviewer simulation.** Before issuing your v2 verdict, ask: would a reviewer who has only seen this delta (`7f4d8b4cfce17939578f61fe94f328b944427145..34d88d50a42c21973cfdb2fe25e2b2d63ff4cc2a`) with no NACK history ACK this? If you can't argue yes from that diff alone, NACK.
+- **External-bot anchor.** Imagine `egg-reviewer[bot]` reads only this delta (`7f4d8b4cfce17939578f61fe94f328b944427145..34d88d50a42c21973cfdb2fe25e2b2d63ff4cc2a`) with no NACK context. What would it flag? Anything it'd flag, you should NACK first.
+
+**Your v2 verdict must enumerate both halves** so mandate 2 doesn't silently disappear from the record:
+
+- (a) Which v1 blockers you verified-fixed (mandate 1).
+- (b) What new issues you audited-and-did-not-find (mandate 2). Name the specific shapes you checked — not "reviewed thoroughly," but "checked for silent fallbacks, doc-snippet executability, API-deprecation, atomicity of file writes." If you can't enumerate (b), you haven't done mandate 2.
+
+**Re-reviews are cheap by design.** Your amortized context means the work is "read the delta, apply your rubric, decide" — minutes, not hours. NACK without hesitance; the orchestrator absorbs cycles. Two NACKs on the same producer where the second names new findings is the correct trajectory, not goalpost-moving. The downstream GitHub reviewer should find nothing in this delta. Anything it catches that lives in this cycle's diff is a miss attributable to this re-review.
+
+````yaml
+id: b2b2da4e-d6ee-4f
+phase: implement
+metadata:
+  producer_role: coder
+  version: 2
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:33Z] orchestrator → reviewer_concurrency (CONSENSUS_RE_REVIEW): Re-review required: coder submitted new proposal v2
+
+Producer coder has submitted a new proposal (version 2) after withdrawal. Your previous confirmation was on an earlier version. Please re-review and ACK/NACK the new proposal.
+
+**Adversarial re-review**
+
+**Your v2 review has TWO equal-weight mandates:**
+
+1. **Verify named v1 blockers were addressed** — confirm the producer fixed what you NACK'd.
+2. **Audit the delta since your last review (`git log 7f4d8b4cfce17939578f61fe94f328b944427145..34d88d50a42c21973cfdb2fe25e2b2d63ff4cc2a --not origin/<base> -p` — the commits landed since the version you last verdicted) as a fresh reviewer** — ignore your v1 NACK history. Read that diff as if you'd never seen the prior version. Apply your lens (security threat-model, concurrency races, contract AC, line-by-line bugs, silent-fallback shapes — whichever your role owns) to the delta itself, not to whether your previous concerns were satisfied. **Mandate 2 is bounded to this delta** — it does NOT ask you to re-traverse the whole accumulated surface from earlier cycles; that work was amortized when you first reviewed those commits.
+
+Both mandates have equal weight. If (1) passes but (2) finds new issues, you NACK. ACK requires both pass.
+
+**The named-blockers anchor is a known trap. Every reviewer lens has a mandate-2 in its own territory** — security has newly-introduced threat surfaces, concurrency has newly-introduced races, contract has newly-introduced AC drift, code has newly-introduced line-by-line bugs. The four issues that escaped PR #2724 to the GitHub bot were all of code-lens shape (`${ANSWER}` as bare Python, deprecated `datetime.utcnow()`, non-atomic write, bare `except: pass`) — the persistent reviewer correctly answered mandate 1 ("did prior issues get fixed? yes") and skipped mandate 2 ("does this delta introduce new issues? actually yes"). The shape generalizes: whatever your lens, this delta can introduce issues your prior NACK didn't name. Watching the producer deliver a targeted fix pulls strongly toward "verify my fix-request landed → ACK." Recognize the pull and do mandate 2 anyway.
+
+**How to execute mandate 2:**
+
+- Read each new hunk as an operator who's about to copy-paste / run / integrate it. Would this code execute as written? Would these docs send a copy-paster down a working path?
+- Apply every rubric pass to the new hunks. New issues outside the scope of your prior NACK are blocking; your prior NACK does not bound this re-review.
+- **Fresh-reviewer simulation.** Before issuing your v2 verdict, ask: would a reviewer who has only seen this delta (`7f4d8b4cfce17939578f61fe94f328b944427145..34d88d50a42c21973cfdb2fe25e2b2d63ff4cc2a`) with no NACK history ACK this? If you can't argue yes from that diff alone, NACK.
+- **External-bot anchor.** Imagine `egg-reviewer[bot]` reads only this delta (`7f4d8b4cfce17939578f61fe94f328b944427145..34d88d50a42c21973cfdb2fe25e2b2d63ff4cc2a`) with no NACK context. What would it flag? Anything it'd flag, you should NACK first.
+
+**Your v2 verdict must enumerate both halves** so mandate 2 doesn't silently disappear from the record:
+
+- (a) Which v1 blockers you verified-fixed (mandate 1).
+- (b) What new issues you audited-and-did-not-find (mandate 2). Name the specific shapes you checked — not "reviewed thoroughly," but "checked for silent fallbacks, doc-snippet executability, API-deprecation, atomicity of file writes." If you can't enumerate (b), you haven't done mandate 2.
+
+**Re-reviews are cheap by design.** Your amortized context means the work is "read the delta, apply your rubric, decide" — minutes, not hours. NACK without hesitance; the orchestrator absorbs cycles. Two NACKs on the same producer where the second names new findings is the correct trajectory, not goalpost-moving. The downstream GitHub reviewer should find nothing in this delta. Anything it catches that lives in this cycle's diff is a miss attributable to this re-review.
+
+````yaml
+id: 1ab6d7d1-91e6-4e
+phase: implement
+metadata:
+  producer_role: coder
+  version: 2
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:37Z] tester (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: 6f8834c0-2458-46
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:37Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: 178e137a-0768-4b
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:38Z] reviewer_code_holistic (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: 729a7673-0f41-4c
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:40Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: 4a344e2d-2a15-43
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:41Z] reviewer_security (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: 07da51b1-bdea-4a
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:42Z] reviewer_concurrency (HEARTBEAT): heartbeat: WORKING
+
+one-shot event handler action=ack (slice=slice-3)
+
+````yaml
+id: ae95d026-abfa-44
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:46Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 8863a918-1b46-42
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:48Z] reviewer_code_holistic (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: efe38819-a664-48
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:49Z] reviewer_concurrency (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 1692e7c0-24d6-4d
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:50Z] coder (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=218967 util=0.22 cache_hit=0.98 decision=below_threshold
+
+````yaml
+id: 0423ce21-1fbc-48
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:50Z] reviewer_security (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 3b3ed8c9-7c92-42
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:52Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 057c017f-a9b8-4a
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:50:55Z] tester (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: ba283e23-c5d7-44
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:51:35Z] reviewer_concurrency → coder (CONSENSUS_ACK): ACK from reviewer_concurrency for coder
+
+Re-reviewed the v1->v2 delta through the concurrency & async lens. The v2 change is a pure append (route/parsers/budget/glob/regexpCache core is byte-for-byte unchanged, so my v1 concurrency clearance still holds); the additions are serialization (toRoutingJson/tierFromDisplay) and a CLI entrypoint addressing the code-holistic BLOCKING items, not concurrency. toRoutingJson and the tier-casing adapters are pure synchronous functions with no shared state or async. runCli(fs) plus the require.main===module guard are fully synchronous — readFileSync/writeFileSync/existsSync/mkdirSync only, no async/await, Promises, or callbacks — a one-shot read->pure route()->write-one-file CLI with no shared mutable state and no async ordering. I considered the existsSync->readFileSync TOCTOU on resolved-tiers.json and the non-atomic writeFileSync of routing.json: neither is a real race because the two-invocation resolvedTiers protocol is strictly sequential (orchestrator writes then re-invokes; review.md Steps 7/8 read routing.json only after Step 3 completes), so there is no concurrent writer/reader in this gated single-shot workflow. The regexpCache exercised by runCli's route() is the same unchanged, idempotent, single-threaded-safe cache. No concurrency or async defects.
+
+````yaml
+id: 12489d56-4a06-4c
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/lib/router.ts
+    reason: "Re-reviewed the v1->v2 delta through the concurrency & async lens. The\
+      \ v2 change is a pure append (route/parsers/budget/glob/regexpCache core is\
+      \ byte-for-byte unchanged, so my v1 concurrency clearance still holds); the\
+      \ additions are serialization (toRoutingJson/tierFromDisplay) and a CLI entrypoint\
+      \ addressing the code-holistic BLOCKING items, not concurrency. toRoutingJson\
+      \ and the tier-casing adapters are pure synchronous functions with no shared\
+      \ state or async. runCli(fs) plus the require.main===module guard are fully\
+      \ synchronous \u2014 readFileSync/writeFileSync/existsSync/mkdirSync only, no\
+      \ async/await, Promises, or callbacks \u2014 a one-shot read->pure route()->write-one-file\
+      \ CLI with no shared mutable state and no async ordering. I considered the existsSync->readFileSync\
+      \ TOCTOU on resolved-tiers.json and the non-atomic writeFileSync of routing.json:\
+      \ neither is a real race because the two-invocation resolvedTiers protocol is\
+      \ strictly sequential (orchestrator writes then re-invokes; review.md Steps\
+      \ 7/8 read routing.json only after Step 3 completes), so there is no concurrent\
+      \ writer/reader in this gated single-shot workflow. The regexpCache exercised\
+      \ by runCli's route() is the same unchanged, idempotent, single-threaded-safe\
+      \ cache. No concurrency or async defects."
+    ack_version: 2
+  version: 2
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:51:38Z] reviewer_concurrency (CONSENSUS_CONFIRMED): Consensus confirmed by reviewer_concurrency
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: 3d18c1f3-6b80-43
+phase: implement
+metadata:
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:51:42Z] reviewer_concurrency (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=95027 util=0.10 cache_hit=0.99 decision=below_threshold
+
+````yaml
+id: 48a16b6f-e419-40
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:52:06Z] reviewer_code_holistic → coder (CONSENSUS_ACK): ACK from reviewer_code_holistic for coder
+
+ACK v2 — both v1 blocking reasons resolved, verified against review.md at 34d88d50. BLOCKING-1 (no CLI entrypoint): router.ts now has a `require.main === module` guard (fronted by `typeof require !== "undefined"` so it never fires on ESM/vitest import) that runs runCli(require("node:fs")), wired to review.md Step 3's `node -r @swc-node/register workflows/review/lib/router.ts` (L271) and writing /tmp/gh-aw/review/routing.json (L274); node:fs is lazily loaded inside the guard and injected into runCli, keeping the module import-clean for the unit tests. BLOCKING-2 (shape mismatch): new toRoutingJson() emits exactly the contract review.md documents (L277-283) — teams:{owners:{path:[team]} over source files only with no-owner→[], fallback:[{team,files}] ranked}, perFileTier bridged to capitalized High|Medium|Low|Trivial via TIER_TO_DISPLAY, plus pendingRiskQuestions carried in JSON and resolved-tiers.json read for the documented second pass, so the two-invocation resolvedTiers protocol stays intact. The pure route()/parsers/budget core is byte-for-byte unchanged (diff is a pure append at line 744), so the tester's already-ACKed router.test.ts still passes and my prior tester-ACK coordination note is satisfied exactly: serialization lives in the CLI shell, not by reshaping route(). New I/O code is clean (extractFileList tolerates bare-array or {files:[…]} wrapper; tierFromDisplay accepts both casings with a safe low fallback). No remaining holistic objection.
+
+````yaml
+id: dd3ff1b2-c1dc-42
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/lib/router.ts
+    - workflows/review/review.md
+    reason: "ACK v2 \u2014 both v1 blocking reasons resolved, verified against review.md\
+      \ at 34d88d50. BLOCKING-1 (no CLI entrypoint): router.ts now has a `require.main\
+      \ === module` guard (fronted by `typeof require !== \"undefined\"` so it never\
+      \ fires on ESM/vitest import) that runs runCli(require(\"node:fs\")), wired\
+      \ to review.md Step 3's `node -r @swc-node/register workflows/review/lib/router.ts`\
+      \ (L271) and writing /tmp/gh-aw/review/routing.json (L274); node:fs is lazily\
+      \ loaded inside the guard and injected into runCli, keeping the module import-clean\
+      \ for the unit tests. BLOCKING-2 (shape mismatch): new toRoutingJson() emits\
+      \ exactly the contract review.md documents (L277-283) \u2014 teams:{owners:{path:[team]}\
+      \ over source files only with no-owner\u2192[], fallback:[{team,files}] ranked},\
+      \ perFileTier bridged to capitalized High|Medium|Low|Trivial via TIER_TO_DISPLAY,\
+      \ plus pendingRiskQuestions carried in JSON and resolved-tiers.json read for\
+      \ the documented second pass, so the two-invocation resolvedTiers protocol stays\
+      \ intact. The pure route()/parsers/budget core is byte-for-byte unchanged (diff\
+      \ is a pure append at line 744), so the tester's already-ACKed router.test.ts\
+      \ still passes and my prior tester-ACK coordination note is satisfied exactly:\
+      \ serialization lives in the CLI shell, not by reshaping route(). New I/O code\
+      \ is clean (extractFileList tolerates bare-array or {files:[\u2026]} wrapper;\
+      \ tierFromDisplay accepts both casings with a safe low fallback). No remaining\
+      \ holistic objection."
+    ack_version: 2
+  version: 2
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:52:10Z] reviewer_code_holistic (CONSENSUS_CONFIRMED): Consensus confirmed by reviewer_code_holistic
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: ffa00df6-3ee3-49
+phase: implement
+metadata:
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:52:15Z] reviewer_contract → coder (CONSENSUS_ACK): ACK from reviewer_contract for coder
+
+v2 (7f4d8b4c..34d88d50) ACKed. My v1 NACK was purely a contract-state gap; both task-3-1 and task-3-2 are now status=complete at 34d88d50, resolving it. v2 also adds ~181 lines to router.ts addressing a separate reviewer_code_holistic NACK (BLOCKING-1 CLI entrypoint + BLOCKING-2 routing.json serialization); I reviewed that new code for contract adherence. The pure route()/parsers/budget core is byte-for-byte unchanged, so task-3-1/3-2 ACs (deterministic lens/team/tier output; monotonic tier-scaled budget + misrouted floor) remain satisfied as verified at v1. The additions are in-scope integration glue intrinsic to 'R10 router in code' (task-3-1): (a) toRoutingJson() + RoutingJson type emit exactly the shape review.md Step 3 documents and Steps 7/8 consume — lensesToSpawn, teams:{owners (per-source-file path->teams, mirroring the removed owned-files scope), fallback:[{team,files}]} (= former reviewer-mapper owners/fallbackTeams), perFileTier in the documented capitalized High|Medium|Low|Trivial casing (bridged from the lowercase core via TIER_TO_DISPLAY), runBudget, plus pendingRiskQuestions carrying the one bounded question for the §8.6 two-invocation protocol; (b) runCli(fs) reads the Step-1 files.json (+ optional resolved-tiers.json second pass) / .gitattributes / .github/REVIEWERS, runs route(), writes routing.json, fs injected for testability; (c) a require.main===module guard makes router.ts directly executable at exactly the path review.md v2 (9df58d9b) invokes — the two sides of the interface now converge. R8 no-prose tripwire (§8.7) held: emits only JSON structure, tier display-codes, paths, team slugs — no human-read prose. No eval-gating (directive #2), no #194 re-implementation (directive #5), reviewer-mapper subsumption preserved (directive #4). NON-BLOCKING observations (carried, not part of this ACK): (1) review.md's 'Route first' prose lists full.diff as a router input, but router.ts correctly reads only files.json + .gitattributes + REVIEWERS per §8.6 — minor prose/impl drift in review.md, router behavior is correct, flag for a future documenter touch; (2) the new toRoutingJson/runCli surface arrived after the tester's router.test.ts (which covers the route() core's five axes) and is currently uncovered — not a task-3-1/3-2 AC gap, but reviewer_code may want the tester to add coverage. Deep runtime/lint correctness of the CLI shell is reviewer_code's domain.
+
+````yaml
+id: 207a901a-1f02-4f
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/lib/router.ts
+    reason: "v2 (7f4d8b4c..34d88d50) ACKed. My v1 NACK was purely a contract-state\
+      \ gap; both task-3-1 and task-3-2 are now status=complete at 34d88d50, resolving\
+      \ it. v2 also adds ~181 lines to router.ts addressing a separate reviewer_code_holistic\
+      \ NACK (BLOCKING-1 CLI entrypoint + BLOCKING-2 routing.json serialization);\
+      \ I reviewed that new code for contract adherence. The pure route()/parsers/budget\
+      \ core is byte-for-byte unchanged, so task-3-1/3-2 ACs (deterministic lens/team/tier\
+      \ output; monotonic tier-scaled budget + misrouted floor) remain satisfied as\
+      \ verified at v1. The additions are in-scope integration glue intrinsic to 'R10\
+      \ router in code' (task-3-1): (a) toRoutingJson() + RoutingJson type emit exactly\
+      \ the shape review.md Step 3 documents and Steps 7/8 consume \u2014 lensesToSpawn,\
+      \ teams:{owners (per-source-file path->teams, mirroring the removed owned-files\
+      \ scope), fallback:[{team,files}]} (= former reviewer-mapper owners/fallbackTeams),\
+      \ perFileTier in the documented capitalized High|Medium|Low|Trivial casing (bridged\
+      \ from the lowercase core via TIER_TO_DISPLAY), runBudget, plus pendingRiskQuestions\
+      \ carrying the one bounded question for the \xA78.6 two-invocation protocol;\
+      \ (b) runCli(fs) reads the Step-1 files.json (+ optional resolved-tiers.json\
+      \ second pass) / .gitattributes / .github/REVIEWERS, runs route(), writes routing.json,\
+      \ fs injected for testability; (c) a require.main===module guard makes router.ts\
+      \ directly executable at exactly the path review.md v2 (9df58d9b) invokes \u2014\
+      \ the two sides of the interface now converge. R8 no-prose tripwire (\xA78.7)\
+      \ held: emits only JSON structure, tier display-codes, paths, team slugs \u2014\
+      \ no human-read prose. No eval-gating (directive #2), no #194 re-implementation\
+      \ (directive #5), reviewer-mapper subsumption preserved (directive #4). NON-BLOCKING\
+      \ observations (carried, not part of this ACK): (1) review.md's 'Route first'\
+      \ prose lists full.diff as a router input, but router.ts correctly reads only\
+      \ files.json + .gitattributes + REVIEWERS per \xA78.6 \u2014 minor prose/impl\
+      \ drift in review.md, router behavior is correct, flag for a future documenter\
+      \ touch; (2) the new toRoutingJson/runCli surface arrived after the tester's\
+      \ router.test.ts (which covers the route() core's five axes) and is currently\
+      \ uncovered \u2014 not a task-3-1/3-2 AC gap, but reviewer_code may want the\
+      \ tester to add coverage. Deep runtime/lint correctness of the CLI shell is\
+      \ reviewer_code's domain."
+    ack_version: 2
+    attestation:
+      tasks_verified:
+      - task-3-1
+      - task-3-2
+  version: 2
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:52:15Z] reviewer_code_holistic (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=96410 util=0.10 cache_hit=0.96 decision=below_threshold
+
+````yaml
+id: 61176316-7367-42
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:52:16Z] reviewer_contract (CONSENSUS_CONFIRMED): Consensus confirmed by reviewer_contract
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: eb09f517-56b9-4a
+phase: implement
+metadata:
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:52:24Z] reviewer_contract (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=154739 util=0.15 cache_hit=0.97 decision=below_threshold
+
+````yaml
+id: 9d421d7b-d0b6-4f
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:52:38Z] reviewer_security → coder (CONSENSUS_ACK): ACK from reviewer_security for coder
+
+Security lens: ACK v2. (a) Mandate 1: N/A — my v1 was a clean ACK with no security blocker, so there is nothing to verify-fixed (v2 addresses code-lens BLOCKING-1/2). (b) Mandate 2, fresh audit of the 7f4d8b4..34d88d50 delta (CLI entrypoint runCli + toRoutingJson serialization + tier casing bridge; pure route()/parsers/budget core is byte-for-byte unchanged): checked (1) path traversal — every fs read/write path is a hardcoded constant (/tmp/gh-aw/review/*, .gitattributes, .github/REVIEWERS); files.json rec.path is used only as a glob-match subject and map key, never to construct an fs path → none; (2) injection / dynamic code exec — no eval/shell/child_process, no regex built from the new inputs, only JSON.parse → none; (3) fail-open vs fail-closed — malformed input throws in JSON.parse, so no routing.json is written and the workflow errors rather than silently under-reviewing → correct direction; (4) silent security-weakening fallback — tierFromDisplay unknown→"low" understates risk, but second-pass answers come from the trusted orchestrator small-model call, not the PR → acceptable; (5) /tmp predictable-write symlink/TOCTOU — theoretical only, reuses #194's on-disk convention on an ephemeral single-tenant runner → low. The one real security surface the delta introduces is a trust-boundary/review-evasion dependency: runCli reads .gitattributes + .github/REVIEWERS from cwd, so if the review workflow checks out the PR HEAD a contributor could self-mark malicious source as linguist-generated (skip the security lens) or rewrite REVIEWERS to reassign ownership off the security team. That mitigation lives in the review.md/checkout wiring (source these from the base/trusted ref), not in this pure lib+CLI — advisory carried forward for the wiring slice, not blocking router.ts. No new blocking security issue in the delta.
+
+````yaml
+id: 819adfac-018c-48
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/lib/router.ts
+    reason: "Security lens: ACK v2. (a) Mandate 1: N/A \u2014 my v1 was a clean ACK\
+      \ with no security blocker, so there is nothing to verify-fixed (v2 addresses\
+      \ code-lens BLOCKING-1/2). (b) Mandate 2, fresh audit of the 7f4d8b4..34d88d50\
+      \ delta (CLI entrypoint runCli + toRoutingJson serialization + tier casing bridge;\
+      \ pure route()/parsers/budget core is byte-for-byte unchanged): checked (1)\
+      \ path traversal \u2014 every fs read/write path is a hardcoded constant (/tmp/gh-aw/review/*,\
+      \ .gitattributes, .github/REVIEWERS); files.json rec.path is used only as a\
+      \ glob-match subject and map key, never to construct an fs path \u2192 none;\
+      \ (2) injection / dynamic code exec \u2014 no eval/shell/child_process, no regex\
+      \ built from the new inputs, only JSON.parse \u2192 none; (3) fail-open vs fail-closed\
+      \ \u2014 malformed input throws in JSON.parse, so no routing.json is written\
+      \ and the workflow errors rather than silently under-reviewing \u2192 correct\
+      \ direction; (4) silent security-weakening fallback \u2014 tierFromDisplay unknown\u2192\
+      \"low\" understates risk, but second-pass answers come from the trusted orchestrator\
+      \ small-model call, not the PR \u2192 acceptable; (5) /tmp predictable-write\
+      \ symlink/TOCTOU \u2014 theoretical only, reuses #194's on-disk convention on\
+      \ an ephemeral single-tenant runner \u2192 low. The one real security surface\
+      \ the delta introduces is a trust-boundary/review-evasion dependency: runCli\
+      \ reads .gitattributes + .github/REVIEWERS from cwd, so if the review workflow\
+      \ checks out the PR HEAD a contributor could self-mark malicious source as linguist-generated\
+      \ (skip the security lens) or rewrite REVIEWERS to reassign ownership off the\
+      \ security team. That mitigation lives in the review.md/checkout wiring (source\
+      \ these from the base/trusted ref), not in this pure lib+CLI \u2014 advisory\
+      \ carried forward for the wiring slice, not blocking router.ts. No new blocking\
+      \ security issue in the delta."
+    ack_version: 2
+  version: 2
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:52:43Z] reviewer_security (CONSENSUS_CONFIRMED): Consensus confirmed by reviewer_security
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: f16db294-204f-42
+phase: implement
+metadata:
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:52:47Z] reviewer_security (HEARTBEAT): heartbeat: WORKING
+
+context-measure occ=114086 util=0.11 cache_hit=0.96 decision=below_threshold
+
+````yaml
+id: 5299ca14-7436-42
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:53:03Z] tester → coder (CONSENSUS_ACK): ACK from tester for coder
+
+tester reviewer ACK of coder v2 (34d88d50). The v2 delta is purely additive to router.ts — it appends the routing.json serialization (toRoutingJson, RoutingJson, DisplayTier, tierFromDisplay/TIER_TO_DISPLAY) and an fs-injected CLI entrypoint (runCli, extractFileList) AFTER the existing route() function; the deterministic core and every export my task-3-4 tests (a7b4bee2) exercise are unchanged, so those tests remain valid. Correctness verified against the consumed contract: RoutingJson matches review.md Step 3's documented routing.json shape exactly — lensesToSpawn; teams.owners as the per-file {path:[team,...]} map (incl. [] for no-owner source files); teams.fallback as the file-count-ranked list; perFileTier in display casing (High|Medium|Low|Trivial) bridged by TIER_TO_DISPLAY/tierFromDisplay; runBudget. owners is correctly scoped to source files only (generated excluded, mirroring owned-files.json). reviewFiles is a pattern-triage output, not a router field, and is correctly omitted. pendingRiskQuestions is a correct additive field enabling review.md's documented second-pass model-touch protocol. CLI is defensively parsed (bare-array or {files} wrapper; missing status→"modified"; resolved-tiers via tierFromDisplay with unknown→low) and guarded by require.main===module so it never runs on import. No correctness or testability defects. NOTE (non-blocking coverage gap, tester-owned): toRoutingJson/tierFromDisplay/runCli are new and not yet covered by router.test.ts (task-3-4 AC is the core route axes only); the coder deliberately exported them + injected fs for testability. I will extend my test file to cover the serialization/CLI as a producer follow-up — not a blocker on the coder's artifact.
+
+````yaml
+id: ddcbe05e-3a0f-4d
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/lib/router.ts
+    reason: "tester reviewer ACK of coder v2 (34d88d50). The v2 delta is purely additive\
+      \ to router.ts \u2014 it appends the routing.json serialization (toRoutingJson,\
+      \ RoutingJson, DisplayTier, tierFromDisplay/TIER_TO_DISPLAY) and an fs-injected\
+      \ CLI entrypoint (runCli, extractFileList) AFTER the existing route() function;\
+      \ the deterministic core and every export my task-3-4 tests (a7b4bee2) exercise\
+      \ are unchanged, so those tests remain valid. Correctness verified against the\
+      \ consumed contract: RoutingJson matches review.md Step 3's documented routing.json\
+      \ shape exactly \u2014 lensesToSpawn; teams.owners as the per-file {path:[team,...]}\
+      \ map (incl. [] for no-owner source files); teams.fallback as the file-count-ranked\
+      \ list; perFileTier in display casing (High|Medium|Low|Trivial) bridged by TIER_TO_DISPLAY/tierFromDisplay;\
+      \ runBudget. owners is correctly scoped to source files only (generated excluded,\
+      \ mirroring owned-files.json). reviewFiles is a pattern-triage output, not a\
+      \ router field, and is correctly omitted. pendingRiskQuestions is a correct\
+      \ additive field enabling review.md's documented second-pass model-touch protocol.\
+      \ CLI is defensively parsed (bare-array or {files} wrapper; missing status\u2192\
+      \"modified\"; resolved-tiers via tierFromDisplay with unknown\u2192low) and\
+      \ guarded by require.main===module so it never runs on import. No correctness\
+      \ or testability defects. NOTE (non-blocking coverage gap, tester-owned): toRoutingJson/tierFromDisplay/runCli\
+      \ are new and not yet covered by router.test.ts (task-3-4 AC is the core route\
+      \ axes only); the coder deliberately exported them + injected fs for testability.\
+      \ I will extend my test file to cover the serialization/CLI as a producer follow-up\
+      \ \u2014 not a blocker on the coder's artifact."
+    ack_version: 2
+  version: 2
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:53:03Z] orchestrator → tester (STATUS): Ready to confirm — all confirm preconditions satisfied
+
+Your proposal (version 1) is ready to confirm — all blocking reviews are clear and global confirm preconditions are met. Run `egg-orch consensus confirmed` to confirm.
+
+````yaml
+id: 6e5fff48-eb42-45
+phase: implement
+metadata:
+  ready_to_confirm: true
+  version: 1
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:53:03Z] tester (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 19176b8c-82c0-45
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:53:04Z] tester (CONSENSUS_CONFIRMED): Consensus confirmed by tester
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: cd46a9d6-586c-48
+phase: implement
+metadata:
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:53:37Z] reviewer_code → coder (CONSENSUS_ACK): ACK from reviewer_code for coder
+
+ACK v2 (sha 34d88d50). Pure core (route/parsers/budget) is byte-for-byte unchanged from v1 (which I ACKed); delta is only the I/O+serialization shell. Two-mandate re-review:
+
+(a) MANDATE 1 — named v1 blockers verified fixed (these were reviewer_code_holistic's NACKs that triggered the withdrawal; my own v1 was a clean ACK with one non-blocking advisory):
+- BLOCKING-1 (CLI entrypoint): runCli(fs) + `if (typeof require !== "undefined" && require.main === module)` guard make router.ts directly executable by review.md Step 3's `node -r @swc-node/register workflows/review/lib/router.ts`. Guard runs only on direct execution, never on import — tests stay clean.
+- BLOCKING-2 (routing.json shape): toRoutingJson emits exactly review.md's documented contract — lensesToSpawn, teams:{owners, fallback}, capitalized perFileTier (High|Medium|Low|Trivial via TIER_TO_DISPLAY), runBudget. owners scoped to source files only (mirrors old owned-files); no-owner source files emitted as [] (matches doc). Two-pass resolved-tiers.json protocol preserved (tierFromDisplay bridges casing).
+
+(b) MANDATE 2 — fresh audit of the delta hunks, specific shapes checked (not "reviewed thoroughly"):
+- Non-atomic write (the exact escaped-bug shape from the re-review notice): writeFileSync in place, no temp+rename. CHECKED — not hazardous: single writer, single sequential subsequent reader in the same workflow; no concurrent reader can observe a partial file. Not blocking.
+- API deprecation: require("node:fs") + sync methods are current; no utcnow-class API.
+- Doc/path executability: reads /tmp/gh-aw/review/files.json + .gitattributes + .github/REVIEWERS, writes /tmp/gh-aw/review/routing.json — matches review.md Step 1 staging + Step 3 output path. Executes as written.
+- Fail-loud vs silent-fallback: files.json read is NOT existsSync-guarded → throws if missing (correct fail-loud); optional inputs ARE guarded. Correct asymmetry.
+- Silent fallbacks found + judged: tierFromDisplay unknown→"low", extractFileList unrecognized→[], status??"modified" unchecked cast. All boundary defaults over orchestrator-controlled JSON; "low" is a defensible non-trivial default. NON-BLOCKING. Noted: a malformed *resolved* tier would silently downgrade a conservative-high pending file — but the resolved path is an explicit override channel and "low" isn't the floor. Observation, not a blocker.
+- Type soundness: FsLike is a structural subset of node:fs; runCli returns RoutingJson; route call satisfies RouterConfig.
+- Cross-artifact contract: emitted keys match review.md Step 7/8 reads; extra pendingRiskQuestions key is additive + consistent with the §"one model touch" prose.
+- eslint/typecheck gate (slice-2 failure class): .eslintrc extends only eslint:recommended+prettier and filters khan config to no-prefix core rules, so @typescript-eslint/no-require-imports is NOT enabled; env:{node:true} + @types/node ^25.3.3 make require/module/require.main lint+typecheck clean.
+
+Fresh-reviewer simulation: a reviewer seeing only this delta would ACK — serialization matches the consumed contract, CLI executes as written, no new blocking bug. Standing v1 advisory (conventions in ALWAYS_ON_LENSES vs slice-6's router-gated description) is untouched by this delta and remains a non-blocking slice-6 reconciliation item.
+
+Environment limit (disclosed): node_modules absent + no network → could not run tsc/vitest; static review only, code self-contained.
+
+````yaml
+id: 197889fa-1572-48
+phase: implement
+metadata:
+  payload:
+    artifact_references:
+    - workflows/review/lib/router.ts
+    reason: "ACK v2 (sha 34d88d50). Pure core (route/parsers/budget) is byte-for-byte\
+      \ unchanged from v1 (which I ACKed); delta is only the I/O+serialization shell.\
+      \ Two-mandate re-review:\n\n(a) MANDATE 1 \u2014 named v1 blockers verified\
+      \ fixed (these were reviewer_code_holistic's NACKs that triggered the withdrawal;\
+      \ my own v1 was a clean ACK with one non-blocking advisory):\n- BLOCKING-1 (CLI\
+      \ entrypoint): runCli(fs) + `if (typeof require !== \"undefined\" && require.main\
+      \ === module)` guard make router.ts directly executable by review.md Step 3's\
+      \ `node -r @swc-node/register workflows/review/lib/router.ts`. Guard runs only\
+      \ on direct execution, never on import \u2014 tests stay clean.\n- BLOCKING-2\
+      \ (routing.json shape): toRoutingJson emits exactly review.md's documented contract\
+      \ \u2014 lensesToSpawn, teams:{owners, fallback}, capitalized perFileTier (High|Medium|Low|Trivial\
+      \ via TIER_TO_DISPLAY), runBudget. owners scoped to source files only (mirrors\
+      \ old owned-files); no-owner source files emitted as [] (matches doc). Two-pass\
+      \ resolved-tiers.json protocol preserved (tierFromDisplay bridges casing).\n\
+      \n(b) MANDATE 2 \u2014 fresh audit of the delta hunks, specific shapes checked\
+      \ (not \"reviewed thoroughly\"):\n- Non-atomic write (the exact escaped-bug\
+      \ shape from the re-review notice): writeFileSync in place, no temp+rename.\
+      \ CHECKED \u2014 not hazardous: single writer, single sequential subsequent\
+      \ reader in the same workflow; no concurrent reader can observe a partial file.\
+      \ Not blocking.\n- API deprecation: require(\"node:fs\") + sync methods are\
+      \ current; no utcnow-class API.\n- Doc/path executability: reads /tmp/gh-aw/review/files.json\
+      \ + .gitattributes + .github/REVIEWERS, writes /tmp/gh-aw/review/routing.json\
+      \ \u2014 matches review.md Step 1 staging + Step 3 output path. Executes as\
+      \ written.\n- Fail-loud vs silent-fallback: files.json read is NOT existsSync-guarded\
+      \ \u2192 throws if missing (correct fail-loud); optional inputs ARE guarded.\
+      \ Correct asymmetry.\n- Silent fallbacks found + judged: tierFromDisplay unknown\u2192\
+      \"low\", extractFileList unrecognized\u2192[], status??\"modified\" unchecked\
+      \ cast. All boundary defaults over orchestrator-controlled JSON; \"low\" is\
+      \ a defensible non-trivial default. NON-BLOCKING. Noted: a malformed *resolved*\
+      \ tier would silently downgrade a conservative-high pending file \u2014 but\
+      \ the resolved path is an explicit override channel and \"low\" isn't the floor.\
+      \ Observation, not a blocker.\n- Type soundness: FsLike is a structural subset\
+      \ of node:fs; runCli returns RoutingJson; route call satisfies RouterConfig.\n\
+      - Cross-artifact contract: emitted keys match review.md Step 7/8 reads; extra\
+      \ pendingRiskQuestions key is additive + consistent with the \xA7\"one model\
+      \ touch\" prose.\n- eslint/typecheck gate (slice-2 failure class): .eslintrc\
+      \ extends only eslint:recommended+prettier and filters khan config to no-prefix\
+      \ core rules, so @typescript-eslint/no-require-imports is NOT enabled; env:{node:true}\
+      \ + @types/node ^25.3.3 make require/module/require.main lint+typecheck clean.\n\
+      \nFresh-reviewer simulation: a reviewer seeing only this delta would ACK \u2014\
+      \ serialization matches the consumed contract, CLI executes as written, no new\
+      \ blocking bug. Standing v1 advisory (conventions in ALWAYS_ON_LENSES vs slice-6's\
+      \ router-gated description) is untouched by this delta and remains a non-blocking\
+      \ slice-6 reconciliation item.\n\nEnvironment limit (disclosed): node_modules\
+      \ absent + no network \u2192 could not run tsc/vitest; static review only, code\
+      \ self-contained."
+    ack_version: 2
+    attestation:
+      files_reviewed:
+      - workflows/review/lib/router.ts
+      issues_found: 0
+      mandate_1_verified:
+      - BLOCKING-1 CLI entrypoint present (runCli + require.main guard)
+      - BLOCKING-2 routing.json shape matches documented contract (toRoutingJson)
+      mandate_2_shapes_checked:
+      - 'non-atomic-write (not hazardous: sequential single-writer/single-reader)'
+      - api-deprecation (node:fs current)
+      - doc-path-executability (paths match review.md staging)
+      - fail-loud-vs-silent-fallback (files.json fails loud, optional inputs guarded)
+      - silent-fallback tierFromDisplay/extractFileList (boundary defaults, non-blocking)
+      - type-soundness (FsLike subset, RouterConfig satisfied)
+      - eslint-typecheck-gate (no-require-imports NOT enabled, @types/node present)
+      checks_blocked:
+      - vitest-tsc-execution
+      checks_blocked_reason: node_modules absent + no network; static review only
+  version: 2
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:53:37Z] orchestrator → coder (STATUS): Ready to confirm — all confirm preconditions satisfied
+
+Your proposal (version 2) is ready to confirm — all blocking reviews are clear and global confirm preconditions are met. Run `egg-orch consensus confirmed` to confirm.
+
+````yaml
+id: 2694b362-ea44-42
+phase: implement
+metadata:
+  ready_to_confirm: true
+  version: 2
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:53:37Z] reviewer_code (HEARTBEAT): heartbeat: WORKING
+
+in-tool-loop liveness (slice=slice-3)
+
+````yaml
+id: 1834eb78-3d1e-4e
+phase: implement
+metadata:
+  state: WORKING
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:53:40Z] coder (CONSENSUS_CONFIRMED): Consensus confirmed by coder
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: 2f18bbf5-088c-44
+phase: implement
+metadata:
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:53:40Z] reviewer_code (CONSENSUS_CONFIRMED): Consensus confirmed by reviewer_code
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: 2113fd1c-314f-49
+phase: implement
+metadata:
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:53:40Z] reviewer_code_holistic (CONSENSUS_CONFIRMED): Consensus confirmed by reviewer_code_holistic
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: c6837ddf-aa26-40
+phase: implement
+metadata:
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:53:40Z] reviewer_contract (CONSENSUS_CONFIRMED): Consensus confirmed by reviewer_contract
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: db954407-dfc9-40
+phase: implement
+metadata:
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:53:40Z] reviewer_security (CONSENSUS_CONFIRMED): Consensus confirmed by reviewer_security
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: 3553cf42-488e-4d
+phase: implement
+metadata:
+  slice_id: slice-3
+````
+
+### [2026-07-03T08:53:40Z] reviewer_concurrency (CONSENSUS_CONFIRMED): Consensus confirmed by reviewer_concurrency
+
+orchestrator-side confirm (#3064 event loop)
+
+````yaml
+id: 3d11b81f-d96a-46
+phase: implement
+metadata:
+  slice_id: slice-3
+````
