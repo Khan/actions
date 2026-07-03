@@ -49,9 +49,12 @@ export const ALWAYS_ON_LENSES = [
     "conventions",
     "pattern-triage",
     "first-principles",
-] as const satisfies readonly Lens[];
+] as const;
 
-const ALWAYS_ON_SET: ReadonlySet<Lens> = new Set(ALWAYS_ON_LENSES);
+// `satisfies readonly Lens[]` is the natural spelling, but the repo's
+// prettier (2.6.2) cannot parse `satisfies`; this assignment keeps the same
+// compile-time guarantee that every entry is a known Lens.
+const ALWAYS_ON_SET: ReadonlySet<Lens> = new Set<Lens>(ALWAYS_ON_LENSES);
 
 /**
  * The eleven specialist lenses the router dispatches by path. Derived from
@@ -73,7 +76,7 @@ export const SPECIALIST_LENSES: readonly Lens[] = KNOWN_LENSES.filter(
  */
 export const RISK_TIERS = ["trivial", "low", "medium", "high"] as const;
 
-export type RiskTier = (typeof RISK_TIERS)[number];
+export type RiskTier = typeof RISK_TIERS[number];
 
 const TIER_RANK: Record<RiskTier, number> = {
     trivial: 0,
