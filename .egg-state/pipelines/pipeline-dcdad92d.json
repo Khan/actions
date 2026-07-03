@@ -2,7 +2,7 @@
   "id": "pipeline-dcdad92d",
   "issue_number": null,
   "repo": "Khan/actions",
-  "branch": null,
+  "branch": "egg/pipeline-dcdad92d/work",
   "base_branch": "main",
   "repos": [
     {
@@ -80,7 +80,7 @@
   "phases": {},
   "decisions": [],
   "created_at": "2026-07-03T01:25:07.748859Z",
-  "updated_at": "2026-07-03T01:25:08.465565Z",
+  "updated_at": "2026-07-03T01:25:09.587031Z",
   "contract_synced": false,
   "network_mode": null,
   "mode": "issue",
@@ -93,7 +93,7 @@
   "source_branch": null,
   "source_artifact_prefix": null,
   "run_epoch": null,
-  "version": 3,
+  "version": 4,
   "jira_ticket": null,
   "is_epic": false,
   "pipeline_mode": null,
