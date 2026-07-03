@@ -1,0 +1,49 @@
+{
+  "pipeline_id": "pipeline-dcdad92d",
+  "phase": "plan",
+  "role": "risk_analyst",
+  "artifact": ".egg-state/agent-outputs/risk_analyst/plan-risk-analysis.md",
+  "commit_sha": "db7f6cbc",
+  "summary": "21 plan-phase risks (RK-1..RK-21) with plan-encodable mitigations, plus 7 risk-derived slice-ordering/reviewer acceptance gates. Respects all operator HITL resolutions; folds simplifier S2-S6.",
+  "risks": [
+    {"id": "RK-1", "category": "sequencing", "impact": "high", "likelihood": "medium", "title": "Wave-2 rebalance (R7) ships before the R5 smoke set exists", "mitigation": "R5 smoke harness blocks R7 slice; genuine build dependency, not an eval-evidence gate; R7 acceptance = smoke set green in no-post mode."},
+    {"id": "RK-2", "category": "sequencing", "impact": "medium", "likelihood": "medium", "title": "Lenses built before the deterministic router exists", "mitigation": "Router slice precedes lens slices; routing contract frozen as interface; lenses consume it, never re-classify."},
+    {"id": "RK-3", "category": "sequencing", "impact": "medium", "likelihood": "medium", "title": "Computed verdict (R8b) built before versioned finding schema (R8a)", "mitigation": "Schema slice precedes verdict + R17; schema versioned from first landing."},
+    {"id": "RK-4", "category": "directive-compliance", "impact": "high", "likelihood": "medium", "title": "Roadmap-phase deferral smuggled back as slice ordering", "mitigation": "AC-4 (all 11 lenses) + AC-2 (no roadmap/eval deferral) as hard slice-acceptance gates; only genuine build deps justify ordering."},
+    {"id": "RK-5", "category": "scope", "impact": "high", "likelihood": "high", "title": "Determinism boundary (R8) grows into judgment territory", "mitigation": "Both tripwires as review gates: loosen fields not boundary; reject code that rewrites prose or scores beyond declared severity/confidence fields (simplifier S5)."},
+    {"id": "RK-6", "category": "scope", "impact": "medium", "likelihood": "medium", "title": "Security & auth lens split into two (12th lens)", "mitigation": "Build exactly 11 named lenses; a split is a HITL question (directive 7), not a builder option (simplifier S2)."},
+    {"id": "RK-7", "category": "scope", "impact": "medium", "likelihood": "high", "title": "Double-build of smoke set vs full eval suite", "mitigation": "One dataset format/runner/no-post mode; smoke set is a tagged subset with CI entry point; single shared harness slice both depend on (simplifier S3)."},
+    {"id": "RK-8", "category": "scope", "impact": "low-medium", "likelihood": "medium", "title": "Drift-guard / version stamp built as a second mechanism", "mitigation": "R14 adds no new mechanism; documents R11's stamp as consumer-readable surface; fold R14 into R11 slice (simplifier S4)."},
+    {"id": "RK-9", "category": "scope", "impact": "medium", "likelihood": "low-medium", "title": "Accidental re-implementation of a #194 item", "mitigation": "AC-1 as per-slice review check; slices touching severity/verdict/re-review cite the #194 baseline they build on."},
+    {"id": "RK-10", "category": "correctness", "impact": "high", "likelihood": "medium", "title": "R2 never-auto-approve-with-missing-core-dimension interacts with #194 visibility note", "mitigation": "R2 slice enumerates core passes (correctness, skill/severity) vs note-and-continue (pattern-triage); smoke case for each."},
+    {"id": "RK-11", "category": "correctness", "impact": "high", "likelihood": "medium", "title": "Consumer trigger overrides / extension points regress invisibly", "mitigation": "§6 interface requirements as slice acceptance on trigger/correctness/severity/thumbs/version slices; correctness-checks.md import kept working; interface checks in smoke harness where feasible."},
+    {"id": "RK-12", "category": "correctness", "impact": "medium", "likelihood": "medium", "title": "R1 submission robustness not exercised by no-post mode", "mitigation": "R1 slice needs a targeted test of submission call/body shape independent of the no-post smoke path."},
+    {"id": "RK-13", "category": "trust-boundary", "impact": "high", "likelihood": "medium", "title": "Completeness lens Jira/Confluence fetch = untrusted-data injection surface", "mitigation": "Untrusted-input acceptance on completeness-lens + E3 slices; read-only tokens; fetch confined to non-posting sub-agent; adversarial ticket-fetch injection case in smoke set."},
+    {"id": "RK-14", "category": "trust-boundary", "impact": "medium", "likelihood": "low", "title": "Judging vs posting agent confusion", "mitigation": "Code-owns-safe-output-calls is a review invariant on every lens/sub-agent slice."},
+    {"id": "RK-15", "category": "cost", "impact": "medium", "likelihood": "medium", "title": "11-lens roster + investigation tooling vs 20-min/$10 caps", "mitigation": "Router tier-scaled budget (only touched-path lenses spawn); one scaling rule + one misrouted-PR floor; R9 caps tool calls per finding; caps documented not gated (operator resolution)."},
+    {"id": "RK-16", "category": "cost", "impact": "low-medium", "likelihood": "medium", "title": "Fable 5 first-principles vs timeout", "mitigation": "First-principles advisory-only, never blocks, degrades gracefully; Fable arms are post-suite experiment notes not build tasks (AC-5)."},
+    {"id": "RK-17", "category": "cost", "impact": "low", "likelihood": "low", "title": "Model launch defaults drift from proposal effort table", "mitigation": "Centralize effort/model table as single config the slices reference, not per-slice literals."},
+    {"id": "RK-18", "category": "directive-compliance", "impact": "high", "likelihood": "medium", "title": "Eval suite (R11) treated as a construction gate", "mitigation": "R11 is project-sized but never a predecessor to lens/prompt construction; only shared-harness -> smoke-CI ordering is legitimate (regression protection)."},
+    {"id": "RK-19", "category": "eval", "impact": "high", "likelihood": "low", "title": "Eval data dependencies pull consumer repos as a write target", "mitigation": "Dataset slices read consumer PR/incident records and vendor into this repo; zero commits/PRs against consumer repos (§5, AC-3)."},
+    {"id": "RK-20", "category": "eval", "impact": "medium", "likelihood": "medium", "title": "Golden-set overfitting / LLM-judge miscalibration", "mitigation": "Golden holdout + fresh mutations; human audit sample; thumbs labels calibrate judge; adversarial set as hard gate for automatic mode (future policy lever). R11 slice acceptance items, not build gates."},
+    {"id": "RK-21", "category": "engine", "impact": "medium", "likelihood": "medium", "title": "gh-aw single-session model constrains determinism boundary", "mitigation": "R8 sliced schema -> verdict -> rendering; each increment ships behind existing orchestrator, no multi-session redesign."}
+  ],
+  "acceptance_gates": [
+    "R5 smoke harness blocks R7 wave-2 rebalance; router blocks lenses; R8a schema blocks R8b verdict + R17 (genuine build deps, not eval gates)",
+    "One shared eval harness; smoke set is a tagged subset not a separate runner; R14 reuses R11's version stamp",
+    "All 11 lenses are build tasks; security & auth is one lens (split => HITL); no roadmap/eval-evidence deferral",
+    "Untrusted-input acceptance on completeness lens + E3 slices; safe-output calls stay with the orchestrator",
+    "Determinism-boundary tripwires (both directions) as review gates on R8 slices",
+    "§6 interface requirements as acceptance criteria on trigger/correctness/severity/thumbs/version slices; no consumer-repo target anywhere",
+    "One budget-scaling rule + one misrouted-PR floor; no per-lens knobs; caps documented not gated"
+  ],
+  "not_raised_operator_resolved": [
+    "graduation bar (post-launch policy)",
+    "blocking-verdict policy threshold (implementer judgment + documented default)",
+    "vendor-vs-consume (consume; restructure in shared Khan/actions)",
+    "ownership (determined)",
+    "budget/timeout caps (documented defaults, no HITL)"
+  ],
+  "decisions_registered": [],
+  "no_decisions_rationale": "All four proposal open questions resolved by operator at refine gate; budget caps resolved non-blocking; directive 7 forbids re-raising. Conditional security-lens-split HITL not active (plan builds exactly 11 lenses). No plan-phase build choice depends on an unresolved operator question."
+}
