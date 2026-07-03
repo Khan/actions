@@ -511,7 +511,7 @@
         {
           "id": "task-6-1",
           "description": "Always-on reviewers: holistic; completeness (Jira/Confluence read-only inside\nthe non-posting sub-agent; fetched text is data under review); test-adequacy;\nfirst-principles (advisory-only, never blocks, Fable 5 day one); conventions\n(advisory; router-gated by greppable trigger signatures).",
-          "status": "pending",
+          "status": "complete",
           "commit": "75e982c3",
           "checkpoint_id": null,
           "notes": "",
@@ -2290,6 +2290,17 @@
       "old_value": null,
       "new_value": "75e982c3",
       "reason": "Linked commit 75e982c to task-6-1",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T18:55:20.725752Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.5.tasks.0.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-6-1 as complete",
       "checkpoint_id": null
     }
   ],
