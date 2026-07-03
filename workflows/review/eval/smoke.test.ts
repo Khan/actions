@@ -199,3 +199,125 @@ describe("gate properties the wave-2 rebalance (the rebalance) must not regress"
         }
     });
 });
+
+/**
+ * TASK-10-3 — verify the wave-2 recall/precision rebalance against this same
+ * slice-9 smoke set.
+ *
+ * The rebalance (slice-10) is a set of *prompt* edits to the reviewer sub-agents
+ * (review.md edits 8–13: coverage-first, blocking-requires-a-concrete-failing-
+ * scenario, drop-only-the-refuted / downgrade-the-uncertain, confirm-before-you-
+ * claim, cite-exact-lines, and the edit-13 posting bar — inline ≥ medium
+ * confidence, low-confidence collapsed). None of those edits touch the
+ * deterministic review path this runner replays, so the smoke set stays green by
+ * construction; the point of this block is to pin *why* it cannot regress the two
+ * properties task-10-3 names, in terms of the rebalance's own mechanism rather
+ * than re-asserting the generic slice-9 gate above.
+ *
+ * The load-bearing invariants, read off the corpus + the deterministic run:
+ *   - Recall: every must-catch finding is `blocking` AND ≥ medium confidence, so
+ *     neither edit-13's confidence posting bar nor edit-10's downgrade/refuter
+ *     pass (both of which act only on non-blocking, low-confidence advisories)
+ *     can demote or drop it — must-catch recall is structurally pinned at 100%.
+ *   - Precision: the rebalance only ever *removes* or *collapses* advisory noise,
+ *     so it cannot manufacture a NEW blocking finding on a clean PR — clean
+ *     false-block stays at 0.
+ *   - The collapse/downgrade path is actually exercised: the corpus carries at
+ *     least one low-confidence advisory that the rebalance targets, and it is
+ *     never a must-catch, so trimming it is safe.
+ */
+describe("wave-2 rebalance verification against the smoke set (task-10-3)", () => {
+    /**
+     * Reference threshold for edit-13's "inline ≥ medium confidence" posting
+     * bar. Kept local to the test as a *documentation* of the rebalance intent —
+     * the deterministic runner does not (and must not) implement a confidence
+     * gate; this is the bar the recall invariant is proven safe against.
+     */
+    const MEDIUM_CONFIDENCE = 0.5;
+
+    /** Every must-catch finding across the smoke set, paired with its case. */
+    const mustCatchFindings = RUNS.flatMap(({corpusCase, result}) =>
+        (corpusCase.expected.mustCatch ?? []).map((id) => {
+            const candidate = result.allCandidates.find((c) => c.id === id);
+            return {caseId: corpusCase.id, id, candidate};
+        }),
+    );
+
+    it("has must-catch repros to protect (recall check is not vacuous)", () => {
+        expect(mustCatchFindings.length).toBeGreaterThan(0);
+    });
+
+    it("every must-catch finding exists as a recorded candidate", () => {
+        // Guards the two invariants below from passing vacuously on a typo'd id.
+        for (const {caseId, id, candidate} of mustCatchFindings) {
+            expect(candidate, `${caseId}:${id} missing from candidates`).toBeDefined();
+        }
+    });
+
+    it("no recall regression: every must-catch finding is blocking AND ≥ medium confidence", () => {
+        // This is the structural reason the rebalance cannot drop a must-catch:
+        // edit-13's posting bar and edit-10's downgrade/refuter pass only touch
+        // non-blocking, low-confidence advisories. If a future must-catch repro
+        // were added as advisory or below the bar, this fails LOUDLY here rather
+        // than silently regressing recall once the prompt bar tightens.
+        const unprotected: string[] = [];
+        for (const {caseId, id, candidate} of mustCatchFindings) {
+            if (candidate === undefined) {
+                continue; // reported by the existence test above
+            }
+            const {severity, confidence} = candidate.finding;
+            if (severity !== "blocking" || confidence < MEDIUM_CONFIDENCE) {
+                unprotected.push(
+                    `${caseId}:${id} (severity=${severity}, confidence=${confidence})`,
+                );
+            }
+        }
+        expect(unprotected).toEqual([]);
+
+        // And they are in fact still posted by the deterministic path today.
+        for (const {corpusCase, result} of RUNS) {
+            const posted = postedIds(result);
+            for (const id of corpusCase.expected.mustCatch ?? []) {
+                expect(posted.has(id)).toBe(true);
+            }
+        }
+    });
+
+    it("no new false-block: clean cases carry no blocking finding for the rebalance to surface", () => {
+        // Precision side: the rebalance can only trim advisory noise, never add a
+        // blocking finding. So a clean PR stays APPROVE iff it had no blocking
+        // finding to begin with — assert that precondition holds on the corpus,
+        // then that the run indeed approves with nothing blocking posted.
+        for (const {corpusCase, result} of RUNS) {
+            if (corpusCase.category !== "clean") {
+                continue;
+            }
+            const blockingCandidates = result.allCandidates.filter(
+                (c) => c.finding.severity === "blocking",
+            );
+            expect(
+                blockingCandidates.map((c) => c.id),
+                `${corpusCase.id} unexpectedly carries a blocking finding`,
+            ).toEqual([]);
+            expect(result.verdict.event).toBe("APPROVE");
+            expect(result.postedCandidates.some((c) => c.blocking)).toBe(false);
+        }
+    });
+
+    it("exercises the downgrade/collapse path: a low-confidence advisory exists and is never a must-catch", () => {
+        // Edit-10 ("downgrade the uncertain") / edit-13 (collapse low-confidence)
+        // must have something to act on for the safety argument to be non-vacuous.
+        const mustCatchIds = new Set(mustCatchFindings.map((f) => f.id));
+        const lowConfidenceAdvisories = RUNS.flatMap(({result}) =>
+            result.allCandidates.filter(
+                (c) =>
+                    c.finding.severity === "advisory" &&
+                    c.finding.confidence < MEDIUM_CONFIDENCE,
+            ),
+        );
+        expect(lowConfidenceAdvisories.length).toBeGreaterThan(0);
+        for (const candidate of lowConfidenceAdvisories) {
+            expect(mustCatchIds.has(candidate.id)).toBe(false);
+        }
+    });
+});
