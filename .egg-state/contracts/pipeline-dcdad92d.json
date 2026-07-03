@@ -1214,7 +1214,7 @@
         {
           "id": "task-11-2",
           "description": "Five metrics: must-catch recall (~100%), golden precision, clean false-block\n(~0), noise, calibration.",
-          "status": "pending",
+          "status": "complete",
           "commit": "bd1cbd7d",
           "checkpoint_id": null,
           "notes": "",
@@ -2961,6 +2961,17 @@
       "old_value": null,
       "new_value": "bd1cbd7d",
       "reason": "Linked commit bd1cbd7 to task-11-2",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:19:19.268536Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.10.tasks.1.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-11-2 as complete",
       "checkpoint_id": null
     }
   ],
