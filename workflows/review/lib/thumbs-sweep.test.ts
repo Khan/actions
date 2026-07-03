@@ -132,9 +132,9 @@ describe("validateSweepConfig", () => {
     });
 
     it("both consumer repos are configurable purely by owner/repo", () => {
-        expect(
-            validateSweepConfig({...VALID_CONFIG, repo: "webapp"}).ok,
-        ).toBe(true);
+        expect(validateSweepConfig({...VALID_CONFIG, repo: "webapp"}).ok).toBe(
+            true,
+        );
         expect(
             validateSweepConfig({...VALID_CONFIG, repo: "frontend"}).ok,
         ).toBe(true);
@@ -169,9 +169,7 @@ describe("marker + follow-up rendering", () => {
 
     it("parseFollowupMarkers is pure across repeated calls (no shared lastIndex)", () => {
         const body = renderFollowupBody("inline", 55);
-        expect(parseFollowupMarkers(body)).toEqual(
-            parseFollowupMarkers(body),
-        );
+        expect(parseFollowupMarkers(body)).toEqual(parseFollowupMarkers(body));
     });
 
     it("the follow-up body offers the full reason vocabulary plus free text", () => {
@@ -343,9 +341,9 @@ describe("no re-ping", () => {
         const second = await sweepThumbs(port, VALID_CONFIG);
         expect(second.followupsPosted).toBe(0);
         expect(port.posted).toHaveLength(1);
-        expect(
-            second.actions.find((a) => a.commentId === 80)?.reason,
-        ).toBe("already-followed-up");
+        expect(second.actions.find((a) => a.commentId === 80)?.reason).toBe(
+            "already-followed-up",
+        );
     });
 
     it("re-pings a DIFFERENT comment even when another was already followed up", async () => {
@@ -359,7 +357,7 @@ describe("no re-ping", () => {
             },
             [buildFollowupMarker("inline", 90)],
         );
-        const result = await sweepThumbs(port, VALID_CONFIG);
+        await sweepThumbs(port, VALID_CONFIG);
 
         expect(port.posted).toHaveLength(1);
         expect(port.posted[0]?.commentId).toBe(91);
@@ -421,9 +419,9 @@ describe("two-grain collection", () => {
 
         expect(port.posted).toHaveLength(1);
         expect(port.posted[0]?.grain).toBe("inline");
-        expect(
-            result.actions.find((a) => a.grain === "summary")?.reason,
-        ).toBe("no-downvote");
+        expect(result.actions.find((a) => a.grain === "summary")?.reason).toBe(
+            "no-downvote",
+        );
     });
 
     it("produces one action per comment across both grains", async () => {
@@ -454,7 +452,11 @@ describe("config guard", () => {
             summary: [],
         });
         await expect(
-            sweepThumbs(port, {owner: "", repo: "", botLogin: ""} as ThumbsSweepConfig),
+            sweepThumbs(port, {
+                owner: "",
+                repo: "",
+                botLogin: "",
+            } as ThumbsSweepConfig),
         ).rejects.toThrow(/Invalid thumbs-sweep config/);
         // Nothing was posted because the guard fires before any traversal.
         expect(port.posted).toHaveLength(0);

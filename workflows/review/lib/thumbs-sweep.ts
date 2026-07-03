@@ -32,7 +32,7 @@
  */
 export const FEEDBACK_GRAINS = ["inline", "summary"] as const;
 
-export type FeedbackGrain = (typeof FEEDBACK_GRAINS)[number];
+export type FeedbackGrain = typeof FEEDBACK_GRAINS[number];
 
 /**
  * GitHub's reaction `content` values for the thumbs signals. GitHub models 👍 as
@@ -54,7 +54,7 @@ export const DOWNVOTE_REASONS = [
     "duplicate",
 ] as const;
 
-export type DownvoteReason = (typeof DOWNVOTE_REASONS)[number];
+export type DownvoteReason = typeof DOWNVOTE_REASONS[number];
 
 /** A single reaction observed on a bot comment. */
 export type Reaction = {
