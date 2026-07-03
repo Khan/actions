@@ -89,7 +89,7 @@ export const REFUSAL_REASONS = [
     "run-total-cap-exceeded",
 ] as const;
 
-export type RefusalReason = (typeof REFUSAL_REASONS)[number];
+export type RefusalReason = typeof REFUSAL_REASONS[number];
 
 /**
  * The outcome of a cap check. `remainingForFinding` / `remainingForRun` are the
