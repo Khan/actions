@@ -1342,7 +1342,7 @@
       "id": "slice-12",
       "name": "P2 items (R13, R14, R15, R16, R17)",
       "goal": "Land the P2 follow-ups: per-finding resolution rule, the drift-guard\ndocumentation reusing the version stamp, live counters, dismissal-learning\ncandidates, and the conditional-approval verdict.",
-      "status": "in_progress",
+      "status": "complete",
       "review_cycles": 0,
       "max_cycles": 3,
       "escalated": false,
@@ -1461,8 +1461,8 @@
       "parent_branch_at_creation": "egg/pipeline-dcdad92d/slice-11",
       "integration_base_sha": "334157c4d3b77f2aba85c7cc1e8e3184dda35c88",
       "commit": null,
-      "pr_number": null,
-      "pr_url": null,
+      "pr_number": 207,
+      "pr_url": "https://github.com/Khan/actions/pull/207",
       "repo": null,
       "review_feedback": []
     }
