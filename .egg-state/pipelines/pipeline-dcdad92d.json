@@ -194,10 +194,27 @@
       "resolution": "{\"action\": \"approve\", \"context\": \"Operator approves the plan: 12 slices / 55 tasks, linear review.md spine with the thumbs sweep as the parallel branch; the three named build edges (schema→verdict, router→lenses, smoke→rebalance) verified as real dependencies; security & auth stays a single lens with a HITL question required before any split.\"}",
       "phase": "plan",
       "content_changed": null
+    },
+    {
+      "id": "decision-3",
+      "question": "The implement phase has 1 unresolved coverage gap. Resolve it (mark the gap resolved via the contract) and approve, or choose 'override' to finalize with the gap open.",
+      "context": "These tester→coder coverage gaps are still open on the contract. Finalizing with an open gap ships it into the committed contract and fails CI (test_models_gaps.py) red on the PR.\n\n- `task-11-6` / `gap-1` (tester→coder): task-11-6's \"full suite as scheduled (not per-PR)\" is satisfied at the code level (suite.test.ts proves the full suite is invocable and correct, and that the only model seam — judgeCorpus — is opt-in/off the per-PR path), but there is no scheduled CI trigger. The smoke gate has a staged entry (.github-staging/review-smoke.yml, pull_request), yet no equivalent staged SCHEDULED workflow (e.g. .github-staging/review-eval-full.yml with `on: schedule:`) exists to invoke the full four-dataset suite + live judge off-PR. That file is coder-scope: tester is role-blocked from .github-staging/* (verified via check_file_restriction; alternative_role=coder). Please add a staged scheduled workflow that runs the full suite (loadCorpus -> runCorpus -> computeMetrics + evaluateGates + judgeCorpus with the live Opus-4.8 judge) on a schedule, with a PR-body note to `git mv` it into .github/workflows/, mirroring the review-smoke.yml staging pattern.",
+      "options": [
+        "approve",
+        "override"
+      ],
+      "decision_type": "phase_gate",
+      "questions": [],
+      "status": "pending",
+      "created_at": "2026-07-03T21:02:41.833401Z",
+      "resolved_at": null,
+      "resolution": null,
+      "phase": "implement",
+      "content_changed": null
     }
   ],
   "created_at": "2026-07-03T01:25:07.748859Z",
-  "updated_at": "2026-07-03T21:02:39.086467Z",
+  "updated_at": "2026-07-03T21:02:41.840181Z",
   "contract_synced": true,
   "network_mode": null,
   "mode": "issue",
@@ -210,7 +227,7 @@
   "source_branch": null,
   "source_artifact_prefix": null,
   "run_epoch": "2026-07-03T17:57:03.215205Z",
-  "version": 104,
+  "version": 105,
   "jira_ticket": null,
   "is_epic": false,
   "pipeline_mode": null,
