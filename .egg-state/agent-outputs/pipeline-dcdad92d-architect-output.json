@@ -1,0 +1,50 @@
+{
+  "pipeline_id": "pipeline-dcdad92d",
+  "phase": "plan",
+  "role": "architect",
+  "artifact": ".egg-state/drafts/pipeline-dcdad92d-plan.md",
+  "commit_sha": "8cdec851",
+  "summary": "Architect §8 on the shared plan resolves the one decision the task_planner deferred (plan §1 + appendix forest-note): the code-integration mechanism and siting for the R8 determinism-boundary code and the R10 router in the gh-aw single-session model. Decision: TS CLI tools under actions/review/ built with the existing tsc/ncc/vitest toolchain, invoked by the orchestrator via bash over JSON in /tmp/gh-aw/review/; orchestrator stays the single session and sole safe-output caller. Three integration surfaces named (in-session CLIs / standalone scheduled workflows / no-post eval harness); in-session data-flow contract, no-post mechanism, router's single model touch, and boundary-enforcement review wiring fixed. Slice DAG unchanged and convergent with the task_planner's; the three operator-named edges hold with no re-ordering.",
+  "integration_decision": {
+    "mechanism": "TypeScript CLI tools invoked by the orchestrator via bash (node), exchanging JSON on disk under the existing /tmp/gh-aw/review/ scratch dir; the orchestrator remains the single agentic session and the sole caller of GitHub and safe outputs.",
+    "toolchain": "Reuse the repo's existing actions/ build/test pattern: tsc -p actions/tsconfig.json, @vercel/ncc bundling, co-located vitest *.test.ts. Precedent: actions/fix-workflows/cli.ts.",
+    "siting": "actions/review/ (one action dir sharing schema.ts); finalizes the appendix's indicative workflows/review/lib/*.ts paths name-for-name (workflows/ has no TS build wired; actions/ does).",
+    "rejected_alternatives": [
+      "Multi-job split (router/verdict as separate GH Actions jobs) — fights gh-aw's single-session model and forces cross-job state hand-off.",
+      "Bespoke runtime/build system — rejected in favor of reusing the established actions/*/index.ts + ncc + vitest pattern (reuse over rebuild)."
+    ]
+  },
+  "integration_surfaces": [
+    {"id": "A", "name": "in-session CLIs (per review run)", "components": ["router (S3)", "schema-validate (S1)", "verdict (S2)", "render (S2)"], "note": "Only surface that touches a live PR; orchestrator invokes via bash over /tmp/gh-aw/review/*.json."},
+    {"id": "B", "name": "standalone scheduled/polling workflows (no per-PR session)", "components": ["thumbs sweep (S8/R4)", "live counters (S12/R15)", "dismissal-learning candidate generation (S12/R16)"], "note": "R4's both-consumer-repos guarantee (interface §4.3) realized as a config-parameterized standalone workflow, not a consumer commit."},
+    {"id": "C", "name": "CI / scheduled no-post eval harness", "components": ["smoke set CI entry (S9)", "full suite scheduled (S11)"], "note": "Drives the same code pipeline (and scored model sub-agents) with safe-outputs stubbed; one dataset format/runner/no-post mode."}
+  ],
+  "in_session_dataflow": [
+    "orchestrator stages full.diff + files.json -> router CLI -> routing.json (lensesToSpawn, teams, perFileTier, runBudget); Step 3 dispatch consumes it; reviewer-mapper dispatch removed",
+    "each sub-agent writes out/<agent>.json (#194 flow) -> schema-validate against schema.ts; malformed => dimension treated as unavailable, feeding the R2 missing-dimension gate (not silently dropped)",
+    "validated findings + posted-comment labels -> verdict CLI -> verdict.json {event: APPROVE|REQUEST_CHANGES|HOLD_FOR_HUMAN, reasons[]}; consumes #194's mechanical label rule, does not re-implement it",
+    "findings + verdict -> render CLI -> comment/review bodies; orchestrator posts via existing safe outputs (submit-pull-request-review, add-comment); code never posts"
+  ],
+  "design_constraints": {
+    "no_post_run_mode": "safe-output calls are the only side-effecting boundary; no-post mode swaps that one boundary for a capture sink (mechanism behind R5/R6/R11 / task-9-2 / task-10-4).",
+    "router_model_touch": "router core is pure deterministic TS; the only judgment (diff-direction-dependent risk tiers) is emitted as a bounded question, resolved by the orchestrator's single small-model call, and fed back on a second router invocation — the deterministic core never calls a model.",
+    "boundary_enforcement": "physical CLI/prose split makes the R8 converse tripwire mechanically checkable: any diff adding prose synthesis to actions/review/* or scoring beyond declared severity/confidence fields is scope creep to reject in review.",
+    "trigger_override_integrity": "adding Surface-A bash invocations to the orchestrator prompt touches no on:/label frontmatter, so webapp manual /review and frontend automatic mode (interface §4.6) are preserved by construction."
+  },
+  "dependency_edges_honored": [
+    "router (S3) before the lenses that consume its routing (S7)",
+    "finding schema (S1) before the computed verdict (S2)",
+    "smoke set (S9) before the wave-2 rebalance (S10)"
+  ],
+  "dag_convergence": "The architect integration design and the task_planner slice DAG were reached independently and converge; §8 adds the how-code-is-invoked layer with no re-ordering of §3 and no change to the task_planner's roles/tasks/ordering.",
+  "reuse_over_rebuild": [
+    "existing actions/ tsc+ncc+vitest build (no new build config)",
+    "existing /tmp/gh-aw/review/ on-disk JSON convention from #194",
+    "existing safe outputs (submit-pull-request-review, add-comment) — code never posts",
+    "single shared schema.ts imported by all three surfaces so findings are one type everywhere"
+  ],
+  "no_194_reimplementation": true,
+  "consumer_repos_interface_only": true,
+  "decisions_registered": [],
+  "no_decisions_rationale": "No HITL decision is registered at plan time. The four proposal open questions were resolved by the operator at the refine gate and are non-blocking; the seven 2026-07-02 directions resolved this phase's structural judgment calls. The §8 integration decision is a pure technical-design choice (CLI-over-bash vs multi-job vs bespoke runtime; actions/review/ vs workflows/review/lib/ siting) on reuse/single-session grounds, changing no scope and no ordering — no operator judgment required. The pre-declared security-lens-split trigger (plan §6/task-7-1) and the residual blocking-verdict threshold remain HITL-if-a-build-choice-depends per directive 7; neither is live now."
+}

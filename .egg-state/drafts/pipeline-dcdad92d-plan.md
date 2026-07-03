@@ -182,7 +182,71 @@ No HITL decision is registered at plan time — no build choice in this decompos
 4. **All 11 specialist lenses are build tasks** — S7 task-7-1…7-11. ✔
 5. **Model launch defaults are build tasks; Fable arms only post-suite notes** — S6 task-6-3; §5. ✔
 
-> **Slice-DAG note (forest + no-overlap constraint, #3046):** the slice DAG must be a forest (each slice ≤1 parent) AND any two slices touching the same file must lie on one linear dependency chain. Because `workflows/review/review.md` is touched by eight slices, the plan is a single linear **spine** (S1→S2→S3→S4→S5→S6→S7→S9→S10→S11→S12) with S8 (thumbs, file-disjoint) branching off S1. Each slice's `dependencies` names its spine parent; its genuine build upstreams are in the §3 "Real upstreams" line and are always transitive ancestors, so every slice has what it needs to build. Code file paths under `workflows/review/lib/` and `workflows/review/eval/` are **indicative**; the architect finalizes exact code-siting and the gh-aw single-session invocation mechanism (§1 architect dependency).
+---
+
+## 8. Architecture — code integration mechanism & siting (architect; resolves the §1 flagged decision)
+
+The §1 note correctly reserved one decision for the architect: *how* the determinism-boundary code (R8) and router (R10) are invoked inside the gh-aw single-session model (analysis §9), and where that code is sited (task-1-1's "architect to site"). This section fixes that. The task_planner's slice DAG (§2) and this design were reached independently and **converge** — the three operator-named edges (router→lenses, schema→verdict, smoke→rebalance) hold under this integration mechanism with **no re-ordering** of §3.
+
+### 8.1 Decision
+
+Implement the deterministic code as **TypeScript CLI tools sited under `actions/review/`**, built and tested with the repo's *existing* toolchain (`tsc -p actions/tsconfig.json`, `@vercel/ncc` bundling, co-located `*.test.ts` under `vitest`), and **invoked by the orchestrator via `bash` (`node …`) on JSON files in the existing `/tmp/gh-aw/review/` scratch directory** that #194 already uses. The orchestrator remains the single agentic session and the *sole* caller of GitHub and safe outputs; the code is deterministic JSON-in/JSON-out plumbing it shells out to mid-session.
+
+Rejected alternatives and why: **multi-job split** (router/verdict as separate GH Actions jobs) fights gh-aw's single-session model and forces state hand-off between jobs — rejected. **A bespoke runtime/build system** — rejected; the repo already ships the `actions/*/index.ts` (+ `.test.ts`, `action.yml`, ncc) pattern, and `actions/fix-workflows/cli.ts` is direct precedent for a CLI entry point. Reuse it (principle "reuse over rebuild").
+
+### 8.2 Three integration surfaces (name them; they are not all the per-PR session)
+
+- **Surface A — in-session CLIs (per review run).** Router (S3), schema-validate (S1), computed verdict (S2), Conventional-Comment render (S2). The orchestrator invokes these via bash during a review, exchanging JSON under `/tmp/gh-aw/review/`. This is the only surface that touches a live PR.
+- **Surface B — standalone scheduled/polling workflows (no per-PR session).** Thumbs sweep (S8, R4), live counters (S12, R15), dismissal-learning candidate generation (S12, R16). These run on their own triggers (schedule/poll) as deterministic code over reaction data and #194's per-run JSON artifacts — never inside the review session. R4's "deployable against both consumer repos" (interface §4.3) is realized as this standalone workflow parameterized by consumer config, not a consumer commit.
+- **Surface C — CI / scheduled eval harness (no-post).** Smoke set (S9) as a CI entry point on Khan/actions; full suite (S11) scheduled. Drives the same code pipeline (and, where scored, model sub-agents) in no-post mode. One harness, one dataset format, one runner (simplifier guardrail; §0).
+
+The task_planner's per-slice dependencies are unchanged; §8 only says *which surface each code task lands on*.
+
+### 8.3 Code siting (resolves task-1-1's open siting)
+
+One action directory, **`actions/review/`**, with shared modules and thin CLI entrypoints co-located, added to the `actions/tsconfig.json` `include` list:
+
+```
+actions/review/
+  schema.ts        # R8a finding schema + validator + VERSION constant   (S1 task-1-1)
+  router.ts        # R10 classification/tier/team + budget rule+floor      (S3)
+  verdict.ts       # R8b computed verdict incl. hold-for-human             (S2)
+  render.ts        # R8c Conventional-Comment templating                   (S2)
+  version-stamp.ts # R11/R14 prompt+config hash → HTML marker (one surface)(S11)
+  cli/*.ts         # thin argv/stdin→JSON wrappers over the above          (Surface A)
+  *.test.ts        # vitest, co-located per repo convention
+```
+
+Standalone code (Surface B) and the eval harness (Surface C) live in their own dirs/workflows but **import the same `schema.ts`** so findings are one type everywhere. Keeping the plumbing in one lib is what physically enforces "a few hundred lines" and one-owner-per-concern (§0, R8).
+
+**This finalizes the appendix's indicative paths.** The Structured Task Appendix and task-1-1 use `workflows/review/lib/*.ts` as explicitly *indicative* siting pending the architect's decision; §8.3 finalizes that to `actions/review/*.ts` (chosen for the existing `actions/tsconfig.json` + ncc + vitest build with zero new config — `workflows/` has no TS build wired). Task file paths in the appendix map name-for-name (`render-comment.ts` → `actions/review/render.ts`, etc.); the task_planner's decomposition, roles, and ordering are otherwise unchanged.
+
+### 8.4 In-session data-flow contract (Surface A, per review run)
+
+Extends #194's on-disk convention; each arrow is a bash `node actions/review/cli/<tool>.js` call:
+
+1. Orchestrator stages `full.diff` + `files.json` (existing) → **`router`** reads them → writes `routing.json` (`{lensesToSpawn[], teams, perFileTier, runBudget}`). Step 3 dispatch consumes it (task-3-3); `reviewer-mapper` dispatch removed.
+2. Each lens/reviewer sub-agent writes `out/<agent>.json` (existing #194 flow) → **`schema-validate`** validates each against `schema.ts`; malformed → the dimension is treated as *unavailable*, feeding the R2 missing-dimension gate (task-2-2) rather than being silently dropped.
+3. Validated findings + posted-comment labels → **`verdict`** → `verdict.json` (`{event: APPROVE|REQUEST_CHANGES|HOLD_FOR_HUMAN, reasons[]}`). Consumes #194's mechanical label rule; does not re-implement it.
+4. Findings + verdict → **`render`** → comment bodies + review body. Orchestrator posts them through the *existing* safe outputs (`submit-pull-request-review`, `add-comment`). Code never posts.
+
+### 8.5 No-post run mode (Surface C) — one stubbed boundary
+
+Because safe-output calls are the *only* side-effecting boundary (principle 1), no-post mode is a one-place swap: the harness drives §8.4 steps 1–4 against a fixture `pr-context.json`/`files.json`/`full.diff` and captures step 4's output to disk instead of calling safe outputs. This is what makes R5/R6/R11 exercisable without any GitHub write, and is the mechanism behind task-9-2 / task-10-4.
+
+### 8.6 Router's one model touch (design constraint for S3)
+
+The router core is pure deterministic TS. The only judgment it needs — diff-direction-dependent risk tiers (task-3-1) — stays *outside* the deterministic core: `router.ts` emits the ambiguous files as a bounded question; the orchestrator resolves that single small-model call (or a minimal sub-agent) and passes the answer back on a second `router` invocation. The deterministic core never calls a model, so it stays unit-testable (task-3-4) and inside the boundary.
+
+### 8.7 Boundary enforcement (review gate wiring for principle 1 / R8 tripwire)
+
+The physical split — CLIs transform JSON, models author prose — makes the converse tripwire (§0) mechanically checkable: any diff that adds prose synthesis to a file under `actions/review/`, or grows verdict/router scoring beyond the declared `severity`/`confidence` fields, is scope creep to reject in review. reviewer_plan/reviewers should treat "an `actions/review/*` CLI emitting a human-read sentence" as the tripwire signal.
+
+### 8.8 Trigger-override integrity (interface §4.6)
+
+Adding Surface-A bash invocations to the orchestrator prompt does not touch the workflow `on:`/label frontmatter, so webapp's manual `/review` and frontend's automatic mode (interface §4.6) are preserved by construction; the cross-cutting AC on S3/S6/S10 remains "no trigger-frontmatter regression."
+
+> **Slice-DAG note (forest + no-overlap constraint, #3046):** the slice DAG must be a forest (each slice ≤1 parent) AND any two slices touching the same file must lie on one linear dependency chain. Because `workflows/review/review.md` is touched by eight slices, the plan is a single linear **spine** (S1→S2→S3→S4→S5→S6→S7→S9→S10→S11→S12) with S8 (thumbs, file-disjoint) branching off S1. Each slice's `dependencies` names its spine parent; its genuine build upstreams are in the §3 "Real upstreams" line and are always transitive ancestors, so every slice has what it needs to build. Code file paths under `workflows/review/lib/` and `workflows/review/eval/` in the appendix are **indicative**; §8 (architect) finalizes exact code-siting to `actions/review/*` and the gh-aw single-session invocation mechanism.
 
 ---
 
