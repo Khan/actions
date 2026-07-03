@@ -108,7 +108,12 @@ describe("validateFinding — well-formed findings", () => {
     it("accepts a LEFT-side line anchor", () => {
         const result = validateFinding(
             makeValidFinding({
-                anchor: {type: "line", path: "src/app.ts", line: 7, side: "LEFT"},
+                anchor: {
+                    type: "line",
+                    path: "src/app.ts",
+                    line: 7,
+                    side: "LEFT",
+                },
             }),
         );
         expect(result.ok).toBe(true);
@@ -129,14 +134,18 @@ describe("validateFinding — well-formed findings", () => {
     });
 
     it("accepts advisory severity", () => {
-        expect(validateFinding(makeValidFinding({severity: "advisory"})).ok).toBe(
-            true,
-        );
+        expect(
+            validateFinding(makeValidFinding({severity: "advisory"})).ok,
+        ).toBe(true);
     });
 
     it("accepts confidence at both interval boundaries", () => {
-        expect(validateFinding(makeValidFinding({confidence: 0})).ok).toBe(true);
-        expect(validateFinding(makeValidFinding({confidence: 1})).ok).toBe(true);
+        expect(validateFinding(makeValidFinding({confidence: 0})).ok).toBe(
+            true,
+        );
+        expect(validateFinding(makeValidFinding({confidence: 1})).ok).toBe(
+            true,
+        );
     });
 
     it("accepts the optional suggested_patch + pre_merge_obligation when present", () => {
@@ -178,8 +187,8 @@ describe("validateFinding — malformed findings", () => {
             makeValidFinding({schema_version: FINDING_SCHEMA_VERSION + 1}),
             /schema_version/,
         );
-        const {schema_version, ...noVersion} = makeValidFinding();
-        void schema_version;
+        const noVersion: Record<string, unknown> = {...makeValidFinding()};
+        delete noVersion["schema_version"];
         expectRejects(noVersion, /schema_version/);
     });
 
@@ -206,9 +215,18 @@ describe("validateFinding — malformed findings", () => {
 
     it("rejects an empty / malformed evidence_trace", () => {
         expectRejects(makeValidFinding({evidence_trace: []}), /evidence_trace/);
-        expectRejects(makeValidFinding({evidence_trace: "not-array"}), /evidence_trace/);
-        expectRejects(makeValidFinding({evidence_trace: [""]}), /evidence_trace/);
-        expectRejects(makeValidFinding({evidence_trace: ["ok", 3]}), /evidence_trace/);
+        expectRejects(
+            makeValidFinding({evidence_trace: "not-array"}),
+            /evidence_trace/,
+        );
+        expectRejects(
+            makeValidFinding({evidence_trace: [""]}),
+            /evidence_trace/,
+        );
+        expectRejects(
+            makeValidFinding({evidence_trace: ["ok", 3]}),
+            /evidence_trace/,
+        );
     });
 
     it("rejects a missing producing_hunt", () => {
@@ -223,7 +241,10 @@ describe("validateFinding — malformed findings", () => {
     });
 
     it("rejects present-but-empty optional fields", () => {
-        expectRejects(makeValidFinding({suggested_patch: ""}), /suggested_patch/);
+        expectRejects(
+            makeValidFinding({suggested_patch: ""}),
+            /suggested_patch/,
+        );
         expectRejects(
             makeValidFinding({pre_merge_obligation: ""}),
             /pre_merge_obligation/,
@@ -232,19 +253,30 @@ describe("validateFinding — malformed findings", () => {
 
     describe("anchor", () => {
         it("rejects a non-object anchor", () => {
-            expectRejects(makeValidFinding({anchor: "line"}), /anchor: must be an object/);
+            expectRejects(
+                makeValidFinding({anchor: "line"}),
+                /anchor: must be an object/,
+            );
         });
 
         it("rejects an unknown anchor.type", () => {
             expectRejects(
-                makeValidFinding({anchor: {type: "region", path: "x", line: 1}}),
+                makeValidFinding({
+                    anchor: {type: "region", path: "x", line: 1},
+                }),
                 /anchor\.type/,
             );
         });
 
         it("rejects a line/file anchor missing its path", () => {
-            expectRejects(makeValidFinding({anchor: {type: "line", line: 1}}), /anchor\.path/);
-            expectRejects(makeValidFinding({anchor: {type: "file"}}), /anchor\.path/);
+            expectRejects(
+                makeValidFinding({anchor: {type: "line", line: 1}}),
+                /anchor\.path/,
+            );
+            expectRejects(
+                makeValidFinding({anchor: {type: "file"}}),
+                /anchor\.path/,
+            );
         });
 
         it("rejects a non-positive / non-integer line", () => {
@@ -253,7 +285,9 @@ describe("validateFinding — malformed findings", () => {
                 /anchor\.line/,
             );
             expectRejects(
-                makeValidFinding({anchor: {type: "line", path: "x", line: 1.5}}),
+                makeValidFinding({
+                    anchor: {type: "line", path: "x", line: 1.5},
+                }),
                 /anchor\.line/,
             );
         });
