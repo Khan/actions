@@ -1256,7 +1256,7 @@
         {
           "id": "task-11-4",
           "description": "Overfitting guards: golden-set holdout + fresh mutations; adversarial set as a\nhard gate for automatic mode.",
-          "status": "pending",
+          "status": "complete",
           "commit": "bd1cbd7d",
           "checkpoint_id": null,
           "notes": "",
@@ -3005,6 +3005,17 @@
       "old_value": null,
       "new_value": "bd1cbd7d",
       "reason": "Linked commit bd1cbd7 to task-11-4",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:19:27.087117Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.10.tasks.3.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-11-4 as complete",
       "checkpoint_id": null
     }
   ],
