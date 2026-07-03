@@ -250,7 +250,10 @@ describe("wave-2 rebalance verification against the smoke set (task-10-3)", () =
     it("every must-catch finding exists as a recorded candidate", () => {
         // Guards the two invariants below from passing vacuously on a typo'd id.
         for (const {caseId, id, candidate} of mustCatchFindings) {
-            expect(candidate, `${caseId}:${id} missing from candidates`).toBeDefined();
+            expect(
+                candidate,
+                `${caseId}:${id} missing from candidates`,
+            ).toBeDefined();
         }
     });
 
