@@ -6,7 +6,34 @@
   "current_phase": "refine",
   "acceptance_criteria": [],
   "slices": [],
-  "decisions": [],
+  "decisions": [
+    {
+      "id": "decision-1",
+      "question": "[Phase gate: refine] The refine phase has completed. Please review the analysis and approve to continue, or provide feedback to request changes.\n\nDecision ledger: explicitly none \u2014 refiner attested: This refine round deliberately registers no HITL decisions. The four proposal open questions (graduation bar, blocking-verdict policy, vendor-vs-consume, ownership) are documented in \u00a77 of the analysis with their operator-approved treatment carried over from the prior round: vendor-vs-consume is resolved by the operator's task statement itself; graduation bar and ownership are post-launch/organizational with no build choice depending on them; the blocking-verdict mechanical question is answered by #194's shipped severity model, with the residual policy threshold to be raised as HITL the moment an R8(b) computed-verdict build choice depends on it. The 2026-07-02 operator directions already resolved this round's structural judgment calls (all-11 lenses, no eval gating, launch-default models), and the simplifier's S2 (security-lens split) is folded in as an explicit HITL-if-needed trigger rather than a present decision \u2014 no genuine judgment call is open at refine time.",
+      "type": "hitl",
+      "phase": null,
+      "options": [
+        {
+          "id": "opt-1",
+          "label": "approve",
+          "description": null,
+          "adds_task": null
+        },
+        {
+          "id": "opt-2",
+          "label": "request changes",
+          "description": null,
+          "adds_task": null
+        }
+      ],
+      "resolved": true,
+      "resolution": "Operator approves the refine analysis. Open-question resolutions from the operator (2026-07-02): (1) Graduation bar \u2014 do not consider it in this run; humans will decide post-launch; never raise it as a build blocker. (2) Blocking-verdict policy threshold \u2014 delegated to the implementing agents' judgment when R8(b)'s computed verdict needs it; pick a sensible default consistent with #194's severity model and the repro-required rule, document it clearly, and expect it to be tuned later in preparation for always-on mode; do not block on HITL for this. (3) Vendor-vs-consume \u2014 resolved: stay on consume; the restructure lands in the shared Khan/actions workflow and the extension points + drift-guard surface are kept so consumers inherit improvements without forking. (4) Ownership \u2014 determined; humans will maintain the reviewer; remove the at-risk framing from R15/R16/suite upkeep. Additionally: do not treat the 20-min/$10 budget/timeout caps as blockers or surface cap questions \u2014 proceed with reasonable defaults and document what was assumed; limits will be dialed in after the fact.",
+      "resolved_by": "human",
+      "resolved_at": "2026-07-03T03:12:42.937923Z",
+      "debounce_until": null,
+      "redirect_seed": null
+    }
+  ],
   "workflow_owner": null,
   "audit_log": [],
   "refine_review_cycles": 0,

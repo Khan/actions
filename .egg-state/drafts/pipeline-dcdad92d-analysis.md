@@ -106,3 +106,10 @@ Per operator direction 7, the proposal's deferred decisions surface as HITL deci
 - **Eval-suite data dependencies**: incident repros and golden/clean sets are built from Khan incident history and consumer-repo PR records; the suite must consume those without this pipeline writing to consumer repos.
 - **Fable 5 constraints**: 2× pricing, 30-day org data-retention, longer turns vs. the timeout — reasons the Fable arms stay post-suite experiments (first-principles excepted, advisory-only).
 - **Suite cost**: full-suite runs spend real inference budget; smoke set is the CI gate, full suite is scheduled.
+
+
+## HITL Resolution
+
+The following was approved by a human reviewer at the refine phase gate:
+
+Operator approves the refine analysis. Open-question resolutions from the operator (2026-07-02): (1) Graduation bar — do not consider it in this run; humans will decide post-launch; never raise it as a build blocker. (2) Blocking-verdict policy threshold — delegated to the implementing agents' judgment when R8(b)'s computed verdict needs it; pick a sensible default consistent with #194's severity model and the repro-required rule, document it clearly, and expect it to be tuned later in preparation for always-on mode; do not block on HITL for this. (3) Vendor-vs-consume — resolved: stay on consume; the restructure lands in the shared Khan/actions workflow and the extension points + drift-guard surface are kept so consumers inherit improvements without forking. (4) Ownership — determined; humans will maintain the reviewer; remove the at-risk framing from R15/R16/suite upkeep. Additionally: do not treat the 20-min/$10 budget/timeout caps as blockers or surface cap questions — proceed with reasonable defaults and document what was assumed; limits will be dialed in after the fact.
