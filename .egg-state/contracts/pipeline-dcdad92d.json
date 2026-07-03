@@ -115,7 +115,7 @@
       "id": "slice-2",
       "name": "Determinism boundary: computed verdict, rendering, missing-dimension gate",
       "goal": "Compute the verdict in code from findings + posted-comment labels (with a\nhold-for-human path), render Conventional Comments from templates, and hold for\na human when a core review dimension produced no output.",
-      "status": "pending",
+      "status": "in_progress",
       "review_cycles": 0,
       "max_cycles": 3,
       "escalated": false,
@@ -124,8 +124,8 @@
         {
           "id": "task-2-1",
           "description": "R8(b): computed verdict in code from findings + posted-comment labels,\nincluding a hold-for-human outcome for policy-named conflicts. Consume #194's\nmechanical label model (do not re-implement it). Pick and document a sensible\nblocking-threshold default (operator: implementer judgment, tunable later,\nnot a HITL gate).",
-          "status": "pending",
-          "commit": null,
+          "status": "complete",
+          "commit": "257ce1a0",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Verdict is a pure function of schema + labels; hold-for-human path covered by\na test; chosen default documented.",
@@ -145,8 +145,8 @@
         {
           "id": "task-2-2",
           "description": "R2: never auto-approve when the correctness pass OR the skill/severity pass\nproduced no output -- hold for a human. A lost pattern-triage may still\nnote-and-continue. This is the gate atop #194's visibility-only note.",
-          "status": "pending",
-          "commit": null,
+          "status": "complete",
+          "commit": "257ce1a0",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Missing core dimension -> hold-for-human (not approve-with-note); missing\npattern-triage -> note-and-continue.",
@@ -166,8 +166,8 @@
         {
           "id": "task-2-3",
           "description": "R8(c): templated rendering of Conventional Comments from the schema. Code\nowns label-wrapping + template; models own every human-read sentence.",
-          "status": "pending",
-          "commit": null,
+          "status": "complete",
+          "commit": "257ce1a0",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Rendering is deterministic given a finding; no prose synthesis in code.",
@@ -187,8 +187,8 @@
         {
           "id": "task-2-4",
           "description": "Tests: verdict truth table (incl. hold-for-human + missing-dimension) and\nrendering snapshots.",
-          "status": "pending",
-          "commit": null,
+          "status": "complete",
+          "commit": "2b55dbbb",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Truth-table and snapshot tests green.",
@@ -211,8 +211,8 @@
         "slice-1"
       ],
       "serialized_chain_order": [],
-      "parent_branch_at_creation": null,
-      "integration_base_sha": null,
+      "parent_branch_at_creation": "egg/pipeline-dcdad92d/slice-1",
+      "integration_base_sha": "ae81db7aa2b51ae6aa7a1948f6c3571a9a37b68f",
       "commit": null,
       "pr_number": null,
       "pr_url": null,
@@ -1536,10 +1536,10 @@
           "adds_task": null
         }
       ],
-      "resolved": false,
-      "resolution": null,
-      "resolved_by": null,
-      "resolved_at": null,
+      "resolved": true,
+      "resolution": "Reclassify slice-2 as IN_PROGRESS and let the live BRC consensus finish \u2014 do not mark complete and do not restart. The PENDING-with-commits combination is an artifact of the operator's cancel(cleanup=false)+restart_agent driver-relaunch recovery (egg#3469), not corruption: all four contract tasks are complete, code+tests are committed, and reviewers are actively re-ACKing the coder's v2 with the tester's proposal in flight.",
+      "resolved_by": "human",
+      "resolved_at": "2026-07-03T08:05:25.943719Z",
       "debounce_until": null,
       "redirect_seed": null
     },
@@ -1741,6 +1741,94 @@
       "old_value": "9293c0fb",
       "new_value": "696b9dc5",
       "reason": "Linked commit 696b9dc to task-1-4",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T07:37:26.167707Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.1.tasks.3.commit",
+      "old_value": null,
+      "new_value": "2b55dbbb",
+      "reason": "Linked commit 2b55dbb to task-2-4",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T07:37:26.191261Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.1.tasks.3.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-2-4 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T07:38:26.045425Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.1.tasks.0.commit",
+      "old_value": null,
+      "new_value": "257ce1a0",
+      "reason": "Linked commit 257ce1a to task-2-1",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T07:38:26.060989Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.1.tasks.0.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-2-1 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T07:38:26.591072Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.1.tasks.1.commit",
+      "old_value": null,
+      "new_value": "257ce1a0",
+      "reason": "Linked commit 257ce1a to task-2-2",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T07:38:26.616781Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.1.tasks.1.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-2-2 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T07:38:27.026962Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.1.tasks.2.commit",
+      "old_value": null,
+      "new_value": "257ce1a0",
+      "reason": "Linked commit 257ce1a to task-2-3",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T07:38:27.058164Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.1.tasks.2.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-2-3 as complete",
       "checkpoint_id": null
     }
   ],
