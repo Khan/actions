@@ -10,7 +10,7 @@
       "id": "slice-1",
       "name": "Foundations: finding schema, submission reliability, context staging",
       "goal": "Establish the versioned structured finding schema, a single robust review\nsubmission call, and staged per-run context for all sub-agents. Unblocks the\ndeterminism boundary, the router, and the prompt edits.",
-      "status": "pending",
+      "status": "complete",
       "review_cycles": 0,
       "max_cycles": 3,
       "escalated": false,
@@ -19,8 +19,8 @@
         {
           "id": "task-1-1",
           "description": "R8(a): versioned structured finding schema + validator. Fields: id, lens,\nanchor (incl. a PR-level anchor type), severity, confidence, evidence_trace,\noptional suggested_patch, optional pre_merge_obligation, producing_hunt,\nmodel_authored_prose. Export a schema version constant.",
-          "status": "pending",
-          "commit": null,
+          "status": "complete",
+          "commit": "0c7e5edc",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Validator accepts a well-formed finding and rejects a malformed one; version\nconstant exported and unit-tested.",
@@ -40,10 +40,10 @@
         {
           "id": "task-1-2",
           "description": "R1: standardize review submission on one robust call with a real body in the\norchestrator prompt; remove the --body-stdin / empty-body retry dance.",
-          "status": "pending",
-          "commit": null,
+          "status": "complete",
+          "commit": "2d430e84",
           "checkpoint_id": null,
-          "notes": "",
+          "notes": "R1: Rewrote Step 6 submission to a single robust submit-pull-request-review call that always sends a real, non-empty one-line body. Removed the empty-body branch (APPROVE-with-inline-comments now sends `Approved \u2014 see inline comments.`). Explicitly documented one submission path: no empty-body variant, no stdin body, no fallback/retry. Fixed the downstream skipped-dimension note that referenced the empty-body case.",
           "acceptance_criteria": "Exactly one submission path documented in review.md; no empty-body fallback\nremains.",
           "files_affected": [
             "workflows/review/review.md"
@@ -61,10 +61,10 @@
         {
           "id": "task-1-3",
           "description": "Prompt edit E2: stage pr-context.json on disk for ALL sub-agents (extends\n#194 diff staging). Foundation for the lenses in slice 7.",
-          "status": "pending",
-          "commit": null,
+          "status": "complete",
+          "commit": "2d430e84",
           "checkpoint_id": null,
-          "notes": "",
+          "notes": "E2: Added `/tmp/gh-aw/review/pr-context.json` staging in Step 1 (PR number, title, description, author, baseBranch, headSha, isDraft, repo, plus diffPath/filesPath pointers), written once before any sub-agent dispatch. Wired all six sub-agent read blocks (correctness-reviewer, skill-auditor, pattern-triage, reviewer-mapper, thread-reconciler, claim-validator) to read it, with an untrusted-input note on the author description. Extends #194 diff staging; foundation for slice-7 lenses.",
           "acceptance_criteria": "Every sub-agent dispatch reads context from the staged file.",
           "files_affected": [
             "workflows/review/review.md"
@@ -82,10 +82,10 @@
         {
           "id": "task-1-4",
           "description": "Unit tests for the finding schema/validator (TASK-1-1).",
-          "status": "pending",
-          "commit": null,
+          "status": "complete",
+          "commit": "696b9dc5",
           "checkpoint_id": null,
-          "notes": "",
+          "notes": "37 vitest tests at workflows/review/lib/finding-schema.test.ts, green. Covers: FINDING_SCHEMA_VERSION constant (===1); well-formed findings for line/range/side, file, and PR-level anchors + optional suggested_patch/pre_merge_obligation + every KNOWN_LENSES value + confidence boundaries; malformed rejection for each required field (non-object, bad/missing schema_version, empty id, unknown/non-string lens, bad severity, out-of-range/NaN/non-number confidence, empty/malformed evidence_trace, missing producing_hunt/model_authored_prose, present-but-empty optional fields, and all anchor variants incl. inverted start_line>line range); the all-violations collection behavior (>=8 errors on a fully-bad finding); isValidFinding narrowing; assertFinding return + throw-with-all-violations. Run env note: repo's default `node` is v20.12 which cannot require() vite7 ESM (ERR_REQUIRE_ESM); ran green under node v24.13 (/opt/node24). Deps installed via pnpm 10.0.0 (frozen lockfile).",
           "acceptance_criteria": "Tests cover valid + malformed findings and the version constant; green.",
           "files_affected": [
             "workflows/review/lib/finding-schema.test.ts"
@@ -103,11 +103,11 @@
       ],
       "dependencies": [],
       "serialized_chain_order": [],
-      "parent_branch_at_creation": null,
-      "integration_base_sha": null,
+      "parent_branch_at_creation": "egg/pipeline-dcdad92d/work",
+      "integration_base_sha": "ce9a232402357a474b75220d711ca5a3004dcd8e",
       "commit": null,
-      "pr_number": null,
-      "pr_url": null,
+      "pr_number": 197,
+      "pr_url": "https://github.com/Khan/actions/pull/197",
       "repo": null,
       "review_feedback": []
     },
@@ -1513,7 +1513,173 @@
     }
   ],
   "workflow_owner": null,
-  "audit_log": [],
+  "audit_log": [
+    {
+      "timestamp": "2026-07-03T04:03:16.843292Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.1.notes",
+      "old_value": "",
+      "new_value": "R1: Rewrote Step 6 submission to a single robust submit-pull-request-review call that always sends a real, non-empty one-line body. Removed the empty-body branch (APPROVE-with-inline-comments now sends `Approved \u2014 see inline comments.`). Explicitly documented one submission path: no empty-body variant, no stdin body, no fallback/retry. Fixed the downstream skipped-dimension note that referenced the empty-body case.",
+      "reason": "Updated notes for task-1-2",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T04:03:19.256063Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.2.notes",
+      "old_value": "",
+      "new_value": "E2: Added `/tmp/gh-aw/review/pr-context.json` staging in Step 1 (PR number, title, description, author, baseBranch, headSha, isDraft, repo, plus diffPath/filesPath pointers), written once before any sub-agent dispatch. Wired all six sub-agent read blocks (correctness-reviewer, skill-auditor, pattern-triage, reviewer-mapper, thread-reconciler, claim-validator) to read it, with an untrusted-input note on the author description. Extends #194 diff staging; foundation for slice-7 lenses.",
+      "reason": "Updated notes for task-1-3",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T04:03:28.419560Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.1.commit",
+      "old_value": null,
+      "new_value": "2d430e84",
+      "reason": "Linked commit 2d430e8 to task-1-2",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T04:03:28.448434Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.1.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-1-2 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T04:03:28.708692Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.2.commit",
+      "old_value": null,
+      "new_value": "2d430e84",
+      "reason": "Linked commit 2d430e8 to task-1-3",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T04:03:28.748434Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.2.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-1-3 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T04:04:20.679954Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.0.commit",
+      "old_value": null,
+      "new_value": "4b4658f1b0f79d9ae773d0291ec8a92a2a2fb3bf",
+      "reason": "Linked commit 4b4658f to task-1-1",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T04:04:20.706733Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.0.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-1-1 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T04:04:53.352366Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.0.commit",
+      "old_value": "4b4658f1b0f79d9ae773d0291ec8a92a2a2fb3bf",
+      "new_value": "0c7e5edc",
+      "reason": "Linked commit 0c7e5ed to task-1-1",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T04:36:00.577097Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.3.commit",
+      "old_value": null,
+      "new_value": "5252a346",
+      "reason": "Linked commit 5252a34 to task-1-4",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T04:36:06.735946Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.3.notes",
+      "old_value": "",
+      "new_value": "37 vitest tests at workflows/review/lib/finding-schema.test.ts, green. Covers: FINDING_SCHEMA_VERSION constant (===1); well-formed findings for line/range/side, file, and PR-level anchors + optional suggested_patch/pre_merge_obligation + every KNOWN_LENSES value + confidence boundaries; malformed rejection for each required field (non-object, bad/missing schema_version, empty id, unknown/non-string lens, bad severity, out-of-range/NaN/non-number confidence, empty/malformed evidence_trace, missing producing_hunt/model_authored_prose, present-but-empty optional fields, and all anchor variants incl. inverted start_line>line range); the all-violations collection behavior (>=8 errors on a fully-bad finding); isValidFinding narrowing; assertFinding return + throw-with-all-violations. Run env note: repo's default `node` is v20.12 which cannot require() vite7 ESM (ERR_REQUIRE_ESM); ran green under node v24.13 (/opt/node24). Deps installed via pnpm 10.0.0 (frozen lockfile).",
+      "reason": "Updated notes for task-1-4",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T04:36:10.041753Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.3.commit",
+      "old_value": "5252a346",
+      "new_value": "5252a346",
+      "reason": "Linked commit 5252a34 to task-1-4",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T04:36:10.078542Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.3.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-1-4 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T04:37:22.861275Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.3.commit",
+      "old_value": "5252a346",
+      "new_value": "9293c0fb",
+      "reason": "Linked commit 9293c0f to task-1-4",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T04:39:23.735222Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.0.tasks.3.commit",
+      "old_value": "9293c0fb",
+      "new_value": "696b9dc5",
+      "reason": "Linked commit 696b9dc to task-1-4",
+      "checkpoint_id": null
+    }
+  ],
   "refine_review_cycles": 0,
   "refine_review_feedback": "",
   "plan_review_cycles": 0,
@@ -1523,7 +1689,7 @@
     "description": "Implements the Khan/actions half of the \"Improving the Khan PR review agent\"\nproposal on top of #194: reliability P0s, the 13 remaining prompt edits, the\ndeterminism boundary (finding schema -> computed verdict -> templated rendering),\na deterministic router that subsumes reviewer-mapper, all 11 specialist lenses\nplus the always-on reviewers, the thumbs feedback sweep, the wave-2\nrecall/precision rebalance, and the full eval suite. No consumer-repo changes;\nconsumer-named work is preserved as interface guarantees on the shared workflow.",
     "test_plan": "- Automated: vitest unit tests for the finding schema/validator, computed verdict\n  (incl. hold-for-human), comment rendering, router (classification/tier/budget),\n  per-finding tool-call cap, thumbs sweep, and the eval-suite runner; the smoke\n  subset runs in CI on this repo via the shared no-post runner.\n- Manual: run the review workflow in no-post mode against the smoke corpus and\n  confirm findings/verdict render without any GitHub write; rerun webapp PR #40536\n  through the no-post harness with edits 8+10 and confirm the OpenAccess\n  authorization question surfaces (R6).",
     "manual_steps": "Pre-merge: none (no migrations). Confirm the reviewer version stamp changes when\nprompt/config changes.\nPost-merge: consumer repos (webapp/frontend) inherit changes via `source:` import\non their own schedule; the thumbs sweep and drift-guard stamp are deployable\nagainst both from day one but consumer wiring happens separately, later.",
-    "context_pr_number": null,
+    "context_pr_number": 196,
     "deferred_actions": []
   },
   "feedback": null,
