@@ -766,7 +766,7 @@
           "id": "task-7-8",
           "description": "Cross-deploy serialization lens: skill rules + incident-derived tri-state\nhunts.",
           "status": "pending",
-          "commit": null,
+          "commit": "956f63a1",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Rules + tri-state hunts present; findings emit valid schema; effort high.",
@@ -2554,6 +2554,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-7-7 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T19:16:32.126414Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.6.tasks.7.commit",
+      "old_value": null,
+      "new_value": "956f63a1",
+      "reason": "Linked commit 956f63a to task-7-8",
       "checkpoint_id": null
     }
   ],
