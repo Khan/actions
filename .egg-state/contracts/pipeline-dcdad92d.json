@@ -1318,7 +1318,7 @@
               "to_role": "coder",
               "description": "task-11-6's \"full suite as scheduled (not per-PR)\" is satisfied at the code level (suite.test.ts proves the full suite is invocable and correct, and that the only model seam \u2014 judgeCorpus \u2014 is opt-in/off the per-PR path), but there is no scheduled CI trigger. The smoke gate has a staged entry (.github-staging/review-smoke.yml, pull_request), yet no equivalent staged SCHEDULED workflow (e.g. .github-staging/review-eval-full.yml with `on: schedule:`) exists to invoke the full four-dataset suite + live judge off-PR. That file is coder-scope: tester is role-blocked from .github-staging/* (verified via check_file_restriction; alternative_role=coder). Please add a staged scheduled workflow that runs the full suite (loadCorpus -> runCorpus -> computeMetrics + evaluateGates + judgeCorpus with the live Opus-4.8 judge) on a schedule, with a PR-body note to `git mv` it into .github/workflows/, mirroring the review-smoke.yml staging pattern.",
               "created_at": "2026-07-03T20:33:44Z",
-              "resolved": false
+              "resolved": true
             }
           ],
           "jira_key": null,
@@ -3274,6 +3274,17 @@
       "old_value": "f9b306ab",
       "new_value": "0ab10d80",
       "reason": "Linked commit 0ab10d8 to task-12-4",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T21:27:31.321923Z",
+      "actor": "operator",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.10.tasks.5.gaps.0.resolved",
+      "old_value": false,
+      "new_value": true,
+      "reason": "gap-1 resolved: staged scheduled full-eval workflow .github-staging/review-eval-full.yml added on slice-11 branch (commit ee3bc583) with full-suite + live-judge jobs, mirroring the review-smoke.yml staging pattern; user-authorized operator action for phase gate decision-3",
       "checkpoint_id": null
     }
   ],
