@@ -1043,7 +1043,7 @@
           "id": "task-9-4",
           "description": "Dedicated CI workflow entry point for the smoke set, STAGED under\n`.github-staging/` because no producer role may push `.github/` directly\n(#2508). Call it out in the PR body for a human to move to\n`.github/workflows/review-smoke.yml`. Optional if TASK-9-3's vitest gate\nsuffices; provided so the CI entry point is explicit and does not assume\nexisting CI wiring.",
           "status": "pending",
-          "commit": null,
+          "commit": "9c5f45c9",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Staged workflow present under `.github-staging/`; PR body notes the human move\nstep.",
@@ -2752,6 +2752,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-9-2 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T19:39:36.776331Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.8.tasks.3.commit",
+      "old_value": null,
+      "new_value": "9c5f45c9",
+      "reason": "Linked commit 9c5f45c to task-9-4",
       "checkpoint_id": null
     }
   ],
