@@ -1568,10 +1568,10 @@
           "adds_task": null
         }
       ],
-      "resolved": false,
-      "resolution": null,
-      "resolved_by": null,
-      "resolved_at": null,
+      "resolved": true,
+      "resolution": "Reclassify slice-8 as IN_PROGRESS and let BRC continue \u2014 do not mark complete and do not restart. The implementation is committed (33d513e7) and content-verified by reviewer_contract, but the coder still owes the bookkeeping fix (mark task-8-1 complete) and a re-propose after the earlier contract_incomplete NACK; the event loop should respawn the coder to finish that.",
+      "resolved_by": "human",
+      "resolved_at": "2026-07-03T08:05:29.684175Z",
       "debounce_until": null,
       "redirect_seed": null
     }
