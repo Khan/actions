@@ -1,0 +1,664 @@
+# yaml-tasks
+# Architect authoritative slice scaffold (forest). Slices/tasks/files reproduced verbatim
+# from the task_planner's converged plan appendix; the architect certifies the forest and
+# adds serialized_chain_order recording each slice's GENUINE upstream deps (analysis DAG)
+# — distinct from the linear-spine 'dependencies' edge, which is a superset that also
+# serializes the eight workflows/review/review.md writers so sibling branches never
+# collide (#3046). Spine: S1->S2->S3->S4->S5->S6->S7->S9->S10->S11->S12; S8 (thumbs,
+# file-disjoint) branches off S1 in parallel. Operator edges honored: schema(S1)->verdict
+# (S2), router(S3)->lenses(S7), smoke(S9)->rebalance(S10). Code siting per plan §8:
+# workflows/review/lib/ + workflows/review/eval/ (review-internal code in the self-contained
+# workflows/review/ package; not actions/, which is for action.yml composite actions).
+pr:
+  title: 'review: roster restructure, determinism boundary, eval suite'
+  description: |
+    Implements the Khan/actions half of the "Improving the Khan PR review agent"
+    proposal on top of #194: reliability P0s, the 13 remaining prompt edits, the
+    determinism boundary (finding schema -> computed verdict -> templated rendering),
+    a deterministic router that subsumes reviewer-mapper, all 11 specialist lenses
+    plus the always-on reviewers, the thumbs feedback sweep, the wave-2
+    recall/precision rebalance, and the full eval suite. No consumer-repo changes;
+    consumer-named work is preserved as interface guarantees on the shared workflow.
+  test_plan: |
+    - Automated: vitest unit tests for the finding schema/validator, computed verdict
+      (incl. hold-for-human), comment rendering, router (classification/tier/budget),
+      per-finding tool-call cap, thumbs sweep, and the eval-suite runner; the smoke
+      subset runs in CI on this repo via the shared no-post runner.
+    - Manual: run the review workflow in no-post mode against the smoke corpus and
+      confirm findings/verdict render without any GitHub write; rerun webapp PR #40536
+      through the no-post harness with edits 8+10 and confirm the OpenAccess
+      authorization question surfaces (R6).
+  manual_steps: |
+    Pre-merge: none (no migrations). Confirm the reviewer version stamp changes when
+    prompt/config changes.
+    Post-merge: consumer repos (webapp/frontend) inherit changes via `source:` import
+    on their own schedule; the thumbs sweep and drift-guard stamp are deployable
+    against both from day one but consumer wiring happens separately, later.
+slices:
+- id: slice-1
+  name: 'Foundations: finding schema, submission reliability, context staging'
+  goal: |-
+    Establish the versioned structured finding schema, a single robust review
+    submission call, and staged per-run context for all sub-agents. Unblocks the
+    determinism boundary, the router, and the prompt edits.
+  exit_criteria: |-
+    Schema validates well-formed findings and rejects malformed ones; exactly one
+    submission path exists; every sub-agent reads staged context from disk.
+  tasks:
+  - id: TASK-1-1
+    description: |-
+      R8(a): versioned structured finding schema + validator. Fields: id, lens,
+      anchor (incl. a PR-level anchor type), severity, confidence, evidence_trace,
+      optional suggested_patch, optional pre_merge_obligation, producing_hunt,
+      model_authored_prose. Export a schema version constant.
+    acceptance: |-
+      Validator accepts a well-formed finding and rejects a malformed one; version
+      constant exported and unit-tested.
+    role: coder
+    files:
+    - workflows/review/lib/finding-schema.ts
+  - id: TASK-1-2
+    description: |-
+      R1: standardize review submission on one robust call with a real body in the
+      orchestrator prompt; remove the --body-stdin / empty-body retry dance.
+    acceptance: |-
+      Exactly one submission path documented in review.md; no empty-body fallback
+      remains.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-1-3
+    description: |-
+      Prompt edit E2: stage pr-context.json on disk for ALL sub-agents (extends
+      #194 diff staging). Foundation for the lenses in slice 7.
+    acceptance: Every sub-agent dispatch reads context from the staged file.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-1-4
+    description: Unit tests for the finding schema/validator (TASK-1-1).
+    acceptance: Tests cover valid + malformed findings and the version constant; green.
+    role: tester
+    files:
+    - workflows/review/lib/finding-schema.test.ts
+- id: slice-2
+  name: 'Determinism boundary: computed verdict, rendering, missing-dimension gate'
+  goal: |-
+    Compute the verdict in code from findings + posted-comment labels (with a
+    hold-for-human path), render Conventional Comments from templates, and hold for
+    a human when a core review dimension produced no output.
+  dependencies: slice-1
+  exit_criteria: |-
+    Verdict is a pure function of schema + labels with an exercised hold-for-human
+    path; missing core dimension holds for a human instead of approving.
+  tasks:
+  - id: TASK-2-1
+    description: |-
+      R8(b): computed verdict in code from findings + posted-comment labels,
+      including a hold-for-human outcome for policy-named conflicts. Consume #194's
+      mechanical label model (do not re-implement it). Pick and document a sensible
+      blocking-threshold default (operator: implementer judgment, tunable later,
+      not a HITL gate).
+    acceptance: |-
+      Verdict is a pure function of schema + labels; hold-for-human path covered by
+      a test; chosen default documented.
+    role: coder
+    files:
+    - workflows/review/lib/verdict.ts
+  - id: TASK-2-2
+    description: |-
+      R2: never auto-approve when the correctness pass OR the skill/severity pass
+      produced no output -- hold for a human. A lost pattern-triage may still
+      note-and-continue. This is the gate atop #194's visibility-only note.
+    acceptance: |-
+      Missing core dimension -> hold-for-human (not approve-with-note); missing
+      pattern-triage -> note-and-continue.
+    role: coder
+    files:
+    - workflows/review/lib/verdict.ts
+  - id: TASK-2-3
+    description: |-
+      R8(c): templated rendering of Conventional Comments from the schema. Code
+      owns label-wrapping + template; models own every human-read sentence.
+    acceptance: Rendering is deterministic given a finding; no prose synthesis in code.
+    role: coder
+    files:
+    - workflows/review/lib/render-comment.ts
+  - id: TASK-2-4
+    description: |-
+      Tests: verdict truth table (incl. hold-for-human + missing-dimension) and
+      rendering snapshots.
+    acceptance: Truth-table and snapshot tests green.
+    role: tester
+    files:
+    - workflows/review/lib/verdict.test.ts
+    - workflows/review/lib/render-comment.test.ts
+- id: slice-3
+  name: Deterministic router (subsumes reviewer-mapper)
+  goal: |-
+    Classify changed files, map paths to lenses, map teams from REVIEWERS, assign a
+    per-file risk tier, and scale the run budget by tier -- replacing the Haiku
+    reviewer-mapper sub-agent with code.
+  dependencies: slice-2
+  exit_criteria: |-
+    Router yields deterministic lens/team/tier for a fixture diff; reviewer-mapper is
+    no longer dispatched; budget scales by tier with a misrouted-PR floor.
+  tasks:
+  - id: TASK-3-1
+    description: |-
+      R10 router in code: file classification from .gitattributes, path->lens
+      mapping, team mapping from consumer REVIEWERS, per-file risk tier (small-model
+      check only for diff-direction-dependent tiers). Subsumes reviewer-mapper (R12).
+    acceptance: |-
+      Deterministic lens/team/tier output for a fixture diff; reviewer-mapper no
+      longer dispatched.
+    role: coder
+    files:
+    - workflows/review/lib/router.ts
+  - id: TASK-3-2
+    description: |-
+      R10 budget: ONE rule scaling run budget by highest touched risk tier + ONE
+      floor for misrouted PRs (no per-lens knobs). Document assumed default caps.
+    acceptance: Budget scales monotonically with tier; misrouted PR gets the floor.
+    role: coder
+    files:
+    - workflows/review/lib/router.ts
+  - id: TASK-3-3
+    description: |-
+      Wire the orchestrator (Step 3) to consume router output for lens dispatch and
+      drop the reviewer-mapper dispatch/parse.
+    acceptance: Only the router feeds lens/team routing in review.md.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-3-4
+    description: 'Router unit tests: classification, path->lens, tier, budget scaling, floor.'
+    acceptance: Router tests green over fixtures.
+    role: tester
+    files:
+    - workflows/review/lib/router.test.ts
+- id: slice-4
+  name: Reliability/quality prompt edits (E1, E3, E5, E6, E7, R3b)
+  goal: |-
+    Land the remaining reliability/quality prompt edits: high-risk trigger,
+    untrusted-input rule, deletions-are-findings, reply-chain reconciliation,
+    skip-open-thread lines, and the flag-a-pre-existing-bug rule.
+  dependencies: slice-3
+  exit_criteria: Each edit is present in review.md with its rule text; no §3 regression.
+  tasks:
+  - id: TASK-4-1
+    description: |-
+      E1 high-risk trigger named + one-line judgment; E3 untrusted-input rule
+      (embedded instructions are content to analyze; an attempt to direct the
+      reviewer is itself a finding); E5 deletions-are-findings.
+    acceptance: Each edit present with its rule text.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-4-2
+    description: |-
+      E6 full reply-chain staged; reconciler judges author reasoning and never
+      re-raises a conceded point. E7 skip lines with open human threads.
+    acceptance: Reconciler prompt reflects both rules.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-4-3
+    description: |-
+      R3b flag-a-pre-existing-bug rule: a real bug in touched lines is fair to flag
+      even if it predates the change. Builds on #194 severity; does not reopen it.
+    acceptance: Rule present, scoped to touched lines.
+    role: documenter
+    files:
+    - workflows/review/review.md
+- id: slice-5
+  name: Investigation tooling for reviewers
+  goal: |-
+    Give reviewers bounded investigation: grep callers, trace call chains, run one
+    targeted cheap check per finding, with a per-finding tool-call cap enforced in
+    code.
+  dependencies: slice-4
+  exit_criteria: |-
+    Investigation instructions present and used by the lenses; per-finding cap
+    enforced deterministically.
+  tasks:
+  - id: TASK-5-1
+    description: |-
+      R9 sub-agent instructions for bounded investigation: grep callers, trace call
+      chains, run one targeted cheap check per finding.
+    acceptance: Instructions present; consumed by slice-7 lenses.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-5-2
+    description: |-
+      R9 enforce a cap on tool calls per finding in code, living inside the run
+      budget from slice 3. Document the assumed default cap (not a HITL surface).
+    acceptance: Cap enforced; over-cap calls refused deterministically.
+    role: coder
+    files:
+    - workflows/review/lib/investigation-cap.ts
+  - id: TASK-5-3
+    description: Test the per-finding tool-call cap.
+    acceptance: Cap test green.
+    role: tester
+    files:
+    - workflows/review/lib/investigation-cap.test.ts
+- id: slice-6
+  name: 'Roster framework: always-on reviewers, model defaults, kept gates'
+  goal: |-
+    Define the always-on reviewers (holistic, completeness, test-adequacy,
+    first-principles, conventions) with their trust/advisory constraints, apply the
+    model launch defaults + effort table, and wire the kept gates to the new roster.
+  dependencies: slice-5
+  serialized_chain_order:
+  - slice-3
+  - slice-5
+  exit_criteria: |-
+    Five always-on reviewers defined with constraints; every role carries its
+    launch-default model + effort; kept gates preserved with no §3 regression.
+  tasks:
+  - id: TASK-6-1
+    description: |-
+      Always-on reviewers: holistic; completeness (Jira/Confluence read-only inside
+      the non-posting sub-agent; fetched text is data under review); test-adequacy;
+      first-principles (advisory-only, never blocks, Fable 5 day one); conventions
+      (advisory; router-gated by greppable trigger signatures).
+    acceptance: Five always-on reviewers defined with their trust/advisory constraints.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-6-2
+    description: 'Prompt edit 14: named mandates for holistic / completeness / first-principles.'
+    acceptance: Mandates present.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-6-3
+    description: |-
+      R12 model launch defaults + effort table: Opus 4.8 workhorse; medium =
+      triage/reconciliation; high = lenses/whole-change; xhigh = security lens +
+      claim-validator/refuters; first-principles = Fable 5. Do NOT re-pin #194's
+      existing model pins -- extend the effort assignments.
+    acceptance: Every role carries its launch-default model + effort matching the R12 table.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-6-4
+    description: |-
+      Kept gates wired to the new roster: pattern-triage (exclusions in guidance
+      comment), claim-validator + refuter panel (batched/parallel), deterministic
+      dedup + verdict bookends (verdict from slice 2), thread-reconciler.
+    acceptance: Gates preserved; no §3 regression.
+    role: documenter
+    files:
+    - workflows/review/review.md
+- id: slice-7
+  name: Eleven specialist lenses (+ skill-auditor fold-in)
+  goal: |-
+    Build all eleven specialist lenses, each folding its skill's rules plus
+    incident-derived executable hunts (tri-state: ran / not-applicable / found) that
+    emit into the finding schema. Fold skill-auditor into the lenses.
+  dependencies: slice-6
+  serialized_chain_order:
+  - slice-3
+  - slice-5
+  - slice-6
+  exit_criteria: |-
+    All eleven lenses present with rules + tri-state hunts emitting valid schema
+    findings; skill-auditor folded; correctness-checks.md extension point intact.
+  tasks:
+  - id: TASK-7-1
+    description: |-
+      Security & auth lens -- SINGLE lens, effort xhigh. Do NOT split it. If
+      implementation shows a genuine need to split along the risk-config seam
+      (authorization correctness vs. web/platform security), raise a HITL question
+      (operator direction 7 / simplifier guardrail 2); do not split unilaterally.
+    acceptance: |-
+      Rules + tri-state hunts present; findings emit valid schema; effort xhigh; no
+      unilateral split.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-7-2
+    description: 'AI safety & moderation lens: skill rules + incident-derived tri-state hunts.'
+    acceptance: Rules + tri-state hunts present; findings emit valid schema; effort high.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-7-3
+    description: 'Mass-comms & COPPA lens: skill rules + incident-derived tri-state hunts.'
+    acceptance: Rules + tri-state hunts present; findings emit valid schema; effort high.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-7-4
+    description: 'Caching & resource lens: skill rules + incident-derived tri-state hunts.'
+    acceptance: Rules + tri-state hunts present; findings emit valid schema; effort high.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-7-5
+    description: 'Data & migrations lens: skill rules + incident-derived tri-state hunts.'
+    acceptance: Rules + tri-state hunts present; findings emit valid schema; effort high.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-7-6
+    description: 'Concurrency & async lens: skill rules + incident-derived tri-state hunts.'
+    acceptance: Rules + tri-state hunts present; findings emit valid schema; effort high.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-7-7
+    description: 'API & federation compat lens: skill rules + incident-derived tri-state hunts.'
+    acceptance: Rules + tri-state hunts present; findings emit valid schema; effort high.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-7-8
+    description: |-
+      Cross-deploy serialization lens: skill rules + incident-derived tri-state
+      hunts.
+    acceptance: Rules + tri-state hunts present; findings emit valid schema; effort high.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-7-9
+    description: 'Deploy & infra config lens: skill rules + incident-derived tri-state hunts.'
+    acceptance: Rules + tri-state hunts present; findings emit valid schema; effort high.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-7-10
+    description: 'Money & payments lens: skill rules + incident-derived tri-state hunts.'
+    acceptance: Rules + tri-state hunts present; findings emit valid schema; effort high.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-7-11
+    description: 'Content & i18n lens: skill rules + incident-derived tri-state hunts.'
+    acceptance: Rules + tri-state hunts present; findings emit valid schema; effort high.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-7-12
+    description: |-
+      Remove the standalone skill-auditor dispatch once its checks fold into the
+      lenses; ensure no consumer correctness-checks.md content is stranded
+      (interface req §4.2).
+    acceptance: skill-auditor folded; correctness-checks.md extension point intact.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-7-13
+    description: |-
+      Fixture-based tests that each lens's incident hunts fire on a known repro and
+      report not-applicable on a clean fixture (reuse slice-9 fixtures where
+      available).
+    acceptance: Lens hunt fixtures green (fires on repro, not-applicable on clean).
+    role: tester
+    files:
+    - workflows/review/lib/lenses.test.ts
+- id: slice-8
+  name: Thumbs feedback sweep (independent deterministic code)
+  goal: |-
+    Collect 👍/👎 reactions at two grains, ask one follow-up per new 👎, and never
+    re-ping -- pure code, deployable against both consumer repos from day one.
+  dependencies: slice-1
+  exit_criteria: |-
+    One follow-up per new 👎, idempotent (never re-pings), works against either
+    consumer repo's config.
+  tasks:
+  - id: TASK-8-1
+    description: |-
+      R4 thumbs sweep, pure code (no model): 👍/👎 at two grains; polling sweep
+      collects reactions; one follow-up per NEW 👎 (incorrect / unimportant /
+      unclear / duplicate + free text); never re-ping. Deployable against both
+      consumer repos (interface guarantee §4.3) -- no consumer commit.
+    acceptance: |-
+      One follow-up per new 👎; idempotent (no re-ping); two-grain collection;
+      config-driven for either repo.
+    role: coder
+    files:
+    - workflows/review/lib/thumbs-sweep.ts
+  - id: TASK-8-2
+    description: 'Tests: new-👎 detection, single follow-up, no re-ping, two-grain collection.'
+    acceptance: Thumbs-sweep tests green.
+    role: tester
+    files:
+    - workflows/review/lib/thumbs-sweep.test.ts
+- id: slice-9
+  name: Smoke benchmark (tagged subset of the eval corpus)
+  goal: |-
+    Author a ~dozen-case smoke corpus (incident repros, adversarial-injection PRs,
+    known-clean PRs) in the shared eval dataset format, run it through a shared
+    no-post runner, and wire it as a CI gate on this repo. Must precede the wave-2
+    rebalance.
+  dependencies: slice-7
+  serialized_chain_order:
+  - slice-2
+  exit_criteria: |-
+    Smoke cases load via the shared loader; no-post run produces findings/verdict
+    with zero GitHub writes; CI runs the smoke set green on baseline.
+  tasks:
+  - id: TASK-9-1
+    description: |-
+      R5 smoke corpus (~a dozen cases): incident repros, adversarial-injection PRs,
+      known-clean PRs -- SAME dataset format as the slice-11 corpus (tagged subset,
+      one harness).
+    acceptance: Cases load with the shared loader; tags identify the smoke subset.
+    role: coder
+    files:
+    - workflows/review/eval/corpus/smoke/
+  - id: TASK-9-2
+    description: |-
+      R5 shared runner with a no-post run mode exercising the real review path
+      without posting to any real PR.
+    acceptance: Run mode produces findings/verdict with no GitHub write.
+    role: coder
+    files:
+    - workflows/review/eval/runner.ts
+  - id: TASK-9-3
+    description: |-
+      Smoke set runs under vitest so the repo's existing `pnpm test` CI job gates it
+      on Khan/actions -- the smoke test IS the CI entry point.
+    acceptance: '`pnpm test` runs the smoke set; green on baseline.'
+    role: tester
+    files:
+    - workflows/review/eval/smoke.test.ts
+  - id: TASK-9-4
+    description: |-
+      Dedicated CI workflow entry point for the smoke set, STAGED under
+      `.github-staging/` because no producer role may push `.github/` directly
+      (#2508). Call it out in the PR body for a human to move to
+      `.github/workflows/review-smoke.yml`. Optional if TASK-9-3's vitest gate
+      suffices; provided so the CI entry point is explicit and does not assume
+      existing CI wiring.
+    acceptance: |-
+      Staged workflow present under `.github-staging/`; PR body notes the human move
+      step.
+    role: coder
+    files:
+    - .github-staging/review-smoke.yml
+- id: slice-10
+  name: Wave-2 recall/precision rebalance
+  goal: |-
+    Land edits 8-13, the blocking-claim refuter panel, and the posting bar, verified
+    against the smoke set so recall/precision do not regress while the rebalance
+    ships. Includes the webapp #40536 causal experiment via the no-post harness.
+  dependencies: slice-9
+  serialized_chain_order:
+  - slice-2
+  - slice-7
+  - slice-9
+  exit_criteria: |-
+    Edits present; smoke set green (no must-catch recall regression, no new clean
+    false-block); #40536 experiment recorded.
+  tasks:
+  - id: TASK-10-1
+    description: |-
+      Edits 8 (coverage first), 9 (blocking requires a concrete failing scenario),
+      10 (drop only the refuted; downgrade the uncertain), 11 (confirm before you
+      claim), 12 (cite exact lines or quote).
+    acceptance: Each edit present.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-10-2
+    description: |-
+      Blocking-claim refuter panel (batched/parallel) + edit 13 posting bar: ranked
+      posting; inline >= medium confidence; low-confidence in one collapsed section;
+      suggested diffs where clear; no padding. Wire to the slice-2 verdict / slice-1
+      confidence fields.
+    acceptance: Posting bar + refuter panel wired to verdict/confidence.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-10-3
+    description: |-
+      Verify the rebalance against the slice-9 smoke set (no recall regression on
+      must-catch; no new false-block on clean).
+    acceptance: Smoke set green after rebalance.
+    role: tester
+    files:
+    - workflows/review/eval/smoke.test.ts
+  - id: TASK-10-4
+    description: |-
+      R6 causal experiment: rerun the reviewer on webapp PR #40536 with edits 8+10
+      via the no-post harness (no consumer write). Success = the OpenAccess
+      authorization question surfaces.
+    acceptance: Experiment recorded; surfacing observed or a documented negative result.
+    role: documenter
+    files:
+    - workflows/review/eval/experiments/webapp-40536.md
+- id: slice-11
+  name: Full eval suite (four datasets, five metrics, judge, version stamp)
+  goal: |-
+    Build the eval suite that measures what this run shipped: four datasets, five
+    metrics, an Opus-4.8 LLM-judge with human audit, overfitting guards, an
+    adversarial hard gate, and the reviewer version stamp that doubles as the single
+    drift-guard surface.
+  dependencies: slice-10
+  serialized_chain_order:
+  - slice-3
+  - slice-7
+  - slice-8
+  - slice-9
+  exit_criteria: |-
+    Four datasets load via the shared loader; five metrics computed; judge scores a
+    run with an audit sample; version stamp changes on prompt/config change; smoke
+    subset gates CI, full suite scheduled.
+  tasks:
+  - id: TASK-11-1
+    description: |-
+      Four datasets: incident repros; regenerated synthetic mutations mapped to
+      lenses; golden set (human-comment + revert/follow-up labels); clean set. Built
+      from Khan incident history + consumer PR records WITHOUT writing to consumer
+      repos.
+    acceptance: Four datasets load via the shared loader.
+    role: coder
+    files:
+    - workflows/review/eval/corpus/
+  - id: TASK-11-2
+    description: |-
+      Five metrics: must-catch recall (~100%), golden precision, clean false-block
+      (~0), noise, calibration.
+    acceptance: Metrics computed over a dataset run.
+    role: coder
+    files:
+    - workflows/review/eval/metrics.ts
+  - id: TASK-11-3
+    description: |-
+      Opus 4.8 LLM-judge with a human-audit sample; thumbs labels (slice 8)
+      calibrate the judge.
+    acceptance: Judge scores a run; audit sample surfaced.
+    role: coder
+    files:
+    - workflows/review/eval/judge.ts
+  - id: TASK-11-4
+    description: |-
+      Overfitting guards: golden-set holdout + fresh mutations; adversarial set as a
+      hard gate for automatic mode.
+    acceptance: Holdout separated; adversarial gate enforced.
+    role: coder
+    files:
+    - workflows/review/eval/gates.ts
+  - id: TASK-11-5
+    description: |-
+      Reviewer version stamp: hash of prompt+config stamped via the existing #194
+      HTML marker. This is the SINGLE drift-guard surface (R14 reuses it; no new
+      mechanism).
+    acceptance: Stamp changes when prompt/config changes; readable by a consumer sync check.
+    role: coder
+    files:
+    - workflows/review/lib/version-stamp.ts
+  - id: TASK-11-6
+    description: |-
+      Suite self-tests + wire the smoke subset (slice 9) as the CI gate; full suite
+      as scheduled (not per-PR).
+    acceptance: CI runs smoke; full suite invocable on schedule.
+    role: tester
+    files:
+    - workflows/review/eval/suite.test.ts
+- id: slice-12
+  name: P2 items (R13, R14, R15, R16, R17)
+  goal: |-
+    Land the P2 follow-ups: per-finding resolution rule, the drift-guard
+    documentation reusing the version stamp, live counters, dismissal-learning
+    candidates, and the conditional-approval verdict.
+  dependencies: slice-11
+  serialized_chain_order:
+  - slice-2
+  - slice-8
+  - slice-11
+  exit_criteria: |-
+    Each P2 requirement present; drift guard adds no new mechanism; dismissal
+    candidates are human-approved, never auto-adopted.
+  tasks:
+  - id: TASK-12-1
+    description: |-
+      R13 per-finding resolution rule on re-review: every actionable finding gets
+      fixed / deferred-to-filed-issue / disagreed-with-reason.
+    acceptance: Rule present.
+    role: documenter
+    files:
+    - workflows/review/review.md
+  - id: TASK-12-2
+    description: |-
+      R14 config drift guard: document the slice-11 version stamp as the stable
+      consumer-readable sync surface (interface §4.5). Adds NO new mechanism.
+    acceptance: Doc points to the stamp; no second surface.
+    role: documenter
+    files:
+    - workflows/review/README.md
+  - id: TASK-12-3
+    description: |-
+      R15 live counters mined from run logs + #194 per-run JSON artifacts: validator
+      drop rate per lens, comments/PR, verdict mix, thumbs agree rate, cost/run.
+    acceptance: Counters computed from existing artifacts; no new logging mechanism required.
+    role: coder
+    files:
+    - workflows/review/lib/counters.ts
+  - id: TASK-12-4
+    description: |-
+      R16 dismissal-learning: dismissed/resolved threads, 👎-with-replies, and
+      correct pushback become candidate do-not-flag-here notes proposed as changes
+      to a committed config file a human approves -- never auto-adopted.
+    acceptance: |-
+      Candidates written as a proposed diff for human approval; nothing
+      auto-applied.
+    role: coder
+    files:
+    - workflows/review/lib/dismissal-learning.ts
+  - id: TASK-12-5
+    description: |-
+      R17 conditional-approval verdict: APPROVE + a prominent structured obligations
+      comment via the existing add-comment safe output; renders from the schema's
+      pre_merge_obligation field.
+    acceptance: |-
+      APPROVE-with-obligations renders from the schema; uses the existing safe
+      output.
+    role: coder
+    files:
+    - workflows/review/lib/render-comment.ts

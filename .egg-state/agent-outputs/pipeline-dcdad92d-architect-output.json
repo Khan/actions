@@ -4,14 +4,15 @@
   "role": "architect",
   "artifact": ".egg-state/drafts/pipeline-dcdad92d-plan.md",
   "commit_sha": "8cdec851",
-  "summary": "Architect §8 on the shared plan resolves the one decision the task_planner deferred (plan §1 + appendix forest-note): the code-integration mechanism and siting for the R8 determinism-boundary code and the R10 router in the gh-aw single-session model. Decision: TS CLI tools under actions/review/ built with the existing tsc/ncc/vitest toolchain, invoked by the orchestrator via bash over JSON in /tmp/gh-aw/review/; orchestrator stays the single session and sole safe-output caller. Three integration surfaces named (in-session CLIs / standalone scheduled workflows / no-post eval harness); in-session data-flow contract, no-post mechanism, router's single model touch, and boundary-enforcement review wiring fixed. Slice DAG unchanged and convergent with the task_planner's; the three operator-named edges hold with no re-ordering.",
+  "summary": "Architect §8 on the shared plan resolves the one decision the task_planner deferred (plan §1 + appendix forest-note): the code-integration mechanism and siting for the R8 determinism-boundary code and the R10 router in the gh-aw single-session model. Decision: TS CLI tools under workflows/review/lib/ (co-located inside the self-contained workflows/review/ package), tested with the existing vitest/@swc-node/register, invoked by the orchestrator via bash (node -r @swc-node/register) over JSON in /tmp/gh-aw/review/; orchestrator stays the single session and sole safe-output caller. Three integration surfaces named (in-session CLIs / standalone scheduled workflows / no-post eval harness); in-session data-flow contract, no-post mechanism, router's single model touch, and boundary-enforcement review wiring fixed. Slice DAG unchanged and convergent with the task_planner's; the three operator-named edges hold with no re-ordering.",
   "integration_decision": {
-    "mechanism": "TypeScript CLI tools invoked by the orchestrator via bash (node), exchanging JSON on disk under the existing /tmp/gh-aw/review/ scratch dir; the orchestrator remains the single agentic session and the sole caller of GitHub and safe outputs.",
-    "toolchain": "Reuse the repo's existing actions/ build/test pattern: tsc -p actions/tsconfig.json, @vercel/ncc bundling, co-located vitest *.test.ts. Precedent: actions/fix-workflows/cli.ts.",
-    "siting": "actions/review/ (one action dir sharing schema.ts); finalizes the appendix's indicative workflows/review/lib/*.ts paths name-for-name (workflows/ has no TS build wired; actions/ does).",
+    "mechanism": "TypeScript CLI tools invoked by the orchestrator via bash (node -r @swc-node/register), exchanging JSON on disk under the existing /tmp/gh-aw/review/ scratch dir; the orchestrator remains the single agentic session and the sole caller of GitHub and safe outputs.",
+    "toolchain": "Reuse existing tooling: vitest (root config discovers **/*.test.ts via @swc-node/register, so .ts runs without a separate build); the orchestrator runs the CLIs via node -r @swc-node/register (or a pre-bundled entry).",
+    "siting": "workflows/review/lib/ (support code) + workflows/review/eval/ (harness), co-located inside the self-contained workflows/review/ package (its own package.json). Endorses the task_planner's indicative paths name-for-name; rejects actions/ siting because actions/* is for reusable cross-workflow composite actions and this code is review-internal.",
     "rejected_alternatives": [
       "Multi-job split (router/verdict as separate GH Actions jobs) — fights gh-aw's single-session model and forces cross-job state hand-off.",
-      "Bespoke runtime/build system — rejected in favor of reusing the established actions/*/index.ts + ncc + vitest pattern (reuse over rebuild)."
+      "Siting under actions/ — actions/* is for reusable composite actions shared across workflows; review-internal code belongs inside the workflows/review/ package (cohesion).",
+      "Bespoke runtime/build system — rejected in favor of reusing vitest + @swc-node/register the repo already has (reuse over rebuild)."
     ]
   },
   "integration_surfaces": [
@@ -28,7 +29,7 @@
   "design_constraints": {
     "no_post_run_mode": "safe-output calls are the only side-effecting boundary; no-post mode swaps that one boundary for a capture sink (mechanism behind R5/R6/R11 / task-9-2 / task-10-4).",
     "router_model_touch": "router core is pure deterministic TS; the only judgment (diff-direction-dependent risk tiers) is emitted as a bounded question, resolved by the orchestrator's single small-model call, and fed back on a second router invocation — the deterministic core never calls a model.",
-    "boundary_enforcement": "physical CLI/prose split makes the R8 converse tripwire mechanically checkable: any diff adding prose synthesis to actions/review/* or scoring beyond declared severity/confidence fields is scope creep to reject in review.",
+    "boundary_enforcement": "physical CLI/prose split makes the R8 converse tripwire mechanically checkable: any diff adding prose synthesis to workflows/review/lib/* or scoring beyond declared severity/confidence fields is scope creep to reject in review.",
     "trigger_override_integrity": "adding Surface-A bash invocations to the orchestrator prompt touches no on:/label frontmatter, so webapp manual /review and frontend automatic mode (interface §4.6) are preserved by construction."
   },
   "dependency_edges_honored": [
@@ -38,10 +39,11 @@
   ],
   "dag_convergence": "The architect integration design and the task_planner slice DAG were reached independently and converge; §8 adds the how-code-is-invoked layer with no re-ordering of §3 and no change to the task_planner's roles/tasks/ordering.",
   "reuse_over_rebuild": [
-    "existing actions/ tsc+ncc+vitest build (no new build config)",
+    "existing vitest + @swc-node/register (runs .ts without a separate build; no new build config)",
+    "existing workflows/review/ self-contained package (its own package.json) as the code home",
     "existing /tmp/gh-aw/review/ on-disk JSON convention from #194",
     "existing safe outputs (submit-pull-request-review, add-comment) — code never posts",
-    "single shared schema.ts imported by all three surfaces so findings are one type everywhere"
+    "single shared finding-schema.ts imported by all three surfaces so findings are one type everywhere"
   ],
   "no_194_reimplementation": true,
   "consumer_repos_interface_only": true,

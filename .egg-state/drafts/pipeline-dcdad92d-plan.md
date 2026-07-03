@@ -191,9 +191,9 @@ The §1 note correctly reserved one decision for the architect: *how* the determ
 
 ### 8.1 Decision
 
-Implement the deterministic code as **TypeScript CLI tools sited under `actions/review/`**, built and tested with the repo's *existing* toolchain (`tsc -p actions/tsconfig.json`, `@vercel/ncc` bundling, co-located `*.test.ts` under `vitest`), and **invoked by the orchestrator via `bash` (`node …`) on JSON files in the existing `/tmp/gh-aw/review/` scratch directory** that #194 already uses. The orchestrator remains the single agentic session and the *sole* caller of GitHub and safe outputs; the code is deterministic JSON-in/JSON-out plumbing it shells out to mid-session.
+Implement the deterministic code as **TypeScript CLI tools sited under `workflows/review/lib/`** (co-located with `review.md` inside the self-contained `workflows/review/` package — it already ships its own `package.json`), tested with the repo's *existing* `vitest` (root config already discovers `**/*.test.ts` via `@swc-node/register`, so `.ts` runs without a separate build), and **invoked by the orchestrator via `bash` (`node …`) on JSON files in the existing `/tmp/gh-aw/review/` scratch directory** that #194 already uses. The orchestrator remains the single agentic session and the *sole* caller of GitHub and safe outputs; the code is deterministic JSON-in/JSON-out plumbing it shells out to mid-session.
 
-Rejected alternatives and why: **multi-job split** (router/verdict as separate GH Actions jobs) fights gh-aw's single-session model and forces state hand-off between jobs — rejected. **A bespoke runtime/build system** — rejected; the repo already ships the `actions/*/index.ts` (+ `.test.ts`, `action.yml`, ncc) pattern, and `actions/fix-workflows/cli.ts` is direct precedent for a CLI entry point. Reuse it (principle "reuse over rebuild").
+Rejected alternatives and why: **multi-job split** (router/verdict as separate GH Actions jobs) fights gh-aw's single-session model and forces state hand-off between jobs — rejected. **Siting under `actions/`** — rejected; `actions/*` is for *reusable composite actions shared across workflows*, whereas this code is review-internal, so it belongs inside the `workflows/review/` package next to the prompt it serves (cohesion over the actions/ build convention). **A bespoke runtime/build system** — rejected; `@swc-node/register` already runs the `.ts` under vitest, and the orchestrator invokes the CLIs via `node -r @swc-node/register` (or a pre-bundled entry), reusing tooling the repo already has (principle "reuse over rebuild").
 
 ### 8.2 Three integration surfaces (name them; they are not all the per-PR session)
 
@@ -205,26 +205,27 @@ The task_planner's per-slice dependencies are unchanged; §8 only says *which su
 
 ### 8.3 Code siting (resolves task-1-1's open siting)
 
-One action directory, **`actions/review/`**, with shared modules and thin CLI entrypoints co-located, added to the `actions/tsconfig.json` `include` list:
+One support-code lib, **`workflows/review/lib/`**, with shared modules and thin CLI entrypoints co-located; the eval harness sits beside it under `workflows/review/eval/`:
 
 ```
-actions/review/
-  schema.ts        # R8a finding schema + validator + VERSION constant   (S1 task-1-1)
-  router.ts        # R10 classification/tier/team + budget rule+floor      (S3)
-  verdict.ts       # R8b computed verdict incl. hold-for-human             (S2)
-  render.ts        # R8c Conventional-Comment templating                   (S2)
-  version-stamp.ts # R11/R14 prompt+config hash → HTML marker (one surface)(S11)
-  cli/*.ts         # thin argv/stdin→JSON wrappers over the above          (Surface A)
-  *.test.ts        # vitest, co-located per repo convention
+workflows/review/lib/
+  finding-schema.ts   # R8a finding schema + validator + VERSION constant  (S1 task-1-1)
+  router.ts           # R10 classification/tier/team + budget rule+floor     (S3)
+  verdict.ts          # R8b computed verdict incl. hold-for-human            (S2)
+  render-comment.ts   # R8c Conventional-Comment templating                 (S2)
+  version-stamp.ts    # R11/R14 prompt+config hash → HTML marker (one surface)(S11)
+  cli/*.ts            # thin argv/stdin→JSON wrappers over the above         (Surface A)
+  *.test.ts           # vitest, co-located per repo convention
+workflows/review/eval/  # Surface C harness (runner, corpus, metrics, judge, gates)
 ```
 
-Standalone code (Surface B) and the eval harness (Surface C) live in their own dirs/workflows but **import the same `schema.ts`** so findings are one type everywhere. Keeping the plumbing in one lib is what physically enforces "a few hundred lines" and one-owner-per-concern (§0, R8).
+Standalone code (Surface B — `thumbs-sweep.ts`, `counters.ts`, `dismissal-learning.ts`) and the eval harness (Surface C) live under the same `workflows/review/` package but **import the same `finding-schema.ts`** so findings are one type everywhere. Keeping the plumbing in one lib is what physically enforces "a few hundred lines" and one-owner-per-concern (§0, R8).
 
-**This finalizes the appendix's indicative paths.** The Structured Task Appendix and task-1-1 use `workflows/review/lib/*.ts` as explicitly *indicative* siting pending the architect's decision; §8.3 finalizes that to `actions/review/*.ts` (chosen for the existing `actions/tsconfig.json` + ncc + vitest build with zero new config — `workflows/` has no TS build wired). Task file paths in the appendix map name-for-name (`render-comment.ts` → `actions/review/render.ts`, etc.); the task_planner's decomposition, roles, and ordering are otherwise unchanged.
+**This endorses the appendix's siting.** The Structured Task Appendix and task-1-1 already place code under `workflows/review/lib/` (marked indicative pending the architect); §8.3 confirms that choice — the review workflow is a self-contained package (`workflows/review/package.json`), so its support code belongs inside it, not in the shared `actions/` reusable-actions dir. The task_planner's file paths, decomposition, roles, and ordering are unchanged; the architect's addition is the *invocation/build mechanism* (§8.1) and the surfaces/data-flow below, not a relocation.
 
 ### 8.4 In-session data-flow contract (Surface A, per review run)
 
-Extends #194's on-disk convention; each arrow is a bash `node actions/review/cli/<tool>.js` call:
+Extends #194's on-disk convention; each arrow is a bash `node -r @swc-node/register workflows/review/lib/cli/<tool>.ts` call:
 
 1. Orchestrator stages `full.diff` + `files.json` (existing) → **`router`** reads them → writes `routing.json` (`{lensesToSpawn[], teams, perFileTier, runBudget}`). Step 3 dispatch consumes it (task-3-3); `reviewer-mapper` dispatch removed.
 2. Each lens/reviewer sub-agent writes `out/<agent>.json` (existing #194 flow) → **`schema-validate`** validates each against `schema.ts`; malformed → the dimension is treated as *unavailable*, feeding the R2 missing-dimension gate (task-2-2) rather than being silently dropped.
@@ -241,13 +242,13 @@ The router core is pure deterministic TS. The only judgment it needs — diff-di
 
 ### 8.7 Boundary enforcement (review gate wiring for principle 1 / R8 tripwire)
 
-The physical split — CLIs transform JSON, models author prose — makes the converse tripwire (§0) mechanically checkable: any diff that adds prose synthesis to a file under `actions/review/`, or grows verdict/router scoring beyond the declared `severity`/`confidence` fields, is scope creep to reject in review. reviewer_plan/reviewers should treat "an `actions/review/*` CLI emitting a human-read sentence" as the tripwire signal.
+The physical split — CLIs transform JSON, models author prose — makes the converse tripwire (§0) mechanically checkable: any diff that adds prose synthesis to a file under `workflows/review/lib/`, or grows verdict/router scoring beyond the declared `severity`/`confidence` fields, is scope creep to reject in review. reviewer_plan/reviewers should treat "a `workflows/review/lib/*` CLI emitting a human-read sentence" as the tripwire signal.
 
 ### 8.8 Trigger-override integrity (interface §4.6)
 
 Adding Surface-A bash invocations to the orchestrator prompt does not touch the workflow `on:`/label frontmatter, so webapp's manual `/review` and frontend's automatic mode (interface §4.6) are preserved by construction; the cross-cutting AC on S3/S6/S10 remains "no trigger-frontmatter regression."
 
-> **Slice-DAG note (forest + no-overlap constraint, #3046):** the slice DAG must be a forest (each slice ≤1 parent) AND any two slices touching the same file must lie on one linear dependency chain. Because `workflows/review/review.md` is touched by eight slices, the plan is a single linear **spine** (S1→S2→S3→S4→S5→S6→S7→S9→S10→S11→S12) with S8 (thumbs, file-disjoint) branching off S1. Each slice's `dependencies` names its spine parent; its genuine build upstreams are in the §3 "Real upstreams" line and are always transitive ancestors, so every slice has what it needs to build. Code file paths under `workflows/review/lib/` and `workflows/review/eval/` in the appendix are **indicative**; §8 (architect) finalizes exact code-siting to `actions/review/*` and the gh-aw single-session invocation mechanism.
+> **Slice-DAG note (forest + no-overlap constraint, #3046):** the slice DAG must be a forest (each slice ≤1 parent) AND any two slices touching the same file must lie on one linear dependency chain. Because `workflows/review/review.md` is touched by eight slices, the plan is a single linear **spine** (S1→S2→S3→S4→S5→S6→S7→S9→S10→S11→S12) with S8 (thumbs, file-disjoint) branching off S1. Each slice's `dependencies` names its spine parent; its genuine build upstreams are in the §3 "Real upstreams" line and are always transitive ancestors, so every slice has what it needs to build. §8 (architect) finalizes exact code-siting and the gh-aw single-session invocation mechanism: the appendix's `workflows/review/lib/` and `workflows/review/eval/` paths are **confirmed** (review-internal code stays in the self-contained `workflows/review/` package — `actions/` is reserved for `action.yml`-bearing reusable composite actions consumed via `uses:`, which this code is not).
 
 ---
 
