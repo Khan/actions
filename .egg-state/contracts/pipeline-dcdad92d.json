@@ -416,7 +416,7 @@
       "id": "slice-5",
       "name": "Investigation tooling for reviewers",
       "goal": "Give reviewers bounded investigation: grep callers, trace call chains, run one\ntargeted cheap check per finding, with a per-finding tool-call cap enforced in\ncode.",
-      "status": "in_progress",
+      "status": "complete",
       "review_cycles": 0,
       "max_cycles": 3,
       "escalated": false,
