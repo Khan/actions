@@ -169,8 +169,8 @@ resolves for `gh aw add`.
 A consumer that pins the shared reviewer (via `gh aw add …@review-v0` or a committed
 config snapshot) needs a way to tell when the reviewer's *behaviour* has drifted from
 the version it last synced. That signal is a **single surface**: the reviewer **version
-stamp**, an HTML marker the workflow already renders into its posted review comment
-(reusing the `pr-reviewer:` marker namespace `#194` established):
+stamp**, produced by `lib/version-stamp.ts` and rendered as one HTML marker that reuses
+the `pr-reviewer:` marker namespace `#194` established:
 
 ```
 <!-- pr-reviewer:version stamp=<hex> format=<n> schema=<n> -->
@@ -179,14 +179,23 @@ stamp**, an HTML marker the workflow already renders into its posted review comm
 `stamp` is a SHA-256 over exactly the behaviour-defining inputs — the sub-agent prompts,
 the model/effort table, the lens roster, the router rules, the tunable thresholds, and
 the finding-schema version — so it changes when, and only when, the reviewer's behaviour
-changes; unrelated churn (a test fixture, a docs edit) does **not** move it. A consumer's
-sync check parses `stamp=` off the latest posted review (or off a committed skill
-snapshot) and compares it against the value it last synced; a mismatch means "re-sync."
-`format` lets an old consumer tell "I don't understand this stamp shape" apart from "the
-reviewer changed," and `schema` is the finding-schema version the run was on.
+changes; unrelated churn (a test fixture, a docs edit) does **not** move it. `format`
+lets an old consumer tell "I don't understand this stamp shape" apart from "the reviewer
+changed," and `schema` is the finding-schema version the run was on.
 
-This is the **only** drift surface. The drift guard reads the existing stamp — it adds no
-second version file and no separate config-hash mechanism, so "the reviewer changed" has
-exactly one home. The stamp is produced by `lib/version-stamp.ts`; the eval suite labels
-each run with the same stamp so a metrics regression can be attributed to a specific
-reviewer version.
+The intended drift check is mechanical: a consumer reads the `stamp=` value from wherever
+the workflow surfaces the marker and compares it against the value it last synced; a
+mismatch means "re-sync." The designated surface for that read is the marker block, to be
+emitted alongside the existing `pr-reviewer:risks-and-patterns` approval comment (Step 7)
+or written into a committed skill snapshot.
+
+**Current status:** the stamp itself exists and is exercised today — `lib/version-stamp.ts`
+computes it and the eval suite labels every run with it, so a metrics regression can be
+attributed to a specific reviewer version. The workflow does **not** yet render the
+`pr-reviewer:version` marker into its posted review/approval comment; wiring that emit
+point into the Step 7 posting path is pending follow-through. Until it lands, a consumer
+drift check has no marker to parse from a live review.
+
+This is deliberately the **only** drift surface. It reuses the existing version stamp and
+the `#194` marker namespace — it adds no second version file and no separate config-hash
+mechanism, so "the reviewer changed" has exactly one home.
