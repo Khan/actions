@@ -1278,7 +1278,7 @@
           "id": "task-11-5",
           "description": "Reviewer version stamp: hash of prompt+config stamped via the existing #194\nHTML marker. This is the SINGLE drift-guard surface (R14 reuses it; no new\nmechanism).",
           "status": "pending",
-          "commit": null,
+          "commit": "bd1cbd7d",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Stamp changes when prompt/config changes; readable by a consumer sync check.",
@@ -3016,6 +3016,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-11-4 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:19:28.973652Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.10.tasks.4.commit",
+      "old_value": null,
+      "new_value": "bd1cbd7d",
+      "reason": "Linked commit bd1cbd7 to task-11-5",
       "checkpoint_id": null
     }
   ],
