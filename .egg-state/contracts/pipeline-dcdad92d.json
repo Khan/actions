@@ -533,7 +533,7 @@
           "id": "task-6-2",
           "description": "Prompt edit 14: named mandates for holistic / completeness / first-principles.",
           "status": "pending",
-          "commit": null,
+          "commit": "75e982c3",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Mandates present.",
@@ -2301,6 +2301,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-6-1 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T18:55:22.629217Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.5.tasks.1.commit",
+      "old_value": null,
+      "new_value": "75e982c3",
+      "reason": "Linked commit 75e982c to task-6-2",
       "checkpoint_id": null
     }
   ],
