@@ -1149,7 +1149,7 @@
         {
           "id": "task-10-4",
           "description": "R6 causal experiment: rerun the reviewer on webapp PR #40536 with edits 8+10\nvia the no-post harness (no consumer write). Success = the OpenAccess\nauthorization question surfaces.",
-          "status": "pending",
+          "status": "complete",
           "commit": "4854796d",
           "checkpoint_id": null,
           "notes": "",
@@ -2884,6 +2884,17 @@
       "old_value": null,
       "new_value": "4854796d",
       "reason": "Linked commit 4854796 to task-10-4",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:04:17.608391Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.9.tasks.3.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-10-4 as complete",
       "checkpoint_id": null
     }
   ],
