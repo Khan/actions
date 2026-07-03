@@ -26,7 +26,6 @@
  * passes the judge's rationale through verbatim.
  */
 
-import type {DownvoteReason} from "../lib/thumbs-sweep";
 import type {EvalRun} from "./run-types";
 
 /** The pinned judge model — Opus 4.8, the workhorse (review.md model table). */
@@ -137,15 +136,38 @@ const EMPTY_VERDICT_COUNTS = (): Record<JudgeVerdict, number> => ({
 });
 
 /**
- * Join scores to requests and summarise. Throws if the model returned a score for
- * an unknown `findingId` or failed to score a request — a judge that silently
- * drops a comment would corrupt every downstream number, so we fail loudly.
+ * Join scores to requests and summarise. Fails loudly rather than corrupt every
+ * downstream number, on any of three join defects:
+ *   - a request the model did not score (a silently-dropped comment);
+ *   - a score for a `findingId` that matches no request (an extra/hallucinated
+ *     score);
+ *   - two requests sharing a `findingId` (the join is by bare `findingId`, which
+ *     is only case-unique in the corpus schema — a collision would mis-join, so
+ *     we reject it here instead of silently picking one).
  */
 export const aggregate = (
     requests: JudgeRequest[],
     scores: JudgeScore[],
 ): JudgeReport => {
+    const requestIds = new Set<string>();
+    for (const request of requests) {
+        if (requestIds.has(request.findingId)) {
+            throw new Error(
+                `Duplicate finding id "${request.findingId}" across judge requests: the score join is by finding id, which must be unique within a run`,
+            );
+        }
+        requestIds.add(request.findingId);
+    }
+
     const byId = new Map(scores.map((s) => [s.findingId, s]));
+    for (const score of scores) {
+        if (!requestIds.has(score.findingId)) {
+            throw new Error(
+                `Judge returned a score for unknown finding "${score.findingId}" (no matching request)`,
+            );
+        }
+    }
+
     const scored: ScoredRequest[] = [];
     const verdictCounts = EMPTY_VERDICT_COUNTS();
     const disagreements: ScoredRequest[] = [];
@@ -232,6 +254,24 @@ export const selectAuditSample = (
 /* -------------------------------------------------------------------------- */
 /* Thumbs calibration                                                         */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * The fixed downvote-reason vocabulary the slice-8 thumbs sweep offers on a 👎.
+ *
+ * Declared locally rather than imported from `../lib/thumbs-sweep` on purpose:
+ * the judge consumes thumbs labels as *data* (see {@link ThumbsLabel}) and never
+ * needs the sweep module at build time, so importing its type would create a
+ * cross-slice build dependency on slice-8 for a field this module only carries
+ * through (calibration keys off `direction`, not `reason`). This union is
+ * structurally identical to slice-8's `DownvoteReason`, so a value produced there
+ * is assignable here and vice versa; keep the two in sync if the sweep's
+ * vocabulary changes.
+ */
+export type DownvoteReason =
+    | "incorrect"
+    | "unimportant"
+    | "unclear"
+    | "duplicate";
 
 /**
  * A human thumbs signal on a posted comment, mined by the slice-8 sweep. `up`
