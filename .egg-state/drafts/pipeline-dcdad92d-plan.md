@@ -120,7 +120,8 @@ Build **all eleven** lenses in this run (operator direction 1). Each folds its s
 
 - **task-9-1 (coder)** — Smoke corpus (~a dozen cases): incident repros, adversarial-injection PRs, known-clean PRs — authored in the **same dataset format** as the S11 corpus (tagged subset, one harness). *AC: cases load with the shared loader; tags identify the smoke subset.*
 - **task-9-2 (coder)** — Shared runner with a **no-post run mode** that exercises the real review path without posting to any real PR. *AC: run mode produces findings/verdict without any GitHub write.*
-- **task-9-3 (tester)** — CI entry point running the smoke set on this repo (Khan/actions). *AC: `pnpm test`/CI invokes the smoke set; green on baseline.*
+- **task-9-3 (tester)** — Smoke set runs under vitest so the repo's existing `pnpm test` CI job gates it — the smoke test *is* the CI entry point. *AC: `pnpm test` runs the smoke set; green on baseline.*
+- **task-9-4 (coder)** — Dedicated CI workflow entry point **staged under `.github-staging/`** (no producer role may push `.github/` directly, #2508); called out in the PR body for a human to move to `.github/workflows/`. Optional if task-9-3's vitest gate suffices; provided so the CI entry point is explicit. *AC: staged workflow present; PR body notes the move step.*
 
 ### Slice 10 — Wave-2 recall/precision rebalance
 *Real upstreams: S9 (smoke set exists FIRST — regression protection), S7 (lenses), S2 (verdict). Spine parent: S9 (S7, S2 transitive ancestors). Requirements: R7, R6, prompt edit 13.*
@@ -128,7 +129,7 @@ Build **all eleven** lenses in this run (operator direction 1). Each folds its s
 - **task-10-1 (documenter)** — Edits 8 (coverage first), 9 (blocking requires a concrete failing scenario), 10 (drop only the refuted; downgrade the uncertain), 11 (confirm before you claim), 12 (cite exact lines or quote). *AC: each edit present.*
 - **task-10-2 (documenter)** — Blocking-claim **refuter panel** (batched/parallel) + edit 13 posting bar: ranked posting; inline ≥ medium confidence; low-confidence in one collapsed section; suggested diffs where clear; no padding. *AC: posting bar + refuter panel wired to the S2 verdict/S1 confidence fields.*
 - **task-10-3 (tester)** — Verify the rebalance against the S9 smoke set (no recall regression on must-catch cases; no new false-block on clean cases). *AC: smoke set green after rebalance.*
-- **task-10-4 (tester)** — R6 causal experiment: rerun the reviewer on webapp PR #40536 with edits 8+10 applied **via the no-post harness** (no consumer write). Success = the OpenAccess authorization question surfaces. *AC: experiment recorded; surfacing observed or a documented negative result.*
+- **task-10-4 (documenter)** — R6 causal experiment: rerun the reviewer on webapp PR #40536 with edits 8+10 applied **via the no-post harness** (no consumer write). Success = the OpenAccess authorization question surfaces; the deliverable is the recorded experiment note. *AC: experiment recorded; surfacing observed or a documented negative result.*
 
 ### Slice 11 — Full eval suite
 *Real upstreams: S1 (schema), S3 (router), S7 (lenses), S9 (shared runner) — all transitive ancestors via the spine — plus S8 thumbs **labels** as a runtime data flow (S8 is a parallel branch, not a build ancestor; the suite consumes label data, not S8 code). Spine parent: S10. Requirements: R11. Measures what this run built — never a precondition for building it.*
@@ -753,13 +754,27 @@ slices:
           - "workflows/review/eval/runner.ts"
       - id: TASK-9-3
         description: |-
-          CI entry point running the smoke set on Khan/actions.
+          Smoke set runs under vitest so the repo's existing `pnpm test` CI job gates it
+          on Khan/actions -- the smoke test IS the CI entry point.
         acceptance: |-
-          CI invokes the smoke set; green on baseline.
+          `pnpm test` runs the smoke set; green on baseline.
         role: tester
         files:
           - "workflows/review/eval/smoke.test.ts"
-          - ".github/workflows/review-smoke.yml"
+      - id: TASK-9-4
+        description: |-
+          Dedicated CI workflow entry point for the smoke set, STAGED under
+          `.github-staging/` because no producer role may push `.github/` directly
+          (#2508). Call it out in the PR body for a human to move to
+          `.github/workflows/review-smoke.yml`. Optional if TASK-9-3's vitest gate
+          suffices; provided so the CI entry point is explicit and does not assume
+          existing CI wiring.
+        acceptance: |-
+          Staged workflow present under `.github-staging/`; PR body notes the human move
+          step.
+        role: coder
+        files:
+          - ".github-staging/review-smoke.yml"
   - id: 10
     name: |-
       Wave-2 recall/precision rebalance
@@ -809,7 +824,7 @@ slices:
           authorization question surfaces.
         acceptance: |-
           Experiment recorded; surfacing observed or a documented negative result.
-        role: tester
+        role: documenter
         files:
           - "workflows/review/eval/experiments/webapp-40536.md"
   - id: 11
