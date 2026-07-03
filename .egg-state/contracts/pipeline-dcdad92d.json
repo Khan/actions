@@ -1351,7 +1351,7 @@
         {
           "id": "task-12-1",
           "description": "R13 per-finding resolution rule on re-review: every actionable finding gets\nfixed / deferred-to-filed-issue / disagreed-with-reason.",
-          "status": "pending",
+          "status": "complete",
           "commit": "9866cb10",
           "checkpoint_id": null,
           "notes": "",
@@ -3120,6 +3120,17 @@
       "old_value": null,
       "new_value": "9866cb10",
       "reason": "Linked commit 9866cb1 to task-12-1",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:43:08.498089Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.11.tasks.0.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-12-1 as complete",
       "checkpoint_id": null
     }
   ],
