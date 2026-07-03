@@ -1373,7 +1373,7 @@
           "id": "task-12-2",
           "description": "R14 config drift guard: document the slice-11 version stamp as the stable\nconsumer-readable sync surface (interface \u00a74.5). Adds NO new mechanism.",
           "status": "pending",
-          "commit": null,
+          "commit": "9866cb10",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Doc points to the stamp; no second surface.",
@@ -3131,6 +3131,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-12-1 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:43:10.543027Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.11.tasks.1.commit",
+      "old_value": null,
+      "new_value": "9866cb10",
+      "reason": "Linked commit 9866cb1 to task-12-2",
       "checkpoint_id": null
     }
   ],
