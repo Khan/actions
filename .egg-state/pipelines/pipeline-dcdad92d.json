@@ -165,6 +165,21 @@
           "error": null,
           "retry_count": 0,
           "conflicts": []
+        },
+        {
+          "role": "tester",
+          "status": "running",
+          "container_id": null,
+          "container_info": null,
+          "slice_id": "slice-5",
+          "started_at": "2026-07-03T17:42:08.254225Z",
+          "completed_at": null,
+          "resolved_model": null,
+          "commit": null,
+          "outputs": {},
+          "error": null,
+          "retry_count": 0,
+          "conflicts": []
         }
       ],
       "review_cycles": 0,
@@ -222,7 +237,7 @@
     }
   ],
   "created_at": "2026-07-03T01:25:07.748859Z",
-  "updated_at": "2026-07-03T17:42:00.760991Z",
+  "updated_at": "2026-07-03T17:42:08.256711Z",
   "contract_synced": true,
   "network_mode": null,
   "mode": "issue",
@@ -235,7 +250,7 @@
   "source_branch": null,
   "source_artifact_prefix": null,
   "run_epoch": "2026-07-03T09:48:24.184735Z",
-  "version": 77,
+  "version": 78,
   "jira_ticket": null,
   "is_epic": false,
   "pipeline_mode": null,
