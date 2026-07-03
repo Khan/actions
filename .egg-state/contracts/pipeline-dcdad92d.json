@@ -575,7 +575,7 @@
           "id": "task-6-4",
           "description": "Kept gates wired to the new roster: pattern-triage (exclusions in guidance\ncomment), claim-validator + refuter panel (batched/parallel), deterministic\ndedup + verdict bookends (verdict from slice 2), thread-reconciler.",
           "status": "pending",
-          "commit": null,
+          "commit": "75e982c3",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Gates preserved; no \u00a73 regression.",
@@ -2345,6 +2345,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-6-3 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T18:55:30.370581Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.5.tasks.3.commit",
+      "old_value": null,
+      "new_value": "75e982c3",
+      "reason": "Linked commit 75e982c to task-6-4",
       "checkpoint_id": null
     }
   ],
