@@ -915,7 +915,7 @@
           "id": "task-8-1",
           "description": "R4 thumbs sweep, pure code (no model): \ud83d\udc4d/\ud83d\udc4e at two grains; polling sweep\ncollects reactions; one follow-up per NEW \ud83d\udc4e (incorrect / unimportant /\nunclear / duplicate + free text); never re-ping. Deployable against both\nconsumer repos (interface guarantee \u00a74.3) -- no consumer commit.",
           "status": "pending",
-          "commit": null,
+          "commit": "33d513e7",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "One follow-up per new \ud83d\udc4e; idempotent (no re-ping); two-grain collection;\nconfig-driven for either repo.",
@@ -2664,6 +2664,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-7-12 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T19:21:41.588331Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.7.tasks.0.commit",
+      "old_value": null,
+      "new_value": "33d513e7",
+      "reason": "Linked commit 33d513e to task-8-1",
       "checkpoint_id": null
     }
   ],
