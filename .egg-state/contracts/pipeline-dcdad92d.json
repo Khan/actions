@@ -979,7 +979,7 @@
         {
           "id": "task-9-1",
           "description": "R5 smoke corpus (~a dozen cases): incident repros, adversarial-injection PRs,\nknown-clean PRs -- SAME dataset format as the slice-11 corpus (tagged subset,\none harness).",
-          "status": "pending",
+          "status": "complete",
           "commit": "9c5f45c9",
           "checkpoint_id": null,
           "notes": "",
@@ -2719,6 +2719,17 @@
       "old_value": null,
       "new_value": "9c5f45c9",
       "reason": "Linked commit 9c5f45c to task-9-1",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T19:39:30.940126Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.8.tasks.0.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-9-1 as complete",
       "checkpoint_id": null
     }
   ],
