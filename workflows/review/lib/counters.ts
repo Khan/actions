@@ -175,7 +175,9 @@ export const computeRunCounters = (
             dropped,
             dropRate: total === 0 ? 0 : dropped / total,
         }))
-        .sort((a, b) => (a.source < b.source ? -1 : a.source > b.source ? 1 : 0));
+        .sort((a, b) =>
+            a.source < b.source ? -1 : a.source > b.source ? 1 : 0,
+        );
 
     const totalJudged = validatorDropBySource.reduce(
         (sum, s) => sum + s.total,
@@ -345,7 +347,9 @@ export const joinValidatorDecisions = (
     return decisions;
 };
 
-const normalizeThumbs = (summary: Record<string, unknown>): ThumbsTally | undefined => {
+const normalizeThumbs = (
+    summary: Record<string, unknown>,
+): ThumbsTally | undefined => {
     const thumbs = summary["thumbs"];
     if (!isRecord(thumbs)) {
         return undefined;
@@ -355,7 +359,9 @@ const normalizeThumbs = (summary: Record<string, unknown>): ThumbsTally | undefi
     return {up, down};
 };
 
-const normalizeCost = (summary: Record<string, unknown>): RunCost | undefined => {
+const normalizeCost = (
+    summary: Record<string, unknown>,
+): RunCost | undefined => {
     const cost = summary["cost"];
     if (!isRecord(cost)) {
         return undefined;
@@ -396,8 +402,8 @@ export const normalizeRunArtifacts = (
         typeof raw.runId === "string" && raw.runId.length > 0
             ? raw.runId
             : typeof summaryRunId === "string" && summaryRunId.length > 0
-              ? summaryRunId
-              : fallbackRunId;
+            ? summaryRunId
+            : fallbackRunId;
 
     const rawVerdict = summary["verdict"];
     const verdict: VerdictEvent = isVerdictEvent(rawVerdict)
@@ -407,7 +413,10 @@ export const normalizeRunArtifacts = (
     const postedCommentCount =
         asFiniteNumber(summary["postedCommentCount"]) ?? 0;
 
-    const validatorDecisions = joinValidatorDecisions(raw.claims, raw.validator);
+    const validatorDecisions = joinValidatorDecisions(
+        raw.claims,
+        raw.validator,
+    );
 
     const thumbs = normalizeThumbs(summary);
     const cost = normalizeCost(summary);

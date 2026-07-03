@@ -329,7 +329,9 @@ export const renderObligationsComment = (
     const items = withObligations.map(
         // `pre_merge_obligation` is model-authored and copied verbatim.
         (finding) =>
-            `- [ ] **${describeAnchor(finding.anchor)}** — ${finding.pre_merge_obligation}`,
+            `- [ ] **${describeAnchor(finding.anchor)}** — ${
+                finding.pre_merge_obligation
+            }`,
     );
 
     return [

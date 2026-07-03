@@ -125,7 +125,11 @@ export const DEFAULT_CONFIG_PATH = "workflows/review/config/do-not-flag.json";
 const CODE_OWNED_RATIONALE =
     "Repeatedly dismissed by authors; candidate suppression for human review.";
 
-const groupKey = (lens: string, path: string, label: string | undefined): string =>
+const groupKey = (
+    lens: string,
+    path: string,
+    label: string | undefined,
+): string =>
     // Label is part of the key so a suppression stays scoped to the label that
     // was dismissed; `\0` cannot appear in the inputs, so it is a safe joiner.
     `${lens}\0${path}\0${label ?? ""}`;
