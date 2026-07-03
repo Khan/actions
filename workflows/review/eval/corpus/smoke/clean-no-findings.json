@@ -1,0 +1,20 @@
+{
+    "id": "clean-no-findings",
+    "tags": ["smoke", "clean"],
+    "category": "clean",
+    "description": "A small, correct refactor with no defects. The reviewer must stay silent and APPROVE with no inline comments — the clean false-block guard.",
+    "changedFiles": [
+        {"path": "src/util/format.ts", "status": "modified"}
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 0,
+        "mustNotPost": []
+    }
+}

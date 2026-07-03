@@ -1,0 +1,39 @@
+{
+    "id": "advisory-first-principles",
+    "tags": ["smoke", "clean", "first-principles"],
+    "category": "clean",
+    "description": "first-principles raises a diverse-perspective concern as a non-blocking thought. It is advisory-only and can never drive REQUEST_CHANGES, so the verdict must be APPROVE even though a reviewer is uneasy about the approach.",
+    "changedFiles": [
+        {"path": "src/feature/new-flow.ts", "status": "added"}
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "first-principles",
+            "finding": {
+                "schema_version": 1,
+                "id": "fp-simpler-approach-1",
+                "lens": "first-principles",
+                "anchor": {"type": "pr"},
+                "severity": "advisory",
+                "confidence": 0.5,
+                "evidence_trace": [
+                    "the PR introduces a new flow that overlaps substantially with the existing `legacy-flow.ts`",
+                    "a thinner adapter over the existing flow may achieve the same outcome",
+                    "raised as a non-blocking perspective, not a defect"
+                ],
+                "producing_hunt": "first-principles:should-this-exist",
+                "model_authored_prose": "Consider whether a thin adapter over the existing flow would meet this need instead of a parallel implementation — non-blocking, just a perspective to weigh."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 1,
+        "mustNotPost": []
+    }
+}

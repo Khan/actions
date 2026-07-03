@@ -1,0 +1,39 @@
+{
+    "id": "incident-auth-bypass",
+    "tags": ["smoke", "incident", "security-auth"],
+    "category": "incident-repro",
+    "description": "Repro of an auth-bypass incident: a permission check is short-circuited so an unauthenticated caller reaches a privileged path. The security-auth lens must catch it and block.",
+    "changedFiles": [
+        {"path": "src/auth/middleware.ts", "status": "modified"}
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "security-auth",
+            "finding": {
+                "schema_version": 1,
+                "id": "sec-auth-bypass-1",
+                "lens": "security-auth",
+                "anchor": {"type": "line", "path": "src/auth/middleware.ts", "line": 57, "side": "RIGHT"},
+                "severity": "blocking",
+                "confidence": 0.95,
+                "evidence_trace": [
+                    "src/auth/middleware.ts:57 changes the guard from `if (!user.isAdmin) return 403` to `if (!user.isAdmin) {}`",
+                    "the empty body means the admin check no longer short-circuits the handler",
+                    "downstream handler mutates billing settings without any remaining authorization gate"
+                ],
+                "producing_hunt": "security-auth:authz-guard",
+                "model_authored_prose": "The admin guard here no longer returns on failure, so a non-admin reaches the privileged handler. Restore the early `return 403` when `!user.isAdmin`."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": ["sec-auth-bypass-1"]
+    }
+}
