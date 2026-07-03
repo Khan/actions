@@ -7,7 +7,7 @@
 
 ## Current state (plan phase)
 
-- **Proposed**: pending/latest — plan-phase guardrails at `.egg-state/agent-outputs/simplifier/plan-simplification-report.md` (enrichment_sha = the proposal commit stamped in the propose message; see BRC transcript for authoritative version/SHA).
+- **Proposed**: v1 accepted, `enrichment_sha: a71070e79777b28e07368ed3e22214fb3e62bc72`, reviewer: reviewer_plan. Artifacts: `plan-simplification-report.md` + required human summary `.egg-state/drafts/pipeline-dcdad92d-plan-human.md` (plan-gate-required path, confirmed; update it on any re-propose and once the task_planner's actual slice list lands).
 - Input assessed: finalized analysis `996fe06d` + HITL `8abb035f`. No plan draft existed at assessment time — guardrails are prospective; my reviewer verdict on the actual plan applies them.
 
 ## summary_of_assessment (claim)
