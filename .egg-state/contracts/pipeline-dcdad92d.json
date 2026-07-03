@@ -1001,7 +1001,7 @@
           "id": "task-9-2",
           "description": "R5 shared runner with a no-post run mode exercising the real review path\nwithout posting to any real PR.",
           "status": "pending",
-          "commit": null,
+          "commit": "9c5f45c9",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Run mode produces findings/verdict with no GitHub write.",
@@ -2730,6 +2730,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-9-1 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T19:39:33.064319Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.8.tasks.1.commit",
+      "old_value": null,
+      "new_value": "9c5f45c9",
+      "reason": "Linked commit 9c5f45c to task-9-2",
       "checkpoint_id": null
     }
   ],
