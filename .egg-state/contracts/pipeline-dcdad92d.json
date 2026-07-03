@@ -1415,7 +1415,7 @@
           "id": "task-12-4",
           "description": "R16 dismissal-learning: dismissed/resolved threads, \ud83d\udc4e-with-replies, and\ncorrect pushback become candidate do-not-flag-here notes proposed as changes\nto a committed config file a human approves -- never auto-adopted.",
           "status": "pending",
-          "commit": null,
+          "commit": "67f9340e",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Candidates written as a proposed diff for human approval; nothing\nauto-applied.",
@@ -3186,6 +3186,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-12-3 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:50:50.053968Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.11.tasks.3.commit",
+      "old_value": null,
+      "new_value": "67f9340e",
+      "reason": "Linked commit 67f9340 to task-12-4",
       "checkpoint_id": null
     }
   ],
