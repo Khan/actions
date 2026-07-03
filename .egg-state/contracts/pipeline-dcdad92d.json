@@ -723,7 +723,7 @@
         {
           "id": "task-7-6",
           "description": "Concurrency & async lens: skill rules + incident-derived tri-state hunts.",
-          "status": "pending",
+          "status": "complete",
           "commit": "956f63a1",
           "checkpoint_id": null,
           "notes": "",
@@ -2521,6 +2521,17 @@
       "old_value": null,
       "new_value": "956f63a1",
       "reason": "Linked commit 956f63a to task-7-6",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T19:16:25.831394Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.6.tasks.5.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-7-6 as complete",
       "checkpoint_id": null
     }
   ],
