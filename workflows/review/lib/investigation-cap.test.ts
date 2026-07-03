@@ -267,6 +267,41 @@ describe("InvestigationCap", () => {
         expect(guard.getUsedTotal()).toBe(1);
     });
 
+    it("check() previews a per-finding refusal at the cap without consuming", () => {
+        const guard = new InvestigationCap(caps);
+        guard.request("f1");
+        guard.request("f1");
+        guard.request("f1"); // f1 now at its per-finding cap of 3
+        const before = guard.snapshot();
+
+        // check() reports the same refusal request() would, but mutates nothing.
+        const preview = expectRefused(guard.check("f1"));
+        expect(preview.reason).toBe("per-finding-cap-exceeded");
+        expect(preview.remainingForFinding).toBe(0);
+
+        expect(guard.snapshot()).toEqual(before);
+        expect(guard.usedForFinding("f1")).toBe(3);
+        expect(guard.getUsedTotal()).toBe(3);
+    });
+
+    it("check() previews a run-total refusal for an untouched finding without consuming", () => {
+        // Exhaust the run-wide pool (5) across findings under their own caps.
+        const guard = new InvestigationCap(caps);
+        for (const id of ["a", "b", "c", "d", "e"]) {
+            expectAllowed(guard.request(id));
+        }
+        const before = guard.snapshot();
+
+        // A brand-new finding is under its own cap, but the run pool is dry.
+        const preview = expectRefused(guard.check("f"));
+        expect(preview.reason).toBe("run-total-cap-exceeded");
+        expect(preview.remainingForRun).toBe(0);
+        expect(preview.remainingForFinding).toBe(3);
+
+        expect(guard.snapshot()).toEqual(before);
+        expect(guard.getUsedTotal()).toBe(5);
+    });
+
     it("builds a guard from a RunBudget whose caps match that budget", () => {
         const budget = computeRunBudget("high", false, {generatedPatterns: []});
         const guard = InvestigationCap.fromRunBudget(budget);
