@@ -961,3 +961,10 @@ slices:
         files:
           - "workflows/review/lib/render-comment.ts"
 ```
+
+
+## HITL Resolution
+
+The following was approved by a human reviewer at the plan phase gate:
+
+Operator approves the plan: 12 slices / 55 tasks, linear review.md spine with the thumbs sweep as the parallel branch; the three named build edges (schema→verdict, router→lenses, smoke→rebalance) verified as real dependencies; security & auth stays a single lens with a HITL question required before any split.

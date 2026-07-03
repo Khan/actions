@@ -1484,6 +1484,32 @@
       "resolved_at": "2026-07-03T03:12:42.937923Z",
       "debounce_until": null,
       "redirect_seed": null
+    },
+    {
+      "id": "decision-2",
+      "question": "[Phase gate: plan] The plan phase has completed. Please review the plan and approve to continue, or provide feedback to request changes.\n\nDecision ledger: 1 decision(s) registered this phase (decision-1), 1 resolved.",
+      "type": "hitl",
+      "phase": null,
+      "options": [
+        {
+          "id": "opt-1",
+          "label": "approve",
+          "description": null,
+          "adds_task": null
+        },
+        {
+          "id": "opt-2",
+          "label": "request changes",
+          "description": null,
+          "adds_task": null
+        }
+      ],
+      "resolved": true,
+      "resolution": "Operator approves the plan: 12 slices / 55 tasks, linear review.md spine with the thumbs sweep as the parallel branch; the three named build edges (schema\u2192verdict, router\u2192lenses, smoke\u2192rebalance) verified as real dependencies; security & auth stays a single lens with a HITL question required before any split.",
+      "resolved_by": "human",
+      "resolved_at": "2026-07-03T03:58:57.939343Z",
+      "debounce_until": null,
+      "redirect_seed": null
     }
   ],
   "workflow_owner": null,
