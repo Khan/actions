@@ -850,7 +850,7 @@
           "id": "task-7-12",
           "description": "Remove the standalone skill-auditor dispatch once its checks fold into the\nlenses; ensure no consumer correctness-checks.md content is stranded\n(interface req \u00a74.2).",
           "status": "pending",
-          "commit": null,
+          "commit": "956f63a1",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "skill-auditor folded; correctness-checks.md extension point intact.",
@@ -2642,6 +2642,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-7-11 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T19:16:48.578840Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.6.tasks.11.commit",
+      "old_value": null,
+      "new_value": "956f63a1",
+      "reason": "Linked commit 956f63a to task-7-12",
       "checkpoint_id": null
     }
   ],
