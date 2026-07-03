@@ -1,0 +1,37 @@
+{
+    "id": "clean-scope-drops-stale-nit",
+    "tags": ["clean", "holdout"],
+    "category": "clean",
+    "description": "Known-clean HOLDOUT PR on re-review: the only candidate is a non-blocking nit on an unchanged line from a prior pass. The newly-changed-code scope filter must drop it, so the run approves and posts nothing.",
+    "changedFiles": [
+        {"path": "src/util/dates.ts", "status": "modified"}
+    ],
+    "scope": {
+        "priorReview": true,
+        "inScope": {"src/util/dates.ts": [88, 89, 90]}
+    },
+    "findings": [
+        {
+            "source": "conventions",
+            "finding": {
+                "schema_version": 1,
+                "id": "clean-stale-nit",
+                "lens": "conventions",
+                "anchor": {"type": "line", "path": "src/util/dates.ts", "line": 12, "side": "RIGHT"},
+                "severity": "advisory",
+                "confidence": 0.3,
+                "evidence_trace": [
+                    "src/util/dates.ts:12 uses a ternary where an if/else would read more clearly",
+                    "line 12 is unchanged in this push (in-scope lines are 88-90)"
+                ],
+                "producing_hunt": "conventions:readability-nit",
+                "model_authored_prose": "This ternary is a little dense; an if/else would read more clearly. Optional."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 0,
+        "mustNotPost": ["clean-stale-nit"]
+    }
+}

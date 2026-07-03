@@ -1,0 +1,34 @@
+{
+    "id": "mutation-concurrency-async",
+    "tags": ["synthetic-mutation", "fresh", "concurrency-async"],
+    "category": "synthetic-mutation",
+    "description": "Synthetic mutation mapped to the concurrency-async lens: a check-then-act on a shared counter is no longer inside the lock, introducing a race. The concurrency-async lens must catch it.",
+    "changedFiles": [
+        {"path": "src/services/quota.ts", "status": "modified"}
+    ],
+    "findings": [
+        {
+            "source": "concurrency-async",
+            "finding": {
+                "schema_version": 1,
+                "id": "mutation-concurrency-race",
+                "lens": "concurrency-async",
+                "anchor": {"type": "line", "path": "src/services/quota.ts", "line": 73, "side": "RIGHT"},
+                "severity": "blocking",
+                "confidence": 0.82,
+                "evidence_trace": [
+                    "src/services/quota.ts:73 reads `used` then increments it outside the `await mutex.acquire()` region",
+                    "two concurrent requests can both read the same `used` and both pass the quota check",
+                    "the prior code performed the read+increment inside the held lock"
+                ],
+                "producing_hunt": "concurrency-async:check-then-act",
+                "model_authored_prose": "The quota read-and-increment moved outside the mutex, so two concurrent callers can both pass the check and overshoot the quota. Keep the read+increment inside the held lock."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": ["mutation-concurrency-race"]
+    }
+}
