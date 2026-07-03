@@ -53,8 +53,8 @@ export const NON_BLOCKING_LABELS = [
     "note (non-blocking)",
 ] as const;
 
-export type BlockingLabel = (typeof BLOCKING_LABELS)[number];
-export type NonBlockingLabel = (typeof NON_BLOCKING_LABELS)[number];
+export type BlockingLabel = typeof BLOCKING_LABELS[number];
+export type NonBlockingLabel = typeof NON_BLOCKING_LABELS[number];
 export type ConventionalLabel = BlockingLabel | NonBlockingLabel;
 
 /**
@@ -100,7 +100,9 @@ const BEST_PRACTICE_LENSES: ReadonlySet<Lens> = new Set<Lens>(["conventions"]);
 export const labelForFinding = (finding: Finding): ConventionalLabel => {
     const bestPractice = BEST_PRACTICE_LENSES.has(finding.lens);
     if (finding.severity === "blocking") {
-        return bestPractice ? "issue (blocking, best-practice)" : "issue (blocking)";
+        return bestPractice
+            ? "issue (blocking, best-practice)"
+            : "issue (blocking)";
     }
     return bestPractice
         ? "suggestion (non-blocking, best-practice)"
