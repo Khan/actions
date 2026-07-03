@@ -1184,7 +1184,7 @@
       "id": "slice-11",
       "name": "Full eval suite (four datasets, five metrics, judge, version stamp)",
       "goal": "Build the eval suite that measures what this run shipped: four datasets, five\nmetrics, an Opus-4.8 LLM-judge with human audit, overfitting guards, an\nadversarial hard gate, and the reviewer version stamp that doubles as the single\ndrift-guard surface.",
-      "status": "pending",
+      "status": "in_progress",
       "review_cycles": 0,
       "max_cycles": 3,
       "escalated": false,
@@ -1194,7 +1194,7 @@
           "id": "task-11-1",
           "description": "Four datasets: incident repros; regenerated synthetic mutations mapped to\nlenses; golden set (human-comment + revert/follow-up labels); clean set. Built\nfrom Khan incident history + consumer PR records WITHOUT writing to consumer\nrepos.",
           "status": "pending",
-          "commit": null,
+          "commit": "bd1cbd7d",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Four datasets load via the shared loader.",
@@ -1321,8 +1321,8 @@
         "slice-10"
       ],
       "serialized_chain_order": [],
-      "parent_branch_at_creation": null,
-      "integration_base_sha": null,
+      "parent_branch_at_creation": "egg/pipeline-dcdad92d/slice-10",
+      "integration_base_sha": "0c30b5c7ffd1f8ebfde536729dcea1f50bd22f97",
       "commit": null,
       "pr_number": null,
       "pr_url": null,
@@ -2928,6 +2928,17 @@
       "old_value": "4854796d",
       "new_value": "131a17f3",
       "reason": "Linked commit 131a17f to task-10-4",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:19:13.511587Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.10.tasks.0.commit",
+      "old_value": null,
+      "new_value": "bd1cbd7d",
+      "reason": "Linked commit bd1cbd7 to task-11-1",
       "checkpoint_id": null
     }
   ],
