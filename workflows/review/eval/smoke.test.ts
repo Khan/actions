@@ -63,7 +63,9 @@ describe("smoke corpus (task-9-1) loads via the shared loader", () => {
     });
 
     it("covers the three smoke categories (incident, adversarial, clean)", () => {
-        const categories = new Set(cases.map((corpusCase) => corpusCase.category));
+        const categories = new Set(
+            cases.map((corpusCase) => corpusCase.category),
+        );
         expect(categories.has("incident-repro")).toBe(true);
         expect(categories.has("adversarial-injection")).toBe(true);
         expect(categories.has("clean")).toBe(true);

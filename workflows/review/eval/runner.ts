@@ -39,7 +39,11 @@ import {
     type VerdictEvent,
 } from "../lib/render-comment";
 import {route, type RoutingResult, type RouterConfig} from "../lib/router";
-import {computeVerdict, type DimensionReport, type Verdict} from "../lib/verdict";
+import {
+    computeVerdict,
+    type DimensionReport,
+    type Verdict,
+} from "../lib/verdict";
 import {
     loadSmokeCorpus,
     type CaseDimensions,
@@ -207,10 +211,7 @@ export const applyScopeFilter = (
 /* Skipped-dimension notes                                                    */
 /* -------------------------------------------------------------------------- */
 
-const SKIPPED_DIMENSION_META: Record<
-    keyof CaseDimensions,
-    SkippedDimension
-> = {
+const SKIPPED_DIMENSION_META: Record<keyof CaseDimensions, SkippedDimension> = {
     correctness: {dimension: "correctness", subAgent: "correctness-reviewer"},
     skillSeverity: {dimension: "skill/severity", subAgent: "specialist lenses"},
     patternTriage: {dimension: "pattern triage", subAgent: "pattern-triage"},
@@ -266,10 +267,8 @@ export const runCase = (
     const allCandidates = recorded.map(toCandidate);
 
     // 3. Scope filter to newly-changed code.
-    const {posted: postedCandidates, dropped: droppedByScope} = applyScopeFilter(
-        allCandidates,
-        corpusCase.scope,
-    );
+    const {posted: postedCandidates, dropped: droppedByScope} =
+        applyScopeFilter(allCandidates, corpusCase.scope);
 
     // 4. Mechanical verdict from the posted labels + dimension gate + conflicts.
     const postedLabels = postedCandidates.map((c) => c.label);

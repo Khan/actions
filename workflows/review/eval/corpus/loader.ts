@@ -53,7 +53,7 @@ export const CASE_CATEGORIES = [
     "synthetic-mutation",
 ] as const;
 
-export type CaseCategory = (typeof CASE_CATEGORIES)[number];
+export type CaseCategory = typeof CASE_CATEGORIES[number];
 
 /**
  * A single recorded sub-agent finding, as it appears in a case file. `source` is
@@ -225,9 +225,14 @@ const parseChangedFiles = (raw: unknown, errors: string[]): ChangedFile[] => {
             errors.push(`changedFiles[${i}].path: required non-empty string`);
         }
         const status = entry["status"];
-        if (!isNonEmptyString(status) || !FILE_STATUSES.includes(status as FileStatus)) {
+        if (
+            !isNonEmptyString(status) ||
+            !FILE_STATUSES.includes(status as FileStatus)
+        ) {
             errors.push(
-                `changedFiles[${i}].status: must be one of ${FILE_STATUSES.join(", ")}`,
+                `changedFiles[${i}].status: must be one of ${FILE_STATUSES.join(
+                    ", ",
+                )}`,
             );
         }
         if (isNonEmptyString(entry["path"]) && isNonEmptyString(status)) {
@@ -246,14 +251,23 @@ const parseDimensions = (raw: unknown, errors: string[]): CaseDimensions => {
         return {...DEFAULT_DIMENSIONS};
     }
     const out: CaseDimensions = {...DEFAULT_DIMENSIONS};
-    for (const key of ["correctness", "skillSeverity", "patternTriage"] as const) {
+    for (const key of [
+        "correctness",
+        "skillSeverity",
+        "patternTriage",
+    ] as const) {
         const value = raw[key];
         if (value === undefined) {
             continue;
         }
-        if (!isNonEmptyString(value) || !DIMENSION_STATUSES.includes(value as DimensionStatus)) {
+        if (
+            !isNonEmptyString(value) ||
+            !DIMENSION_STATUSES.includes(value as DimensionStatus)
+        ) {
             errors.push(
-                `dimensions.${key}: must be one of ${DIMENSION_STATUSES.join(", ")}`,
+                `dimensions.${key}: must be one of ${DIMENSION_STATUSES.join(
+                    ", ",
+                )}`,
             );
             continue;
         }
@@ -311,12 +325,19 @@ const parsePolicyConflicts = (
             return;
         }
         if (!isNonEmptyString(entry["policy"])) {
-            errors.push(`policyConflicts[${i}].policy: required non-empty string`);
+            errors.push(
+                `policyConflicts[${i}].policy: required non-empty string`,
+            );
         }
         if (!isNonEmptyString(entry["detail"])) {
-            errors.push(`policyConflicts[${i}].detail: required non-empty string`);
+            errors.push(
+                `policyConflicts[${i}].detail: required non-empty string`,
+            );
         }
-        if (isNonEmptyString(entry["policy"]) && isNonEmptyString(entry["detail"])) {
+        if (
+            isNonEmptyString(entry["policy"]) &&
+            isNonEmptyString(entry["detail"])
+        ) {
             conflicts.push({policy: entry["policy"], detail: entry["detail"]});
         }
     });
@@ -343,7 +364,9 @@ const parseScope = (raw: unknown, errors: string[]): CaseScope | undefined => {
             for (const [path, lines] of Object.entries(rawInScope)) {
                 if (
                     !Array.isArray(lines) ||
-                    !lines.every((n) => Number.isInteger(n) && (n as number) > 0)
+                    !lines.every(
+                        (n) => Number.isInteger(n) && (n as number) > 0,
+                    )
                 ) {
                     errors.push(
                         `scope.inScope[${path}]: must be an array of positive integers`,
@@ -366,11 +389,18 @@ const parseExpectation = (raw: unknown, errors: string[]): CaseExpectation => {
         return {verdict: "APPROVE"};
     }
     const verdict = raw["verdict"];
-    if (!isNonEmptyString(verdict) || !VERDICT_EVENTS.includes(verdict as VerdictEvent)) {
-        errors.push(`expected.verdict: must be one of ${VERDICT_EVENTS.join(", ")}`);
+    if (
+        !isNonEmptyString(verdict) ||
+        !VERDICT_EVENTS.includes(verdict as VerdictEvent)
+    ) {
+        errors.push(
+            `expected.verdict: must be one of ${VERDICT_EVENTS.join(", ")}`,
+        );
     }
     const expectation: CaseExpectation = {
-        verdict: (isNonEmptyString(verdict) ? verdict : "APPROVE") as VerdictEvent,
+        verdict: (isNonEmptyString(verdict)
+            ? verdict
+            : "APPROVE") as VerdictEvent,
     };
 
     const strArray = (key: "mustCatch" | "mustNotPost"): void => {
@@ -379,7 +409,9 @@ const parseExpectation = (raw: unknown, errors: string[]): CaseExpectation => {
             return;
         }
         if (!Array.isArray(value) || !value.every(isNonEmptyString)) {
-            errors.push(`expected.${key}: must be an array of non-empty strings`);
+            errors.push(
+                `expected.${key}: must be an array of non-empty strings`,
+            );
             return;
         }
         expectation[key] = value as string[];
@@ -390,7 +422,9 @@ const parseExpectation = (raw: unknown, errors: string[]): CaseExpectation => {
     const count = raw["postedCommentCount"];
     if (count !== undefined) {
         if (!Number.isInteger(count) || (count as number) < 0) {
-            errors.push("expected.postedCommentCount: must be a non-negative integer");
+            errors.push(
+                "expected.postedCommentCount: must be a non-negative integer",
+            );
         } else {
             expectation.postedCommentCount = count as number;
         }
@@ -415,12 +449,19 @@ export const parseCase = (raw: unknown, sourcePath: string): CorpusCase => {
     }
 
     const tags = raw["tags"];
-    if (!Array.isArray(tags) || tags.length === 0 || !tags.every(isNonEmptyString)) {
+    if (
+        !Array.isArray(tags) ||
+        tags.length === 0 ||
+        !tags.every(isNonEmptyString)
+    ) {
         errors.push("tags: must be a non-empty array of non-empty strings");
     }
 
     const category = raw["category"];
-    if (!isNonEmptyString(category) || !CASE_CATEGORIES.includes(category as CaseCategory)) {
+    if (
+        !isNonEmptyString(category) ||
+        !CASE_CATEGORIES.includes(category as CaseCategory)
+    ) {
         errors.push(`category: must be one of ${CASE_CATEGORIES.join(", ")}`);
     }
 
@@ -431,7 +472,10 @@ export const parseCase = (raw: unknown, sourcePath: string): CorpusCase => {
     const changedFiles = parseChangedFiles(raw["changedFiles"], errors);
     const dimensions = parseDimensions(raw["dimensions"], errors);
     const findings = parseFindings(raw["findings"], errors);
-    const policyConflicts = parsePolicyConflicts(raw["policyConflicts"], errors);
+    const policyConflicts = parsePolicyConflicts(
+        raw["policyConflicts"],
+        errors,
+    );
     const scope = parseScope(raw["scope"], errors);
     const expected = parseExpectation(raw["expected"], errors);
 
