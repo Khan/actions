@@ -287,7 +287,7 @@ only when there are candidate comments to validate).
 
 **Route first — the deterministic router (no model).** Before dispatching any
 sub-agent, run the **router**. It is deterministic code, not a sub-agent: invoke it with
-`node -r @swc-node/register workflows/review/lib/cli/router.ts`. It reads the diff and
+`node -r @swc-node/register workflows/review/lib/router.ts`. It reads the diff and
 file list staged in Step 1 (`/tmp/gh-aw/review/full.diff`,
 `/tmp/gh-aw/review/files.json`) plus `.gitattributes` and `.github/REVIEWERS` from the
 checkout, and writes `/tmp/gh-aw/review/routing.json`:
