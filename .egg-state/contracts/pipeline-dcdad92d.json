@@ -935,7 +935,7 @@
         {
           "id": "task-8-2",
           "description": "Tests: new-\ud83d\udc4e detection, single follow-up, no re-ping, two-grain collection.",
-          "status": "pending",
+          "status": "complete",
           "commit": "c0843811",
           "checkpoint_id": null,
           "notes": "",
@@ -2697,6 +2697,17 @@
       "old_value": null,
       "new_value": "c0843811",
       "reason": "Linked commit c084381 to task-8-2",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T19:23:51.402397Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.7.tasks.1.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-8-2 as complete",
       "checkpoint_id": null
     }
   ],
