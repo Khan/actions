@@ -22,34 +22,38 @@ This plan decomposes the operator-approved refine analysis (`.egg-state/drafts/p
 
 ## 2. Slice dependency graph
 
+**Why this is (almost) a single chain.** `workflows/review/review.md` is one file touched by eight slices (S1, S3, S4, S5, S6, S7, S10, S12). The implement phase cuts each slice's branch off its dependency parent and integrates independently, so two slices that touch the same file **must** lie on one linear dependency chain or they collide at integration (issue #3046). Two smaller code-file overlaps add the same constraint: `render-comment.ts` (S2, S12) and `eval/smoke.test.ts` (S9, S10). The result is a linear **implementation spine**; only the thumbs sweep (S8) is file-disjoint from everything and branches off S1 in parallel.
+
 ```
-S1 Foundations (schema + submission reliability + context staging)
-   ├── S2 Determinism boundary (verdict + rendering + missing-dimension gate)   [needs S1 schema]
-   ├── S3 Deterministic router (subsumes reviewer-mapper)                        [needs S1 schema]
-   └── S4 Reliability/quality prompt edits (E1,E2,E3,E5,E6,E7 + R3b)            [needs S1 E2 staging]
-S5 Investigation tooling                                                         [needs S1 schema]
-S6 Roster framework: always-on reviewers + model defaults + kept gates          [needs S3, S5, S1]
-S7 Eleven specialist lenses (+ skill-auditor fold-in)                            [needs S6, S3, S5, S1]
-S8 Thumbs feedback sweep (independent code)                                      [needs S1 only]
-S9 Smoke benchmark (tagged subset of eval corpus, no-post mode, CI)             [needs S1, S2]
-S10 Wave-2 recall/precision rebalance (edits 8–13 + refuter panel + R6)         [needs S9 FIRST, S7, S2]
-S11 Full eval suite (4 datasets, 5 metrics, judge, version stamp)               [needs S1, S3, S7, S8, S9]
-S12 P2 items (R13,R14,R15,R16,R17)                                              [needs S2, S11, S8]
+S1  Foundations (finding schema + submission reliability + context staging)   [root]
+ └─ S2  Determinism boundary (verdict + rendering + missing-dimension gate)
+     └─ S3  Deterministic router (subsumes reviewer-mapper)
+         └─ S4  Reliability/quality prompt edits (E1,E3,E5,E6,E7 + R3b)
+             └─ S5  Investigation tooling
+                 └─ S6  Roster framework: always-on reviewers + models + gates
+                     └─ S7  Eleven specialist lenses (+ skill-auditor fold-in)
+                         └─ S9  Smoke benchmark (tagged subset, no-post, CI)
+                             └─ S10 Wave-2 recall/precision rebalance (+R6)
+                                 └─ S11 Full eval suite (datasets, metrics, judge, stamp)
+                                     └─ S12 P2 items (R13,R14,R15,R16,R17)
+S1 └─ S8  Thumbs feedback sweep (file-disjoint parallel branch)
 ```
 
-**The three dependency edges the operator named explicitly (AC2) are honored:**
-1. Router (S3) before the lenses that consume its routing (S7). ✔
-2. Finding schema (S1) before the computed verdict (S2). ✔
-3. Smoke set (S9) lands **before** the wave-2 rebalance (S10) — genuine regression protection while the rebalance ships. ✔
+**Real build dependency vs. serialization order.** The spine's `dependencies` edge is a *superset* of each slice's real build need — the extra edges exist only to serialize `review.md` writers so their branches never fork. Each slice's genuine upstreams are stated in its "Depends on" line in §3. The distinction matters for the architect: a slice needs only its *real* upstreams present to build; the serialization just fixes the integration order.
 
-All other ordering is real build dependency only; independent slices (S3, S4, S5, S8) may proceed in parallel once S1 lands.
+**The three build edges the operator named explicitly (AC2) are honored — all real, not serialization artifacts:**
+1. Finding schema (S1) before the computed verdict (S2). ✔
+2. Router (S3) before the lenses that consume its routing (S7). ✔
+3. Smoke set (S9) **before** the wave-2 rebalance (S10) — genuine regression protection while the rebalance ships. ✔
+
+**Genuinely parallel-capable but serialized by the `review.md` bottleneck:** S3 (router, code), S4 (prompt edits), S5 (investigation) share only `review.md` with each other, so they are chained rather than run in parallel. **Thumbs (S8)** is the one slice that stays parallel. Its logical link to the eval suite (thumbs *labels* feed the golden set / judge calibration, R11) is a **runtime data flow, not a build-file dependency** — S8 ships no code S11 compiles against — so S8 correctly branches off S1 instead of joining the spine.
 
 ---
 
 ## 3. Slices and tasks
 
 ### Slice 1 — Foundations: finding schema, submission reliability, context staging
-*Depends on: nothing (unblocks S2/S3/S4). Requirements: R1, R8(a), prompt edit E2.*
+*Real upstreams: none (root; unblocks the spine and the S8 thumbs branch). Requirements: R1, R8(a), prompt edit E2.*
 
 - **task-1-1 (coder)** — Versioned structured finding schema + validator (R8a). Fields: `id`, `lens`, `anchor` (incl. a PR-level anchor type), `severity`, `confidence`, `evidence_trace`, optional `suggested_patch`, optional `pre_merge_obligation`, `producing_hunt`, `model_authored_prose`. Ship a schema version constant. Files (indicative): new TS module under a review-support lib (architect to site, e.g. `workflows/review/lib/` or a new `actions/review-*`). *AC: schema validates a well-formed finding and rejects a malformed one; version constant exported.*
 - **task-1-2 (documenter)** — R1: standardize review submission on **one** robust call with a real body in the Step 6/8 orchestrator prompt; remove the `--body-stdin`/empty-body retry dance. *AC: exactly one submission path documented; no empty-body fallback remains.*
@@ -57,7 +61,7 @@ All other ordering is real build dependency only; independent slices (S3, S4, S5
 - **task-1-4 (tester)** — Unit tests for the schema/validator (task-1-1).
 
 ### Slice 2 — Determinism boundary: computed verdict, rendering, missing-dimension gate
-*Depends on: S1 (schema). Requirements: R2, R8(b), R8(c).*
+*Real upstreams: S1 (schema). Spine parent: S1. Requirements: R2, R8(b), R8(c).*
 
 - **task-2-1 (coder)** — R8(b) computed verdict in code from the finding set + posted-comment labels, **including a hold-for-human outcome** for policy-named conflicts. Consistent with #194's mechanical model (REQUEST_CHANGES iff a blocking label posts); do not re-implement #194's label mechanism — consume it. Pick and **document** a sensible blocking threshold default (operator HITL: delegated to implementer judgment, tunable later — not a HITL gate). *AC: verdict is a pure function of schema + labels; hold-for-human path exercised by a test.*
 - **task-2-2 (coder/documenter)** — R2 gate: never auto-approve when the correctness pass **or** the skill/severity pass produced no output — **hold for a human** (a lost `pattern-triage` may still note-and-continue). This is the *gate* on top of #194's visibility-only note. *AC: missing core dimension → hold-for-human, not approve-with-note; missing pattern-triage → note-and-continue.*
@@ -65,7 +69,7 @@ All other ordering is real build dependency only; independent slices (S3, S4, S5
 - **task-2-4 (tester)** — Tests: verdict truth table (incl. hold-for-human + missing-dimension), rendering snapshots.
 
 ### Slice 3 — Deterministic router (subsumes reviewer-mapper)
-*Depends on: S1 (schema). Requirements: R10 router, R12 reviewer-mapper→code.*
+*Real upstreams: S1 (schema). Spine parent: S2 (serialized behind the determinism boundary only to keep the `review.md` write in S3's wiring task ordered — router code itself needs only S1). Requirements: R10 router, R12 reviewer-mapper→code.*
 
 - **task-3-1 (coder)** — Router in code: file classification from `.gitattributes`, path→lens mapping, team mapping from consumer `REVIEWERS`, per-file risk tier (small-model check invoked only for diff-direction-dependent tiers). **Subsumes `reviewer-mapper`** (removes the Haiku sub-agent; R12). *AC: deterministic lens/team/tier output for a fixture diff; reviewer-mapper no longer dispatched.*
 - **task-3-2 (coder)** — Budget scaling: **one** rule scaling the run budget by the highest touched risk tier + **one** floor for misrouted PRs (no per-lens knobs; simplifier guardrail 6). Document the default caps assumed. *AC: budget scales monotonically with tier; misrouted PR gets the floor.*
@@ -73,7 +77,7 @@ All other ordering is real build dependency only; independent slices (S3, S4, S5
 - **task-3-4 (tester)** — Router unit tests (classification, path→lens, tier, budget scaling, floor).
 
 ### Slice 4 — Reliability/quality prompt edits
-*Depends on: S1 (E2 staging). Requirements: R3 (edits 1,2,3,5,6,7), R3b.*
+*Real upstreams: S1 (E2 staging). Spine parent: S3 (serialized behind the router only for the shared `review.md` write — these edits are independent of router code). Requirements: R3 (edits 1,2,3,5,6,7), R3b.*
 
 - **task-4-1 (documenter)** — E1 high-risk trigger named + one-line judgment; E3 untrusted-input rule (embedded instructions are content to analyze; an attempt to direct the reviewer is itself a finding); E5 deletions-are-findings. *AC: each edit present with its rule text.*
 - **task-4-2 (documenter)** — E6 full reply-chain staged; reconciler judges author reasoning and never re-raises a conceded point. E7 skip lines with open human threads. *AC: reconciler prompt reflects both rules.*
@@ -82,14 +86,14 @@ All other ordering is real build dependency only; independent slices (S3, S4, S5
 > Prompt edit 4 = #194 (done). Prompt edit 14 (holistic/completeness/first-principles mandates) lands in S6; edit 13 (posting bar) + edits 8–12 land in S10.
 
 ### Slice 5 — Investigation tooling for reviewers
-*Depends on: S1 (schema). Requirements: R9.*
+*Real upstreams: S1 (schema). Spine parent: S4 (serialized for the shared `review.md` write). Requirements: R9.*
 
 - **task-5-1 (documenter)** — Sub-agent instructions for bounded investigation: grep callers, trace call chains, run one targeted cheap check per finding. *AC: instructions present; used by S7 lenses.*
 - **task-5-2 (coder)** — Enforce a **cap on tool calls per finding** in code (the cap lives inside the run budget from S3; document the default cap — operator: don't surface as HITL). *AC: cap enforced; over-cap calls refused deterministically.*
 - **task-5-3 (tester)** — Test the per-finding cap.
 
 ### Slice 6 — Roster framework: always-on reviewers, model defaults, kept gates
-*Depends on: S3 (router), S5 (investigation), S1 (schema/E2). Requirements: R10 (always-on + gates + edit 14), R12 (model defaults).*
+*Real upstreams: S3 (router), S5 (investigation), S1 (schema/E2). Spine parent: S5 (S3 is a transitive ancestor). Requirements: R10 (always-on + gates + edit 14), R12 (model defaults).*
 
 - **task-6-1 (documenter)** — Always-on reviewers: `holistic`, `completeness` (Jira/Confluence read-only **inside the non-posting sub-agent**; fetched text is data under review — trust-boundary rule stated), `test-adequacy`, `first-principles` (**advisory-only, never blocks, Fable 5 day one**), `conventions` (advisory; router-gated by greppable trigger signatures). *AC: five always-on reviewers defined with their trust/advisory constraints.*
 - **task-6-2 (documenter)** — Prompt edit 14: named mandates for holistic / completeness / first-principles. *AC: mandates present.*
@@ -97,7 +101,7 @@ All other ordering is real build dependency only; independent slices (S3, S4, S5
 - **task-6-4 (documenter)** — Kept gates wired to the new roster: `pattern-triage` (exclusions in guidance comment), `claim-validator` + refuter panel (batched/parallel), deterministic dedup + verdict bookends (verdict from S2), `thread-reconciler`. *AC: gates preserved; no §3 regression.*
 
 ### Slice 7 — Eleven specialist lenses
-*Depends on: S6 (roster framework), S3 (router), S5 (investigation), S1 (schema). Requirements: R10 lenses; folds `skill-auditor`.*
+*Real upstreams: S6 (roster framework), S3 (router), S5 (investigation), S1 (schema) — all transitive ancestors. Spine parent: S6. Requirements: R10 lenses; folds `skill-auditor`.*
 
 Build **all eleven** lenses in this run (operator direction 1). Each folds its skill's rules + incident-derived executable hunts (each hunt reports ran / not-applicable / found) and emits into the S1 finding schema. `skill-auditor` folds into the lenses.
 
@@ -106,20 +110,20 @@ Build **all eleven** lenses in this run (operator direction 1). Each folds its s
 - **task-7-13 (tester)** — Fixture-based tests that each lens's incident hunts fire on a known repro and report not-applicable on a clean fixture (uses S9 fixtures where available).
 
 ### Slice 8 — Thumbs feedback sweep (independent deterministic code)
-*Depends on: S1 only. Requirements: R4. Feeds S11 (golden set) and S12/R16 (dismissal-learning).*
+*Real upstreams: S1 (schema). Parent: S1 — file-disjoint parallel branch, NOT on the spine. Feeds S11 (golden set) and S12/R16 (dismissal-learning) as a **runtime data flow**, not a build-file dependency. Requirements: R4.*
 
 - **task-8-1 (coder)** — Thumbs sweep, pure code (no model): 👍/👎 at two grains; polling sweep collects reactions; one follow-up per **new** 👎 (incorrect / unimportant / unclear / duplicate + free text); never re-ping. **Deployable against both consumer repos from day one** as an interface guarantee (§4.3) — no consumer commit. *AC: one follow-up per new 👎, idempotent (never re-pings), works against either repo's config.*
 - **task-8-2 (tester)** — Tests: new-👎 detection, single follow-up, no re-ping, two-grain collection.
 
 ### Slice 9 — Smoke benchmark (tagged subset of the eval corpus)
-*Depends on: S1 (schema), S2 (verdict path). Requirements: R5. MUST precede S10.*
+*Real upstreams: S1 (schema), S2 (verdict path). Spine parent: S7 (S2 is a transitive ancestor; serialized after the lenses so the smoke corpus can exercise the full built review path). Requirements: R5. MUST precede S10.*
 
 - **task-9-1 (coder)** — Smoke corpus (~a dozen cases): incident repros, adversarial-injection PRs, known-clean PRs — authored in the **same dataset format** as the S11 corpus (tagged subset, one harness). *AC: cases load with the shared loader; tags identify the smoke subset.*
 - **task-9-2 (coder)** — Shared runner with a **no-post run mode** that exercises the real review path without posting to any real PR. *AC: run mode produces findings/verdict without any GitHub write.*
 - **task-9-3 (tester)** — CI entry point running the smoke set on this repo (Khan/actions). *AC: `pnpm test`/CI invokes the smoke set; green on baseline.*
 
 ### Slice 10 — Wave-2 recall/precision rebalance
-*Depends on: S9 (smoke set exists FIRST — regression protection), S7 (lenses), S2 (verdict). Requirements: R7, R6, prompt edit 13.*
+*Real upstreams: S9 (smoke set exists FIRST — regression protection), S7 (lenses), S2 (verdict). Spine parent: S9 (S7, S2 transitive ancestors). Requirements: R7, R6, prompt edit 13.*
 
 - **task-10-1 (documenter)** — Edits 8 (coverage first), 9 (blocking requires a concrete failing scenario), 10 (drop only the refuted; downgrade the uncertain), 11 (confirm before you claim), 12 (cite exact lines or quote). *AC: each edit present.*
 - **task-10-2 (documenter)** — Blocking-claim **refuter panel** (batched/parallel) + edit 13 posting bar: ranked posting; inline ≥ medium confidence; low-confidence in one collapsed section; suggested diffs where clear; no padding. *AC: posting bar + refuter panel wired to the S2 verdict/S1 confidence fields.*
@@ -127,7 +131,7 @@ Build **all eleven** lenses in this run (operator direction 1). Each folds its s
 - **task-10-4 (tester)** — R6 causal experiment: rerun the reviewer on webapp PR #40536 with edits 8+10 applied **via the no-post harness** (no consumer write). Success = the OpenAccess authorization question surfaces. *AC: experiment recorded; surfacing observed or a documented negative result.*
 
 ### Slice 11 — Full eval suite
-*Depends on: S1 (schema), S3 (router), S7 (lenses), S8 (thumbs labels), S9 (shared runner). Requirements: R11. Measures what this run built — never a precondition for building it.*
+*Real upstreams: S1 (schema), S3 (router), S7 (lenses), S9 (shared runner) — all transitive ancestors via the spine — plus S8 thumbs **labels** as a runtime data flow (S8 is a parallel branch, not a build ancestor; the suite consumes label data, not S8 code). Spine parent: S10. Requirements: R11. Measures what this run built — never a precondition for building it.*
 
 - **task-11-1 (coder)** — Four datasets: incident repros; regenerated synthetic mutations mapped to lenses; golden set (human-comment + revert/follow-up labels); clean set. Built from Khan incident history + consumer PR records **without writing to consumer repos** (analysis §9). *AC: four datasets load via the shared loader.*
 - **task-11-2 (coder)** — Five metrics: must-catch recall (≈100%), golden precision, clean false-block (≈0), noise, calibration. *AC: metrics computed over a dataset run.*
@@ -137,7 +141,7 @@ Build **all eleven** lenses in this run (operator direction 1). Each folds its s
 - **task-11-6 (tester)** — Suite self-tests + wire smoke subset (S9) as the CI gate; full suite as scheduled (not per-PR). *AC: CI runs smoke; full suite invocable on schedule.*
 
 ### Slice 12 — P2 items
-*Depends on: S2 (verdict/schema), S11 (version stamp, judge), S8 (thumbs). Requirements: R13, R14, R15, R16, R17.*
+*Real upstreams: S2 (verdict/schema; shares `render-comment.ts`), S11 (version stamp, judge) — transitive ancestors — plus S8 thumbs data (runtime, for R16 dismissal-learning). Spine parent: S11. Requirements: R13, R14, R15, R16, R17.*
 
 - **task-12-1 (documenter)** — R13 per-finding resolution rule on re-review: every actionable finding gets fixed / deferred-to-filed-issue / disagreed-with-reason. *AC: rule present.*
 - **task-12-2 (documenter)** — R14 config drift guard: **document** the S11 version stamp as the stable consumer-readable surface for sync checks (interface §4.5). **Adds no new mechanism.** *AC: doc points to the stamp; no second surface.*
@@ -178,7 +182,7 @@ No HITL decision is registered at plan time — no build choice in this decompos
 4. **All 11 specialist lenses are build tasks** — S7 task-7-1…7-11. ✔
 5. **Model launch defaults are build tasks; Fable arms only post-suite notes** — S6 task-6-3; §5. ✔
 
-> **Slice-DAG note (forest constraint):** the slice DAG must be a forest (each slice ≤1 parent). Multi-upstream slices below carry a single `dependencies` parent plus `serialized_chain_order` recording the full upstream order the orchestrator must respect. Code file paths under `workflows/review/lib/` are **indicative**; the architect finalizes the exact code-siting and the gh-aw single-session invocation mechanism (§1 architect dependency).
+> **Slice-DAG note (forest + no-overlap constraint, #3046):** the slice DAG must be a forest (each slice ≤1 parent) AND any two slices touching the same file must lie on one linear dependency chain. Because `workflows/review/review.md` is touched by eight slices, the plan is a single linear **spine** (S1→S2→S3→S4→S5→S6→S7→S9→S10→S11→S12) with S8 (thumbs, file-disjoint) branching off S1. Each slice's `dependencies` names its spine parent; its genuine build upstreams are in the §3 "Real upstreams" line and are always transitive ancestors, so every slice has what it needs to build. Code file paths under `workflows/review/lib/` and `workflows/review/eval/` are **indicative**; the architect finalizes exact code-siting and the gh-aw single-session invocation mechanism (§1 architect dependency).
 
 ---
 
@@ -324,7 +328,7 @@ slices:
       Classify changed files, map paths to lenses, map teams from REVIEWERS, assign a
       per-file risk tier, and scale the run budget by tier -- replacing the Haiku
       reviewer-mapper sub-agent with code.
-    dependencies: "slice-1"
+    dependencies: "slice-2"
     exit_criteria: |-
       Router yields deterministic lens/team/tier for a fixture diff; reviewer-mapper is
       no longer dispatched; budget scales by tier with a misrouted-PR floor.
@@ -373,7 +377,7 @@ slices:
       Land the remaining reliability/quality prompt edits: high-risk trigger,
       untrusted-input rule, deletions-are-findings, reply-chain reconciliation,
       skip-open-thread lines, and the flag-a-pre-existing-bug rule.
-    dependencies: "slice-1"
+    dependencies: "slice-3"
     exit_criteria: |-
       Each edit is present in review.md with its rule text; no §3 regression.
     tasks:
@@ -412,7 +416,7 @@ slices:
       Give reviewers bounded investigation: grep callers, trace call chains, run one
       targeted cheap check per finding, with a per-finding tool-call cap enforced in
       code.
-    dependencies: "slice-1"
+    dependencies: "slice-4"
     exit_criteria: |-
       Investigation instructions present and used by the lenses; per-finding cap
       enforced deterministically.
@@ -451,9 +455,6 @@ slices:
       first-principles, conventions) with their trust/advisory constraints, apply the
       model launch defaults + effort table, and wire the kept gates to the new roster.
     dependencies: "slice-5"
-    serialized_chain_order:
-      - "slice-3"
-      - "slice-5"
     exit_criteria: |-
       Five always-on reviewers defined with constraints; every role carries its
       launch-default model + effort; kept gates preserved with no §3 regression.
@@ -662,7 +663,7 @@ slices:
       known-clean PRs) in the shared eval dataset format, run it through a shared
       no-post runner, and wire it as a CI gate on this repo. Must precede the wave-2
       rebalance.
-    dependencies: "slice-2"
+    dependencies: "slice-7"
     exit_criteria: |-
       Smoke cases load via the shared loader; no-post run produces findings/verdict
       with zero GitHub writes; CI runs the smoke set green on baseline.
@@ -703,9 +704,6 @@ slices:
       against the smoke set so recall/precision do not regress while the rebalance
       ships. Includes the webapp #40536 causal experiment via the no-post harness.
     dependencies: "slice-9"
-    serialized_chain_order:
-      - "slice-7"
-      - "slice-9"
     exit_criteria: |-
       Edits present; smoke set green (no must-catch recall regression, no new clean
       false-block); #40536 experiment recorded.
@@ -758,11 +756,7 @@ slices:
       metrics, an Opus-4.8 LLM-judge with human audit, overfitting guards, an
       adversarial hard gate, and the reviewer version stamp that doubles as the single
       drift-guard surface.
-    dependencies: "slice-9"
-    serialized_chain_order:
-      - "slice-7"
-      - "slice-8"
-      - "slice-9"
+    dependencies: "slice-10"
     exit_criteria: |-
       Four datasets load via the shared loader; five metrics computed; judge scores a
       run with an audit sample; version stamp changes on prompt/config change; smoke
@@ -833,9 +827,6 @@ slices:
       documentation reusing the version stamp, live counters, dismissal-learning
       candidates, and the conditional-approval verdict.
     dependencies: "slice-11"
-    serialized_chain_order:
-      - "slice-8"
-      - "slice-11"
     exit_criteria: |-
       Each P2 requirement present; drift guard adds no new mechanism; dismissal
       candidates are human-approved, never auto-adopted.
