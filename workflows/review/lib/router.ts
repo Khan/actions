@@ -744,3 +744,181 @@ export const route = (
         pendingRiskQuestions,
     };
 };
+
+/* -------------------------------------------------------------------------- */
+/* Serialization to the routing.json contract review.md consumes             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * review.md (Step 3) uses a capitalized tier vocabulary in routing.json
+ * ("High|Medium|Low|Trivial"), whereas the pure core uses lowercase tiers
+ * (consistent with the rest of the lib). The casing is bridged here, at the
+ * I/O boundary, so the core stays lowercase and the emitted JSON matches the
+ * consumed contract.
+ */
+export type DisplayTier = "Trivial" | "Low" | "Medium" | "High";
+
+const TIER_TO_DISPLAY: Record<RiskTier, DisplayTier> = {
+    trivial: "Trivial",
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+};
+
+/**
+ * Parse a tier from either the display casing (routing.json / resolved-tiers
+ * input) or the internal lowercase casing. Unknown values fall back to "low".
+ */
+export const tierFromDisplay = (value: string): RiskTier => {
+    switch (value) {
+        case "Trivial":
+        case "trivial":
+            return "trivial";
+        case "Low":
+        case "low":
+            return "low";
+        case "Medium":
+        case "medium":
+            return "medium";
+        case "High":
+        case "high":
+            return "high";
+        default:
+            return "low";
+    }
+};
+
+/**
+ * The exact shape review.md's Step 3 documents and Steps 7/8 consume. `teams`
+ * is nested as `{owners, fallback}` (Step 7 groups by owner; Step 8 maps
+ * reviewers from owners and falls back via the ranked list — exactly the
+ * `owners`/`fallbackTeams` the removed `reviewer-mapper` produced). `perFileTier`
+ * uses the display casing. `pendingRiskQuestions` carries the router's one
+ * bounded question so the orchestrator can run the documented second pass; it
+ * is absent (empty) when the first pass is already final.
+ */
+export type RoutingJson = {
+    lensesToSpawn: Lens[];
+    teams: {
+        owners: Record<string, string[]>;
+        fallback: {team: string; files: number}[];
+    };
+    perFileTier: Record<string, DisplayTier>;
+    runBudget: RunBudget;
+    pendingRiskQuestions: RiskQuestion[];
+};
+
+/**
+ * Adapt a {@link RoutingResult} to the {@link RoutingJson} contract. `owners`
+ * is the per-file team map over the substantive (source) files only — generated
+ * files carry no ownership, mirroring the old `owned-files.json` scope. Pure and
+ * deterministic; exported so the serialization shape is unit-testable.
+ */
+export const toRoutingJson = (result: RoutingResult): RoutingJson => {
+    const owners: Record<string, string[]> = {};
+    for (const file of result.perFile) {
+        if (file.classification === "source") {
+            owners[file.path] = file.teams;
+        }
+    }
+
+    const perFileTier: Record<string, DisplayTier> = {};
+    for (const [path, tier] of Object.entries(result.perFileTier)) {
+        perFileTier[path] = TIER_TO_DISPLAY[tier];
+    }
+
+    return {
+        lensesToSpawn: result.lensesToSpawn,
+        teams: {owners, fallback: result.fallbackTeams},
+        perFileTier,
+        runBudget: result.runBudget,
+        pendingRiskQuestions: result.pendingRiskQuestions,
+    };
+};
+
+/* -------------------------------------------------------------------------- */
+/* CLI entrypoint (Surface A — review.md Step 3 invokes this file directly)   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Staging paths, extending #194's on-disk convention. review.md Step 1 stages
+ * `files.json`; the router reads it, `.gitattributes`, and `.github/REVIEWERS`
+ * (relative to the checkout root, the workflow's cwd), and writes `routing.json`.
+ * The deterministic core does not read `full.diff`: the only diff-content
+ * judgement (direction-dependent tiers) is externalised to the orchestrator's
+ * small-model call, not parsed here (plan §8.6).
+ */
+const REVIEW_DIR = "/tmp/gh-aw/review";
+const FILES_PATH = `${REVIEW_DIR}/files.json`;
+const ROUTING_OUT = `${REVIEW_DIR}/routing.json`;
+/** Optional second-pass input: {path: tier} answers for pending questions. */
+const RESOLVED_TIERS_PATH = `${REVIEW_DIR}/resolved-tiers.json`;
+const GITATTRIBUTES_PATH = ".gitattributes";
+const REVIEWERS_PATH = ".github/REVIEWERS";
+
+type FsLike = {
+    readFileSync: (p: string, enc: "utf8") => string;
+    writeFileSync: (p: string, data: string) => void;
+    existsSync: (p: string) => boolean;
+    mkdirSync: (p: string, opts: {recursive: boolean}) => void;
+};
+
+/**
+ * Read + parse the staged inputs, run {@link route}, and write `routing.json` in
+ * the {@link RoutingJson} shape. Factored out (fs injected) so it is testable
+ * without touching the real filesystem. Returns the written JSON.
+ */
+/** Accept either a bare `[{path,status}]` array or a `{files:[…]}` wrapper. */
+const extractFileList = (raw: unknown): unknown[] => {
+    if (Array.isArray(raw)) {
+        return raw;
+    }
+    const wrapped = (raw as {files?: unknown}).files;
+    return Array.isArray(wrapped) ? wrapped : [];
+};
+
+export const runCli = (fs: FsLike): RoutingJson => {
+    const readText = (p: string): string => fs.readFileSync(p, "utf8");
+
+    const files: ChangedFile[] = extractFileList(
+        JSON.parse(readText(FILES_PATH)),
+    ).map((entry) => {
+        const rec = entry as {path?: unknown; status?: unknown};
+        return {
+            path: String(rec.path ?? ""),
+            status: (rec.status ?? "modified") as FileStatus,
+        };
+    });
+
+    const generatedPatterns = fs.existsSync(GITATTRIBUTES_PATH)
+        ? parseGitattributesGenerated(readText(GITATTRIBUTES_PATH))
+        : [];
+    const reviewerRules = fs.existsSync(REVIEWERS_PATH)
+        ? parseReviewers(readText(REVIEWERS_PATH))
+        : [];
+
+    const input: RouteInput = {files};
+    if (fs.existsSync(RESOLVED_TIERS_PATH)) {
+        const raw: Record<string, unknown> = JSON.parse(
+            readText(RESOLVED_TIERS_PATH),
+        );
+        const resolvedTiers: Record<string, RiskTier> = {};
+        for (const [path, value] of Object.entries(raw)) {
+            resolvedTiers[path] = tierFromDisplay(String(value));
+        }
+        input.resolvedTiers = resolvedTiers;
+    }
+
+    const result = route(input, {generatedPatterns, reviewerRules});
+    const json = toRoutingJson(result);
+
+    fs.mkdirSync(REVIEW_DIR, {recursive: true});
+    fs.writeFileSync(ROUTING_OUT, JSON.stringify(json, null, 2));
+    return json;
+};
+
+// Run only when executed directly (review.md Step 3), never on import (tests).
+if (typeof require !== "undefined" && require.main === module) {
+    const fs = require("node:fs") as FsLike;
+    runCli(fs);
+}
