@@ -53,7 +53,9 @@ describe("computeVerdict — APPROVE", () => {
 
     it("treats an unrecognised label as non-blocking (never blocks alone)", () => {
         const verdict = computeVerdict(
-            makeInput({postedLabels: ["praise (non-blocking)", "totally-made-up"]}),
+            makeInput({
+                postedLabels: ["praise (non-blocking)", "totally-made-up"],
+            }),
         );
         expect(verdict.event).toBe("APPROVE");
         expect(verdict.reasons).toEqual([]);
@@ -92,7 +94,9 @@ describe("computeVerdict — REQUEST_CHANGES", () => {
 describe("computeVerdict — HOLD_FOR_HUMAN (R2 core-dimension gate)", () => {
     it("holds when correctness is unavailable", () => {
         const verdict = computeVerdict(
-            makeInput({dimensions: {...allAssessed, correctness: "unavailable"}}),
+            makeInput({
+                dimensions: {...allAssessed, correctness: "unavailable"},
+            }),
         );
         expect(verdict.event).toBe("HOLD_FOR_HUMAN");
         expect(verdict.reasons).toContainEqual({
@@ -103,7 +107,9 @@ describe("computeVerdict — HOLD_FOR_HUMAN (R2 core-dimension gate)", () => {
 
     it("holds when the skill/severity pass is unavailable", () => {
         const verdict = computeVerdict(
-            makeInput({dimensions: {...allAssessed, skillSeverity: "unavailable"}}),
+            makeInput({
+                dimensions: {...allAssessed, skillSeverity: "unavailable"},
+            }),
         );
         expect(verdict.event).toBe("HOLD_FOR_HUMAN");
         expect(verdict.reasons).toContainEqual({
@@ -152,7 +158,9 @@ describe("computeVerdict — HOLD_FOR_HUMAN (R2 core-dimension gate)", () => {
 describe("computeVerdict — pattern-triage is note-and-continue (never holds)", () => {
     it("approves (does not hold) when only pattern-triage is unavailable", () => {
         const verdict = computeVerdict(
-            makeInput({dimensions: {...allAssessed, patternTriage: "unavailable"}}),
+            makeInput({
+                dimensions: {...allAssessed, patternTriage: "unavailable"},
+            }),
         );
         expect(verdict.event).toBe("APPROVE");
         expect(verdict.reasons).toEqual([{code: "pattern-triage-unavailable"}]);
@@ -183,7 +191,9 @@ describe("computeVerdict — policy-named conflicts", () => {
     };
 
     it("holds on a policy conflict and passes detail through verbatim", () => {
-        const verdict = computeVerdict(makeInput({policyConflicts: [conflict]}));
+        const verdict = computeVerdict(
+            makeInput({policyConflicts: [conflict]}),
+        );
         expect(verdict.event).toBe("HOLD_FOR_HUMAN");
         expect(verdict.reasons).toEqual([
             {
@@ -239,7 +249,10 @@ describe("computeVerdict — blocking threshold", () => {
         "clamps a threshold below 1 (%p) back to 1",
         (threshold) => {
             const verdict = computeVerdict(
-                makeInput({postedLabels: [BLOCKING], blockingThreshold: threshold}),
+                makeInput({
+                    postedLabels: [BLOCKING],
+                    blockingThreshold: threshold,
+                }),
             );
             expect(verdict.event).toBe("REQUEST_CHANGES");
         },

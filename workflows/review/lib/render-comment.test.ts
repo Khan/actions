@@ -31,7 +31,8 @@ const makeFinding = (overrides: Record<string, unknown> = {}): Finding =>
         confidence: 0.9,
         evidence_trace: ["src/app.ts:42 flows unsanitized input into exec()"],
         producing_hunt: "security-auth/command-injection",
-        model_authored_prose: "User input flows unsanitized into a shell command.",
+        model_authored_prose:
+            "User input flows unsanitized into a shell command.",
         ...overrides,
     });
 
@@ -65,13 +66,17 @@ describe("labelForFinding — deterministic from severity + lens", () => {
 
     it("advisory + correctness lens -> suggestion (non-blocking)", () => {
         expect(
-            labelForFinding(makeFinding({severity: "advisory", lens: "correctness"})),
+            labelForFinding(
+                makeFinding({severity: "advisory", lens: "correctness"}),
+            ),
         ).toBe("suggestion (non-blocking)");
     });
 
     it("advisory + conventions lens -> suggestion (non-blocking, best-practice)", () => {
         expect(
-            labelForFinding(makeFinding({severity: "advisory", lens: "conventions"})),
+            labelForFinding(
+                makeFinding({severity: "advisory", lens: "conventions"}),
+            ),
         ).toBe("suggestion (non-blocking, best-practice)");
     });
 
@@ -83,14 +88,18 @@ describe("labelForFinding — deterministic from severity + lens", () => {
             "data-migrations",
         ];
         for (const lens of specialist) {
-            expect(labelForFinding(makeFinding({lens}))).toBe("issue (blocking)");
+            expect(labelForFinding(makeFinding({lens}))).toBe(
+                "issue (blocking)",
+            );
         }
     });
 });
 
 describe("renderComment — templated Conventional Comment", () => {
     it("renders a blocking finding with no suggested patch", () => {
-        expect(renderComment(makeFinding())).toMatchInlineSnapshot(`"**issue (blocking):** User input flows unsanitized into a shell command."`);
+        expect(renderComment(makeFinding())).toMatchInlineSnapshot(
+            `"**issue (blocking):** User input flows unsanitized into a shell command."`,
+        );
     });
 
     it("appends a verbatim ```suggestion block when a patch is present", () => {
@@ -112,7 +121,9 @@ describe("renderComment — templated Conventional Comment", () => {
     it("copies model-authored prose through verbatim (no synthesis/paraphrase)", () => {
         const prose =
             "This exact sentence — with an em-dash, `code`, and\na newline — must survive untouched.";
-        const rendered = renderComment(makeFinding({model_authored_prose: prose}));
+        const rendered = renderComment(
+            makeFinding({model_authored_prose: prose}),
+        );
         expect(rendered).toContain(prose);
     });
 
@@ -125,14 +136,22 @@ describe("renderComment — templated Conventional Comment", () => {
 
 describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => {
     const body = (overrides: Partial<ReviewBodyInput>): string =>
-        renderReviewBody({event: "APPROVE", hasInlineComments: false, ...overrides});
+        renderReviewBody({
+            event: "APPROVE",
+            hasInlineComments: false,
+            ...overrides,
+        });
 
     it("APPROVE without inline comments", () => {
-        expect(body({event: "APPROVE", hasInlineComments: false})).toMatchInlineSnapshot(`"Approved — no blocking issues found."`);
+        expect(
+            body({event: "APPROVE", hasInlineComments: false}),
+        ).toMatchInlineSnapshot(`"Approved — no blocking issues found."`);
     });
 
     it("APPROVE with inline comments", () => {
-        expect(body({event: "APPROVE", hasInlineComments: true})).toMatchInlineSnapshot(`"Approved — see inline comments."`);
+        expect(
+            body({event: "APPROVE", hasInlineComments: true}),
+        ).toMatchInlineSnapshot(`"Approved — see inline comments."`);
     });
 
     it("REQUEST_CHANGES", () => {
@@ -144,13 +163,17 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
     it("HOLD_FOR_HUMAN without inline comments", () => {
         expect(
             body({event: "HOLD_FOR_HUMAN", hasInlineComments: false}),
-        ).toMatchInlineSnapshot(`"Holding for human review — automated review could not complete this run."`);
+        ).toMatchInlineSnapshot(
+            `"Holding for human review — automated review could not complete this run."`,
+        );
     });
 
     it("HOLD_FOR_HUMAN with inline comments", () => {
         expect(
             body({event: "HOLD_FOR_HUMAN", hasInlineComments: true}),
-        ).toMatchInlineSnapshot(`"Holding for human review — see inline comments."`);
+        ).toMatchInlineSnapshot(
+            `"Holding for human review — see inline comments."`,
+        );
     });
 
     it("every branch returns a non-empty first line (safe-output contract)", () => {
@@ -161,7 +184,10 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
         ];
         for (const event of events) {
             for (const hasInlineComments of [true, false]) {
-                const first = renderReviewBody({event, hasInlineComments}).split("\n")[0];
+                const first = renderReviewBody({
+                    event,
+                    hasInlineComments,
+                }).split("\n")[0];
                 expect(first.length).toBeGreaterThan(0);
             }
         }
@@ -173,8 +199,14 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
                 event: "APPROVE",
                 hasInlineComments: false,
                 skippedDimensions: [
-                    {dimension: "correctness", subAgent: "correctness-reviewer"},
-                    {dimension: "claim validation", subAgent: "claim-validator"},
+                    {
+                        dimension: "correctness",
+                        subAgent: "correctness-reviewer",
+                    },
+                    {
+                        dimension: "claim validation",
+                        subAgent: "claim-validator",
+                    },
                 ],
             }),
         ).toMatchInlineSnapshot(`
