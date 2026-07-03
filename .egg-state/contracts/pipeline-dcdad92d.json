@@ -1128,7 +1128,7 @@
         {
           "id": "task-10-3",
           "description": "Verify the rebalance against the slice-9 smoke set (no recall regression on\nmust-catch; no new false-block on clean).",
-          "status": "pending",
+          "status": "complete",
           "commit": "a9209682",
           "checkpoint_id": null,
           "notes": "",
@@ -2807,6 +2807,17 @@
       "old_value": null,
       "new_value": "a9209682",
       "reason": "Linked commit a920968 to task-10-3",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:01:15.926063Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.9.tasks.2.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-10-3 as complete",
       "checkpoint_id": null
     }
   ],
