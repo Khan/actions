@@ -163,3 +163,30 @@ on release a `review-v<major>.<minor>.<patch>` tag (and a moving `review-v<major
 tag) is cut **at the real commit tree** (not the rewritten-subtree bare tags that
 the `actions/` packages use), so the nested `workflows/review/review.md@<ref>` path
 resolves for `gh aw add`.
+
+### Config drift guard (the version stamp)
+
+A consumer that pins the shared reviewer (via `gh aw add …@review-v0` or a committed
+config snapshot) needs a way to tell when the reviewer's *behaviour* has drifted from
+the version it last synced. That signal is a **single surface**: the reviewer **version
+stamp**, an HTML marker the workflow already renders into its posted review comment
+(reusing the `pr-reviewer:` marker namespace `#194` established):
+
+```
+<!-- pr-reviewer:version stamp=<hex> format=<n> schema=<n> -->
+```
+
+`stamp` is a SHA-256 over exactly the behaviour-defining inputs — the sub-agent prompts,
+the model/effort table, the lens roster, the router rules, the tunable thresholds, and
+the finding-schema version — so it changes when, and only when, the reviewer's behaviour
+changes; unrelated churn (a test fixture, a docs edit) does **not** move it. A consumer's
+sync check parses `stamp=` off the latest posted review (or off a committed skill
+snapshot) and compares it against the value it last synced; a mismatch means "re-sync."
+`format` lets an old consumer tell "I don't understand this stamp shape" apart from "the
+reviewer changed," and `schema` is the finding-schema version the run was on.
+
+This is the **only** drift surface. The drift guard reads the existing stamp — it adds no
+second version file and no separate config-hash mechanism, so "the reviewer changed" has
+exactly one home. The stamp is produced by `lib/version-stamp.ts`; the eval suite labels
+each run with the same stamp so a metrics regression can be attributed to a specific
+reviewer version.
