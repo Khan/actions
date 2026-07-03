@@ -1087,7 +1087,7 @@
           "id": "task-10-1",
           "description": "Edits 8 (coverage first), 9 (blocking requires a concrete failing scenario),\n10 (drop only the refuted; downgrade the uncertain), 11 (confirm before you\nclaim), 12 (cite exact lines or quote).",
           "status": "complete",
-          "commit": "4854796d",
+          "commit": "131a17f3",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Each edit present.",
@@ -2895,6 +2895,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-10-4 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:05:01.174954Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.9.tasks.0.commit",
+      "old_value": "4854796d",
+      "new_value": "131a17f3",
+      "reason": "Linked commit 131a17f to task-10-1",
       "checkpoint_id": null
     }
   ],
