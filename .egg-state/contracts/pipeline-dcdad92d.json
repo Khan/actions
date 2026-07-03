@@ -416,7 +416,7 @@
       "id": "slice-5",
       "name": "Investigation tooling for reviewers",
       "goal": "Give reviewers bounded investigation: grep callers, trace call chains, run one\ntargeted cheap check per finding, with a per-finding tool-call cap enforced in\ncode.",
-      "status": "pending",
+      "status": "in_progress",
       "review_cycles": 0,
       "max_cycles": 3,
       "escalated": false,
@@ -425,8 +425,8 @@
         {
           "id": "task-5-1",
           "description": "R9 sub-agent instructions for bounded investigation: grep callers, trace call\nchains, run one targeted cheap check per finding.",
-          "status": "pending",
-          "commit": null,
+          "status": "complete",
+          "commit": "c7a2a5f1",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Instructions present; consumed by slice-7 lenses.",
@@ -446,8 +446,8 @@
         {
           "id": "task-5-2",
           "description": "R9 enforce a cap on tool calls per finding in code, living inside the run\nbudget from slice 3. Document the assumed default cap (not a HITL surface).",
-          "status": "pending",
-          "commit": null,
+          "status": "complete",
+          "commit": "01b44d09",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Cap enforced; over-cap calls refused deterministically.",
@@ -467,8 +467,8 @@
         {
           "id": "task-5-3",
           "description": "Test the per-finding tool-call cap.",
-          "status": "pending",
-          "commit": null,
+          "status": "complete",
+          "commit": "8e51405f",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Cap test green.",
@@ -490,8 +490,8 @@
         "slice-4"
       ],
       "serialized_chain_order": [],
-      "parent_branch_at_creation": null,
-      "integration_base_sha": null,
+      "parent_branch_at_creation": "egg/pipeline-dcdad92d/slice-4",
+      "integration_base_sha": "f6725ede3a7ad81ed0274e6903fff4368fcc47de",
       "commit": null,
       "pr_number": null,
       "pr_url": null,
@@ -1600,10 +1600,10 @@
           "adds_task": null
         }
       ],
-      "resolved": false,
-      "resolution": null,
-      "resolved_by": null,
-      "resolved_at": null,
+      "resolved": true,
+      "resolution": "Reclassify slice-5 as IN_PROGRESS and let BRC finish \u2014 do not mark complete, do not restart, do not cancel. (Operator answer given at ~10:05, submission delayed by operator-side error \u2014 apologies for the gap.) Code and tests are committed (task-5-1 @ c7a2a5f1, task-5-2 @ 01b44d09, task-5-3 @ ca916300) and content-verified by all reviewers; the PENDING-with-commits combination is bookkeeping skew, not corruption.",
+      "resolved_by": "human",
+      "resolved_at": "2026-07-03T17:09:57.034024Z",
       "debounce_until": null,
       "redirect_seed": null
     }
@@ -2136,6 +2136,149 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-4-3 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T09:50:12.669697Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.4.tasks.2.commit",
+      "old_value": null,
+      "new_value": "ca916300",
+      "reason": "Linked commit ca91630 to task-5-3",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T09:50:12.690878Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.4.tasks.2.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-5-3 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T09:52:05.097532Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.4.tasks.1.commit",
+      "old_value": null,
+      "new_value": "01b44d09",
+      "reason": "Linked commit 01b44d0 to task-5-2",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T09:52:05.649777Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.4.tasks.1.commit",
+      "old_value": "01b44d09",
+      "new_value": "01b44d09",
+      "reason": "Linked commit 01b44d0 to task-5-2",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T09:52:05.676902Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.4.tasks.1.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-5-2 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T09:54:04.600149Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.4.tasks.1.commit",
+      "old_value": "01b44d09",
+      "new_value": "01b44d09",
+      "reason": "Linked commit 01b44d0 to task-5-2",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T09:54:04.623481Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.4.tasks.1.status",
+      "old_value": "complete",
+      "new_value": "complete",
+      "reason": "Marked task-5-2 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T10:31:12.025359Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.4.tasks.0.commit",
+      "old_value": null,
+      "new_value": "c7a2a5f1",
+      "reason": "Linked commit c7a2a5f to task-5-1",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T10:31:12.047893Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.4.tasks.0.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-5-1 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T11:33:08.289609Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.4.tasks.2.commit",
+      "old_value": "ca916300",
+      "new_value": "ca916300",
+      "reason": "Linked commit ca91630 to task-5-3",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T11:33:08.314330Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.4.tasks.2.status",
+      "old_value": "complete",
+      "new_value": "complete",
+      "reason": "Marked task-5-3 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T16:36:14.268045Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.4.tasks.2.commit",
+      "old_value": "ca916300",
+      "new_value": "8e51405f",
+      "reason": "Linked commit 8e51405 to task-5-3",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T16:36:14.315404Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.4.tasks.2.status",
+      "old_value": "complete",
+      "new_value": "complete",
+      "reason": "Marked task-5-3 as complete",
       "checkpoint_id": null
     }
   ],
