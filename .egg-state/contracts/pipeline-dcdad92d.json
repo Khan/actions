@@ -1342,7 +1342,7 @@
       "id": "slice-12",
       "name": "P2 items (R13, R14, R15, R16, R17)",
       "goal": "Land the P2 follow-ups: per-finding resolution rule, the drift-guard\ndocumentation reusing the version stamp, live counters, dismissal-learning\ncandidates, and the conditional-approval verdict.",
-      "status": "pending",
+      "status": "in_progress",
       "review_cycles": 0,
       "max_cycles": 3,
       "escalated": false,
@@ -1352,7 +1352,7 @@
           "id": "task-12-1",
           "description": "R13 per-finding resolution rule on re-review: every actionable finding gets\nfixed / deferred-to-filed-issue / disagreed-with-reason.",
           "status": "pending",
-          "commit": null,
+          "commit": "9866cb10",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Rule present.",
@@ -1458,8 +1458,8 @@
         "slice-11"
       ],
       "serialized_chain_order": [],
-      "parent_branch_at_creation": null,
-      "integration_base_sha": null,
+      "parent_branch_at_creation": "egg/pipeline-dcdad92d/slice-11",
+      "integration_base_sha": "334157c4d3b77f2aba85c7cc1e8e3184dda35c88",
       "commit": null,
       "pr_number": null,
       "pr_url": null,
@@ -3109,6 +3109,17 @@
       "old_value": "5873f068",
       "new_value": "4636e6f2",
       "reason": "Linked commit 4636e6f to task-11-6",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:43:06.626720Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.11.tasks.0.commit",
+      "old_value": null,
+      "new_value": "9866cb10",
+      "reason": "Linked commit 9866cb1 to task-12-1",
       "checkpoint_id": null
     }
   ],
