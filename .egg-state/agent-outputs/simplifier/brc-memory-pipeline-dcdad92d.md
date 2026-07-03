@@ -1,26 +1,31 @@
 # Simplifier durable BRC memory — pipeline-dcdad92d
 
-## Current state (refine phase)
+## Phase history
 
-- **Proposed**: v1, `enrichment_sha: 157b56b22aed205fcd0fb74e08e79123c11ad855`
-- Artifact: `.egg-state/agent-outputs/simplifier/simplification-report.md`
-- Assessed input: seeded analysis draft `.egg-state/drafts/pipeline-dcdad92d-analysis.md` (prior operator-approved analysis + revision header), repo `main` = `54f804c9`.
+- **refine (complete, operator-approved)**: proposed v1 (`4ac141b4`), report + required human summary at `.egg-state/drafts/pipeline-dcdad92d-analysis-human.md` (NOTE: the propose gate REQUIRES that exact human-summary path; expect a plan analog on plan proposes). All six refine findings (S1–S6) were folded into the finalized analysis (`996fe06d`). HITL resolutions persisted (`8abb035f`): no graduation-bar work; blocking threshold = implementer default, documented, no HITL; consume-not-vendor; ownership determined (at-risk framing removed); budget caps = reasonable documented defaults, never surfaced as blockers.
+- **plan (current)**: producing guardrails; see below.
 
-## summary_of_assessment (claim, SHA-stamped above)
+## Current state (plan phase)
 
-Seeded analysis is lean and directive-compliant; body already incorporates operator directions 1–4. No cuttable scope (directives mandate all 11 lenses, launch-default models, no eval-gated construction); no §3/#194 re-implementation found. Findings, all non-blocking:
+- **Proposed**: pending/latest — plan-phase guardrails at `.egg-state/agent-outputs/simplifier/plan-simplification-report.md` (enrichment_sha = the proposal commit stamped in the propose message; see BRC transcript for authoritative version/SHA).
+- Input assessed: finalized analysis `996fe06d` + HITL `8abb035f`. No plan draft existed at assessment time — guardrails are prospective; my reviewer verdict on the actual plan applies them.
 
-- **S1** stale `pipeline-121df67a` id on line 5; delete the line-1 revision header once body confirmed revised (one authoritative text).
-- **S2** don't split security & auth lens — exactly the operator's 11; split only via HITL if implementation forces it.
-- **S3** R5 smoke set must be a tagged subset of the R11 suite: one harness, one dataset format, one no-post mode; smoke = CI entry point.
-- **S4** R14 drift-guard surface == R11 version stamp; R14 adds no new mechanism.
-- **S5** R8 boundary discipline: code owns merge/aggregate/labels/safe-outputs only; code creeping into judgment = reject in review.
-- **S6** one budget scaling rule + one misrouted-PR floor; no per-lens budget knobs.
+## summary_of_assessment (claim)
 
-## Reviewer stance (for my reviewer_phase duties)
+Plan guardrails P1–P7:
+- **P1** only 3 real dependency chains (router→lenses; schema→verdict→rendering; smoke→wave-2) + R6-after-edits-8/10; any other ordering is fake — NACK under AC-2.
+- **P2** lenses = ONE template task + 11 instantiations; skill-auditor retirement rides the lens slices. Biggest over-build risk.
+- **P3** subsumptions are single build-and-replace tasks (router/reviewer-mapper; skill-auditor/lenses).
+- **P4** HITL resolutions delete work: no graduation-bar tasks, no blocking-threshold HITL/slice (implementer default inside R8(b)), no ownership caveats, no cap-raising tasks or cap questions (R9 builds inside current caps).
+- **P5** coherent slices, not one per R-number (indicative grouping in report §P5).
+- **P6** R14 and R17 are riders (doc line in R11 slice; render path on R8(c)), not slices.
+- **P7** §6 interface guarantees = acceptance criteria on the slices that could break them; neither standalone verify-tasks nor omission.
 
-Refiner's analysis is ACK-worthy once S1 is fixed and S2–S6 folded in (a few sentences each). Nothing blocks. If refiner re-proposes without S1's pipeline-id fix, NACK on correctness (wrong pipeline id in a phase artifact); S2–S6 alone are not NACK-worthy.
+## Reviewer stance (for my reviewer_phase duties on the plan)
+
+ACK a plan that: orders only by P1's edges; templates the lenses (P2); keeps subsumptions unified (P3); resurrects no HITL-deleted work (P4); groups coherently (P5); keeps R14/R17 as riders (P6); attaches §6 constraints to slices (P7); satisfies refine AC-1..5 (esp. all 11 lenses as build tasks, launch-default models as build tasks, Fable arms as notes only, no consumer-repo deliverables, no eval-evidence deferral).
+NACK-worthy: fake ordering/deferral (AC-2 violation), missing lenses or model defaults (AC-4/5), consumer-repo targets (AC-3), re-implementing §3/#194 items (AC-1), resurrected HITL work (P4). P5/P6/P7 misses alone = push in ACK notes or single NACK only if pervasive.
 
 ## HITL ledger
 
-No decisions registered this phase; rationale: report cuts nothing and defers nothing — all findings are guardrails within operator-mandated scope. S2's HITL is conditional, owned by implement phase if the split need materializes.
+No decisions registered in plan phase; rationale: the operator's refine-gate resolutions closed every open judgment call that could gate planning; remaining P-findings are guardrails, not decisions. S2's conditional security-lens-split HITL still owned by implement phase if the need materializes.
