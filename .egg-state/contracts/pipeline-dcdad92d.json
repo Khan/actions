@@ -1150,7 +1150,7 @@
           "id": "task-10-4",
           "description": "R6 causal experiment: rerun the reviewer on webapp PR #40536 with edits 8+10\nvia the no-post harness (no consumer write). Success = the OpenAccess\nauthorization question surfaces.",
           "status": "complete",
-          "commit": "4854796d",
+          "commit": "131a17f3",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Experiment recorded; surfacing observed or a documented negative result.",
@@ -2917,6 +2917,17 @@
       "old_value": "4854796d",
       "new_value": "131a17f3",
       "reason": "Linked commit 131a17f to task-10-2",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:05:05.200562Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.9.tasks.3.commit",
+      "old_value": "4854796d",
+      "new_value": "131a17f3",
+      "reason": "Linked commit 131a17f to task-10-4",
       "checkpoint_id": null
     }
   ],
