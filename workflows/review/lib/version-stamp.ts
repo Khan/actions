@@ -156,7 +156,9 @@ const MARKER_RE = new RegExp(
  * compare `.stamp` against the last-synced value. Returns the first marker found;
  * a body carries at most one.
  */
-export const parseVersionMarker = (text: string): ParsedVersionMarker | null => {
+export const parseVersionMarker = (
+    text: string,
+): ParsedVersionMarker | null => {
     const match = MARKER_RE.exec(text);
     if (match === null) {
         return null;
@@ -180,5 +182,7 @@ export const parseVersionMarker = (text: string): ParsedVersionMarker | null => 
  * calls. Kept as a named function (rather than `!==` at the call site) so the
  * "drift" concept has a single, documented home and R14's guard reads as intent.
  */
-export const hasDrifted = (syncedStamp: string, currentStamp: string): boolean =>
-    syncedStamp !== currentStamp;
+export const hasDrifted = (
+    syncedStamp: string,
+    currentStamp: string,
+): boolean => syncedStamp !== currentStamp;

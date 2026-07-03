@@ -235,9 +235,15 @@ export const calibration = (runs: EvalRun[]): CalibrationMetric => {
         const mustNotPost = new Set(run.corpusCase.expected.mustNotPost ?? []);
         for (const candidate of run.result.postedCandidates) {
             if (mustCatch.has(candidate.id)) {
-                samples.push({confidence: candidate.finding.confidence, correct: true});
+                samples.push({
+                    confidence: candidate.finding.confidence,
+                    correct: true,
+                });
             } else if (mustNotPost.has(candidate.id)) {
-                samples.push({confidence: candidate.finding.confidence, correct: false});
+                samples.push({
+                    confidence: candidate.finding.confidence,
+                    correct: false,
+                });
             }
         }
     }
@@ -258,9 +264,7 @@ export const calibration = (runs: EvalRun[]): CalibrationMetric => {
                 ? 0
                 : inBucket.reduce((sum, s) => sum + s.confidence, 0) / count;
         const accuracy =
-            count === 0
-                ? 0
-                : inBucket.filter((s) => s.correct).length / count;
+            count === 0 ? 0 : inBucket.filter((s) => s.correct).length / count;
         buckets.push({lower, upper, count, meanConfidence, accuracy});
     }
 
@@ -270,7 +274,9 @@ export const calibration = (runs: EvalRun[]): CalibrationMetric => {
             ? null
             : buckets.reduce(
                   (sum, b) =>
-                      sum + (b.count / total) * Math.abs(b.meanConfidence - b.accuracy),
+                      sum +
+                      (b.count / total) *
+                          Math.abs(b.meanConfidence - b.accuracy),
                   0,
               );
 

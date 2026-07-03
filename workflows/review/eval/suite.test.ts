@@ -51,7 +51,11 @@ import {
     parseVersionMarker,
     renderVersionMarker,
 } from "../lib/version-stamp.ts";
-import {FINDING_SCHEMA_VERSION, type Lens, type Severity} from "../lib/finding-schema.ts";
+import {
+    FINDING_SCHEMA_VERSION,
+    type Lens,
+    type Severity,
+} from "../lib/finding-schema.ts";
 
 /**
  * Full eval-suite **self-tests** + CI-wiring guard (TASK-11-6).
@@ -135,7 +139,9 @@ const makeCase = (over: CaseOverrides = {}): CorpusCase => {
         tags: over.tags ?? ["synthetic"],
         category: over.category ?? "incident-repro",
         description: "synthetic self-test case",
-        changedFiles: over.changedFiles ?? [{path: "src/x.ts", status: "modified"}],
+        changedFiles: over.changedFiles ?? [
+            {path: "src/x.ts", status: "modified"},
+        ],
         findings: over.findings ?? [],
         policyConflicts: over.policyConflicts ?? [],
         expected: over.expected ?? {verdict: "APPROVE"},
@@ -283,10 +289,20 @@ describe("metrics self-tests (task-11-2): five numbers computed deterministicall
         const run = makeRun({
             category: "golden",
             findings: [
-                {source: "content-i18n", finding: finding({id: "hit", lens: "content-i18n"})},
-                {source: "conventions", finding: finding({id: "extra", lens: "conventions"})},
+                {
+                    source: "content-i18n",
+                    finding: finding({id: "hit", lens: "content-i18n"}),
+                },
+                {
+                    source: "conventions",
+                    finding: finding({id: "extra", lens: "conventions"}),
+                },
             ],
-            expected: {verdict: "APPROVE", mustCatch: ["hit"], postedCommentCount: 2},
+            expected: {
+                verdict: "APPROVE",
+                mustCatch: ["hit"],
+                postedCommentCount: 2,
+            },
         });
         const m = goldenPrecision([run]);
         expect(m.numerator).toBe(1);
@@ -297,13 +313,25 @@ describe("metrics self-tests (task-11-2): five numbers computed deterministicall
     it("clean false-block is 1 when a clean case blocks, 0 when it approves", () => {
         const blocked = makeRun({
             category: "clean",
-            findings: [{source: "correctness", finding: finding({id: "bug", severity: "blocking", confidence: 0.9})}],
+            findings: [
+                {
+                    source: "correctness",
+                    finding: finding({
+                        id: "bug",
+                        severity: "blocking",
+                        confidence: 0.9,
+                    }),
+                },
+            ],
             expected: {verdict: "REQUEST_CHANGES"},
         });
         expect(blocked.result.verdict.event).toBe("REQUEST_CHANGES");
         expect(cleanFalseBlock([blocked]).rate).toBe(1);
 
-        const passed = makeRun({category: "clean", expected: {verdict: "APPROVE"}});
+        const passed = makeRun({
+            category: "clean",
+            expected: {verdict: "APPROVE"},
+        });
         expect(cleanFalseBlock([passed]).rate).toBe(0);
     });
 
@@ -323,10 +351,20 @@ describe("metrics self-tests (task-11-2): five numbers computed deterministicall
         // meanConfidence 0.9, accuracy 0.5 -> ECE 0.4.
         const run = makeRun({
             findings: [
-                {source: "correctness", finding: finding({id: "hit", confidence: 0.9})},
-                {source: "correctness", finding: finding({id: "miss", confidence: 0.9})},
+                {
+                    source: "correctness",
+                    finding: finding({id: "hit", confidence: 0.9}),
+                },
+                {
+                    source: "correctness",
+                    finding: finding({id: "miss", confidence: 0.9}),
+                },
             ],
-            expected: {verdict: "APPROVE", mustCatch: ["hit"], mustNotPost: ["miss"]},
+            expected: {
+                verdict: "APPROVE",
+                mustCatch: ["hit"],
+                mustNotPost: ["miss"],
+            },
         });
         const c = calibration([run]);
         expect(c.buckets.length).toBe(CALIBRATION_BUCKETS);
@@ -335,7 +373,12 @@ describe("metrics self-tests (task-11-2): five numbers computed deterministicall
 
         // No labelled posted findings -> nothing to calibrate.
         const unlabelled = makeRun({
-            findings: [{source: "correctness", finding: finding({id: "x", confidence: 0.7})}],
+            findings: [
+                {
+                    source: "correctness",
+                    finding: finding({id: "x", confidence: 0.7}),
+                },
+            ],
             expected: {verdict: "APPROVE"},
         });
         expect(calibration([unlabelled]).ece).toBeNull();
@@ -351,7 +394,9 @@ describe("gates self-tests (task-11-4): adversarial hard gate + overfitting spli
         // Expect REQUEST_CHANGES + a must-catch that the advisory run drops, and a
         // pinned comment count that will not match.
         const run = makeRun({
-            findings: [{source: "correctness", finding: finding({id: "posted"})}],
+            findings: [
+                {source: "correctness", finding: finding({id: "posted"})},
+            ],
             expected: {
                 verdict: "REQUEST_CHANGES",
                 mustCatch: ["never-posted"],
@@ -359,9 +404,16 @@ describe("gates self-tests (task-11-4): adversarial hard gate + overfitting spli
                 postedCommentCount: 5,
             },
         });
-        const codes = checkExpectation(run).map((f) => f.code).sort();
+        const codes = checkExpectation(run)
+            .map((f) => f.code)
+            .sort();
         expect(codes).toEqual(
-            ["comment-count-mismatch", "must-catch-dropped", "must-not-post-emitted", "wrong-verdict"].sort(),
+            [
+                "comment-count-mismatch",
+                "must-catch-dropped",
+                "must-not-post-emitted",
+                "wrong-verdict",
+            ].sort(),
         );
     });
 
@@ -371,7 +423,12 @@ describe("gates self-tests (task-11-4): adversarial hard gate + overfitting spli
         const manipulated = makeRun({
             category: "adversarial-injection",
             tags: ["adversarial"],
-            findings: [{source: "security-auth", finding: finding({id: "sink", lens: "security-auth"})}],
+            findings: [
+                {
+                    source: "security-auth",
+                    finding: finding({id: "sink", lens: "security-auth"}),
+                },
+            ],
             expected: {verdict: "REQUEST_CHANGES", mustCatch: ["sink"]},
         });
         const gate = adversarialGate([manipulated]);
@@ -384,11 +441,29 @@ describe("gates self-tests (task-11-4): adversarial hard gate + overfitting spli
     it("overfitting report splits holdout vs. training and reports the sizes", () => {
         const holdoutRun = makeRun({
             tags: ["synthetic", TAG_HOLDOUT],
-            findings: [{source: "correctness", finding: finding({id: "h", severity: "blocking", confidence: 0.9})}],
+            findings: [
+                {
+                    source: "correctness",
+                    finding: finding({
+                        id: "h",
+                        severity: "blocking",
+                        confidence: 0.9,
+                    }),
+                },
+            ],
             expected: {verdict: "REQUEST_CHANGES", mustCatch: ["h"]},
         });
         const trainRun = makeRun({
-            findings: [{source: "correctness", finding: finding({id: "t", severity: "blocking", confidence: 0.9})}],
+            findings: [
+                {
+                    source: "correctness",
+                    finding: finding({
+                        id: "t",
+                        severity: "blocking",
+                        confidence: 0.9,
+                    }),
+                },
+            ],
             expected: {verdict: "REQUEST_CHANGES", mustCatch: ["t"]},
         });
         const report = overfittingReport([holdoutRun, trainRun]);
@@ -404,14 +479,27 @@ describe("gates self-tests (task-11-4): adversarial hard gate + overfitting spli
 /* -------------------------------------------------------------------------- */
 
 /** A deterministic stub judge: verdict/quality driven by a per-findingId table. */
-const stubModel = (
-    table: Record<string, {verdict: JudgeScore["verdict"]; quality: number}>,
-    fallback: {verdict: JudgeScore["verdict"]; quality: number} = {verdict: "good", quality: 0.8},
-): JudgeModel => async (requests: JudgeRequest[]): Promise<JudgeScore[]> =>
-    requests.map((r) => {
-        const scored = table[r.findingId] ?? fallback;
-        return {findingId: r.findingId, verdict: scored.verdict, quality: scored.quality, rationale: "stub"};
-    });
+const stubModel =
+    (
+        table: Record<
+            string,
+            {verdict: JudgeScore["verdict"]; quality: number}
+        >,
+        fallback: {verdict: JudgeScore["verdict"]; quality: number} = {
+            verdict: "good",
+            quality: 0.8,
+        },
+    ): JudgeModel =>
+    async (requests: JudgeRequest[]): Promise<JudgeScore[]> =>
+        requests.map((r) => {
+            const scored = table[r.findingId] ?? fallback;
+            return {
+                findingId: r.findingId,
+                verdict: scored.verdict,
+                quality: scored.quality,
+                rationale: "stub",
+            };
+        });
 
 describe("judge self-tests (task-11-3): pure aggregation around a stubbed model", () => {
     it("pins the judge model to Opus 4.8 (operator direction 4)", () => {
@@ -420,8 +508,18 @@ describe("judge self-tests (task-11-3): pure aggregation around a stubbed model"
 
     it("builds one request per posted comment across the corpus", () => {
         const runs = [
-            makeRun({findings: [{source: "correctness", finding: finding({id: "a"})}], expected: {verdict: "APPROVE"}}),
-            makeRun({findings: [{source: "correctness", finding: finding({id: "b"})}], expected: {verdict: "APPROVE"}}),
+            makeRun({
+                findings: [
+                    {source: "correctness", finding: finding({id: "a"})},
+                ],
+                expected: {verdict: "APPROVE"},
+            }),
+            makeRun({
+                findings: [
+                    {source: "correctness", finding: finding({id: "b"})},
+                ],
+                expected: {verdict: "APPROVE"},
+            }),
         ];
         const requests = buildCorpusRequests(runs);
         expect(requests.map((r) => r.findingId).sort()).toEqual(["a", "b"]);
@@ -429,7 +527,12 @@ describe("judge self-tests (task-11-3): pure aggregation around a stubbed model"
 
     it("aggregate throws when the model drops a score", () => {
         const requests = buildCorpusRequests([
-            makeRun({findings: [{source: "correctness", finding: finding({id: "a"})}], expected: {verdict: "APPROVE"}}),
+            makeRun({
+                findings: [
+                    {source: "correctness", finding: finding({id: "a"})},
+                ],
+                expected: {verdict: "APPROVE"},
+            }),
         ]);
         expect(() => aggregate(requests, [])).toThrow(/no score/i);
     });
@@ -448,7 +551,9 @@ describe("judge self-tests (task-11-3): pure aggregation around a stubbed model"
             nit: {verdict: "good", quality: 0.9}, // a non-must-catch the judge likes
         })(requests);
         const report = aggregate(requests, scores);
-        const disagreementIds = report.disagreements.map((d) => d.request.findingId).sort();
+        const disagreementIds = report.disagreements
+            .map((d) => d.request.findingId)
+            .sort();
         expect(disagreementIds).toEqual(["catch", "nit"]);
         expect(report.meanQuality).toBeCloseTo(0.5, 10);
         expect(report.verdictCounts.bad).toBe(1);
@@ -456,7 +561,11 @@ describe("judge self-tests (task-11-3): pure aggregation around a stubbed model"
     });
 
     it("selectAuditSample is deterministic, disagreement-first, and size-capped", () => {
-        const scored = (findingId: string, verdict: JudgeScore["verdict"], gt: boolean) => ({
+        const scored = (
+            findingId: string,
+            verdict: JudgeScore["verdict"],
+            gt: boolean,
+        ) => ({
             request: {
                 caseId: "c",
                 findingId,
@@ -472,7 +581,11 @@ describe("judge self-tests (task-11-3): pure aggregation around a stubbed model"
         // "d" is a disagreement (good but not ground-truth catch); "b" borderline;
         // "g" a plain good.
         const report: JudgeReport = {
-            scored: [scored("g", "good", true), scored("b", "borderline", true), scored("d", "good", false)],
+            scored: [
+                scored("g", "good", true),
+                scored("b", "borderline", true),
+                scored("d", "good", false),
+            ],
             meanQuality: 0.5,
             verdictCounts: {good: 2, borderline: 1, bad: 0},
             disagreements: [scored("d", "good", false)],
@@ -482,9 +595,9 @@ describe("judge self-tests (task-11-3): pure aggregation around a stubbed model"
         expect(sample[0]?.request.findingId).toBe("d"); // disagreement first
         expect(sample[1]?.request.findingId).toBe("b"); // then borderline
         // Deterministic: same inputs -> identical selection.
-        expect(selectAuditSample(report, 2).map((s) => s.request.findingId)).toEqual(
-            sample.map((s) => s.request.findingId),
-        );
+        expect(
+            selectAuditSample(report, 2).map((s) => s.request.findingId),
+        ).toEqual(sample.map((s) => s.request.findingId));
         expect(DEFAULT_AUDIT_SIZE).toBeGreaterThan(0);
     });
 
@@ -503,7 +616,11 @@ describe("judge self-tests (task-11-3): pure aggregation around a stubbed model"
             score: {findingId, verdict, quality: 0.5, rationale: "r"},
         });
         const report: JudgeReport = {
-            scored: [scored("agree", "good"), scored("conflict", "bad"), scored("bord", "borderline")],
+            scored: [
+                scored("agree", "good"),
+                scored("conflict", "bad"),
+                scored("bord", "borderline"),
+            ],
             meanQuality: 0.5,
             verdictCounts: {good: 1, borderline: 1, bad: 1},
             disagreements: [],
@@ -544,14 +661,29 @@ describe("version stamp self-tests (task-11-5): the one drift-guard surface", ()
 
     it("changes when the prompt, the config, or the schema version changes", () => {
         const stamp = computeVersionStamp(base);
-        expect(computeVersionStamp({...base, prompts: {"review.md": "v2"}})).not.toBe(stamp);
-        expect(computeVersionStamp({...base, config: {effort: "xhigh"}})).not.toBe(stamp);
-        expect(computeVersionStamp({...base, schemaVersion: FINDING_SCHEMA_VERSION + 1})).not.toBe(stamp);
+        expect(
+            computeVersionStamp({...base, prompts: {"review.md": "v2"}}),
+        ).not.toBe(stamp);
+        expect(
+            computeVersionStamp({...base, config: {effort: "xhigh"}}),
+        ).not.toBe(stamp);
+        expect(
+            computeVersionStamp({
+                ...base,
+                schemaVersion: FINDING_SCHEMA_VERSION + 1,
+            }),
+        ).not.toBe(stamp);
     });
 
     it("is stable under key reordering (content hash, not insertion order)", () => {
-        const a = computeVersionStamp({config: {a: 1, b: 2}, prompts: {x: "1", y: "2"}});
-        const b = computeVersionStamp({prompts: {y: "2", x: "1"}, config: {b: 2, a: 1}});
+        const a = computeVersionStamp({
+            config: {a: 1, b: 2},
+            prompts: {x: "1", y: "2"},
+        });
+        const b = computeVersionStamp({
+            prompts: {y: "2", x: "1"},
+            config: {b: 2, a: 1},
+        });
         expect(a).toBe(b);
         // canonicalize is the property that guarantees it.
         expect(canonicalize({a: 1, b: 2})).toBe(canonicalize({b: 2, a: 1}));
@@ -570,7 +702,10 @@ describe("version stamp self-tests (task-11-5): the one drift-guard surface", ()
 
     it("hasDrifted is the drift predicate a consumer sync check calls", () => {
         const stamp = computeVersionStamp(base);
-        const drifted = computeVersionStamp({...base, prompts: {"review.md": "v9"}});
+        const drifted = computeVersionStamp({
+            ...base,
+            prompts: {"review.md": "v9"},
+        });
         expect(hasDrifted(stamp, stamp)).toBe(false);
         expect(hasDrifted(stamp, drifted)).toBe(true);
     });
@@ -603,7 +738,14 @@ describe("CI wiring (task-11-6): smoke gates per-PR, live-judge suite is schedul
         // supplied only by a scheduled job. Here we prove it composes with a stub
         // and returns a Promise (i.e. it is the async boundary, off the per-PR path).
         const pending = judgeCorpus(
-            [makeRun({findings: [{source: "correctness", finding: finding({id: "a"})}], expected: {verdict: "APPROVE"}})],
+            [
+                makeRun({
+                    findings: [
+                        {source: "correctness", finding: finding({id: "a"})},
+                    ],
+                    expected: {verdict: "APPROVE"},
+                }),
+            ],
             stubModel({}),
         );
         expect(pending).toBeInstanceOf(Promise);

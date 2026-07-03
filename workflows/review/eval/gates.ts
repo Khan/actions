@@ -162,7 +162,9 @@ export type OverfittingReport = {
  * noisy); it is the generalisation signal a human reads alongside the hard gate.
  */
 export const overfittingReport = (runs: EvalRun[]): OverfittingReport => {
-    const holdoutRuns = runs.filter((r) => r.corpusCase.tags.includes(TAG_HOLDOUT));
+    const holdoutRuns = runs.filter((r) =>
+        r.corpusCase.tags.includes(TAG_HOLDOUT),
+    );
     const trainingRuns = runs.filter(
         (r) => !r.corpusCase.tags.includes(TAG_HOLDOUT),
     );

@@ -295,7 +295,11 @@ export type ThumbsCalibration = {
      */
     agreementRate: number | null;
     /** The comments where judge and human conflict (judge good but 👎, or bad but 👍). */
-    conflicts: {findingId: string; verdict: JudgeVerdict; direction: "up" | "down"}[];
+    conflicts: {
+        findingId: string;
+        verdict: JudgeVerdict;
+        direction: "up" | "down";
+    }[];
 };
 
 /**
@@ -375,7 +379,12 @@ export const judgeCorpus = async (
         report,
         auditSample,
         ...(options.thumbs !== undefined
-            ? {thumbsCalibration: calibrateAgainstThumbs(report, options.thumbs)}
+            ? {
+                  thumbsCalibration: calibrateAgainstThumbs(
+                      report,
+                      options.thumbs,
+                  ),
+              }
             : {}),
     };
 };
