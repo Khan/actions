@@ -829,7 +829,7 @@
           "id": "task-7-11",
           "description": "Content & i18n lens: skill rules + incident-derived tri-state hunts.",
           "status": "pending",
-          "commit": null,
+          "commit": "956f63a1",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Rules + tri-state hunts present; findings emit valid schema; effort high.",
@@ -2620,6 +2620,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-7-10 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T19:16:44.551969Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.6.tasks.10.commit",
+      "old_value": null,
+      "new_value": "956f63a1",
+      "reason": "Linked commit 956f63a to task-7-11",
       "checkpoint_id": null
     }
   ],
