@@ -5,7 +5,1459 @@
   "pipeline_id": "pipeline-dcdad92d",
   "current_phase": "refine",
   "acceptance_criteria": [],
-  "slices": [],
+  "slices": [
+    {
+      "id": "slice-1",
+      "name": "Foundations: finding schema, submission reliability, context staging",
+      "goal": "Establish the versioned structured finding schema, a single robust review\nsubmission call, and staged per-run context for all sub-agents. Unblocks the\ndeterminism boundary, the router, and the prompt edits.",
+      "status": "pending",
+      "review_cycles": 0,
+      "max_cycles": 3,
+      "escalated": false,
+      "escalation_reason": null,
+      "tasks": [
+        {
+          "id": "task-1-1",
+          "description": "R8(a): versioned structured finding schema + validator. Fields: id, lens,\nanchor (incl. a PR-level anchor type), severity, confidence, evidence_trace,\noptional suggested_patch, optional pre_merge_obligation, producing_hunt,\nmodel_authored_prose. Export a schema version constant.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Validator accepts a well-formed finding and rejects a malformed one; version\nconstant exported and unit-tested.",
+          "files_affected": [
+            "workflows/review/lib/finding-schema.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-1-2",
+          "description": "R1: standardize review submission on one robust call with a real body in the\norchestrator prompt; remove the --body-stdin / empty-body retry dance.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Exactly one submission path documented in review.md; no empty-body fallback\nremains.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-1-3",
+          "description": "Prompt edit E2: stage pr-context.json on disk for ALL sub-agents (extends\n#194 diff staging). Foundation for the lenses in slice 7.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Every sub-agent dispatch reads context from the staged file.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-1-4",
+          "description": "Unit tests for the finding schema/validator (TASK-1-1).",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Tests cover valid + malformed findings and the version constant; green.",
+          "files_affected": [
+            "workflows/review/lib/finding-schema.test.ts"
+          ],
+          "role": "tester",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        }
+      ],
+      "dependencies": [],
+      "serialized_chain_order": [],
+      "parent_branch_at_creation": null,
+      "integration_base_sha": null,
+      "commit": null,
+      "pr_number": null,
+      "pr_url": null,
+      "repo": null,
+      "review_feedback": []
+    },
+    {
+      "id": "slice-2",
+      "name": "Determinism boundary: computed verdict, rendering, missing-dimension gate",
+      "goal": "Compute the verdict in code from findings + posted-comment labels (with a\nhold-for-human path), render Conventional Comments from templates, and hold for\na human when a core review dimension produced no output.",
+      "status": "pending",
+      "review_cycles": 0,
+      "max_cycles": 3,
+      "escalated": false,
+      "escalation_reason": null,
+      "tasks": [
+        {
+          "id": "task-2-1",
+          "description": "R8(b): computed verdict in code from findings + posted-comment labels,\nincluding a hold-for-human outcome for policy-named conflicts. Consume #194's\nmechanical label model (do not re-implement it). Pick and document a sensible\nblocking-threshold default (operator: implementer judgment, tunable later,\nnot a HITL gate).",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Verdict is a pure function of schema + labels; hold-for-human path covered by\na test; chosen default documented.",
+          "files_affected": [
+            "workflows/review/lib/verdict.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-2-2",
+          "description": "R2: never auto-approve when the correctness pass OR the skill/severity pass\nproduced no output -- hold for a human. A lost pattern-triage may still\nnote-and-continue. This is the gate atop #194's visibility-only note.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Missing core dimension -> hold-for-human (not approve-with-note); missing\npattern-triage -> note-and-continue.",
+          "files_affected": [
+            "workflows/review/lib/verdict.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-2-3",
+          "description": "R8(c): templated rendering of Conventional Comments from the schema. Code\nowns label-wrapping + template; models own every human-read sentence.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Rendering is deterministic given a finding; no prose synthesis in code.",
+          "files_affected": [
+            "workflows/review/lib/render-comment.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-2-4",
+          "description": "Tests: verdict truth table (incl. hold-for-human + missing-dimension) and\nrendering snapshots.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Truth-table and snapshot tests green.",
+          "files_affected": [
+            "workflows/review/lib/verdict.test.ts",
+            "workflows/review/lib/render-comment.test.ts"
+          ],
+          "role": "tester",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        }
+      ],
+      "dependencies": [
+        "slice-1"
+      ],
+      "serialized_chain_order": [],
+      "parent_branch_at_creation": null,
+      "integration_base_sha": null,
+      "commit": null,
+      "pr_number": null,
+      "pr_url": null,
+      "repo": null,
+      "review_feedback": []
+    },
+    {
+      "id": "slice-3",
+      "name": "Deterministic router (subsumes reviewer-mapper)",
+      "goal": "Classify changed files, map paths to lenses, map teams from REVIEWERS, assign a\nper-file risk tier, and scale the run budget by tier -- replacing the Haiku\nreviewer-mapper sub-agent with code.",
+      "status": "pending",
+      "review_cycles": 0,
+      "max_cycles": 3,
+      "escalated": false,
+      "escalation_reason": null,
+      "tasks": [
+        {
+          "id": "task-3-1",
+          "description": "R10 router in code: file classification from .gitattributes, path->lens\nmapping, team mapping from consumer REVIEWERS, per-file risk tier (small-model\ncheck only for diff-direction-dependent tiers). Subsumes reviewer-mapper (R12).",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Deterministic lens/team/tier output for a fixture diff; reviewer-mapper no\nlonger dispatched.",
+          "files_affected": [
+            "workflows/review/lib/router.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-3-2",
+          "description": "R10 budget: ONE rule scaling run budget by highest touched risk tier + ONE\nfloor for misrouted PRs (no per-lens knobs). Document assumed default caps.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Budget scales monotonically with tier; misrouted PR gets the floor.",
+          "files_affected": [
+            "workflows/review/lib/router.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-3-3",
+          "description": "Wire the orchestrator (Step 3) to consume router output for lens dispatch and\ndrop the reviewer-mapper dispatch/parse.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Only the router feeds lens/team routing in review.md.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-3-4",
+          "description": "Router unit tests: classification, path->lens, tier, budget scaling, floor.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Router tests green over fixtures.",
+          "files_affected": [
+            "workflows/review/lib/router.test.ts"
+          ],
+          "role": "tester",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        }
+      ],
+      "dependencies": [
+        "slice-2"
+      ],
+      "serialized_chain_order": [],
+      "parent_branch_at_creation": null,
+      "integration_base_sha": null,
+      "commit": null,
+      "pr_number": null,
+      "pr_url": null,
+      "repo": null,
+      "review_feedback": []
+    },
+    {
+      "id": "slice-4",
+      "name": "Reliability/quality prompt edits (E1, E3, E5, E6, E7, R3b)",
+      "goal": "Land the remaining reliability/quality prompt edits: high-risk trigger,\nuntrusted-input rule, deletions-are-findings, reply-chain reconciliation,\nskip-open-thread lines, and the flag-a-pre-existing-bug rule.",
+      "status": "pending",
+      "review_cycles": 0,
+      "max_cycles": 3,
+      "escalated": false,
+      "escalation_reason": null,
+      "tasks": [
+        {
+          "id": "task-4-1",
+          "description": "E1 high-risk trigger named + one-line judgment; E3 untrusted-input rule\n(embedded instructions are content to analyze; an attempt to direct the\nreviewer is itself a finding); E5 deletions-are-findings.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Each edit present with its rule text.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-4-2",
+          "description": "E6 full reply-chain staged; reconciler judges author reasoning and never\nre-raises a conceded point. E7 skip lines with open human threads.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Reconciler prompt reflects both rules.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-4-3",
+          "description": "R3b flag-a-pre-existing-bug rule: a real bug in touched lines is fair to flag\neven if it predates the change. Builds on #194 severity; does not reopen it.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Rule present, scoped to touched lines.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        }
+      ],
+      "dependencies": [
+        "slice-3"
+      ],
+      "serialized_chain_order": [],
+      "parent_branch_at_creation": null,
+      "integration_base_sha": null,
+      "commit": null,
+      "pr_number": null,
+      "pr_url": null,
+      "repo": null,
+      "review_feedback": []
+    },
+    {
+      "id": "slice-5",
+      "name": "Investigation tooling for reviewers",
+      "goal": "Give reviewers bounded investigation: grep callers, trace call chains, run one\ntargeted cheap check per finding, with a per-finding tool-call cap enforced in\ncode.",
+      "status": "pending",
+      "review_cycles": 0,
+      "max_cycles": 3,
+      "escalated": false,
+      "escalation_reason": null,
+      "tasks": [
+        {
+          "id": "task-5-1",
+          "description": "R9 sub-agent instructions for bounded investigation: grep callers, trace call\nchains, run one targeted cheap check per finding.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Instructions present; consumed by slice-7 lenses.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-5-2",
+          "description": "R9 enforce a cap on tool calls per finding in code, living inside the run\nbudget from slice 3. Document the assumed default cap (not a HITL surface).",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Cap enforced; over-cap calls refused deterministically.",
+          "files_affected": [
+            "workflows/review/lib/investigation-cap.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-5-3",
+          "description": "Test the per-finding tool-call cap.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Cap test green.",
+          "files_affected": [
+            "workflows/review/lib/investigation-cap.test.ts"
+          ],
+          "role": "tester",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        }
+      ],
+      "dependencies": [
+        "slice-4"
+      ],
+      "serialized_chain_order": [],
+      "parent_branch_at_creation": null,
+      "integration_base_sha": null,
+      "commit": null,
+      "pr_number": null,
+      "pr_url": null,
+      "repo": null,
+      "review_feedback": []
+    },
+    {
+      "id": "slice-6",
+      "name": "Roster framework: always-on reviewers, model defaults, kept gates",
+      "goal": "Define the always-on reviewers (holistic, completeness, test-adequacy,\nfirst-principles, conventions) with their trust/advisory constraints, apply the\nmodel launch defaults + effort table, and wire the kept gates to the new roster.",
+      "status": "pending",
+      "review_cycles": 0,
+      "max_cycles": 3,
+      "escalated": false,
+      "escalation_reason": null,
+      "tasks": [
+        {
+          "id": "task-6-1",
+          "description": "Always-on reviewers: holistic; completeness (Jira/Confluence read-only inside\nthe non-posting sub-agent; fetched text is data under review); test-adequacy;\nfirst-principles (advisory-only, never blocks, Fable 5 day one); conventions\n(advisory; router-gated by greppable trigger signatures).",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Five always-on reviewers defined with their trust/advisory constraints.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-6-2",
+          "description": "Prompt edit 14: named mandates for holistic / completeness / first-principles.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Mandates present.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-6-3",
+          "description": "R12 model launch defaults + effort table: Opus 4.8 workhorse; medium =\ntriage/reconciliation; high = lenses/whole-change; xhigh = security lens +\nclaim-validator/refuters; first-principles = Fable 5. Do NOT re-pin #194's\nexisting model pins -- extend the effort assignments.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Every role carries its launch-default model + effort matching the R12 table.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-6-4",
+          "description": "Kept gates wired to the new roster: pattern-triage (exclusions in guidance\ncomment), claim-validator + refuter panel (batched/parallel), deterministic\ndedup + verdict bookends (verdict from slice 2), thread-reconciler.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Gates preserved; no \u00a73 regression.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        }
+      ],
+      "dependencies": [
+        "slice-5"
+      ],
+      "serialized_chain_order": [],
+      "parent_branch_at_creation": null,
+      "integration_base_sha": null,
+      "commit": null,
+      "pr_number": null,
+      "pr_url": null,
+      "repo": null,
+      "review_feedback": []
+    },
+    {
+      "id": "slice-7",
+      "name": "Eleven specialist lenses (+ skill-auditor fold-in)",
+      "goal": "Build all eleven specialist lenses, each folding its skill's rules plus\nincident-derived executable hunts (tri-state: ran / not-applicable / found) that\nemit into the finding schema. Fold skill-auditor into the lenses.",
+      "status": "pending",
+      "review_cycles": 0,
+      "max_cycles": 3,
+      "escalated": false,
+      "escalation_reason": null,
+      "tasks": [
+        {
+          "id": "task-7-1",
+          "description": "Security & auth lens -- SINGLE lens, effort xhigh. Do NOT split it. If\nimplementation shows a genuine need to split along the risk-config seam\n(authorization correctness vs. web/platform security), raise a HITL question\n(operator direction 7 / simplifier guardrail 2); do not split unilaterally.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Rules + tri-state hunts present; findings emit valid schema; effort xhigh; no\nunilateral split.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-7-2",
+          "description": "AI safety & moderation lens: skill rules + incident-derived tri-state hunts.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Rules + tri-state hunts present; findings emit valid schema; effort high.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-7-3",
+          "description": "Mass-comms & COPPA lens: skill rules + incident-derived tri-state hunts.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Rules + tri-state hunts present; findings emit valid schema; effort high.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-7-4",
+          "description": "Caching & resource lens: skill rules + incident-derived tri-state hunts.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Rules + tri-state hunts present; findings emit valid schema; effort high.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-7-5",
+          "description": "Data & migrations lens: skill rules + incident-derived tri-state hunts.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Rules + tri-state hunts present; findings emit valid schema; effort high.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-7-6",
+          "description": "Concurrency & async lens: skill rules + incident-derived tri-state hunts.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Rules + tri-state hunts present; findings emit valid schema; effort high.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-7-7",
+          "description": "API & federation compat lens: skill rules + incident-derived tri-state hunts.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Rules + tri-state hunts present; findings emit valid schema; effort high.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-7-8",
+          "description": "Cross-deploy serialization lens: skill rules + incident-derived tri-state\nhunts.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Rules + tri-state hunts present; findings emit valid schema; effort high.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-7-9",
+          "description": "Deploy & infra config lens: skill rules + incident-derived tri-state hunts.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Rules + tri-state hunts present; findings emit valid schema; effort high.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-7-10",
+          "description": "Money & payments lens: skill rules + incident-derived tri-state hunts.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Rules + tri-state hunts present; findings emit valid schema; effort high.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-7-11",
+          "description": "Content & i18n lens: skill rules + incident-derived tri-state hunts.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Rules + tri-state hunts present; findings emit valid schema; effort high.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-7-12",
+          "description": "Remove the standalone skill-auditor dispatch once its checks fold into the\nlenses; ensure no consumer correctness-checks.md content is stranded\n(interface req \u00a74.2).",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "skill-auditor folded; correctness-checks.md extension point intact.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-7-13",
+          "description": "Fixture-based tests that each lens's incident hunts fire on a known repro and\nreport not-applicable on a clean fixture (reuse slice-9 fixtures where\navailable).",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Lens hunt fixtures green (fires on repro, not-applicable on clean).",
+          "files_affected": [
+            "workflows/review/lib/lenses.test.ts"
+          ],
+          "role": "tester",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        }
+      ],
+      "dependencies": [
+        "slice-6"
+      ],
+      "serialized_chain_order": [],
+      "parent_branch_at_creation": null,
+      "integration_base_sha": null,
+      "commit": null,
+      "pr_number": null,
+      "pr_url": null,
+      "repo": null,
+      "review_feedback": []
+    },
+    {
+      "id": "slice-8",
+      "name": "Thumbs feedback sweep (independent deterministic code)",
+      "goal": "Collect \ud83d\udc4d/\ud83d\udc4e reactions at two grains, ask one follow-up per new \ud83d\udc4e, and never\nre-ping -- pure code, deployable against both consumer repos from day one.",
+      "status": "pending",
+      "review_cycles": 0,
+      "max_cycles": 3,
+      "escalated": false,
+      "escalation_reason": null,
+      "tasks": [
+        {
+          "id": "task-8-1",
+          "description": "R4 thumbs sweep, pure code (no model): \ud83d\udc4d/\ud83d\udc4e at two grains; polling sweep\ncollects reactions; one follow-up per NEW \ud83d\udc4e (incorrect / unimportant /\nunclear / duplicate + free text); never re-ping. Deployable against both\nconsumer repos (interface guarantee \u00a74.3) -- no consumer commit.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "One follow-up per new \ud83d\udc4e; idempotent (no re-ping); two-grain collection;\nconfig-driven for either repo.",
+          "files_affected": [
+            "workflows/review/lib/thumbs-sweep.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-8-2",
+          "description": "Tests: new-\ud83d\udc4e detection, single follow-up, no re-ping, two-grain collection.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Thumbs-sweep tests green.",
+          "files_affected": [
+            "workflows/review/lib/thumbs-sweep.test.ts"
+          ],
+          "role": "tester",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        }
+      ],
+      "dependencies": [
+        "slice-1"
+      ],
+      "serialized_chain_order": [],
+      "parent_branch_at_creation": null,
+      "integration_base_sha": null,
+      "commit": null,
+      "pr_number": null,
+      "pr_url": null,
+      "repo": null,
+      "review_feedback": []
+    },
+    {
+      "id": "slice-9",
+      "name": "Smoke benchmark (tagged subset of the eval corpus)",
+      "goal": "Author a ~dozen-case smoke corpus (incident repros, adversarial-injection PRs,\nknown-clean PRs) in the shared eval dataset format, run it through a shared\nno-post runner, and wire it as a CI gate on this repo. Must precede the wave-2\nrebalance.",
+      "status": "pending",
+      "review_cycles": 0,
+      "max_cycles": 3,
+      "escalated": false,
+      "escalation_reason": null,
+      "tasks": [
+        {
+          "id": "task-9-1",
+          "description": "R5 smoke corpus (~a dozen cases): incident repros, adversarial-injection PRs,\nknown-clean PRs -- SAME dataset format as the slice-11 corpus (tagged subset,\none harness).",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Cases load with the shared loader; tags identify the smoke subset.",
+          "files_affected": [
+            "workflows/review/eval/corpus/smoke/"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-9-2",
+          "description": "R5 shared runner with a no-post run mode exercising the real review path\nwithout posting to any real PR.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Run mode produces findings/verdict with no GitHub write.",
+          "files_affected": [
+            "workflows/review/eval/runner.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-9-3",
+          "description": "Smoke set runs under vitest so the repo's existing `pnpm test` CI job gates it\non Khan/actions -- the smoke test IS the CI entry point.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "`pnpm test` runs the smoke set; green on baseline.",
+          "files_affected": [
+            "workflows/review/eval/smoke.test.ts"
+          ],
+          "role": "tester",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-9-4",
+          "description": "Dedicated CI workflow entry point for the smoke set, STAGED under\n`.github-staging/` because no producer role may push `.github/` directly\n(#2508). Call it out in the PR body for a human to move to\n`.github/workflows/review-smoke.yml`. Optional if TASK-9-3's vitest gate\nsuffices; provided so the CI entry point is explicit and does not assume\nexisting CI wiring.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Staged workflow present under `.github-staging/`; PR body notes the human move\nstep.",
+          "files_affected": [
+            ".github-staging/review-smoke.yml"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        }
+      ],
+      "dependencies": [
+        "slice-7"
+      ],
+      "serialized_chain_order": [],
+      "parent_branch_at_creation": null,
+      "integration_base_sha": null,
+      "commit": null,
+      "pr_number": null,
+      "pr_url": null,
+      "repo": null,
+      "review_feedback": []
+    },
+    {
+      "id": "slice-10",
+      "name": "Wave-2 recall/precision rebalance",
+      "goal": "Land edits 8-13, the blocking-claim refuter panel, and the posting bar, verified\nagainst the smoke set so recall/precision do not regress while the rebalance\nships. Includes the webapp #40536 causal experiment via the no-post harness.",
+      "status": "pending",
+      "review_cycles": 0,
+      "max_cycles": 3,
+      "escalated": false,
+      "escalation_reason": null,
+      "tasks": [
+        {
+          "id": "task-10-1",
+          "description": "Edits 8 (coverage first), 9 (blocking requires a concrete failing scenario),\n10 (drop only the refuted; downgrade the uncertain), 11 (confirm before you\nclaim), 12 (cite exact lines or quote).",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Each edit present.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-10-2",
+          "description": "Blocking-claim refuter panel (batched/parallel) + edit 13 posting bar: ranked\nposting; inline >= medium confidence; low-confidence in one collapsed section;\nsuggested diffs where clear; no padding. Wire to the slice-2 verdict / slice-1\nconfidence fields.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Posting bar + refuter panel wired to verdict/confidence.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-10-3",
+          "description": "Verify the rebalance against the slice-9 smoke set (no recall regression on\nmust-catch; no new false-block on clean).",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Smoke set green after rebalance.",
+          "files_affected": [
+            "workflows/review/eval/smoke.test.ts"
+          ],
+          "role": "tester",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-10-4",
+          "description": "R6 causal experiment: rerun the reviewer on webapp PR #40536 with edits 8+10\nvia the no-post harness (no consumer write). Success = the OpenAccess\nauthorization question surfaces.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Experiment recorded; surfacing observed or a documented negative result.",
+          "files_affected": [
+            "workflows/review/eval/experiments/webapp-40536.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        }
+      ],
+      "dependencies": [
+        "slice-9"
+      ],
+      "serialized_chain_order": [],
+      "parent_branch_at_creation": null,
+      "integration_base_sha": null,
+      "commit": null,
+      "pr_number": null,
+      "pr_url": null,
+      "repo": null,
+      "review_feedback": []
+    },
+    {
+      "id": "slice-11",
+      "name": "Full eval suite (four datasets, five metrics, judge, version stamp)",
+      "goal": "Build the eval suite that measures what this run shipped: four datasets, five\nmetrics, an Opus-4.8 LLM-judge with human audit, overfitting guards, an\nadversarial hard gate, and the reviewer version stamp that doubles as the single\ndrift-guard surface.",
+      "status": "pending",
+      "review_cycles": 0,
+      "max_cycles": 3,
+      "escalated": false,
+      "escalation_reason": null,
+      "tasks": [
+        {
+          "id": "task-11-1",
+          "description": "Four datasets: incident repros; regenerated synthetic mutations mapped to\nlenses; golden set (human-comment + revert/follow-up labels); clean set. Built\nfrom Khan incident history + consumer PR records WITHOUT writing to consumer\nrepos.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Four datasets load via the shared loader.",
+          "files_affected": [
+            "workflows/review/eval/corpus/"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-11-2",
+          "description": "Five metrics: must-catch recall (~100%), golden precision, clean false-block\n(~0), noise, calibration.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Metrics computed over a dataset run.",
+          "files_affected": [
+            "workflows/review/eval/metrics.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-11-3",
+          "description": "Opus 4.8 LLM-judge with a human-audit sample; thumbs labels (slice 8)\ncalibrate the judge.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Judge scores a run; audit sample surfaced.",
+          "files_affected": [
+            "workflows/review/eval/judge.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-11-4",
+          "description": "Overfitting guards: golden-set holdout + fresh mutations; adversarial set as a\nhard gate for automatic mode.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Holdout separated; adversarial gate enforced.",
+          "files_affected": [
+            "workflows/review/eval/gates.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-11-5",
+          "description": "Reviewer version stamp: hash of prompt+config stamped via the existing #194\nHTML marker. This is the SINGLE drift-guard surface (R14 reuses it; no new\nmechanism).",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Stamp changes when prompt/config changes; readable by a consumer sync check.",
+          "files_affected": [
+            "workflows/review/lib/version-stamp.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-11-6",
+          "description": "Suite self-tests + wire the smoke subset (slice 9) as the CI gate; full suite\nas scheduled (not per-PR).",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "CI runs smoke; full suite invocable on schedule.",
+          "files_affected": [
+            "workflows/review/eval/suite.test.ts"
+          ],
+          "role": "tester",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        }
+      ],
+      "dependencies": [
+        "slice-10"
+      ],
+      "serialized_chain_order": [],
+      "parent_branch_at_creation": null,
+      "integration_base_sha": null,
+      "commit": null,
+      "pr_number": null,
+      "pr_url": null,
+      "repo": null,
+      "review_feedback": []
+    },
+    {
+      "id": "slice-12",
+      "name": "P2 items (R13, R14, R15, R16, R17)",
+      "goal": "Land the P2 follow-ups: per-finding resolution rule, the drift-guard\ndocumentation reusing the version stamp, live counters, dismissal-learning\ncandidates, and the conditional-approval verdict.",
+      "status": "pending",
+      "review_cycles": 0,
+      "max_cycles": 3,
+      "escalated": false,
+      "escalation_reason": null,
+      "tasks": [
+        {
+          "id": "task-12-1",
+          "description": "R13 per-finding resolution rule on re-review: every actionable finding gets\nfixed / deferred-to-filed-issue / disagreed-with-reason.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Rule present.",
+          "files_affected": [
+            "workflows/review/review.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-12-2",
+          "description": "R14 config drift guard: document the slice-11 version stamp as the stable\nconsumer-readable sync surface (interface \u00a74.5). Adds NO new mechanism.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Doc points to the stamp; no second surface.",
+          "files_affected": [
+            "workflows/review/README.md"
+          ],
+          "role": "documenter",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-12-3",
+          "description": "R15 live counters mined from run logs + #194 per-run JSON artifacts: validator\ndrop rate per lens, comments/PR, verdict mix, thumbs agree rate, cost/run.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Counters computed from existing artifacts; no new logging mechanism required.",
+          "files_affected": [
+            "workflows/review/lib/counters.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-12-4",
+          "description": "R16 dismissal-learning: dismissed/resolved threads, \ud83d\udc4e-with-replies, and\ncorrect pushback become candidate do-not-flag-here notes proposed as changes\nto a committed config file a human approves -- never auto-adopted.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "Candidates written as a proposed diff for human approval; nothing\nauto-applied.",
+          "files_affected": [
+            "workflows/review/lib/dismissal-learning.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        },
+        {
+          "id": "task-12-5",
+          "description": "R17 conditional-approval verdict: APPROVE + a prominent structured obligations\ncomment via the existing add-comment safe output; renders from the schema's\npre_merge_obligation field.",
+          "status": "pending",
+          "commit": null,
+          "checkpoint_id": null,
+          "notes": "",
+          "acceptance_criteria": "APPROVE-with-obligations renders from the schema; uses the existing safe\noutput.",
+          "files_affected": [
+            "workflows/review/lib/render-comment.ts"
+          ],
+          "role": "coder",
+          "review_cycles": 0,
+          "max_cycles": 3,
+          "escalated": false,
+          "delegation_attempts": 0,
+          "gaps": [],
+          "jira_key": null,
+          "jira_action": null,
+          "jira_action_status": null
+        }
+      ],
+      "dependencies": [
+        "slice-11"
+      ],
+      "serialized_chain_order": [],
+      "parent_branch_at_creation": null,
+      "integration_base_sha": null,
+      "commit": null,
+      "pr_number": null,
+      "pr_url": null,
+      "repo": null,
+      "review_feedback": []
+    }
+  ],
   "decisions": [
     {
       "id": "decision-1",
@@ -40,7 +1492,14 @@
   "refine_review_feedback": "",
   "plan_review_cycles": 0,
   "plan_review_feedback": "",
-  "pr": null,
+  "pr": {
+    "title": "review: roster restructure, determinism boundary, eval suite",
+    "description": "Implements the Khan/actions half of the \"Improving the Khan PR review agent\"\nproposal on top of #194: reliability P0s, the 13 remaining prompt edits, the\ndeterminism boundary (finding schema -> computed verdict -> templated rendering),\na deterministic router that subsumes reviewer-mapper, all 11 specialist lenses\nplus the always-on reviewers, the thumbs feedback sweep, the wave-2\nrecall/precision rebalance, and the full eval suite. No consumer-repo changes;\nconsumer-named work is preserved as interface guarantees on the shared workflow.",
+    "test_plan": "- Automated: vitest unit tests for the finding schema/validator, computed verdict\n  (incl. hold-for-human), comment rendering, router (classification/tier/budget),\n  per-finding tool-call cap, thumbs sweep, and the eval-suite runner; the smoke\n  subset runs in CI on this repo via the shared no-post runner.\n- Manual: run the review workflow in no-post mode against the smoke corpus and\n  confirm findings/verdict render without any GitHub write; rerun webapp PR #40536\n  through the no-post harness with edits 8+10 and confirm the OpenAccess\n  authorization question surfaces (R6).",
+    "manual_steps": "Pre-merge: none (no migrations). Confirm the reviewer version stamp changes when\nprompt/config changes.\nPost-merge: consumer repos (webapp/frontend) inherit changes via `source:` import\non their own schedule; the thumbs sweep and drift-guard stamp are deployable\nagainst both from day one but consumer wiring happens separately, later.",
+    "context_pr_number": null,
+    "deferred_actions": []
+  },
   "feedback": null,
   "phase_configs": null,
   "agent_executions": []
