@@ -970,7 +970,7 @@
       "id": "slice-9",
       "name": "Smoke benchmark (tagged subset of the eval corpus)",
       "goal": "Author a ~dozen-case smoke corpus (incident repros, adversarial-injection PRs,\nknown-clean PRs) in the shared eval dataset format, run it through a shared\nno-post runner, and wire it as a CI gate on this repo. Must precede the wave-2\nrebalance.",
-      "status": "pending",
+      "status": "in_progress",
       "review_cycles": 0,
       "max_cycles": 3,
       "escalated": false,
@@ -980,7 +980,7 @@
           "id": "task-9-1",
           "description": "R5 smoke corpus (~a dozen cases): incident repros, adversarial-injection PRs,\nknown-clean PRs -- SAME dataset format as the slice-11 corpus (tagged subset,\none harness).",
           "status": "pending",
-          "commit": null,
+          "commit": "9c5f45c9",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Cases load with the shared loader; tags identify the smoke subset.",
@@ -1065,8 +1065,8 @@
         "slice-7"
       ],
       "serialized_chain_order": [],
-      "parent_branch_at_creation": null,
-      "integration_base_sha": null,
+      "parent_branch_at_creation": "egg/pipeline-dcdad92d/slice-7",
+      "integration_base_sha": "9134ff538d459e0e58f72e4f94fa295741623cc6",
       "commit": null,
       "pr_number": null,
       "pr_url": null,
@@ -2708,6 +2708,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-8-2 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T19:39:29.116469Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.8.tasks.0.commit",
+      "old_value": null,
+      "new_value": "9c5f45c9",
+      "reason": "Linked commit 9c5f45c to task-9-1",
       "checkpoint_id": null
     }
   ],
