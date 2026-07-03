@@ -1436,7 +1436,7 @@
           "id": "task-12-5",
           "description": "R17 conditional-approval verdict: APPROVE + a prominent structured obligations\ncomment via the existing add-comment safe output; renders from the schema's\npre_merge_obligation field.",
           "status": "complete",
-          "commit": "67f9340e",
+          "commit": "f9b306ab",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "APPROVE-with-obligations renders from the schema; uses the existing safe\noutput.",
@@ -3252,6 +3252,17 @@
       "old_value": "67f9340e",
       "new_value": "f9b306ab",
       "reason": "Linked commit f9b306a to task-12-4",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:51:38.006659Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.11.tasks.4.commit",
+      "old_value": "67f9340e",
+      "new_value": "f9b306ab",
+      "reason": "Linked commit f9b306a to task-12-5",
       "checkpoint_id": null
     }
   ],
