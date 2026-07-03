@@ -1077,7 +1077,7 @@
       "id": "slice-10",
       "name": "Wave-2 recall/precision rebalance",
       "goal": "Land edits 8-13, the blocking-claim refuter panel, and the posting bar, verified\nagainst the smoke set so recall/precision do not regress while the rebalance\nships. Includes the webapp #40536 causal experiment via the no-post harness.",
-      "status": "pending",
+      "status": "in_progress",
       "review_cycles": 0,
       "max_cycles": 3,
       "escalated": false,
@@ -1129,7 +1129,7 @@
           "id": "task-10-3",
           "description": "Verify the rebalance against the slice-9 smoke set (no recall regression on\nmust-catch; no new false-block on clean).",
           "status": "pending",
-          "commit": null,
+          "commit": "a9209682",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Smoke set green after rebalance.",
@@ -1172,8 +1172,8 @@
         "slice-9"
       ],
       "serialized_chain_order": [],
-      "parent_branch_at_creation": null,
-      "integration_base_sha": null,
+      "parent_branch_at_creation": "egg/pipeline-dcdad92d/slice-9",
+      "integration_base_sha": "4a368a93db73e5c3118ef446f33bd8e7728ed9a1",
       "commit": null,
       "pr_number": null,
       "pr_url": null,
@@ -2796,6 +2796,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-9-3 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:01:14.011498Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.9.tasks.2.commit",
+      "old_value": null,
+      "new_value": "a9209682",
+      "reason": "Linked commit a920968 to task-10-3",
       "checkpoint_id": null
     }
   ],
