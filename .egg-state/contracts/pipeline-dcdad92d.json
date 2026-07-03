@@ -870,7 +870,7 @@
         {
           "id": "task-7-13",
           "description": "Fixture-based tests that each lens's incident hunts fire on a known repro and\nreport not-applicable on a clean fixture (reuse slice-9 fixtures where\navailable).",
-          "status": "pending",
+          "status": "complete",
           "commit": "1f7ad780",
           "checkpoint_id": null,
           "notes": "Fixture-based lens-hunt tests at workflows/review/lib/lenses.test.ts (TASK-7-13). Covers all 11 specialist lenses (asserted against SPECIALIST_LENSES from router.ts \u2014 a future added lens forces a fixture). Each lens has a deterministic executable hunt over in-memory diff fixtures reporting the proposal's tri-state: repro->\"found\"(+schema-valid Finding via real validateFinding), correct in-scope change->\"ran\", out-of-scope->\"not-applicable\". Repros drawn from the documented incident taxonomy (PR#40536 OpenAccess, moderation universal-modifier drop, cacheable-404 #13118, ~36K-email misfire, destructive SQL migration, Go loop-var capture, removed GraphQL field, proto field reuse, CSP tightening, non-idempotent Stripe charge, unwrapped i18n string). Cross-lens tests: each repro trips ONLY its owner; no lens fires on any clean fixture (no false-block). This is the deterministic testable surface \u2014 the production hunts themselves are model-owned prose in review.md (documenter tasks 7-1..7-12). Self-contained fixture format that slice-9 smoke / slice-11 mutations reuse.\n\nEnv note: repo has no node_modules and no network here, so `pnpm test`/vitest could not be executed in-pod (prior slices had network and installed vite7 under node v24). Detector + tri-state logic verified GREEN by porting the file's LENS_HUNTS/runHunt through Node v24 (/opt/node24) --experimental-strip-types with a faithful validateFinding port: \"ALL CHECKS PASS (11 lenses)\". Reviewer with network can confirm via `pnpm install && npx vitest run workflows/review/lib/lenses.test.ts` under node>=24.",
@@ -2389,6 +2389,17 @@
       "old_value": null,
       "new_value": "1f7ad780",
       "reason": "Linked commit 1f7ad78 to task-7-13",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T19:09:31.519566Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.6.tasks.12.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-7-13 as complete",
       "checkpoint_id": null
     }
   ],
