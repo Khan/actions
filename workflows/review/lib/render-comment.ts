@@ -18,7 +18,7 @@
  * outcome, keeping a single source of truth for "which labels block".
  */
 
-import type {Finding, Lens} from "./finding-schema";
+import type {Anchor, Finding, Lens} from "./finding-schema";
 
 /**
  * The review-outcome vocabulary. `APPROVE` / `REQUEST_CHANGES` are #194's
@@ -164,6 +164,16 @@ export type ReviewBodyInput = {
     skippedDimensions?: readonly SkippedDimension[];
     /** Policy conflicts behind a HOLD_FOR_HUMAN verdict; ignored otherwise. */
     policyConflicts?: readonly PolicyConflictNote[];
+    /**
+     * Count of pre-merge obligations surfaced this run (conditional
+     * approval). When `> 0` on an `APPROVE`, the body states that approval is
+     * conditional on the separately-posted pre-merge obligations comment
+     * ({@link renderObligationsComment}). Ignored for non-`APPROVE` events — an
+     * obligation only rides alongside an approval; a `REQUEST_CHANGES` /
+     * `HOLD_FOR_HUMAN` already routes the change back to the author. Absent or
+     * `0` leaves the APPROVE body exactly as #194 rendered it.
+     */
+    obligationCount?: number;
 };
 
 /**
@@ -195,14 +205,26 @@ const HOLD_UNSTUCK_LINES = [
 export const renderReviewBody = (input: ReviewBodyInput): string => {
     let head: string;
     switch (input.event) {
-        case "APPROVE":
-            // With inline comments, the comments make the review non-empty; the
-            // one-line body exists only to keep a comment-less approval
-            // submittable.
-            head = input.hasInlineComments
-                ? ""
-                : "Approved — no blocking issues found.";
+        case "APPROVE": {
+            const obligations = input.obligationCount ?? 0;
+            if (obligations > 0) {
+                // Conditional approval: the body must say the approval is
+                // conditional on the separately-posted pre-merge obligations
+                // comment. The count is code-computed; no prose about the code.
+                head =
+                    obligations === 1
+                        ? "Approved with 1 pre-merge obligation — see the pre-merge obligations comment."
+                        : `Approved with ${obligations} pre-merge obligations — see the pre-merge obligations comment.`;
+            } else {
+                // With inline comments, the comments make the review non-empty;
+                // the one-line body exists only to keep a comment-less approval
+                // submittable.
+                head = input.hasInlineComments
+                    ? ""
+                    : "Approved — no blocking issues found.";
+            }
             break;
+        }
         case "REQUEST_CHANGES":
             // A REQUEST_CHANGES verdict normally carries at least one blocking
             // inline comment (the verdict follows from the posted labels), so
@@ -242,3 +264,95 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
 
     return lines.filter((line) => line !== "").join("\n");
 };
+
+/* -------------------------------------------------------------------------- */
+/* R17: conditional-approval (pre-merge obligations) comment                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A code-owned, structural description of where a finding is anchored — a
+ * location token (`path:line`, a `path:start-end` range, a bare `path`, or the
+ * literal `PR-level`), never a sentence about the code. Used to head each
+ * obligation line so a human can jump to the relevant spot.
+ */
+const describeAnchor = (anchor: Anchor): string => {
+    switch (anchor.type) {
+        case "line":
+            return anchor.start_line !== undefined
+                ? `${anchor.path}:${anchor.start_line}-${anchor.line}`
+                : `${anchor.path}:${anchor.line}`;
+        case "file":
+            return anchor.path;
+        case "pr":
+            return "PR-level";
+        default: {
+            const unreachable: never = anchor;
+            throw new Error(`Unhandled anchor type: ${String(unreachable)}`);
+        }
+    }
+};
+
+/** The code-owned heading of the R17 pre-merge obligations comment. */
+export const OBLIGATIONS_COMMENT_HEADING = "## ⚠️ Pre-merge obligations";
+
+/**
+ * R17: render the prominent, structured *pre-merge obligations* comment for a
+ * conditional approval (APPROVE-with-obligations). Posted as a standalone PR
+ * comment via the existing `add-comment` safe output (not an inline review
+ * comment, and not the review body), so it stays visible after the APPROVE.
+ *
+ * This is squarely on the determinism boundary, exactly like {@link renderComment}:
+ * CODE owns the heading, the intro line, and the `- [ ]` checklist wrapping plus
+ * each finding's location token; the MODEL owns every human-read sentence — the
+ * obligation text is the finding's `pre_merge_obligation`, copied verbatim. No
+ * prose is synthesised here.
+ *
+ * Renders one checkbox per finding that carries a non-empty `pre_merge_obligation`,
+ * in the order given (callers pass findings in a deterministic order). Returns
+ * `null` when no finding carries an obligation — the caller then posts nothing and
+ * leaves the plain APPROVE untouched (the count it feeds to {@link renderReviewBody}
+ * is likewise `0`). The count for the review body is simply the length of the
+ * filtered set, exposed via {@link countObligations} so the two stay in lockstep.
+ */
+export const renderObligationsComment = (
+    findings: readonly Finding[],
+): string | null => {
+    const withObligations = findings.filter(
+        (finding): finding is Finding & {pre_merge_obligation: string} =>
+            finding.pre_merge_obligation !== undefined &&
+            finding.pre_merge_obligation.length > 0,
+    );
+    if (withObligations.length === 0) {
+        return null;
+    }
+
+    const items = withObligations.map(
+        // `pre_merge_obligation` is model-authored and copied verbatim.
+        (finding) =>
+            `- [ ] **${describeAnchor(finding.anchor)}** — ${finding.pre_merge_obligation}`,
+    );
+
+    return [
+        OBLIGATIONS_COMMENT_HEADING,
+        "",
+        "This PR is **approved**, but the following must be completed before it is merged:",
+        "",
+        ...items,
+    ].join("\n");
+};
+
+/**
+ * Count of findings that carry a pre-merge obligation — the value to pass as
+ * {@link ReviewBodyInput.obligationCount}. Kept as a named helper so the review
+ * body's count and {@link renderObligationsComment}'s checklist are derived from
+ * the identical predicate and can never disagree.
+ */
+export const countObligations = (findings: readonly Finding[]): number =>
+    findings.reduce(
+        (count, finding) =>
+            finding.pre_merge_obligation !== undefined &&
+            finding.pre_merge_obligation.length > 0
+                ? count + 1
+                : count,
+        0,
+    );
