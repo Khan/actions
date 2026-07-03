@@ -1236,7 +1236,7 @@
           "id": "task-11-3",
           "description": "Opus 4.8 LLM-judge with a human-audit sample; thumbs labels (slice 8)\ncalibrate the judge.",
           "status": "pending",
-          "commit": null,
+          "commit": "bd1cbd7d",
           "checkpoint_id": null,
           "notes": "",
           "acceptance_criteria": "Judge scores a run; audit sample surfaced.",
@@ -2972,6 +2972,17 @@
       "old_value": "pending",
       "new_value": "complete",
       "reason": "Marked task-11-2 as complete",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T20:19:21.151174Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.10.tasks.2.commit",
+      "old_value": null,
+      "new_value": "bd1cbd7d",
+      "reason": "Linked commit bd1cbd7 to task-11-3",
       "checkpoint_id": null
     }
   ],
