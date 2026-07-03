@@ -553,7 +553,7 @@
         {
           "id": "task-6-3",
           "description": "R12 model launch defaults + effort table: Opus 4.8 workhorse; medium =\ntriage/reconciliation; high = lenses/whole-change; xhigh = security lens +\nclaim-validator/refuters; first-principles = Fable 5. Do NOT re-pin #194's\nexisting model pins -- extend the effort assignments.",
-          "status": "pending",
+          "status": "complete",
           "commit": "75e982c3",
           "checkpoint_id": null,
           "notes": "",
@@ -2334,6 +2334,17 @@
       "old_value": null,
       "new_value": "75e982c3",
       "reason": "Linked commit 75e982c to task-6-3",
+      "checkpoint_id": null
+    },
+    {
+      "timestamp": "2026-07-03T18:55:28.440889Z",
+      "actor": "egg",
+      "role": "implementer",
+      "action": "update",
+      "field_path": "phases.5.tasks.2.status",
+      "old_value": "pending",
+      "new_value": "complete",
+      "reason": "Marked task-6-3 as complete",
       "checkpoint_id": null
     }
   ],
