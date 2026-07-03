@@ -54,7 +54,7 @@ export const KNOWN_LENSES = [
     "first-principles",
 ] as const;
 
-export type Lens = (typeof KNOWN_LENSES)[number];
+export type Lens = typeof KNOWN_LENSES[number];
 
 /**
  * Per-finding severity. This is the blocking-relevant axis #194 introduced
@@ -65,7 +65,7 @@ export type Lens = (typeof KNOWN_LENSES)[number];
  */
 export const SEVERITIES = ["blocking", "advisory"] as const;
 
-export type Severity = (typeof SEVERITIES)[number];
+export type Severity = typeof SEVERITIES[number];
 
 /**
  * Confidence axis (enables the calibration metric in slice 11). Numeric so a
@@ -85,7 +85,7 @@ export const MAX_CONFIDENCE = 1;
  */
 export const ANCHOR_TYPES = ["line", "file", "pr"] as const;
 
-export type AnchorType = (typeof ANCHOR_TYPES)[number];
+export type AnchorType = typeof ANCHOR_TYPES[number];
 
 export type Side = "LEFT" | "RIGHT";
 
@@ -168,9 +168,7 @@ const validateAnchor = (value: unknown, errors: string[]): void => {
 
     const type = value["type"];
     if (!isNonEmptyString(type) || !ANCHOR_TYPES.includes(type as AnchorType)) {
-        errors.push(
-            `anchor.type: must be one of ${ANCHOR_TYPES.join(", ")}`,
-        );
+        errors.push(`anchor.type: must be one of ${ANCHOR_TYPES.join(", ")}`);
         return;
     }
 
@@ -180,7 +178,9 @@ const validateAnchor = (value: unknown, errors: string[]): void => {
     }
 
     if (!isNonEmptyString(value["path"])) {
-        errors.push(`anchor.path: required non-empty string for ${type} anchor`);
+        errors.push(
+            `anchor.path: required non-empty string for ${type} anchor`,
+        );
     }
 
     if (type === "line") {
@@ -317,7 +317,9 @@ export const assertFinding = (input: unknown): Finding => {
     const result = validateFinding(input);
     if (!result.ok) {
         throw new Error(
-            `Invalid finding:\n${result.errors.map((e) => `  - ${e}`).join("\n")}`,
+            `Invalid finding:\n${result.errors
+                .map((e) => `  - ${e}`)
+                .join("\n")}`,
         );
     }
     return result.finding;
