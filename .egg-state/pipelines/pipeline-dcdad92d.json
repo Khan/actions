@@ -146,10 +146,27 @@
       "resolution": "{\"action\": \"approve\", \"context\": \"Operator approves the refine analysis. Open-question resolutions from the operator (2026-07-02): (1) Graduation bar — do not consider it in this run; humans will decide post-launch; never raise it as a build blocker. (2) Blocking-verdict policy threshold — delegated to the implementing agents' judgment when R8(b)'s computed verdict needs it; pick a sensible default consistent with #194's severity model and the repro-required rule, document it clearly, and expect it to be tuned later in preparation for always-on mode; do not block on HITL for this. (3) Vendor-vs-consume — resolved: stay on consume; the restructure lands in the shared Khan/actions workflow and the extension points + drift-guard surface are kept so consumers inherit improvements without forking. (4) Ownership — determined; humans will maintain the reviewer; remove the at-risk framing from R15/R16/suite upkeep. Additionally: do not treat the 20-min/$10 budget/timeout caps as blockers or surface cap questions — proceed with reasonable defaults and document what was assumed; limits will be dialed in after the fact.\"}",
       "phase": "refine",
       "content_changed": null
+    },
+    {
+      "id": "decision-2",
+      "question": "The plan phase has completed. Please review the plan and approve to continue, or provide feedback to request changes.\n\nDecision ledger: 1 decision(s) registered this phase (decision-1), 1 resolved.",
+      "context": "# Human summary — plan phase, pipeline-dcdad92d\n\n*Status: written at the start of the plan phase (simplifier's proposal; no task_planner slice list yet). It digests what the plan will contain given the approved analysis and your refine-gate answers, and will be superseded/extended as the planners' drafts land.*\n\n## What the plan is slicing\n\nEverything the approved analysis mandates for this run, all constructed now: the two reliability P0s (one robust review-submission call; hold-for-human when a core review dimension silently fails), the thirteen remaining prompt edits, the deterministic router replacing `reviewer-mapper`, **all 11 specialist lenses**, the always-on reviewer roster (holistic, completeness, test-adequacy, first-principles on Fable 5, conventions), the small determinism boundary (finding schema → computed verdict → templated comments), the thumbs feedback sweep, the eval suite with its CI smoke subset, the wave-2 recall/precision rebalance with the refuter panel and posting bar, and the P2 tail (per-finding resolutions, live counters, dismissal-learning, conditional approvals).\n\n## Only three things order anything\n\nSlices are ordered by real build dependencies only — there are exactly three chains (plus one small rider):\n\n1. **Router before lenses** — the lenses consume its routing.\n2. **Finding schema before computed verdict before comment rendering** — each layer builds on the previous.\n3. **Smoke set before the wave-2 rebalance** — so the recall/precision rebalance ships with regression protection (plus: the causal experiment on webapp PR #40536 runs once edits 8+10 and the no-post mode exist).\n\nEverything else can proceed in parallel. Any other ordering in a plan draft would be a fake dependency, and I'll flag it in review.\n\n## Keep-it-simple guardrails the plan must honor\n\n- **Lenses**: one shared lens template (structure, hunt-reporting contract, schema conformance) + eleven content instantiations — not eleven bespoke designs. `skill-auditor` folds into the lenses as part of those slices.\n- **Replacements are single tasks**: build-router-and-remove-mapper is one task, not two that can drift apart.\n- **No double mechanisms**: the smoke set is a tagged subset of the eval suite (one harness); the drift-guard surface *is* the eval suite's version stamp (a documentation line, not a build); conditional approvals render from the finding schema's existing obligation field.\n- **Interface guarantees** (consumer severity declarations, correctness-checks import, trigger overrides, etc.) attach as acceptance criteria on the slices that could break them — not standalone verification tasks.\n\n## Your refine-gate answers removed work\n\n- No graduation-bar tasks anywhere (post-launch, human decision).\n- The blocking-verdict threshold is an implementer-chosen, clearly documented default inside the computed-verdict task — no decision round-trip.\n- No ownership contingency framing — humans own the reviewer.\n- Budget/timeout caps: the plan assumes reasonable defaults and documents them; no cap-raising tasks or questions.\n\n## What you'll be asked during planning\n\nNothing is expected to need a HITL decision at plan time — your refine answers closed every open judgment call that could gate slicing. The one standing conditional: if implementation genuinely needs to split the security & auth lens in two, that comes back to you rather than being a builder's choice.\n\n\n[View the full detailed plan draft](https://github.com/Khan/actions/blob/egg/pipeline-dcdad92d/work/.egg-state/drafts/pipeline-dcdad92d-plan.md)",
+      "options": [
+        "approve",
+        "request changes"
+      ],
+      "decision_type": "phase_gate",
+      "questions": [],
+      "status": "pending",
+      "created_at": "2026-07-03T03:47:19.924024Z",
+      "resolved_at": null,
+      "resolution": null,
+      "phase": "plan",
+      "content_changed": null
     }
   ],
   "created_at": "2026-07-03T01:25:07.748859Z",
-  "updated_at": "2026-07-03T03:47:16.630329Z",
+  "updated_at": "2026-07-03T03:47:19.928106Z",
   "contract_synced": true,
   "network_mode": null,
   "mode": "issue",
@@ -162,7 +179,7 @@
   "source_branch": null,
   "source_artifact_prefix": null,
   "run_epoch": "2026-07-03T03:12:46.519233Z",
-  "version": 20,
+  "version": 21,
   "jira_ticket": null,
   "is_epic": false,
   "pipeline_mode": null,
