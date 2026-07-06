@@ -1,4 +1,4 @@
-# R6 causal experiment — webapp PR #40536 (OpenAccess authorization)
+# Causal experiment — webapp PR #40536 (OpenAccess authorization)
 
 **Task:** task-10-4 · **Slice:** slice-10 (wave-2 recall/precision rebalance) ·
 **Edits under test:** E8 (coverage first) + E10 (drop only the refuted; downgrade the
@@ -9,7 +9,7 @@ uncertain).
 The prior reviewer **missed** the authorization question on Khan/webapp PR #40536: a
 resolver was made `OpenAccess` (its authorization guard effectively removed), and the
 review approved without flagging that an unauthenticated/under-privileged caller can now
-reach the privileged path. R6 asserts this is a **recall** failure that the wave-2 edits
+reach the privileged path. The proposal asserts this is a **recall** failure that the rebalance edits
 fix:
 
 - **E8 (coverage first)** makes the security-auth reviewer *raise* the authorization
@@ -50,7 +50,7 @@ Two ways to drive it, both write-free:
    const {plannedReview} = runCase(c); // no GitHub write
    ```
 
-2. **Live producer arm (the full R6 rerun, run outside this pipeline).** The same
+2. **Live producer arm (the full rerun, run outside this pipeline).** The same
    `runCase(corpusCase, {produceFindings})` swaps in a live model producer over a
    #40536-derived case via `RunOptions.produceFindings`, keeping every downstream stage
    identical. Because directive 6 forbids consumer-repo work inside this pipeline, the live
