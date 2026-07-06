@@ -1,7 +1,7 @@
 /**
- * R8(a): the versioned, structured finding schema shared by every reviewer
+ * The versioned, structured finding schema shared by every reviewer
  * sub-agent and the deterministic determinism-boundary code that consumes it
- * (computed verdict — slice 2, templated rendering — slice 2).
+ * (the computed verdict and the templated comment rendering).
  *
  * A "finding" is the single unit a lens sub-agent emits. Sub-agents write these
  * as JSON (the #194 per-run sub-agent artifacts), so the wire keys are
@@ -27,11 +27,11 @@ export const FINDING_SCHEMA_VERSION = 1;
 
 /**
  * The lenses (specialist + always-on) allowed to author a finding. The
- * deterministic router (slice 3) dispatches to these; keeping the canonical list
+ * deterministic router dispatches to these; keeping the canonical list
  * here means the validator can reject a finding attributed to an unknown lens
  * (e.g. a typo or a decommissioned lens) rather than letting it flow downstream.
  *
- * The eleven specialist lenses come straight from the operator directive; the
+ * The specialist lenses cover the path-gated risk areas; the
  * remaining entries are the always-on / whole-change reviewers and triage.
  */
 export const KNOWN_LENSES = [
@@ -58,7 +58,7 @@ export type Lens = typeof KNOWN_LENSES[number];
 
 /**
  * Per-finding severity. This is the blocking-relevant axis #194 introduced
- * (blocking vs. advisory); the computed verdict (slice 2) turns the mix of
+ * (blocking vs. advisory); the computed verdict turns the mix of
  * severities plus posted-comment labels into a run-level outcome. Kept
  * deliberately small — richer taxonomy lives in Conventional-Comment labels,
  * which are code-owned at render time, not here.
@@ -68,7 +68,7 @@ export const SEVERITIES = ["blocking", "advisory"] as const;
 export type Severity = typeof SEVERITIES[number];
 
 /**
- * Confidence axis (enables the calibration metric in slice 11). Numeric so a
+ * Confidence axis (enables the eval suite's calibration metric). Numeric so a
  * calibration curve can be plotted; constrained to the closed unit interval.
  */
 export const MIN_CONFIDENCE = 0;
@@ -137,13 +137,13 @@ export type Finding = {
     /** Optional unified-diff patch the author suggests (rendered as a suggestion). */
     suggested_patch?: string;
     /**
-     * Optional pre-merge obligation text. Drives the R17 conditional-approval
-     * (APPROVE-with-obligations) rendering in slice 12.
+     * Optional pre-merge obligation text. Drives the conditional-approval
+     * (APPROVE-with-obligations) rendering.
      */
     pre_merge_obligation?: string;
     /**
      * Identifier of the concrete hunt/sub-agent run that produced this finding
-     * (provenance for the R15 counters and validator drop-rate per lens).
+     * (provenance for the live counters and validator drop-rate per lens).
      */
     producing_hunt: string;
     /** The single human-read sentence(s) authored by the model. */

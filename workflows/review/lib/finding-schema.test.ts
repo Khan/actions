@@ -13,8 +13,8 @@ import {
 } from "./finding-schema.ts";
 
 /**
- * Unit tests for the R8(a) versioned structured finding schema/validator
- * (TASK-1-1). Covers the exported version constant, well-formed findings across
+ * Unit tests for the versioned structured finding schema/validator.
+ * Covers the exported version constant, well-formed findings across
  * every anchor type + optional fields, and malformed findings for every
  * required field — including the all-violations collection behavior the coder
  * documented (so per-lens validator drop-rate stays diagnosable).
