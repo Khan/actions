@@ -1,5 +1,5 @@
 /**
- * R4: the thumbs feedback sweep — pure, deterministic code (no model in the
+ * The thumbs feedback sweep — pure, deterministic code (no model in the
  * loop) that turns reviewer-comment reactions into structured feedback.
  *
  * Reviewers on a PR react to the bot's comments with 👍 / 👎. This sweep runs
@@ -44,7 +44,7 @@ export const THUMBS_DOWN = "-1";
 /**
  * The fixed vocabulary a follow-up offers the reactor for *why* they downvoted.
  * Deliberately closed so the labels aggregate cleanly (they calibrate the
- * slice-11 judge and feed the slice-12 dismissal-learning candidates); free text
+ * eval-suite judge and feed the dismissal-learning candidates); free text
  * is invited in addition, not instead.
  */
 export const DOWNVOTE_REASONS = [

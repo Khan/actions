@@ -18,8 +18,8 @@ import {
 } from "./thumbs-sweep.ts";
 
 /**
- * Unit tests for the R4 thumbs feedback sweep (task-8-2). The task calls out four
- * behaviors that must hold; each has its own describe block below:
+ * Unit tests for the thumbs feedback sweep. Four behaviors must hold; each has
+ * its own describe block below:
  *   - new-👎 detection    -> a comment that carries a 👎 is picked up
  *   - single follow-up    -> exactly one follow-up per newly-downvoted comment
  *   - no re-ping          -> a comment already followed up is never pinged again
