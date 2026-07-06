@@ -1,15 +1,16 @@
 /**
- * R8(c): deterministic, templated rendering of Conventional Comments from the
+ * Deterministic, templated rendering of Conventional Comments from the
  * structured finding schema, plus the review-body template.
  *
- * This module sits squarely inside the determinism boundary (analysis R8): CODE
+ * This module sits squarely inside the determinism boundary: CODE
  * owns the label taxonomy, the label-wrapping, and the comment/review-body
  * templates; MODELS own every human-read sentence. The only free text that flows
  * through here is text a lens sub-agent already authored — `model_authored_prose`
  * and the optional `suggested_patch` — copied verbatim. Nothing in this file
- * synthesises, paraphrases, or scores prose; that is the converse tripwire the
- * plan calls out (§0/§8.7). If you find yourself composing a sentence about the
- * code here, it belongs in a sub-agent prompt, not in this module.
+ * synthesises, paraphrases, or scores prose about the code under review; if you
+ * find yourself composing a sentence about the code here, it belongs in a
+ * sub-agent prompt, not in this module. (Fixed template lines, like the
+ * skipped-dimension note and the hold-for-human instructions, are code-owned.)
  *
  * The label taxonomy is owned here (not in `verdict.ts`) because the labels are
  * fundamentally a rendering concern — they are the wrapper code puts around a
@@ -21,7 +22,7 @@ import type {Finding, Lens} from "./finding-schema";
 
 /**
  * The review-outcome vocabulary. `APPROVE` / `REQUEST_CHANGES` are #194's
- * mechanical events; `HOLD_FOR_HUMAN` is this slice's addition (R2 missing-core
+ * mechanical events; `HOLD_FOR_HUMAN` is the third outcome (missing-core
  * dimension gate + policy-named conflicts). It is not a GitHub review event —
  * `review.md` only allows `[APPROVE, REQUEST_CHANGES]` — so the orchestrator
  * surfaces a hold by pulling in a human rather than auto-submitting an approval.
@@ -143,6 +144,16 @@ export type SkippedDimension = {
     subAgent: string;
 };
 
+/**
+ * A policy-named conflict to surface in a hold-for-human body. Structurally
+ * matches `verdict.ts`'s `PolicyConflict` (no import, to keep the import graph
+ * one-directional). `detail` is model-authored text passed through verbatim.
+ */
+export type PolicyConflictNote = {
+    policy: string;
+    detail: string;
+};
+
 export type ReviewBodyInput = {
     /** The computed verdict event (from `verdict.ts`). */
     event: VerdictEvent;
@@ -150,31 +161,60 @@ export type ReviewBodyInput = {
     hasInlineComments: boolean;
     /** Dimensions skipped this run; one note line is appended per entry. */
     skippedDimensions?: readonly SkippedDimension[];
+    /** Policy conflicts behind a HOLD_FOR_HUMAN verdict; ignored otherwise. */
+    policyConflicts?: readonly PolicyConflictNote[];
 };
 
 /**
- * Render the single-line review body (plus any skipped-dimension notes) for a
- * verdict. Mirrors `review.md` Step 6 exactly for APPROVE/REQUEST_CHANGES, and
- * adds a hold-for-human body for the new event. Every branch returns a real,
- * non-empty single line before notes are appended (the safe-output contract
- * forbids an empty body). Skipped-dimension note lines are appended verbatim in
- * the template `review.md` fixes; they apply to every verdict.
+ * How the author of a held PR gets unstuck. Fixed template text (code-owned,
+ * like the skipped-dimension note): a hold must never strand the author with a
+ * verdict and no next action.
+ */
+const HOLD_UNSTUCK_LINES = [
+    "To get unstuck: push a new commit (or re-run the review workflow from the " +
+        "Actions tab) to retry the failed pass, or ask a human to review this " +
+        "PR manually. A hold means the automated review declined to approve on " +
+        "a partial assessment; it does not mean changes are required.",
+    "A maintainer can apply the `skip-ai-review` label to opt this PR out of " +
+        "automated review.",
+] as const;
+
+/**
+ * Render the review body for a verdict. Mirrors `review.md` Step 6 exactly for
+ * APPROVE/REQUEST_CHANGES, and renders a self-explanatory hold-for-human body
+ * for the third event.
+ *
+ * The body convention (matching `review.md`): when inline comments exist, the
+ * comments ARE the review, so the body stays empty; GitHub requires a non-empty
+ * body only when a review has no comments. A non-empty body therefore appears
+ * only for a comment-less review, for skipped-dimension notes (appended to
+ * every verdict, and forming the entire body when the head is empty), and for
+ * HOLD_FOR_HUMAN, which must always explain itself and how to proceed.
  */
 export const renderReviewBody = (input: ReviewBodyInput): string => {
     let head: string;
     switch (input.event) {
         case "APPROVE":
+            // With inline comments, the comments make the review non-empty; the
+            // one-line body exists only to keep a comment-less approval
+            // submittable.
             head = input.hasInlineComments
-                ? "Approved — see inline comments."
+                ? ""
                 : "Approved — no blocking issues found.";
             break;
         case "REQUEST_CHANGES":
-            head = "Changes requested — see inline comments.";
+            // A REQUEST_CHANGES verdict normally carries at least one blocking
+            // inline comment (the verdict follows from the posted labels), so
+            // its body is empty too; the pointer line covers only the
+            // degenerate comment-less case.
+            head = input.hasInlineComments
+                ? ""
+                : "Changes requested — see inline comments.";
             break;
         case "HOLD_FOR_HUMAN":
-            head = input.hasInlineComments
-                ? "Holding for human review — see inline comments."
-                : "Holding for human review — automated review could not complete this run.";
+            head =
+                "Holding for human review — the automated review could not " +
+                "complete safely this run.";
             break;
         default: {
             // Exhaustiveness guard: a new VerdictEvent must add a body branch.
@@ -188,5 +228,16 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             `Note: ${dimension} not assessed this run (${subAgent} output unavailable).`,
     );
 
-    return [head, ...notes].join("\n");
+    const lines = [head, ...notes];
+
+    if (input.event === "HOLD_FOR_HUMAN") {
+        lines.push(
+            ...(input.policyConflicts ?? []).map(
+                ({policy, detail}) => `Policy conflict (${policy}): ${detail}`,
+            ),
+            ...HOLD_UNSTUCK_LINES,
+        );
+    }
+
+    return lines.filter((line) => line !== "").join("\n");
 };

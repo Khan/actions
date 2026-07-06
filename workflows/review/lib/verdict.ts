@@ -1,11 +1,11 @@
 /**
- * R8(b): the computed review verdict.
+ * The computed review verdict.
  *
  * The verdict is a pure function of (1) the Conventional-Comment labels on the
  * comments that will actually be posted, (2) which review dimensions were
  * assessed this run, and (3) any policy-named conflicts a lens flagged. It emits
  * one of three events with a machine-readable list of reasons. No prose is
- * synthesised here (analysis R8 / plan §8.7): reasons are structured records, not
+ * synthesised here: reasons are structured records, not
  * sentences about the code.
  *
  * Relationship to #194: #194 already established the *mechanical label model* —
@@ -15,16 +15,23 @@
  * ADDS on top is the third outcome the pipeline needs:
  *
  *   - HOLD_FOR_HUMAN when a *core* review dimension (correctness or the
- *     skill/severity pass) produced no output — the R2 gate: never auto-approve a
- *     change a core dimension never looked at. This is the gate *on top of* #194's
- *     visibility-only skipped-dimension note (`review.md` Step 6): #194 surfaces
- *     the gap in the body; this refuses to let the run resolve to APPROVE.
+ *     skill/severity pass) produced no output and the run would otherwise have
+ *     auto-approved: never approve a change a core dimension never looked at.
+ *     This is the gate *on top of* #194's visibility-only skipped-dimension note
+ *     (`review.md` Step 6): #194 surfaces the gap in the body; this refuses to
+ *     let the run resolve to APPROVE on a partial assessment.
  *   - HOLD_FOR_HUMAN when a lens flags a policy-named conflict it cannot
- *     adjudicate (e.g. two policies that disagree) — a human decides.
+ *     adjudicate (e.g. two policies that disagree) — a human decides, again only
+ *     where the alternative would have been an auto-approval.
+ *
+ * The hold never withholds actionable feedback: with blocking findings present
+ * the verdict stays REQUEST_CHANGES (the author already has concrete changes to
+ * make, and the re-review after those changes retries the failed dimension),
+ * with the missing dimension or conflict still recorded in `reasons` and
+ * rendered into the review body.
  *
  * A lost *pattern-triage* pass does NOT hold: it is note-and-continue (surfaced
- * as a reason and via `review.md`'s skipped-dimension note), matching the plan's
- * task-2-2 acceptance criterion.
+ * as a reason and via `review.md`'s skipped-dimension note).
  *
  * Verdicts follow the labels on the *posted* set specifically because
  * `claim-validator` and the newly-changed-code scope filter (both upstream, in
@@ -40,7 +47,7 @@ import type {VerdictEvent} from "./render-comment";
 export type {VerdictEvent} from "./render-comment";
 
 /**
- * The two dimensions whose absence forces a hold (R2). Named to match the
+ * The two dimensions whose absence forces a hold. Named to match the
  * review passes: `correctness` (the correctness reviewer) and `skill-severity`
  * (the skill/severity pass).
  */
@@ -108,7 +115,7 @@ export type VerdictInput = {
  * Default blocking threshold: a *single* blocking label is enough to request
  * changes.
  *
- * Rationale (this is the documented default task-2-1 asks for): #194's
+ * Rationale: #194's
  * established mechanical model is "REQUEST_CHANGES iff at least one posted
  * comment carries a blocking label" — i.e. a threshold of 1. We keep that exact
  * behaviour as the launch default so this module is a faithful consumer of #194
@@ -117,10 +124,8 @@ export type VerdictInput = {
  * catch; there is no principled reason to let one such defect through, so the
  * threshold is 1 and not higher.
  *
- * It is exposed as a tunable input (not a HITL gate — the refine HITL resolution
- * and plan §11 delegate the blocking-verdict threshold to implementer judgement,
- * tunable later) so the eval suite can experiment with a higher bar without a
- * code change. Values < 1 are treated as 1 (a run with blocking labels always
+ * It is exposed as a tunable input so the eval suite can experiment with a
+ * higher bar without a code change. Values < 1 are treated as 1 (a run with blocking labels always
  * blocks; a run without them never does).
  */
 export const DEFAULT_BLOCKING_THRESHOLD = 1;
@@ -128,19 +133,24 @@ export const DEFAULT_BLOCKING_THRESHOLD = 1;
 /**
  * Compute the review verdict. Pure: no I/O, no clock, no randomness — the same
  * input always yields the same verdict, which is what makes the determinism
- * boundary testable (task-2-4 truth table).
+ * boundary testable.
  *
- * Precedence is HOLD_FOR_HUMAN > REQUEST_CHANGES > APPROVE:
+ * Precedence is REQUEST_CHANGES > HOLD_FOR_HUMAN > APPROVE:
  *
- *   1. If any core dimension is unavailable, or any policy conflict is present,
- *      the run cannot be auto-resolved -> HOLD_FOR_HUMAN. This dominates even a
- *      blocking label: when the automation could not complete its own
- *      assessment, a human adjudicates rather than the bot issuing a verdict on
- *      a partial picture. All applicable reasons (including any blocking labels
- *      found) are still recorded so nothing is lost.
- *   2. Otherwise, if the blocking-label count meets the threshold ->
- *      REQUEST_CHANGES.
+ *   1. If the blocking-label count meets the threshold -> REQUEST_CHANGES. A
+ *      blocking finding is actionable on its own: the author gets concrete
+ *      changes to make even when another dimension failed, and the re-review
+ *      after those changes retries the failed dimension anyway. Any missing
+ *      core dimension or policy conflict is still recorded in `reasons` (and
+ *      rendered into the body), so nothing is hidden.
+ *   2. Otherwise, if any core dimension is unavailable or any policy conflict
+ *      is present, the run must not resolve to an approval the automation
+ *      cannot stand behind -> HOLD_FOR_HUMAN.
  *   3. Otherwise -> APPROVE.
+ *
+ * The hold therefore only ever replaces what would otherwise have been an
+ * auto-approval; it never sits in front of feedback the author could already
+ * act on.
  */
 export const computeVerdict = (input: VerdictInput): Verdict => {
     const threshold = Math.max(
@@ -158,7 +168,7 @@ export const computeVerdict = (input: VerdictInput): Verdict => {
         return count;
     }, 0);
 
-    // (b) R2 core-dimension gate.
+    // (b) Core-dimension gate.
     const missingCore: CoreDimension[] = [];
     if (input.dimensions.correctness === "unavailable") {
         missingCore.push("correctness");
@@ -181,14 +191,15 @@ export const computeVerdict = (input: VerdictInput): Verdict => {
         reasons.push({code: "policy-conflict", policy, detail});
     }
 
-    // Precedence: hold dominates.
-    if (missingCore.length > 0 || policyConflicts.length > 0) {
-        return {event: "HOLD_FOR_HUMAN", reasons};
-    }
-
+    // Precedence: a blocking finding is actionable on its own, so it wins.
     // A run with zero blocking labels is never REQUEST_CHANGES (review.md Step 4).
     if (blockingLabelCount > 0 && blockingLabelCount >= threshold) {
         return {event: "REQUEST_CHANGES", reasons};
+    }
+
+    // The hold only ever replaces what would otherwise be an auto-approval.
+    if (missingCore.length > 0 || policyConflicts.length > 0) {
+        return {event: "HOLD_FOR_HUMAN", reasons};
     }
 
     return {event: "APPROVE", reasons};

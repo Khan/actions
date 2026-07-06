@@ -10,12 +10,14 @@ import {
 import {BLOCKING_LABELS, NON_BLOCKING_LABELS} from "./render-comment.ts";
 
 /**
- * Truth-table tests for the R8(b)/R2 computed verdict (TASK-2-4).
+ * Truth-table tests for the computed verdict.
  *
  * `computeVerdict` is a pure function of (posted labels, dimension availability,
- * policy conflicts) with a documented precedence HOLD_FOR_HUMAN >
- * REQUEST_CHANGES > APPROVE. These tests pin every cell of that table, the
- * threshold clamping, the structured (prose-free) reasons, and purity.
+ * policy conflicts) with a documented precedence REQUEST_CHANGES >
+ * HOLD_FOR_HUMAN > APPROVE: a blocking finding is actionable on its own, so the
+ * hold only ever replaces what would otherwise be an auto-approval. These tests
+ * pin every cell of that table, the threshold clamping, the structured
+ * (prose-free) reasons, and purity.
  */
 
 // All dimensions present — the common "nothing skipped" case. Tests clone +
@@ -91,7 +93,7 @@ describe("computeVerdict — REQUEST_CHANGES", () => {
     });
 });
 
-describe("computeVerdict — HOLD_FOR_HUMAN (R2 core-dimension gate)", () => {
+describe("computeVerdict — HOLD_FOR_HUMAN (core-dimension gate)", () => {
     it("holds when correctness is unavailable", () => {
         const verdict = computeVerdict(
             makeInput({
@@ -135,14 +137,17 @@ describe("computeVerdict — HOLD_FOR_HUMAN (R2 core-dimension gate)", () => {
         ]);
     });
 
-    it("hold dominates a blocking label, but still records the blocking reason", () => {
+    it("a blocking label beats the hold (actionable feedback wins), with the gate still recorded", () => {
         const verdict = computeVerdict(
             makeInput({
                 postedLabels: [BLOCKING],
                 dimensions: {...allAssessed, correctness: "unavailable"},
             }),
         );
-        expect(verdict.event).toBe("HOLD_FOR_HUMAN");
+        // The author already has concrete changes to make; the re-review after
+        // those changes retries the failed dimension. The hold only replaces
+        // would-be approvals.
+        expect(verdict.event).toBe("REQUEST_CHANGES");
         // Nothing lost: both the blocking label and the gate are surfaced.
         expect(verdict.reasons).toContainEqual({
             code: "blocking-label",
@@ -215,11 +220,14 @@ describe("computeVerdict — policy-named conflicts", () => {
         ).toHaveLength(2);
     });
 
-    it("hold (policy conflict) dominates a blocking label", () => {
+    it("a blocking label beats the hold (policy conflict), with the conflict still recorded", () => {
         const verdict = computeVerdict(
             makeInput({postedLabels: [BLOCKING], policyConflicts: [conflict]}),
         );
-        expect(verdict.event).toBe("HOLD_FOR_HUMAN");
+        expect(verdict.event).toBe("REQUEST_CHANGES");
+        expect(
+            verdict.reasons.filter((r) => r.code === "policy-conflict"),
+        ).toHaveLength(1);
     });
 });
 

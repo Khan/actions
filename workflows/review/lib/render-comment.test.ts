@@ -12,7 +12,7 @@ import {
 import {assertFinding, type Finding, type Lens} from "./finding-schema.ts";
 
 /**
- * Rendering tests for R8(c) (TASK-2-4). The renderer sits on the determinism
+ * Rendering tests. The renderer sits on the determinism
  * boundary: CODE owns the label taxonomy + templated wrapping; MODELS own every
  * human-read sentence. These tests pin the deterministic label mapping and
  * snapshot the templated output so any drift in code-owned wrapping is caught,
@@ -148,49 +148,101 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
         ).toMatchInlineSnapshot(`"Approved — no blocking issues found."`);
     });
 
-    it("APPROVE with inline comments", () => {
-        expect(
-            body({event: "APPROVE", hasInlineComments: true}),
-        ).toMatchInlineSnapshot(`"Approved — see inline comments."`);
+    it("APPROVE with inline comments has an empty body (the comments ARE the review)", () => {
+        expect(body({event: "APPROVE", hasInlineComments: true})).toBe("");
     });
 
-    it("REQUEST_CHANGES", () => {
+    it("REQUEST_CHANGES with inline comments has an empty body", () => {
+        expect(body({event: "REQUEST_CHANGES", hasInlineComments: true})).toBe(
+            "",
+        );
+    });
+
+    it("REQUEST_CHANGES without inline comments keeps the pointer line (degenerate case)", () => {
         expect(
-            body({event: "REQUEST_CHANGES", hasInlineComments: true}),
+            body({event: "REQUEST_CHANGES", hasInlineComments: false}),
         ).toMatchInlineSnapshot(`"Changes requested — see inline comments."`);
     });
 
-    it("HOLD_FOR_HUMAN without inline comments", () => {
-        expect(
-            body({event: "HOLD_FOR_HUMAN", hasInlineComments: false}),
-        ).toMatchInlineSnapshot(
-            `"Holding for human review — automated review could not complete this run."`,
+    it("HOLD_FOR_HUMAN explains itself and how to get unstuck", () => {
+        const rendered = body({
+            event: "HOLD_FOR_HUMAN",
+            hasInlineComments: false,
+        });
+        expect(rendered).toMatchInlineSnapshot(`
+          "Holding for human review — the automated review could not complete safely this run.
+          To get unstuck: push a new commit (or re-run the review workflow from the Actions tab) to retry the failed pass, or ask a human to review this PR manually. A hold means the automated review declined to approve on a partial assessment; it does not mean changes are required.
+          A maintainer can apply the \`skip-ai-review\` label to opt this PR out of automated review."
+        `);
+    });
+
+    it("HOLD_FOR_HUMAN is never empty, even with inline comments", () => {
+        const rendered = body({
+            event: "HOLD_FOR_HUMAN",
+            hasInlineComments: true,
+        });
+        expect(rendered.split("\n")[0]).toBe(
+            "Holding for human review — the automated review could not complete safely this run.",
+        );
+        expect(rendered).toContain("To get unstuck:");
+    });
+
+    it("HOLD_FOR_HUMAN renders policy-conflict lines before the unstuck instructions", () => {
+        const rendered = body({
+            event: "HOLD_FOR_HUMAN",
+            hasInlineComments: false,
+            policyConflicts: [
+                {
+                    policy: "skill-severity vs risk-tier",
+                    detail: "the skill file marks this advisory; the risk config marks it blocking.",
+                },
+            ],
+        });
+        expect(rendered).toContain(
+            "Policy conflict (skill-severity vs risk-tier): the skill file marks this advisory; the risk config marks it blocking.",
+        );
+        expect(rendered.indexOf("Policy conflict")).toBeLessThan(
+            rendered.indexOf("To get unstuck:"),
         );
     });
 
-    it("HOLD_FOR_HUMAN with inline comments", () => {
+    it("policy conflicts are ignored for non-hold verdicts", () => {
         expect(
-            body({event: "HOLD_FOR_HUMAN", hasInlineComments: true}),
-        ).toMatchInlineSnapshot(
-            `"Holding for human review — see inline comments."`,
-        );
+            body({
+                event: "APPROVE",
+                hasInlineComments: true,
+                policyConflicts: [{policy: "p", detail: "d"}],
+            }),
+        ).toBe("");
     });
 
-    it("every branch returns a non-empty first line (safe-output contract)", () => {
+    it("a comment-less review always has a non-empty body (GitHub requires one)", () => {
         const events: ReviewBodyInput["event"][] = [
             "APPROVE",
             "REQUEST_CHANGES",
             "HOLD_FOR_HUMAN",
         ];
         for (const event of events) {
-            for (const hasInlineComments of [true, false]) {
-                const first = renderReviewBody({
-                    event,
-                    hasInlineComments,
-                }).split("\n")[0];
-                expect(first.length).toBeGreaterThan(0);
-            }
+            const first = renderReviewBody({
+                event,
+                hasInlineComments: false,
+            }).split("\n")[0];
+            expect(first.length).toBeGreaterThan(0);
         }
+    });
+
+    it("skipped-dimension notes form the entire body when the head is empty", () => {
+        expect(
+            body({
+                event: "APPROVE",
+                hasInlineComments: true,
+                skippedDimensions: [
+                    {dimension: "patterns", subAgent: "pattern-triage"},
+                ],
+            }),
+        ).toBe(
+            "Note: patterns not assessed this run (pattern-triage output unavailable).",
+        );
     });
 
     it("appends one skipped-dimension note line per entry", () => {
