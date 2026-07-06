@@ -47,11 +47,15 @@ export const KNOWN_LENSES = [
     "deploy-infra-config",
     "money-payments",
     "content-i18n",
-    // Always-on / whole-change reviewers and triage.
+    // Whole-change reviewers (the default correctness pass plus the opt-in
+    // reviewers a repo can `enable` in its ROUTING file) and triage.
     "correctness",
     "conventions",
     "pattern-triage",
     "first-principles",
+    "holistic",
+    "completeness",
+    "test-adequacy",
 ] as const;
 
 export type Lens = typeof KNOWN_LENSES[number];

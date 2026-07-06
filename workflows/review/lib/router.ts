@@ -33,11 +33,13 @@
 import {KNOWN_LENSES} from "./finding-schema";
 import type {Lens} from "./finding-schema";
 import {
+    ENABLEABLE_REVIEWERS,
     parseRoutingConfig,
     RISK_TIERS,
     ROUTING_CONFIG_PATH,
 } from "./routing-config";
 import type {
+    EnableableReviewer,
     LensRule,
     RiskRule,
     RiskTier,
@@ -46,25 +48,41 @@ import type {
 
 // Re-exported so consumers (and the tests) can treat the router as the single
 // entry point for routing vocabulary and the ROUTING parser.
-export {parseRoutingConfig, RISK_TIERS, ROUTING_CONFIG_PATH};
-export type {LensRule, RiskRule, RiskTier, RoutingFileConfig};
+export {
+    ENABLEABLE_REVIEWERS,
+    parseRoutingConfig,
+    RISK_TIERS,
+    ROUTING_CONFIG_PATH,
+};
+export type {
+    EnableableReviewer,
+    LensRule,
+    RiskRule,
+    RiskTier,
+    RoutingFileConfig,
+};
 
 /* -------------------------------------------------------------------------- */
 /* Lens taxonomy                                                              */
 /* -------------------------------------------------------------------------- */
 
 /**
- * The always-on / whole-change reviewers and triage. These run every review
- * regardless of routing, so they are NOT part of the router's `lensesToSpawn`
- * (which names only the *specialist* lenses gated by touched paths). Kept here
- * as the complement of {@link SPECIALIST_LENSES} so the two lists cannot drift
- * from the canonical `KNOWN_LENSES`.
+ * The whole-change reviewers and triage: never path-gated, so NOT part of the
+ * router's `lensesToSpawn` (which names only the *specialist* lenses gated by
+ * touched paths). Whether each runs is a separate question — the default
+ * roster always does, and the opt-in ones ({@link ENABLEABLE_REVIEWERS}) run
+ * only when the repo's ROUTING file enables them (`enabledReviewers`). Kept
+ * here as the complement of {@link SPECIALIST_LENSES} so the two lists cannot
+ * drift from the canonical `KNOWN_LENSES`.
  */
 export const ALWAYS_ON_LENSES = [
     "correctness",
     "conventions",
     "pattern-triage",
     "first-principles",
+    "holistic",
+    "completeness",
+    "test-adequacy",
 ] as const;
 
 // `satisfies readonly Lens[]` is the natural spelling, but the repo's
@@ -762,6 +780,11 @@ export type RoutingJson = {
     runBudget: RunBudget;
     pendingRiskQuestions: RiskQuestion[];
     /**
+     * Opt-in whole-change reviewers the repo's `ROUTING` file enables
+     * (`enable <reviewer>` lines). Empty means the default roster only.
+     */
+    enabledReviewers: EnableableReviewer[];
+    /**
      * Whether the consumer `ROUTING` file was found, plus any parse warnings
      * (or the missing-file warning). The orchestrator surfaces these in the
      * review body's note lines so a silently-unconfigured repo is visible.
@@ -781,6 +804,7 @@ export type RoutingJson = {
 export const toRoutingJson = (
     result: RoutingResult,
     routingConfig: RoutingJson["routingConfig"] = {present: true, warnings: []},
+    enabledReviewers: EnableableReviewer[] = [],
 ): RoutingJson => {
     const owners: Record<string, string[]> = {};
     for (const file of result.perFile) {
@@ -800,6 +824,7 @@ export const toRoutingJson = (
         perFileTier,
         runBudget: result.runBudget,
         pendingRiskQuestions: result.pendingRiskQuestions,
+        enabledReviewers,
         routingConfig,
     };
 };
@@ -878,6 +903,7 @@ export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
         : {
               lensRules: [],
               riskRules: [],
+              enabledReviewers: [],
               warnings: [
                   `routing config missing (${ROUTING_CONFIG_PATH}): no ` +
                       `specialist lenses will run; always-on reviewers only ` +
@@ -903,10 +929,14 @@ export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
         lensRules: routingFileConfig.lensRules,
         riskRules: routingFileConfig.riskRules,
     });
-    const json = toRoutingJson(result, {
-        present: routingConfigPresent,
-        warnings: routingFileConfig.warnings,
-    });
+    const json = toRoutingJson(
+        result,
+        {
+            present: routingConfigPresent,
+            warnings: routingFileConfig.warnings,
+        },
+        routingFileConfig.enabledReviewers,
+    );
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});
     fs.writeFileSync(ROUTING_OUT, JSON.stringify(json, null, 2));

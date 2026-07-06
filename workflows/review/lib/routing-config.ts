@@ -44,10 +44,29 @@ export type RiskRule = {
 /** Where a consuming repo keeps its routing map, next to its review config. */
 export const ROUTING_CONFIG_PATH = ".github/aw/review/ROUTING";
 
+/**
+ * The opt-in whole-change reviewers a repo may `enable` in its ROUTING file.
+ * None run by default: each costs credits on every PR, so a repo turns one on
+ * only once the eval suite shows it earns its keep. (The default roster —
+ * correctness, skill audit, triage, reconciliation, validation — needs no
+ * enabling.)
+ */
+export const ENABLEABLE_REVIEWERS = [
+    "holistic",
+    "completeness",
+    "test-adequacy",
+    "first-principles",
+    "conventions",
+] as const;
+
+export type EnableableReviewer = typeof ENABLEABLE_REVIEWERS[number];
+
 /** Parsed `.github/aw/review/ROUTING` config. */
 export type RoutingFileConfig = {
     lensRules: LensRule[];
     riskRules: RiskRule[];
+    /** Opt-in whole-change reviewers this repo enables (canonical order). */
+    enabledReviewers: EnableableReviewer[];
     /** Fixed-format parse warnings (unknown lens/tier, no-op rule). */
     warnings: string[];
 };
@@ -56,9 +75,10 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
 
 /**
  * Parse the consumer-owned routing map. Line grammar, `REVIEWERS`-style —
- * blanks and `#` comments skipped, one rule per line:
+ * blanks and `#` comments skipped, one rule or directive per line:
  *
  *     <pattern> [lens=<lens>[,<lens>…]] [tier=trivial|low|medium|high] [direction-dependent]
+ *     enable <reviewer>[,<reviewer>…]
  *
  * `lens=` names specialist lenses to spawn when the pattern is touched (multiple
  * matching rules union their lenses). `tier=` assigns a risk tier; when several
@@ -68,14 +88,17 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  * subtree beneath it). `direction-dependent` marks a tier
  * that cannot be finalised from the path alone (tightening vs. loosening; see
  * {@link RiskRule.diffDirectionDependent}) and requires `tier=`.
+ * `enable` turns on an opt-in whole-change reviewer
+ * ({@link ENABLEABLE_REVIEWERS}) for every review in this repo.
  *
- * Malformed fields and unknown lens names produce a warning and skip the lens or
- * line rather than aborting the run: routing degrades to fewer lenses, never to
- * a crashed review.
+ * Malformed fields and unknown lens/reviewer names produce a warning and skip
+ * the lens or line rather than aborting the run: routing degrades to fewer
+ * reviewers, never to a crashed review.
  */
 export const parseRoutingConfig = (content: string): RoutingFileConfig => {
     const lensRules: LensRule[] = [];
     const riskRules: RiskRule[] = [];
+    const enabled = new Set<EnableableReviewer>();
     const warnings: string[] = [];
 
     const lines = content.split(/\r?\n/);
@@ -86,6 +109,31 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
         }
         const lineNo = index + 1;
         const [pattern, ...fields] = line.split(/\s+/);
+
+        if (pattern === "enable") {
+            const names = fields.flatMap((field) => field.split(","));
+            if (names.length === 0) {
+                warnings.push(
+                    `ROUTING line ${lineNo}: enable names no reviewer (line skipped)`,
+                );
+                continue;
+            }
+            for (const name of names) {
+                if (name === "") {
+                    continue;
+                }
+                if (
+                    (ENABLEABLE_REVIEWERS as readonly string[]).includes(name)
+                ) {
+                    enabled.add(name as EnableableReviewer);
+                } else {
+                    warnings.push(
+                        `ROUTING line ${lineNo}: unknown reviewer "${name}" (skipped)`,
+                    );
+                }
+            }
+            continue;
+        }
 
         const lenses = new Set<Lens>();
         let tier: RiskTier | undefined;
@@ -154,5 +202,12 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
         }
     }
 
-    return {lensRules, riskRules, warnings};
+    return {
+        lensRules,
+        riskRules,
+        enabledReviewers: ENABLEABLE_REVIEWERS.filter((reviewer) =>
+            enabled.has(reviewer),
+        ),
+        warnings,
+    };
 };

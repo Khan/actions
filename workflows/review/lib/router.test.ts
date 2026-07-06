@@ -755,3 +755,57 @@ describe("parseRoutingConfig", () => {
         expect(config.warnings.join("\n")).toContain("no lens= or tier=");
     });
 });
+
+describe("parseRoutingConfig: enable directives", () => {
+    it("collects enabled reviewers in canonical order, deduped", () => {
+        const config = parseRoutingConfig(
+            ["enable test-adequacy", "enable holistic,test-adequacy"].join(
+                "\n",
+            ),
+        );
+        expect(config.enabledReviewers).toEqual(["holistic", "test-adequacy"]);
+        expect(config.warnings).toEqual([]);
+    });
+
+    it("warns on an unknown reviewer and keeps the known ones", () => {
+        const config = parseRoutingConfig("enable holistic,skynet");
+        expect(config.enabledReviewers).toEqual(["holistic"]);
+        expect(config.warnings.join("\n")).toContain(
+            'unknown reviewer "skynet"',
+        );
+    });
+
+    it("warns on a bare enable line", () => {
+        const config = parseRoutingConfig("enable");
+        expect(config.enabledReviewers).toEqual([]);
+        expect(config.warnings.join("\n")).toContain("names no reviewer");
+    });
+
+    it("defaults to no enabled reviewers", () => {
+        expect(
+            parseRoutingConfig("docs/** tier=trivial").enabledReviewers,
+        ).toEqual([]);
+    });
+});
+
+describe("runCli: enabled reviewers", () => {
+    it("surfaces enable directives in routing.json", () => {
+        const {fs} = fakeFs({
+            ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
+                {path: "a.ts", status: "modified"},
+            ]),
+            [ROUTING_CONFIG_PATH]: "enable holistic,first-principles",
+        });
+        const json = runCli(fs);
+        expect(json.enabledReviewers).toEqual(["holistic", "first-principles"]);
+    });
+
+    it("emits no enabled reviewers without a ROUTING config", () => {
+        const {fs} = fakeFs({
+            ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
+                {path: "a.ts", status: "modified"},
+            ]),
+        });
+        expect(runCli(fs).enabledReviewers).toEqual([]);
+    });
+});
