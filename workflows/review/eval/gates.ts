@@ -1,5 +1,5 @@
 /**
- * R5 overfitting guards + the adversarial hard gate (task-11-4).
+ * Overfitting guards + the adversarial hard gate.
  *
  * The eval suite can be gamed two ways, and this module defends both:
  *
@@ -18,7 +18,7 @@
  *      automatic mode is not allowed and the reviewer falls back to advisory /
  *      human adjudication.
  *
- * Determinism boundary (analysis R8): pure functions over structured runs; no
+ * Determinism boundary: pure functions over structured runs; no
  * prose about code under review, no model call.
  */
 

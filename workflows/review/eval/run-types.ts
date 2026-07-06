@@ -1,5 +1,5 @@
 /**
- * The shared "one scored run" shape used by the slice-11 metrics, judge, and
+ * The shared "one scored run" shape used by the suite metrics, judge, and
  * gates. A corpus case paired with the {@link RunResult} the no-post runner
  * produced for it — the exact pairing `runSmokeCorpus` already returns, lifted to
  * a named type so metrics/judge/gates agree on their input without importing each

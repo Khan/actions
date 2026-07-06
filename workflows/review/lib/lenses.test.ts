@@ -23,7 +23,7 @@ import {SPECIALIST_LENSES} from "./router.ts";
  *
  * So this file is a self-contained, deterministic model of that tri-state
  * contract, one hunt per specialist lens, each derived from a documented Khan
- * incident (the same incident taxonomy the slice-9 smoke corpus and slice-11
+ * incident (the same incident taxonomy the smoke corpus and full-suite
  * mutation set draw from -- this harness is the fixture format they reuse). For
  * every lens we assert the three states the proposal names:
  *
@@ -705,7 +705,7 @@ describe("specialist lens hunt fixtures (TASK-7-13)", () => {
                 // The finding is attributed to this lens and this hunt...
                 expect(finding.lens).toBe(hunt.lens);
                 expect(finding.producing_hunt).toBe(hunt.id);
-                // ...and it emits into the real finding schema (slice-7 goal:
+                // ...and it emits into the real finding schema (the goal:
                 // "findings emit valid schema").
                 const result = validateFinding(finding);
                 expect(

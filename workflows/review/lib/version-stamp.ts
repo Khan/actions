@@ -7,11 +7,11 @@
  * consumer repo's sync check parses the marker off a posted review comment (or a
  * committed skill snapshot) and compares the `stamp=` value against the one it
  * last synced; a mismatch means the shared reviewer's prompt or config changed
- * since the consumer pinned it. The eval suite (slice 11) uses the same stamp to
+ * since the consumer pinned it. The eval suite uses the same stamp to
  * label a run so a metrics regression can be attributed to a specific reviewer
  * version.
  *
- * Determinism boundary (analysis R8): this module authors no prose about code
+ * Determinism boundary: this module authors no prose about code
  * under review. Every string it emits is a hash, a marker key, or a structural
  * token — never a sentence composed about a diff.
  *
@@ -107,7 +107,7 @@ export const canonicalize = (value: unknown): string => {
  * Compute the reviewer version stamp: a hex SHA-256 over the canonicalised
  * (prompts, config, schemaVersion, format) tuple. Pure and deterministic — no
  * clock, no randomness — so the same inputs always yield the same stamp and a
- * changed input always yields a different one (the task-11-5 acceptance: "stamp
+ * changed input always yields a different one (the guarantee: "stamp
  * changes when prompt/config changes"). Truncated to 16 hex chars: a 64-bit
  * prefix is far more than enough to make an accidental collision between two
  * reviewer versions impossible in practice, while keeping the marker compact.

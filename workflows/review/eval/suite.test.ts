@@ -60,9 +60,9 @@ import {
 /**
  * Full eval-suite **self-tests** + CI-wiring guard (TASK-11-6).
  *
- * task-11-6 has two halves and this file is both:
+ * This file has two halves:
  *
- *   1. **Suite self-tests.** The slice-11 coder shipped the eval suite as five
+ *   1. **Suite self-tests.** The eval suite ships as five
  *      leaf modules — the shared corpus `loader`, the deterministic no-post
  *      `runner`, the five `metrics`, the overfitting/adversarial `gates`, the
  *      LLM-`judge`, and the reviewer `version-stamp`. This file is the harness
@@ -73,7 +73,7 @@ import {
  *
  *   2. **Wire the smoke subset as the per-PR CI gate; the full suite as
  *      scheduled (not per-PR).** The smoke subset is already the `pnpm test`
- *      gate (slice-9 `smoke.test.ts`, and the staged `.github-staging/
+ *      gate (`smoke.test.ts`, and the staged `.github-staging/
  *      review-smoke.yml`). What this file additionally *enforces* is the property
  *      that makes that split safe: everything the per-PR gate runs is
  *      deterministic and model-free — the ONLY model seam in the whole suite is
@@ -83,7 +83,7 @@ import {
  *      opt-in and belongs to a scheduled job. These tests use a stub judge model;
  *      they never call a real model.
  *
- * This is a CONSUMER of the coder's slice-11 artifacts, not a re-implementation:
+ * This is a CONSUMER of the suite modules, not a re-implementation:
  * every assertion drives the public exports of the modules under test.
  *
  * Determinism: no model, no network, no clock, no randomness. The judge is
@@ -177,7 +177,7 @@ const SMOKE_CASES: CorpusCase[] = loadSmokeCorpus();
 /* 1. Four datasets load via the shared loader; smoke is a strict subset.      */
 /* -------------------------------------------------------------------------- */
 
-describe("full corpus (task-11-1): four datasets load via the one shared loader", () => {
+describe("full corpus: four datasets load via the one shared loader", () => {
     it("loads a corpus strictly larger than the smoke subset", () => {
         expect(FULL_CASES.length).toBeGreaterThan(SMOKE_CASES.length);
     });
@@ -231,7 +231,7 @@ describe("full corpus (task-11-1): four datasets load via the one shared loader"
 /* 2. The full suite is INVOCABLE and green on baseline (deterministic path).  */
 /* -------------------------------------------------------------------------- */
 
-describe("full suite runs green on baseline (task-11-6 'full suite invocable')", () => {
+describe("full suite runs green on baseline ('full suite invocable')", () => {
     it.each(FULL_RUNS)(
         "$corpusCase.id meets its expected block exactly",
         (run) => {
@@ -262,10 +262,10 @@ describe("full suite runs green on baseline (task-11-6 'full suite invocable')",
 });
 
 /* -------------------------------------------------------------------------- */
-/* 3. The five metrics (task-11-2) — focused fixtures.                         */
+/* 3. The five metrics — focused fixtures.                         */
 /* -------------------------------------------------------------------------- */
 
-describe("metrics self-tests (task-11-2): five numbers computed deterministically", () => {
+describe("metrics self-tests: five numbers computed deterministically", () => {
     it("must-catch recall counts posted vs. dropped required ids", () => {
         // Finding "a" is posted; "b" is required but absent -> 1/2.
         const run = makeRun({
@@ -386,10 +386,10 @@ describe("metrics self-tests (task-11-2): five numbers computed deterministicall
 });
 
 /* -------------------------------------------------------------------------- */
-/* 4. Gates (task-11-4): adversarial hard gate + overfitting report.           */
+/* 4. Gates: adversarial hard gate + overfitting report.           */
 /* -------------------------------------------------------------------------- */
 
-describe("gates self-tests (task-11-4): adversarial hard gate + overfitting split", () => {
+describe("gates self-tests: adversarial hard gate + overfitting split", () => {
     it("checkExpectation surfaces each failure code", () => {
         // Expect REQUEST_CHANGES + a must-catch that the advisory run drops, and a
         // pinned comment count that will not match.
@@ -475,7 +475,7 @@ describe("gates self-tests (task-11-4): adversarial hard gate + overfitting spli
 });
 
 /* -------------------------------------------------------------------------- */
-/* 5. Judge (task-11-3): a STUB model — never a live call.                     */
+/* 5. Judge: a STUB model — never a live call.                     */
 /* -------------------------------------------------------------------------- */
 
 /** A deterministic stub judge: verdict/quality driven by a per-findingId table. */
@@ -501,7 +501,7 @@ const stubModel =
             };
         });
 
-describe("judge self-tests (task-11-3): pure aggregation around a stubbed model", () => {
+describe("judge self-tests: pure aggregation around a stubbed model", () => {
     it("pins the judge model to Opus 4.8 (operator direction 4)", () => {
         expect(PINNED_JUDGE_MODEL).toBe("claude-opus-4-8");
     });
@@ -653,10 +653,10 @@ describe("judge self-tests (task-11-3): pure aggregation around a stubbed model"
 });
 
 /* -------------------------------------------------------------------------- */
-/* 6. Version stamp (task-11-5): the single drift-guard surface.               */
+/* 6. Version stamp: the single drift-guard surface.               */
 /* -------------------------------------------------------------------------- */
 
-describe("version stamp self-tests (task-11-5): the one drift-guard surface", () => {
+describe("version stamp self-tests: the one drift-guard surface", () => {
     const base = {prompts: {"review.md": "v1"}, config: {effort: "high"}};
 
     it("changes when the prompt, the config, or the schema version changes", () => {
@@ -715,7 +715,7 @@ describe("version stamp self-tests (task-11-5): the one drift-guard surface", ()
 /* 7. CI wiring: smoke = per-PR gate; full suite = scheduled (not per-PR).      */
 /* -------------------------------------------------------------------------- */
 
-describe("CI wiring (task-11-6): smoke gates per-PR, live-judge suite is scheduled", () => {
+describe("CI wiring: smoke gates per-PR, live-judge suite is scheduled", () => {
     it("the smoke subset is a non-empty, strict subset — the per-PR gate stays fast", () => {
         // smoke.test.ts is the `pnpm test` gate; it must run a proper subset so the
         // per-PR job never pays for the full four-dataset corpus.

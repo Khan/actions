@@ -1,7 +1,7 @@
 /**
- * R5 LLM-judge (task-11-3): an Opus-4.8 judge that scores the *quality* of the
+ * LLM-judge: an Opus-4.8 judge that scores the *quality* of the
  * comments a run posted, a human-audit sample surfaced from its output, and a
- * calibration pass against the slice-8 thumbs labels.
+ * calibration pass against the thumbs-sweep labels.
  *
  * Why a judge at all: the deterministic metrics (recall/precision/noise) score
  * whether the reviewer posted the *right findings* against corpus ground truth.
@@ -214,7 +214,7 @@ export const DEFAULT_AUDIT_SIZE = 10;
  * disagreement first (highest value), then every `borderline` verdict, then a
  * stable fill sampled by `findingId` sort — up to `size`. Deterministic (sorted,
  * no randomness) so the same run always surfaces the same sample and a human can
- * re-audit reproducibly. This is the task-11-3 "audit sample surfaced".
+ * re-audit reproducibly. This is the "audit sample surfaced" guarantee.
  */
 export const selectAuditSample = (
     report: JudgeReport,
@@ -256,14 +256,14 @@ export const selectAuditSample = (
 /* -------------------------------------------------------------------------- */
 
 /**
- * The fixed downvote-reason vocabulary the slice-8 thumbs sweep offers on a 👎.
+ * The fixed downvote-reason vocabulary the thumbs sweep offers on a 👎.
  *
  * Declared locally rather than imported from `../lib/thumbs-sweep` on purpose:
  * the judge consumes thumbs labels as *data* (see {@link ThumbsLabel}) and never
  * needs the sweep module at build time, so importing its type would create a
- * cross-slice build dependency on slice-8 for a field this module only carries
+ * build dependency on the thumbs sweep for a field this module only carries
  * through (calibration keys off `direction`, not `reason`). This union is
- * structurally identical to slice-8's `DownvoteReason`, so a value produced there
+ * structurally identical to the thumbs sweep's `DownvoteReason`, so a value produced there
  * is assignable here and vice versa; keep the two in sync if the sweep's
  * vocabulary changes.
  */
@@ -274,7 +274,7 @@ export type DownvoteReason =
     | "duplicate";
 
 /**
- * A human thumbs signal on a posted comment, mined by the slice-8 sweep. `up`
+ * A human thumbs signal on a posted comment, mined by the thumbs sweep. `up`
  * means 👍 (the human agreed with the comment), `down` means 👎 (disagreed);
  * `reason` is the sweep's fixed downvote vocabulary when the human gave one.
  */
@@ -303,7 +303,7 @@ export type ThumbsCalibration = {
 };
 
 /**
- * Calibrate the judge against human thumbs (slice 8). The thumbs are treated as
+ * Calibrate the judge against human thumbs. The thumbs are treated as
  * the human ground truth for *usefulness*; a judge that systematically disagrees
  * with 👎/👍 is mis-calibrated and its scores should be discounted. We only
  * compare comments the human actually reacted to, and only decisive judge

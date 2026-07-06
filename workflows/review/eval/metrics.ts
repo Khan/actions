@@ -1,5 +1,5 @@
 /**
- * R5 eval **metrics** (task-11-2): the five numbers that say whether the reviewer
+ * Eval **metrics**: the five numbers that say whether the reviewer
  * this run shipped is good enough — computed over a corpus run, deterministically
  * and with no model call.
  *
@@ -21,10 +21,10 @@
  *   5. **calibration** — do the model's `confidence` numbers mean anything? We
  *      bucket posted findings by confidence and compare each bucket's mean
  *      confidence to its empirical correctness, reporting the expected
- *      calibration error (ECE). The slice-8 thumbs labels calibrate the same axis
+ *      calibration error (ECE). The thumbs-sweep labels calibrate the same axis
  *      at runtime; here we measure it against the corpus ground truth.
  *
- * Determinism boundary (analysis R8): this module reads structured findings and
+ * Determinism boundary: this module reads structured findings and
  * case expectations and emits numbers. It authors no prose about code under
  * review.
  */
@@ -285,8 +285,8 @@ export const calibration = (runs: EvalRun[]): CalibrationMetric => {
 
 /**
  * Compute all five metrics over a corpus run. This is the single entry the eval
- * suite (and the slice-11 gates) call; each metric is also exported individually
- * for focused tests and for the R15 counters that reuse them.
+ * suite (and the gates) call; each metric is also exported individually
+ * for focused tests and for the live counters that reuse them.
  */
 export const computeMetrics = (runs: EvalRun[]): MetricsReport => ({
     mustCatchRecall: mustCatchRecall(runs),
