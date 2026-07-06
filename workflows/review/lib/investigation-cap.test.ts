@@ -6,25 +6,27 @@ import {
     decideToolCall,
     DEFAULT_TOOL_CALL_CAPS,
     InvestigationCap,
+    journalUsage,
     REFUSAL_REASONS,
+    runCapCli,
     type CapDecision,
     type ToolCallCaps,
 } from "./investigation-cap.ts";
 
 /**
- * Tests for the R9 per-finding investigation tool-call cap (TASK-5-3).
+ * Tests for the per-finding investigation tool-call cap.
  *
  * The cap is the deterministic guard that keeps reviewer investigation bounded:
  * it counts the tool calls a single finding spends and refuses the call that
- * would exceed either the per-finding cap or the run-wide pool. The AC is "cap
- * enforced; over-cap calls refused deterministically", so these tests pin:
+ * would exceed either the per-finding cap or the run-wide pool. Over-cap
+ * calls must be refused deterministically, so these tests pin:
  *   - the pure `decideToolCall` verdict (precedence, clamping, normalisation);
  *   - the stateful `InvestigationCap` accounting (per-finding independence, the
  *     shared run-total pool, no state mutation on a refusal);
  *   - determinism (same inputs / same request sequence => identical verdicts);
- *   - the R8 determinism boundary (every refusal is a fixed code, never prose);
+ *   - the determinism boundary (every refusal is a fixed code, never prose);
  *   - the budget wiring (`capsFromRunBudget` / `fromRunBudget` read the numbers
- *     from the slice-3 `RunBudget` — single source of truth).
+ *     from the router's `RunBudget` — single source of truth).
  *
  * The module is pure TypeScript with no I/O, so every assertion is over an
  * in-memory fixture.
@@ -359,5 +361,120 @@ describe("InvestigationCap", () => {
             expect(fresh.perFinding).toEqual({f1: 1});
             expect(fresh.caps).toEqual(caps);
         });
+    });
+});
+
+/* -------------------------------------------------------------------------- */
+/* journalUsage + runCapCli (the on-disk contract the sub-agents invoke)      */
+/* -------------------------------------------------------------------------- */
+
+describe("journalUsage", () => {
+    it("counts total lines and the lines matching the finding id", () => {
+        const journal = ["f1", "f2", "f1", "", "f3"].join("\n");
+        expect(journalUsage(journal, "f1")).toEqual({
+            usedForFinding: 2,
+            usedTotal: 4,
+        });
+        expect(journalUsage(journal, "f4")).toEqual({
+            usedForFinding: 0,
+            usedTotal: 4,
+        });
+    });
+
+    it("treats an empty or missing journal as zero usage", () => {
+        expect(journalUsage("", "f1")).toEqual({
+            usedForFinding: 0,
+            usedTotal: 0,
+        });
+    });
+});
+
+describe("runCapCli", () => {
+    const ROUTING = "/tmp/gh-aw/review/routing.json";
+    const JOURNAL = "/tmp/gh-aw/review/investigation-journal.log";
+
+    const fakeFs = (inputs: Record<string, string>) => {
+        const files = {...inputs};
+        const mkdirCalls: string[] = [];
+        return {
+            files,
+            mkdirCalls,
+            fs: {
+                readFileSync: (p: string, _enc: "utf8"): string => {
+                    const content = files[p];
+                    if (content === undefined) {
+                        throw new Error(`unexpected read: ${p}`);
+                    }
+                    return content;
+                },
+                existsSync: (p: string): boolean => p in files,
+                appendFileSync: (p: string, data: string): void => {
+                    files[p] = (files[p] ?? "") + data;
+                },
+                mkdirSync: (p: string, _o: {recursive: boolean}): void => {
+                    mkdirCalls.push(p);
+                },
+            },
+        };
+    };
+
+    const routingWithBudget = (maxPerFinding: number, maxTotal: number) =>
+        JSON.stringify({
+            runBudget: {
+                tier: "low",
+                floored: false,
+                maxReviewerInvocations: 4,
+                maxToolCallsPerFinding: maxPerFinding,
+                maxTotalToolCalls: maxTotal,
+                maxWallClockMinutes: 6,
+                maxUsd: 1.5,
+            },
+        });
+
+    it("allows under the cap and appends the consumption to the journal", () => {
+        const {fs, files} = fakeFs({[ROUTING]: routingWithBudget(2, 10)});
+        const decision = runCapCli(["request", "f1"], fs);
+        expect(decision.allowed).toBe(true);
+        expect(files[JOURNAL]).toBe("f1\n");
+    });
+
+    it("refuses once the finding's cap is spent and appends nothing", () => {
+        const {fs, files} = fakeFs({
+            [ROUTING]: routingWithBudget(2, 10),
+            [JOURNAL]: "f1\nf1\n",
+        });
+        const decision = runCapCli(["request", "f1"], fs);
+        expect(decision).toMatchObject({
+            allowed: false,
+            reason: "per-finding-cap-exceeded",
+        });
+        expect(files[JOURNAL]).toBe("f1\nf1\n");
+    });
+
+    it("refuses on the run-wide pool even for a fresh finding", () => {
+        const {fs} = fakeFs({
+            [ROUTING]: routingWithBudget(5, 2),
+            [JOURNAL]: "a\nb\n",
+        });
+        expect(runCapCli(["request", "fresh"], fs)).toMatchObject({
+            allowed: false,
+            reason: "run-total-cap-exceeded",
+        });
+    });
+
+    it("falls back to the default caps when routing.json is absent", () => {
+        const {fs, files} = fakeFs({});
+        const decision = runCapCli(["request", "f1"], fs);
+        expect(decision.allowed).toBe(true);
+        expect(decision.remainingForFinding).toBe(
+            DEFAULT_TOOL_CALL_CAPS.maxToolCallsPerFinding,
+        );
+        expect(files[JOURNAL]).toBe("f1\n");
+    });
+
+    it("rejects a malformed invocation", () => {
+        const {fs} = fakeFs({});
+        expect(() => runCapCli(["request"], fs)).toThrow(/usage/);
+        expect(() => runCapCli(["free-for-all", "f1"], fs)).toThrow(/usage/);
     });
 });

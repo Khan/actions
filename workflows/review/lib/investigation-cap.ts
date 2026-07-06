@@ -1,21 +1,28 @@
 /**
- * R9: the per-finding investigation tool-call cap, enforced in code.
+ * The per-finding investigation tool-call cap, enforced in code.
  *
- * Slice 5 gives reviewer sub-agents bounded investigation (grep callers, trace
+ * Reviewer sub-agents get bounded investigation (grep callers, trace
  * call chains, run one targeted cheap check per finding — the instructions live
- * in `review.md`, task-5-1). This module is the deterministic guard that keeps
+ * in `review.md`). This module is the deterministic guard that keeps
  * that investigation *bounded*: it counts the tool calls a single finding spends
- * and refuses the call that would exceed the cap, so a runaway lens cannot burn
- * the whole run's budget chasing one finding.
+ * and refuses the call that would exceed the cap, so a runaway reviewer cannot
+ * burn the whole run's budget chasing one finding.
  *
- * The cap "lives inside the run budget from slice 3" (plan §slice-5): the numbers
+ * The cap lives inside the run budget: the numbers
  * are not configured here but read from the {@link RunBudget} the router already
  * computes — `maxToolCallsPerFinding` (the per-finding cap) and `maxTotalToolCalls`
  * (the run-wide ceiling the per-finding calls also draw down). This module owns
  * only the *accounting and the refusal decision*, not the numbers, so there is a
  * single source of truth for budget and it scales with risk tier automatically.
  *
- * Determinism boundary (plan §8.6/§8.7, the R8 tripwire): every decision here is
+ * How it is invoked: each finding-producing sub-agent runs the CLI at the bottom
+ * of this file (`investigation-cap.ts request <finding-id>`) before every
+ * investigation tool call, per its prompt in `review.md`. The CLI reads the caps
+ * from the router's `routing.json` and the calls already spent from an
+ * append-only journal shared by all sub-agents of the run, so the accounting is
+ * run-wide even though the sub-agents are separate processes.
+ *
+ * Determinism boundary: every decision here is
  * a pure function of the counts and the caps, and every string it emits is a
  * fixed code (a {@link RefusalReason}), never a sentence about the code under
  * review. Prose stays with the lens sub-agents.
@@ -29,9 +36,9 @@ import type {RunBudget} from "./router";
 
 /**
  * The two ceilings the guard enforces. Both are drawn from the run budget:
- *   - `maxToolCallsPerFinding`: the R9 cap — the most investigation tool calls a
+ *   - `maxToolCallsPerFinding`: the most investigation tool calls a
  *     single finding may spend.
- *   - `maxTotalToolCalls`: the run-wide ceiling from slice 3. Per-finding calls
+ *   - `maxTotalToolCalls`: the run-wide ceiling. Per-finding calls
  *     draw down this shared pool, so a review with many findings cannot exceed
  *     the run budget even when no single finding hits its own cap.
  */
@@ -41,8 +48,7 @@ export type ToolCallCaps = {
 };
 
 /**
- * The assumed default caps, documented per task-5-2 (operator: implementer
- * judgement, tunable later, NOT a HITL surface). These mirror the router's "low"
+ * The assumed default caps (tunable later). These mirror the router's "low"
  * tier defaults ({@link DEFAULT_TIER_BUDGETS.low} — also the misrouted floor), so
  * a guard constructed without a run budget behaves like the default-tier run.
  * Real runs pass {@link capsFromRunBudget} and never fall back to these.
@@ -154,7 +160,7 @@ export const decideToolCall = (
 /* Stateful guard                                                             */
 /* -------------------------------------------------------------------------- */
 
-/** A read-only snapshot of the guard's accounting (for logging / R15 counters). */
+/** A read-only snapshot of the guard's accounting (for logging / live counters). */
 export type CapUsageSnapshot = {
     caps: ToolCallCaps;
     usedTotal: number;
@@ -171,7 +177,7 @@ export type CapUsageSnapshot = {
  *
  * The guard never *performs* a tool call — it only authorises one. Callers that
  * receive `allowed: false` must not run the call; that is what "refused
- * deterministically" (the task-5-2 AC) means at this layer.
+ * deterministically" means at this layer.
  */
 export class InvestigationCap {
     private readonly caps: ToolCallCaps;
@@ -241,4 +247,96 @@ export class InvestigationCap {
             perFinding: Object.fromEntries(this.perFinding),
         };
     }
+}
+
+/* -------------------------------------------------------------------------- */
+/* CLI entrypoint (sub-agents call this before each investigation tool call)  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * On-disk contract. The caps come from the router's `routing.json` (falling
+ * back to {@link DEFAULT_TOOL_CALL_CAPS} when routing has not run); spent calls
+ * live in an append-only journal, one finding id per line, shared by every
+ * sub-agent of the run. Append-then-recount keeps the accounting run-wide
+ * across separate sub-agent processes; concurrent requests can overshoot a cap
+ * by at most the number of in-flight sub-agents, which is acceptable for a
+ * budget ceiling (the decision itself is a pure function of the observed
+ * journal).
+ */
+const REVIEW_DIR = "/tmp/gh-aw/review";
+const ROUTING_PATH = `${REVIEW_DIR}/routing.json`;
+const JOURNAL_PATH = `${REVIEW_DIR}/investigation-journal.log`;
+
+/** Count spent calls in journal content: one line = one authorised call. Pure. */
+export const journalUsage = (
+    content: string,
+    findingId: string,
+): {usedForFinding: number; usedTotal: number} => {
+    let usedForFinding = 0;
+    let usedTotal = 0;
+    for (const rawLine of content.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (line === "") {
+            continue;
+        }
+        usedTotal += 1;
+        if (line === findingId) {
+            usedForFinding += 1;
+        }
+    }
+    return {usedForFinding, usedTotal};
+};
+
+type CapCliFs = {
+    readFileSync: (p: string, enc: "utf8") => string;
+    existsSync: (p: string) => boolean;
+    appendFileSync: (p: string, data: string) => void;
+    mkdirSync: (p: string, opts: {recursive: boolean}) => void;
+};
+
+/**
+ * `investigation-cap.ts request <finding-id>`: decide whether the calling
+ * sub-agent may spend one more investigation tool call on `<finding-id>`, and
+ * record the consumption when allowed. Factored out (fs injected) so it is
+ * testable without touching the real filesystem. Returns the decision the CLI
+ * prints; the entrypoint exits non-zero when refused so a shell caller can
+ * gate on the exit code alone.
+ */
+export const runCapCli = (argv: string[], fs: CapCliFs): CapDecision => {
+    const [command, findingId] = argv;
+    if (command !== "request" || findingId === undefined || findingId === "") {
+        throw new Error("usage: investigation-cap.ts request <finding-id>");
+    }
+
+    const caps: ToolCallCaps = fs.existsSync(ROUTING_PATH)
+        ? capsFromRunBudget(
+              (
+                  JSON.parse(fs.readFileSync(ROUTING_PATH, "utf8")) as {
+                      runBudget: RunBudget;
+                  }
+              ).runBudget,
+          )
+        : DEFAULT_TOOL_CALL_CAPS;
+
+    const journal = fs.existsSync(JOURNAL_PATH)
+        ? fs.readFileSync(JOURNAL_PATH, "utf8")
+        : "";
+    const {usedForFinding, usedTotal} = journalUsage(journal, findingId);
+
+    const decision = decideToolCall(usedForFinding, usedTotal, caps);
+    if (decision.allowed) {
+        fs.mkdirSync(REVIEW_DIR, {recursive: true});
+        fs.appendFileSync(JOURNAL_PATH, `${findingId}\n`);
+    }
+    return decision;
+};
+
+// Run only when executed directly (the sub-agent prompts in review.md), never
+// on import (tests).
+if (typeof require !== "undefined" && require.main === module) {
+    const fs = require("node:fs") as CapCliFs;
+    const decision = runCapCli(process.argv.slice(2), fs);
+    // eslint-disable-next-line no-console
+    console.log(JSON.stringify(decision));
+    process.exit(decision.allowed ? 0 : 1);
 }
