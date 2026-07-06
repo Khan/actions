@@ -1,12 +1,12 @@
 /**
- * R16: dismissal-learning.
+ * Dismissal-learning.
  *
  * The reviewer accumulates evidence that some findings are unwelcome where they
  * fire: bot threads a human resolved without a fix, 👎 reactions that came with a
  * reply, and cases where the author pushed back and was right. This module turns
  * that evidence into candidate **"do-not-flag-here" notes** — suppressions scoped
  * to a (lens, path) — and emits them as a **proposed change to a committed config
- * file that a human approves**. Nothing is ever auto-adopted (plan task-12-4 AC):
+ * file that a human approves**. Nothing is ever auto-adopted:
  * the module only proposes; applying the diff is a human commit.
  *
  * Why human-in-the-loop is structural, not incidental: a suppression is the one
@@ -14,7 +14,7 @@
  * how a real defect class silently stops being flagged. The output here is a diff
  * for review, never a write to the live config.
  *
- * Determinism boundary (analysis R8): this module composes no prose about code.
+ * Determinism boundary: this module composes no prose about code.
  * A candidate's `rationale` is either an author/human-authored reason copied
  * verbatim from the dismissal signal, or a fixed, code-owned meta-note about the
  * process ("repeatedly dismissed…"); the module never writes a sentence
@@ -31,7 +31,7 @@
  *
  *   - `resolved-without-fix`: a bot review thread a human resolved while the
  *     flagged code stayed unchanged — an implicit "not a problem here".
- *   - `thumbs-down-with-reply`: a 👎 reaction (slice-8 sweep) whose follow-up
+ *   - `thumbs-down-with-reply`: a 👎 reaction (thumbs sweep) whose follow-up
  *     reply explained the disagreement — an explicit rejection with a reason.
  *   - `correct-pushback`: the author replied disagreeing and was subsequently
  *     shown right (thread closed won't-fix) — the strongest single signal.

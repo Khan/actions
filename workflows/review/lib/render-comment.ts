@@ -266,7 +266,7 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
 };
 
 /* -------------------------------------------------------------------------- */
-/* R17: conditional-approval (pre-merge obligations) comment                  */
+/* Conditional-approval (pre-merge obligations) comment                  */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -292,11 +292,11 @@ const describeAnchor = (anchor: Anchor): string => {
     }
 };
 
-/** The code-owned heading of the R17 pre-merge obligations comment. */
+/** The code-owned heading of the pre-merge obligations comment. */
 export const OBLIGATIONS_COMMENT_HEADING = "## ⚠️ Pre-merge obligations";
 
 /**
- * R17: render the prominent, structured *pre-merge obligations* comment for a
+ * Render the prominent, structured *pre-merge obligations* comment for a
  * conditional approval (APPROVE-with-obligations). Posted as a standalone PR
  * comment via the existing `add-comment` safe output (not an inline review
  * comment, and not the review body), so it stays visible after the APPROVE.

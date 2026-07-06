@@ -1377,7 +1377,7 @@ including the author's replies, and weigh the author's reasoning before deciding
   comment (the orchestrator opens no duplicate for a kept thread, Step 5). Likewise do
   not re-litigate a point the author has already refuted with sound reasoning.
 
-**Per-finding resolution on re-review (R13).** On a re-review, every actionable finding
+**Per-finding resolution on re-review.** On a re-review, every actionable finding
 the workflow raised in a prior run must reach one of three terminal resolutions — never
 leave a prior actionable finding silently unaccounted for:
 - **fixed** — the flagged code is changed, removed, or no longer applies → **resolve**.

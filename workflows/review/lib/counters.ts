@@ -1,8 +1,8 @@
 /**
- * R15: live operational counters, mined from the per-run JSON artifacts #194
+ * Live operational counters, mined from the per-run JSON artifacts #194
  * already persists plus the run summary the workflow already writes.
  *
- * This adds **no new logging mechanism** (plan task-12-3 AC): every counter is a
+ * This adds **no new logging mechanism**: every counter is a
  * pure aggregation over data that exists on disk after a review run —
  *
  *   - `out/<lens>.json`, `out/claim-validator.json` and `claims.json` (#194's
@@ -10,7 +10,7 @@
  *     source;
  *   - the run summary (verdict, posted-comment count, model cost) -> comments/PR,
  *     verdict mix, cost/run;
- *   - the thumbs reactions the slice-8 sweep collects -> thumbs agree rate.
+ *   - the thumbs reactions the thumbs sweep collects -> thumbs agree rate.
  *
  * The module is split into a pure core and a thin, best-effort filesystem
  * loader. The core ({@link computeRunCounters}, {@link normalizeRunArtifacts})
@@ -21,7 +21,7 @@
  * counter to "unknown" rather than throwing, because these counters run over
  * historical runs where an old artifact layout is expected.
  *
- * Determinism boundary (analysis R8): this module authors no prose. Every string
+ * Determinism boundary: this module authors no prose. Every string
  * it emits or consumes is a source name, a verdict token, or a numeric metric;
  * it never composes a sentence about code under review.
  */
@@ -48,7 +48,7 @@ export type ValidatorDecision = {
     decision: "keep" | "drop";
 };
 
-/** Thumbs reactions collected on a run's comments (slice-8 sweep). */
+/** Thumbs reactions collected on a run's comments (thumbs sweep). */
 export type ThumbsTally = {
     /** 👍 count — a human agreed with the bot's comment. */
     up: number;

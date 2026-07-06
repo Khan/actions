@@ -49,7 +49,7 @@ import {
 } from "../lib/finding-schema.ts";
 
 /**
- * Full eval-suite **self-tests** + CI-wiring guard (TASK-11-6).
+ * Full eval-suite **self-tests** + CI-wiring guard.
  *
  * This file has two halves:
  *
