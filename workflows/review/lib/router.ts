@@ -1,23 +1,23 @@
 /**
- * R10: the deterministic review router. It replaces the Haiku `reviewer-mapper`
- * sub-agent (R12) and the model-driven lens/tier routing that used to live in
+ * The deterministic review router. It replaces the Haiku `reviewer-mapper`
+ * sub-agent and the model-driven lens/tier routing that used to live in
  * `review.md` with pure, unit-testable TypeScript.
  *
- * Given the changed-file list (the existing `files.json`) and a small amount of
- * host-repo config (the linguist-generated globs from `.gitattributes`, the
- * `REVIEWERS` ownership rules, and the path->lens / path->tier tables a consumer
- * supplies), the router decides, deterministically:
+ * Given the changed-file list (the existing `files.json`) and the host-repo
+ * config (the linguist-generated globs from `.gitattributes`, the `REVIEWERS`
+ * ownership rules, and the consumer-owned path->lens / path->tier map in
+ * `.github/aw/review/ROUTING`), the router decides, deterministically:
  *
  *   - which files are generated (skip their contents) vs. real source;
  *   - which specialist lenses to spawn (only the ones whose paths are touched —
- *     this is what keeps the full eleven-lens roster from running on every PR);
+ *     this is what keeps the full lens roster from running on every PR);
  *   - which teams own the change (subsumes `reviewer-mapper`: same
  *     most-specific-pattern-wins + fallback-ranking behaviour, now in code);
  *   - a per-file risk tier; and
  *   - one run budget scaled by the highest touched tier, with one floor for
- *     misrouted PRs (task-3-2).
+ *     misrouted PRs.
  *
- * Determinism boundary (plan §8.6): the core never calls a model. The *only*
+ * Determinism boundary: the core never calls a model. The *only*
  * judgement it cannot make from a path — a risk tier that depends on the
  * *direction* of the diff — is not guessed here. Such files are emitted in
  * `pendingRiskQuestions`; the orchestrator resolves them with one small-model
@@ -25,13 +25,29 @@
  * invocation. Until resolved, the router uses the conservative (highest
  * candidate) tier so the budget is never *understated*.
  *
- * This module authors no human-read prose (the R8 tripwire, plan §8.7): every
+ * This module authors no human-read prose about the code under review: every
  * string it emits is a code, a path, a team slug, or a config value — never a
- * sentence about the code under review. Prose stays with the lens sub-agents.
+ * sentence about the change itself. Prose stays with the lens sub-agents.
  */
 
 import {KNOWN_LENSES} from "./finding-schema";
 import type {Lens} from "./finding-schema";
+import {
+    parseRoutingConfig,
+    RISK_TIERS,
+    ROUTING_CONFIG_PATH,
+} from "./routing-config";
+import type {
+    LensRule,
+    RiskRule,
+    RiskTier,
+    RoutingFileConfig,
+} from "./routing-config";
+
+// Re-exported so consumers (and the tests) can treat the router as the single
+// entry point for routing vocabulary and the ROUTING parser.
+export {parseRoutingConfig, RISK_TIERS, ROUTING_CONFIG_PATH};
+export type {LensRule, RiskRule, RiskTier, RoutingFileConfig};
 
 /* -------------------------------------------------------------------------- */
 /* Lens taxonomy                                                              */
@@ -68,15 +84,6 @@ export const SPECIALIST_LENSES: readonly Lens[] = KNOWN_LENSES.filter(
 /* -------------------------------------------------------------------------- */
 /* Risk tiers                                                                 */
 /* -------------------------------------------------------------------------- */
-
-/**
- * Per-file risk tiers, ordered from least to most risky. The order is load-
- * bearing: budget scaling and "highest touched tier" comparisons use the index
- * as the rank, so the run budget is monotonic in tier by construction.
- */
-export const RISK_TIERS = ["trivial", "low", "medium", "high"] as const;
-
-export type RiskTier = typeof RISK_TIERS[number];
 
 const TIER_RANK: Record<RiskTier, number> = {
     trivial: 0,
@@ -115,25 +122,6 @@ export type ChangedFile = {
 
 export type FileClassification = "generated" | "source";
 
-/** A path-glob -> specialist-lenses rule (consumer-supplied config). */
-export type LensRule = {
-    pattern: string;
-    lenses: Lens[];
-};
-
-/**
- * A path-glob -> risk-tier rule (consumer-supplied config). A rule marked
- * `diffDirectionDependent` cannot be finalised from the path alone (e.g.
- * "loosening" vs. "tightening" a permission check, or shrinking vs. growing a
- * migration): the router defers it to the orchestrator's one small-model call
- * rather than guess. See {@link RouteInput.resolvedTiers}.
- */
-export type RiskRule = {
-    pattern: string;
-    tier: RiskTier;
-    diffDirectionDependent?: boolean;
-};
-
 /** A parsed `REVIEWERS` ownership rule: a path glob and the teams that own it. */
 export type ReviewerRule = {
     pattern: string;
@@ -142,8 +130,8 @@ export type ReviewerRule = {
 
 /**
  * The run budget. All fields scale monotonically with {@link RunBudget.tier}.
- * `maxToolCallsPerFinding` is the field slice 5 (R9 investigation cap) reads —
- * the per-finding cap "lives inside the run budget from slice 3", so it is
+ * `maxToolCallsPerFinding` is the field the investigation cap reads —
+ * the per-finding cap lives inside the run budget, so it is
  * defined here and derived from the tier rather than configured separately.
  */
 export type RunBudget = {
@@ -153,7 +141,7 @@ export type RunBudget = {
     floored: boolean;
     /** Upper bound on specialist+whole-change reviewer invocations for the run. */
     maxReviewerInvocations: number;
-    /** R9: upper bound on investigation tool calls a single finding may spend. */
+    /** Upper bound on investigation tool calls a single finding may spend. */
     maxToolCallsPerFinding: number;
     /** Upper bound on investigation tool calls across the whole run. */
     maxTotalToolCalls: number;
@@ -166,9 +154,13 @@ export type RunBudget = {
 export type RouterConfig = {
     /** linguist-generated globs (from `.gitattributes`). */
     generatedPatterns: string[];
-    /** path->lens rules. Defaults to {@link DEFAULT_LENS_RULES}. */
+    /**
+     * path->lens rules, from the consumer's `ROUTING` file
+     * ({@link parseRoutingConfig}). No default: absent config means no
+     * specialist lenses spawn and the misrouted floor protects the budget.
+     */
     lensRules?: LensRule[];
-    /** path->tier rules. Defaults to {@link DEFAULT_RISK_RULES}. */
+    /** path->tier rules, from the same `ROUTING` file. No default. */
     riskRules?: RiskRule[];
     /** Parsed `REVIEWERS` rules (see {@link parseReviewers}). */
     reviewerRules?: ReviewerRule[];
@@ -236,15 +228,14 @@ export type RouteInput = {
 };
 
 /* -------------------------------------------------------------------------- */
-/* Documented defaults (tunable later; not HITL surfaces per refine cq-2/cq-4)*/
+/* Documented defaults (tunable later)                                        */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Default budget table. These are the *assumed* caps (analysis §9 / plan §8:
- * the 20-min / $10 operator ceiling is a reasonable-default, not a HITL gate).
- * They scale monotonically across every field so the AC "budget scales
- * monotonically with tier" holds for the defaults, and are exported so the eval
- * suite and consumers can override them without a code change.
+ * Default budget table, sized inside the workflow's assumed 20-minute / $10
+ * per-run ceiling. Every field scales monotonically with the tier, and the
+ * table is exported so the eval suite and consumers can override it without a
+ * code change.
  */
 export const DEFAULT_TIER_BUDGETS: Record<RiskTier, RunBudget> = {
     trivial: {
@@ -292,45 +283,6 @@ export const DEFAULT_TIER_BUDGETS: Record<RiskTier, RunBudget> = {
  * pattern claimed it. "low" is the documented default floor.
  */
 export const DEFAULT_MISROUTED_FLOOR_TIER: RiskTier = "low";
-
-/**
- * A generic starter path->lens table. Consumers are expected to override this
- * via config (`lensRules`) with their own repository layout — these defaults
- * key only on universally recognisable signals so the router does something
- * sensible out of the box and the fixture tests have a mapping to exercise.
- * Multiple matching rules union their lenses.
- */
-export const DEFAULT_LENS_RULES: LensRule[] = [
-    {pattern: "**/*.sql", lenses: ["data-migrations"]},
-    {pattern: "**/migrations/**", lenses: ["data-migrations"]},
-    {
-        pattern: "**/*.proto",
-        lenses: ["api-federation-compat", "cross-deploy-serialization"],
-    },
-    {pattern: "**/*.graphql", lenses: ["api-federation-compat"]},
-    {pattern: "**/auth/**", lenses: ["security-auth"]},
-    {pattern: "**/*.tf", lenses: ["deploy-infra-config"]},
-    {pattern: "**/Dockerfile", lenses: ["deploy-infra-config"]},
-    {pattern: "**/*.yaml", lenses: ["deploy-infra-config"]},
-    {pattern: "**/*.yml", lenses: ["deploy-infra-config"]},
-];
-
-/**
- * A generic starter path->tier table. Like {@link DEFAULT_LENS_RULES}, consumers
- * override this via `riskRules`; the real risk taxonomy is the consumer's
- * `risk-classification.md`. The one `diffDirectionDependent` example (auth) shows
- * the mechanism: tightening vs. loosening an auth check is not decidable from the
- * path alone, so it defers to the orchestrator's small-model call.
- */
-export const DEFAULT_RISK_RULES: RiskRule[] = [
-    {pattern: "**/migrations/**", tier: "high"},
-    {pattern: "**/*.sql", tier: "high"},
-    {pattern: "**/auth/**", tier: "high", diffDirectionDependent: true},
-    {pattern: "**/*.tf", tier: "medium"},
-    {pattern: "**/Dockerfile", tier: "medium"},
-    {pattern: "**/*.md", tier: "trivial"},
-    {pattern: "**/*.txt", tier: "trivial"},
-];
 
 /* -------------------------------------------------------------------------- */
 /* Glob matching (self-contained; CODEOWNERS/gitattributes-style)            */
@@ -615,7 +567,7 @@ const tierForFile = (
 /* -------------------------------------------------------------------------- */
 
 /**
- * The single budget rule (task-3-2): scale by the highest touched tier, with one
+ * The single budget rule: scale by the highest touched tier, with one
  * floor for misrouted PRs. No per-lens knobs. When misrouted and the floor tier
  * outranks the touched tier, the floor's budget is used and `floored` is set.
  */
@@ -645,14 +597,14 @@ export const computeRunBudget = (
  * Route a changed-file list to lenses, teams, per-file tiers, and one run
  * budget. Pure and deterministic: same input + config -> same result, with no
  * I/O and no model call (the sole model touch is externalised via
- * `pendingRiskQuestions`; plan §8.6).
+ * `pendingRiskQuestions`).
  */
 export const route = (
     input: RouteInput,
     config: RouterConfig,
 ): RoutingResult => {
-    const lensRules = config.lensRules ?? DEFAULT_LENS_RULES;
-    const riskRules = config.riskRules ?? DEFAULT_RISK_RULES;
+    const lensRules = config.lensRules ?? [];
+    const riskRules = config.riskRules ?? [];
     const reviewerRules = config.reviewerRules ?? [];
     const defaultTier = config.defaultTier ?? "low";
 
@@ -809,6 +761,15 @@ export type RoutingJson = {
     perFileTier: Record<string, DisplayTier>;
     runBudget: RunBudget;
     pendingRiskQuestions: RiskQuestion[];
+    /**
+     * Whether the consumer `ROUTING` file was found, plus any parse warnings
+     * (or the missing-file warning). The orchestrator surfaces these in the
+     * review body's note lines so a silently-unconfigured repo is visible.
+     */
+    routingConfig: {
+        present: boolean;
+        warnings: string[];
+    };
 };
 
 /**
@@ -817,7 +778,10 @@ export type RoutingJson = {
  * files carry no ownership, mirroring the old `owned-files.json` scope. Pure and
  * deterministic; exported so the serialization shape is unit-testable.
  */
-export const toRoutingJson = (result: RoutingResult): RoutingJson => {
+export const toRoutingJson = (
+    result: RoutingResult,
+    routingConfig: RoutingJson["routingConfig"] = {present: true, warnings: []},
+): RoutingJson => {
     const owners: Record<string, string[]> = {};
     for (const file of result.perFile) {
         if (file.classification === "source") {
@@ -836,6 +800,7 @@ export const toRoutingJson = (result: RoutingResult): RoutingJson => {
         perFileTier,
         runBudget: result.runBudget,
         pendingRiskQuestions: result.pendingRiskQuestions,
+        routingConfig,
     };
 };
 
@@ -845,11 +810,13 @@ export const toRoutingJson = (result: RoutingResult): RoutingJson => {
 
 /**
  * Staging paths, extending #194's on-disk convention. review.md Step 1 stages
- * `files.json`; the router reads it, `.gitattributes`, and `.github/REVIEWERS`
- * (relative to the checkout root, the workflow's cwd), and writes `routing.json`.
- * The deterministic core does not read `full.diff`: the only diff-content
- * judgement (direction-dependent tiers) is externalised to the orchestrator's
- * small-model call, not parsed here (plan §8.6).
+ * `files.json`; the router reads it, `.gitattributes`, `.github/REVIEWERS`, and
+ * `.github/aw/review/ROUTING` (the repo-relative files under the repo root —
+ * the workflow's workspace by default, or `REVIEW_REPO_ROOT` when the router is
+ * invoked from the shared-lib checkout rather than the reviewed repo), and
+ * writes `routing.json`. The deterministic core does not read `full.diff`: the
+ * only diff-content judgement (direction-dependent tiers) is externalised to
+ * the orchestrator's small-model call, not parsed here.
  */
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const FILES_PATH = `${REVIEW_DIR}/files.json`;
@@ -880,8 +847,10 @@ const extractFileList = (raw: unknown): unknown[] => {
     return Array.isArray(wrapped) ? wrapped : [];
 };
 
-export const runCli = (fs: FsLike): RoutingJson => {
+export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
     const readText = (p: string): string => fs.readFileSync(p, "utf8");
+    const repoPath = (p: string): string =>
+        repoRoot === "." ? p : `${repoRoot}/${p}`;
 
     const files: ChangedFile[] = extractFileList(
         JSON.parse(readText(FILES_PATH)),
@@ -893,12 +862,28 @@ export const runCli = (fs: FsLike): RoutingJson => {
         };
     });
 
-    const generatedPatterns = fs.existsSync(GITATTRIBUTES_PATH)
-        ? parseGitattributesGenerated(readText(GITATTRIBUTES_PATH))
+    const generatedPatterns = fs.existsSync(repoPath(GITATTRIBUTES_PATH))
+        ? parseGitattributesGenerated(readText(repoPath(GITATTRIBUTES_PATH)))
         : [];
-    const reviewerRules = fs.existsSync(REVIEWERS_PATH)
-        ? parseReviewers(readText(REVIEWERS_PATH))
+    const reviewerRules = fs.existsSync(repoPath(REVIEWERS_PATH))
+        ? parseReviewers(readText(repoPath(REVIEWERS_PATH)))
         : [];
+
+    // The consumer-owned routing map. Missing is not fatal: no specialist
+    // lenses spawn, the misrouted floor protects the budget, and the warning
+    // below is surfaced on the PR so the gap is visible, not silent.
+    const routingConfigPresent = fs.existsSync(repoPath(ROUTING_CONFIG_PATH));
+    const routingFileConfig: RoutingFileConfig = routingConfigPresent
+        ? parseRoutingConfig(readText(repoPath(ROUTING_CONFIG_PATH)))
+        : {
+              lensRules: [],
+              riskRules: [],
+              warnings: [
+                  `routing config missing (${ROUTING_CONFIG_PATH}): no ` +
+                      `specialist lenses will run; always-on reviewers only ` +
+                      `and the run budget is floored`,
+              ],
+          };
 
     const input: RouteInput = {files};
     if (fs.existsSync(RESOLVED_TIERS_PATH)) {
@@ -912,8 +897,16 @@ export const runCli = (fs: FsLike): RoutingJson => {
         input.resolvedTiers = resolvedTiers;
     }
 
-    const result = route(input, {generatedPatterns, reviewerRules});
-    const json = toRoutingJson(result);
+    const result = route(input, {
+        generatedPatterns,
+        reviewerRules,
+        lensRules: routingFileConfig.lensRules,
+        riskRules: routingFileConfig.riskRules,
+    });
+    const json = toRoutingJson(result, {
+        present: routingConfigPresent,
+        warnings: routingFileConfig.warnings,
+    });
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});
     fs.writeFileSync(ROUTING_OUT, JSON.stringify(json, null, 2));
@@ -923,5 +916,5 @@ export const runCli = (fs: FsLike): RoutingJson => {
 // Run only when executed directly (review.md Step 3), never on import (tests).
 if (typeof require !== "undefined" && require.main === module) {
     const fs = require("node:fs") as FsLike;
-    runCli(fs);
+    runCli(fs, process.env.REVIEW_REPO_ROOT ?? ".");
 }

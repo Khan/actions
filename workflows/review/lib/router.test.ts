@@ -9,9 +9,11 @@ import {
     matchesGlob,
     parseGitattributesGenerated,
     parseReviewers,
+    parseRoutingConfig,
     patternSpecificity,
     RISK_TIERS,
     route,
+    ROUTING_CONFIG_PATH,
     runCli,
     SPECIALIST_LENSES,
     teamSlug,
@@ -23,11 +25,11 @@ import {
 } from "./router.ts";
 
 /**
- * Router unit tests (TASK-3-4). `route` and its helpers are pure, deterministic
- * TypeScript (plan §8.6: the core never calls a model), so these tests pin the
- * five AC axes over fixtures -- classification, path->lens, tier, budget
+ * Router unit tests. `route` and its helpers are pure, deterministic
+ * TypeScript (the core never calls a model), so these tests pin the
+ * five axes over fixtures -- classification, path->lens, tier, budget
  * scaling, and the misrouted floor -- plus the reviewer-mapper subsumption
- * (R12: team ownership now in code) and the glob/config parsers the routing is
+ * (team ownership now in code) and the glob/config parsers the routing is
  * built on. No I/O and no network: the CLI does the file read; the core takes
  * content/structure in and returns structure out.
  */
@@ -42,8 +44,28 @@ const file = (
     status,
 });
 
-// Minimal config: no generated globs, DEFAULT_* lens/risk rules, no REVIEWERS.
-const baseConfig: RouterConfig = {generatedPatterns: []};
+// Explicit rule fixtures. The router ships NO default rules (a repo's routing
+// map lives in its own .github/aw/review/ROUTING file), so the tests supply
+// the rules they exercise, shaped like a typical consumer config.
+const baseConfig: RouterConfig = {
+    generatedPatterns: [],
+    lensRules: [
+        {pattern: "**/*.sql", lenses: ["data-migrations"]},
+        {pattern: "**/migrations/**", lenses: ["data-migrations"]},
+        {
+            pattern: "**/*.proto",
+            lenses: ["api-federation-compat", "cross-deploy-serialization"],
+        },
+        {pattern: "**/auth/**", lenses: ["security-auth"]},
+        {pattern: "**/*.tf", lenses: ["deploy-infra-config"]},
+    ],
+    riskRules: [
+        {pattern: "**/migrations/**", tier: "high"},
+        {pattern: "**/*.sql", tier: "high"},
+        {pattern: "**/auth/**", tier: "high", diffDirectionDependent: true},
+        {pattern: "**/*.md", tier: "trivial"},
+    ],
+};
 
 /* -------------------------------------------------------------------------- */
 /* Glob matching                                                              */
@@ -362,7 +384,7 @@ describe("misrouted floor", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* Teams (reviewer-mapper subsumption, R12)                                   */
+/* Teams (reviewer-mapper subsumption)                                        */
 /* -------------------------------------------------------------------------- */
 
 describe("route: team ownership (subsumes reviewer-mapper)", () => {
@@ -514,16 +536,19 @@ const fakeFs = (inputs: Record<string, string>) => {
 };
 
 describe("runCli", () => {
-    it("routes a bare-array files.json and writes routing.json", () => {
+    it("routes a bare-array files.json using the repo's ROUTING config", () => {
         const {fs, written, mkdirCalls} = fakeFs({
             [FILES_PATH]: JSON.stringify([
                 {path: "db/migrations/0001.sql", status: "added"},
             ]),
+            [ROUTING_CONFIG_PATH]:
+                "**/migrations/** tier=high lens=data-migrations",
         });
         const json = runCli(fs);
         expect(json.lensesToSpawn).toEqual(["data-migrations"]);
         expect(json.perFileTier).toEqual({"db/migrations/0001.sql": "High"});
         expect(json.runBudget.tier).toBe("high");
+        expect(json.routingConfig).toEqual({present: true, warnings: []});
         // No REVIEWERS staged -> the source file is owned by nobody.
         expect(json.teams.owners).toEqual({"db/migrations/0001.sql": []});
         expect(json.teams.fallback).toEqual([]);
@@ -532,22 +557,36 @@ describe("runCli", () => {
         expect(JSON.parse(written[ROUTING_OUT])).toEqual(json);
     });
 
-    it("accepts the {files:[...]} wrapper and applies the misrouted floor", () => {
+    it("accepts the {files:[...]} wrapper and degrades safely without a ROUTING config", () => {
         const {fs, written} = fakeFs({
             [FILES_PATH]: JSON.stringify({
                 files: [{path: "README.md", status: "modified"}],
             }),
         });
         const json = runCli(fs);
+        // Missing config: no rules, so no specialist lenses and the default
+        // tier -- and the gap is loudly flagged, never silent.
         expect(json.lensesToSpawn).toEqual([]);
-        expect(json.perFileTier).toEqual({"README.md": "Trivial"});
-        // Source touched but no specialist lens matched -> floored to low.
-        expect(json.runBudget.tier).toBe("low");
-        expect(json.runBudget.floored).toBe(true);
+        expect(json.perFileTier).toEqual({"README.md": "Low"});
+        expect(json.routingConfig.present).toBe(false);
+        expect(json.routingConfig.warnings).toHaveLength(1);
+        expect(json.routingConfig.warnings[0]).toContain(ROUTING_CONFIG_PATH);
         expect(JSON.parse(written[ROUTING_OUT])).toEqual(json);
     });
 
-    it("parses .gitattributes/REVIEWERS and honours the resolved-tiers pass", () => {
+    it("surfaces ROUTING parse warnings in routingConfig", () => {
+        const {fs} = fakeFs({
+            [FILES_PATH]: JSON.stringify([{path: "a.ts", status: "modified"}]),
+            [ROUTING_CONFIG_PATH]: "src/** lens=not-a-real-lens",
+        });
+        const json = runCli(fs);
+        expect(json.routingConfig.present).toBe(true);
+        expect(json.routingConfig.warnings.join("\n")).toContain(
+            'unknown lens "not-a-real-lens"',
+        );
+    });
+
+    it("parses .gitattributes/REVIEWERS/ROUTING and honours the resolved-tiers pass", () => {
         const {fs} = fakeFs({
             [FILES_PATH]: JSON.stringify([
                 {path: "src/auth/login.ts", status: "modified"},
@@ -555,6 +594,8 @@ describe("runCli", () => {
             ]),
             [GITATTRIBUTES_PATH]: "dist/** linguist-generated=true",
             [REVIEWERS_PATH]: "src/auth/ @Khan/Security",
+            [ROUTING_CONFIG_PATH]:
+                "**/auth/** tier=high direction-dependent lens=security-auth",
             [RESOLVED_TIERS_PATH]: JSON.stringify({"src/auth/login.ts": "Low"}),
         });
         const json = runCli(fs);
@@ -568,5 +609,103 @@ describe("runCli", () => {
         expect(json.pendingRiskQuestions).toEqual([]);
         expect(json.lensesToSpawn).toEqual(["security-auth"]);
         expect(json.runBudget.tier).toBe("low");
+    });
+
+    it("reads the repo files under an explicit repoRoot (REVIEW_REPO_ROOT)", () => {
+        const {fs} = fakeFs({
+            [FILES_PATH]: JSON.stringify([
+                {path: "db/migrations/0001.sql", status: "added"},
+            ]),
+            ["/workspace/.github/aw/review/ROUTING"]:
+                "**/migrations/** tier=high lens=data-migrations",
+            ["/workspace/.gitattributes"]: "",
+        });
+        const json = runCli(fs, "/workspace");
+        expect(json.routingConfig.present).toBe(true);
+        expect(json.lensesToSpawn).toEqual(["data-migrations"]);
+    });
+});
+
+/* -------------------------------------------------------------------------- */
+/* parseRoutingConfig (the consumer-owned ROUTING file)                       */
+/* -------------------------------------------------------------------------- */
+
+describe("parseRoutingConfig", () => {
+    it("parses lens, tier, and direction-dependent fields from one line", () => {
+        const config = parseRoutingConfig(
+            "**/auth/** tier=high direction-dependent lens=security-auth",
+        );
+        expect(config.lensRules).toEqual([
+            {pattern: "**/auth/**", lenses: ["security-auth"]},
+        ]);
+        expect(config.riskRules).toEqual([
+            {
+                pattern: "**/auth/**",
+                tier: "high",
+                diffDirectionDependent: true,
+            },
+        ]);
+        expect(config.warnings).toEqual([]);
+    });
+
+    it("skips blanks and comments and accepts multi-lens rules", () => {
+        const config = parseRoutingConfig(
+            [
+                "# routing map",
+                "",
+                "**/*.proto lens=api-federation-compat,cross-deploy-serialization",
+                "docs/** tier=trivial",
+            ].join("\n"),
+        );
+        expect(config.lensRules).toEqual([
+            {
+                pattern: "**/*.proto",
+                lenses: ["api-federation-compat", "cross-deploy-serialization"],
+            },
+        ]);
+        expect(config.riskRules).toEqual([
+            {pattern: "docs/**", tier: "trivial"},
+        ]);
+        expect(config.warnings).toEqual([]);
+    });
+
+    it("warns on an unknown lens and keeps the known ones", () => {
+        const config = parseRoutingConfig(
+            "src/** lens=security-auth,frontend-vibes",
+        );
+        expect(config.lensRules).toEqual([
+            {pattern: "src/**", lenses: ["security-auth"]},
+        ]);
+        expect(config.warnings.join("\n")).toContain(
+            'line 1: unknown lens "frontend-vibes"',
+        );
+    });
+
+    it("skips a line with an unknown tier or unrecognised field, with a warning", () => {
+        const config = parseRoutingConfig(
+            ["src/** tier=extreme", "lib/** lenses=security-auth"].join("\n"),
+        );
+        expect(config.lensRules).toEqual([]);
+        expect(config.riskRules).toEqual([]);
+        expect(config.warnings).toHaveLength(2);
+        expect(config.warnings[0]).toContain('unknown tier "extreme"');
+        expect(config.warnings[1]).toContain(
+            'unrecognised field "lenses=security-auth"',
+        );
+    });
+
+    it("requires tier= alongside direction-dependent", () => {
+        const config = parseRoutingConfig("src/** direction-dependent");
+        expect(config.riskRules).toEqual([]);
+        expect(config.warnings.join("\n")).toContain(
+            "direction-dependent requires tier=",
+        );
+    });
+
+    it("warns on a rule with neither lens= nor tier=", () => {
+        const config = parseRoutingConfig("src/**");
+        expect(config.lensRules).toEqual([]);
+        expect(config.riskRules).toEqual([]);
+        expect(config.warnings.join("\n")).toContain("no lens= or tier=");
     });
 });

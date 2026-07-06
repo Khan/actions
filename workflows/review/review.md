@@ -285,12 +285,15 @@ checkout on disk and returns structured JSON. **You**, the orchestrator, make ev
 GitHub call and every safe-output write. Run them in three phases (the third runs
 only when there are candidate comments to validate).
 
-**Route first — the deterministic router (no model).** Before dispatching any
-sub-agent, run the **router**. It is deterministic code, not a sub-agent: invoke it with
-`node -r @swc-node/register workflows/review/lib/router.ts`. It reads the diff and
-file list staged in Step 1 (`/tmp/gh-aw/review/full.diff`,
-`/tmp/gh-aw/review/files.json`) plus `.gitattributes` and `.github/REVIEWERS` from the
-checkout, and writes `/tmp/gh-aw/review/routing.json`:
+**Route first — the deterministic router.** Before dispatching any
+sub-agent, run the **router**. It is deterministic code, not a sub-agent. It ships in
+the shared review lib checked out by the workflow's `pre-agent-steps` (see the
+frontmatter), so invoke it from that checkout, pointing it at the reviewed repo:
+```
+cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
+  node -r @swc-node/register workflows/review/lib/router.ts
+```
+It writes `/tmp/gh-aw/review/routing.json`:
 ```
 {
   "lensesToSpawn": ["<lens name>", …],
@@ -299,25 +302,53 @@ checkout, and writes `/tmp/gh-aw/review/routing.json`:
     "fallback": [{"team": "team-a", "files": 50}, {"team": "team-b", "files": 2}]
   },
   "perFileTier": {"path/to/file": "High|Medium|Low|Trivial"},
-  "runBudget": { … }
+  "runBudget": { … },
+  "pendingRiskQuestions": [ … ],
+  "routingConfig": {"present": true, "warnings": []}
 }
 ```
-This single deterministic pass **replaces the old `reviewer-mapper` sub-agent**: it
-classifies changed files from `.gitattributes`, maps each path to the specialist lenses
-that should review it (`lensesToSpawn`), maps changed files to their owning team(s) from
-`.github/REVIEWERS` (`teams` — `owners` is the per-file `{path: [team, …]}` map and
-`fallback` is the same teams ranked by how many substantive files each owns, exactly the
-`owners`/`fallbackTeams` the removed `reviewer-mapper` produced), assigns each file a
+This single deterministic pass classifies changed files (generated vs. source, from
+`.gitattributes`), maps each path to the specialist lenses
+that should review it (`lensesToSpawn`), maps changed files to their owning team(s)
+(`teams` — `owners` is the per-file `{path: [team, …]}` map and
+`fallback` is the same teams ranked by how many substantive files each owns), assigns each file a
 risk tier (`perFileTier`), and scales the run budget by the highest touched tier with a
 floor for a misrouted PR (`runBudget`). Everything downstream reads routing from this
-file — there is no reviewer-mapper dispatch or parse anymore.
+file.
 
-**The router's one model touch.** The deterministic core never calls a model. For the
-few risk tiers that depend on the *direction* of a change, `router.ts` instead emits
-those files as a bounded question in its first-pass output. When it does, resolve that
-one small question — a single small-model call (or a minimal sub-agent) over just those
-files — and run the router a **second** time with the answer, so the final
-`routing.json` is complete. If the first pass emits no question, it is already final.
+**Where the routing rules live.** The router hardcodes no repo layout. Each consuming
+repo owns its path map in `.github/aw/review/ROUTING` (the same home as the rest of its
+review config), parsed deterministically, one rule per line:
+```
+# <pattern> [lens=<lens>,…] [tier=trivial|low|medium|high] [direction-dependent]
+services/**/migrations/**  tier=high lens=data-migrations
+**/*.graphql               lens=api-federation-compat
+pkg/auth/**                tier=high direction-dependent lens=security-auth
+docs/**                    tier=trivial
+```
+`ROUTING` is the machine-readable complement to `risk-classification.md`, which stays
+the model-facing prose about file *contents*; team ownership stays in
+`.github/REVIEWERS`, unchanged. If `ROUTING` is missing, the router spawns no
+specialist lenses, the always-on reviewers still run, and the run budget is floored so
+a misrouted PR is never starved; `routingConfig.warnings` says so — surface any
+`routingConfig.warnings` as `Note:` lines in the review body (Step 6) so an
+unconfigured or misconfigured repo is visible on the PR, never silent.
+
+**The router's one model touch.** The deterministic core never calls a model. A few
+risk tiers depend on the *direction* of a change — e.g. a repo marks `pkg/auth/**`
+`direction-dependent` because tightening a permission check is routine while
+loosening one is high-risk, and a path glob cannot tell which this diff does. The
+router never guesses: its first pass emits exactly those files as
+`pendingRiskQuestions`. When (and only when) that list is non-empty, answer each
+question with **one** small-model call (or a minimal sub-agent) over just those
+files' hunks ("does this change tighten or loosen what the rule guards?"), write the
+answers to `/tmp/gh-aw/review/resolved-tiers.json` (`{"<path>": "High|…"}`), and run
+the router **once more**. Both passes happen back-to-back inside this same step —
+routing is never re-run later in the review or on a later push (a new push starts a
+new run, which routes afresh). The second pass reads the answers and writes the
+final `routing.json`; if the first pass emitted no question, the first
+`routing.json` is already final. Until resolved, a pending file carries its highest
+candidate tier, so the budget is never understated.
 
 **Phase 1 — triage (first, alone).** Dispatch **`pattern-triage`**. It returns
 `patterns[]` (common cross-file change patterns; on approval they go in the
@@ -325,8 +356,7 @@ risk/patterns comment, Step 7) and `reviewFiles` (the files that need a real rev
 it has already dropped generated, formatting-only, and pattern-only files). Then write,
 under `/tmp/gh-aw/review/`: `pr.diff` (the patches of the `reviewFiles`) and
 `review-files.json` (the `reviewFiles` list), which the correctness and skills reviewers
-read. (Team ownership no longer needs a staged file list — the router already mapped
-owners from `.github/REVIEWERS` into `routing.json` above.) If `reviewFiles` is empty,
+read. If `reviewFiles` is empty,
 skip the correctness and skills work below but still report any patterns (Step 7).
 
 **Phase 2 — review (in parallel).** First fetch existing review threads
