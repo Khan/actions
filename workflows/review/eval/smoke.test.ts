@@ -11,22 +11,22 @@ import {runSmokeCorpus, type RunResult} from "./runner.ts";
 /**
  * Smoke benchmark CI gate (TASK-9-3).
  *
- * task-9-3 asks for exactly one thing: "the smoke set runs under vitest so the
+ * the spec asks for exactly one thing: "the smoke set runs under vitest so the
  * repo's existing `pnpm test` CI job gates it on Khan/actions -- the smoke test
  * IS the CI entry point", green on baseline. This file is that entry point.
  *
  * It is a *consumer* of the two coder artifacts in this slice, not a
  * re-implementation of them:
- *   - the smoke corpus (task-9-1, `corpus/smoke/*.json`) loaded via the shared
+ *   - the smoke corpus (the spec, `corpus/smoke/*.json`) loaded via the shared
  *     loader (`loadSmokeCorpus`), and
- *   - the shared no-post runner (task-9-2, `runner.ts`) that replays the real,
+ *   - the shared no-post runner (the spec, `runner.ts`) that replays the real,
  *     deterministic review path over each case with zero GitHub writes.
  *
  * The assertions are DATA-DRIVEN off each case's own `expected` block, so the
- * gate never drifts from the corpus: adding a case (or the slice-11 full suite
+ * gate never drifts from the corpus: adding a case (or the full suite
  * growing the corpus) extends the gate automatically, and the numbers below are
  * derived from the loaded set rather than hard-coded. On top of the per-case
- * checks it pins the two properties the slice-10 wave-2 rebalance must not
+ * checks it pins the two properties the recall/precision rebalance must not
  * regress (operator direction 3, "the smoke set before the wave-2 rebalance"):
  *   - must-catch recall = 100% (every incident/adversarial repro is posted), and
  *   - clean false-block = 0 (no clean PR is ever blocked).
@@ -42,7 +42,7 @@ const RUNS: {corpusCase: CorpusCase; result: RunResult}[] = runSmokeCorpus();
 const postedIds = (result: RunResult): Set<string> =>
     new Set(result.postedCandidates.map((candidate) => candidate.id));
 
-describe("smoke corpus (task-9-1) loads via the shared loader", () => {
+describe("smoke corpus  loads via the shared loader", () => {
     const cases = loadSmokeCorpus();
 
     it("is a non-empty ~dozen-case set", () => {
@@ -82,7 +82,7 @@ describe("smoke corpus (task-9-1) loads via the shared loader", () => {
     });
 });
 
-describe("no-post runner (task-9-2) performs no GitHub write", () => {
+describe("no-post runner  performs no GitHub write", () => {
     it.each(RUNS)("$corpusCase.id is a witnessed no-post run", ({result}) => {
         // Structural witness: the runner returns the review it *would* submit and
         // flags posted:false. Nothing is posted to any PR.
@@ -146,7 +146,7 @@ describe("smoke set is green on baseline (per-case expectations)", () => {
     );
 });
 
-describe("gate properties the wave-2 rebalance (slice-10) must not regress", () => {
+describe("gate properties the wave-2 rebalance (the rebalance) must not regress", () => {
     it("achieves 100% must-catch recall across the smoke set", () => {
         const misses: string[] = [];
         for (const {corpusCase, result} of RUNS) {

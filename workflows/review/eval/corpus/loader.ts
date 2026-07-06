@@ -1,19 +1,19 @@
 /**
- * R5 shared eval-corpus loader — the SINGLE dataset format and loader used by
- * both the slice-9 smoke benchmark (a tagged subset) and the slice-11 full eval
- * suite (four datasets, five metrics, judge). "One harness" (task-9-1 /
- * task-11-1): the smoke set is not a separate format, it is the cases in the
+ * Shared eval-corpus loader — the SINGLE dataset format and loader used by
+ * both the smoke benchmark (a tagged subset) and the full eval
+ * suite (four datasets, five metrics, judge). "One harness" (
+ * the spec): the smoke set is not a separate format, it is the cases in the
  * corpus that carry the {@link SMOKE_TAG} tag, so the smoke gate and the full
  * suite read exactly the same files through this loader.
  *
  * A corpus *case* is a JSON file describing one PR the reviewer should be run
  * against, plus the recorded sub-agent findings for it and the expected outcome.
  * The runner (`../runner.ts`) replays the deterministic review path over a case
- * with no GitHub write; the slice-11 metrics/judge score a run against the same
+ * with no GitHub write; the full suite's metrics/judge score a run against the same
  * case's `expected` block. Cases are data (JSON), not code, so a human (or a
  * future generator) can add one without touching TypeScript.
  *
- * This module authors no human-read prose about code under review (the R8
+ * This module authors no human-read prose about code under review (the
  * tripwire the lib modules observe): every string it handles is a case field, a
  * path, a tag, or a validation error — never a sentence composed about a diff.
  */
@@ -33,7 +33,7 @@ import type {DimensionStatus} from "../../lib/verdict";
 /* Tags, categories, and the on-disk case shape                              */
 /* -------------------------------------------------------------------------- */
 
-/** The tag that marks a case as part of the smoke subset (task-9-1). */
+/** The tag that marks a case as part of the smoke subset . */
 export const SMOKE_TAG = "smoke";
 
 /** Default corpus root, relative to the repo checkout (the workflow's cwd). */
@@ -41,9 +41,9 @@ export const CORPUS_ROOT = "workflows/review/eval/corpus";
 
 /**
  * Case categories. The three the smoke set requires (`incident-repro`,
- * `adversarial-injection`, `clean`) plus the two the slice-11 full suite adds
+ * `adversarial-injection`, `clean`) plus the two the full suite adds
  * (`golden` human-comment cases, `synthetic-mutation` lens-mapped mutations), so
- * the format does not need to change when slice 11 lands its datasets.
+ * the format does not need to change when the full suite lands its datasets.
  */
 export const CASE_CATEGORIES = [
     "incident-repro",
@@ -58,7 +58,7 @@ export type CaseCategory = typeof CASE_CATEGORIES[number];
 /**
  * A single recorded sub-agent finding, as it appears in a case file. `source` is
  * the reviewer/lens that produced it (e.g. `security-auth`, `correctness`),
- * carried so the runner and the slice-11 counters can attribute findings; the
+ * carried so the runner and the full suite's counters can attribute findings; the
  * finding body itself is a full {@link Finding} validated against the schema.
  */
 export type RecordedFinding = {
@@ -72,7 +72,7 @@ export type RecordedFinding = {
  * Availability of the verdict-relevant dimensions for a case. Optional in the
  * file; the loader defaults every dimension to `assessed` (the common case — a
  * run where every core pass produced output). A case sets one to `unavailable`
- * to exercise the R2 hold-for-human gate.
+ * to exercise the hold-for-human gate.
  */
 export type CaseDimensions = {
     correctness: DimensionStatus;
@@ -80,7 +80,7 @@ export type CaseDimensions = {
     patternTriage: DimensionStatus;
 };
 
-/** A policy-named conflict a lens surfaced but could not adjudicate (R2 hold). */
+/** A policy-named conflict a lens surfaced but could not adjudicate (hold). */
 export type CasePolicyConflict = {
     policy: string;
     detail: string;
@@ -99,8 +99,8 @@ export type CaseScope = {
 };
 
 /**
- * The scored expectations for a case — the "ground truth" the slice-11 metrics
- * read. `verdict` is the only field the smoke gate needs (task-9-3); the rest
+ * The scored expectations for a case — the "ground truth" the full suite's metrics
+ * read. `verdict` is the only field the smoke gate needs ; the rest
  * are optional and consumed by the full suite's recall/precision/noise metrics.
  */
 export type CaseExpectation = {
@@ -125,7 +125,7 @@ export type CaseExpectation = {
 /**
  * One corpus case. The single dataset format shared by the smoke subset and the
  * full eval suite. `tags` carry `smoke` for the smoke subset; other tags (e.g. a
- * lens name, `holdout`, `adversarial`) let slice-11 slice the corpus for its
+ * lens name, `holdout`, `adversarial`) let the full suite slice the corpus for its
  * holdout and adversarial gates without a format change.
  */
 export type CorpusCase = {
@@ -578,7 +578,7 @@ export const filterByTag = (cases: CorpusCase[], tag: string): CorpusCase[] =>
 
 /**
  * Load the smoke subset: every case in the corpus tagged {@link SMOKE_TAG}. This
- * is the "tagged subset of the eval corpus" (task-9-1) — it reads the same root
+ * is the "tagged subset of the eval corpus"  — it reads the same root
  * the full suite reads and filters by tag, so the smoke gate and the full suite
  * never diverge in format or loader.
  */

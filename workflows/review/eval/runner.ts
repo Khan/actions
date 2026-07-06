@@ -1,5 +1,5 @@
 /**
- * R5 shared eval runner (task-9-2) — a **no-post** run mode that exercises the
+ * Shared eval runner — a **no-post** run mode that exercises the
  * *real* review path over a corpus case and produces findings + a verdict
  * **without any GitHub write**.
  *
@@ -10,7 +10,7 @@
  *   1. `router.route`          — deterministic lens/team/tier routing + budget
  *   2. `labelForFinding`       — code-owned Conventional-Comment label per finding
  *   3. the newly-changed-code scope filter (review.md Step 3)
- *   4. `computeVerdict`        — the mechanical verdict (#194 labels + R2 gate)
+ *   4. `computeVerdict`        — the mechanical verdict (#194 labels + hold gate)
  *   5. `renderComment` / `renderReviewBody` — templated, prose-free rendering
  *
  * The one part that is *not* deterministic in production — the model sub-agents
@@ -23,7 +23,7 @@
  * **No GitHub write, structurally.** This module imports no GitHub client and
  * takes none. It returns the review it *would* submit — the event, body, and
  * inline comments — as plain data ({@link RunResult.plannedReview}); nothing is
- * posted. That is the task-9-2 guarantee and the property the slice-9 CI gate
+ * posted. That is the no-post guarantee and the property the smoke CI gate
  * (`.github-staging/review-smoke.yml`) relies on to run against real PRs' recorded
  * findings safely.
  */
@@ -319,7 +319,7 @@ export const runCorpus = (
 
 /**
  * Convenience: load the smoke subset from disk and run it. This is the entry the
- * slice-9 CI gate drives — it produces a verdict per smoke case with no GitHub
+ * smoke CI gate drives — it produces a verdict per smoke case with no GitHub
  * write. Returns each case paired with its result so a gate can compare against
  * `case.expected`.
  */
