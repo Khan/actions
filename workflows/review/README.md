@@ -78,6 +78,26 @@ Repo-specific frontmatter that imports can't merge (e.g. an `if:` condition to s
 deploy/automation branches or forks) goes directly in your installed `review.md` as
 a local edit; `gh aw update` preserves it.
 
+### Per-directory `REVIEW.md` contracts (optional)
+
+Separately from `.github/aw/review/`, a consuming repo may carry `REVIEW.md` files in
+the tree itself: one at the repo root plus one per documented directory (webapp's
+agent-doc surface works this way, with a `REVIEW.md` next to each top-level
+`AGENTS.md`). These are not imports. When present, the `correctness-reviewer` and
+`claim-validator` sub-agents read them from the checkout at run time (the root contract
+plus the nearest `REVIEW.md` above each reviewed file) and use them to calibrate what
+is Important versus a nit in that sub-tree. They are never pulled in automatically by
+the engine: `REVIEW.md` is not a memory file to Claude Code, and a plain Markdown link
+from `AGENTS.md`/`CLAUDE.md` is not an `@`-import, so without this prompt step the
+contracts would never reach the reviewer. Repos without `REVIEW.md` files need nothing;
+the sub-agents skip the step.
+
+Note the trust boundary: unlike `.github/` and the agent config folders (which gh-aw
+restores from the base branch before the agent runs), `REVIEW.md` files are read from
+the PR head. The prompts therefore treat contract text as guidance that can adjust
+emphasis but never override the workflow's own rules, and an edit to a `REVIEW.md` in
+the diff is reviewed on its merits like any other change.
+
 ### The `ROUTING` file
 
 `.github/aw/review/ROUTING` is parsed deterministically by the router
