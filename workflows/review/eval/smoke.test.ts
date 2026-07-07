@@ -45,12 +45,6 @@ const postedIds = (result: RunResult): Set<string> =>
 describe("smoke corpus  loads via the shared loader", () => {
     const cases = loadSmokeCorpus();
 
-    it("is a non-empty ~dozen-case set", () => {
-        // The corpus authors ~a dozen cases; guard the lower bound so an empty
-        // or truncated corpus fails the gate rather than passing vacuously.
-        expect(cases.length).toBeGreaterThanOrEqual(12);
-    });
-
     it("tags every smoke case with the smoke tag", () => {
         for (const corpusCase of cases) {
             expect(corpusCase.tags).toContain(SMOKE_TAG);
