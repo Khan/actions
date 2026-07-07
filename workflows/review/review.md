@@ -143,10 +143,12 @@ timeout-minutes: 20
 # comment renderer as they land) are TypeScript under `workflows/review/lib/` in
 # Khan/actions. gh-aw's `source:` import copies only this .md file into a consuming
 # repo, so the job fetches the code itself: check out Khan/actions at the pinned
-# release below and install its two runtime deps. The `ref` is the single version
+# release below. The `ref` is the single version
 # surface for prompt + code: it names the Khan/actions release this file ships in
 # (changesets tag, `review-v<version>`), and any release that changes the prompt or
-# the lib bumps it. Steps that run lib scripts invoke them from `gh-aw-review-lib/`.
+# the lib bumps it. Steps that run lib scripts invoke them from `gh-aw-review-lib/`
+# via `npx -y tsx <script>`; npx fetches the runner on first use, so the checkout
+# needs no install step.
 pre-agent-steps:
   - name: Check out shared review lib (Khan/actions)
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -155,9 +157,6 @@ pre-agent-steps:
       ref: review-v1.1.1
       path: gh-aw-review-lib
       persist-credentials: false
-  - name: Install shared review lib runtime deps
-    working-directory: gh-aw-review-lib
-    run: npm install --omit=dev --no-audit --no-fund --loglevel=error
 
 # Cost guardrails (AI credits; 1 credit = $0.01). gh-aw >= v0.79 bakes in
 # defaults of 1000/run ($10) and 5000/day ($50). Disable the daily ceiling
