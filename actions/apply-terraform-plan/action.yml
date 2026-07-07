@@ -93,6 +93,23 @@ runs:
       working-directory: ${{ inputs.terraform_path }}
       run: terraform init -input=false
 
+    # Regenerate local files that are produced as a side effect of reading data
+    # sources -- e.g. the `archive_file` zips referenced by a resource's
+    # `source` (Cloud Function/Cloud Run source bundles). Applying a *saved*
+    # plan skips data-source evaluation, so on a fresh apply runner (a different
+    # machine than the one that generated the plan) those files don't exist and
+    # the apply fails with "open ...zip: no such file or directory". A throwaway
+    # plan re-materializes them; it does not change what the saved binary
+    # applies below. Best-effort (continue-on-error): if it can't run (e.g. a
+    # required TF_VAR is only set in the plan workflow), the apply step still
+    # runs and behaves exactly as it did before this step existed.
+    - name: Regenerate data-source artifacts
+      if: steps.check_files.outputs.skip_apply != 'true' && inputs.auto_approve != 'true'
+      shell: bash
+      working-directory: ${{ inputs.terraform_path }}
+      continue-on-error: true
+      run: terraform plan -input=false -out=/dev/null
+
     - name: Apply Terraform Plan
       if: steps.check_files.outputs.skip_apply != 'true'
       id: apply
