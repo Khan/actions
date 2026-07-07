@@ -10,6 +10,8 @@ import {
     fixSteps,
     isExemptRunner,
     processJob,
+    runsOnIgnored,
+    stepIgnoresSetup,
 } from "./index.ts";
 
 // ---------------------------------------------------------------------------
@@ -442,6 +444,163 @@ jobs:
 // ---------------------------------------------------------------------------
 // Helpers for runs-on tests
 // ---------------------------------------------------------------------------
+
+/** Parse a YAML string and return the first step map from jobs.<id>.steps */
+function parseFirstStep(yaml: string) {
+    const {steps} = parseWorkflowSteps(yaml);
+    const step = steps.items[0];
+    if (!isMap(step)) {
+        throw new Error("Expected a step map");
+    }
+    return step;
+}
+
+// ---------------------------------------------------------------------------
+// Ignore directives
+// ---------------------------------------------------------------------------
+
+describe("runsOnIgnored", () => {
+    // Each suffix is spliced onto `runs-on: ubuntu-latest-m<suffix>`.
+    it.each([
+        [" # fix-workflows-ignore", true],
+        [" # fix-workflows-ignore: runs-on", true],
+        [" # lintignore", true],
+        [" # fix-workflows-ignore: runs-on, setup", true],
+        [" # fix-workflows-ignore: setup", false],
+        ["", false],
+    ])("runs-on%s => %s", (suffix, expected) => {
+        const job = parseWorkflowJob(`
+jobs:
+  build:
+    runs-on: ubuntu-latest-m${suffix}
+    steps: []
+`);
+        expect(runsOnIgnored(job)).toBe(expected);
+    });
+
+    it("returns true for a job-level directive above the runs-on line", () => {
+        const job = parseWorkflowJob(`
+jobs:
+  build:
+    # fix-workflows-ignore
+    runs-on: ubuntu-latest-m
+    steps: []
+`);
+        expect(runsOnIgnored(job)).toBe(true);
+    });
+});
+
+describe("checkRunsOn and fixRunsOn with ignore directives", () => {
+    it("treats an ignored plain runner as compliant and leaves it untouched", () => {
+        const job = parseWorkflowJob(`
+jobs:
+  build:
+    runs-on: ubuntu-latest-m # fix-workflows-ignore
+    steps: []
+`);
+        expect(checkRunsOn(job)).toBe(false);
+        expect(fixRunsOn(job)).toBe(false);
+        expect(job.get("runs-on")).toBe("ubuntu-latest-m");
+    });
+});
+
+describe("stepIgnoresSetup", () => {
+    // Each suffix is spliced onto `uses: actions/checkout@v4<suffix>`.
+    it.each([
+        [" # fix-workflows-ignore", true],
+        [" # fix-workflows-ignore: setup", true],
+        [" # fix-workflows-ignore: runs-on", false],
+        ["", false],
+    ])("checkout uses%s => %s", (suffix, expected) => {
+        const step = parseFirstStep(`
+jobs:
+  build:
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4${suffix}
+`);
+        expect(stepIgnoresSetup(step)).toBe(expected);
+    });
+});
+
+describe("fixSteps with ignore directives", () => {
+    it("does not insert a setup step after an ignored checkout", () => {
+        const {doc, steps} = parseWorkflowSteps(`
+jobs:
+  build:
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4 # fix-workflows-ignore
+      - name: Build
+        run: pnpm build
+`);
+        const result = fixSteps(doc, steps);
+        expect(result).toBe(false);
+        expect(steps.items).toHaveLength(2);
+    });
+
+    it("still inserts setup for a non-ignored checkout alongside an ignored one", () => {
+        const {doc, steps} = parseWorkflowSteps(`
+jobs:
+  build:
+    steps:
+      - name: Exempt Checkout
+        uses: actions/checkout@v4 # fix-workflows-ignore
+      - name: Guarded Checkout
+        uses: actions/checkout@v4
+`);
+        const result = fixSteps(doc, steps);
+        expect(result).toBe(true);
+        // Only the second checkout gains a setup step.
+        expect(steps.items).toHaveLength(3);
+        expect((steps.items[2] as any).get("uses")).toBe(DEFAULT_SETUP_ACTION);
+    });
+});
+
+describe("checkSteps with ignore directives", () => {
+    it("returns false for an ignored checkout that lacks a setup step", () => {
+        const {steps} = parseWorkflowSteps(`
+jobs:
+  build:
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4 # fix-workflows-ignore
+      - name: Build
+        run: pnpm build
+`);
+        expect(checkSteps(steps)).toBe(false);
+    });
+});
+
+describe("processJob and checkJob with ignore directives", () => {
+    it("does not rewrite an ignored runs-on when shouldFixRunsOn is true", () => {
+        const {doc, job} = parseWorkflowJobWithDoc(`
+jobs:
+  build:
+    runs-on: ubuntu-latest-m # fix-workflows-ignore
+    steps: []
+`);
+        expect(processJob(doc, job, {shouldFixRunsOn: true})).toBe(false);
+        expect(job.get("runs-on")).toBe("ubuntu-latest-m");
+        expect(checkJob(job, {shouldFixRunsOn: true})).toBe(false);
+    });
+
+    it("does not insert a setup step for a checkout with a setup-scoped ignore", () => {
+        const {doc, job} = parseWorkflowJobWithDoc(`
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4 # fix-workflows-ignore: setup
+      - name: Build
+        run: pnpm build
+`);
+        expect(processJob(doc, job)).toBe(false);
+        expect(checkJob(job)).toBe(false);
+        expect(job.toJSON().steps).toHaveLength(2);
+    });
+});
 
 /** Parse a YAML string and return the first job's map node. */
 function parseWorkflowJob(yaml: string) {
