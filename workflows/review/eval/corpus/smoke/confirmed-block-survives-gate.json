@@ -1,0 +1,36 @@
+{
+    "id": "confirmed-block-survives-gate",
+    "tags": ["smoke", "incident", "validation", "correctness"],
+    "category": "incident-repro",
+    "description": "Guard for the three-state gate's recall: a real blocking defect (production catch: a rejected background load cached permanently, poisoning every later render after one network hiccup) that the validator CONFIRMS. A confirmed claim must keep its blocking label through the validation replay and still drive REQUEST_CHANGES - the gate strips unconfirmed blocks, never confirmed ones.",
+    "changedFiles": [
+        {"path": "src/certificates/loader.ts", "status": "modified"}
+    ],
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 1,
+                "id": "corr-promise-cache-1",
+                "lens": "correctness",
+                "anchor": {"type": "line", "path": "src/certificates/loader.ts", "line": 41, "side": "RIGHT"},
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "src/certificates/loader.ts:41 stores the in-flight promise in the module-level cache before it settles",
+                    "the catch path never clears the cache entry, so a rejected load is returned to every later caller"
+                ],
+                "producing_hunt": "correctness:error-handling",
+                "model_authored_prose": "A rejected background load is cached permanently: the promise is stored before it settles and the catch path never clears it, so one network hiccup poisons every later render. Clear the cache entry on rejection."
+            }
+        }
+    ],
+    "validation": [
+        {"id": "corr-promise-cache-1", "verification": "confirmed"}
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": ["corr-promise-cache-1"],
+        "postedCommentCount": 1
+    }
+}

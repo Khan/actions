@@ -1,0 +1,36 @@
+{
+    "id": "false-block-api-contract",
+    "tags": ["smoke", "clean", "validation", "false-block"],
+    "category": "clean",
+    "description": "Production-derived false block (frontend audit 2026-07-07): a correctness reviewer blocked on 'Promise.all over these mutations swallows rejections' when the mutation helper's contract never rejects - network errors, timeouts, and 5xx resolve as {status: 'error'}. Reading the helper's source refutes the claim, so the validator returns refuted and the clean PR approves.",
+    "changedFiles": [
+        {"path": "src/assignments/bulk-assign.ts", "status": "modified"}
+    ],
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 1,
+                "id": "corr-promise-all-1",
+                "lens": "correctness",
+                "anchor": {"type": "line", "path": "src/assignments/bulk-assign.ts", "line": 58, "side": "RIGHT"},
+                "severity": "blocking",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/assignments/bulk-assign.ts:58 awaits Promise.all(mutations) with no try/catch",
+                    "a rejected mutation would leave the batch partially applied"
+                ],
+                "producing_hunt": "correctness:error-handling",
+                "model_authored_prose": "`Promise.all` here has no rejection handling - one failed mutation rejects the whole batch and the partial state is never reconciled."
+            }
+        }
+    ],
+    "validation": [
+        {"id": "corr-promise-all-1", "verification": "refuted"}
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustNotPost": ["corr-promise-all-1"],
+        "postedCommentCount": 0
+    }
+}

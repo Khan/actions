@@ -10,11 +10,15 @@
  *   1. `router.route`          — deterministic lens/team/tier routing + budget
  *   2. `labelForFinding`       — code-owned Conventional-Comment label per finding
  *   3. the newly-changed-code scope filter (review.md Step 3)
+ *   3b. the three-state validation gate's apply rules (review.md Step 3
+ *       Phase 3: refuted drops, plausible downgrades to non-blocking, only a
+ *       confirmed claim keeps a blocking label)
  *   4. `computeVerdict`        — the mechanical verdict (#194 labels + hold gate)
  *   5. `renderComment` / `renderReviewBody` — templated, prose-free rendering
  *
- * The one part that is *not* deterministic in production — the model sub-agents
- * that author findings — is supplied by the corpus case as recorded findings, so
+ * The parts that are *not* deterministic in production — the model sub-agents
+ * that author findings and the claim-validator's per-claim verifications — are
+ * supplied by the corpus case as recorded data (`findings`, `validation`), so
  * a smoke run is reproducible and needs no model or network. A future full-eval
  * arm can swap in a live producer via {@link RunOptions.produceFindings} while
  * keeping every downstream stage identical; that is what makes this "the real
@@ -104,10 +108,12 @@ export type RunResult = {
     routing: RoutingResult;
     /** Every recorded finding normalised to a candidate (pre-scope-filter). */
     allCandidates: RunCandidate[];
-    /** Candidates that survive the newly-changed-code scope filter. */
+    /** Candidates that survive the scope filter AND the validation replay. */
     postedCandidates: RunCandidate[];
     /** Candidates dropped by the scope filter (out-of-scope, non-blocking). */
     droppedByScope: RunCandidate[];
+    /** Candidates dropped as `refuted` by the validation replay (Phase 3). */
+    droppedByValidation: RunCandidate[];
     /** Labels on the posted set — the input to the mechanical verdict. */
     postedLabels: string[];
     /** The computed verdict (event + structured reasons). */
@@ -208,6 +214,59 @@ export const applyScopeFilter = (
 };
 
 /* -------------------------------------------------------------------------- */
+/* Validation replay (review.md Step 3 Phase 3, the three-state gate)         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Replay the claim-validator's recorded verifications over the scope-filter
+ * survivors, applying the Phase 3 rules mechanically: `refuted` drops the
+ * candidate; `plausible` downgrades it to non-blocking (severity → `advisory`,
+ * label/body recomputed in code, confidence lowered) so it can never drive
+ * REQUEST_CHANGES — only a `confirmed` claim keeps a blocking label; `confirmed`
+ * (or no recorded verification) keeps the candidate unchanged. A case without a
+ * `validation` block is a no-op, exactly the pre-existing behavior.
+ */
+export const applyValidation = (
+    candidates: RunCandidate[],
+    validation: CorpusCase["validation"],
+): {validated: RunCandidate[]; dropped: RunCandidate[]} => {
+    if (validation === undefined || validation.length === 0) {
+        return {validated: [...candidates], dropped: []};
+    }
+    const byId = new Map(validation.map((v) => [v.id, v]));
+    const validated: RunCandidate[] = [];
+    const dropped: RunCandidate[] = [];
+    for (const candidate of candidates) {
+        const verification = byId.get(candidate.id);
+        if (
+            verification === undefined ||
+            verification.verification === "confirmed"
+        ) {
+            validated.push(candidate);
+            continue;
+        }
+        if (verification.verification === "refuted") {
+            dropped.push(candidate);
+            continue;
+        }
+        // plausible: never blocks. Downgrade the finding and re-run the same
+        // code-owned normalisation so the label mapping cannot drift from
+        // labelForFinding (blocking → the non-blocking equivalent).
+        const downgraded: Finding = {
+            ...candidate.finding,
+            severity: "advisory",
+            confidence:
+                verification.confidence ??
+                Math.min(candidate.finding.confidence, 0.4),
+        };
+        validated.push(
+            toCandidate({source: candidate.source, finding: downgraded}),
+        );
+    }
+    return {validated, dropped};
+};
+
+/* -------------------------------------------------------------------------- */
 /* Skipped-dimension notes                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -267,8 +326,13 @@ export const runCase = (
     const allCandidates = recorded.map(toCandidate);
 
     // 3. Scope filter to newly-changed code.
-    const {posted: postedCandidates, dropped: droppedByScope} =
+    const {posted: inScopeCandidates, dropped: droppedByScope} =
         applyScopeFilter(allCandidates, corpusCase.scope);
+
+    // 3b. Replay the recorded claim-validator verifications (three-state gate:
+    // refuted drops, plausible downgrades to non-blocking, confirmed keeps).
+    const {validated: postedCandidates, dropped: droppedByValidation} =
+        applyValidation(inScopeCandidates, corpusCase.validation);
 
     // 4. Mechanical verdict from the posted labels + dimension gate + conflicts.
     const postedLabels = postedCandidates.map((c) => c.label);
@@ -304,6 +368,7 @@ export const runCase = (
         allCandidates,
         postedCandidates,
         droppedByScope,
+        droppedByValidation,
         postedLabels,
         verdict,
         plannedReview,
