@@ -897,7 +897,12 @@ should only ever be one current risks/patterns comment:
 
 Begin the comment with the exact marker line below (so the comment is identifiable
 on later runs), then include the Review Guidance team sections and/or the
-common-patterns section. Omit whichever is empty.
+common-patterns section. Omit whichever is empty. End the comment with the version
+marker, for attribution and rollback:
+`<!-- pr-reviewer:version v=review-v<version> schema=<n> -->`, where `<version>` is
+the `version` field of `gh-aw-review-lib/workflows/review/package.json` (the pinned
+release this run executed) and `<n>` is the `FINDING_SCHEMA_VERSION` constant in
+`gh-aw-review-lib/workflows/review/lib/finding-schema.ts`.
 
 ````
 <!-- pr-reviewer:risks-and-patterns -->

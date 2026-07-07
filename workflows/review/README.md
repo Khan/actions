@@ -164,38 +164,20 @@ tag) is cut **at the real commit tree** (not the rewritten-subtree bare tags tha
 the `actions/` packages use), so the nested `workflows/review/review.md@<ref>` path
 resolves for `gh aw add`.
 
-### Config drift guard (the version stamp)
+### Version attribution
 
-A consumer that pins the shared reviewer (via `gh aw add …@review-v0` or a committed
-config snapshot) needs a way to tell when the reviewer's *behaviour* has drifted from
-the version it last synced. That signal is a **single surface**: the reviewer **version
-stamp**, produced by `lib/version-stamp.ts` and rendered as one HTML marker that reuses
-the `pr-reviewer:` marker namespace `#194` established:
+Semver is the behavior contract: a release that changes the reviewer's behavior bumps
+the major version, so a consumer pinned to `review-v<major>` can assume the fundamental
+behavior holds within a major. For attribution and rollback, the risks/patterns
+guidance comment (Step 7) carries the release the run executed, in one HTML marker
+reusing the `pr-reviewer:` marker namespace `#194` established:
 
 ```
-<!-- pr-reviewer:version stamp=<hex> format=<n> schema=<n> -->
+<!-- pr-reviewer:version v=review-v<major>.<minor>.<patch> schema=<n> -->
 ```
 
-`stamp` is a SHA-256 over exactly the behaviour-defining inputs — the sub-agent prompts,
-the model/effort table, the lens roster, the router rules, the tunable thresholds, and
-the finding-schema version — so it changes when, and only when, the reviewer's behaviour
-changes; unrelated churn (a test fixture, a docs edit) does **not** move it. `format`
-lets an old consumer tell "I don't understand this stamp shape" apart from "the reviewer
-changed," and `schema` is the finding-schema version the run was on.
-
-The intended drift check is mechanical: a consumer reads the `stamp=` value from wherever
-the workflow surfaces the marker and compares it against the value it last synced; a
-mismatch means "re-sync." The designated surface for that read is the marker block, to be
-emitted alongside the existing `pr-reviewer:risks-and-patterns` approval comment (Step 7)
-or written into a committed skill snapshot.
-
-**Current status:** the stamp itself exists and is exercised today — `lib/version-stamp.ts`
-computes it and the eval suite labels every run with it, so a metrics regression can be
-attributed to a specific reviewer version. The workflow does **not** yet render the
-`pr-reviewer:version` marker into its posted review/approval comment; wiring that emit
-point into the Step 7 posting path is pending follow-through. Until it lands, a consumer
-drift check has no marker to parse from a live review.
-
-This is deliberately the **only** drift surface. It reuses the existing version stamp and
-the `#194` marker namespace — it adds no second version file and no separate config-hash
-mechanism, so "the reviewer changed" has exactly one home.
+`schema` is the finding-schema version (`FINDING_SCHEMA_VERSION` in
+`lib/finding-schema.ts`) the run was on. A bad reviewer release rolls back by
+re-pinning the previous tag; the marker on each posted review makes attribution
+immediate. There is no separate config-hash or drift-stamp mechanism — the release
+tag is the single version surface.
