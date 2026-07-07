@@ -560,7 +560,7 @@ guard/handler/definition that prevents it, and anything it can do neither for is
   to `suggestion (non-blocking, best-practice)`.
 
 **Only a `confirmed` claim may carry a blocking label into Step 4.** The verdict is a
-mechanical function of the labels on the posted comments (slice-2 `computeVerdict`), so
+mechanical function of the labels on the posted comments (`computeVerdict`), so
 the `plausible` downgrade above automatically removes an unconfirmed claim from the
 REQUEST_CHANGES set — recomputing the verdict over the post-validation labels is the
 wiring. This gate is what ties REQUEST_CHANGES to re-verified, demonstrable defects; a
