@@ -86,15 +86,22 @@ rule per line:
 
 ```
 # <pattern> [lens=<lens>,…] [tier=trivial|low|medium|high] [direction-dependent]
+# enable <reviewer>[,<reviewer>…]
 services/**/migrations/**  tier=high lens=data-migrations
 **/*.graphql               lens=api-federation-compat
 pkg/auth/**                tier=high direction-dependent lens=security-auth
 services/**/testdata/**    tier=trivial
 docs/**                    tier=trivial
+enable holistic,test-adequacy
 ```
 
 - `lens=` names the specialist lenses to spawn when the pattern is touched; when
   several rules match a path their lenses are unioned (lenses are additive).
+- `enable` lines turn on the opt-in whole-change reviewers (`holistic`,
+  `completeness`, `test-adequacy`, `first-principles`, `conventions`). Neither
+  lenses nor opt-in reviewers run anywhere by default: a repo opts into each
+  explicitly, and the policy is that a reviewer earns its line here through the
+  eval suite.
 - `tier=` assigns the path a risk tier. When several rules match, the **last
   matching rule in file order wins** (gitignore/CODEOWNERS-style): write the broad
   rule first and its exceptions after it, as with `services/**` and
@@ -113,6 +120,34 @@ and are skipped; routing degrades to fewer lenses, never to a crashed review.
 `ROUTING` is the machine-readable complement to `risk-classification.md`, which
 stays the model-facing prose about file *contents*; team ownership stays in
 `.github/REVIEWERS`, unchanged.
+
+### Models and effort per role
+
+Each sub-agent pins its model in its own definition inside `review.md` (with a
+launch-default `effort:` annotation; the gh-aw Claude engine exposes no per-agent
+effort field yet). The orchestrator prompt deliberately says nothing about
+sub-agent models — this table is the human-facing summary:
+
+| Role | Model | Effort | Why |
+| --- | --- | --- | --- |
+| orchestrator | `claude-opus-4-8` | high | Owns every GitHub/safe-output decision |
+| `pattern-triage` | `claude-sonnet-4-6` | medium | Cheap first-pass triage |
+| `thread-reconciler` | `claude-opus-4-8` | medium | Reconciliation |
+| `correctness-reviewer` | `claude-opus-4-8` | high | Whole-change reviewer |
+| `skill-auditor` | `claude-opus-4-8` | high | Whole-change reviewer |
+| `holistic` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `completeness` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `test-adequacy` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `conventions` | `claude-opus-4-8` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
+| `first-principles` | `claude-fable-5` | high | Opt-in advisory-only; reviews the change's justification |
+| `claim-validator` | `claude-opus-4-8` | xhigh | Adversarial claim validation |
+| specialist lenses | `claude-opus-4-8` | high | Opt-in via `lens=` in `ROUTING`; the security & auth lens is xhigh |
+
+Only the orchestrator and the default roster (`pattern-triage`,
+`correctness-reviewer`, `skill-auditor`, `thread-reconciler`, `claim-validator`)
+run by default; every other row is opt-in via `ROUTING` and earns its line through
+the eval suite. Per-role Fable-5 / Sonnet experiment arms are eval-suite
+measurements to run after the suite exists.
 
 ### Required secrets / variables
 
