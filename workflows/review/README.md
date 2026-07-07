@@ -59,6 +59,7 @@ locally at compile/run time, not from this repo). Create them under
 | `risk-classification.md` | **Required** | Your High/Medium/Low/Trivial file patterns, imported into the `correctness-reviewer` sub-agent, which assigns each reviewed file a risk level. |
 | `ci-tooling.md` | **Required** | The lint/format/type/test issues your CI already catches. Imported into `correctness-reviewer` so it doesn't flag them, and into `claim-validator` so it drops any correctness claim that flags a CI-caught issue. |
 | `skills.md` | **Required** | The catalog of best-practice skill files (and when each applies). Imported into `skill-auditor` to evaluate the diff against, and into `claim-validator` so it can verify a flagged skill violation against the skill's actual rule. |
+| `ROUTING` | Optional | The machine-readable path map the deterministic router reads (see below). Without it the router spawns no specialist lenses and floors the run budget, and the review notes the missing config on the PR. |
 
 All four are **required**, but validated at different times. `config.md` is a
 frontmatter import, embedded and checked at **compile time** — `gh aw compile` fails if
@@ -76,6 +77,42 @@ main workflow would override the import and discard your allowlist.
 Repo-specific frontmatter that imports can't merge (e.g. an `if:` condition to skip
 deploy/automation branches or forks) goes directly in your installed `review.md` as
 a local edit; `gh aw update` preserves it.
+
+### The `ROUTING` file
+
+`.github/aw/review/ROUTING` is parsed deterministically by the router
+(`lib/routing-config.ts`), `REVIEWERS`-style: blanks and `#` comments skipped, one
+rule per line:
+
+```
+# <pattern> [lens=<lens>,…] [tier=trivial|low|medium|high] [direction-dependent]
+services/**/migrations/**  tier=high lens=data-migrations
+**/*.graphql               lens=api-federation-compat
+pkg/auth/**                tier=high direction-dependent lens=security-auth
+services/**/testdata/**    tier=trivial
+docs/**                    tier=trivial
+```
+
+- `lens=` names the specialist lenses to spawn when the pattern is touched; when
+  several rules match a path their lenses are unioned (lenses are additive).
+- `tier=` assigns the path a risk tier. When several rules match, the **last
+  matching rule in file order wins** (gitignore/CODEOWNERS-style): write the broad
+  rule first and its exceptions after it, as with `services/**` and
+  `services/**/testdata/**` above.
+- `direction-dependent` marks a tier that cannot be finalised from the path alone
+  (tightening vs. loosening a check); the router emits the file as a pending risk
+  question instead of guessing, and it applies only when its own rule is the
+  winning tier rule for the path.
+
+Glob semantics are a practical subset of gitignore/CODEOWNERS: `**` crosses
+directories, `*` and `?` stay within a segment, a trailing `/` matches everything
+under a directory, and a pattern without `/` matches the basename anywhere.
+Malformed lines produce a parse warning (surfaced as a `Note:` on the PR review)
+and are skipped; routing degrades to fewer lenses, never to a crashed review.
+
+`ROUTING` is the machine-readable complement to `risk-classification.md`, which
+stays the model-facing prose about file *contents*; team ownership stays in
+`.github/REVIEWERS`, unchanged.
 
 ### Required secrets / variables
 

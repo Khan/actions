@@ -291,7 +291,7 @@ the shared review lib checked out by the workflow's `pre-agent-steps` (see the
 frontmatter), so invoke it from that checkout, pointing it at the reviewed repo:
 ```
 cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
-  node -r @swc-node/register workflows/review/lib/router.ts
+  npx -y tsx workflows/review/lib/router.ts
 ```
 It writes `/tmp/gh-aw/review/routing.json`:
 ```
@@ -316,21 +316,9 @@ risk tier (`perFileTier`), and scales the run budget by the highest touched tier
 floor for a misrouted PR (`runBudget`). Everything downstream reads routing from this
 file.
 
-**Where the routing rules live.** The router hardcodes no repo layout. Each consuming
-repo owns its path map in `.github/aw/review/ROUTING` (the same home as the rest of its
-review config), parsed deterministically, one rule per line:
-```
-# <pattern> [lens=<lens>,…] [tier=trivial|low|medium|high] [direction-dependent]
-services/**/migrations/**  tier=high lens=data-migrations
-**/*.graphql               lens=api-federation-compat
-pkg/auth/**                tier=high direction-dependent lens=security-auth
-docs/**                    tier=trivial
-```
-`ROUTING` is the machine-readable complement to `risk-classification.md`, which stays
-the model-facing prose about file *contents*; team ownership stays in
-`.github/REVIEWERS`, unchanged. If `ROUTING` is missing, the router spawns no
-specialist lenses, the always-on reviewers still run, and the run budget is floored so
-a misrouted PR is never starved; `routingConfig.warnings` says so — surface any
+The routing rules themselves live in the consuming repo
+(`.github/aw/review/ROUTING`; format documented in the shared lib's README) and are
+the router's concern, not yours: you only read its `routing.json` output. Surface any
 `routingConfig.warnings` as `Note:` lines in the review body (Step 6) so an
 unconfigured or misconfigured repo is visible on the PR, never silent.
 
@@ -347,8 +335,8 @@ the router **once more**. Both passes happen back-to-back inside this same step 
 routing is never re-run later in the review or on a later push (a new push starts a
 new run, which routes afresh). The second pass reads the answers and writes the
 final `routing.json`; if the first pass emitted no question, the first
-`routing.json` is already final. Until resolved, a pending file carries its highest
-candidate tier, so the budget is never understated.
+`routing.json` is already final. Until resolved, a pending file carries the
+direction-dependent rule's own tier, so the budget is never understated.
 
 **Phase 1 — triage (first, alone).** Dispatch **`pattern-triage`**. It returns
 `patterns[]` (common cross-file change patterns; on approval they go in the

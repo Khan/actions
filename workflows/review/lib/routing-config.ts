@@ -61,9 +61,12 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  *     <pattern> [lens=<lens>[,<lens>…]] [tier=trivial|low|medium|high] [direction-dependent]
  *
  * `lens=` names specialist lenses to spawn when the pattern is touched (multiple
- * matching rules union their lenses). `tier=` assigns a risk tier (the highest
- * matching rule wins). `direction-dependent` marks a tier that cannot be
- * finalised from the path alone (tightening vs. loosening; see
+ * matching rules union their lenses). `tier=` assigns a risk tier; when several
+ * rules match a path, the LAST matching rule in file order wins
+ * (gitignore/CODEOWNERS-style), so write the broad rule first (a high-tier
+ * services directory) and its exceptions after it (the trivial testdata
+ * subtree beneath it). `direction-dependent` marks a tier
+ * that cannot be finalised from the path alone (tightening vs. loosening; see
  * {@link RiskRule.diffDirectionDependent}) and requires `tier=`.
  *
  * Malformed fields and unknown lens names produce a warning and skip the lens or

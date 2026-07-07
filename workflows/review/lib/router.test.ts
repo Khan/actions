@@ -253,13 +253,59 @@ describe("route: tier", () => {
         expect(result.perFileTier["src/app.ts"]).toBe("medium");
     });
 
-    it("takes the highest tier among matching rules", () => {
+    it("takes the tier of the last matching rule in file order", () => {
         // A .sql migration matches two high rules -> high.
         const result = route(
             {files: [file("db/migrations/0001_init.sql")]},
             baseConfig,
         );
         expect(result.perFileTier["db/migrations/0001_init.sql"]).toBe("high");
+    });
+
+    it("lets a later exception rule override an earlier broad rule", () => {
+        // gitignore/CODEOWNERS-style: broad rule first, exception after.
+        const config = {
+            ...baseConfig,
+            riskRules: [
+                {pattern: "services/**", tier: "high" as const},
+                {pattern: "services/**/testdata/**", tier: "trivial" as const},
+            ],
+        };
+        const result = route(
+            {
+                files: [
+                    file("services/payments/handler.go"),
+                    file("services/payments/testdata/fixtures.json"),
+                ],
+            },
+            config,
+        );
+        expect(result.perFileTier["services/payments/handler.go"]).toBe("high");
+        expect(
+            result.perFileTier["services/payments/testdata/fixtures.json"],
+        ).toBe("trivial");
+    });
+
+    it("ignores an earlier rule's direction-dependence when a later rule wins", () => {
+        // The exception overrides the whole decision, pending included.
+        const config = {
+            ...baseConfig,
+            riskRules: [
+                {
+                    pattern: "pkg/auth/**",
+                    tier: "high" as const,
+                    diffDirectionDependent: true,
+                },
+                {pattern: "pkg/auth/**/testdata/**", tier: "trivial" as const},
+            ],
+        };
+        const result = route(
+            {files: [file("pkg/auth/checks/testdata/tokens.json")]},
+            config,
+        );
+        expect(result.perFile[0].tier).toBe("trivial");
+        expect(result.perFile[0].tierPending).toBe(false);
+        expect(result.pendingRiskQuestions).toEqual([]);
     });
 
     it("defers a diff-direction-dependent file with a conservative tier now", () => {

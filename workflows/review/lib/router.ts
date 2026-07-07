@@ -524,11 +524,15 @@ type TierDecision = {
 };
 
 /**
- * Risk tier for one file. A resolved answer (second pass) is authoritative. Else
- * the tier is the highest among matching rules; if any matching rule is
- * diff-direction-dependent, the decision is `pending` (conservative tier now, a
- * question emitted for the orchestrator). No matching rule -> the configured
- * default tier.
+ * Risk tier for one file. A resolved answer (second pass) is authoritative.
+ * Else the LAST matching rule in `ROUTING` file order wins
+ * (gitignore/CODEOWNERS-style): a repo writes its broad rule first (a
+ * high-tier services directory) and its exceptions after it (the trivial
+ * testdata subtree beneath it), and the exception overrides. The
+ * decision is `pending` only when the winning rule is
+ * diff-direction-dependent (it carries that rule's tier until the
+ * orchestrator's small-model call resolves it). No matching rule -> the
+ * configured default tier.
  */
 const tierForFile = (
     file: ChangedFile,
@@ -548,18 +552,14 @@ const tierForFile = (
         return {tier: defaultTier, pending: false, candidates: [defaultTier]};
     }
 
-    const candidateSet = new Set<RiskTier>();
-    let tier: RiskTier = "trivial";
-    let pending = false;
-    for (const rule of matches) {
-        candidateSet.add(rule.tier);
-        tier = maxTier(tier, rule.tier);
-        if (rule.diffDirectionDependent === true) {
-            pending = true;
-        }
-    }
+    const winner = matches[matches.length - 1];
+    const candidateSet = new Set<RiskTier>(matches.map((rule) => rule.tier));
     const candidates = RISK_TIERS.filter((t) => candidateSet.has(t));
-    return {tier, pending, candidates};
+    return {
+        tier: winner.tier,
+        pending: winner.diffDirectionDependent === true,
+        candidates,
+    };
 };
 
 /* -------------------------------------------------------------------------- */
