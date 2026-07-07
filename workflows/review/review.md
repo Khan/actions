@@ -7,13 +7,23 @@ description: >
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, closed]
   # Run automatically on every code push to a PR (`synchronize`) and when a PR
   # leaves draft (`ready_for_review`), not via a slash command. Reviewer requests
   # are gated on draft status in the prompt (Step 8). Do NOT post a "review
   # started / completed" status comment — only the review itself, the
   # risks/patterns comment (Step 7), and reviewer requests should appear on the
   # PR.
+  #
+  # `closed` (which also fires on merge) is subscribed ONLY to cancel an in-flight
+  # review of the same PR: gh-aw compiles a workflow-level concurrency group keyed
+  # on the PR number with `cancel-in-progress: true`, and cancellation happens at
+  # run level as soon as the closed-event run enters the group, before any job
+  # condition is evaluated. The `if:` below excludes `closed` runs from doing any
+  # work themselves, so every job skips and the run costs nothing. Without this, a
+  # review still running when its PR merges (median run is ~12 minutes) posts a
+  # stale verdict on the merged PR. The safe-outputs guard step below is the
+  # deterministic backstop for the same race.
   status-comment: false
   # Disable gh-aw's pre-activation permission + confused-deputy gate so a same-repo
   # collaborator pushing to a PR they didn't open still triggers the review (the
@@ -32,7 +42,11 @@ on:
 # (zero AI credits) and posts nothing. The label is evaluated on each trigger event
 # (open/synchronize/reopen/ready), so adding it prevents the *next* run — it does not
 # retroactively dismiss a review already left on an earlier push.
+#
+# `closed` events are excluded entirely: those runs exist only to enter the per-PR
+# concurrency group and cancel an in-flight review (see the trigger comment above).
 if: >-
+  github.event.action != 'closed' &&
   !startsWith(github.event.pull_request.head.ref, 'deploy/') &&
   github.event.pull_request.head.ref != 'changeset-release/main' &&
   !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
@@ -108,6 +122,62 @@ safe-outputs:
   # .github/aw/review/config.md (see the `imports:` note above), because its
   # `allowed-team-reviewers` allowlist is repo-specific. Defining it here would override
   # the import and drop the consumer's allowlist.
+  #
+  # Deterministic guard against the merge race: a run that started before its PR
+  # merged or closed would otherwise post its verdict after the fact (observed on
+  # a production PR: CHANGES_REQUESTED with 11 blocking comments landed 16 minutes
+  # after the merge). gh-aw injects these steps into the safe-outputs job after
+  # checkout/setup and before any safe-output handler executes; if the PR is no
+  # longer open at that moment, the step records why in the job summary and
+  # cancels the run, so nothing posts. The `closed` trigger above normally cancels
+  # such runs within seconds of the merge; this guard covers what that cannot:
+  # manual reruns of stale runs, and any cancellation miss. The guard fails OPEN
+  # on API errors (a transient GitHub error must never suppress a legitimate
+  # review of an open PR) and fails CLOSED once a non-open state is positively
+  # observed (if the cancel call is rejected, it fails the job so the handlers
+  # still never run). It checks only `state`, never recency: a run whose PR is
+  # still open posts normally even if a newer push exists, since that push's own
+  # run supersedes it. The bot token is used because this job's GITHUB_TOKEN
+  # lacks the `actions: write` scope that cancelling the run requires.
+  steps:
+    - name: Skip posting when the PR is no longer open
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      with:
+        github-token: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
+        script: |
+          const prNumber = context.payload.pull_request?.number;
+          if (!prNumber) return;
+          let pr;
+          try {
+            ({data: pr} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            }));
+          } catch (error) {
+            core.warning(
+              `Could not check PR #${prNumber} state (${error.message}); posting normally.`);
+            return;
+          }
+          if (pr.state === 'open') return;
+          const why = pr.merged ? `merged at ${pr.merged_at}` : 'closed';
+          await core.summary
+            .addRaw(`Review not posted: PR #${prNumber} was ${why} before this run ` +
+              'finished, so its verdict could no longer affect the merge decision.')
+            .write();
+          try {
+            await github.rest.actions.cancelWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+            // Wait for the runner to receive the cancellation and kill this step.
+            await new Promise((resolve) => setTimeout(resolve, 120000));
+          } catch (error) {
+            core.warning(`Could not cancel the run (${error.message}).`);
+          }
+          core.setFailed(
+            `PR #${prNumber} is ${pr.state}; refusing to post a review after the fact.`);
 
 network:
   allowed:
