@@ -2,8 +2,8 @@ import {describe, it, expect} from "vitest";
 
 import {
     FEEDBACK_GRAINS,
-    THUMBS_UP,
-    THUMBS_DOWN,
+    POSITIVE_REACTIONS,
+    NEGATIVE_REACTIONS,
     DOWNVOTE_REASONS,
     buildFollowupMarker,
     parseFollowupMarkers,
@@ -36,8 +36,8 @@ const VALID_CONFIG: ThumbsSweepConfig = {
     botLogin: "khan-review-bot",
 };
 
-const up = (): {content: string} => ({content: THUMBS_UP});
-const down = (): {content: string} => ({content: THUMBS_DOWN});
+const up = (): {content: string} => ({content: "+1"});
+const down = (): {content: string} => ({content: "-1"});
 
 /**
  * An in-memory {@link ThumbsSweepPort}. Comments are supplied per grain; posted
@@ -87,9 +87,14 @@ describe("exported constants", () => {
         expect([...FEEDBACK_GRAINS]).toEqual(["inline", "summary"]);
     });
 
-    it("thumbs signals key off GitHub's +1 / -1 reaction content", () => {
-        expect(THUMBS_UP).toBe("+1");
-        expect(THUMBS_DOWN).toBe("-1");
+    it("reaction sets match gh-aw's outcome-collector", () => {
+        expect([...POSITIVE_REACTIONS]).toEqual([
+            "+1",
+            "heart",
+            "hooray",
+            "rocket",
+        ]);
+        expect([...NEGATIVE_REACTIONS]).toEqual(["-1", "confused"]);
     });
 
     it("DOWNVOTE_REASONS is the fixed closed vocabulary", () => {
@@ -236,13 +241,13 @@ describe("new-👎 detection", () => {
         }
     });
 
-    it("ignores unrelated reaction emoji, keying strictly on -1", async () => {
+    it("ignores emoji outside the outcome-collector sets", async () => {
         const port = new FakePort({
             inline: [
                 makeComment("inline", 30, [
                     {content: "heart"},
                     {content: "laugh"},
-                    {content: "confused"},
+                    {content: "eyes"},
                 ]),
             ],
             summary: [],
@@ -250,6 +255,16 @@ describe("new-👎 detection", () => {
         const result = await sweepThumbs(port, VALID_CONFIG);
         expect(port.posted).toHaveLength(0);
         expect(result.actions[0]?.reason).toBe("no-downvote");
+    });
+
+    it("treats confused as a negative signal (outcome-collector set)", async () => {
+        const port = new FakePort({
+            inline: [makeComment("inline", 31, [{content: "confused"}])],
+            summary: [],
+        });
+        const result = await sweepThumbs(port, VALID_CONFIG);
+        expect(port.posted).toHaveLength(1);
+        expect(result.actions[0]?.reason).toBe("posted");
     });
 });
 

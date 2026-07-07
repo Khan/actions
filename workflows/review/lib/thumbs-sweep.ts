@@ -35,11 +35,14 @@ export const FEEDBACK_GRAINS = ["inline", "summary"] as const;
 export type FeedbackGrain = typeof FEEDBACK_GRAINS[number];
 
 /**
- * GitHub's reaction `content` values for the thumbs signals. GitHub models 👍 as
- * `"+1"` and 👎 as `"-1"` on the reactions API; we key off those exact strings.
+ * GitHub reaction `content` values treated as positive/negative feedback.
+ * These match gh-aw's outcome-collector exactly, so the sweep and the outcome
+ * collector agree on what counts as a signal: 👍/❤️/🎉/🚀 are positive,
+ * 👎/😕 are negative. (GitHub models 👍 as `"+1"` and 👎 as `"-1"` on the
+ * reactions API.)
  */
-export const THUMBS_UP = "+1";
-export const THUMBS_DOWN = "-1";
+export const POSITIVE_REACTIONS = ["+1", "heart", "hooray", "rocket"] as const;
+export const NEGATIVE_REACTIONS = ["-1", "confused"] as const;
 
 /**
  * The fixed vocabulary a follow-up offers the reactor for *why* they downvoted.
@@ -204,9 +207,11 @@ export const renderFollowupBody = (
 const key = (grain: FeedbackGrain, commentId: number): string =>
     `${grain}:${commentId}`;
 
-/** Count the 👎 reactions on a comment. */
+/** Count the negative reactions (👎/😕, per {@link NEGATIVE_REACTIONS}) on a comment. */
 const countDownvotes = (comment: BotComment): number =>
-    comment.reactions.filter((r) => r.content === THUMBS_DOWN).length;
+    comment.reactions.filter((r) =>
+        (NEGATIVE_REACTIONS as readonly string[]).includes(r.content),
+    ).length;
 
 /**
  * Validate a {@link ThumbsSweepConfig}. Returns every problem (like the finding
