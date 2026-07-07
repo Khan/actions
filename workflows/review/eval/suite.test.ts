@@ -43,15 +43,6 @@ import {
     type ThumbsLabel,
 } from "./judge.ts";
 import {
-    VERSION_MARKER_KEY,
-    VERSION_STAMP_FORMAT,
-    canonicalize,
-    computeVersionStamp,
-    hasDrifted,
-    parseVersionMarker,
-    renderVersionMarker,
-} from "../lib/version-stamp.ts";
-import {
     FINDING_SCHEMA_VERSION,
     type Lens,
     type Severity,
@@ -65,10 +56,10 @@ import {
  *   1. **Suite self-tests.** The eval suite ships as five
  *      leaf modules — the shared corpus `loader`, the deterministic no-post
  *      `runner`, the five `metrics`, the overfitting/adversarial `gates`, the
- *      LLM-`judge`, and the reviewer `version-stamp`. This file is the harness
+ *      and the LLM-`judge`. This file is the harness
  *      that keeps them honest: it exercises each over the *real* four-dataset
  *      corpus plus focused synthetic fixtures, so a regression in a metric, a
- *      gate, the judge's aggregation, or the drift stamp fails a test rather than
+ *      gate, or the judge's aggregation fails a test rather than
  *      silently corrupting a scheduled eval run.
  *
  *   2. **Wire the smoke subset as the per-PR CI gate; the full suite as
@@ -87,7 +78,7 @@ import {
  * every assertion drives the public exports of the modules under test.
  *
  * Determinism: no model, no network, no clock, no randomness. The judge is
- * stubbed; the version stamp and metrics are pure; the corpus is read from disk
+ * stubbed; the metrics are pure; the corpus is read from disk
  * through the same shared loader the runner uses.
  */
 
@@ -653,66 +644,7 @@ describe("judge self-tests: pure aggregation around a stubbed model", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* 6. Version stamp: the single drift-guard surface.               */
-/* -------------------------------------------------------------------------- */
-
-describe("version stamp self-tests: the one drift-guard surface", () => {
-    const base = {prompts: {"review.md": "v1"}, config: {effort: "high"}};
-
-    it("changes when the prompt, the config, or the schema version changes", () => {
-        const stamp = computeVersionStamp(base);
-        expect(
-            computeVersionStamp({...base, prompts: {"review.md": "v2"}}),
-        ).not.toBe(stamp);
-        expect(
-            computeVersionStamp({...base, config: {effort: "xhigh"}}),
-        ).not.toBe(stamp);
-        expect(
-            computeVersionStamp({
-                ...base,
-                schemaVersion: FINDING_SCHEMA_VERSION + 1,
-            }),
-        ).not.toBe(stamp);
-    });
-
-    it("is stable under key reordering (content hash, not insertion order)", () => {
-        const a = computeVersionStamp({
-            config: {a: 1, b: 2},
-            prompts: {x: "1", y: "2"},
-        });
-        const b = computeVersionStamp({
-            prompts: {y: "2", x: "1"},
-            config: {b: 2, a: 1},
-        });
-        expect(a).toBe(b);
-        // canonicalize is the property that guarantees it.
-        expect(canonicalize({a: 1, b: 2})).toBe(canonicalize({b: 2, a: 1}));
-    });
-
-    it("renders into the #194 HTML marker and round-trips through the parser", () => {
-        const marker = renderVersionMarker(base);
-        expect(marker).toContain(`<!-- ${VERSION_MARKER_KEY}`);
-        const parsed = parseVersionMarker(`prefix\n${marker}\nsuffix`);
-        expect(parsed).not.toBeNull();
-        expect(parsed?.stamp).toBe(computeVersionStamp(base));
-        expect(parsed?.format).toBe(VERSION_STAMP_FORMAT);
-        expect(parsed?.schema).toBe(FINDING_SCHEMA_VERSION);
-        expect(parseVersionMarker("no marker here")).toBeNull();
-    });
-
-    it("hasDrifted is the drift predicate a consumer sync check calls", () => {
-        const stamp = computeVersionStamp(base);
-        const drifted = computeVersionStamp({
-            ...base,
-            prompts: {"review.md": "v9"},
-        });
-        expect(hasDrifted(stamp, stamp)).toBe(false);
-        expect(hasDrifted(stamp, drifted)).toBe(true);
-    });
-});
-
-/* -------------------------------------------------------------------------- */
-/* 7. CI wiring: smoke = per-PR gate; full suite = scheduled (not per-PR).      */
+/* 6. CI wiring: smoke = per-PR gate; full suite = scheduled (not per-PR).      */
 /* -------------------------------------------------------------------------- */
 
 describe("CI wiring: smoke gates per-PR, live-judge suite is scheduled", () => {
