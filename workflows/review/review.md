@@ -138,13 +138,28 @@ engine:
   model: claude-opus-4-8
 timeout-minutes: 20
 
-# claude-fable-5 (the first-principles reviewer's pinned model) is not yet in the
-# AI-credits pricing table bundled with gh-aw <= v0.81.x, and the cost-guardrail API
-# proxy rejects any un-priced model with a 400, so the first-principles dispatch fails
-# on every run where it is enabled. Merge its pricing in here (per-token USD; values
-# match the curated entry upstream added in gh-aw-firewall v0.27.27: $10/M input,
-# $1/M cache read, $12.50/M cache write, $50/M output). Remove this block once the
-# workflow runs on a gh-aw release whose bundled table includes the Claude 5 family.
+# claude-fable-5 (the first-principles reviewer's pinned model) is not in the
+# AI-credits pricing table of the firewall api-proxy that gh-aw <= v0.81.x pins
+# (gh-aw-firewall v0.27.11), and the proxy rejects any un-priced model with a 400,
+# so the first-principles dispatch fails on every run where it is enabled. Two
+# pieces fix that, and BOTH pin to the same upstream source of truth
+# (gh-aw-firewall v0.27.27, the release that added curated Claude 5 pricing:
+# $10/M input, $1/M cache read, $12.50/M cache write, $50/M output):
+#
+# 1. `sandbox.agent.version` below runs that firewall version, whose api-proxy
+#    guard knows the model. This is the piece that actually unblocks the dispatch;
+#    the `models:` frontmatter only feeds gh-aw's cost-summary display and does
+#    NOT reach the proxy guard (verified empirically on gh-aw v0.81.6).
+# 2. The `models:` block keeps the run's cost accounting/display correct for the
+#    same model.
+#
+# Remove both once the workflow runs on a gh-aw release whose default firewall
+# is >= v0.27.27.
+sandbox:
+  agent:
+    id: awf
+    version: v0.27.27
+
 models:
   providers:
     anthropic:
@@ -172,7 +187,7 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: review-v1.2.1
+      ref: review-v1.2.2
       path: gh-aw-review-lib
       persist-credentials: false
 
