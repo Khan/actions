@@ -453,25 +453,21 @@ contract:
   comment on any of them (Step 5).
 
 **Specialist lenses (`routing.json` `lensesToSpawn`) — structured-schema output.** The
-eleven specialist lenses (`security-auth`, `ai-safety-moderation`, `mass-comms-coppa`,
-`caching-resource`, `data-migrations`, `concurrency-async`, `api-federation-compat`,
-`cross-deploy-serialization`, `deploy-infra-config`, `money-payments`, `content-i18n`) do
-**not** emit the label-bearing shape. Each returns the **structured finding schema**
-(`workflows/review/lib/finding-schema.ts`): `{"findings": [<finding>], "hunts":
-[{"hunt", "state"}]}`, where every `<finding>` carries `schema_version`, `id`, `lens`,
-`anchor`, `severity` (`blocking`/`advisory`), `confidence`, `evidence_trace`,
-`producing_hunt`, `model_authored_prose`, and optional `suggested_patch` /
-`pre_merge_obligation`. A dispatched lens also owns its domain's best-practice skills
+specialist lenses do **not** emit the label-bearing shape. Each returns the **structured
+finding schema**: `{"findings": [<finding>], "hunts": [{"hunt", "state"}]}`, where every
+`<finding>` carries `schema_version`, `id`, `lens`, `anchor`, `severity`
+(`blocking`/`advisory`), `confidence`, `evidence_trace`, `producing_hunt`,
+`model_authored_prose`, and optional `suggested_patch` / `pre_merge_obligation`. A
+dispatched lens also owns its domain's best-practice skills
 for the run: it reads the repo skills index and applies the relevant skill's rules,
 carrying the skill's declared severity into the finding's `severity`, while the
 `skill-auditor` skips lens-owned skills so no rule is audited twice.
 
 **Normalize each lens finding into a candidate comment (code-owned label).** A lens
 finding has no Conventional-Comment `label` — the label is computed **in code**, never by
-the model, exactly as `labelForFinding` does in `workflows/review/lib/render-comment.ts`:
-`blocking` → `issue (blocking)`, `advisory` → `suggestion (non-blocking)` (a lens is a
-correctness/risk lens, so it renders as a plain label, not a `, best-practice` variant).
-Take the candidate's `path`/`line` from the finding's `anchor` (a `line` anchor →
+the model: `blocking` → `issue (blocking)`, `advisory` → `suggestion (non-blocking)` (a
+lens is a correctness/risk lens, so it renders as a plain label, not a `, best-practice`
+variant). Take the candidate's `path`/`line` from the finding's `anchor` (a `line` anchor →
 `path`+`line`; a `pr` anchor → a top-level review comment with no line), and its comment
 text from `model_authored_prose` (with `suggested_patch` as the fix block). After this
 normalization a lens finding is a candidate in the **same** shape as every other
