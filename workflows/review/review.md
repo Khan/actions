@@ -138,6 +138,39 @@ engine:
   model: claude-opus-4-8
 timeout-minutes: 20
 
+# claude-fable-5 (the first-principles reviewer's pinned model) is not in the
+# AI-credits pricing table of the firewall api-proxy that gh-aw <= v0.81.x pins
+# (gh-aw-firewall v0.27.11), and the proxy rejects any un-priced model with a 400,
+# so the first-principles dispatch fails on every run where it is enabled. Two
+# pieces fix that, and BOTH pin to the same upstream source of truth
+# (gh-aw-firewall v0.27.27, the release that added curated Claude 5 pricing:
+# $10/M input, $1/M cache read, $12.50/M cache write, $50/M output):
+#
+# 1. `sandbox.agent.version` below runs that firewall version, whose api-proxy
+#    guard knows the model. This is the piece that actually unblocks the dispatch;
+#    the `models:` frontmatter only feeds gh-aw's cost-summary display and does
+#    NOT reach the proxy guard (verified empirically on gh-aw v0.81.6).
+# 2. The `models:` block keeps the run's cost accounting/display correct for the
+#    same model.
+#
+# Remove both once the workflow runs on a gh-aw release whose default firewall
+# is >= v0.27.27.
+sandbox:
+  agent:
+    id: awf
+    version: v0.27.27
+
+models:
+  providers:
+    anthropic:
+      models:
+        claude-fable-5:
+          cost:
+            input: 1.0e-05
+            output: 5.0e-05
+            cache_read: 1.0e-06
+            cache_write: 1.25e-05
+
 # The shared review workflow is more than this markdown file: its deterministic
 # pieces (the finding schema and validator today; the router, computed verdict, and
 # comment renderer as they land) are TypeScript under `workflows/review/lib/` in
@@ -154,7 +187,7 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: review-v1.1.1
+      ref: review-v1.2.2
       path: gh-aw-review-lib
       persist-credentials: false
 
@@ -453,25 +486,21 @@ contract:
   comment on any of them (Step 5).
 
 **Specialist lenses (`routing.json` `lensesToSpawn`) — structured-schema output.** The
-eleven specialist lenses (`security-auth`, `ai-safety-moderation`, `mass-comms-coppa`,
-`caching-resource`, `data-migrations`, `concurrency-async`, `api-federation-compat`,
-`cross-deploy-serialization`, `deploy-infra-config`, `money-payments`, `content-i18n`) do
-**not** emit the label-bearing shape. Each returns the **structured finding schema**
-(`workflows/review/lib/finding-schema.ts`): `{"findings": [<finding>], "hunts":
-[{"hunt", "state"}]}`, where every `<finding>` carries `schema_version`, `id`, `lens`,
-`anchor`, `severity` (`blocking`/`advisory`), `confidence`, `evidence_trace`,
-`producing_hunt`, `model_authored_prose`, and optional `suggested_patch` /
-`pre_merge_obligation`. A dispatched lens also owns its domain's best-practice skills
+specialist lenses do **not** emit the label-bearing shape. Each returns the **structured
+finding schema**: `{"findings": [<finding>], "hunts": [{"hunt", "state"}]}`, where every
+`<finding>` carries `schema_version`, `id`, `lens`, `anchor`, `severity`
+(`blocking`/`advisory`), `confidence`, `evidence_trace`, `producing_hunt`,
+`model_authored_prose`, and optional `suggested_patch` / `pre_merge_obligation`. A
+dispatched lens also owns its domain's best-practice skills
 for the run: it reads the repo skills index and applies the relevant skill's rules,
 carrying the skill's declared severity into the finding's `severity`, while the
 `skill-auditor` skips lens-owned skills so no rule is audited twice.
 
 **Normalize each lens finding into a candidate comment (code-owned label).** A lens
 finding has no Conventional-Comment `label` — the label is computed **in code**, never by
-the model, exactly as `labelForFinding` does in `workflows/review/lib/render-comment.ts`:
-`blocking` → `issue (blocking)`, `advisory` → `suggestion (non-blocking)` (a lens is a
-correctness/risk lens, so it renders as a plain label, not a `, best-practice` variant).
-Take the candidate's `path`/`line` from the finding's `anchor` (a `line` anchor →
+the model: `blocking` → `issue (blocking)`, `advisory` → `suggestion (non-blocking)` (a
+lens is a correctness/risk lens, so it renders as a plain label, not a `, best-practice`
+variant). Take the candidate's `path`/`line` from the finding's `anchor` (a `line` anchor →
 `path`+`line`; a `pr` anchor → a top-level review comment with no line), and its comment
 text from `model_authored_prose` (with `suggested_patch` as the fix block). After this
 normalization a lens finding is a candidate in the **same** shape as every other
@@ -1093,7 +1122,11 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
 
 Finally, if you wrote any sub-agent outputs to `/tmp/gh-aw/review/out/` this run
 (Step 3), upload that directory as a run-scoped artifact with the `upload-artifact`
-safe output (`path: /tmp/gh-aw/review/out/`). This captures each reviewer's structured
+safe output. The `path` you pass MUST be the absolute path `/tmp/gh-aw/review/out/` —
+never a relative path like `out`, whatever your current working directory is: the
+safe-outputs processor validates the recorded path against the workflow's
+`allowed-paths` (`/tmp/gh-aw/review/out/**`), so a relative path fails validation with
+"no files matched" even when the files exist. This captures each reviewer's structured
 result for later inspection. Skip it only on an early exit (Step 2) where no sub-agents
 ran and the directory is empty.
 
