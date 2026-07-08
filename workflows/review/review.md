@@ -138,6 +138,24 @@ engine:
   model: claude-opus-4-8
 timeout-minutes: 20
 
+# claude-fable-5 (the first-principles reviewer's pinned model) is not yet in the
+# AI-credits pricing table bundled with gh-aw <= v0.81.x, and the cost-guardrail API
+# proxy rejects any un-priced model with a 400, so the first-principles dispatch fails
+# on every run where it is enabled. Merge its pricing in here (per-token USD; values
+# match the curated entry upstream added in gh-aw-firewall v0.27.27: $10/M input,
+# $1/M cache read, $12.50/M cache write, $50/M output). Remove this block once the
+# workflow runs on a gh-aw release whose bundled table includes the Claude 5 family.
+models:
+  providers:
+    anthropic:
+      models:
+        claude-fable-5:
+          cost:
+            input: 1.0e-05
+            output: 5.0e-05
+            cache_read: 1.0e-06
+            cache_write: 1.25e-05
+
 # The shared review workflow is more than this markdown file: its deterministic
 # pieces (the finding schema and validator today; the router, computed verdict, and
 # comment renderer as they land) are TypeScript under `workflows/review/lib/` in
@@ -154,7 +172,7 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: review-v1.1.1
+      ref: review-v1.2.1
       path: gh-aw-review-lib
       persist-credentials: false
 
@@ -1089,7 +1107,11 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
 
 Finally, if you wrote any sub-agent outputs to `/tmp/gh-aw/review/out/` this run
 (Step 3), upload that directory as a run-scoped artifact with the `upload-artifact`
-safe output (`path: /tmp/gh-aw/review/out/`). This captures each reviewer's structured
+safe output. The `path` you pass MUST be the absolute path `/tmp/gh-aw/review/out/` —
+never a relative path like `out`, whatever your current working directory is: the
+safe-outputs processor validates the recorded path against the workflow's
+`allowed-paths` (`/tmp/gh-aw/review/out/**`), so a relative path fails validation with
+"no files matched" even when the files exist. This captures each reviewer's structured
 result for later inspection. Skip it only on an early exit (Step 2) where no sub-agents
 ran and the directory is empty.
 
