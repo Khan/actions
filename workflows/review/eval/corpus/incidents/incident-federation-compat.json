@@ -1,0 +1,34 @@
+{
+    "id": "incident-federation-compat",
+    "tags": ["incident", "api-federation-compat"],
+    "category": "incident-repro",
+    "description": "Repro of a federation-compat incident: a required GraphQL field is removed from a federated type still requested by another service, breaking the gateway. The api-federation-compat lens must catch it and block.",
+    "changedFiles": [
+        {"path": "src/graphql/schema/user.graphql", "status": "modified"}
+    ],
+    "findings": [
+        {
+            "source": "api-federation-compat",
+            "finding": {
+                "schema_version": 1,
+                "id": "incident-federation-removed-field",
+                "lens": "api-federation-compat",
+                "anchor": {"type": "line", "path": "src/graphql/schema/user.graphql", "line": 24, "side": "LEFT"},
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "src/graphql/schema/user.graphql:24 removes the field `email` from the federated User type",
+                    "the profile service's @requires directive still selects User.email",
+                    "removing a field still selected by a federated consumer breaks gateway composition"
+                ],
+                "producing_hunt": "api-federation-compat:removed-selected-field",
+                "model_authored_prose": "This removes a federated field another service still selects via @requires, which breaks gateway composition. Deprecate it and coordinate the consumer's migration before removal."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": ["incident-federation-removed-field"]
+    }
+}

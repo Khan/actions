@@ -27,7 +27,7 @@ import {runSmokeCorpus, type RunResult} from "./runner.ts";
  * growing the corpus) extends the gate automatically, and the numbers below are
  * derived from the loaded set rather than hard-coded. On top of the per-case
  * checks it pins the two properties the recall/precision rebalance must not
- * regress (operator direction 3, "the smoke set before the wave-2 rebalance"):
+ * regress (the smoke set predates the rebalance):
  *   - must-catch recall = 100% (every incident/adversarial repro is posted), and
  *   - clean false-block = 0 (no clean PR is ever blocked).
  *
@@ -140,7 +140,7 @@ describe("smoke set is green on baseline (per-case expectations)", () => {
     );
 });
 
-describe("gate properties the wave-2 rebalance (the rebalance) must not regress", () => {
+describe("gate properties the rebalance must not regress", () => {
     it("achieves 100% must-catch recall across the smoke set", () => {
         const misses: string[] = [];
         for (const {corpusCase, result} of RUNS) {
@@ -201,10 +201,10 @@ describe("gate properties the wave-2 rebalance (the rebalance) must not regress"
 });
 
 /**
- * TASK-10-3 — verify the wave-2 recall/precision rebalance against this same
- * slice-9 smoke set.
+ * Verify the recall/precision rebalance against this same
+ * smoke set.
  *
- * The rebalance (slice-10) is a set of *prompt* edits to the reviewer sub-agents
+ * The rebalance is a set of *prompt* edits to the reviewer sub-agents
  * (review.md edits 8–13: coverage-first, blocking-requires-a-concrete-failing-
  * scenario, the three-state validation gate (refuted drops, plausible
  * downgrades, only confirmed blocks), confirm-before-you-claim,
@@ -212,8 +212,8 @@ describe("gate properties the wave-2 rebalance (the rebalance) must not regress"
  * confidence, low-confidence collapsed). The gate's *apply rules* are also
  * replayed deterministically by the runner (stage 3b) over each case's recorded
  * `validation` block; the point of this block is to pin *why* the rebalance
- * cannot regress the two properties task-10-3 names, in terms of the
- * rebalance's own mechanism rather than re-asserting the generic slice-9 gate
+ * cannot regress the two properties it names, in terms of the
+ * rebalance's own mechanism rather than re-asserting the generic smoke gate
  * above.
  *
  * The load-bearing invariants, read off the corpus + the deterministic run:
@@ -228,7 +228,7 @@ describe("gate properties the wave-2 rebalance (the rebalance) must not regress"
  *     least one low-confidence advisory that the rebalance targets, and it is
  *     never a must-catch, so trimming it is safe.
  */
-describe("wave-2 rebalance verification against the smoke set (task-10-3)", () => {
+describe("rebalance verification against the smoke set", () => {
     /**
      * Reference threshold for edit-13's "inline ≥ medium confidence" posting
      * bar. Kept local to the test as a *documentation* of the rebalance intent —

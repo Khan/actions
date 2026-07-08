@@ -1,0 +1,39 @@
+# Review eval — scheduled live judge.
+#
+# The DETERMINISTIC eval suite (loadCorpus -> runCorpus -> computeMetrics ->
+# evaluateGates, plus the stub-judge composition checks) needs no secrets and
+# already runs on every PR via the normal test runner (`pnpm run test --run`
+# in node-ci.yml), so it has no job here.
+#
+# What runs here is the one thing normal CI cannot do: the same corpus run
+# scored by the LIVE pinned judge model (judge.ts PINNED_JUDGE_MODEL) through
+# the pure JudgeModel seam. Judge calls cost real money and must never gate
+# PRs, so this is deliberately off-PR on a weekly schedule. The entry point is
+# the committed script `workflows/review/eval/live-judge.ts` (lint/typecheck/
+# test-covered like any other source file); it appends the metrics/gates/judge
+# report to the job summary so results are visible without opening the log.
+
+name: Review Eval Live Judge
+
+on:
+  schedule:
+    # Weekly, Monday 09:00 UTC.
+    - cron: "0 9 * * 1"
+  workflow_dispatch: {}
+
+jobs:
+  live-judge:
+    name: Live judge over the full corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: ./actions/shared-node-cache
+      - name: Run the live judge over the full corpus
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY secret not configured; skipping the live-judge run." >&2
+            exit 0
+          fi
+          pnpm dlx tsx workflows/review/eval/live-judge.ts

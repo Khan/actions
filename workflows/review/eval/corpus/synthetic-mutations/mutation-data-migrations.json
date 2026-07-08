@@ -1,0 +1,34 @@
+{
+    "id": "mutation-data-migrations",
+    "tags": ["synthetic-mutation", "fresh", "data-migrations"],
+    "category": "synthetic-mutation",
+    "description": "Synthetic mutation mapped to the data-migrations lens: a non-nullable column is added to an existing table with no default and no backfill, which fails on a populated table. The data-migrations lens must catch it.",
+    "changedFiles": [
+        {"path": "migrations/0042_add_org_id.py", "status": "added"}
+    ],
+    "findings": [
+        {
+            "source": "data-migrations",
+            "finding": {
+                "schema_version": 1,
+                "id": "mutation-migrations-non-nullable-no-default",
+                "lens": "data-migrations",
+                "anchor": {"type": "line", "path": "migrations/0042_add_org_id.py", "line": 11, "side": "RIGHT"},
+                "severity": "blocking",
+                "confidence": 0.88,
+                "evidence_trace": [
+                    "migrations/0042_add_org_id.py:11 adds column org_id NOT NULL with no default",
+                    "the target table users is already populated in production",
+                    "no separate backfill step precedes the NOT NULL constraint"
+                ],
+                "producing_hunt": "data-migrations:non-nullable-add",
+                "model_authored_prose": "Adding a NOT NULL column with no default to a populated table will fail the migration. Add it nullable, backfill, then add the constraint in a follow-up."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": ["mutation-migrations-non-nullable-no-default"]
+    }
+}
