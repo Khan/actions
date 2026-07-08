@@ -73,8 +73,9 @@ export const isBlockingLabel = (label: string): boolean =>
  * correctness labels. The finding schema deliberately keeps only a two-value
  * `severity` (blocking/advisory); the richer Conventional taxonomy is applied
  * here at render time (schema comment on `SEVERITIES`). #194 maps skill/
- * best-practice findings to the `, best-practice` label variants, so the
- * conventions lens (the skill-auditor's successor) gets them; the specialist
+ * best-practice findings to the `, best-practice` label variants, so among
+ * schema findings only the conventions lens gets them (the skill-auditor's
+ * violations get theirs on the claims path); the specialist
  * correctness lenses (security, money, concurrency, …), the correctness lens,
  * first-principles, and pattern-triage all render as plain correctness labels.
  *
