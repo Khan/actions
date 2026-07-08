@@ -1,0 +1,40 @@
+{
+    "id": "incident-cache-missing-key",
+    "tags": ["smoke", "incident", "caching-resource"],
+    "category": "incident-repro",
+    "description": "Repro of a cache-poisoning incident: a cache key omits the tenant id, so one tenant's response is served to another. The caching-resource lens must catch it and block.",
+    "changedFiles": [
+        {"path": "src/cache/user-profile.ts", "status": "modified"}
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "caching-resource",
+            "finding": {
+                "schema_version": 1,
+                "id": "cache-missing-tenant-1",
+                "lens": "caching-resource",
+                "anchor": {"type": "line", "path": "src/cache/user-profile.ts", "line": 19, "side": "RIGHT"},
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "src/cache/user-profile.ts:19 builds the cache key from `userId` only",
+                    "the same `userId` space is reused across tenants in this deployment",
+                    "a hit for tenant A's user can return tenant B's cached profile"
+                ],
+                "producing_hunt": "caching-resource:key-completeness",
+                "model_authored_prose": "This cache key omits the tenant id, so identical user ids across tenants collide and leak one tenant's profile to another. Include the tenant id in the key.",
+                "suggested_patch": "const key = `profile:${tenantId}:${userId}`;"
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": ["cache-missing-tenant-1"]
+    }
+}

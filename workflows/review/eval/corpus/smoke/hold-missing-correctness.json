@@ -1,0 +1,19 @@
+{
+    "id": "hold-missing-correctness",
+    "tags": ["smoke", "hold", "r2-gate"],
+    "category": "incident-repro",
+    "description": "The correctness pass produced no output this run (sub-agent unavailable). The hold-for-human gate must fire rather than auto-approve a change a core dimension never looked at, even though no blocking label is present.",
+    "changedFiles": [
+        {"path": "src/services/checkout.ts", "status": "modified"}
+    ],
+    "dimensions": {
+        "correctness": "unavailable",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [],
+    "expected": {
+        "verdict": "HOLD_FOR_HUMAN",
+        "postedCommentCount": 0
+    }
+}
