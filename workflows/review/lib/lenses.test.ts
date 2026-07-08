@@ -10,7 +10,7 @@ import {
 import {SPECIALIST_LENSES} from "./router.ts";
 
 /**
- * Lens hunt fixtures (TASK-7-13).
+ * Lens hunt fixtures.
  *
  * Slice 7 builds the eleven specialist lenses as prose sub-agent prompts in
  * `review.md`; the *judgment* half of a hunt (what to flag, severity, the
@@ -668,7 +668,7 @@ const runHunt = (hunt: LensHunt, files: DiffFixture[]): HuntOutcome => {
     return {state: "found", finding};
 };
 
-describe("specialist lens hunt fixtures (TASK-7-13)", () => {
+describe("specialist lens hunt fixtures", () => {
     it("covers every specialist lens with at least one hunt", () => {
         const covered = new Set(LENS_HUNTS.map((h) => h.lens));
         for (const lens of SPECIALIST_LENSES) {

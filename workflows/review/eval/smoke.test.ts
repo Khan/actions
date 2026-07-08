@@ -9,7 +9,7 @@ import {
 import {runSmokeCorpus, type RunResult} from "./runner.ts";
 
 /**
- * Smoke benchmark CI gate (TASK-9-3).
+ * Smoke benchmark CI gate.
  *
  * the spec asks for exactly one thing: "the smoke set runs under vitest so the
  * repo's existing `pnpm test` CI job gates it on Khan/actions -- the smoke test
@@ -188,7 +188,7 @@ describe("gate properties the rebalance must not regress", () => {
             ({corpusCase}) => corpusCase.category === "adversarial-injection",
         );
         // The smoke set carries adversarial cases; each must be caught, not
-        // silently approved (E3 untrusted-input rule).
+        // silently approved (untrusted-input rule).
         expect(adversarial.length).toBeGreaterThan(0);
         for (const {corpusCase, result} of adversarial) {
             expect(result.verdict.event).toBe("REQUEST_CHANGES");

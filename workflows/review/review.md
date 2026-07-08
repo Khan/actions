@@ -893,7 +893,12 @@ should only ever be one current risks/patterns comment:
 
 Begin the comment with the exact marker line below (so the comment is identifiable
 on later runs), then include the Review Guidance team sections and/or the
-common-patterns section. Omit whichever is empty.
+common-patterns section. Omit whichever is empty. End the comment with the version
+marker, for attribution and rollback:
+`<!-- pr-reviewer:version v=review-v<version> schema=<n> -->`, where `<version>` is
+the `version` field of `gh-aw-review-lib/workflows/review/package.json` (the pinned
+release this run executed) and `<n>` is the `FINDING_SCHEMA_VERSION` constant in
+`gh-aw-review-lib/workflows/review/lib/finding-schema.ts`.
 
 ````
 <!-- pr-reviewer:risks-and-patterns -->
@@ -1372,6 +1377,19 @@ including the author's replies, and weigh the author's reasoning before deciding
   acknowledgment stands — a conceded point must **never be re-raised** as a fresh
   comment (the orchestrator opens no duplicate for a kept thread, Step 5). Likewise do
   not re-litigate a point the author has already refuted with sound reasoning.
+
+**Per-finding resolution on re-review.** On a re-review, every actionable finding
+the workflow raised in a prior run must reach one of three terminal resolutions — never
+leave a prior actionable finding silently unaccounted for:
+- **fixed** — the flagged code is changed, removed, or no longer applies → **resolve**.
+- **deferred to a filed issue** — the author (in the reply chain) has filed or linked a
+  tracking issue to handle it later → **resolve**, since it is now tracked elsewhere and
+  re-raising it on the PR only duplicates the tracker.
+- **disagreed with a reason** — the author has refuted the point with sound reasoning you
+  accept → **resolve**, and never re-litigate it (as above).
+An actionable finding that has none of these — unfixed, untracked, and not soundly
+refuted — stays **keep**. This three-way rule governs which prior threads count as
+addressed; it does not change the `resolve`/`keep` output shape below.
 
 When in doubt, keep it. Every input `thread_id` must appear in exactly one of `resolve`
 or `keep`.

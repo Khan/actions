@@ -19,7 +19,7 @@
  *     requests and returns scores (the real one calls {@link PINNED_JUDGE_MODEL};
  *     tests inject a stub). Nothing here imports a model client.
  *
- * Note on the determinism boundary (analysis R8): the review-path lib modules
+ * Note on the determinism boundary: the review-path lib modules
  * must not author prose about code. The judge is NOT on the review path — it runs
  * offline over the eval corpus — so a model authoring a `rationale` here is by
  * design, not a boundary violation. This module composes no prose itself; it

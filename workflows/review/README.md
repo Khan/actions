@@ -163,3 +163,21 @@ on release a `review-v<major>.<minor>.<patch>` tag (and a moving `review-v<major
 tag) is cut **at the real commit tree** (not the rewritten-subtree bare tags that
 the `actions/` packages use), so the nested `workflows/review/review.md@<ref>` path
 resolves for `gh aw add`.
+
+### Version attribution
+
+Semver is the behavior contract: a release that changes the reviewer's behavior bumps
+the major version, so a consumer pinned to `review-v<major>` can assume the fundamental
+behavior holds within a major. For attribution and rollback, the risks/patterns
+guidance comment (Step 7) carries the release the run executed, in one HTML marker
+reusing the `pr-reviewer:` marker namespace `#194` established:
+
+```
+<!-- pr-reviewer:version v=review-v<major>.<minor>.<patch> schema=<n> -->
+```
+
+`schema` is the finding-schema version (`FINDING_SCHEMA_VERSION` in
+`lib/finding-schema.ts`) the run was on. A bad reviewer release rolls back by
+re-pinning the previous tag; the marker on each posted review makes attribution
+immediate. There is no separate config-hash or drift-stamp mechanism — the release
+tag is the single version surface.
