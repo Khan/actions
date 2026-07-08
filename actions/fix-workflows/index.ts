@@ -10,6 +10,9 @@
  * When a violation is found it is fixed automatically.
  * Comments are preserved via the yaml package's document API.
  * Run oxfmt after this script to normalize formatting.
+ *
+ * Individual jobs, `runs-on:` lines, or checkout steps can opt out of a fix
+ * with an inline `fix-workflows-ignore` comment — see IGNORE_DIRECTIVE_RE.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -19,6 +22,7 @@ import {
     isSeq,
     parseDocument,
     type Document,
+    type Node,
     type YAMLMap,
     type YAMLSeq,
 } from "yaml";
@@ -32,6 +36,143 @@ const YAML_WRITE_OPTIONS = {indent: 4, lineWidth: 0} as const;
 /** Matches the required conditional runs-on expression (any runner name). */
 const VALID_RUNS_ON_RE =
     /vars\.USE_GITHUB_RUNNERS\s*==\s*'true'\s*&&\s*'[^']+'\s*\|\|\s*'ephemeral-runner[\w-]*'\s*\}\}$/;
+
+// ---------------------------------------------------------------------------
+// Ignore directives
+// ---------------------------------------------------------------------------
+
+/** The fixes an ignore directive can suppress. */
+export type IgnoreRule = "runs-on" | "setup";
+
+const ALL_IGNORE_RULES: readonly IgnoreRule[] = ["runs-on", "setup"];
+
+/**
+ * Matches an ignore directive inside a single line of a YAML comment. The
+ * optional list after the `:` names which rules to skip; when absent, every
+ * rule is skipped for the annotated node. `lintignore` is accepted as an
+ * alias for `fix-workflows-ignore`. Examples:
+ *
+ *   # fix-workflows-ignore
+ *   # fix-workflows-ignore: runs-on
+ *   # fix-workflows-ignore: runs-on, setup
+ *   # lintignore
+ */
+const IGNORE_DIRECTIVE_RE =
+    /(?:fix-workflows-ignore|lintignore)(?:\s*[:=]\s*([a-z0-9,\s_-]+))?/i;
+
+/** Map a rule token from a directive to its canonical IgnoreRule, or null. */
+function normalizeRule(token: string): IgnoreRule | null {
+    switch (token.trim().toLowerCase()) {
+        case "runs-on":
+        case "runson":
+        case "runs_on":
+            return "runs-on";
+        case "setup":
+        case "secure-network":
+        case "checkout":
+            return "setup";
+        default:
+            return null;
+    }
+}
+
+/**
+ * Parse a single comment line for an ignore directive. Returns the set of
+ * rules it suppresses, or null when the line contains no directive. An
+ * unscoped directive (or one that names only unrecognized rules) suppresses
+ * every rule.
+ */
+function parseDirectiveLine(line: string): Set<IgnoreRule> | null {
+    const match = line.match(IGNORE_DIRECTIVE_RE);
+    if (!match) {
+        return null;
+    }
+    const spec = match[1]?.trim();
+    if (!spec) {
+        return new Set(ALL_IGNORE_RULES);
+    }
+    const rules = new Set<IgnoreRule>();
+    for (const token of spec.split(/[,\s]+/)) {
+        const rule = normalizeRule(token);
+        if (rule) {
+            rules.add(rule);
+        }
+    }
+    // A directive that names only unrecognized rules is treated as unscoped
+    // rather than silently doing nothing — the author clearly wants to skip.
+    return rules.size > 0 ? rules : new Set(ALL_IGNORE_RULES);
+}
+
+/**
+ * Collect the ignore rules requested by the `comment` and `commentBefore`
+ * annotations on any of the given nodes. `commentBefore` may span multiple
+ * lines, so each line is inspected. Returns null when no directive is found.
+ */
+function directiveFrom(
+    ...nodes: Array<Node | null | undefined>
+): Set<IgnoreRule> | null {
+    const merged = new Set<IgnoreRule>();
+    let found = false;
+    for (const node of nodes) {
+        if (!node) {
+            continue;
+        }
+        for (const raw of [node.comment, node.commentBefore]) {
+            if (typeof raw !== "string") {
+                continue;
+            }
+            for (const line of raw.split("\n")) {
+                const rules = parseDirectiveLine(line);
+                if (rules) {
+                    found = true;
+                    for (const rule of rules) {
+                        merged.add(rule);
+                    }
+                }
+            }
+        }
+    }
+    return found ? merged : null;
+}
+
+/** Return the key and value nodes of `map`'s pair whose key is `keyName`. */
+function pairNodes(map: YAMLMap, keyName: string): Node[] {
+    const nodes: Node[] = [];
+    for (const item of map.items) {
+        const pair = item as {key?: Node; value?: Node};
+        if ((pair.key as any)?.value === keyName) {
+            if (pair.key) {
+                nodes.push(pair.key);
+            }
+            if (pair.value) {
+                nodes.push(pair.value);
+            }
+        }
+    }
+    return nodes;
+}
+
+/**
+ * Return true if the runs-on fix is suppressed for `job` by an ignore
+ * directive on the `runs-on:` line (trailing or immediately above it) or on
+ * the job's leading comment.
+ */
+export function runsOnIgnored(job: YAMLMap): boolean {
+    return (
+        directiveFrom(job, ...pairNodes(job, "runs-on"))?.has("runs-on") ??
+        false
+    );
+}
+
+/**
+ * Return true if the setup-step fix is suppressed for a checkout `step` by an
+ * ignore directive on the step (its leading comment) or on its `uses:` line.
+ */
+export function stepIgnoresSetup(step: YAMLMap): boolean {
+    return (
+        directiveFrom(step, ...pairNodes(step, "uses"))?.has("setup") ?? false
+    );
+}
 
 // ---------------------------------------------------------------------------
 // File discovery
@@ -96,6 +237,11 @@ export function fixSteps(
             continue;
         }
 
+        // Skip checkouts that opt out via an inline ignore directive.
+        if (stepIgnoresSetup(step)) {
+            continue;
+        }
+
         const nextStep = steps.items[i + 1];
         const nextUses = isMap(nextStep)
             ? String(nextStep.get("uses") ?? "")
@@ -150,6 +296,10 @@ export function checkSteps(
         if (!uses.startsWith("actions/checkout")) {
             continue;
         }
+        // Skip checkouts that opt out via an inline ignore directive.
+        if (stepIgnoresSetup(step)) {
+            continue;
+        }
         const nextUses = isMap(steps.items[i + 1])
             ? String((steps.items[i + 1] as any).get("uses") ?? "")
             : "";
@@ -179,6 +329,11 @@ export function checkRunsOn(job: YAMLMap): boolean {
         return false;
     }
     if (isExemptRunner(job)) {
+        return false;
+    }
+    // An explicit ignore directive opts the job out of the runs-on fix, so
+    // treat it as compliant. This gates fixRunsOn too, which calls checkRunsOn.
+    if (runsOnIgnored(job)) {
         return false;
     }
     return !VALID_RUNS_ON_RE.test(runsOn);

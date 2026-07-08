@@ -2,7 +2,8 @@ name: Fix Workflows
 description: >-
     Validates and auto-fixes GitHub Actions workflow YAML files
     (checkout-followed-by-setup and optionally runs-on patterns), then
-    formats them with oxfmt.
+    formats them with oxfmt. A `# fix-workflows-ignore` comment on a
+    `runs-on:` line or a checkout step opts that job/step out of the fix.
 inputs:
     fix-runs-on:
         description: >-
@@ -52,7 +53,8 @@ runs:
                 TAG="fix-workflows-v${MAJOR_VERSION}"
                 ARGS="${{ inputs.fix-runs-on == 'true' && ' --fix-runs-on' || '' }} --setup-action '${{ inputs.setup-action }}'"
                 CMD="pnpm dlx github:Khan/actions#${TAG}${ARGS}"
+                HINT="Or add a '# fix-workflows-ignore' comment to the runs-on line or checkout step to opt out."
                 for file in $(git diff --name-only .github/workflows/); do
-                  echo "::warning file=${file}::This file needs updating. Run: ${CMD}"
+                  echo "::warning file=${file}::This file needs updating. Run: ${CMD} ${HINT}"
                 done
               fi
