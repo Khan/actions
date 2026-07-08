@@ -199,3 +199,244 @@ describe("gate properties the wave-2 rebalance (the rebalance) must not regress"
         }
     });
 });
+
+/**
+ * TASK-10-3 — verify the wave-2 recall/precision rebalance against this same
+ * slice-9 smoke set.
+ *
+ * The rebalance (slice-10) is a set of *prompt* edits to the reviewer sub-agents
+ * (review.md edits 8–13: coverage-first, blocking-requires-a-concrete-failing-
+ * scenario, the three-state validation gate (refuted drops, plausible
+ * downgrades, only confirmed blocks), confirm-before-you-claim,
+ * cite-exact-lines, and the edit-13 posting bar — inline ≥ medium
+ * confidence, low-confidence collapsed). The gate's *apply rules* are also
+ * replayed deterministically by the runner (stage 3b) over each case's recorded
+ * `validation` block; the point of this block is to pin *why* the rebalance
+ * cannot regress the two properties task-10-3 names, in terms of the
+ * rebalance's own mechanism rather than re-asserting the generic slice-9 gate
+ * above.
+ *
+ * The load-bearing invariants, read off the corpus + the deterministic run:
+ *   - Recall: every must-catch finding is `blocking`, ≥ medium confidence, AND
+ *     never recorded as `plausible`/`refuted` in a case's validation block, so
+ *     neither edit-13's confidence posting bar nor the gate's downgrade path
+ *     can demote or drop it — must-catch recall is structurally pinned at 100%.
+ *   - Precision: a clean case's blocking findings (the audit-seeded false
+ *     blocks) are always neutralized by the recorded validation, so a clean PR
+ *     stays APPROVE — clean false-block stays at 0.
+ *   - The collapse/downgrade path is actually exercised: the corpus carries at
+ *     least one low-confidence advisory that the rebalance targets, and it is
+ *     never a must-catch, so trimming it is safe.
+ */
+describe("wave-2 rebalance verification against the smoke set (task-10-3)", () => {
+    /**
+     * Reference threshold for edit-13's "inline ≥ medium confidence" posting
+     * bar. Kept local to the test as a *documentation* of the rebalance intent —
+     * the deterministic runner does not (and must not) implement a confidence
+     * gate; this is the bar the recall invariant is proven safe against.
+     */
+    const MEDIUM_CONFIDENCE = 0.5;
+
+    /** Every must-catch finding across the smoke set, paired with its case. */
+    const mustCatchFindings = RUNS.flatMap(({corpusCase, result}) =>
+        (corpusCase.expected.mustCatch ?? []).map((id) => {
+            const candidate = result.allCandidates.find((c) => c.id === id);
+            return {caseId: corpusCase.id, id, candidate};
+        }),
+    );
+
+    it("has must-catch repros to protect (recall check is not vacuous)", () => {
+        expect(mustCatchFindings.length).toBeGreaterThan(0);
+    });
+
+    it("every must-catch finding exists as a recorded candidate", () => {
+        // Guards the two invariants below from passing vacuously on a typo'd id.
+        for (const {caseId, id, candidate} of mustCatchFindings) {
+            expect(
+                candidate,
+                `${caseId}:${id} missing from candidates`,
+            ).toBeDefined();
+        }
+    });
+
+    it("no recall regression: every must-catch finding is blocking, ≥ medium confidence, and never verified below confirmed", () => {
+        // This is the structural reason the rebalance cannot drop a must-catch:
+        // edit-13's posting bar and the gate's downgrade path only touch
+        // non-blocking, low-confidence, or unconfirmed claims. If a future
+        // must-catch repro were added as advisory, below the bar, or recorded
+        // with a plausible/refuted verification, this fails LOUDLY here rather
+        // than silently regressing recall once the prompt bar tightens.
+        const unprotected: string[] = [];
+        const nonConfirmed = new Map(
+            RUNS.flatMap(({corpusCase}) =>
+                (corpusCase.validation ?? [])
+                    .filter((v) => v.verification !== "confirmed")
+                    .map(
+                        (v) =>
+                            [
+                                `${corpusCase.id}:${v.id}`,
+                                v.verification,
+                            ] as const,
+                    ),
+            ),
+        );
+        for (const {caseId, id, candidate} of mustCatchFindings) {
+            if (candidate === undefined) {
+                continue; // reported by the existence test above
+            }
+            const {severity, confidence} = candidate.finding;
+            const verification = nonConfirmed.get(`${caseId}:${id}`);
+            if (
+                severity !== "blocking" ||
+                confidence < MEDIUM_CONFIDENCE ||
+                verification !== undefined
+            ) {
+                unprotected.push(
+                    `${caseId}:${id} (severity=${severity}, confidence=${confidence}, verification=${
+                        verification ?? "confirmed"
+                    })`,
+                );
+            }
+        }
+        expect(unprotected).toEqual([]);
+
+        // And they are in fact still posted by the deterministic path today.
+        for (const {corpusCase, result} of RUNS) {
+            const posted = postedIds(result);
+            for (const id of corpusCase.expected.mustCatch ?? []) {
+                expect(posted.has(id)).toBe(true);
+            }
+        }
+    });
+
+    it("no new false-block: a clean case's blocking findings never survive validation", () => {
+        // Precision side: a clean PR stays APPROVE. A clean case either carries
+        // no blocking finding at all, or carries a production-derived WRONG
+        // blocking finding (the audit-seeded false-block cases) that the
+        // recorded three-state validation must strip: refuted drops it,
+        // plausible downgrades it — only a confirmed claim may keep a blocking
+        // label, and a clean case never confirms one.
+        for (const {corpusCase, result} of RUNS) {
+            if (corpusCase.category !== "clean") {
+                continue;
+            }
+            const verifications = new Map(
+                (corpusCase.validation ?? []).map((v) => [
+                    v.id,
+                    v.verification,
+                ]),
+            );
+            for (const candidate of result.allCandidates) {
+                if (candidate.finding.severity !== "blocking") {
+                    continue;
+                }
+                const verification = verifications.get(candidate.id);
+                expect(
+                    verification === "refuted" || verification === "plausible",
+                    `${corpusCase.id}:${candidate.id} blocking finding with no neutralizing verification`,
+                ).toBe(true);
+            }
+            expect(result.verdict.event).toBe("APPROVE");
+            expect(result.postedCandidates.some((c) => c.blocking)).toBe(false);
+        }
+    });
+
+    it("exercises the downgrade/collapse path: a low-confidence advisory exists and is never a must-catch", () => {
+        // Edit-10 ("downgrade the uncertain") / edit-13 (collapse low-confidence)
+        // must have something to act on for the safety argument to be non-vacuous.
+        const mustCatchIds = new Set(mustCatchFindings.map((f) => f.id));
+        const lowConfidenceAdvisories = RUNS.flatMap(({result}) =>
+            result.allCandidates.filter(
+                (c) =>
+                    c.finding.severity === "advisory" &&
+                    c.finding.confidence < MEDIUM_CONFIDENCE,
+            ),
+        );
+        expect(lowConfidenceAdvisories.length).toBeGreaterThan(0);
+        for (const candidate of lowConfidenceAdvisories) {
+            expect(mustCatchIds.has(candidate.id)).toBe(false);
+        }
+    });
+});
+
+/**
+ * The three-state validation gate, replayed over audit-seeded production cases.
+ *
+ * The false-block cases in the corpus are derived from a 2026-07-07 audit of
+ * every blocking review the bot posted on Khan/frontend since the validator
+ * shipped (90 PRs, 319 blocking claims, 12 confirmed false blocks): a
+ * mechanically-refutable contrast claim that recurred across four PRs, a
+ * misread convention rule, an author-disputed trace-depth miss, a wrong
+ * API-contract assumption, and an author-intent judgment call. Each case
+ * records the verification the validator should have returned; the runner's
+ * stage 3b applies the gate's rules deterministically. This block pins the gate
+ * semantics themselves: refuted drops, plausible posts non-blocking, and ONLY a
+ * confirmed claim may carry a blocking label into the verdict.
+ */
+describe("three-state validation gate (audit-seeded false blocks)", () => {
+    const validatedRuns = RUNS.filter(
+        ({corpusCase}) => (corpusCase.validation ?? []).length > 0,
+    );
+
+    it("exercises all three verification states (gate checks are not vacuous)", () => {
+        expect(validatedRuns.length).toBeGreaterThan(0);
+        const states = new Set(
+            validatedRuns.flatMap(({corpusCase}) =>
+                (corpusCase.validation ?? []).map((v) => v.verification),
+            ),
+        );
+        expect(states.has("refuted")).toBe(true);
+        expect(states.has("plausible")).toBe(true);
+        expect(states.has("confirmed")).toBe(true);
+    });
+
+    it("only a confirmed claim carries a blocking label into the verdict", () => {
+        for (const {corpusCase, result} of validatedRuns) {
+            const verifications = new Map(
+                (corpusCase.validation ?? []).map((v) => [
+                    v.id,
+                    v.verification,
+                ]),
+            );
+            for (const candidate of result.postedCandidates) {
+                if (!candidate.blocking) {
+                    continue;
+                }
+                // Absent verification defaults to confirmed (untouched claim).
+                const verification =
+                    verifications.get(candidate.id) ?? "confirmed";
+                expect(
+                    verification,
+                    `${corpusCase.id}:${candidate.id} blocks without a confirmed verification`,
+                ).toBe("confirmed");
+            }
+        }
+    });
+
+    it("refuted claims are dropped; plausible claims post as non-blocking", () => {
+        for (const {corpusCase, result} of validatedRuns) {
+            const posted = postedIds(result);
+            const droppedIds = new Set(
+                result.droppedByValidation.map((c) => c.id),
+            );
+            for (const verification of corpusCase.validation ?? []) {
+                if (verification.verification === "refuted") {
+                    expect(
+                        droppedIds.has(verification.id),
+                        `${corpusCase.id}:${verification.id} refuted but not dropped`,
+                    ).toBe(true);
+                    expect(posted.has(verification.id)).toBe(false);
+                } else if (verification.verification === "plausible") {
+                    const candidate = result.postedCandidates.find(
+                        (c) => c.id === verification.id,
+                    );
+                    expect(
+                        candidate,
+                        `${corpusCase.id}:${verification.id} plausible but not posted`,
+                    ).toBeDefined();
+                    expect(candidate?.blocking).toBe(false);
+                }
+            }
+        }
+    });
+});

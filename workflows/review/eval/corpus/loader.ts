@@ -98,6 +98,32 @@ export type CaseScope = {
     inScope: Record<string, number[]>;
 };
 
+/** The claim-validator's three-state verification (review.md Step 3 Phase 3). */
+export const VERIFICATION_STATES = [
+    "confirmed",
+    "plausible",
+    "refuted",
+] as const;
+
+export type VerificationState = typeof VERIFICATION_STATES[number];
+
+/**
+ * One recorded claim-validator verification for a case finding. The runner
+ * replays the Phase 3 apply rules mechanically: `refuted` drops the finding,
+ * `plausible` downgrades it to non-blocking (only a `confirmed` claim may carry
+ * a blocking label into the verdict), `confirmed` keeps it. `confidence`
+ * optionally overrides the finding's confidence (the validator lowers it for
+ * `plausible`). Absent from a case → no validation replay (the recorded
+ * findings are treated as the post-validation set, as before).
+ */
+export type CaseVerification = {
+    /** The recorded finding id this verification applies to. */
+    id: string;
+    verification: VerificationState;
+    /** Post-verification confidence in [0,1], when the validator changed it. */
+    confidence?: number;
+};
+
 /**
  * The scored expectations for a case — the "ground truth" the full suite's metrics
  * read. `verdict` is the only field the smoke gate needs ; the rest
@@ -138,6 +164,8 @@ export type CorpusCase = {
     routerConfig?: Record<string, unknown>;
     dimensions: CaseDimensions;
     findings: RecordedFinding[];
+    /** Recorded claim-validator verifications the runner replays (Phase 3). */
+    validation?: CaseVerification[];
     policyConflicts: CasePolicyConflict[];
     /** Absent → first review (whole diff in scope). */
     scope?: CaseScope;
@@ -307,6 +335,79 @@ const parseFindings = (raw: unknown, errors: string[]): RecordedFinding[] => {
     return findings;
 };
 
+const parseValidation = (
+    raw: unknown,
+    findings: RecordedFinding[],
+    errors: string[],
+): CaseVerification[] | undefined => {
+    if (raw === undefined) {
+        return undefined;
+    }
+    if (!Array.isArray(raw)) {
+        errors.push("validation: must be an array when present");
+        return undefined;
+    }
+    const findingIds = new Set(findings.map((f) => f.finding.id));
+    const seen = new Set<string>();
+    const verifications: CaseVerification[] = [];
+    raw.forEach((entry, i) => {
+        if (!isRecord(entry)) {
+            errors.push(`validation[${i}]: must be an object`);
+            return;
+        }
+        const id = entry["id"];
+        if (!isNonEmptyString(id)) {
+            errors.push(`validation[${i}].id: required non-empty string`);
+            return;
+        }
+        if (!findingIds.has(id)) {
+            errors.push(
+                `validation[${i}].id: "${id}" does not match a recorded finding`,
+            );
+            return;
+        }
+        if (seen.has(id)) {
+            errors.push(
+                `validation[${i}].id: duplicate verification for "${id}"`,
+            );
+            return;
+        }
+        seen.add(id);
+        const verification = entry["verification"];
+        if (
+            !isNonEmptyString(verification) ||
+            !VERIFICATION_STATES.includes(verification as VerificationState)
+        ) {
+            errors.push(
+                `validation[${i}].verification: must be one of ${VERIFICATION_STATES.join(
+                    ", ",
+                )}`,
+            );
+            return;
+        }
+        const out: CaseVerification = {
+            id,
+            verification: verification as VerificationState,
+        };
+        const confidence = entry["confidence"];
+        if (confidence !== undefined) {
+            if (
+                typeof confidence !== "number" ||
+                confidence < 0 ||
+                confidence > 1
+            ) {
+                errors.push(
+                    `validation[${i}].confidence: must be a number in [0,1]`,
+                );
+                return;
+            }
+            out.confidence = confidence;
+        }
+        verifications.push(out);
+    });
+    return verifications;
+};
+
 const parsePolicyConflicts = (
     raw: unknown,
     errors: string[],
@@ -472,6 +573,7 @@ export const parseCase = (raw: unknown, sourcePath: string): CorpusCase => {
     const changedFiles = parseChangedFiles(raw["changedFiles"], errors);
     const dimensions = parseDimensions(raw["dimensions"], errors);
     const findings = parseFindings(raw["findings"], errors);
+    const validation = parseValidation(raw["validation"], findings, errors);
     const policyConflicts = parsePolicyConflicts(
         raw["policyConflicts"],
         errors,
@@ -501,6 +603,9 @@ export const parseCase = (raw: unknown, sourcePath: string): CorpusCase => {
     };
     if (isRecord(raw["routerConfig"])) {
         result.routerConfig = raw["routerConfig"];
+    }
+    if (validation !== undefined) {
+        result.validation = validation;
     }
     if (scope !== undefined) {
         result.scope = scope;
