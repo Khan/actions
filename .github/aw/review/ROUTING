@@ -1,0 +1,33 @@
+# Machine-readable routing for the PR-reviewer workflow. Parsed deterministically by
+# the shared router (workflows/review/lib in this repo; format spec in
+# workflows/review/README.md). One rule per line:
+#   <pattern> [lens=<lens>,...] [tier=trivial|low|medium|high] [direction-dependent]
+#   enable <reviewer>[,<reviewer>...]
+# Later tier rules override earlier ones (gitignore-style); lenses union across
+# matching rules. This file complements risk-classification.md (model-facing prose);
+# team ownership stays in .github/REVIEWERS.
+#
+# No specialist lenses are enabled: the eleven lens prompts target webapp's backend
+# domains (auth resolvers, migrations, federation, ...) and none maps to this repo's
+# supply-chain surface. Whole-change reviewers mirror webapp's eval-justified roster.
+
+enable holistic,completeness,test-adequacy,first-principles,conventions
+
+# Shipped composite actions run inside consuming repos' CI with their credentials.
+actions/**                   tier=high
+# This repo's own CI, the publish pipeline, and the compiled agentic workflows.
+.github/workflows/**         tier=high
+utils/**                     tier=high
+# The shared reviewer's deterministic enforcement layer.
+workflows/review/lib/**      tier=high
+
+# Dev-only surfaces.
+workflows/review/eval/**     tier=low
+**/*.test.ts                 tier=low
+
+# Docs are trivial; agentic-workflow .md files are executable, not docs, so they
+# are re-raised after the broad docs rule (last match wins).
+**/*.md                      tier=trivial
+.changeset/*.md              tier=trivial
+workflows/review/review.md   tier=high
+.github/workflows/*.md       tier=high
