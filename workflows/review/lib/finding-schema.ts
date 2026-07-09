@@ -388,7 +388,10 @@ export const validateOutOfLaneObservation = (
     }
 
     const line = input["line"];
-    if (line !== undefined && (!Number.isInteger(line) || (line as number) < 1)) {
+    if (
+        line !== undefined &&
+        (!Number.isInteger(line) || (line as number) < 1)
+    ) {
         errors.push("line: must be a positive integer when present");
     }
 
