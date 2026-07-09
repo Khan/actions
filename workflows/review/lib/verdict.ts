@@ -85,7 +85,8 @@ export type VerdictReason =
     | {code: "blocking-label"; label: string}
     | {code: "core-dimension-unavailable"; dimension: CoreDimension}
     | {code: "pattern-triage-unavailable"}
-    | {code: "policy-conflict"; policy: string; detail: string};
+    | {code: "policy-conflict"; policy: string; detail: string}
+    | {code: "kept-blocking-thread"; count: number};
 
 export type Verdict = {
     event: VerdictEvent;
@@ -109,6 +110,15 @@ export type VerdictInput = {
      * never REQUEST_CHANGES regardless of this value.
      */
     blockingThreshold?: number;
+    /**
+     * How many prior review threads with a blocking opening label the
+     * reconciler KEPT this run (`rereview.json` `keptBlockingCount`). The
+     * re-review flip rule (review.md Step 4): a run may not resolve to
+     * APPROVE while a blocking objection from an earlier review is still
+     * open, even when the run itself posts nothing blocking. Zero or absent
+     * means no floor.
+     */
+    keptBlockingCount?: number;
 };
 
 /**
@@ -191,9 +201,21 @@ export const computeVerdict = (input: VerdictInput): Verdict => {
         reasons.push({code: "policy-conflict", policy, detail});
     }
 
+    // (e) Kept blocking threads — the re-review flip rule. A still-open
+    // blocking objection from an earlier review blocks like a fresh one.
+    const keptBlocking = input.keptBlockingCount ?? 0;
+    if (keptBlocking > 0) {
+        reasons.push({code: "kept-blocking-thread", count: keptBlocking});
+    }
+
     // Precedence: a blocking finding is actionable on its own, so it wins.
-    // A run with zero blocking labels is never REQUEST_CHANGES (review.md Step 4).
-    if (blockingLabelCount > 0 && blockingLabelCount >= threshold) {
+    // A run with zero blocking labels is never REQUEST_CHANGES (review.md
+    // Step 4) — unless a prior review's blocking thread is still open, in
+    // which case the earlier objection is the actionable feedback.
+    if (
+        (blockingLabelCount > 0 && blockingLabelCount >= threshold) ||
+        keptBlocking > 0
+    ) {
         return {event: "REQUEST_CHANGES", reasons};
     }
 

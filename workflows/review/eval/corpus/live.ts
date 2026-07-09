@@ -65,6 +65,54 @@ export type LiveDefectSpec = {
 };
 
 /**
+ * One prior review thread a re-review case stages (an "open PR" snapshot).
+ * `body` is the bot's opening comment from the earlier review, in the
+ * production label template (`**<label>:** …`), quoted as data; `expect` is
+ * the reconciliation ground truth for THIS push's diff.
+ */
+export type RereviewPriorThread = {
+    /** Stable key for staging (`t-<key>` thread id) and scoring. */
+    key: string;
+    /** Path the thread anchors on. */
+    path: string;
+    /** RIGHT-side line, or null for a file-level thread. */
+    line: number | null;
+    /** The opening bot comment, label template included. */
+    body: string;
+    /** The author's reply on the thread, when they left one. */
+    authorReply?: string;
+    /** Ground truth: this push fixed the thread (`resolve`) or not (`keep`). */
+    expect: "resolve" | "keep";
+    /**
+     * Case-insensitive keyword/regex alternates for the thread's mechanism,
+     * used to score duplicate suppression: a fresh finding matching a KEPT
+     * thread's path/window and mechanism is a duplicate comment. Optional;
+     * without it dup detection falls back to path + line proximity.
+     */
+    mechanism?: string[];
+};
+
+/**
+ * The re-review block: what makes a live case an OPEN-PR snapshot (a push
+ * onto an already-reviewed PR) rather than a first review. `priorDiff` is the
+ * diff the last full-depth review reviewed — the anchor fingerprint and the
+ * body stamp are derived from it, exactly as production derives them — and
+ * `priorThreads` are the unresolved bot threads that review left, with
+ * per-thread reconciliation ground truth. The case's own top-level `diff` and
+ * `tree` are the state AFTER this push.
+ */
+export type CaseRereview = {
+    /** The previously fully-reviewed unified diff (anchor fingerprint). */
+    priorDiff: string;
+    /** The prior review's submitted event (rides into the staged stamp). */
+    priorVerdict: "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+    /** The depth the prior review executed (staged stamp; default `full`). */
+    priorDepth: "full" | "scoped" | "flip-gated" | "fast";
+    /** Unresolved bot threads at this push, with reconciliation ground truth. */
+    priorThreads: RereviewPriorThread[];
+};
+
+/**
  * The live block of a live-enabled case: everything a real model run needs
  * that the recorded replay does not. Requires the case to carry a `diff` and
  * the {@link LIVE_TAG} tag; the post-change file tree lives on disk next to
@@ -78,6 +126,8 @@ export type CaseLive = {
     mustCatchSpecs?: LiveDefectSpec[];
     /** Labeled traps a live run must NOT flag (clean-case ground truth). */
     mustNotFlagSpecs?: LiveDefectSpec[];
+    /** Present iff the case is a re-review (open-PR) snapshot. */
+    rereview?: CaseRereview;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -179,6 +229,157 @@ const parseDefectSpecs = (
         specs.push(spec);
     });
     return specs;
+};
+
+const RE_REVIEW_VERDICTS = ["APPROVE", "REQUEST_CHANGES", "COMMENT"] as const;
+const RE_REVIEW_DEPTHS = ["full", "scoped", "flip-gated", "fast"] as const;
+
+/** Parse + validate the `rereview` block (see {@link CaseRereview}). */
+const parseRereview = (
+    raw: unknown,
+    errors: string[],
+): CaseRereview | undefined => {
+    if (raw === undefined) {
+        return undefined;
+    }
+    if (!isRecord(raw)) {
+        errors.push("live.rereview: must be an object when present");
+        return undefined;
+    }
+
+    const priorDiff = raw["priorDiff"];
+    if (!isNonEmptyString(priorDiff)) {
+        errors.push("live.rereview.priorDiff: required non-empty string");
+    } else {
+        const provenance = computeDiffProvenance(priorDiff);
+        if (provenance.warnings.length > 0) {
+            errors.push(
+                `live.rereview.priorDiff: must parse cleanly (${provenance.warnings.join(
+                    "; ",
+                )})`,
+            );
+        }
+    }
+
+    const priorVerdict = raw["priorVerdict"];
+    if (
+        !(RE_REVIEW_VERDICTS as readonly string[]).includes(
+            priorVerdict as string,
+        )
+    ) {
+        errors.push(
+            `live.rereview.priorVerdict: must be one of ${RE_REVIEW_VERDICTS.join(
+                ", ",
+            )}`,
+        );
+    }
+
+    const rawDepth = raw["priorDepth"] ?? "full";
+    if (!(RE_REVIEW_DEPTHS as readonly string[]).includes(rawDepth as string)) {
+        errors.push(
+            `live.rereview.priorDepth: must be one of ${RE_REVIEW_DEPTHS.join(
+                ", ",
+            )}`,
+        );
+    }
+
+    const rawThreads = raw["priorThreads"];
+    const threads: RereviewPriorThread[] = [];
+    if (!Array.isArray(rawThreads) || rawThreads.length === 0) {
+        errors.push(
+            "live.rereview.priorThreads: required non-empty array " +
+                "(a re-review with no prior threads is a plain live case)",
+        );
+    } else {
+        const seen = new Set<string>();
+        rawThreads.forEach((entry, i) => {
+            const at = `live.rereview.priorThreads[${i}]`;
+            if (!isRecord(entry)) {
+                errors.push(`${at}: must be an object`);
+                return;
+            }
+            const key = entry["key"];
+            if (!isNonEmptyString(key)) {
+                errors.push(`${at}.key: required non-empty string`);
+                return;
+            }
+            if (seen.has(key)) {
+                errors.push(`${at}.key: duplicate thread key "${key}"`);
+                return;
+            }
+            seen.add(key);
+            const path = entry["path"];
+            const body = entry["body"];
+            const line = entry["line"];
+            const expect = entry["expect"];
+            if (!isNonEmptyString(path)) {
+                errors.push(`${at}.path: required non-empty string`);
+                return;
+            }
+            if (!isNonEmptyString(body)) {
+                errors.push(`${at}.body: required non-empty string`);
+                return;
+            }
+            if (line !== null && !Number.isInteger(line)) {
+                errors.push(`${at}.line: must be an integer or null`);
+                return;
+            }
+            if (expect !== "resolve" && expect !== "keep") {
+                errors.push(`${at}.expect: must be "resolve" or "keep"`);
+                return;
+            }
+            const authorReply = entry["authorReply"];
+            if (authorReply !== undefined && !isNonEmptyString(authorReply)) {
+                errors.push(
+                    `${at}.authorReply: must be a non-empty string when present`,
+                );
+                return;
+            }
+            const mechanism = entry["mechanism"];
+            if (
+                mechanism !== undefined &&
+                (!Array.isArray(mechanism) ||
+                    mechanism.length === 0 ||
+                    !mechanism.every(isNonEmptyString))
+            ) {
+                errors.push(
+                    `${at}.mechanism: must be a non-empty array of non-empty strings when present`,
+                );
+                return;
+            }
+            const thread: RereviewPriorThread = {
+                key,
+                path,
+                line: line as number | null,
+                body,
+                expect,
+            };
+            if (authorReply !== undefined) {
+                thread.authorReply = authorReply as string;
+            }
+            if (mechanism !== undefined) {
+                thread.mechanism = mechanism as string[];
+            }
+            threads.push(thread);
+        });
+    }
+
+    if (
+        !isNonEmptyString(priorDiff) ||
+        !(RE_REVIEW_VERDICTS as readonly string[]).includes(
+            priorVerdict as string,
+        ) ||
+        !(RE_REVIEW_DEPTHS as readonly string[]).includes(rawDepth as string) ||
+        threads.length === 0
+    ) {
+        return undefined;
+    }
+    return {
+        priorDiff,
+        priorVerdict: priorVerdict as CaseRereview["priorVerdict"],
+        priorDepth: rawDepth as CaseRereview["priorDepth"],
+        priorThreads: threads,
+    };
 };
 
 /**
@@ -288,6 +489,8 @@ export const parseLive = (
         errors,
     );
 
+    const rereview = parseRereview(raw["rereview"], errors);
+
     if (prContext === undefined) {
         return undefined;
     }
@@ -297,6 +500,9 @@ export const parseLive = (
     }
     if (mustNotFlagSpecs !== undefined) {
         live.mustNotFlagSpecs = mustNotFlagSpecs;
+    }
+    if (rereview !== undefined) {
+        live.rereview = rereview;
     }
     return live;
 };

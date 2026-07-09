@@ -40,7 +40,13 @@ export const SMOKE_TAG = "smoke";
 /** The live-enabled half of the case format lives in `./live`; re-exported
  * here so the loader stays the single public surface of the corpus format. */
 export {LIVE_TAG} from "./live";
-export type {CaseLive, LiveDefectSpec, LivePrContext} from "./live";
+export type {
+    CaseLive,
+    CaseRereview,
+    LiveDefectSpec,
+    LivePrContext,
+    RereviewPriorThread,
+} from "./live";
 
 /** Default corpus root, relative to the repo checkout (the workflow's cwd). */
 export const CORPUS_ROOT = "workflows/review/eval/corpus";

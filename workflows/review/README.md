@@ -229,6 +229,27 @@ counters aggregate `costByRereviewDepth`). Lifecycle-class changes like this
 one are trialed with the seeded-defect skill
 (`.claude/skills/review-trial/SKILL.md`).
 
+Re-review behavior is evaluated at three layers, cheapest first:
+
+- **Depth decisions** (`eval/lifecycle/`, deterministic): push sequences
+  replayed through the tripwire and depth logic alone; the adversarial
+  rewrite-after-approval and sparse-PR-then-payload cases live here.
+- **Open-PR corpus cases** (`live.rereview` in a live-enabled case): a case
+  that is a mid-review snapshot, not a first review. It stages the prior
+  review's threads (with author replies), a stamped prior review derived from
+  `priorDiff`, and the depth plan; the live producer then dispatches the
+  reconciler (at every depth) plus the depth-sized finder roster, and
+  `eval/rereview-match.ts` scores thread-resolution accuracy against
+  per-thread ground truth, the flip-gate input (kept blocking count), and
+  duplicate comments on kept threads. The A/B runner prices a mode with
+  `--re-review-mode` (candidate arm only; baseline stays `full`), and the
+  deterministic replay of the same cases exercises the kept-blocking verdict
+  floor and the accountability section. The
+  `golden-retention-lifecycle-1/2/3` chain is the template: planted bugs, a
+  bad partial fix with added bugs, then the full fix.
+- **Live trials** (the review-trial skill): the same lifecycle against the
+  real workflow on real PRs, reserved for architecture-class changes.
+
 ### Models and effort per role
 
 Each sub-agent pins its model in its own definition inside `review.md` (with a

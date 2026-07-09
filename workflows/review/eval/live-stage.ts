@@ -33,8 +33,17 @@ import {
 } from "node:fs";
 
 import {computeDiffProvenance} from "../lib/provenance";
+import {
+    buildScopedDiff,
+    computeHunkSignature,
+    decideReReviewDepth,
+    renderRereviewStamp,
+    STAMP_SCHEMA_VERSION,
+    type ReReviewPlan,
+} from "../lib/rereview-mode";
 import {route, type RouterConfig} from "../lib/router";
-import type {CorpusCase} from "./corpus/loader";
+import type {ReReviewMode} from "../lib/routing-config";
+import type {CaseRereview, CorpusCase} from "./corpus/loader";
 
 /** The staging root production prompts reference (review.md Step 1). */
 export const PRODUCTION_REVIEW_DIR = "/tmp/gh-aw/review";
@@ -73,6 +82,23 @@ export type StagedCase = {
     contextDir: string;
     /** The post-change checkout the sub-agent runs in (its cwd). */
     checkoutDir: string;
+    /**
+     * The re-review depth plan, present iff the case carries a
+     * `live.rereview` block: the same {@link ReReviewPlan} production's
+     * rereview-mode CLI computes, staged as `rereview-plan.json`. The
+     * producer reads `dispatch` off it to size the roster.
+     */
+    rereviewPlan?: ReReviewPlan;
+};
+
+/** Options for {@link stageCase}. */
+export type StageOptions = {
+    /**
+     * The repo's re-review mode for this run (the ROUTING `re-review` line in
+     * production; an arm parameter here, so the A/B can price a mode).
+     * Ignored for cases with no `rereview` block. Default `full`.
+     */
+    reReviewMode?: ReReviewMode;
 };
 
 /** Recursively copy a directory through the fs seam. */
@@ -90,6 +116,90 @@ const copyDir = (src: string, dest: string, fs: StageFs): void => {
 };
 
 /**
+ * Stage the open-PR re-review state for a case carrying a `live.rereview`
+ * block, mirroring production exactly:
+ *
+ *   threads.json          the unresolved bot threads (synthetic `t-<key>`
+ *                         ids), each with its opening comment and any author
+ *                         reply — the reconciler's whole input;
+ *   human-threads.json    empty (corpus threads are all bot threads);
+ *   prior-reviews.json    one prior review whose body carries the hidden
+ *                         fingerprint stamp derived from `priorDiff`, so the
+ *                         depth decision runs on the same stamp mechanics as
+ *                         production;
+ *   rereview-plan.json    the {@link ReReviewPlan} for this push under
+ *                         `mode`; and when it stages `new-hunks`, the scoped
+ *                         diff overwrites `full-stripped.diff` and `pr.diff`
+ *                         (what review.md's scoped/flip-gated depths do), so
+ *                         the dispatched reviewers read only unseen hunks.
+ */
+const stageRereview = (
+    rereview: CaseRereview,
+    currentDiff: string,
+    contextDir: string,
+    mode: ReReviewMode,
+    fs: StageFs,
+): ReReviewPlan => {
+    const threads = rereview.priorThreads.map((thread) => ({
+        thread_id: `t-${thread.key}`,
+        path: thread.path,
+        line: thread.line,
+        comments: [
+            {author: "github-actions[bot]", body: thread.body},
+            ...(thread.authorReply !== undefined
+                ? [{author: "case-author", body: thread.authorReply}]
+                : []),
+        ],
+    }));
+    fs.writeFileSync(
+        `${contextDir}/threads.json`,
+        JSON.stringify(threads, null, 2),
+    );
+    fs.writeFileSync(`${contextDir}/human-threads.json`, "[]");
+
+    const anchorHunks = computeHunkSignature(rereview.priorDiff);
+    const priorStamp = {
+        schemaVersion: STAMP_SCHEMA_VERSION,
+        depth: rereview.priorDepth,
+        verdict: rereview.priorVerdict,
+        anchorDraft: false,
+        anchorHunks,
+    };
+    fs.writeFileSync(
+        `${contextDir}/prior-reviews.json`,
+        JSON.stringify(
+            [
+                {
+                    body: renderRereviewStamp(priorStamp),
+                    submittedAt: "2026-01-01T00:00:00Z",
+                },
+            ],
+            null,
+            2,
+        ),
+    );
+
+    const plan = decideReReviewDepth({
+        mode,
+        isDraft: false,
+        priorStamp,
+        currentSignature: computeHunkSignature(currentDiff),
+    });
+    fs.writeFileSync(
+        `${contextDir}/rereview-plan.json`,
+        JSON.stringify(plan, null, 2),
+    );
+
+    if (plan.staging === "new-hunks") {
+        const scoped = buildScopedDiff(currentDiff, anchorHunks);
+        fs.writeFileSync(`${contextDir}/scoped.diff`, scoped);
+        fs.writeFileSync(`${contextDir}/full-stripped.diff`, scoped);
+        fs.writeFileSync(`${contextDir}/pr.diff`, scoped);
+    }
+    return plan;
+};
+
+/**
  * Stage one live-enabled corpus case under `destDir`. Throws when the case is
  * not live-enabled (no `live` block / no diff) or its tree is missing: the
  * caller selects cases via `loadLiveCorpus()`, so a miss here is a bug, not
@@ -99,6 +209,7 @@ export const stageCase = (
     corpusCase: CorpusCase,
     destDir: string,
     fs: StageFs = DEFAULT_FS,
+    options: StageOptions = {},
 ): StagedCase => {
     const live = corpusCase.live;
     const diff = corpusCase.diff;
@@ -182,7 +293,26 @@ export const stageCase = (
     }
     copyDir(treeDir, checkoutDir, fs);
 
-    return {caseId: corpusCase.id, rootDir: destDir, contextDir, checkoutDir};
+    // Re-review (open-PR) cases: stage the prior review state and the depth
+    // plan LAST, so the scoped overwrite wins over the plain staging above.
+    let rereviewPlan: ReReviewPlan | undefined;
+    if (live.rereview !== undefined) {
+        rereviewPlan = stageRereview(
+            live.rereview,
+            diff,
+            contextDir,
+            options.reReviewMode ?? "full",
+            fs,
+        );
+    }
+
+    return {
+        caseId: corpusCase.id,
+        rootDir: destDir,
+        contextDir,
+        checkoutDir,
+        ...(rereviewPlan !== undefined ? {rereviewPlan} : {}),
+    };
 };
 
 /**

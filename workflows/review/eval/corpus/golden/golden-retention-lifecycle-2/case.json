@@ -1,0 +1,166 @@
+{
+    "id": "golden-retention-lifecycle-2",
+    "tags": [
+        "golden",
+        "rereview-lifecycle",
+        "live"
+    ],
+    "category": "golden",
+    "description": "Push 2 of the retention lifecycle: a bad partial fix with added bugs, as an open-PR re-review snapshot. The purge and the unbounded prune are properly fixed; the off-by-one is 'fixed' to a different off-by-one (offset MAX+1) so its thread must be KEPT; the test fix is deferred in a reply so its thread must be KEPT; and the new dedup feature plants a fresh blocking defect (a lowercased 8-char prefix key silently drops distinct notes) plus an untested dedup window.",
+    "changedFiles": [
+        {
+            "path": "src/notes/purge-user-data.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/notes/retention.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/notes/retention.test.ts",
+            "status": "added"
+        }
+    ],
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "retention-dedup-prefix-collision",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/notes/retention.ts",
+                    "line": 13,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "src/notes/retention.ts: dedupKey = content.toLowerCase().slice(0, 8)",
+                    "src/notes/retention.ts: saveNote returns without put when the key is seen"
+                ],
+                "failure_scenario": "A user saves two distinct notes whose first 8 characters match case-insensitively (e.g. two 'reminder: ...' notes); dedupKey collides, the second note is treated as a duplicate, and it is silently never stored - data loss with no error.",
+                "producing_hunt": "correctness:lossy-dedup-key",
+                "model_authored_prose": "Dedup keys on a lowercased 8-character prefix, so distinct notes sharing a prefix collide and the later one is silently dropped. Compare full content (or a real hash), not a prefix."
+            }
+        },
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "retention-dedup-window-untested",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/notes/retention.ts",
+                    "line": 7,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "src/notes/retention.test.ts: no test constructs a note older than the window"
+                ],
+                "failure_scenario": "A regression that drops the createdAt filter (deduping against all history) or inverts its comparison would pass CI: no test saves a duplicate outside the 30-day window.",
+                "producing_hunt": "correctness:test-adequacy",
+                "model_authored_prose": "The new 30-day dedup window has no test on either side of the boundary; a regression in the window filter would pass CI silently."
+            }
+        }
+    ],
+    "validation": [
+        {
+            "id": "retention-dedup-prefix-collision",
+            "verification": "confirmed"
+        },
+        {
+            "id": "retention-dedup-window-untested",
+            "verification": "confirmed"
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 2,
+        "mustCatch": [
+            "retention-dedup-prefix-collision"
+        ]
+    },
+    "diff": "diff --git a/src/notes/purge-user-data.ts b/src/notes/purge-user-data.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notes/purge-user-data.ts\n@@ -0,0 +1,15 @@\n+import type {Db} from \"./db\";\n+\n+/** Part of account deletion: remove every stored note for the user. */\n+export const purgeUserNotes = async (\n+    db: Db,\n+    userId: string,\n+): Promise<void> => {\n+    for (;;) {\n+        const notes = await db.query(\"Note\", {userId, pageSize: 100});\n+        if (notes.length === 0) {\n+            return;\n+        }\n+        await db.deleteMulti(notes.map((note) => note.id));\n+    }\n+};\ndiff --git a/src/notes/retention.test.ts b/src/notes/retention.test.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notes/retention.test.ts\n@@ -0,0 +1,11 @@\n+import {memDb, note} from \"./testing\";\n+import {pruneNotes, saveNote} from \"./retention\";\n+\n+describe(\"pruneNotes\", () => {\n+    it(\"prunes old notes past the cap\", async () => {\n+        const db = memDb();\n+        await saveNote(db, note(\"u1\", \"first\"));\n+        await saveNote(db, note(\"u1\", \"second\"));\n+        await expect(pruneNotes(db, \"u1\")).resolves.toBeUndefined();\n+    });\n+});\ndiff --git a/src/notes/retention.ts b/src/notes/retention.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notes/retention.ts\n@@ -0,0 +1,44 @@\n+import type {Db, Note} from \"./db\";\n+\n+/** Hard cap on stored notes per user; prune enforces it on every save. */\n+export const MAX_NOTES_PER_USER = 200;\n+\n+/** Window inside which a repeated note is treated as a duplicate. */\n+export const DEDUP_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;\n+\n+const PRUNE_BATCH = 50;\n+\n+/** Duplicate key: normalised content prefix, cheap to compare. */\n+const dedupKey = (content: string): string =>\n+    content.toLowerCase().slice(0, 8);\n+\n+export const saveNote = async (db: Db, note: Note): Promise<void> => {\n+    const existing = await db.query(\"Note\", {\n+        userId: note.userId,\n+        pageSize: \"all\",\n+    });\n+    const since = note.createdAt - DEDUP_WINDOW_MS;\n+    const seen = new Set(\n+        existing\n+            .filter((stored) => stored.createdAt >= since)\n+            .map((stored) => dedupKey(stored.content)),\n+    );\n+    if (seen.has(dedupKey(note.content))) {\n+        return;\n+    }\n+    await db.put(note);\n+    // Intentionally fire-and-forget: a failing prune must not fail the save.\n+    void pruneNotes(db, note.userId);\n+};\n+\n+export const pruneNotes = async (db: Db, userId: string): Promise<void> => {\n+    const stale = await db.query(\"Note\", {\n+        userId,\n+        orderDesc: \"createdAt\",\n+        offset: MAX_NOTES_PER_USER + 1,\n+        pageSize: PRUNE_BATCH,\n+    });\n+    if (stale.length > 0) {\n+        await db.deleteMulti(stale.map((note) => note.id));\n+    }\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "notes: cap stored notes per user and delete them with user data",
+            "description": "Adds a per-user retention cap enforced on save, and wires note deletion into account deletion. Push 2: review fixes plus save-time dedup.",
+            "author": "dev-notes",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "retention-dedup-prefix-collision",
+                "path": "src/notes/retention.ts",
+                "mechanism": [
+                    "prefix",
+                    "slice\\(0, ?8\\)",
+                    "distinct notes.*(collide|dropped)|silently (dropped|never stored)"
+                ]
+            },
+            {
+                "key": "retention-dedup-window-untested",
+                "path": "src/notes/retention.ts",
+                "mechanism": [
+                    "window.*(untested|no test)|no test.*window",
+                    "DEDUP_WINDOW",
+                    "boundary"
+                ]
+            }
+        ],
+        "rereview": {
+            "priorDiff": "diff --git a/src/notes/purge-user-data.ts b/src/notes/purge-user-data.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notes/purge-user-data.ts\n@@ -0,0 +1,10 @@\n+import type {Db} from \"./db\";\n+\n+/** Part of account deletion: remove every stored note for the user. */\n+export const purgeUserNotes = async (\n+    db: Db,\n+    userId: string,\n+): Promise<void> => {\n+    const notes = await db.query(\"Note\", {userId});\n+    await db.deleteMulti(notes.map((note) => note.id));\n+};\ndiff --git a/src/notes/retention.test.ts b/src/notes/retention.test.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notes/retention.test.ts\n@@ -0,0 +1,11 @@\n+import {memDb, note} from \"./testing\";\n+import {pruneNotes, saveNote} from \"./retention\";\n+\n+describe(\"pruneNotes\", () => {\n+    it(\"prunes old notes past the cap\", async () => {\n+        const db = memDb();\n+        await saveNote(db, note(\"u1\", \"first\"));\n+        await saveNote(db, note(\"u1\", \"second\"));\n+        await expect(pruneNotes(db, \"u1\")).resolves.toBeUndefined();\n+    });\n+});\ndiff --git a/src/notes/retention.ts b/src/notes/retention.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notes/retention.ts\n@@ -0,0 +1,22 @@\n+import type {Db, Note} from \"./db\";\n+\n+/** Hard cap on stored notes per user; prune enforces it on every save. */\n+export const MAX_NOTES_PER_USER = 200;\n+\n+export const saveNote = async (db: Db, note: Note): Promise<void> => {\n+    await db.put(note);\n+    // Intentionally fire-and-forget: a failing prune must not fail the save.\n+    void pruneNotes(db, note.userId);\n+};\n+\n+export const pruneNotes = async (db: Db, userId: string): Promise<void> => {\n+    const stale = await db.query(\"Note\", {\n+        userId,\n+        orderDesc: \"createdAt\",\n+        offset: MAX_NOTES_PER_USER - 1,\n+        pageSize: \"all\",\n+    });\n+    if (stale.length > 0) {\n+        await db.deleteMulti(stale.map((note) => note.id));\n+    }\n+};\n",
+            "priorVerdict": "REQUEST_CHANGES",
+            "priorDepth": "full",
+            "priorThreads": [
+                {
+                    "key": "purge-limit",
+                    "path": "src/notes/purge-user-data.ts",
+                    "line": 7,
+                    "body": "**issue (blocking):** Account deletion removes at most one note. `query(\"Note\", {userId})` uses the facade's default `pageSize` of 1 (src/notes/db.ts), so `deleteMulti` receives a single id and every other note survives the purge.",
+                    "authorReply": "Good catch - purge now pages through every batch of 100 until the query returns nothing.",
+                    "expect": "resolve"
+                },
+                {
+                    "key": "cap-off-by-one",
+                    "path": "src/notes/retention.ts",
+                    "line": 17,
+                    "body": "**issue (blocking):** Off-by-one - with newest-first ordering, `offset: MAX_NOTES_PER_USER - 1` keeps one note fewer than the cap. Use `offset: MAX_NOTES_PER_USER`.",
+                    "authorReply": "Fixed the offset math.",
+                    "expect": "keep",
+                    "mechanism": [
+                        "off.by.one",
+                        "offset",
+                        "MAX_NOTES_PER_USER"
+                    ]
+                },
+                {
+                    "key": "unbounded-prune",
+                    "path": "src/notes/retention.ts",
+                    "line": 18,
+                    "body": "**issue (blocking):** The prune query loads the entire stale result set at once (`pageSize: \"all\"`). Delete in bounded batches so a large backlog cannot balloon a save.",
+                    "authorReply": "Now deletes in batches of 50.",
+                    "expect": "resolve"
+                },
+                {
+                    "key": "test-asserts-nothing",
+                    "path": "src/notes/retention.test.ts",
+                    "line": 8,
+                    "body": "**todo (blocking):** The prune test saves 2 notes against a cap of 200 and asserts only that the promise resolves; it can never exercise the cap. Save past the cap and assert the retained count.",
+                    "authorReply": "Will tighten the test in a follow-up.",
+                    "expect": "keep",
+                    "mechanism": [
+                        "assert",
+                        "cap",
+                        "test"
+                    ]
+                }
+            ]
+        }
+    }
+}
