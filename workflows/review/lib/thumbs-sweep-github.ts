@@ -4,10 +4,10 @@
  *
  * Division of labour (unchanged from the sweep module): `thumbs-sweep.ts` owns
  * all control flow and idempotency; this module owns only the GitHub traversal —
- * which comments are the reviewer's, at which grain, with which reactions — and
- * the write calls (`postFollowup`, `addReactions`). It holds no sweep logic: a
- * bug here can mis-list or mis-post, but it cannot re-ping or double-seed,
- * because those rules live in the sweep core.
+ * which comments are the reviewer's, at which grain, with which reactions and
+ * thread state — and the write call (`postFollowup`). It holds no sweep logic:
+ * a bug here can mis-list or mis-post, but it cannot re-ping, because that rule
+ * lives in the sweep core.
  *
  * How the reviewer's comments are identified (per grain):
  *
@@ -31,10 +31,15 @@
  * what makes the sweep idempotent across restarts with no state store.
  *
  * API-call bounding: the traversal reads only pull requests updated within
- * `lookbackDays` (default 14), newest first, capped at `maxPulls`. Reactions are
- * fetched per comment only when the comment's reaction summary shows any
- * reactions at all. Every request is counted and reported via {@link
- * GithubThumbsSweepPort.stats} so each run's API budget is auditable.
+ * `lookbackDays` (default 14), newest first, capped at `maxPulls`; closed or
+ * merged PRs are skipped once closed for more than `closedGraceDays` (default
+ * 3) — feedback lands around merge time, and a landed PR's reactions stop
+ * changing shortly after. Reactions are fetched per comment only when the
+ * comment's reaction summary shows any reactions at all. Resolved inline
+ * threads are counted with one GraphQL query per PR that has reviewer inline
+ * comments (thread resolution is not on the REST comment listing). Every
+ * request is counted and reported via {@link GithubThumbsSweepPort.stats} so
+ * each run's API budget is auditable.
  */
 
 import type {
@@ -44,7 +49,11 @@ import type {
     Reaction,
     ThumbsSweepPort,
 } from "./thumbs-sweep.ts";
-import {parseFollowupMarkers} from "./thumbs-sweep.ts";
+import {
+    NEGATIVE_REACTIONS,
+    parseFollowupMarkers,
+    POSITIVE_REACTIONS,
+} from "./thumbs-sweep.ts";
 import {BLOCKING_LABELS, NON_BLOCKING_LABELS} from "./render-comment.ts";
 
 /**
@@ -119,6 +128,12 @@ export type GithubThumbsSweepOptions = {
     /** Hard cap on PRs traversed per sweep. Default 200. */
     maxPulls?: number;
     /**
+     * Closed/merged PRs stay in the sweep for this many days after closing
+     * (feedback often lands right around merge time), then are skipped. Default
+     * 3.
+     */
+    closedGraceDays?: number;
+    /**
      * The gh-aw workflow id(s) of the repo's review install(s), used to build
      * the {@link workflowCallIdMarker}(s) that identify the summary comment.
      * Default `["review"]`; a repo running a preview arm adds its id here.
@@ -130,7 +145,9 @@ export type GithubThumbsSweepOptions = {
 
 const DEFAULT_LOOKBACK_DAYS = 14;
 const DEFAULT_MAX_PULLS = 200;
+const DEFAULT_CLOSED_GRACE_DAYS = 3;
 const PER_PAGE = 100;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Per-sweep traversal stats, for the auditable job summary. */
 export type SweepTraversalStats = {
@@ -139,10 +156,19 @@ export type SweepTraversalStats = {
     /** Total GitHub API requests issued (reads and writes). */
     apiRequests: number;
     /**
-     * Real-user 👍/👎 tallies observed across the reviewer's comments (the
-     * bot's own seeded reactions excluded) — the live "thumbs agree" numbers.
+     * Real-user reaction tallies observed across the reviewer's comments (the
+     * bot's own reactions excluded), using the shared
+     * {@link POSITIVE_REACTIONS} / {@link NEGATIVE_REACTIONS} sets
+     * (👍/❤️/🎉/🚀 vs 👎/😕) — the live agree/disagree numbers.
      */
-    thumbs: {up: number; down: number};
+    reactions: {positive: number; negative: number};
+    /**
+     * Reviewer inline threads currently resolved — reported as its own
+     * positive column, not folded into the reaction tallies (threads are also
+     * resolved just to clear noise, and a resolution can't answer a "why?"
+     * follow-up).
+     */
+    resolvedInlineThreads: number;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -191,6 +217,81 @@ const reactionTotalOf = (value: unknown): number => {
     return typeof total === "number" ? total : 0;
 };
 
+/** The shared reaction vocabularies as sets, for the live tallies. */
+const positive: ReadonlySet<string> = new Set(POSITIVE_REACTIONS);
+const negative: ReadonlySet<string> = new Set(NEGATIVE_REACTIONS);
+
+/**
+ * Review threads for one PR, paged. `comments(first: 1)` yields the thread's
+ * root comment, whose `databaseId` is the REST comment id the traversal
+ * already classified — the join key back to the sweep's inline candidates.
+ */
+const RESOLVED_THREADS_QUERY = `
+query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+    repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) {
+            reviewThreads(first: 100, after: $cursor) {
+                pageInfo { hasNextPage endCursor }
+                nodes {
+                    isResolved
+                    comments(first: 1) { nodes { databaseId } }
+                }
+            }
+        }
+    }
+}`;
+
+/** The `reviewThreads` connection from a GraphQL response body, if present. */
+const threadsConnectionOf = (
+    body: unknown,
+): Record<string, unknown> | undefined => {
+    if (!isRecord(body)) {
+        return undefined;
+    }
+    const data = body["data"];
+    if (!isRecord(data)) {
+        return undefined;
+    }
+    const repository = data["repository"];
+    if (!isRecord(repository)) {
+        return undefined;
+    }
+    const pullRequest = repository["pullRequest"];
+    if (!isRecord(pullRequest)) {
+        return undefined;
+    }
+    const threads = pullRequest["reviewThreads"];
+    return isRecord(threads) ? threads : undefined;
+};
+
+/** REST comment id of a thread's root comment, if the node carries one. */
+const threadRootCommentIdOf = (
+    node: Record<string, unknown>,
+): number | undefined => {
+    const comments = node["comments"];
+    if (!isRecord(comments)) {
+        return undefined;
+    }
+    const [first] = asArray(comments["nodes"]);
+    if (!isRecord(first)) {
+        return undefined;
+    }
+    const id = first["databaseId"];
+    return typeof id === "number" && Number.isInteger(id) ? id : undefined;
+};
+
+/** The cursor for the next threads page, or null when this was the last. */
+const nextThreadsCursorOf = (
+    threads: Record<string, unknown>,
+): string | null => {
+    const pageInfo = threads["pageInfo"];
+    if (!isRecord(pageInfo) || pageInfo["hasNextPage"] !== true) {
+        return null;
+    }
+    const cursor = pageInfo["endCursor"];
+    return typeof cursor === "string" ? cursor : null;
+};
+
 /** One traversed comment, before its reactions are resolved. */
 type CandidateComment = {
     grain: FeedbackGrain;
@@ -212,12 +313,14 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
     private readonly botLogin: string;
     private readonly lookbackDays: number;
     private readonly maxPulls: number;
+    private readonly closedGraceDays: number;
     private readonly summaryMarkers: readonly string[];
     private readonly now: number | undefined;
 
     private apiRequests = 0;
-    private thumbsUp = 0;
-    private thumbsDown = 0;
+    private positiveReactions = 0;
+    private negativeReactions = 0;
+    private resolvedInlineThreads = 0;
     private pullsScanned = 0;
 
     /** (grain, commentId) -> PR number, filled by the traversal. */
@@ -237,6 +340,8 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
         this.botLogin = options.botLogin;
         this.lookbackDays = options.lookbackDays ?? DEFAULT_LOOKBACK_DAYS;
         this.maxPulls = options.maxPulls ?? DEFAULT_MAX_PULLS;
+        this.closedGraceDays =
+            options.closedGraceDays ?? DEFAULT_CLOSED_GRACE_DAYS;
         this.summaryMarkers = (options.reviewWorkflowIds ?? ["review"]).map(
             (workflowId) =>
                 workflowCallIdMarker(options.owner, options.repo, workflowId),
@@ -249,7 +354,11 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
         return {
             pullsScanned: this.pullsScanned,
             apiRequests: this.apiRequests,
-            thumbs: {up: this.thumbsUp, down: this.thumbsDown},
+            reactions: {
+                positive: this.positiveReactions,
+                negative: this.negativeReactions,
+            },
+            resolvedInlineThreads: this.resolvedInlineThreads,
         };
     }
 
@@ -299,25 +408,6 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
         );
     }
 
-    async addReactions(
-        grain: FeedbackGrain,
-        commentId: number,
-        contents: readonly string[],
-    ): Promise<void> {
-        const route =
-            grain === "inline"
-                ? "POST /repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions"
-                : "POST /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions";
-        for (const content of contents) {
-            await this.write(route, {
-                owner: this.owner,
-                repo: this.repo,
-                comment_id: commentId,
-                content,
-            });
-        }
-    }
-
     private load() {
         this.snapshot ??= this.traverse();
         return this.snapshot;
@@ -360,10 +450,16 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
         }
     }
 
-    /** PR numbers updated within the lookback window, newest first, capped. */
+    /**
+     * PR numbers updated within the lookback window, newest first, capped.
+     * Closed/merged PRs past the closed-grace window are skipped: feedback
+     * lands around merge time, so a short grace period captures the post-merge
+     * tail without re-sweeping long-landed PRs forever.
+     */
     private async recentPullNumbers(): Promise<number[]> {
-        const cutoff =
-            (this.now ?? Date.now()) - this.lookbackDays * 24 * 60 * 60 * 1000;
+        const nowMs = this.now ?? Date.now();
+        const cutoff = nowMs - this.lookbackDays * DAY_MS;
+        const closedCutoff = nowMs - this.closedGraceDays * DAY_MS;
         const numbers: number[] = [];
         for (let page = 1; numbers.length < this.maxPulls; page += 1) {
             const data = await this.get("GET /repos/{owner}/{repo}/pulls", {
@@ -391,6 +487,15 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
                 if (Date.parse(updatedAt) < cutoff) {
                     // Sorted by updated desc: everything after is older still.
                     return numbers;
+                }
+                const closedAt = pull["closed_at"];
+                if (
+                    pull["state"] === "closed" &&
+                    typeof closedAt === "string" &&
+                    Date.parse(closedAt) < closedCutoff
+                ) {
+                    // Skip, but keep scanning: update order is not close order.
+                    continue;
                 }
                 numbers.push(number);
                 if (numbers.length >= this.maxPulls) {
@@ -498,12 +603,14 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
             const reactions = await this.reactionsFor(candidate);
             for (const reaction of reactions) {
                 if (reaction.user === this.botLogin) {
-                    continue; // Seeded nudges are never live signal.
+                    // The bot's own reactions (e.g. post-time seeded nudges)
+                    // are never live signal.
+                    continue;
                 }
-                if (reaction.content === "+1") {
-                    this.thumbsUp += 1;
-                } else if (reaction.content === "-1") {
-                    this.thumbsDown += 1;
+                if (positive.has(reaction.content)) {
+                    this.positiveReactions += 1;
+                } else if (negative.has(reaction.content)) {
+                    this.negativeReactions += 1;
                 }
             }
             comments.get(candidate.grain)?.push({
@@ -513,6 +620,66 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
             });
         }
 
+        // Resolved inline threads, one GraphQL query per PR that has reviewer
+        // inline comments. Counted here (not fed to the sweep core): resolution
+        // is a reported positive signal, never a follow-up trigger.
+        const inlineByPull = new Map<number, Set<number>>();
+        for (const candidate of candidates) {
+            if (candidate.grain !== "inline") {
+                continue;
+            }
+            const ids = inlineByPull.get(candidate.pullNumber) ?? new Set();
+            ids.add(candidate.id);
+            inlineByPull.set(candidate.pullNumber, ids);
+        }
+        for (const [pullNumber, ids] of inlineByPull) {
+            this.resolvedInlineThreads += await this.resolvedThreadCount(
+                pullNumber,
+                ids,
+            );
+        }
+
         return {comments, followupBodies};
+    }
+
+    /**
+     * Count this PR's resolved review threads whose root comment is one of the
+     * sweep's inline candidates. Thread resolution is only exposed via GraphQL
+     * (`pullRequest.reviewThreads`), not the REST comment listing.
+     */
+    private async resolvedThreadCount(
+        pullNumber: number,
+        candidateIds: ReadonlySet<number>,
+    ): Promise<number> {
+        let resolved = 0;
+        let cursor: string | null = null;
+        do {
+            const data = await this.get("POST /graphql", {
+                query: RESOLVED_THREADS_QUERY,
+                variables: {
+                    owner: this.owner,
+                    repo: this.repo,
+                    number: pullNumber,
+                    cursor,
+                },
+            });
+            const threads = threadsConnectionOf(data);
+            if (threads === undefined) {
+                // Missing/unreadable response (e.g. GraphQL error): report
+                // what was counted so far rather than failing the sweep.
+                return resolved;
+            }
+            for (const node of asArray(threads["nodes"])) {
+                if (!isRecord(node) || node["isResolved"] !== true) {
+                    continue;
+                }
+                const rootId = threadRootCommentIdOf(node);
+                if (rootId !== undefined && candidateIds.has(rootId)) {
+                    resolved += 1;
+                }
+            }
+            cursor = nextThreadsCursorOf(threads);
+        } while (cursor !== null);
+        return resolved;
     }
 }

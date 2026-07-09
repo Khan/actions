@@ -19,12 +19,12 @@
  *   GITHUB_REPOSITORY             `owner/repo`; provided by Actions.
  *   REVIEW_SWEEP_BOT_LOGIN        login the reviewer posts as
  *                                 (default `github-actions[bot]`).
- *   REVIEW_SWEEP_SEED_REACTIONS   `true` to seed the 👍/👎 nudge pair
- *                                 (default `false`).
  *   REVIEW_SWEEP_LOOKBACK_DAYS    PR-activity window (default 14).
  *   REVIEW_SWEEP_MAX_PULLS        traversal cap (default 200).
+ *   REVIEW_SWEEP_CLOSED_GRACE_DAYS  days a closed/merged PR stays in the
+ *                                 sweep after closing (default 3).
  *   REVIEW_SWEEP_DRY_RUN          `true` to traverse and decide without
- *                                 posting or seeding anything (first-run
+ *                                 posting anything (first-run
  *                                 audit; default `false`).
  *   REVIEW_SWEEP_WORKFLOW_IDS     comma-separated gh-aw workflow ids whose
  *                                 call-id markers identify the summary
@@ -79,16 +79,16 @@ export const renderSweepSummary = (
 
     const lines = [
         options.dryRun === true
-            ? "## Thumbs feedback sweep (DRY RUN — nothing was posted or seeded)"
+            ? "## Thumbs feedback sweep (DRY RUN — nothing was posted)"
             : "## Thumbs feedback sweep",
         "",
         `- Reviewer comments swept: **${result.actions.length}** across ${stats.pullsScanned} recently-active PRs`,
-        `- Live thumbs observed (bot's own seeds excluded): **${stats.thumbs.up} 👍 / ${stats.thumbs.down} 👎**`,
+        `- Live reactions observed (bot's own excluded; 👍/❤️/🎉/🚀 vs 👎/😕): **${stats.reactions.positive} positive / ${stats.reactions.negative} negative**`,
+        `- Reviewer inline threads resolved: **${stats.resolvedInlineThreads}**`,
         `- Follow-ups posted this sweep: **${result.followupsPosted}**` +
             ` (already followed up: ${
                 byReason.get("already-followed-up") ?? 0
             })`,
-        `- Nudge reactions seeded this sweep: **${result.reactionsSeeded}**`,
         `- GitHub API requests used: ${stats.apiRequests}`,
     ];
 
@@ -121,9 +121,9 @@ const main = async (): Promise<void> => {
     const [owner, repo] = repository.split("/", 2) as [string, string];
 
     const botLogin = env("REVIEW_SWEEP_BOT_LOGIN") ?? "github-actions[bot]";
-    const seedReactions = env("REVIEW_SWEEP_SEED_REACTIONS") === "true";
     const lookbackDays = intEnv("REVIEW_SWEEP_LOOKBACK_DAYS");
     const maxPulls = intEnv("REVIEW_SWEEP_MAX_PULLS");
+    const closedGraceDays = intEnv("REVIEW_SWEEP_CLOSED_GRACE_DAYS");
     const dryRun = env("REVIEW_SWEEP_DRY_RUN") === "true";
     const reviewWorkflowIds = (env("REVIEW_SWEEP_WORKFLOW_IDS") ?? "review")
         .split(",")
@@ -148,17 +148,17 @@ const main = async (): Promise<void> => {
         reviewWorkflowIds,
         ...(lookbackDays !== undefined ? {lookbackDays} : {}),
         ...(maxPulls !== undefined ? {maxPulls} : {}),
+        ...(closedGraceDays !== undefined ? {closedGraceDays} : {}),
     });
 
     // Dry-run mode (`REVIEW_SWEEP_DRY_RUN=true`): traverse and decide exactly
-    // as a real sweep would, but swallow the two write calls. Useful for a
-    // first-run audit of what a repo's sweep WOULD post/seed.
+    // as a real sweep would, but swallow the write call. Useful for a
+    // first-run audit of what a repo's sweep WOULD post.
     const effectivePort: ThumbsSweepPort = dryRun
         ? {
               listBotComments: (grain) => port.listBotComments(grain),
               listExistingFollowups: () => port.listExistingFollowups(),
               postFollowup: async () => {},
-              addReactions: async () => {},
           }
         : port;
 
@@ -166,7 +166,6 @@ const main = async (): Promise<void> => {
         owner,
         repo,
         botLogin,
-        seedReactions,
     });
     const stats = port.stats();
 

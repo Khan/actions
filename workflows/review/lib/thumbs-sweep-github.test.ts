@@ -20,6 +20,8 @@ const BOT = "github-actions[bot]";
 const NOW = Date.parse("2026-07-08T00:00:00Z");
 const RECENT = "2026-07-07T12:00:00Z"; // inside the 14-day window
 const STALE = "2026-05-01T00:00:00Z"; // far outside it
+const CLOSED_RECENTLY = "2026-07-07T00:00:00Z"; // inside the 3-day closed grace
+const CLOSED_LONG_AGO = "2026-07-03T00:00:00Z"; // past the closed grace
 
 // Production summary comments carry gh-aw's engine-emitted call-id marker,
 // not (yet) the pr-reviewer marker — mirror that shape here.
@@ -48,7 +50,7 @@ const makeFakeGithub = () => {
             id: 101,
             user: {login: BOT},
             body: "**issue (blocking):** off-by-one in the prune loop.",
-            reactions: {total_count: 2},
+            reactions: {total_count: 3},
         },
         {
             // The sweep's own earlier follow-up reply: idempotency source,
@@ -93,9 +95,18 @@ const makeFakeGithub = () => {
     const reactionsByComment: Record<number, unknown[]> = {
         101: [
             {content: "-1", user: {login: "human-dev"}},
-            {content: "+1", user: {login: BOT}}, // seeded; must not count
+            {content: "heart", user: {login: "another-dev"}}, // positive set
+            {content: "+1", user: {login: BOT}}, // the bot's own; must not count
         ],
     };
+
+    // PR #7's review threads: the candidate 101's thread is resolved (counts);
+    // the resolved thread rooted at the human comment 104 must not count.
+    const reviewThreads = [
+        {isResolved: true, comments: {nodes: [{databaseId: 101}]}},
+        {isResolved: false, comments: {nodes: [{databaseId: 103}]}},
+        {isResolved: true, comments: {nodes: [{databaseId: 104}]}},
+    ];
 
     const request: OctokitRequestFn = async (route, params = {}) => {
         if (route === "GET /repos/{owner}/{repo}/pulls") {
@@ -104,7 +115,21 @@ const makeFakeGithub = () => {
                 data:
                     page === 1
                         ? [
-                              {number: 7, updated_at: RECENT},
+                              {number: 7, updated_at: RECENT, state: "open"},
+                              {
+                                  // Closed within the grace window -> swept.
+                                  number: 6,
+                                  updated_at: RECENT,
+                                  state: "closed",
+                                  closed_at: CLOSED_RECENTLY,
+                              },
+                              {
+                                  // Closed past the grace window -> skipped.
+                                  number: 5,
+                                  updated_at: RECENT,
+                                  state: "closed",
+                                  closed_at: CLOSED_LONG_AGO,
+                              },
                               {number: 1, updated_at: STALE},
                           ]
                         : [],
@@ -113,14 +138,43 @@ const makeFakeGithub = () => {
         if (
             route === "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments"
         ) {
-            expect(params["pull_number"]).toBe(7);
-            return {data: params["page"] === 1 ? inlineComments : []};
+            expect([6, 7]).toContain(params["pull_number"]);
+            const items =
+                params["pull_number"] === 7 && params["page"] === 1
+                    ? inlineComments
+                    : [];
+            return {data: items};
         }
         if (
             route === "GET /repos/{owner}/{repo}/issues/{issue_number}/comments"
         ) {
-            expect(params["issue_number"]).toBe(7);
-            return {data: params["page"] === 1 ? issueComments : []};
+            expect([6, 7]).toContain(params["issue_number"]);
+            const items =
+                params["issue_number"] === 7 && params["page"] === 1
+                    ? issueComments
+                    : [];
+            return {data: items};
+        }
+        if (route === "POST /graphql") {
+            const variables = params["variables"] as Record<string, unknown>;
+            expect(variables["number"]).toBe(7); // only PRs with inline candidates
+            return {
+                data: {
+                    data: {
+                        repository: {
+                            pullRequest: {
+                                reviewThreads: {
+                                    pageInfo: {
+                                        hasNextPage: false,
+                                        endCursor: null,
+                                    },
+                                    nodes: reviewThreads,
+                                },
+                            },
+                        },
+                    },
+                },
+            };
         }
         if (
             route ===
@@ -188,9 +242,10 @@ describe("traversal and classification", () => {
 
         const inline = await port.listBotComments("inline");
         expect(inline.map((c) => c.id)).toEqual([101]);
-        // Reactor logins survive so the sweep can exclude the bot's seeds.
+        // Reactor logins survive so the sweep can exclude the bot's own.
         expect(inline[0]?.reactions).toEqual([
             {content: "-1", user: "human-dev"},
+            {content: "heart", user: "another-dev"},
             {content: "+1", user: BOT},
         ]);
 
@@ -202,15 +257,21 @@ describe("traversal and classification", () => {
         expect(followups[0]).toContain("comment-id=999");
     });
 
-    it("stays within the lookback window and reports auditable stats", async () => {
+    it("stays within the lookback + closed-grace windows and reports auditable stats", async () => {
         const {request} = makeFakeGithub();
         const port = makePort(request);
         await port.listBotComments("inline");
 
         const stats = port.stats();
-        expect(stats.pullsScanned).toBe(1); // the stale PR is never traversed
-        // Only the human 👎 counts; the bot's seeded 👍 is excluded.
-        expect(stats.thumbs).toEqual({up: 0, down: 1});
+        // The open PR and the recently-closed PR are traversed; the PR closed
+        // past the grace window and the stale PR are not.
+        expect(stats.pullsScanned).toBe(2);
+        // The human 👎 and ❤️ count (shared reaction sets); the bot's own 👍
+        // is excluded.
+        expect(stats.reactions).toEqual({positive: 1, negative: 1});
+        // Candidate 101's thread is resolved; the non-candidate threads on the
+        // same PR are not counted.
+        expect(stats.resolvedInlineThreads).toBe(1);
         expect(stats.apiRequests).toBeGreaterThan(0);
     });
 });
@@ -249,32 +310,10 @@ describe("writes", () => {
             port.postFollowup({grain: "inline", commentId: 555, body: "?"}),
         ).rejects.toThrow(/unknown comment/);
     });
-
-    it("seeds reactions on the grain-appropriate endpoint", async () => {
-        const {request, writes} = makeFakeGithub();
-        const port = makePort(request);
-        await port.addReactions("inline", 101, ["+1", "-1"]);
-        await port.addReactions("summary", 201, ["+1"]);
-
-        expect(writes.map((w) => [w.route, w.params["content"]])).toEqual([
-            [
-                "POST /repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions",
-                "+1",
-            ],
-            [
-                "POST /repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions",
-                "-1",
-            ],
-            [
-                "POST /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions",
-                "+1",
-            ],
-        ]);
-    });
 });
 
 describe("end-to-end with the sweep core", () => {
-    it("seeds missing nudges and follows up the human 👎 exactly once", async () => {
+    it("follows up the human 👎 exactly once", async () => {
         const {request, writes} = makeFakeGithub();
         const port = makePort(request);
 
@@ -282,12 +321,8 @@ describe("end-to-end with the sweep core", () => {
             owner: "Khan",
             repo: "webapp",
             botLogin: BOT,
-            seedReactions: true,
         });
 
-        // Comment 101 already has the bot's 👍 -> only 👎 is seeded there;
-        // comment 201 has neither -> both are seeded.
-        expect(result.reactionsSeeded).toBe(3);
         // The human 👎 on 101 draws exactly one follow-up, threaded inline.
         expect(result.followupsPosted).toBe(1);
         const followupWrites = writes.filter((w) =>
