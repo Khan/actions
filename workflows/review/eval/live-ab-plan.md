@@ -2,7 +2,9 @@
 
 Status (2026-07-09): Phase 1 implemented in Khan/actions#233 (draft) except the
 trial-case port, which runs as a follow-up on top of it; this plan doc is
-Khan/actions#232. Phases 2 through 5 not started. Each phase is scoped so a separate
+Khan/actions#232. Phases 2a/2b (prompt extraction, case staging) are
+Khan/actions#234, stacked on #233; phase 2c (model dispatch) and phases 3 to 5 not
+started. Each phase is scoped so a separate
 agent can execute it with only this document plus the repo. Phases 1 and 2 are
 independent of each other; Phase 3 needs both; Phase 4 needs Phase 3; Phase 5 (the
 trial-runner skill) is independent of all of them.
