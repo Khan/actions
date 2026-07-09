@@ -169,6 +169,14 @@ export type CorpusCase = {
     policyConflicts: CasePolicyConflict[];
     /** Absent → first review (whole diff in scope). */
     scope?: CaseScope;
+    /**
+     * The PR's unified diff text, when the case exercises the
+     * change-provenance gate: the runner computes the changed-line map from it
+     * and collapses out-of-provenance findings into one note. Absent → the
+     * gate is skipped (every finding treated as change-anchored, the
+     * pre-gate behavior).
+     */
+    diff?: string;
     expected: CaseExpectation;
     /** Absolute or repo-relative path the case was loaded from (provenance). */
     sourcePath: string;
@@ -585,6 +593,10 @@ export const parseCase = (raw: unknown, sourcePath: string): CorpusCase => {
         errors.push("routerConfig: must be an object when present");
     }
 
+    if (raw["diff"] !== undefined && !isNonEmptyString(raw["diff"])) {
+        errors.push("diff: must be a non-empty string when present");
+    }
+
     if (errors.length > 0) {
         throw new CorpusCaseError(sourcePath, errors);
     }
@@ -609,6 +621,9 @@ export const parseCase = (raw: unknown, sourcePath: string): CorpusCase => {
     }
     if (scope !== undefined) {
         result.scope = scope;
+    }
+    if (isNonEmptyString(raw["diff"])) {
+        result.diff = raw["diff"];
     }
     return result;
 };
