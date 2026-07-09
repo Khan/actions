@@ -1,0 +1,297 @@
+/**
+ * Finding-to-spec matching and live metrics (`live-ab-plan.md` Phase 3a).
+ *
+ * A live model run chooses its own finding ids, so the recorded-corpus
+ * metrics (which correlate `expected.mustCatch` ids with posted ids) cannot
+ * score it. Live-enabled cases instead carry labeled defect specs
+ * (`live.mustCatchSpecs` / `live.mustNotFlagSpecs`: path, line window,
+ * mechanism alternates), and this module maps a run's POSTED candidates onto
+ * them:
+ *
+ *  - Deterministic first pass: a candidate matches a spec when its anchor
+ *    agrees with the spec's path (and line window, when both carry one) AND
+ *    any mechanism alternate matches the finding's `failure_scenario` or
+ *    `model_authored_prose`, case-insensitively.
+ *  - Judge fallback (injected, hard-capped): when a spec stays unmatched but
+ *    posted candidates share its file, an async yes/no arbiter may claim the
+ *    match. Fallback matches are recorded as such so a human can audit them.
+ *
+ * `computeLiveMetrics` then aggregates per-case matches into the live
+ * analogues of the recorded suite's numbers: must-catch recall, clean
+ * false-flag, noise, and verdict agreement.
+ */
+
+import type {LiveDefectSpec} from "./corpus/loader";
+import type {CorpusCase} from "./corpus/loader";
+import type {RunCandidate, RunResult} from "./runner";
+
+/* -------------------------------------------------------------------------- */
+/* Matching                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/** How a spec got matched (deterministic pass or the judge fallback). */
+export type MatchVia = "deterministic" | "fallback";
+
+export type SpecMatch = {
+    specKey: string;
+    /** The posted candidate that satisfied the spec. */
+    findingId: string;
+    via: MatchVia;
+};
+
+export type CaseMatchReport = {
+    caseId: string;
+    /** mustCatchSpecs satisfied by a posted candidate. */
+    caught: SpecMatch[];
+    /** mustCatchSpecs no posted candidate satisfied. */
+    missed: string[];
+    /** mustNotFlagSpecs a posted candidate satisfied (false flags). */
+    falseFlags: SpecMatch[];
+    /** Posted candidate ids that satisfied no spec (the noise numerator). */
+    unmatchedFindingIds: string[];
+    /** Number of posted candidates (the noise denominator contribution). */
+    postedCount: number;
+};
+
+/**
+ * The injected fallback arbiter: does `candidate` describe the defect `spec`
+ * names? Used only for specs the deterministic pass left unmatched, and only
+ * against candidates on the spec's file; call count is capped by the caller.
+ */
+export type MatchFallback = (
+    candidate: RunCandidate,
+    spec: LiveDefectSpec,
+) => Promise<boolean>;
+
+export type MatchOptions = {
+    fallback?: MatchFallback;
+    /** Cap on fallback calls per case (default 10). */
+    maxFallbackCalls?: number;
+};
+
+const DEFAULT_MAX_FALLBACK_CALLS = 10;
+
+/** Whether a candidate's anchor agrees with a spec's location. */
+const anchorAgrees = (
+    candidate: RunCandidate,
+    spec: LiveDefectSpec,
+): boolean => {
+    const anchor = candidate.anchor;
+    if (anchor.type === "pr") {
+        // A PR-level comment names no location; mechanism alone decides.
+        return true;
+    }
+    if (anchor.path !== spec.path) {
+        return false;
+    }
+    if (anchor.type === "file" || spec.lineStart === undefined) {
+        return true;
+    }
+    const start = anchor.type === "line" ? anchor.start_line ?? anchor.line : 0;
+    const end = anchor.type === "line" ? anchor.line : 0;
+    // Overlap between the anchor's line range and the spec window.
+    return end >= spec.lineStart && start <= (spec.lineEnd ?? spec.lineStart);
+};
+
+/** Whether any mechanism alternate matches the finding's own description. */
+const mechanismAgrees = (
+    candidate: RunCandidate,
+    spec: LiveDefectSpec,
+): boolean => {
+    const haystack = `${candidate.finding.failure_scenario}\n${candidate.finding.model_authored_prose}`;
+    return spec.mechanism.some((alternate) => {
+        try {
+            return new RegExp(alternate, "i").test(haystack);
+        } catch {
+            // A malformed alternate falls back to a literal substring test
+            // rather than crashing the eval.
+            return haystack.toLowerCase().includes(alternate.toLowerCase());
+        }
+    });
+};
+
+/** The deterministic rule: location AND mechanism. */
+export const matchesSpec = (
+    candidate: RunCandidate,
+    spec: LiveDefectSpec,
+): boolean => anchorAgrees(candidate, spec) && mechanismAgrees(candidate, spec);
+
+/**
+ * Match one case's POSTED candidates against its live specs. Each posted
+ * candidate satisfies at most one spec (first match in spec order), so one
+ * comment cannot claim two defects; each spec is satisfied by at most one
+ * candidate.
+ */
+export const matchCase = async (
+    corpusCase: CorpusCase,
+    result: RunResult,
+    options: MatchOptions = {},
+): Promise<CaseMatchReport> => {
+    const mustCatch = corpusCase.live?.mustCatchSpecs ?? [];
+    const mustNotFlag = corpusCase.live?.mustNotFlagSpecs ?? [];
+    const maxFallbackCalls =
+        options.maxFallbackCalls ?? DEFAULT_MAX_FALLBACK_CALLS;
+
+    const posted = result.postedCandidates;
+    const claimed = new Set<string>(); // candidate ids already used
+    const caught: SpecMatch[] = [];
+    const missed: string[] = [];
+    const falseFlags: SpecMatch[] = [];
+    let fallbackCalls = 0;
+
+    const claim = async (
+        spec: LiveDefectSpec,
+    ): Promise<SpecMatch | undefined> => {
+        for (const candidate of posted) {
+            if (claimed.has(candidate.id)) {
+                continue;
+            }
+            if (matchesSpec(candidate, spec)) {
+                claimed.add(candidate.id);
+                return {
+                    specKey: spec.key,
+                    findingId: candidate.id,
+                    via: "deterministic",
+                };
+            }
+        }
+        if (options.fallback === undefined) {
+            return undefined;
+        }
+        // Fallback: only candidates sharing the spec's file, in posted order.
+        for (const candidate of posted) {
+            if (claimed.has(candidate.id) || candidate.path !== spec.path) {
+                continue;
+            }
+            if (fallbackCalls >= maxFallbackCalls) {
+                return undefined;
+            }
+            fallbackCalls += 1;
+            if (await options.fallback(candidate, spec)) {
+                claimed.add(candidate.id);
+                return {
+                    specKey: spec.key,
+                    findingId: candidate.id,
+                    via: "fallback",
+                };
+            }
+        }
+        return undefined;
+    };
+
+    for (const spec of mustCatch) {
+        const match = await claim(spec);
+        if (match === undefined) {
+            missed.push(spec.key);
+        } else {
+            caught.push(match);
+        }
+    }
+    // A false flag is a real posting failure; the deterministic rule alone
+    // decides it (the fallback exists to rescue recall, not to indict).
+    for (const spec of mustNotFlag) {
+        for (const candidate of posted) {
+            if (claimed.has(candidate.id)) {
+                continue;
+            }
+            if (matchesSpec(candidate, spec)) {
+                claimed.add(candidate.id);
+                falseFlags.push({
+                    specKey: spec.key,
+                    findingId: candidate.id,
+                    via: "deterministic",
+                });
+                break;
+            }
+        }
+    }
+
+    return {
+        caseId: corpusCase.id,
+        caught,
+        missed,
+        falseFlags,
+        unmatchedFindingIds: posted
+            .filter((candidate) => !claimed.has(candidate.id))
+            .map((candidate) => candidate.id),
+        postedCount: posted.length,
+    };
+};
+
+/* -------------------------------------------------------------------------- */
+/* Live metrics                                                               */
+/* -------------------------------------------------------------------------- */
+
+/** One arm's aggregated live numbers. */
+export type LiveMetricsReport = {
+    caseCount: number;
+    /** Specs caught / specs labeled, across every case. */
+    mustCatchRecall: {numerator: number; denominator: number; rate: number};
+    /** Cases whose verdict equals the case's expected verdict. */
+    verdictAgreement: {numerator: number; denominator: number; rate: number};
+    /** must-not-flag specs matched, plus clean cases that blocked. */
+    cleanFalseFlag: {count: number; details: string[]};
+    /** Posted candidates matching no spec / posted candidates. */
+    noise: {numerator: number; denominator: number; rate: number};
+};
+
+export type LiveCaseRun = {
+    corpusCase: CorpusCase;
+    result: RunResult;
+    match: CaseMatchReport;
+};
+
+const rate = (numerator: number, denominator: number): number =>
+    denominator === 0 ? 0 : numerator / denominator;
+
+export const computeLiveMetrics = (runs: LiveCaseRun[]): LiveMetricsReport => {
+    let caughtCount = 0;
+    let specCount = 0;
+    let verdictHits = 0;
+    let unmatched = 0;
+    let posted = 0;
+    const falseFlagDetails: string[] = [];
+
+    for (const {corpusCase, result, match} of runs) {
+        caughtCount += match.caught.length;
+        specCount += match.caught.length + match.missed.length;
+        if (result.verdict.event === corpusCase.expected.verdict) {
+            verdictHits += 1;
+        }
+        unmatched += match.unmatchedFindingIds.length;
+        posted += match.postedCount;
+        for (const flag of match.falseFlags) {
+            falseFlagDetails.push(`${corpusCase.id}:${flag.specKey}`);
+        }
+        if (
+            corpusCase.category === "clean" &&
+            (result.verdict.event !== "APPROVE" ||
+                result.postedCandidates.some((c) => c.blocking))
+        ) {
+            falseFlagDetails.push(`${corpusCase.id}:blocked-clean-case`);
+        }
+    }
+
+    return {
+        caseCount: runs.length,
+        mustCatchRecall: {
+            numerator: caughtCount,
+            denominator: specCount,
+            rate: rate(caughtCount, specCount),
+        },
+        verdictAgreement: {
+            numerator: verdictHits,
+            denominator: runs.length,
+            rate: rate(verdictHits, runs.length),
+        },
+        cleanFalseFlag: {
+            count: falseFlagDetails.length,
+            details: falseFlagDetails,
+        },
+        noise: {
+            numerator: unmatched,
+            denominator: posted,
+            rate: rate(unmatched, posted),
+        },
+    };
+};

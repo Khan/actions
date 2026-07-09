@@ -1,0 +1,276 @@
+import {describe, it, expect} from "vitest";
+
+import {parseCase, type LiveDefectSpec} from "./corpus/loader";
+import {
+    computeLiveMetrics,
+    matchCase,
+    matchesSpec,
+    type LiveCaseRun,
+} from "./live-match";
+import {runCase, type RunCandidate} from "./runner";
+
+const DIFF = [
+    "diff --git a/src/a.ts b/src/a.ts",
+    "--- a/src/a.ts",
+    "+++ b/src/a.ts",
+    "@@ -1,3 +1,4 @@",
+    "-const total = round(cents);",
+    "+const total = subtotal * 1.08;",
+    "+const rounded = total.toFixed(2);",
+    " export {compute};",
+    " // end",
+    "",
+].join("\n");
+
+/** A minimal posted candidate for direct matchesSpec tests. */
+const candidate = (over: Partial<RunCandidate> = {}): RunCandidate => ({
+    id: "cand-1",
+    source: "correctness",
+    lens: "correctness",
+    label: "issue (blocking)",
+    blocking: true,
+    anchor: {type: "line", path: "src/a.ts", line: 1, side: "RIGHT"},
+    path: "src/a.ts",
+    line: 1,
+    body: "**issue (blocking):** float math",
+    finding: {
+        schema_version: 2,
+        id: "cand-1",
+        lens: "correctness",
+        anchor: {type: "line", path: "src/a.ts", line: 1, side: "RIGHT"},
+        severity: "blocking",
+        confidence: 0.8,
+        evidence_trace: ["e"],
+        failure_scenario:
+            "totals computed in floating point drift by a cent on large carts.",
+        producing_hunt: "h",
+        model_authored_prose: "The tax total uses float math and rounds late.",
+    },
+    ...over,
+});
+
+const spec = (over: Partial<LiveDefectSpec> = {}): LiveDefectSpec => ({
+    key: "bug-1",
+    path: "src/a.ts",
+    lineStart: 1,
+    lineEnd: 3,
+    mechanism: ["float(ing)?[- ]?point", "rounds? late"],
+    ...over,
+});
+
+describe("matchesSpec", () => {
+    it("matches on window overlap plus any mechanism alternate", () => {
+        expect(matchesSpec(candidate(), spec())).toBe(true);
+    });
+
+    it("rejects a wrong path and a line outside the window", () => {
+        expect(matchesSpec(candidate(), spec({path: "src/b.ts"}))).toBe(false);
+        expect(
+            matchesSpec(candidate(), spec({lineStart: 10, lineEnd: 12})),
+        ).toBe(false);
+    });
+
+    it("rejects a location match whose mechanism does not agree", () => {
+        expect(
+            matchesSpec(candidate(), spec({mechanism: ["sql injection"]})),
+        ).toBe(false);
+    });
+
+    it("matches file anchors on path alone and pr anchors on mechanism alone", () => {
+        const fileAnchored = candidate({
+            anchor: {type: "file", path: "src/a.ts"},
+        });
+        expect(matchesSpec(fileAnchored, spec())).toBe(true);
+        const prAnchored = candidate({anchor: {type: "pr"}});
+        expect(matchesSpec(prAnchored, spec({path: "src/other.ts"}))).toBe(
+            true,
+        );
+    });
+
+    it("treats a malformed regex alternate as a literal substring", () => {
+        expect(
+            matchesSpec(candidate(), spec({mechanism: ["float math and ("]})),
+        ).toBe(false);
+        expect(
+            matchesSpec(candidate(), spec({mechanism: ["uses float math"]})),
+        ).toBe(true);
+    });
+});
+
+/** Build a live case + deterministic run whose posted set we control. */
+const liveRun = (over: {
+    id?: string;
+    category?: string;
+    mustCatchSpecs?: LiveDefectSpec[];
+    mustNotFlagSpecs?: LiveDefectSpec[];
+    findings?: unknown[];
+    expectedVerdict?: string;
+}) => {
+    const corpusCase = parseCase(
+        {
+            id: over.id ?? "match-case",
+            tags: ["live"],
+            category: over.category ?? "incident-repro",
+            description: "matcher fixture",
+            changedFiles: [{path: "src/a.ts", status: "modified"}],
+            expected: {verdict: over.expectedVerdict ?? "REQUEST_CHANGES"},
+            diff: DIFF,
+            findings: (over.findings ?? []).map((finding) => ({
+                source: "correctness",
+                finding,
+            })),
+            live: {
+                prContext: {
+                    title: "t",
+                    description: "",
+                    author: "a",
+                    baseBranch: "main",
+                },
+                ...(over.mustCatchSpecs
+                    ? {mustCatchSpecs: over.mustCatchSpecs}
+                    : {}),
+                ...(over.mustNotFlagSpecs
+                    ? {mustNotFlagSpecs: over.mustNotFlagSpecs}
+                    : {}),
+            },
+        },
+        `test://${over.id ?? "match-case"}`,
+    );
+    return {corpusCase, result: runCase(corpusCase)};
+};
+
+const finding = (id: string, prose: string, severity = "blocking") => ({
+    schema_version: 2,
+    id,
+    lens: "correctness",
+    anchor: {type: "line", path: "src/a.ts", line: 1, side: "RIGHT"},
+    severity,
+    confidence: 0.8,
+    evidence_trace: ["e"],
+    failure_scenario: prose,
+    producing_hunt: "h",
+    model_authored_prose: prose,
+});
+
+describe("matchCase", () => {
+    it("reports caught, missed, and unmatched findings", async () => {
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [
+                spec({key: "float-bug"}),
+                spec({key: "never-found", mechanism: ["deadlock"]}),
+            ],
+            findings: [
+                finding("f-float", "floating point totals round late."),
+                finding("f-noise", "the variable name is unclear.", "advisory"),
+            ],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught).toEqual([
+            {specKey: "float-bug", findingId: "f-float", via: "deterministic"},
+        ]);
+        expect(match.missed).toEqual(["never-found"]);
+        expect(match.unmatchedFindingIds).toEqual(["f-noise"]);
+        expect(match.postedCount).toBe(2);
+    });
+
+    it("never lets one candidate satisfy two specs", async () => {
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [spec({key: "first"}), spec({key: "second"})],
+            findings: [finding("f-only", "floating point rounds late.")],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught.length).toBe(1);
+        expect(match.missed).toEqual(["second"]);
+    });
+
+    it("flags must-not-flag specs deterministically", async () => {
+        const {corpusCase, result} = liveRun({
+            mustNotFlagSpecs: [
+                spec({key: "trap", mechanism: ["500.entity|batch cap"]}),
+            ],
+            findings: [
+                finding("f-trap", "the delete exceeds the 500-entity cap."),
+            ],
+            expectedVerdict: "REQUEST_CHANGES",
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.falseFlags[0]?.specKey).toBe("trap");
+        expect(match.unmatchedFindingIds).toEqual([]);
+    });
+
+    it("uses the capped fallback only for same-file leftovers and records it", async () => {
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [spec({key: "subtle", mechanism: ["off.by.one"]})],
+            findings: [
+                finding("f-vague", "the loop boundary looks wrong here."),
+            ],
+        });
+        const calls: string[] = [];
+        const match = await matchCase(corpusCase, result, {
+            fallback: async (cand, s) => {
+                calls.push(`${cand.id}->${s.key}`);
+                return true;
+            },
+        });
+        expect(calls).toEqual(["f-vague->subtle"]);
+        expect(match.caught).toEqual([
+            {specKey: "subtle", findingId: "f-vague", via: "fallback"},
+        ]);
+
+        const capped = await matchCase(corpusCase, result, {
+            fallback: async () => true,
+            maxFallbackCalls: 0,
+        });
+        expect(capped.missed).toEqual(["subtle"]);
+    });
+});
+
+describe("computeLiveMetrics", () => {
+    it("aggregates recall, verdict agreement, noise, and clean false flags", async () => {
+        const incident = liveRun({
+            id: "case-incident",
+            mustCatchSpecs: [
+                spec({key: "hit"}),
+                spec({key: "miss", mechanism: ["deadlock"]}),
+            ],
+            findings: [
+                finding("f-hit", "floating point rounds late."),
+                finding("f-extra", "naming could be better.", "advisory"),
+            ],
+        });
+        // A clean case that wrongly blocks.
+        const clean = liveRun({
+            id: "case-clean",
+            category: "clean",
+            expectedVerdict: "APPROVE",
+            findings: [finding("f-block", "this blocks for no reason.")],
+        });
+        const runs: LiveCaseRun[] = [];
+        for (const {corpusCase, result} of [incident, clean]) {
+            runs.push({
+                corpusCase,
+                result,
+                match: await matchCase(corpusCase, result),
+            });
+        }
+        const metrics = computeLiveMetrics(runs);
+        expect(metrics.caseCount).toBe(2);
+        expect(metrics.mustCatchRecall).toEqual({
+            numerator: 1,
+            denominator: 2,
+            rate: 0.5,
+        });
+        // incident expected REQUEST_CHANGES and blocked: agreement; clean
+        // expected APPROVE but blocked: disagreement.
+        expect(metrics.verdictAgreement.numerator).toBe(1);
+        expect(metrics.cleanFalseFlag.details).toContain(
+            "case-clean:blocked-clean-case",
+        );
+        // Noise: f-extra and f-block matched nothing (3 posted total).
+        expect(metrics.noise).toEqual({
+            numerator: 2,
+            denominator: 3,
+            rate: 2 / 3,
+        });
+    });
+});
