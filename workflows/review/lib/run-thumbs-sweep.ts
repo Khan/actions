@@ -23,6 +23,12 @@
  *                                 (default `false`).
  *   REVIEW_SWEEP_LOOKBACK_DAYS    PR-activity window (default 14).
  *   REVIEW_SWEEP_MAX_PULLS        traversal cap (default 200).
+ *   REVIEW_SWEEP_DRY_RUN          `true` to traverse and decide without
+ *                                 posting or seeding anything (first-run
+ *                                 audit; default `false`).
+ *   REVIEW_SWEEP_WORKFLOW_IDS     comma-separated gh-aw workflow ids whose
+ *                                 call-id markers identify the summary
+ *                                 comment (default `review`).
  *
  * Output: the full {@link SweepResult} as JSON on stdout, and — when
  * `GITHUB_STEP_SUMMARY` is set — a Markdown digest appended to the job summary
@@ -31,9 +37,11 @@
 
 import {appendFileSync} from "node:fs";
 
-import {Octokit} from "octokit";
-
-import {sweepThumbs, type SweepResult} from "./thumbs-sweep.ts";
+import {
+    sweepThumbs,
+    type SweepResult,
+    type ThumbsSweepPort,
+} from "./thumbs-sweep.ts";
 import {
     GithubThumbsSweepPort,
     type OctokitRequestFn,
@@ -61,6 +69,7 @@ const intEnv = (name: string): number | undefined => {
 export const renderSweepSummary = (
     result: SweepResult,
     stats: SweepTraversalStats,
+    options: {dryRun?: boolean} = {},
 ): string => {
     const byReason = new Map<string, number>();
     for (const action of result.actions) {
@@ -69,7 +78,9 @@ export const renderSweepSummary = (
     const downvoted = result.actions.filter((a) => a.downvotes > 0);
 
     const lines = [
-        "## Thumbs feedback sweep",
+        options.dryRun === true
+            ? "## Thumbs feedback sweep (DRY RUN — nothing was posted or seeded)"
+            : "## Thumbs feedback sweep",
         "",
         `- Reviewer comments swept: **${result.actions.length}** across ${stats.pullsScanned} recently-active PRs`,
         `- Live thumbs observed (bot's own seeds excluded): **${stats.thumbs.up} 👍 / ${stats.thumbs.down} 👎**`,
@@ -113,10 +124,19 @@ const main = async (): Promise<void> => {
     const seedReactions = env("REVIEW_SWEEP_SEED_REACTIONS") === "true";
     const lookbackDays = intEnv("REVIEW_SWEEP_LOOKBACK_DAYS");
     const maxPulls = intEnv("REVIEW_SWEEP_MAX_PULLS");
+    const dryRun = env("REVIEW_SWEEP_DRY_RUN") === "true";
+    const reviewWorkflowIds = (env("REVIEW_SWEEP_WORKFLOW_IDS") ?? "review")
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => id !== "");
 
     // `Octokit` from the `octokit` package ships the throttling/retry plugins,
     // so secondary-rate-limit pauses are handled by the client instead of
-    // failing the scheduled run.
+    // failing the scheduled run. Loaded with a dynamic import because the
+    // package is ESM-only while tsx runs this script as CJS (no `"type":
+    // "module"` in this package); `import()` crosses that boundary, a static
+    // import cannot.
+    const {Octokit} = await import("octokit");
     const octokit = new Octokit({auth: token});
     const request: OctokitRequestFn = (route, params) =>
         octokit.request(route, params);
@@ -125,11 +145,24 @@ const main = async (): Promise<void> => {
         owner,
         repo,
         botLogin,
+        reviewWorkflowIds,
         ...(lookbackDays !== undefined ? {lookbackDays} : {}),
         ...(maxPulls !== undefined ? {maxPulls} : {}),
     });
 
-    const result = await sweepThumbs(port, {
+    // Dry-run mode (`REVIEW_SWEEP_DRY_RUN=true`): traverse and decide exactly
+    // as a real sweep would, but swallow the two write calls. Useful for a
+    // first-run audit of what a repo's sweep WOULD post/seed.
+    const effectivePort: ThumbsSweepPort = dryRun
+        ? {
+              listBotComments: (grain) => port.listBotComments(grain),
+              listExistingFollowups: () => port.listExistingFollowups(),
+              postFollowup: async () => {},
+              addReactions: async () => {},
+          }
+        : port;
+
+    const result = await sweepThumbs(effectivePort, {
         owner,
         repo,
         botLogin,
@@ -137,11 +170,16 @@ const main = async (): Promise<void> => {
     });
     const stats = port.stats();
 
-    process.stdout.write(`${JSON.stringify({result, stats}, null, 2)}\n`);
+    process.stdout.write(
+        `${JSON.stringify({dryRun, result, stats}, null, 2)}\n`,
+    );
 
     const summaryPath = env("GITHUB_STEP_SUMMARY");
     if (summaryPath !== undefined) {
-        appendFileSync(summaryPath, renderSweepSummary(result, stats));
+        appendFileSync(
+            summaryPath,
+            renderSweepSummary(result, stats, {dryRun}),
+        );
     }
 };
 

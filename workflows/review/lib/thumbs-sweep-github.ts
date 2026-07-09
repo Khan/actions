@@ -11,11 +11,14 @@
  *
  * How the reviewer's comments are identified (per grain):
  *
- *   - `summary` — issue comments authored by `botLogin` that carry the
- *     workflow's hidden risks/patterns marker (`pr-reviewer:risks-and-patterns`,
- *     the exact marker line `review.md` Step 7 requires the comment to begin
- *     with). The marker, not the author, is what scopes the sweep to the
- *     reviewer: `github-actions[bot]` authors many other workflows' comments.
+ *   - `summary` — issue comments authored by `botLogin` that carry one of the
+ *     workflow's hidden markers: the risks/patterns marker
+ *     (`pr-reviewer:risks-and-patterns`, the exact marker line `review.md`
+ *     Step 7 requires the comment to begin with) or gh-aw's engine-emitted
+ *     `gh-aw-workflow-call-id` marker for the repo's review install (what
+ *     observed production comments actually carry). The marker, not the
+ *     author, is what scopes the sweep to the reviewer:
+ *     `github-actions[bot]` authors many other workflows' comments.
  *   - `inline` — pull-request review comments authored by `botLogin` whose body
  *     starts with one of the reviewer's code-owned Conventional-Comment labels
  *     (`**issue (blocking):** …`, `render-comment.ts`'s taxonomy). Inline
@@ -64,6 +67,21 @@ export type OctokitRequestFn = (
 export const SUMMARY_COMMENT_MARKER = "<!-- pr-reviewer:risks-and-patterns -->";
 
 /**
+ * The engine-emitted marker gh-aw appends to every comment a workflow posts:
+ * `<!-- gh-aw-workflow-call-id: <owner>/<repo>/<workflow-id> -->`. Observed
+ * production summary comments carry this but not the `pr-reviewer` marker
+ * (the orchestrator's marker line is not reliably emitted on older pins), so
+ * the sweep accepts either. The reviewer's only `add-comment` output is the
+ * risks/patterns comment (`max: 1`, status comments disabled), so scoping by
+ * the review workflow's call id is exact, not heuristic.
+ */
+export const workflowCallIdMarker = (
+    owner: string,
+    repo: string,
+    workflowId: string,
+): string => `<!-- gh-aw-workflow-call-id: ${owner}/${repo}/${workflowId} -->`;
+
+/**
  * Body prefixes that identify a reviewer inline comment: the code-owned
  * Conventional-Comment label taxonomy, exactly as `renderComment` templates it
  * (`**<label>:** …`). Built from `render-comment.ts`'s canonical label lists so
@@ -79,8 +97,12 @@ export const isReviewerInlineBody = (body: string): boolean =>
     INLINE_COMMENT_PREFIXES.some((prefix) => body.startsWith(prefix));
 
 /** Whether a body is the reviewer's risks/patterns summary comment. */
-export const isReviewerSummaryBody = (body: string): boolean =>
-    body.includes(SUMMARY_COMMENT_MARKER);
+export const isReviewerSummaryBody = (
+    body: string,
+    extraMarkers: readonly string[] = [],
+): boolean =>
+    body.includes(SUMMARY_COMMENT_MARKER) ||
+    extraMarkers.some((marker) => body.includes(marker));
 
 /** Whether a body is a thumbs-sweep follow-up (any grain). */
 export const isFollowupBody = (body: string): boolean =>
@@ -96,6 +118,12 @@ export type GithubThumbsSweepOptions = {
     lookbackDays?: number;
     /** Hard cap on PRs traversed per sweep. Default 200. */
     maxPulls?: number;
+    /**
+     * The gh-aw workflow id(s) of the repo's review install(s), used to build
+     * the {@link workflowCallIdMarker}(s) that identify the summary comment.
+     * Default `["review"]`; a repo running a preview arm adds its id here.
+     */
+    reviewWorkflowIds?: readonly string[];
     /** Clock override (ms since epoch) so tests can pin the lookback window. */
     now?: number;
 };
@@ -184,6 +212,7 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
     private readonly botLogin: string;
     private readonly lookbackDays: number;
     private readonly maxPulls: number;
+    private readonly summaryMarkers: readonly string[];
     private readonly now: number | undefined;
 
     private apiRequests = 0;
@@ -208,6 +237,10 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
         this.botLogin = options.botLogin;
         this.lookbackDays = options.lookbackDays ?? DEFAULT_LOOKBACK_DAYS;
         this.maxPulls = options.maxPulls ?? DEFAULT_MAX_PULLS;
+        this.summaryMarkers = (options.reviewWorkflowIds ?? ["review"]).map(
+            (workflowId) =>
+                workflowCallIdMarker(options.owner, options.repo, workflowId),
+        );
         this.now = options.now;
     }
 
@@ -452,7 +485,9 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
                 }
             };
             classify("inline", inline, isReviewerInlineBody);
-            classify("summary", summary, isReviewerSummaryBody);
+            classify("summary", summary, (body) =>
+                isReviewerSummaryBody(body, this.summaryMarkers),
+            );
         }
 
         const comments = new Map<FeedbackGrain, BotComment[]>([

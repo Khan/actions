@@ -21,7 +21,14 @@ const NOW = Date.parse("2026-07-08T00:00:00Z");
 const RECENT = "2026-07-07T12:00:00Z"; // inside the 14-day window
 const STALE = "2026-05-01T00:00:00Z"; // far outside it
 
+// Production summary comments carry gh-aw's engine-emitted call-id marker,
+// not (yet) the pr-reviewer marker — mirror that shape here.
 const SUMMARY_BODY = [
+    "## Review Guidance",
+    "<!-- gh-aw-workflow-call-id: Khan/webapp/review -->",
+].join("\n");
+
+const PR_REVIEWER_SUMMARY_BODY = [
     "<!-- pr-reviewer:risks-and-patterns -->",
     "## Review Guidance",
     "<!-- pr-reviewer:version v=review-v1.4.0 schema=1 -->",
@@ -160,8 +167,16 @@ describe("comment identification", () => {
         expect(isReviewerInlineBody("regular prose")).toBe(false);
     });
 
-    it("identifies the summary comment by its hidden marker", () => {
-        expect(isReviewerSummaryBody(SUMMARY_BODY)).toBe(true);
+    it("identifies the summary comment by either hidden marker", () => {
+        // The spec'd pr-reviewer marker matches unconditionally.
+        expect(isReviewerSummaryBody(PR_REVIEWER_SUMMARY_BODY)).toBe(true);
+        // The engine-emitted call-id marker matches when configured.
+        expect(isReviewerSummaryBody(SUMMARY_BODY)).toBe(false);
+        expect(
+            isReviewerSummaryBody(SUMMARY_BODY, [
+                "<!-- gh-aw-workflow-call-id: Khan/webapp/review -->",
+            ]),
+        ).toBe(true);
         expect(isReviewerSummaryBody("Test results: all green")).toBe(false);
     });
 });
