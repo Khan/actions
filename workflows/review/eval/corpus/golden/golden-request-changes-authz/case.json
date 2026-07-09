@@ -1,0 +1,73 @@
+{
+    "id": "golden-request-changes-authz",
+    "tags": [
+        "golden",
+        "security-auth",
+        "holdout",
+        "live"
+    ],
+    "category": "golden",
+    "description": "Golden HOLDOUT case from a merged webapp PR that was later reverted: a human flagged a missing authorization check on a new admin endpoint as blocking, and the PR was changed. Ground truth = that blocking comment.",
+    "changedFiles": [
+        {
+            "path": "src/api/admin_routes.py",
+            "status": "added"
+        }
+    ],
+    "findings": [
+        {
+            "source": "security-auth",
+            "finding": {
+                "schema_version": 2,
+                "id": "golden-authz-missing",
+                "lens": "security-auth",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/api/admin_routes.py",
+                    "line": 20,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "src/api/admin_routes.py:18 defines POST /admin/reset with no @requires_admin decorator",
+                    "every other handler in this module carries @requires_admin",
+                    "the human reviewer flagged this exact line and the PR added the decorator before merge"
+                ],
+                "failure_scenario": "A logged-in non-admin calls this endpoint and the handler runs, exposing the admin action to any account.",
+                "producing_hunt": "security-auth:missing-authz-decorator",
+                "model_authored_prose": "This new admin endpoint has no authorization decorator, unlike its siblings in this module. Add @requires_admin so a non-admin cannot invoke it."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": [
+            "golden-authz-missing"
+        ]
+    },
+    "diff": "diff --git a/src/api/admin_routes.py b/src/api/admin_routes.py\nnew file mode 100644\n--- /dev/null\n+++ b/src/api/admin_routes.py\n@@ -0,0 +1,24 @@\n+\"\"\"Admin maintenance routes.\n+\n+Every route in this blueprint is mounted under /api/admin by create_app().\n+\"\"\"\n+from flask import Blueprint, jsonify\n+\n+from app.auth.decorators import require_admin\n+from app.models.users import delete_user_content, lookup_user\n+\n+admin_bp = Blueprint(\"admin\", __name__)\n+\n+\n+@admin_bp.get(\"/users/<user_id>\")\n+@require_admin\n+def get_user(user_id):\n+    \"\"\"Inspect a user record (support tooling).\"\"\"\n+    return jsonify(lookup_user(user_id))\n+\n+\n+@admin_bp.post(\"/users/<user_id>/purge\")\n+def purge_user_content(user_id):\n+    \"\"\"Hard-delete a user's content (GDPR erasure requests).\"\"\"\n+    delete_user_content(user_id)\n+    return jsonify({\"status\": \"purged\", \"user_id\": user_id})\n",
+    "live": {
+        "prContext": {
+            "title": "admin: add user purge endpoint for GDPR erasure",
+            "description": "Support needs a button to hard-delete user content on verified erasure requests.",
+            "author": "dev-trust",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "golden-authz-missing",
+                "path": "src/api/admin_routes.py",
+                "mechanism": [
+                    "require_admin",
+                    "authoriz|permission",
+                    "any (logged.in )?user|unauthenticated|without.*admin"
+                ],
+                "lens": "security-auth",
+                "lineStart": 15,
+                "lineEnd": 25
+            }
+        ]
+    }
+}

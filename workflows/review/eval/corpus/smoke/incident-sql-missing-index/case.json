@@ -1,0 +1,83 @@
+{
+    "id": "incident-sql-missing-index",
+    "tags": [
+        "smoke",
+        "incident",
+        "data-migrations",
+        "live"
+    ],
+    "category": "incident-repro",
+    "description": "Repro of a production incident: a migration adds a column filtered by a hot query but no index, causing a table scan under load. The data-migrations lens must catch it and block.",
+    "changedFiles": [
+        {
+            "path": "db/migrations/20260601_add_status.sql",
+            "status": "added"
+        },
+        {
+            "path": "src/models/order.ts",
+            "status": "modified"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "data-migrations",
+            "finding": {
+                "schema_version": 2,
+                "id": "dm-missing-index-1",
+                "lens": "data-migrations",
+                "anchor": {
+                    "type": "line",
+                    "path": "db/migrations/20260601_add_status.sql",
+                    "line": 3,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "db/migrations/20260601_add_status.sql:3 adds column `status` to `orders`",
+                    "src/models/order.ts filters `WHERE status = ?` on a table with millions of rows",
+                    "no CREATE INDEX accompanies the column, so the query degrades to a full table scan"
+                ],
+                "failure_scenario": "Once the table grows, the `status` filter in order.ts runs as a full table scan and the hot query times out under load.",
+                "producing_hunt": "data-migrations:index-coverage",
+                "model_authored_prose": "This migration adds `status` but no index, yet `order.ts` filters on it \u2014 add an index for `status` or the hot query will table-scan under load.",
+                "suggested_patch": "CREATE INDEX CONCURRENTLY idx_orders_status ON orders (status);"
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": [
+            "dm-missing-index-1"
+        ]
+    },
+    "diff": "diff --git a/db/migrations/20260601_add_status.sql b/db/migrations/20260601_add_status.sql\nnew file mode 100644\n--- /dev/null\n+++ b/db/migrations/20260601_add_status.sql\n@@ -0,0 +1,3 @@\n+-- Add a fulfillment status to orders so the picker UI can filter work.\n+ALTER TABLE orders\n+    ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';\ndiff --git a/src/models/order.ts b/src/models/order.ts\n--- a/src/models/order.ts\n+++ b/src/models/order.ts\n@@ -4,13 +4,15 @@\n     id: string;\n     customerId: string;\n     createdAt: string;\n+    status: string;\n };\n \n-/** The picker dashboard's work queue: newest orders first. */\n+/** The picker dashboard's work queue: pending orders, newest first. */\n export const listOrders = async (limit: number): Promise<Order[]> => {\n     return sql`\n-        SELECT id, customer_id, created_at\n+        SELECT id, customer_id, created_at, status\n         FROM orders\n+        WHERE status = 'pending'\n         ORDER BY created_at DESC\n         LIMIT ${limit}\n     `;\n",
+    "live": {
+        "prContext": {
+            "title": "orders: add fulfillment status and filter the work queue",
+            "description": "The picker dashboard should only show pending orders. Adds an orders.status column and filters the hot listOrders query on it.",
+            "author": "dev-fulfillment",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "dm-missing-index-1",
+                "path": "db/migrations/20260601_add_status.sql",
+                "mechanism": [
+                    "index",
+                    "table scan|full scan|seq(uential)? scan",
+                    "hot query|under load"
+                ],
+                "lens": "data-migrations",
+                "lineStart": 1,
+                "lineEnd": 5
+            }
+        ]
+    }
+}

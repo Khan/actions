@@ -1,0 +1,79 @@
+{
+    "id": "incident-cache-missing-key",
+    "tags": [
+        "smoke",
+        "incident",
+        "caching-resource",
+        "live"
+    ],
+    "category": "incident-repro",
+    "description": "Repro of a cache-poisoning incident: a cache key omits the tenant id, so one tenant's response is served to another. The caching-resource lens must catch it and block.",
+    "changedFiles": [
+        {
+            "path": "src/cache/user-profile.ts",
+            "status": "modified"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "caching-resource",
+            "finding": {
+                "schema_version": 2,
+                "id": "cache-missing-tenant-1",
+                "lens": "caching-resource",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/cache/user-profile.ts",
+                    "line": 7,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "src/cache/user-profile.ts:19 builds the cache key from `userId` only",
+                    "the same `userId` space is reused across tenants in this deployment",
+                    "a hit for tenant A's user can return tenant B's cached profile"
+                ],
+                "failure_scenario": "Tenant A caches the profile for user id 7; tenant B's user id 7 then reads tenant A's profile from the colliding key.",
+                "producing_hunt": "caching-resource:key-completeness",
+                "model_authored_prose": "This cache key omits the tenant id, so identical user ids across tenants collide and leak one tenant's profile to another. Include the tenant id in the key.",
+                "suggested_patch": "const key = `profile:${tenantId}:${userId}`;"
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": [
+            "cache-missing-tenant-1"
+        ]
+    },
+    "diff": "diff --git a/src/cache/user-profile.ts b/src/cache/user-profile.ts\n--- a/src/cache/user-profile.ts\n+++ b/src/cache/user-profile.ts\n@@ -3,12 +3,15 @@\n \n const TTL_SECONDS = 300;\n \n-/** Cached read of a user's profile, keyed per tenant and user. */\n+/** Canonical cache key for a profile entry. */\n+const profileKey = (userId: string): string => `user-profile:${userId}`;\n+\n+/** Cached read of a user's profile. */\n export const getUserProfile = async (\n     tenantId: string,\n     userId: string,\n ): Promise<UserProfile> => {\n-    const key = `user-profile:${tenantId}:${userId}`;\n+    const key = profileKey(userId);\n     const cached = await cacheGet<UserProfile>(key);\n     if (cached !== null) {\n         return cached;\n",
+    "live": {
+        "prContext": {
+            "title": "cache: extract a canonical profileKey helper",
+            "description": "Pulls cache-key construction into one helper ahead of adding the avatar cache.",
+            "author": "dev-growth",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "cache-missing-tenant-1",
+                "path": "src/cache/user-profile.ts",
+                "mechanism": [
+                    "tenant",
+                    "cross.tenant|another tenant|wrong tenant",
+                    "cache key.*(omit|missing|drop)|(omit|missing|drop).*cache key"
+                ],
+                "lens": "caching-resource",
+                "lineStart": 1,
+                "lineEnd": 15
+            }
+        ]
+    }
+}

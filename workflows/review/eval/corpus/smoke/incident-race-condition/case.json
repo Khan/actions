@@ -1,0 +1,79 @@
+{
+    "id": "incident-race-condition",
+    "tags": [
+        "smoke",
+        "incident",
+        "concurrency-async",
+        "live"
+    ],
+    "category": "incident-repro",
+    "description": "Repro of a concurrency incident: a read-modify-write on a shared counter is not atomic, so concurrent requests lose updates. The concurrency-async lens must catch it and block.",
+    "changedFiles": [
+        {
+            "path": "src/services/quota.ts",
+            "status": "modified"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "concurrency-async",
+            "finding": {
+                "schema_version": 2,
+                "id": "conc-lost-update-1",
+                "lens": "concurrency-async",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/services/quota.ts",
+                    "line": 21,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.85,
+                "evidence_trace": [
+                    "src/services/quota.ts:34 reads `count`, adds 1 in JS, then writes it back",
+                    "the handler runs per-request with no lock or atomic increment",
+                    "two concurrent requests read the same value and one increment is lost"
+                ],
+                "failure_scenario": "Two concurrent requests read count=N, both write N+1, and one increment is silently lost.",
+                "producing_hunt": "concurrency-async:read-modify-write",
+                "model_authored_prose": "This read-modify-write on `count` is not atomic \u2014 concurrent requests will lose increments. Use an atomic DB increment (`UPDATE ... SET count = count + 1`) instead."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": [
+            "conc-lost-update-1"
+        ]
+    },
+    "diff": "diff --git a/src/services/quota.ts b/src/services/quota.ts\n--- a/src/services/quota.ts\n+++ b/src/services/quota.ts\n@@ -1,20 +1,26 @@\n-import {kvGet, kvIncrBy} from \"../store/kv\";\n+import {kvGet, kvSet} from \"../store/kv\";\n \n /** Per-tenant daily API quota accounting. */\n const quotaKey = (tenantId: string, day: string): string =>\n     `quota:${tenantId}:${day}`;\n \n+/** Usage above this ceiling is clamped rather than recorded. */\n+const DAILY_CEILING = 1_000_000;\n+\n /**\n- * Record `amount` units of usage and return the new total. kvIncrBy is a\n- * single atomic server-side increment, so concurrent requests never lose\n- * an update.\n+ * Record `amount` units of usage, clamped to the daily ceiling, and return\n+ * the new total.\n  */\n export const recordUsage = async (\n     tenantId: string,\n     day: string,\n     amount: number,\n ): Promise<number> => {\n-    return kvIncrBy(quotaKey(tenantId, day), amount);\n+    const key = quotaKey(tenantId, day);\n+    const current = (await kvGet<number>(key)) ?? 0;\n+    const next = Math.min(current + amount, DAILY_CEILING);\n+    await kvSet(key, next);\n+    return next;\n };\n \n /** Read the current usage total (0 when unset). */\n",
+    "live": {
+        "prContext": {
+            "title": "quota: clamp recorded usage to a daily ceiling",
+            "description": "Runaway clients could grow the counter unboundedly; clamp at 1M units per day.",
+            "author": "dev-infra",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "conc-lost-update-1",
+                "path": "src/services/quota.ts",
+                "mechanism": [
+                    "read.modify.write",
+                    "atomic",
+                    "lost update|lose.* update|overwrit",
+                    "race|concurrent"
+                ],
+                "lens": "concurrency-async",
+                "lineStart": 15,
+                "lineEnd": 27
+            }
+        ]
+    }
+}
