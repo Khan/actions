@@ -71,6 +71,7 @@ export type ArmRunReport = {
         expected: string;
         caught: number;
         missed: string[];
+        /** `<agent>: <reason>` per failed agent (diagnosable from the report). */
         failedAgents: string[];
     }[];
     judge?: {meanQuality: number; verdictCounts: Record<string, number>};
@@ -132,7 +133,7 @@ export const runArm = async (
             missed: match.missed,
             failedAgents: produced.perAgent
                 .filter((a) => a.failed !== undefined)
-                .map((a) => a.name),
+                .map((a) => `${a.name}: ${a.failed}`),
         });
     }
 
