@@ -98,7 +98,10 @@ const noComments = (): Record<FeedbackGrain, BotComment[]> => ({
 
 describe("reaction seeding and self-reaction filtering", () => {
     const BOT = VALID_CONFIG.botLogin;
-    const seedingConfig: ThumbsSweepConfig = {...VALID_CONFIG, seedReactions: true};
+    const seedingConfig: ThumbsSweepConfig = {
+        ...VALID_CONFIG,
+        seedReactions: true,
+    };
 
     it("seeds one thumbs-up and one thumbs-down on an unseeded comment", async () => {
         const port = new FakePort({
