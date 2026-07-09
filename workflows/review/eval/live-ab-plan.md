@@ -1,8 +1,11 @@
 # Plan: live A/B evals for review-bot changes
 
-Status: planned, not started. Each phase is scoped so a separate agent can execute it
-with only this document plus the repo. Phases 1 and 2 are independent of each other;
-Phase 3 needs both; Phase 4 needs Phase 3.
+Status (2026-07-09): Phase 1 implemented in Khan/actions#233 (draft) except the
+trial-case port, which runs as a follow-up on top of it; this plan doc is
+Khan/actions#232. Phases 2 through 5 not started. Each phase is scoped so a separate
+agent can execute it with only this document plus the repo. Phases 1 and 2 are
+independent of each other; Phase 3 needs both; Phase 4 needs Phase 3; Phase 5 (the
+trial-runner skill) is independent of all of them.
 
 ## Context
 
@@ -99,6 +102,13 @@ playbook's standing rule); gating thresholds are a later human ratification (doc
    except the Phase 4 workflow's PR comment.
 
 ## Phase 1: live-enabled corpus cases
+
+> Status: shipped in Khan/actions#233 except the trial-case port (the
+> Khan/webapp#40690 cases), tracked as a follow-up PR on top of #233. Notes for
+> whoever touches this next: the live half of the format lives in
+> `corpus/live.ts` (the loader re-exports it; `loader.ts` sits near its
+> 1000-line lint cap), and case anchors were REWRITTEN to the authored defect
+> lines rather than padding files to the old synthetic line numbers.
 
 **Goal:** enough corpus cases carry the real change content for a model to review.
 Today only `smoke/provenance-pre-existing-dropped.json` has a `diff` (331 bytes); no
@@ -310,6 +320,48 @@ comparison. New file `eval/live-ab.ts` (plus `eval/live-match.ts` for the matche
 - A changeset (patch is fine; the workflow file is repo CI, but the plan doc and any
   eval code touched ride along).
 
+## Phase 5: a trial-runner skill for seeded live-PR evals
+
+**Goal:** turn the Khan/webapp#40678 trial pattern (isolated copies of one seeded
+PR, each reviewed by a different arm of the real production workflow, lifecycle
+pushes, defect-by-defect scoring) from a hand-choreographed week into a Claude Code
+skill an operator invokes in an afternoon. Independent of Phases 1 to 4; lives in
+this repo as `.claude/skills/review-trial/SKILL.md` (agent-facing instructions plus
+any helper scripts), since the trial choreography belongs to the workflow's owners
+even though a given trial runs in a consuming repo.
+
+What stays human: authoring the seeded branch and the ground-truth defect table
+(seed quality is the whole value of a trial; a model authoring its own seeds would
+grade its own homework). Everything after that is choreography the skill automates:
+
+1. **Setup.** Input: a seeded branch in the consuming repo, the defect table
+   (key, file, mechanism, the same shape as `mustCatchSpecs`), and the list of
+   arms (e.g. a pinned prior release tag, the candidate branch's workflow, the
+   hosted reviewer). For each arm, create an isolated copy of the seeded branch as
+   its own draft PR so no reviewer sees another's comments, and (for workflow arms)
+   point that copy's review workflow at the arm's version. Guard from the round-two
+   doc's operational floor: live shadow arms need DISTINCT workflow names, because
+   same-named workflows share a gh-aw concurrency group per PR and cancel each
+   other.
+2. **Run and collect.** Trigger each arm's review, wait for completion, then pull
+   the run artifacts (findings, claims, verdict, safe outputs) and the billed
+   cost/wall clock per run. Support the lifecycle protocol: optional scripted
+   second and third pushes (fixes plus fresh seeds, then everything fixed) with a
+   re-review per push.
+3. **Score and report.** Match posted comments against the defect table (reusing
+   the Phase 3 matcher once it exists; manual-assisted matching until then),
+   produce the defect-by-defect arm table, verdict/comment/cost summary, and
+   lifecycle economics, in the #40678 report format.
+4. **Export and clean up.** Emit corpus case skeletons from the trial (diff, tree,
+   specs pre-filled; recorded findings from the winning arm's artifacts) so every
+   trial feeds Phase 1's corpus, then close the trial PRs and delete the branches.
+
+Acceptance: re-running the #40678 trial via the skill reproduces its table with an
+afternoon of operator time, and the skill's output includes ready-to-review corpus
+case directories. Cost expectation per the measured trial: roughly $7 to $10 per
+workflow-arm run, times arms, times lifecycle pushes; the skill prints the projected
+total and asks before dispatching.
+
 ## Relationship to seeded live-PR trials (Khan/webapp#40678)
 
 The corpus A/B this plan builds does NOT replace the seeded-defect trial pattern
@@ -333,7 +385,8 @@ for architecture-bet-class changes (the playbook's fourth class, e.g. the
 deterministic orchestrator), for lifecycle/re-review behavior changes, and as a
 periodic ground-truthing before graduating a repo to automatic mode. Every trial
 feeds its seeds back into the corpus ("the corpus compounds"), which is exactly how
-the ten #40678 seeds enter Phase 1.
+the ten #40678 seeds enter Phase 1. Phase 5 above packages the trial choreography
+as a skill so that cadence is actually sustainable.
 
 ## Cost expectations (sanity rail, not a gate)
 
