@@ -15,7 +15,7 @@
         {
             "source": "mass-comms-coppa",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "coppa-retention-note-1",
                 "lens": "mass-comms-coppa",
                 "anchor": {"type": "file", "path": "src/comms/email-collect.ts"},
@@ -26,6 +26,7 @@
                     "COPPA data-minimization policy discourages retaining child contact data",
                     "the audit-retention policy requires keeping contact records for 7 years"
                 ],
+                "failure_scenario": "Whichever policy this code follows, the other is breached: deleting satisfies COPPA minimization but violates audit retention, and keeping does the reverse.",
                 "producing_hunt": "mass-comms-coppa:policy-conflict",
                 "model_authored_prose": "This change sits between two policies that pull in opposite directions (COPPA minimization vs. audit retention); a human should decide which governs here."
             }

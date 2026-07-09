@@ -662,6 +662,7 @@ const runHunt = (hunt: LensHunt, files: DiffFixture[]): HuntOutcome => {
             `hunt ${hunt.id} fired in ${match.path}`,
             match.evidence,
         ],
+        failure_scenario: `the condition hunt ${hunt.id} looks for occurs in ${match.path}`,
         producing_hunt: hunt.id,
         model_authored_prose: hunt.description,
     };

@@ -10,7 +10,7 @@
         {
             "source": "correctness",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "corr-promise-cache-1",
                 "lens": "correctness",
                 "anchor": {"type": "line", "path": "src/certificates/loader.ts", "line": 41, "side": "RIGHT"},
@@ -20,6 +20,7 @@
                     "src/certificates/loader.ts:41 stores the in-flight promise in the module-level cache before it settles",
                     "the catch path never clears the cache entry, so a rejected load is returned to every later caller"
                 ],
+                "failure_scenario": "One network hiccup rejects the load, the rejected promise stays cached, and every later render awaits the same rejection until restart.",
                 "producing_hunt": "correctness:error-handling",
                 "model_authored_prose": "A rejected background load is cached permanently: the promise is stored before it settles and the catch path never clears it, so one network hiccup poisons every later render. Clear the cache entry on rejection."
             }

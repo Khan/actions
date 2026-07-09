@@ -106,6 +106,7 @@ const finding = (over: FindingOverrides = {}): Record<string, unknown> => ({
     severity: over.severity ?? "advisory",
     confidence: over.confidence ?? 0.5,
     evidence_trace: ["synthetic evidence line"],
+    failure_scenario: "synthetic inputs produce the synthetic wrong outcome.",
     producing_hunt: "test:hunt",
     model_authored_prose: "Synthetic finding prose for the eval self-tests.",
 });
