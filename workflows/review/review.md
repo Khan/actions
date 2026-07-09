@@ -566,18 +566,19 @@ by the provenance CLI above), before the scope filter below:
   entry's `added` or `removedAdjacent` list (candidates carry RIGHT-side lines;
   `removedAdjacent` is what lets a deletion finding, anchored beside the removed
   code, pass). Change-anchored candidates continue through the pipeline untouched.
-- Every other candidate is a **pre-existing observation**. It must not carry a
-  blocking label (map any blocking label to `note (non-blocking)`), it does not
-  count toward the verdict, and it does not post as its own comment: remove it from
-  the candidate set now, before validation, and collect it. After Step 5's posting
-  decisions, post all collected pre-existing observations as at most **one**
-  additional top-level comment (no line): a single `note (non-blocking)` whose body
-  says the items are pre-existing and not introduced by this change, with one line
-  per observation (`path:line` plus the finding's own prose) inside a collapsed
-  `<details>` block. Zero collected observations means no note at all.
+- Every other candidate is a **pre-existing observation**. It does not count
+  toward the verdict and it does not post to the PR at all — not as its own
+  comment and not in any collapsed section: remove it from the candidate set now,
+  before validation. Write the removed set to
+  `/tmp/gh-aw/review/out/pre-existing.json` (one entry per observation: the
+  finding's `id`, anchor, and prose) so the run artifact keeps the gate's
+  set-asides inspectable; the artifact is their only destination. A pre-existing
+  issue important enough to surface must anchor on a line the diff actually
+  touches (the "materially amplifies" rule above) — anything that cannot meet
+  that bar is not this PR's feedback.
 - **Fail open.** If `provenance.json` is missing or its `warnings` list is
   non-empty (the staged diff could not be parsed), skip this gate entirely (gate
-  nothing, post no note) and surface the gap as a `Note:` line in the review body
+  nothing) and surface the gap as a `Note:` line in the review body
   (Step 6), so a staging bug degrades to the ungated behavior rather than silently
   demoting every finding.
 
@@ -687,8 +688,7 @@ newly-changed-code scope filter, and after
 dropping candidates on open human-thread lines (Step 5). A claim the validator
 dropped or downgraded to non-blocking, or that the provenance gate, scope filter, or
 human-thread filter removed,
-is not in that set and cannot affect the verdict. The pre-existing observations note
-(Step 3) is always `note (non-blocking)`, so it never affects the verdict either. Because the verdict follows only the
+is not in that set and cannot affect the verdict. Because the verdict follows only the
 posted labels, an advisory-only reviewer (one whose definition permits it only
 non-blocking labels) can never drive REQUEST_CHANGES, and an `advisory`-severity
 lens finding is code-mapped to a non-blocking label — counting labels already
@@ -874,11 +874,10 @@ ranked bar, not first-come. Rank every comment by (1) blocking before non-blocki
   posted. An APPROVE with zero comments is a valid, good outcome — say nothing rather than
   manufacture feedback.
 
-**The pre-existing observations note rides outside the bar.** If the
-change-provenance gate (Step 3) collected any pre-existing observations, post their
-single collapsed `note (non-blocking)` as one additional top-level comment (no
-line). It is not ranked, it does not count against the inline cap below, and it is
-never blocking; zero collected observations means no note.
+**Pre-existing observations are not in the posting pool.** Whatever the
+change-provenance gate (Step 3) set aside lives only in the run artifact
+(`out/pre-existing.json`); do not resurrect it here as a comment, a note, or a
+line in the collapsed section.
 
 **Cap.** At most 20 **inline** comments. If more clear the medium bar than that, keep the
 top 20 by the ranking above and move the remainder into the collapsed low-confidence

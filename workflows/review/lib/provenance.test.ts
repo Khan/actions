@@ -17,7 +17,7 @@ import {
 /**
  * Unit tests for the change-provenance gate: a finding whose anchor is not an
  * added or modified line of the diff cannot carry a blocking label, and
- * pre-existing observations are set aside for the single collapsed note. Also
+ * pre-existing observations are set aside (artifact-only, never posted). Also
  * covers the CLI that stages `provenance.json` and the generated-stripped
  * whole-change diff.
  */

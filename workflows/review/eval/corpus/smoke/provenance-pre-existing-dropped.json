@@ -1,8 +1,8 @@
 {
-    "id": "provenance-pre-existing-collapses",
+    "id": "provenance-pre-existing-dropped",
     "tags": ["smoke", "provenance", "correctness"],
     "category": "incident-repro",
-    "description": "Guard for the change-provenance gate (reported pain from frontend: a bug fix inside legacy code draws blocking reviews of the surrounding known problems, which the author cannot be asked to fix in that PR). A real-looking blocking finding anchored on a line the diff does not touch must not carry a blocking label or post as its own comment - it collapses into the single pre-existing note - while the change-anchored advisory on the fixed line posts normally and the verdict stays APPROVE.",
+    "description": "Guard for the change-provenance gate (reported pain from frontend: a bug fix inside legacy code draws blocking reviews of the surrounding known problems, which the author cannot be asked to fix in that PR). A real-looking blocking finding anchored on a line the diff does not touch must not post to the PR in any form (it is set aside to the run artifact, not rendered as a note or comment), while the change-anchored advisory on the fixed line posts normally and the verdict stays APPROVE.",
     "changedFiles": [
         {"path": "src/legacy/receipts.ts", "status": "modified"}
     ],
@@ -46,6 +46,6 @@
     "expected": {
         "verdict": "APPROVE",
         "mustNotPost": ["legacy-swallowed-error"],
-        "postedCommentCount": 2
+        "postedCommentCount": 1
     }
 }

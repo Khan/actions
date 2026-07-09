@@ -40,10 +40,10 @@ summary and requests the owning teams. The config files below feed these sub-age
 A mechanical gate sits between the reviewers and the PR. The **change-provenance
 gate** (enforced in code against the diff's parsed changed-line map, not by prompt)
 requires every finding to trace to the change: a finding whose anchor is not an
-added or modified line of the diff cannot carry a blocking label, and such
-pre-existing observations post as at most one collapsed non-blocking note instead of
-individual comments; a pre-existing defect the diff materially amplifies passes
-naturally because it anchors on the amplifying line.
+added or modified line of the diff cannot carry a blocking label and does not post
+at all — such pre-existing observations are recorded in the run artifact only; a
+pre-existing defect the diff materially amplifies passes naturally because it
+anchors on the amplifying line.
 
 ## Install
 

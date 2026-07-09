@@ -5,13 +5,13 @@
  * introduced by the diff, or it is a pre-existing observation the diff merely
  * sits near. The gate makes that distinction mechanical: a finding whose
  * anchor is not an added or modified line of the diff cannot carry a blocking
- * label, and pre-existing observations collapse into at most one non-blocking
- * note (`renderPreExistingNote` in `render-comment.ts`) instead of posting as
- * individual comments. This is what stops a bug fix inside legacy code from
- * drawing blocking reviews of the surrounding known problems the author cannot
- * be asked to fix in that PR. (A pre-existing defect the diff materially
- * *amplifies* passes the gate naturally: the amplifying lines are added or
- * modified lines, so the finding anchors on them.)
+ * label and does not post to the PR at all — the set-asides are recorded in
+ * the run artifact (for tuning the gate), never as comments. This is what
+ * stops a bug fix inside legacy code from drawing blocking reviews of the
+ * surrounding known problems the author cannot be asked to fix in that PR.
+ * (A pre-existing defect the diff materially *amplifies* passes the gate
+ * naturally: the amplifying lines are added or modified lines, so the finding
+ * anchors on them.)
  *
  * The line-level facts come from `diff.ts` ({@link computeChangedLines});
  * anchors are judged as follows:
@@ -123,8 +123,8 @@ export type ProvenanceGateResult = {
     /**
      * Pre-existing observations: out-of-provenance findings with `severity`
      * coerced to `advisory`, so no downstream label computation can render
-     * them blocking. They post as at most one collapsed note
-     * (`renderPreExistingNote`), never as individual comments.
+     * them blocking. They never post to the PR — they are recorded in the run
+     * artifact only, so the gate stays inspectable without adding comments.
      */
     preExisting: Finding[];
 };
