@@ -707,14 +707,28 @@ output is missing or unparseable, do **not** drop the comments: post the unvalid
 claims anyway, and surface the gap as a skipped dimension (`claim validation`) with the
 note in Step 6, so the author knows they were not double-checked this run.
 
-**Run out of budget gracefully: always land the review.** The run has a hard
-AI-credits cap (frontmatter) and the router's `runBudget` carries the soft `maxUsd`
-target for this PR's tier. A run that dies at the hard cap costs everything and
-delivers nothing, so the hard cap must never be what stops you: treat the soft
-target as the point to start landing. When spend or elapsed time approaches it (or
-the run is clearly on an expensive trajectory: an unusually large diff, many
-sub-agents still pending, many turns already spent), stop starting new work and shed
-remaining work in this order:
+**Run out of budget gracefully: always land the review.** Two hard ceilings kill a
+run that overruns: the per-run AI-credits cap (gh-aw's baked-in default; the
+frontmatter only disables the *daily* cap) and the job's `timeout-minutes`. A run
+that dies at a hard ceiling costs everything and delivers nothing, so a hard
+ceiling must never be what stops you: treat the router's soft targets
+(`runBudget`, Step 3) as the point to start landing. You cannot observe your own
+credit spend (nothing reports credits consumed back to you mid-run), so never
+estimate dollars; watch the signals you can observe, as spend proxies:
+
+- **Elapsed wall-clock** vs `runBudget.maxWallClockMinutes`: capture epoch seconds
+  (`date +%s`) the first time you use the shell in Step 1 and diff against it at
+  each later checkpoint. This is the sharpest proxy, and the job-timeout ceiling
+  it guards is just as fatal as the credits cap.
+- **Dispatch count** vs `runBudget.maxReviewerInvocations`: reviewers and lenses
+  already dispatched plus still pending.
+- **Run-wide investigation usage** vs `runBudget.maxTotalToolCalls`: one line per
+  authorised call in `/tmp/gh-aw/review/investigation-journal.log` (`wc -l`).
+- **Trajectory**: an unusually large diff, many sub-agents still pending, many
+  turns already spent.
+
+When these proxies say the run is nearing a soft target, stop starting new work and
+shed remaining work in this order:
 
 1. Skip any not-yet-dispatched opt-in reviewers and specialist lenses; each becomes
    a skipped dimension (Step 6 note).

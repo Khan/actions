@@ -50,10 +50,13 @@ added or modified line of the diff cannot carry a blocking label and does not po
 at all — such pre-existing observations are recorded in the run artifact only; a
 pre-existing defect the diff materially amplifies passes naturally because it
 anchors on the amplifying line. And the **budget guardrail**
-makes the orchestrator land short of the AI-credits cap: nearing it, remaining work
-is shed (each shed reviewer becomes a skipped-dimension note) and the verdict is
-submitted from the findings validated so far, so a run never dies at the cap with
-everything spent and nothing posted.
+makes the orchestrator land short of the run's hard ceilings (the per-run
+AI-credits cap and the job timeout). The agent cannot see its own credit spend, so
+it tracks observable proxies (elapsed wall-clock, dispatch counts, the shared
+investigation journal) against the router's soft budget targets; nearing one, it
+sheds remaining work (each shed reviewer becomes a skipped-dimension note) and
+submits the verdict from the findings validated so far, so a run never dies at a
+ceiling with everything spent and nothing posted.
 
 ## Install
 
