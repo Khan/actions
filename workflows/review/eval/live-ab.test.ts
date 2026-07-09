@@ -223,6 +223,9 @@ describe("renderMarkdownReport", () => {
         expect(markdown).toContain("Adversarial hard gate: PASSED");
         expect(markdown).toContain("SKIPPED (budget exhausted");
         expect(markdown).toContain("- candidate:case-2");
+        // The stability footer closes every report, so a reader always sees
+        // which rows are single-run signals and which are cross-run trends.
+        expect(markdown.trimEnd().endsWith("load-bearing metric.*")).toBe(true);
     });
 
     it("marks a failed adversarial gate", () => {

@@ -228,6 +228,23 @@ export type AbReport = {
 
 const pct = (value: number): string => `${(value * 100).toFixed(0)}%`;
 
+/**
+ * Which report rows a reader may act on from ONE run. Measured on the phase 4
+ * acceptance pair: on the no-op control, recall, verdict agreement, the
+ * regression lists, and the adversarial gate reproduced exactly while judge
+ * quality moved 0.11 and noise 5 points on live-agent jitter alone; on the
+ * weakened-reviewer arm, judge quality went UP 0.16 while recall fell 17
+ * points (fewer, surer comments each score better). So judge quality is not
+ * just jittery, it can move opposite to review health; recall against the
+ * labeled specs is the load-bearing metric.
+ */
+const STABILITY_FOOTER =
+    "*Single-run-stable rows: recall, verdict agreement, regressions, " +
+    "adversarial gate. Judge quality and noise are not: they jitter " +
+    "run-to-run at this corpus size, and a regressed reviewer can score " +
+    "HIGHER on judge quality (fewer, surer comments each read better). " +
+    "Recall against the labeled specs is the load-bearing metric.*";
+
 export const renderMarkdownReport = (report: AbReport): string => {
     const {baseline, candidate} = report.arms;
     const row = (
@@ -371,6 +388,7 @@ export const renderMarkdownReport = (report: AbReport): string => {
             "",
         );
     }
+    lines.push(STABILITY_FOOTER, "");
     return lines.join("\n");
 };
 
