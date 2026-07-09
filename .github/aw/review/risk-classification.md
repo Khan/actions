@@ -93,11 +93,13 @@ tests of a few actions. It has no actionlint/shellcheck, no security scanning, a
 no check that compiled artifacts match their sources. Findings here are candidates
 for **blocking** comments:
 
-**Template injection in composite actions.** Any `${{ inputs.* }}`,
-`${{ github.event.* }}`, or other attacker-influenceable expression interpolated
-directly into a `run:` script or `github-script` body is a command/JS injection in
-the CONSUMING repo's CI. Require env-var indirection (`env:` + `"$VAR"`) for
-untrusted values. Same check applies to workflow files in this repo.
+**Template injection in composite actions.** Any dollar-brace GitHub Actions
+expression over `inputs.*`, `github.event.*`, or another attacker-influenceable
+value, interpolated directly into a `run:` script or `github-script` body, is a
+command/JS injection in the CONSUMING repo's CI. Require env-var indirection
+(`env:` + `"$VAR"`) for untrusted values. Same check applies to workflow files in
+this repo. (Spelled without the literal expression syntax here because gh-aw
+rejects runtime imports containing it; see this file's header.)
 
 **Action pinning.** Every new or changed `uses:` of a third-party action must be
 pinned to a full commit SHA (with a version comment), not a tag or branch.
