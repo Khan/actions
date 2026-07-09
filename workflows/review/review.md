@@ -58,6 +58,24 @@ tools:
     toolsets: [pull_requests, repos]
 
 safe-outputs:
+  # Domains allowed to survive gh-aw's text-sanitization in this workflow's safe
+  # outputs (the inline review comments and the risks/patterns PR comment). gh-aw
+  # strips any link whose host isn't matched here, to blunt data-exfiltration via a
+  # crafted URL in untrusted PR content. Each entry matches the bare host and all of
+  # its subdomains. This list is drawn from the domains that actually appear in our PR
+  # bodies and comments (surveyed across recent Khan/frontend PRs); add a domain here
+  # when we start linking a new one.
+  allowed-domains:
+    - github.com                 # PR / issue / commit / permalink references (most common)
+    - khanacademy.org            # www, admin, and per-PR deploy previews (prod-znd-*, classroom, i18n subdomains)
+    - khanacademy.dev            # KA dev / preview environments
+    - khanacademy.atlassian.net  # Jira and Confluence
+    - khanacademy.slack.com      # Slack threads linked from PRs
+    - claude.ai                  # Claude conversation share links
+    - claude.com                 # Anthropic / Claude (current primary domain)
+    - figma.com                  # design links
+    - docs.google.com            # Google Docs
+    - cursor.com                 # Cursor (editor / agent links)
   # gh-aw's comment footer — its attribution block, including the "Add this agentic
   # workflow to your repo" install snippet (built from `source:`) — is disabled via
   # `footer: false` on the review and the risk/patterns comment below. Inline review
