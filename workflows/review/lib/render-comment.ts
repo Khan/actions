@@ -266,6 +266,58 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
 };
 
 /* -------------------------------------------------------------------------- */
+/* Pre-existing observations note (change-provenance gate)                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Render the single collapsed note that carries every pre-existing
+ * observation the change-provenance gate set aside (`provenance.ts`): a
+ * finding whose anchor is not an added or modified line of the diff cannot
+ * carry a blocking label and does not post as an individual comment; instead
+ * all such observations collapse into this one `note (non-blocking)` body.
+ *
+ * Same determinism split as {@link renderComment}: CODE owns the label, the
+ * intro line, the `<details>` wrapping, and each entry's location token; the
+ * MODEL owns each entry's prose (`model_authored_prose`, copied verbatim).
+ * Returns `null` when there is nothing to note; the caller then posts no
+ * note at all.
+ */
+export const renderPreExistingNote = (
+    preExisting: readonly Finding[],
+): string | null => {
+    if (preExisting.length === 0) {
+        return null;
+    }
+
+    const count = preExisting.length;
+    const summary =
+        count === 1
+            ? "1 pre-existing observation"
+            : `${count} pre-existing observations`;
+
+    const items = preExisting.map(
+        // Model-authored prose, copied verbatim after the code-owned token.
+        (finding) =>
+            `- \`${describeAnchor(finding.anchor)}\` ${
+                finding.model_authored_prose
+            }`,
+    );
+
+    return [
+        "**note (non-blocking):** Pre-existing observations on code this PR " +
+            "does not change (not introduced by this change; no action " +
+            "required in this PR):",
+        "",
+        "<details>",
+        `<summary>${summary}</summary>`,
+        "",
+        ...items,
+        "",
+        "</details>",
+    ].join("\n");
+};
+
+/* -------------------------------------------------------------------------- */
 /* Conditional-approval (pre-merge obligations) comment                  */
 /* -------------------------------------------------------------------------- */
 

@@ -6,6 +6,7 @@ import {
     isBlockingLabel,
     labelForFinding,
     renderComment,
+    renderPreExistingNote,
     renderReviewBody,
     type ReviewBodyInput,
 } from "./render-comment.ts";
@@ -138,6 +139,59 @@ describe("renderComment — templated Conventional Comment", () => {
         const patch = "-old line\n+new line";
         const rendered = renderComment(makeFinding({suggested_patch: patch}));
         expect(rendered).toContain(patch);
+    });
+});
+
+describe("renderPreExistingNote: one collapsed note for the provenance gate", () => {
+    it("returns null when there is nothing to note", () => {
+        expect(renderPreExistingNote([])).toBeNull();
+    });
+
+    it("renders a single non-blocking note with one entry per observation", () => {
+        const note = renderPreExistingNote([
+            makeFinding({
+                severity: "advisory",
+                model_authored_prose: "This legacy helper swallows errors.",
+            }),
+            makeFinding({
+                id: "finding-2",
+                severity: "advisory",
+                anchor: {type: "file", path: "src/legacy.ts"},
+                model_authored_prose: "This module predates the null checks.",
+            }),
+        ]);
+        expect(note).toMatchInlineSnapshot(`
+          "**note (non-blocking):** Pre-existing observations on code this PR does not change (not introduced by this change; no action required in this PR):
+
+          <details>
+          <summary>2 pre-existing observations</summary>
+
+          - \`src/app.ts:42\` This legacy helper swallows errors.
+          - \`src/legacy.ts\` This module predates the null checks.
+
+          </details>"
+        `);
+    });
+
+    it("uses the singular summary for one observation and copies prose verbatim", () => {
+        const prose = "Exact prose — with `code` — must survive untouched.";
+        const note = renderPreExistingNote([
+            makeFinding({severity: "advisory", model_authored_prose: prose}),
+        ]);
+        expect(note).toContain("1 pre-existing observation</summary>");
+        expect(note).toContain(prose);
+    });
+
+    it("never carries a blocking label, whatever the findings' severity", () => {
+        // Defense in depth: the gate coerces severity to advisory, but even a
+        // blocking finding handed directly to the renderer gets the fixed
+        // note label.
+        const note = renderPreExistingNote([makeFinding()]);
+        expect(note).toContain("**note (non-blocking):**");
+        expect(isBlockingLabel("note (non-blocking)")).toBe(false);
+        for (const label of BLOCKING_LABELS) {
+            expect(note).not.toContain(label);
+        }
     });
 });
 

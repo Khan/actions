@@ -131,11 +131,13 @@ describe("smoke set is green on baseline (per-case expectations)", () => {
             expect(result.plannedReview.comments.length).toBe(
                 corpusCase.expected.postedCommentCount,
             );
-            // The planned review's comments and the posted candidates are the
-            // same set, so the count is coherent across both surfaces.
-            expect(result.postedCandidates.length).toBe(
-                corpusCase.expected.postedCommentCount,
-            );
+            // The planned review's comments are the posted candidates plus
+            // (at most) the one collapsed pre-existing note, so the count is
+            // coherent across both surfaces.
+            expect(
+                result.postedCandidates.length +
+                    (result.preExistingNote === null ? 0 : 1),
+            ).toBe(corpusCase.expected.postedCommentCount);
         },
     );
 });

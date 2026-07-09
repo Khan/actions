@@ -1,0 +1,51 @@
+{
+    "id": "provenance-pre-existing-collapses",
+    "tags": ["smoke", "provenance", "correctness"],
+    "category": "incident-repro",
+    "description": "Guard for the change-provenance gate (reported pain from frontend: a bug fix inside legacy code draws blocking reviews of the surrounding known problems, which the author cannot be asked to fix in that PR). A real-looking blocking finding anchored on a line the diff does not touch must not carry a blocking label or post as its own comment - it collapses into the single pre-existing note - while the change-anchored advisory on the fixed line posts normally and the verdict stays APPROVE.",
+    "changedFiles": [
+        {"path": "src/legacy/receipts.ts", "status": "modified"}
+    ],
+    "diff": "diff --git a/src/legacy/receipts.ts b/src/legacy/receipts.ts\n--- a/src/legacy/receipts.ts\n+++ b/src/legacy/receipts.ts\n@@ -20,3 +20,3 @@ function totalFor(cart) {\n     const items = cart.items;\n-    return items.reduce((sum, item) => sum + item.price, 0);\n+    return items.reduce((sum, item) => sum + item.price * item.qty, 0);\n }",
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "fix-qty-nan",
+                "lens": "correctness",
+                "anchor": {"type": "line", "path": "src/legacy/receipts.ts", "line": 21, "side": "RIGHT"},
+                "severity": "advisory",
+                "confidence": 0.6,
+                "evidence_trace": [
+                    "src/legacy/receipts.ts:21 multiplies by item.qty, which the item shape marks optional"
+                ],
+                "failure_scenario": "A cart item without a qty field makes price * qty NaN, so the whole total renders as NaN.",
+                "producing_hunt": "correctness:line-scan",
+                "model_authored_prose": "item.qty is optional on this shape; default it (item.qty ?? 1) so a qty-less item cannot turn the total into NaN."
+            }
+        },
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "legacy-swallowed-error",
+                "lens": "correctness",
+                "anchor": {"type": "line", "path": "src/legacy/receipts.ts", "line": 45, "side": "RIGHT"},
+                "severity": "blocking",
+                "confidence": 0.85,
+                "evidence_trace": [
+                    "src/legacy/receipts.ts:45 catches the send failure and returns success without logging"
+                ],
+                "failure_scenario": "sendReceipt fails, the catch swallows it, and the caller records the receipt as delivered when it never was.",
+                "producing_hunt": "correctness:line-scan",
+                "model_authored_prose": "This catch swallows the send failure and reports success; surface the error so callers can react. (Pre-existing: this PR does not touch these lines.)"
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustNotPost": ["legacy-swallowed-error"],
+        "postedCommentCount": 2
+    }
+}

@@ -71,14 +71,19 @@ export const checkExpectation = (run: EvalRun): ExpectationFailure[] => {
         failures.push({code: "must-not-post-emitted", ids: leaked});
     }
 
+    // The posted comments are the candidates plus (at most) the one
+    // collapsed pre-existing note the provenance gate produces.
+    const postedCount =
+        run.result.postedCandidates.length +
+        (run.result.preExistingNote === null ? 0 : 1);
     if (
         expected.postedCommentCount !== undefined &&
-        run.result.postedCandidates.length !== expected.postedCommentCount
+        postedCount !== expected.postedCommentCount
     ) {
         failures.push({
             code: "comment-count-mismatch",
             expected: expected.postedCommentCount,
-            actual: run.result.postedCandidates.length,
+            actual: postedCount,
         });
     }
 

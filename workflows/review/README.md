@@ -17,7 +17,10 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
 
 1. **`pattern-triage`** finds common cross-file patterns and narrows the diff to the
    files that need a real review — dropping generated, formatting-only, and
-   pattern-only changes.
+   pattern-only changes. In parallel, deterministic code stages the derived diff
+   artifacts: the changed-line provenance map, and a whole-change diff with
+   `linguist-generated` files stripped, which is what every whole-change reviewer and
+   specialist lens reads (so a lock-file-heavy PR cannot balloon their context).
 2. Then, in parallel, **`correctness-reviewer`** (risk level + correctness) and
    **`skill-auditor`** (best-practice skills) review that narrowed set, while
    **`reviewer-mapper`** maps the substantive changes to their owning teams for reviewer
@@ -33,6 +36,14 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
 The workflow then posts the per-line Conventional Comments that survived validation,
 submits an approve / request-changes review, and on approval posts the risk/patterns
 summary and requests the owning teams. The config files below feed these sub-agents.
+
+A mechanical gate sits between the reviewers and the PR. The **change-provenance
+gate** (enforced in code against the diff's parsed changed-line map, not by prompt)
+requires every finding to trace to the change: a finding whose anchor is not an
+added or modified line of the diff cannot carry a blocking label, and such
+pre-existing observations post as at most one collapsed non-blocking note instead of
+individual comments; a pre-existing defect the diff materially amplifies passes
+naturally because it anchors on the amplifying line.
 
 ## Install
 
