@@ -169,6 +169,35 @@ run by default; every other row is opt-in via `ROUTING` and earns its line throu
 the eval suite. Per-role Fable-5 / Sonnet experiment arms are eval-suite
 measurements to run after the suite exists.
 
+### Feedback signal: thumbs sweep and live counters
+
+Two small scheduled workflows in each consumer repo turn on the tuning loop's
+production signal. Both are plain GitHub Actions YAML (not gh-aw), both check
+out this repo at the pinned `review-v*` tag and run lib scripts with
+`npx -y tsx`, and neither touches review semantics:
+
+- **Thumbs sweep** (`lib/run-thumbs-sweep.ts`, every 1-2 hours): collects 👍/👎
+  reactions on the reviewer's comments at both grains (inline review comments,
+  identified by the code-owned Conventional-Comment label prefixes; the
+  risks/patterns summary comment, identified by its hidden marker), seeds the
+  visible 👍/👎 nudge pair on any reviewer comment lacking it
+  (`REVIEW_SWEEP_SEED_REACTIONS=true`), and posts exactly one "why?" follow-up
+  per newly-downvoted comment. Idempotent across restarts via the hidden
+  follow-up markers; bounded to PRs updated in the last 14 days. Needs only
+  `pull-requests: write`. The sweep run needs `npm install --omit=dev` in the
+  checked-out `workflows/review/` first (the sweep's `octokit` dependency is
+  pinned exactly in `package.json`); the other lib scripts remain
+  dependency-free. Each run's `SweepResult` and API-request count land in the
+  job summary.
+- **Live counters** (`lib/counters-report.ts`, weekly): the workflow downloads
+  the review runs' per-run artifacts (bounded window), and the script
+  aggregates them with `lib/counters.ts` into the job summary — verdict mix,
+  comments/run, validator drop rate, cost/run. Needs only `actions: read`.
+
+The reviewer posts as `github-actions[bot]` (gh-aw safe outputs use the
+workflow's own token), so that login is both the sweep's `botLogin` filter and
+the author of its seeded reactions and follow-ups.
+
 ### Required secrets / variables
 
 - `ANTHROPIC_API_KEY` — used by the `claude` engine.

@@ -278,9 +278,12 @@ export type RawRunArtifacts = {
     /** `claims.json`: each entry carries at least `id` and `source`. */
     claims?: unknown;
     /**
-     * `out/claim-validator.json`: per-claim `keep`/`drop` verdicts. Accepts a
-     * bare array or an object with a `results`/`decisions` array; each entry
-     * carries an `id` and a `verdict` (`keep`/`drop`).
+     * `out/claim-validator.json`: per-claim validation outcomes. Accepts a bare
+     * array or an object with a `results`/`decisions`/`claims` array (the
+     * production validator writes `{"claims": […]}`). Each entry carries an
+     * `id` and either a `verdict` (`keep`/`drop`) or the three-state
+     * `verification` (`confirmed`/`plausible`/`refuted`), which folds to
+     * keep/keep/drop for the drop-rate counter.
      */
     validator?: unknown;
     /** The run summary: verdict, posted-comment count, thumbs, cost. */
@@ -298,19 +301,51 @@ const extractValidatorEntries = (validator: unknown): unknown[] => {
         if (Array.isArray(validator["decisions"])) {
             return validator["decisions"];
         }
+        if (Array.isArray(validator["claims"])) {
+            return validator["claims"];
+        }
     }
     return [];
 };
 
 /**
- * Join `claims.json` (id -> source) with `claim-validator.json` (id -> verdict)
- * into per-source {@link ValidatorDecision}s. A validator entry whose `id` has no
- * matching claim, or whose verdict is neither `keep` nor `drop`, is skipped — a
- * malformed artifact drops a data point rather than corrupting the counter.
+ * Fold a validator entry's outcome to the binary `keep`/`drop` the counters
+ * aggregate. Two vocabularies appear in real artifacts: the original
+ * `verdict: keep|drop`, and the three-state `verification:
+ * confirmed|plausible|refuted` (the recall/precision rebalance) — a `plausible`
+ * claim is kept-but-downgraded, so for drop-rate purposes it counts as `keep`.
+ */
+const decisionOf = (
+    entry: Record<string, unknown>,
+): "keep" | "drop" | undefined => {
+    const verdict = entry["verdict"] ?? entry["verification"];
+    if (
+        verdict === "keep" ||
+        verdict === "confirmed" ||
+        verdict === "plausible"
+    ) {
+        return "keep";
+    }
+    if (verdict === "drop" || verdict === "refuted") {
+        return "drop";
+    }
+    return undefined;
+};
+
+/**
+ * Join `claims.json` (id -> source) with `claim-validator.json` (id -> outcome)
+ * into per-source {@link ValidatorDecision}s. A validator entry with no
+ * recognisable outcome is skipped — a malformed artifact drops a data point
+ * rather than corrupting the counter. An entry whose `id` has no matching claim
+ * is skipped too, unless `fallbackSource` is given, in which case it is counted
+ * under that source: production runs upload `out/**` but not `claims.json`, so
+ * without the fallback every real decision would be discarded and the overall
+ * drop rate would read as zero activity.
  */
 export const joinValidatorDecisions = (
     claims: unknown,
     validator: unknown,
+    fallbackSource?: string,
 ): ValidatorDecision[] => {
     const sourceById = new Map<string, string>();
     if (Array.isArray(claims)) {
@@ -331,18 +366,15 @@ export const joinValidatorDecisions = (
             continue;
         }
         const id = entry["id"];
-        const verdict = entry["verdict"];
-        if (typeof id !== "string") {
+        const decision = decisionOf(entry);
+        if (typeof id !== "string" || decision === undefined) {
             continue;
         }
-        if (verdict !== "keep" && verdict !== "drop") {
-            continue;
-        }
-        const source = sourceById.get(id);
+        const source = sourceById.get(id) ?? fallbackSource;
         if (source === undefined) {
             continue;
         }
-        decisions.push({source, decision: verdict});
+        decisions.push({source, decision});
     }
     return decisions;
 };
@@ -392,6 +424,7 @@ const normalizeCost = (
 export const normalizeRunArtifacts = (
     raw: RawRunArtifacts,
     fallbackRunId: string,
+    fallbackSource?: string,
 ): RunArtifacts => {
     const summary: Record<string, unknown> = isRecord(raw.summary)
         ? raw.summary
@@ -416,6 +449,7 @@ export const normalizeRunArtifacts = (
     const validatorDecisions = joinValidatorDecisions(
         raw.claims,
         raw.validator,
+        fallbackSource,
     );
 
     const thumbs = normalizeThumbs(summary);
