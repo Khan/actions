@@ -117,18 +117,29 @@ export const labelForFinding = (finding: Finding): ConventionalLabel => {
  *
  *     **<label>:** <model_authored_prose>
  *
+ *     > **Rule:** <rule_quote>
+ *
  *     ```suggestion
  *     <suggested_patch>
  *     ```
  *
  * The label and the `**…:**` wrapping are code-owned; the prose after it is the
  * model's `model_authored_prose` copied verbatim (it already carries the subject
- * and any discussion). The suggestion block is appended only when the finding
- * carries a `suggested_patch`, again copied verbatim. No other text is emitted.
+ * and any discussion). For a skill finding carrying a `rule_quote`, the exact
+ * rule text is surfaced as a blockquote — quote-the-rule already puts it in
+ * `evidence_trace`, but authors never see evidence traces, so the comment is
+ * where the actual rule must appear (the quote itself is skill-file text copied
+ * verbatim; only the `> **Rule:**` wrapping is code-owned). The suggestion
+ * block is appended only when the finding carries a `suggested_patch`, again
+ * copied verbatim. No other text is emitted.
  */
 export const renderComment = (finding: Finding): string => {
     const label = labelForFinding(finding);
     const lines: string[] = [`**${label}:** ${finding.model_authored_prose}`];
+
+    if (finding.rule_quote !== undefined) {
+        lines.push("", `> **Rule:** ${finding.rule_quote}`);
+    }
 
     if (finding.suggested_patch !== undefined) {
         lines.push("", "```suggestion", finding.suggested_patch, "```");
