@@ -148,12 +148,20 @@ network:
 # (Settings → Secrets and variables → Actions): GH_AW_OTEL_SENTRY_ENDPOINT — the Sentry
 # OTLP traces endpoint with `/v1/traces` stripped (…/api/<project>/integration/otlp) — and
 # GH_AW_OTEL_SENTRY_AUTHORIZATION — the `sentry sentry_key=<public-key>` header value.
-observability:
-  otlp:
-    endpoint:
-      - url: ${{ secrets.GH_AW_OTEL_SENTRY_ENDPOINT }}
-        headers:
-          x-sentry-auth: ${{ secrets.GH_AW_OTEL_SENTRY_AUTHORIZATION }}
+#
+# KHAN/ACTIONS LOCAL OVERRIDE: the shared source's `observability:` block is disabled
+# here because this repo has no GH_AW_OTEL_SENTRY_* secrets configured, and a missing
+# endpoint is NOT a graceful degrade: the compiled lock feeds the empty value into the
+# MCP gateway's OTLP config, whose schema requires a non-empty https:// URL, so the
+# agent job fails at startup (observed on the first run of PR #241). Restore the block
+# below verbatim once the two secrets exist in this repo.
+#
+# observability:
+#   otlp:
+#     endpoint:
+#       - url: ${{ secrets.GH_AW_OTEL_SENTRY_ENDPOINT }}
+#         headers:
+#           x-sentry-auth: ${{ secrets.GH_AW_OTEL_SENTRY_AUTHORIZATION }}
 
 # Pin the orchestrator to a specific model version rather than a floating tier alias, so
 # the review doesn't silently change behavior when a new Opus ships. If we use Opus, we
