@@ -249,4 +249,29 @@ describe("renderMarkdownReport", () => {
         expect(markdown).toContain("Adversarial hard gate: FAILED");
         expect(markdown).toContain("- adv-1: missed spec bug");
     });
+
+    it("renders judge errors as degradation notes, not omissions", async () => {
+        const baseline = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            produceHit(1),
+            {maxUsd: 100},
+        );
+        const candidate = await runArm(
+            "candidate",
+            [liveCase("case-1")],
+            produceHit(1),
+            {maxUsd: 100},
+        );
+        candidate.judgeError = "judge call failed: 500";
+        const markdown = renderMarkdownReport({
+            baseRef: "abc",
+            reviewMdSha: {baseline: "a".repeat(64), candidate: "b".repeat(64)},
+            arms: {baseline, candidate},
+            regressions: {lost: [], gained: []},
+            adversarialFailures: [],
+        });
+        expect(markdown).toContain("Judge scoring failed");
+        expect(markdown).toContain("- candidate: judge call failed: 500");
+    });
 });
