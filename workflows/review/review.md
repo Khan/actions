@@ -115,13 +115,27 @@ safe-outputs:
   # the reviewer after the fact — this is the only place that reasoning is captured
   # as clean structured data (the Actions logs and OTLP traces are harder to mine).
   # The orchestrator writes each result to `/tmp/gh-aw/review/out/` (Step 3) and
-  # uploads only that directory (`allowed-paths`); 30-day retention gives a useful
+  # uploads that directory in one call (Step 9); 30-day retention gives a useful
   # window for post-hoc review.
+  #
+  # `allowed-paths` patterns match STAGING-RELATIVE paths, not original absolute
+  # paths. gh-aw's upload_artifact tool copies an uploaded directory into its
+  # staging area under the directory's basename and records only that relative
+  # name (`out`), and the safe_outputs job then filters the staged files
+  # (`out/<agent>.json`) against these patterns with a fully anchored matcher
+  # (gh-aw `upload_artifact.cjs` `resolveFiles` + `glob_pattern_helpers.cjs`).
+  # An absolute pattern like "/tmp/gh-aw/review/out/**" therefore matches
+  # nothing, ever, and fails the upload with "no files matched the selection
+  # criteria" — observed on every review run under gh-aw v0.81.6. "out/**"
+  # matches the staged layout; the absolute form is kept alongside it so the
+  # upload keeps working if a future gh-aw release matches against the original
+  # path instead (the filter is an OR across patterns).
   upload-artifact:
     max-uploads: 1
     retention-days: 30
     allowed-paths:
-      - "/tmp/gh-aw/review/out/**"
+      - "out/**"                    # staging-relative layout (what v0.81.6 matches)
+      - "/tmp/gh-aw/review/out/**"  # original absolute path (future-proofing)
   # NOTE: `add-reviewer` is intentionally defined only in the imported
   # .github/aw/review/config.md (see the `imports:` note above), because its
   # `allowed-team-reviewers` allowlist is repo-specific. Defining it here would override
@@ -1268,13 +1282,19 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
 
 Finally, if you wrote any sub-agent outputs to `/tmp/gh-aw/review/out/` this run
 (Step 3), upload that directory as a run-scoped artifact with the `upload-artifact`
-safe output. The `path` you pass MUST be the absolute path `/tmp/gh-aw/review/out/` —
-never a relative path like `out`, whatever your current working directory is: the
-safe-outputs processor validates the recorded path against the workflow's
-`allowed-paths` (`/tmp/gh-aw/review/out/**`), so a relative path fails validation with
-"no files matched" even when the files exist. This captures each reviewer's structured
-result for later inspection. Skip it only on an early exit (Step 2) where no sub-agents
-ran and the directory is empty.
+safe output. First copy the claim-audit input in beside the sub-agent outputs, so
+the artifact carries the whole audit trail: if Phase 3 ran, copy
+`/tmp/gh-aw/review/claims.json` to `/tmp/gh-aw/review/out/claims.json` (the
+candidate claims the validator was handed; `out/claim-validator.json` already
+records its verdicts, and `out/pre-existing.json` the provenance gate's
+set-asides). Then upload with **one** call whose `path` is the absolute directory
+path `/tmp/gh-aw/review/out/` — always the whole directory, never an individual
+file: the tool copies what you pass into its staging area under its basename, and
+the workflow's `allowed-paths` match that staged `out/**` layout, so a single-file
+upload (staged under the bare filename, with no `out/` prefix) fails validation
+with "no files matched" even though the file exists. This captures each reviewer's
+structured result for later inspection. Skip the upload only on an early exit
+(Step 2) where no sub-agents ran and the directory is empty.
 
 ## Tone Guidelines
 
