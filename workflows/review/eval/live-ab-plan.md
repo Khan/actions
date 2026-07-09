@@ -6,16 +6,43 @@ Khan/actions#235 (13 live cases total). Phase 2 is complete in Khan/actions#234
 (stacked on #233): extraction, staging, the producer behind its runner seam, and
 the SDK runner + CLI. Phase 3 is Khan/actions#236 (matcher, live metrics, A/B
 runner) and Phase 4 is Khan/actions#237 (the Review Eval A/B workflow), each
-stacked on its predecessor. Everything model-free is tested and green; the
-first ANTHROPIC_API_KEY environment to touch this stack should run the Phase 2
-CLI smoke (`live-runner.ts --case <id>`), then a small `live-ab.ts` run, then
-the two Phase 4 acceptance PRs. Phase 5 (the trial-runner skill) is
-Khan/actions#238 (`.claude/skills/review-trial/SKILL.md`, off main); its
-acceptance run (reproducing the #40678 table via the skill) needs a
-consumer-repo trial. All five phases are now in draft PRs. Each phase is scoped so a separate
-agent can execute it with only this document plus the repo. Phases 1 and 2 are
-independent of each other; Phase 3 needs both; Phase 4 needs Phase 3; Phase 5 (the
-trial-runner skill) is independent of all of them.
+stacked on its predecessor. Everything model-free is tested and green. Phase 5
+(the trial-runner skill) is Khan/actions#238
+(`.claude/skills/review-trial/SKILL.md`, off main); its acceptance run
+(reproducing the #40678 table via the skill) needs a consumer-repo trial. All
+five phases are now in draft PRs. Each phase is scoped so a separate agent can
+execute it with only this document plus the repo. Phases 1 and 2 are
+independent of each other; Phase 3 needs both; Phase 4 needs Phase 3; Phase 5
+(the trial-runner skill) is independent of all of them.
+
+**Phase 4 acceptance: PASSED (2026-07-09).** The two do-not-merge acceptance
+PRs ran the Review Eval A/B workflow end to end with a real key (runs
+29052332224 and 29052334404, ~26 min and ~$7.70 total per run, 7 live cases
+per arm):
+
+- Control (#239, comment-only edit): must-catch recall and verdict agreement
+  both flat at +0%, adversarial gate passed. Judge mean quality moved -0.11
+  and noise +5% on a no-op change: at N=7 with live agents, single-run judge
+  and noise deltas are jitter; the trustworthy rows are recall, verdict
+  agreement, the named-regression list, and the adversarial gate.
+- Signal (#240, deliberately weakened correctness reviewer): recall -17% and
+  verdict agreement -14%, with the missed defect named
+  (`incident-money-rounding:money-fp-rounding-1`). The instrument detects a
+  real prompt regression and names it.
+
+Follow-ups out of acceptance, unowned:
+
+1. **Record agent-failure reasons in the report.** `claim-validator failed`
+   appeared on `incident-cache-missing-key` in 2 of 4 arm-runs (flaky, not
+   systematic; the case still caught its defect and computed the right
+   verdict, so degradation is graceful). But the report and logs carry only
+   the agent name, no error text; the runner should persist the failure
+   reason (parse error, timeout, turn cap) into `live-ab-report.json` so a
+   flaky agent is diagnosable without a rerun.
+2. **Document the jitter bound.** The report footer should say which rows are
+   single-run-stable (recall, verdict, regressions, gate) and which need
+   repeated runs before acting (judge quality, noise), so a reader does not
+   chase a -0.11 judge delta on a comment change.
 
 ## Context
 
