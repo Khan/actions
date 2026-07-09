@@ -38,9 +38,9 @@ const thread = (overrides: Partial<StagedThread>): StagedThread => ({
 
 describe("parseLeadingLabel", () => {
     it("extracts the label from the workflow's own comment template", () => {
-        expect(
-            parseLeadingLabel("**issue (blocking):** Broken."),
-        ).toBe("issue (blocking)");
+        expect(parseLeadingLabel("**issue (blocking):** Broken.")).toBe(
+            "issue (blocking)",
+        );
         expect(
             parseLeadingLabel(
                 "**suggestion (non-blocking, best-practice):** Consider X.",
@@ -94,9 +94,7 @@ describe("renderRereviewSection", () => {
             threads: [thread({thread_id: "a"}), thread({thread_id: "b"})],
             reconciler: {resolve: ["a", "b"], keep: []},
         });
-        expect(result.section).toBe(
-            "All 2 prior review threads are resolved.",
-        );
+        expect(result.section).toBe("All 2 prior review threads are resolved.");
     });
 
     it("uses singular wording for one resolved thread", () => {
@@ -104,9 +102,7 @@ describe("renderRereviewSection", () => {
             threads: [thread({thread_id: "a"})],
             reconciler: {resolve: ["a"], keep: []},
         });
-        expect(result.section).toBe(
-            "The 1 prior review thread is resolved.",
-        );
+        expect(result.section).toBe("The 1 prior review thread is resolved.");
     });
 
     it("enumerates kept threads as links, blocking first", () => {
@@ -165,7 +161,9 @@ describe("renderRereviewSection", () => {
             threads: [thread({thread_id: "a", url: undefined})],
             reconciler: {resolve: [], keep: ["a"]},
         });
-        expect(result.section).toContain("- **issue (blocking)** `services/foo/foo.go:12`:");
+        expect(result.section).toContain(
+            "- **issue (blocking)** `services/foo/foo.go:12`:",
+        );
         expect(result.section).not.toContain("](");
     });
 
@@ -192,7 +190,8 @@ describe("renderReviewBody with a re-review section", () => {
         const body = renderReviewBody({
             event: "REQUEST_CHANGES",
             hasInlineComments: false,
-            rereviewSection: "1 of 1 prior review thread is still unaddressed:\n- **issue (blocking)** `a.go:1`: x",
+            rereviewSection:
+                "1 of 1 prior review thread is still unaddressed:\n- **issue (blocking)** `a.go:1`: x",
             skippedDimensions: [
                 {dimension: "patterns", subAgent: "pattern-triage"},
             ],

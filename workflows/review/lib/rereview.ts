@@ -143,7 +143,9 @@ const compareKept = (a: KeptEntry, b: KeptEntry): number => {
 const renderKeptLine = (entry: KeptEntry): string => {
     const anchorToken = `\`${entry.anchor}\``;
     const linked =
-        entry.url !== undefined ? `[${anchorToken}](${entry.url})` : anchorToken;
+        entry.url !== undefined
+            ? `[${anchorToken}](${entry.url})`
+            : anchorToken;
     return `- **${entry.label}** ${linked}: ${entry.excerpt}`;
 };
 
@@ -247,13 +249,10 @@ const parseThreads = (raw: unknown): StagedThread[] => {
             continue;
         }
         const comments = Array.isArray(entry["comments"])
-            ? entry["comments"]
-                  .filter(isRecord)
-                  .map((c) => ({
-                      author:
-                          typeof c["author"] === "string" ? c["author"] : "",
-                      body: typeof c["body"] === "string" ? c["body"] : "",
-                  }))
+            ? entry["comments"].filter(isRecord).map((c) => ({
+                  author: typeof c["author"] === "string" ? c["author"] : "",
+                  body: typeof c["body"] === "string" ? c["body"] : "",
+              }))
             : [];
         threads.push({
             thread_id: entry["thread_id"],
