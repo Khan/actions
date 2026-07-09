@@ -132,7 +132,9 @@ describe("runArm", () => {
         expect(report.usd).toBe(2);
         expect(report.metrics.mustCatchRecall.rate).toBe(1);
         expect(report.perCase[0]?.verdict).toBe("REQUEST_CHANGES");
-        expect(report.perCase[0]?.failedAgents).toEqual(["skill-auditor"]);
+        expect(report.perCase[0]?.failedAgents).toEqual([
+            "skill-auditor: malformed output",
+        ]);
         expect(report.skippedCases).toEqual([]);
     });
 
