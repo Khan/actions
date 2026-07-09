@@ -15,7 +15,7 @@
         {
             "source": "caching-resource",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "cache-missing-tenant-1",
                 "lens": "caching-resource",
                 "anchor": {"type": "line", "path": "src/cache/user-profile.ts", "line": 19, "side": "RIGHT"},
@@ -26,6 +26,7 @@
                     "the same `userId` space is reused across tenants in this deployment",
                     "a hit for tenant A's user can return tenant B's cached profile"
                 ],
+                "failure_scenario": "Tenant A caches the profile for user id 7; tenant B's user id 7 then reads tenant A's profile from the colliding key.",
                 "producing_hunt": "caching-resource:key-completeness",
                 "model_authored_prose": "This cache key omits the tenant id, so identical user ids across tenants collide and leak one tenant's profile to another. Include the tenant id in the key.",
                 "suggested_patch": "const key = `profile:${tenantId}:${userId}`;"

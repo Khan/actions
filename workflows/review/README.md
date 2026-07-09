@@ -22,9 +22,12 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
    **`skill-auditor`** (best-practice skills) review that narrowed set, while
    **`reviewer-mapper`** maps the substantive changes to their owning teams for reviewer
    routing, plus a reconciler that resolves earlier bot threads the changes have addressed.
+   Every finding names a concrete `failure_scenario`: the specific inputs or state
+   and the wrong outcome they produce.
 3. If those reviewers proposed any comments, **`claim-validator`** re-checks each one
-   against the actual code — and, for best-practice claims, against the relevant skill's
-   real rule — and drops the false positives or corrects inaccurate ones before anything
+   against the actual code (attacking the finding's stated failure scenario) and,
+   for best-practice claims, against the relevant skill's
+   real rule, and drops the false positives or corrects inaccurate ones before anything
    is posted, so a wrong claim never reaches the PR or forces a change request.
 
 The workflow then posts the per-line Conventional Comments that survived validation,

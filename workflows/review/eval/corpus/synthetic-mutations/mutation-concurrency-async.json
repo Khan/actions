@@ -10,7 +10,7 @@
         {
             "source": "concurrency-async",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "mutation-concurrency-race",
                 "lens": "concurrency-async",
                 "anchor": {"type": "line", "path": "src/services/quota.ts", "line": 73, "side": "RIGHT"},
@@ -21,6 +21,7 @@
                     "two concurrent requests can both read the same `used` and both pass the quota check",
                     "the prior code performed the read+increment inside the held lock"
                 ],
+                "failure_scenario": "Two callers pass the quota check concurrently outside the mutex, both increment, and usage overshoots the quota.",
                 "producing_hunt": "concurrency-async:check-then-act",
                 "model_authored_prose": "The quota read-and-increment moved outside the mutex, so two concurrent callers can both pass the check and overshoot the quota. Keep the read+increment inside the held lock."
             }

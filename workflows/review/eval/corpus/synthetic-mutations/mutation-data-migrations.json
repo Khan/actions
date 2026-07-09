@@ -10,7 +10,7 @@
         {
             "source": "data-migrations",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "mutation-migrations-non-nullable-no-default",
                 "lens": "data-migrations",
                 "anchor": {"type": "line", "path": "migrations/0042_add_org_id.py", "line": 11, "side": "RIGHT"},
@@ -21,6 +21,7 @@
                     "the target table users is already populated in production",
                     "no separate backfill step precedes the NOT NULL constraint"
                 ],
+                "failure_scenario": "Running the migration against the populated table fails: existing rows cannot satisfy NOT NULL with no default.",
                 "producing_hunt": "data-migrations:non-nullable-add",
                 "model_authored_prose": "Adding a NOT NULL column with no default to a populated table will fail the migration. Add it nullable, backfill, then add the constraint in a follow-up."
             }

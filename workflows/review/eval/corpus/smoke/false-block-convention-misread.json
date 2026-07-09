@@ -10,7 +10,7 @@
         {
             "source": "conventions",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "conv-inline-snapshot-1",
                 "lens": "conventions",
                 "anchor": {"type": "file", "path": "src/hooks/use-streaming-transcription.test.ts"},
@@ -20,6 +20,7 @@
                     "src/hooks/use-streaming-transcription.test.ts contains no toMatchInlineSnapshot",
                     "unit-test skill discusses inline snapshots for complex assertions"
                 ],
+                "failure_scenario": "Without inline snapshots, a drift in the emitted analytics payload passes review because the assertion diff never shows the payload.",
                 "producing_hunt": "conventions:unit-test",
                 "model_authored_prose": "Unit-test conventions - this file has no `toMatchInlineSnapshot` assertion; the analytics-payload assertions should use inline snapshots."
             }

@@ -14,7 +14,7 @@
         {
             "source": "conventions",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "clean-stale-nit",
                 "lens": "conventions",
                 "anchor": {"type": "line", "path": "src/util/dates.ts", "line": 12, "side": "RIGHT"},
@@ -24,6 +24,7 @@
                     "src/util/dates.ts:12 uses a ternary where an if/else would read more clearly",
                     "line 12 is unchanged in this push (in-scope lines are 88-90)"
                 ],
+                "failure_scenario": "No runtime misbehavior; the dense ternary just slows the next reader until it is unpacked.",
                 "producing_hunt": "conventions:readability-nit",
                 "model_authored_prose": "This ternary is a little dense; an if/else would read more clearly. Optional."
             }

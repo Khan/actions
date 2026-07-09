@@ -15,7 +15,7 @@
         {
             "source": "concurrency-async",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "conc-lost-update-1",
                 "lens": "concurrency-async",
                 "anchor": {"type": "line", "path": "src/services/quota.ts", "line": 34, "side": "RIGHT"},
@@ -26,6 +26,7 @@
                     "the handler runs per-request with no lock or atomic increment",
                     "two concurrent requests read the same value and one increment is lost"
                 ],
+                "failure_scenario": "Two concurrent requests read count=N, both write N+1, and one increment is silently lost.",
                 "producing_hunt": "concurrency-async:read-modify-write",
                 "model_authored_prose": "This read-modify-write on `count` is not atomic — concurrent requests will lose increments. Use an atomic DB increment (`UPDATE ... SET count = count + 1`) instead."
             }

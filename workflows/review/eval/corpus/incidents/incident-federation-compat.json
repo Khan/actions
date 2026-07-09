@@ -10,7 +10,7 @@
         {
             "source": "api-federation-compat",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "incident-federation-removed-field",
                 "lens": "api-federation-compat",
                 "anchor": {"type": "line", "path": "src/graphql/schema/user.graphql", "line": 24, "side": "LEFT"},
@@ -21,6 +21,7 @@
                     "the profile service's @requires directive still selects User.email",
                     "removing a field still selected by a federated consumer breaks gateway composition"
                 ],
+                "failure_scenario": "The consuming service's @requires selection on this field fails gateway composition, so the next schema publish breaks the graph.",
                 "producing_hunt": "api-federation-compat:removed-selected-field",
                 "model_authored_prose": "This removes a federated field another service still selects via @requires, which breaks gateway composition. Deprecate it and coordinate the consumer's migration before removal."
             }
