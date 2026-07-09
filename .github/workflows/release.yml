@@ -30,6 +30,11 @@ jobs:
         if: steps.has-changesets.outputs.result == 'true'
         uses: changesets/action@6a0a831ff30acef54f2c6aa1cbbc1096b066edaf # v1
         with:
+          # Not the default `changeset version`: version-packages also syncs
+          # the pinned `ref:` inside workflows/review/review.md to the version
+          # being released, so the bump lands in the same Version Packages
+          # commit that gets tagged (see utils/sync-review-version.ts).
+          version: pnpm run version-packages
           publish: exit 1
         env:
           GITHUB_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
