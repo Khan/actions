@@ -6,10 +6,16 @@ import {
     isBlockingLabel,
     labelForFinding,
     renderComment,
+    renderPreExistingNote,
     renderReviewBody,
     type ReviewBodyInput,
 } from "./render-comment.ts";
-import {assertFinding, type Finding, type Lens} from "./finding-schema.ts";
+import {
+    FINDING_SCHEMA_VERSION,
+    assertFinding,
+    type Finding,
+    type Lens,
+} from "./finding-schema.ts";
 
 /**
  * Rendering tests. The renderer sits on the determinism
@@ -23,13 +29,15 @@ import {assertFinding, type Finding, type Lens} from "./finding-schema.ts";
 // never pass against a finding the rest of the pipeline would reject.
 const makeFinding = (overrides: Record<string, unknown> = {}): Finding =>
     assertFinding({
-        schema_version: 1,
+        schema_version: FINDING_SCHEMA_VERSION,
         id: "finding-1",
         lens: "security-auth",
         anchor: {type: "line", path: "src/app.ts", line: 42},
         severity: "blocking",
         confidence: 0.9,
         evidence_trace: ["src/app.ts:42 flows unsanitized input into exec()"],
+        failure_scenario:
+            "A request param containing shell metacharacters reaches exec() unescaped and runs arbitrary commands.",
         producing_hunt: "security-auth/command-injection",
         model_authored_prose:
             "User input flows unsanitized into a shell command.",
@@ -131,6 +139,59 @@ describe("renderComment — templated Conventional Comment", () => {
         const patch = "-old line\n+new line";
         const rendered = renderComment(makeFinding({suggested_patch: patch}));
         expect(rendered).toContain(patch);
+    });
+});
+
+describe("renderPreExistingNote: one collapsed note for the provenance gate", () => {
+    it("returns null when there is nothing to note", () => {
+        expect(renderPreExistingNote([])).toBeNull();
+    });
+
+    it("renders a single non-blocking note with one entry per observation", () => {
+        const note = renderPreExistingNote([
+            makeFinding({
+                severity: "advisory",
+                model_authored_prose: "This legacy helper swallows errors.",
+            }),
+            makeFinding({
+                id: "finding-2",
+                severity: "advisory",
+                anchor: {type: "file", path: "src/legacy.ts"},
+                model_authored_prose: "This module predates the null checks.",
+            }),
+        ]);
+        expect(note).toMatchInlineSnapshot(`
+          "**note (non-blocking):** Pre-existing observations on code this PR does not change (not introduced by this change; no action required in this PR):
+
+          <details>
+          <summary>2 pre-existing observations</summary>
+
+          - \`src/app.ts:42\` This legacy helper swallows errors.
+          - \`src/legacy.ts\` This module predates the null checks.
+
+          </details>"
+        `);
+    });
+
+    it("uses the singular summary for one observation and copies prose verbatim", () => {
+        const prose = "Exact prose — with `code` — must survive untouched.";
+        const note = renderPreExistingNote([
+            makeFinding({severity: "advisory", model_authored_prose: prose}),
+        ]);
+        expect(note).toContain("1 pre-existing observation</summary>");
+        expect(note).toContain(prose);
+    });
+
+    it("never carries a blocking label, whatever the findings' severity", () => {
+        // Defense in depth: the gate coerces severity to advisory, but even a
+        // blocking finding handed directly to the renderer gets the fixed
+        // note label.
+        const note = renderPreExistingNote([makeFinding()]);
+        expect(note).toContain("**note (non-blocking):**");
+        expect(isBlockingLabel("note (non-blocking)")).toBe(false);
+        for (const label of BLOCKING_LABELS) {
+            expect(note).not.toContain(label);
+        }
     });
 });
 

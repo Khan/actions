@@ -15,7 +15,7 @@
         {
             "source": "conventions",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "conv-naming-1",
                 "lens": "conventions",
                 "anchor": {"type": "line", "path": "src/widgets/card.tsx", "line": 42, "side": "RIGHT"},
@@ -25,6 +25,7 @@
                     "src/widgets/card.tsx:42 introduces a component prop named `data`",
                     "repo skill conventions/naming.md prefers a domain-specific prop name over `data`"
                 ],
+                "failure_scenario": "No runtime failure; call sites read `data` and give the next reader no signal about what the prop holds.",
                 "producing_hunt": "conventions:prop-naming",
                 "model_authored_prose": "Prefer a domain-specific prop name over the generic `data` here so call sites read clearly."
             }

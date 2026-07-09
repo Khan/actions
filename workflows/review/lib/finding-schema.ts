@@ -22,8 +22,15 @@
  * Monotonic schema version. Bump whenever a field is added/removed/retyped in a
  * way that invalidates previously-serialized findings. Consumers compare the
  * `schema_version` on each finding against this constant.
+ *
+ * Version history:
+ *   1: initial structured finding shape.
+ *   2: `failure_scenario` is required on every finding, the concrete
+ *       inputs/state and the wrong outcome they produce. It is the specific
+ *       claim the claim-validator attacks, so a finding without one is not
+ *       verifiable and is rejected.
  */
-export const FINDING_SCHEMA_VERSION = 1;
+export const FINDING_SCHEMA_VERSION = 2;
 
 /**
  * The lenses (specialist + always-on) allowed to author a finding. The
@@ -138,6 +145,15 @@ export type Finding = {
      * finding with no evidence is not actionable and is rejected.
      */
     evidence_trace: string[];
+    /**
+     * The concrete failing scenario: the specific inputs, state, or conditions
+     * and the wrong output/crash/consequence they produce. Required on every
+     * finding (not just blocking ones); it is the specific claim the
+     * claim-validator attacks. For an advisory observation with no failure per
+     * se, it states the concrete consequence of leaving the finding
+     * unaddressed.
+     */
+    failure_scenario: string;
     /** Optional unified-diff patch the author suggests (rendered as a suggestion). */
     suggested_patch?: string;
     /**
@@ -274,6 +290,10 @@ export const validateFinding = (input: unknown): ValidationResult => {
         errors.push(
             "evidence_trace: must be a non-empty array of non-empty strings",
         );
+    }
+
+    if (!isNonEmptyString(input["failure_scenario"])) {
+        errors.push("failure_scenario: required non-empty string");
     }
 
     if (!isNonEmptyString(input["producing_hunt"])) {

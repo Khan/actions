@@ -17,19 +17,43 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
 
 1. **`pattern-triage`** finds common cross-file patterns and narrows the diff to the
    files that need a real review — dropping generated, formatting-only, and
-   pattern-only changes.
-2. Then, in parallel, **`correctness-reviewer`** (risk level + correctness) and
-   **`skill-auditor`** (best-practice skills) review that narrowed set, while
+   pattern-only changes. In parallel, deterministic code stages the derived diff
+   artifacts: the changed-line provenance map, and a whole-change diff with
+   `linguist-generated` files stripped, which is what every whole-change reviewer and
+   specialist lens reads (so a lock-file-heavy PR cannot balloon their context).
+2. Then, in parallel, **`correctness-reviewer`** (risk level + correctness, worked
+   through three named procedures: a line scan, a removed-behavior audit, and a
+   cross-file trace) and
+   **`skill-auditor`** (best-practice skills; a violation is only flagged when the
+   exact rule text and the exact violating line can both be quoted) review that
+   narrowed set, while
    **`reviewer-mapper`** maps the substantive changes to their owning teams for reviewer
    routing, plus a reconciler that resolves earlier bot threads the changes have addressed.
+   Every finding names a concrete `failure_scenario`: the specific inputs or state
+   and the wrong outcome they produce.
 3. If those reviewers proposed any comments, **`claim-validator`** re-checks each one
-   against the actual code — and, for best-practice claims, against the relevant skill's
-   real rule — and drops the false positives or corrects inaccurate ones before anything
-   is posted, so a wrong claim never reaches the PR or forces a change request.
+   against the actual code (attacking the finding's stated failure scenario) and,
+   for best-practice claims, against the relevant skill's
+   real rule, and drops the false positives or corrects inaccurate ones before anything
+   is posted, so a wrong claim never reaches the PR or forces a change request. A claim
+   about a mechanism that predates the diff is confirmed only when the diff materially
+   amplifies its consequence and the finding says so.
 
 The workflow then posts the per-line Conventional Comments that survived validation,
 submits an approve / request-changes review, and on approval posts the risk/patterns
 summary and requests the owning teams. The config files below feed these sub-agents.
+
+Two mechanical gates sit between the reviewers and the PR. The **change-provenance
+gate** (enforced in code against the diff's parsed changed-line map, not by prompt)
+requires every finding to trace to the change: a finding whose anchor is not an
+added or modified line of the diff cannot carry a blocking label, and such
+pre-existing observations post as at most one collapsed non-blocking note instead of
+individual comments; a pre-existing defect the diff materially amplifies passes
+naturally because it anchors on the amplifying line. And the **budget guardrail**
+makes the orchestrator land short of the AI-credits cap: nearing it, remaining work
+is shed (each shed reviewer becomes a skipped-dimension note) and the verdict is
+submitted from the findings validated so far, so a run never dies at the cap with
+everything spent and nothing posted.
 
 ## Install
 

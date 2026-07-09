@@ -10,7 +10,7 @@
         {
             "source": "correctness",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "corr-promise-all-1",
                 "lens": "correctness",
                 "anchor": {"type": "line", "path": "src/assignments/bulk-assign.ts", "line": 58, "side": "RIGHT"},
@@ -20,6 +20,7 @@
                     "src/assignments/bulk-assign.ts:58 awaits Promise.all(mutations) with no try/catch",
                     "a rejected mutation would leave the batch partially applied"
                 ],
+                "failure_scenario": "One failed mutation rejects the whole `Promise.all` batch, and the sibling mutations that already applied are never reconciled.",
                 "producing_hunt": "correctness:error-handling",
                 "model_authored_prose": "`Promise.all` here has no rejection handling - one failed mutation rejects the whole batch and the partial state is never reconciled."
             }

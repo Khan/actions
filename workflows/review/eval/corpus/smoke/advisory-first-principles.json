@@ -15,7 +15,7 @@
         {
             "source": "first-principles",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "fp-simpler-approach-1",
                 "lens": "first-principles",
                 "anchor": {"type": "pr"},
@@ -26,6 +26,7 @@
                     "a thinner adapter over the existing flow may achieve the same outcome",
                     "raised as a non-blocking perspective, not a defect"
                 ],
+                "failure_scenario": "If the parallel implementation ships, two flows cover the same need and drift apart; the adapter route avoids that maintenance split.",
                 "producing_hunt": "first-principles:should-this-exist",
                 "model_authored_prose": "Consider whether a thin adapter over the existing flow would meet this need instead of a parallel implementation — non-blocking, just a perspective to weigh."
             }

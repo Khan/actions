@@ -10,7 +10,7 @@
         {
             "source": "conventions",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "conv-contrast-subtle-1",
                 "lens": "conventions",
                 "anchor": {"type": "line", "path": "src/reports/summary-panel.tsx", "line": 133, "side": "RIGHT"},
@@ -20,6 +20,7 @@
                     "src/reports/summary-panel.tsx:133 uses semanticColor.core.foreground.neutral.subtle on small BodyText",
                     "accessibility skill requires 4.5:1 contrast for normal-size text"
                 ],
+                "failure_scenario": "Small body text in `neutral.subtle` renders below the 4.5:1 contrast ratio, so low-vision users cannot read it reliably.",
                 "producing_hunt": "conventions:contrast",
                 "model_authored_prose": "Accessibility - `neutral.subtle` on small body text does not meet the 4.5:1 contrast requirement; use `neutral.default` here."
             }

@@ -30,14 +30,16 @@ const makeValidFinding = (overrides: Record<string, unknown> = {}) => ({
     severity: "blocking",
     confidence: 0.9,
     evidence_trace: ["src/app.ts:42 calls exec() with unsanitized input"],
+    failure_scenario:
+        "A request whose `name` param contains `; rm -rf /` reaches exec() unescaped and runs as a shell command.",
     producing_hunt: "security-auth/command-injection",
     model_authored_prose: "User input flows unsanitized into a shell command.",
     ...overrides,
 });
 
 describe("FINDING_SCHEMA_VERSION", () => {
-    it("is the exported monotonic constant (===1 at launch)", () => {
-        expect(FINDING_SCHEMA_VERSION).toBe(1);
+    it("is the exported monotonic constant (===2 since failure_scenario)", () => {
+        expect(FINDING_SCHEMA_VERSION).toBe(2);
         expect(typeof FINDING_SCHEMA_VERSION).toBe("number");
     });
 });
@@ -231,6 +233,16 @@ describe("validateFinding — malformed findings", () => {
 
     it("rejects a missing producing_hunt", () => {
         expectRejects(makeValidFinding({producing_hunt: ""}), /producing_hunt/);
+    });
+
+    it("rejects a missing / empty failure_scenario", () => {
+        expectRejects(
+            makeValidFinding({failure_scenario: ""}),
+            /failure_scenario/,
+        );
+        const noScenario: Record<string, unknown> = {...makeValidFinding()};
+        delete noScenario["failure_scenario"];
+        expectRejects(noScenario, /failure_scenario/);
     });
 
     it("rejects a missing model_authored_prose", () => {
