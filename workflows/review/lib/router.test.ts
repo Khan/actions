@@ -2,7 +2,9 @@ import {describe, it, expect} from "vitest";
 
 import {
     ALWAYS_ON_LENSES,
+    clampBudgetToCreditCap,
     computeRunBudget,
+    DEFAULT_MAX_AI_CREDITS,
     DEFAULT_MISROUTED_FLOOR_TIER,
     DEFAULT_TIER_BUDGETS,
     isGenerated,
@@ -11,6 +13,7 @@ import {
     parseReviewers,
     parseRoutingConfig,
     patternSpecificity,
+    resolveCreditCap,
     RISK_TIERS,
     route,
     ROUTING_CONFIG_PATH,
@@ -386,6 +389,132 @@ describe("computeRunBudget: scaling", () => {
     });
 });
 
+describe("clampBudgetToCreditCap", () => {
+    it("records but does not clamp a cap that covers the tier budget", () => {
+        const clamped = clampBudgetToCreditCap(DEFAULT_TIER_BUDGETS.high, 2500);
+        expect(clamped).toEqual({
+            ...DEFAULT_TIER_BUDGETS.high,
+            effectiveCreditCap: 2500,
+        });
+        expect(clamped.capClamped).toBeUndefined();
+    });
+
+    it("scales every soft target proportionally under a tight cap", () => {
+        // The budget-shed incident shape: the high tier ($10) planned inside a
+        // 400-credit ($4) cap, so the run died at the api-proxy mid-validation.
+        const clamped = clampBudgetToCreditCap(DEFAULT_TIER_BUDGETS.high, 400);
+        expect(clamped).toEqual({
+            ...DEFAULT_TIER_BUDGETS.high,
+            maxReviewerInvocations: 4, // floor(12 * 0.4)
+            maxToolCallsPerFinding: 3, // floor(8 * 0.4)
+            maxTotalToolCalls: 48, // floor(120 * 0.4)
+            maxWallClockMinutes: 8, // floor(20 * 0.4)
+            maxUsd: 4,
+            effectiveCreditCap: 400,
+            capClamped: true,
+        });
+    });
+
+    it("never drops below the trivial tier's floors", () => {
+        const floor = DEFAULT_TIER_BUDGETS.trivial;
+        const clamped = clampBudgetToCreditCap(DEFAULT_TIER_BUDGETS.high, 10);
+        expect(clamped.maxReviewerInvocations).toBe(
+            floor.maxReviewerInvocations,
+        );
+        expect(clamped.maxToolCallsPerFinding).toBe(
+            floor.maxToolCallsPerFinding,
+        );
+        expect(clamped.maxTotalToolCalls).toBe(floor.maxTotalToolCalls);
+        expect(clamped.maxWallClockMinutes).toBe(floor.maxWallClockMinutes);
+        expect(clamped.maxUsd).toBe(0.1);
+        expect(clamped.capClamped).toBe(true);
+    });
+
+    it("treats a zero or negative cap as explicitly uncapped", () => {
+        expect(clampBudgetToCreditCap(DEFAULT_TIER_BUDGETS.high, -1)).toEqual(
+            DEFAULT_TIER_BUDGETS.high,
+        );
+        expect(clampBudgetToCreditCap(DEFAULT_TIER_BUDGETS.high, 0)).toEqual(
+            DEFAULT_TIER_BUDGETS.high,
+        );
+    });
+
+    it("applies through computeRunBudget via config.maxAiCredits", () => {
+        const budget = computeRunBudget("high", false, {
+            ...baseConfig,
+            maxAiCredits: 400,
+        });
+        expect(budget.tier).toBe("high");
+        expect(budget.capClamped).toBe(true);
+        expect(budget.maxUsd).toBe(4);
+    });
+});
+
+describe("resolveCreditCap", () => {
+    const noFs = {
+        existsSync: (): boolean => false,
+        readFileSync: (): string => {
+            throw new Error("unexpected read");
+        },
+    };
+
+    it("prefers the REVIEW_MAX_AI_CREDITS frontmatter mirror", () => {
+        expect(
+            resolveCreditCap(
+                {REVIEW_MAX_AI_CREDITS: "2500", GH_AW_MAX_AI_CREDITS: "400"},
+                noFs,
+            ),
+        ).toBe(2500);
+    });
+
+    it("falls back to GH_AW_MAX_AI_CREDITS", () => {
+        expect(resolveCreditCap({GH_AW_MAX_AI_CREDITS: "400"}, noFs)).toBe(
+            400,
+        );
+    });
+
+    it("ignores non-numeric and empty env values and keeps looking", () => {
+        expect(
+            resolveCreditCap(
+                {REVIEW_MAX_AI_CREDITS: "lots", GH_AW_MAX_AI_CREDITS: ""},
+                noFs,
+            ),
+        ).toBe(DEFAULT_MAX_AI_CREDITS);
+    });
+
+    it("reads apiProxy.maxAiCredits from a visible awf config", () => {
+        const {fs} = fakeFs({
+            "/tmp/gh-aw/awf-config.json": JSON.stringify({
+                apiProxy: {maxAiCredits: 400},
+            }),
+        });
+        expect(resolveCreditCap({}, fs)).toBe(400);
+    });
+
+    it("prefers the RUNNER_TEMP awf config over the /tmp fallback", () => {
+        const {fs} = fakeFs({
+            "/rt/gh-aw/awf-config.json": JSON.stringify({
+                apiProxy: {maxAiCredits: 250},
+            }),
+            "/tmp/gh-aw/awf-config.json": JSON.stringify({
+                apiProxy: {maxAiCredits: 400},
+            }),
+        });
+        expect(resolveCreditCap({RUNNER_TEMP: "/rt"}, fs)).toBe(250);
+    });
+
+    it("survives an unparseable awf config and falls through", () => {
+        const {fs} = fakeFs({
+            "/tmp/gh-aw/awf-config.json": "not json",
+        });
+        expect(resolveCreditCap({}, fs)).toBe(DEFAULT_MAX_AI_CREDITS);
+    });
+
+    it("defaults to gh-aw's baked-in cap when nothing is discoverable", () => {
+        expect(resolveCreditCap({}, noFs)).toBe(DEFAULT_MAX_AI_CREDITS);
+    });
+});
+
 /* -------------------------------------------------------------------------- */
 /* Misrouted floor                                                            */
 /* -------------------------------------------------------------------------- */
@@ -604,6 +733,21 @@ describe("runCli", () => {
         // The output dir is created and the written JSON round-trips.
         expect(mkdirCalls).toEqual([REVIEW_DIR]);
         expect(JSON.parse(written[ROUTING_OUT])).toEqual(json);
+    });
+
+    it("clamps the run budget to the credit cap from the environment", () => {
+        const {fs} = fakeFs({
+            [FILES_PATH]: JSON.stringify([
+                {path: "db/migrations/0001.sql", status: "added"},
+            ]),
+            [ROUTING_CONFIG_PATH]:
+                "**/migrations/** tier=high lens=data-migrations",
+        });
+        const json = runCli(fs, ".", {REVIEW_MAX_AI_CREDITS: "400"});
+        expect(json.runBudget.tier).toBe("high");
+        expect(json.runBudget.capClamped).toBe(true);
+        expect(json.runBudget.maxUsd).toBe(4);
+        expect(json.runBudget.effectiveCreditCap).toBe(400);
     });
 
     it("accepts the {files:[...]} wrapper and degrades safely without a ROUTING config", () => {

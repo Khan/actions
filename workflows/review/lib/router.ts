@@ -167,6 +167,19 @@ export type RunBudget = {
     maxWallClockMinutes: number;
     /** Soft spend ceiling (USD) the orchestrator should target. */
     maxUsd: number;
+    /**
+     * The effective per-run AI-credit cap this budget was checked against
+     * (credits; 1 credit = $0.01), when one was known. Absent when the cap
+     * was unknown or explicitly uncapped.
+     */
+    effectiveCreditCap?: number;
+    /**
+     * True when {@link effectiveCreditCap} is tighter than the tier's table
+     * budget and the soft targets above were scaled down to fit it. The
+     * orchestrator treats a clamped budget as already-tight: dispatch
+     * conservatively and expect to shed (review.md Step 3 Phase 3).
+     */
+    capClamped?: boolean;
 };
 
 export type RouterConfig = {
@@ -188,6 +201,15 @@ export type RouterConfig = {
     misroutedFloorTier?: RiskTier;
     /** Tier assigned to a source file that matches no risk rule. Defaults to "low". */
     defaultTier?: RiskTier;
+    /**
+     * Effective per-run AI-credit cap (credits; 1 credit = $0.01). When set
+     * and positive, the selected tier budget is clamped so the soft targets
+     * never promise more work than the hard cap can pay for
+     * ({@link clampBudgetToCreditCap}). Zero or negative means explicitly
+     * uncapped; undefined means unknown (no clamp). The CLI resolves this
+     * from the environment via {@link resolveCreditCap}.
+     */
+    maxAiCredits?: number;
 };
 
 /** Per-file routing decision. */
@@ -585,9 +607,70 @@ const tierForFile = (
 /* -------------------------------------------------------------------------- */
 
 /**
+ * gh-aw's baked-in per-run AI-credits default (credits; 1 credit = $0.01),
+ * assumed when no cap is discoverable from the environment.
+ */
+export const DEFAULT_MAX_AI_CREDITS = 1000;
+
+/**
+ * Clamp a tier budget to the effective per-run credit cap. The tier table is
+ * sized inside the workflow's assumed $10 ceiling; when a consumer sets a
+ * tighter `max-ai-credits`, the un-clamped soft targets promise more work
+ * than the hard cap can pay for, and the run dies at the api-proxy with
+ * findings in hand instead of shedding early (observed: a 400-credit run
+ * planned against the high tier's $10 targets and was killed mid-validation).
+ * Scaling is proportional to spend, floored at the trivial tier's values so
+ * even a tiny cap yields the smallest designed review rather than zero work.
+ * A zero/negative cap means explicitly uncapped; undefined means unknown.
+ */
+export const clampBudgetToCreditCap = (
+    budget: RunBudget,
+    capCredits: number | undefined,
+): RunBudget => {
+    if (
+        capCredits === undefined ||
+        !Number.isFinite(capCredits) ||
+        capCredits <= 0
+    ) {
+        return budget;
+    }
+    const capUsd = capCredits / 100;
+    if (capUsd >= budget.maxUsd) {
+        return {...budget, effectiveCreditCap: capCredits};
+    }
+    const ratio = capUsd / budget.maxUsd;
+    const floor = DEFAULT_TIER_BUDGETS.trivial;
+    const scale = (value: number, min: number): number =>
+        Math.max(min, Math.floor(value * ratio));
+    return {
+        ...budget,
+        maxReviewerInvocations: scale(
+            budget.maxReviewerInvocations,
+            floor.maxReviewerInvocations,
+        ),
+        maxToolCallsPerFinding: scale(
+            budget.maxToolCallsPerFinding,
+            floor.maxToolCallsPerFinding,
+        ),
+        maxTotalToolCalls: scale(
+            budget.maxTotalToolCalls,
+            floor.maxTotalToolCalls,
+        ),
+        maxWallClockMinutes: scale(
+            budget.maxWallClockMinutes,
+            floor.maxWallClockMinutes,
+        ),
+        maxUsd: capUsd,
+        effectiveCreditCap: capCredits,
+        capClamped: true,
+    };
+};
+
+/**
  * The single budget rule: scale by the highest touched tier, with one
  * floor for misrouted PRs. No per-lens knobs. When misrouted and the floor tier
  * outranks the touched tier, the floor's budget is used and `floored` is set.
+ * The selected budget is then clamped to `config.maxAiCredits` when known.
  */
 export const computeRunBudget = (
     highestTier: RiskTier,
@@ -604,7 +687,10 @@ export const computeRunBudget = (
         floored = true;
     }
 
-    return {...table[effectiveTier], tier: effectiveTier, floored};
+    return clampBudgetToCreditCap(
+        {...table[effectiveTier], tier: effectiveTier, floored},
+        config.maxAiCredits,
+    );
 };
 
 /* -------------------------------------------------------------------------- */
@@ -873,6 +959,58 @@ type FsLike = {
  * the {@link RoutingJson} shape. Factored out (fs injected) so it is testable
  * without touching the real filesystem. Returns the written JSON.
  */
+/**
+ * Resolve the effective per-run AI-credit cap from the environment, most
+ * explicit source first:
+ *
+ *   1. `REVIEW_MAX_AI_CREDITS` — the frontmatter `env:` mirror of
+ *      `max-ai-credits` (the cap itself is enforced runner-side by the
+ *      firewall api-proxy and is not otherwise exported to the agent).
+ *   2. `GH_AW_MAX_AI_CREDITS` — in case a future gh-aw exports it directly.
+ *   3. The awf firewall config (`apiProxy.maxAiCredits`), when its file is
+ *      visible from the agent container.
+ *   4. gh-aw's baked-in default ({@link DEFAULT_MAX_AI_CREDITS}).
+ *
+ * Returns the cap in credits; may be zero/negative when a source explicitly
+ * disables the cap (the clamp treats that as uncapped).
+ */
+export const resolveCreditCap = (
+    env: Record<string, string | undefined>,
+    fs: Pick<FsLike, "existsSync" | "readFileSync">,
+): number => {
+    for (const name of ["REVIEW_MAX_AI_CREDITS", "GH_AW_MAX_AI_CREDITS"]) {
+        const raw = env[name];
+        if (raw !== undefined && raw.trim() !== "") {
+            const parsed = Number(raw);
+            if (Number.isFinite(parsed)) {
+                return parsed;
+            }
+        }
+    }
+    const runnerTemp = env["RUNNER_TEMP"];
+    const candidates = [
+        ...(runnerTemp ? [`${runnerTemp}/gh-aw/awf-config.json`] : []),
+        "/tmp/gh-aw/awf-config.json",
+    ];
+    for (const path of candidates) {
+        if (!fs.existsSync(path)) {
+            continue;
+        }
+        try {
+            const parsed = JSON.parse(fs.readFileSync(path, "utf8")) as {
+                apiProxy?: {maxAiCredits?: unknown};
+            };
+            const cap = parsed.apiProxy?.maxAiCredits;
+            if (typeof cap === "number" && Number.isFinite(cap)) {
+                return cap;
+            }
+        } catch {
+            // Unreadable or unparseable candidate: fall through to the next.
+        }
+    }
+    return DEFAULT_MAX_AI_CREDITS;
+};
+
 /** Accept either a bare `[{path,status}]` array or a `{files:[…]}` wrapper. */
 const extractFileList = (raw: unknown): unknown[] => {
     if (Array.isArray(raw)) {
@@ -882,7 +1020,11 @@ const extractFileList = (raw: unknown): unknown[] => {
     return Array.isArray(wrapped) ? wrapped : [];
 };
 
-export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
+export const runCli = (
+    fs: FsLike,
+    repoRoot = ".",
+    env: Record<string, string | undefined> = {},
+): RoutingJson => {
     const readText = (p: string): string => fs.readFileSync(p, "utf8");
     const repoPath = (p: string): string =>
         repoRoot === "." ? p : `${repoRoot}/${p}`;
@@ -938,6 +1080,7 @@ export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
         reviewerRules,
         lensRules: routingFileConfig.lensRules,
         riskRules: routingFileConfig.riskRules,
+        maxAiCredits: resolveCreditCap(env, fs),
     });
     const json = toRoutingJson(
         result,
@@ -956,5 +1099,5 @@ export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
 // Run only when executed directly (review.md Step 3), never on import (tests).
 if (typeof require !== "undefined" && require.main === module) {
     const fs = require("node:fs") as FsLike;
-    runCli(fs, process.env.REVIEW_REPO_ROOT ?? ".");
+    runCli(fs, process.env.REVIEW_REPO_ROOT ?? ".", process.env);
 }
