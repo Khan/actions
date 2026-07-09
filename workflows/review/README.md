@@ -250,6 +250,17 @@ Re-review behavior is evaluated at three layers, cheapest first:
 - **Live trials** (the review-trial skill): the same lifecycle against the
   real workflow on real PRs, reserved for architecture-class changes.
 
+To price every dial setting in one command, `eval/rereview-sweep.ts` runs the
+working tree's reviewer over the rereview cases at each mode
+(`--modes full,scoped,flip-gated,fast` by default) and reports recall, thread
+resolution, flip-gate correctness, duplicates, and dollars per mode. The mode
+is a run parameter, so no special case format exists; three realities the
+sweep reports instead: the tripwire can override the dial (each row shows the
+EXECUTED depth), pricing the cheap paths needs at least one under-threshold
+case (`golden-retention-fix-push`, a one-hunk fix push whose fix plants a
+fresh defect inside the new hunk), and `fast` has definitionally zero
+fresh-defect recall (its cost, shown as recall against dollars).
+
 ### Models and effort per role
 
 Each sub-agent pins its model in its own definition inside `review.md` (with a
