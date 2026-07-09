@@ -1,0 +1,62 @@
+# Review eval — the re-review mode sweep, on demand.
+#
+# Runs the working tree's reviewer over the corpus's open-PR (rereview) cases
+# at each requested dial setting and prices the dial in one table: recall,
+# thread resolution, flip-gate correctness, duplicates, and dollars per mode,
+# with the EXECUTED depth per case (the tripwire may override the dial).
+#
+# Sweeps dispatch real model calls (ballpark: rereview cases x modes x a few
+# agents, low tens of dollars at the default budget), so this never runs on a
+# PR trigger: dispatch it manually against the branch you want priced (for a
+# stacked PR, pick its head branch), and read the table in the job summary.
+# The JSON report is uploaded as an artifact for the tuning loop.
+
+name: Review Re-review Mode Sweep
+
+on:
+  workflow_dispatch:
+    inputs:
+      modes:
+        description: "Comma-separated dial settings to sweep"
+        required: false
+        default: "full,scoped,flip-gated,fast"
+      cases:
+        description: "Comma-separated rereview case ids (default: all)"
+        required: false
+        default: ""
+      max_usd:
+        description: "Hard budget across the sweep"
+        required: false
+        default: "30"
+
+jobs:
+  rereview-sweep:
+    name: Sweep the re-review dial over the rereview corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: ./actions/shared-node-cache
+      - name: Run the sweep
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MODES: ${{ inputs.modes }}
+          CASES: ${{ inputs.cases }}
+          MAX_USD: ${{ inputs.max_usd }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY secret not configured; skipping the sweep." >&2
+            exit 0
+          fi
+          ARGS="--modes $MODES --max-usd $MAX_USD --out out/rereview-sweep.json"
+          if [ -n "$CASES" ]; then
+            ARGS="$ARGS --cases $CASES"
+          fi
+          pnpm dlx tsx workflows/review/eval/rereview-sweep.ts $ARGS \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload the JSON report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rereview-sweep-report
+          path: out/rereview-sweep.json
+          if-no-files-found: ignore
