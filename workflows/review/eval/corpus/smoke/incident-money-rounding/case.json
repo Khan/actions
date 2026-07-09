@@ -75,5 +75,15 @@
                 "lineEnd": 45
             }
         ]
+    },
+    "routerConfig": {
+        "lensRules": [
+            {
+                "pattern": "src/payments/pricing.ts",
+                "lenses": [
+                    "money-payments"
+                ]
+            }
+        ]
     }
 }
