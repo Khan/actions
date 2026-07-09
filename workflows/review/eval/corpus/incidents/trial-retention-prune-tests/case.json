@@ -192,5 +192,15 @@
                 "lineEnd": 38
             }
         ]
+    },
+    "routerConfig": {
+        "lensRules": [
+            {
+                "pattern": "services/notes/prune.go",
+                "lenses": [
+                    "caching-resource"
+                ]
+            }
+        ]
     }
 }
