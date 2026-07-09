@@ -9,8 +9,10 @@ runner) and Phase 4 is Khan/actions#237 (the Review Eval A/B workflow), each
 stacked on its predecessor. Everything model-free is tested and green; the
 first ANTHROPIC_API_KEY environment to touch this stack should run the Phase 2
 CLI smoke (`live-runner.ts --case <id>`), then a small `live-ab.ts` run, then
-the two Phase 4 acceptance PRs. Phase 5 (the trial-runner skill) is not
-started; its section below is the spec to hand off. Each phase is scoped so a separate
+the two Phase 4 acceptance PRs. Phase 5 (the trial-runner skill) is
+Khan/actions#238 (`.claude/skills/review-trial/SKILL.md`, off main); its
+acceptance run (reproducing the #40678 table via the skill) needs a
+consumer-repo trial. All five phases are now in draft PRs. Each phase is scoped so a separate
 agent can execute it with only this document plus the repo. Phases 1 and 2 are
 independent of each other; Phase 3 needs both; Phase 4 needs Phase 3; Phase 5 (the
 trial-runner skill) is independent of all of them.
