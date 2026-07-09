@@ -1,0 +1,83 @@
+{
+    "id": "trial-dedup-composite-key",
+    "tags": [
+        "incident",
+        "trial",
+        "live"
+    ],
+    "category": "incident-repro",
+    "description": "Sanitized structural rewrite of a v1.4.0 re-run miss (dedup push): the new save path keys its duplicate check on Note.Body alone while the Note entity carries a Kind that readers select on (the store docs say notes of different kinds may share a Body), so a same-Body note of a different kind is silently never saved. The prior reviewer version caught this; v1.4.0 missed it at the finder level.",
+    "changedFiles": [
+        {
+            "path": "services/notes/save.go",
+            "status": "added"
+        },
+        {
+            "path": "services/notes/save_test.go",
+            "status": "added"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "save-dedup-composite-key",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/save.go",
+                    "line": 32,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "services/notes/save.go:32 keys the dedup set on note.Body alone",
+                    "services/notes/store.go documents Kind as a field readers select on: notes of different kinds may share a Body",
+                    "a fresh note whose Body matches an existing note of a different Kind lands in seen and is silently skipped"
+                ],
+                "failure_scenario": "A user stores a Kind=\"note\" entry; later the summary pipeline saves a Kind=\"summary\" note with the same Body. SaveNotes keys dedup on Body alone, so the summary is silently dropped (no error, no write) and readers querying Kind=\"summary\" find nothing, though the caller was told the save succeeded.",
+                "producing_hunt": "correctness:dedup-key-completeness",
+                "model_authored_prose": "Dedup keys on `note.Body` alone, but `Note.Kind` is part of note identity: readers select on it, and the store docs say notes of different kinds may share a Body. Key the seen set on the (Kind, Body) pair, or dedup per kind."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "save-dedup-composite-key"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/services/notes/save.go b/services/notes/save.go\nnew file mode 100644\n--- /dev/null\n+++ b/services/notes/save.go\n@@ -0,0 +1,49 @@\n+package notes\n+\n+import (\n+\t\"context\"\n+\t\"fmt\"\n+)\n+\n+// dedupCheckLimit bounds the dedup read to the retention cap; a user\n+// never retains more notes than that, so reading this many covers\n+// everything a new note could duplicate.\n+const dedupCheckLimit = 200\n+\n+// saveEnv is the slice of the request environment saving needs,\n+// kept local so this file names only what it uses.\n+type saveEnv interface {\n+\tStore() Store\n+}\n+\n+// SaveNotes stores the given notes for userID. A note the user\n+// already has is skipped, so repeated submissions of the same\n+// content do not pile up duplicate entries.\n+func SaveNotes(ctx context.Context, env saveEnv, userID string, notes []Note) error {\n+\texisting, err := env.Store().Run(ctx, Query{\n+\t\tUserID: userID,\n+\t\tLimit:  dedupCheckLimit,\n+\t})\n+\tif err != nil {\n+\t\treturn fmt.Errorf(\"list notes for dedup of %s: %w\", userID, err)\n+\t}\n+\tseen := make(map[string]bool, len(existing))\n+\tfor _, note := range existing {\n+\t\tseen[note.Body] = true\n+\t}\n+\tfresh := make([]Note, 0, len(notes))\n+\tfor _, note := range notes {\n+\t\tif seen[note.Body] {\n+\t\t\tcontinue\n+\t\t}\n+\t\tseen[note.Body] = true\n+\t\tfresh = append(fresh, note)\n+\t}\n+\tif len(fresh) == 0 {\n+\t\treturn nil\n+\t}\n+\tif err := env.Store().Put(ctx, fresh); err != nil {\n+\t\treturn fmt.Errorf(\"save notes for %s: %w\", userID, err)\n+\t}\n+\treturn nil\n+}\ndiff --git a/services/notes/save_test.go b/services/notes/save_test.go\nnew file mode 100644\n--- /dev/null\n+++ b/services/notes/save_test.go\n@@ -0,0 +1,97 @@\n+package notes\n+\n+import (\n+\t\"context\"\n+\t\"fmt\"\n+\t\"testing\"\n+)\n+\n+// saveStore is an in-memory Store for the save tests.\n+type saveStore struct {\n+\tnotes  []Note\n+\tnextID int\n+}\n+\n+func (s *saveStore) Run(_ context.Context, q Query) ([]Note, error) {\n+\tlimit := q.Limit\n+\tif limit == 0 {\n+\t\tlimit = 1\n+\t}\n+\tvar out []Note\n+\tfor _, note := range s.notes {\n+\t\tif note.UserID != q.UserID {\n+\t\t\tcontinue\n+\t\t}\n+\t\tif q.Kind != \"\" && note.Kind != q.Kind {\n+\t\t\tcontinue\n+\t\t}\n+\t\tout = append(out, note)\n+\t\tif len(out) == limit {\n+\t\t\tbreak\n+\t\t}\n+\t}\n+\treturn out, nil\n+}\n+\n+func (s *saveStore) Put(_ context.Context, notes []Note) error {\n+\tfor _, note := range notes {\n+\t\ts.nextID++\n+\t\tnote.ID = fmt.Sprintf(\"note-%d\", s.nextID)\n+\t\ts.notes = append(s.notes, note)\n+\t}\n+\treturn nil\n+}\n+\n+func (s *saveStore) Delete(_ context.Context, ids []string) error {\n+\tdrop := make(map[string]bool, len(ids))\n+\tfor _, id := range ids {\n+\t\tdrop[id] = true\n+\t}\n+\tkept := s.notes[:0]\n+\tfor _, note := range s.notes {\n+\t\tif !drop[note.ID] {\n+\t\t\tkept = append(kept, note)\n+\t\t}\n+\t}\n+\ts.notes = kept\n+\treturn nil\n+}\n+\n+// saveTestEnv bundles the fakes behind the saveEnv interface.\n+type saveTestEnv struct {\n+\tstore *saveStore\n+}\n+\n+func (e *saveTestEnv) Store() Store { return e.store }\n+\n+func TestSaveSkipsDuplicates(t *testing.T) {\n+\tenv := &saveTestEnv{store: &saveStore{}}\n+\tnote := Note{\n+\t\tUserID: \"user-1\",\n+\t\tKind:   \"note\",\n+\t\tBody:   \"reread chapter three before the quiz\",\n+\t}\n+\tif err := SaveNotes(context.Background(), env, \"user-1\", []Note{note}); err != nil {\n+\t\tt.Fatalf(\"SaveNotes: %v\", err)\n+\t}\n+\tif err := SaveNotes(context.Background(), env, \"user-1\", []Note{note}); err != nil {\n+\t\tt.Fatalf(\"SaveNotes: %v\", err)\n+\t}\n+\tif got := len(env.store.notes); got != 1 {\n+\t\tt.Fatalf(\"duplicate save stored %d notes, want 1\", got)\n+\t}\n+}\n+\n+func TestSaveStoresDistinctNotes(t *testing.T) {\n+\tenv := &saveTestEnv{store: &saveStore{}}\n+\tnotes := []Note{\n+\t\t{UserID: \"user-1\", Kind: \"note\", Body: \"reread chapter three before the quiz\"},\n+\t\t{UserID: \"user-1\", Kind: \"note\", Body: \"ask about the second practice set\"},\n+\t}\n+\tif err := SaveNotes(context.Background(), env, \"user-1\", notes); err != nil {\n+\t\tt.Fatalf(\"SaveNotes: %v\", err)\n+\t}\n+\tif got := len(env.store.notes); got != 2 {\n+\t\tt.Fatalf(\"stored %d notes, want 2\", got)\n+\t}\n+}\n",
+    "live": {
+        "prContext": {
+            "title": "notes: skip duplicate notes on save",
+            "description": "Saving the same note across sessions piles up identical entries. SaveNotes now skips notes the user already has among their recent notes before writing. Includes tests against an in-memory store.",
+            "author": "dev-notes",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "save-dedup-composite-key",
+                "path": "services/notes/save.go",
+                "mechanism": [
+                    "key(s|ed)? (the )?(dedup|seen|duplicate).{0,20} on (note\\.)?Body (alone|only)",
+                    "ignor(es?|ing) (note\\.)?Kind",
+                    "(same|identical|shared?) Body.{0,40}(different|distinct|another) [Kk]ind",
+                    "composite.{0,20}(key|identity)",
+                    "(dedup|duplicate check).{0,40}(drops?|skips?|suppress).{0,40}(summary|kind)"
+                ],
+                "lens": "correctness",
+                "lineStart": 27,
+                "lineEnd": 37
+            }
+        ]
+    }
+}
