@@ -28,21 +28,27 @@ per arm):
 - Signal (#240, deliberately weakened correctness reviewer): recall -17% and
   verdict agreement -14%, with the missed defect named
   (`incident-money-rounding:money-fp-rounding-1`). The instrument detects a
-  real prompt regression and names it.
+  real prompt regression and names it. The most instructive number: judge
+  mean quality went UP (+0.16) on the regressed arm, because fewer, surer
+  comments each score better. Judge quality alone would have called the
+  regression an improvement; recall against labeled specs is the load-bearing
+  metric, which is exactly why the corpus carries ground truth.
 
-Follow-ups out of acceptance, unowned:
+Follow-ups out of acceptance, all landed:
 
-1. **Record agent-failure reasons in the report.** `claim-validator failed`
-   appeared on `incident-cache-missing-key` in 2 of 4 arm-runs (flaky, not
-   systematic; the case still caught its defect and computed the right
-   verdict, so degradation is graceful). But the report and logs carry only
-   the agent name, no error text; the runner should persist the failure
-   reason (parse error, timeout, turn cap) into `live-ab-report.json` so a
-   flaky agent is diagnosable without a rerun.
-2. **Document the jitter bound.** The report footer should say which rows are
-   single-run-stable (recall, verdict, regressions, gate) and which need
-   repeated runs before acting (judge quality, noise), so a reader does not
-   chase a -0.11 judge delta on a comment change.
+1. **Agent-failure reasons in the report** (on #236). `claim-validator failed`
+   appeared on `incident-cache-missing-key` in 2 of 4 arm-runs, flaky, with
+   graceful degradation, but undiagnosable: the report carried only the agent
+   name. `perCase.failedAgents` entries are now `<agent>: <reason>`. The
+   flake itself is still to be root-caused on a future run.
+2. **Per-row stability footer** (on #236). Every report now closes with which
+   rows are single-run signals (recall, verdict agreement, regressions, gate)
+   and a warning that judge quality can move opposite to review health.
+3. **Lens routing on live cases** (on #233/#235, found by acceptance):
+   `incident-sql-missing-index` was missed by all four arms because live
+   cases carried no `routerConfig` lens rules, so specialist lenses never
+   spawned. Every live case whose ground truth belongs to a specialist lens
+   now routes that lens on the finding's file.
 
 ## Context
 
