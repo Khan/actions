@@ -590,6 +590,22 @@ inline-comment path with no separate gate. Record each lens's `hunts[]` tri-stat
 (`ran` / `not-applicable` / `found`) alongside its findings in the lens's `out/<lens>.json`
 artifact (below); the hunts are provenance/metrics, not comments, so they are not posted.
 
+**Route out-of-lane observations into the candidate set (code-owned label).** The
+`skill-auditor` and every specialist lens may return `out_of_lane_observations[]`
+alongside their findings: real concerns their own mandate does not let them report
+(for the skill-auditor, a concern that is not a quotable skill-rule violation; for a
+lens, a concern outside its domain). Do not discard these. Convert each observation
+into a candidate comment in the same label-bearing shape as every other candidate:
+`path`/`line` from the observation, `subject` from its `observation` text verbatim,
+`failure_scenario` verbatim, and the label **`question (non-blocking)`** — the label
+is code-assigned, never model-chosen: an out-of-lane observation is a handoff, not a
+vetted finding, so it can never block on its own (and the `claim-validator` never
+upgrades severity). Set the candidate's `source` to `"<agent> (out-of-lane)"`. From
+here each one flows through the identical change-provenance gate → scope filter →
+`claims.json` → validation → posting path as every other candidate — do not shortcut
+one past validation, and do not drop one because its producer was unsure of its lane
+(that uncertainty is exactly why it is handed to the validator).
+
 Parse each sub-agent's JSON and keep only the compact result. As you parse each one,
 also write its raw JSON verbatim to `/tmp/gh-aw/review/out/<agent>.json` (create the
 `out/` directory if needed) — one file per dispatched sub-agent, named after it,
@@ -1549,6 +1565,15 @@ spirit-of-the-doc inference, no extrapolating a written rule to a case it does n
 name. (The `claim-validator` re-checks skill claims against the skill file's real
 text, so an unquotable claim will not survive anyway.)
 
+**Hand off, never drop, an out-of-lane observation.** When your audit surfaces a
+real concern that is **not** a quotable skill-rule violation — e.g. a correctness or
+data-integrity problem you noticed while checking a rule — do not force it into a
+violation and do not discard it: record it in `out_of_lane_observations[]` with a
+concrete `failure_scenario`. The orchestrator routes it to claim validation as a
+non-blocking candidate, so declining to report it as a violation (correct under
+quote-the-rule) no longer kills the observation. An observation whose failure
+scenario you cannot state concretely is not worth handing off.
+
 **Stay on the changed lines.** Anchor every violation on a line this PR adds or
 modifies, and only report a violation the *change* commits — never audit untouched
 code that merely appears in surrounding context, and never re-litigate pre-existing
@@ -1573,11 +1598,19 @@ Return ONLY this JSON object (no prose, no code fence):
     "label": "issue (blocking, best-practice)|suggestion (non-blocking, best-practice)",
     "failure_scenario": "one sentence: the concrete consequence of the breach (what goes wrong, for whom)",
     "subject": "one line naming the skill area", "discussion": "the rule violated and the fix, quoting both", "suggestion": "optional fix code"
+  }],
+  "out_of_lane_observations": [{
+    "path": "...", "line": 0,
+    "observation": "one sentence: the concern, stated concretely",
+    "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
+    "suggested_lane": "correctness"
   }]
 }
 `line` is a RIGHT-side diff line. `failure_scenario` is required on every finding:
 the concrete consequence of the breach, stated specifically enough for the
-claim-validator to attack. If no skill is relevant or no violations exist,
+claim-validator to attack. `out_of_lane_observations` carries the hand-off rule
+above (omit it or return `[]` when there is nothing to hand off; `line` and
+`suggested_lane` are optional). If no skill is relevant or no violations exist,
 return {"findings": []}.
 
 ## agent: `pattern-triage`
@@ -2269,6 +2302,15 @@ diff looks clean, so the `not-applicable`/`ran` record proves it was checked.
   deserialization sink without validation or parameterization. `found` on an unguarded
   sink.
 
+**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
+real concern **outside this lens's domain** — noticed while tracing a caller or
+reading surrounding context — do not force it into `findings[]` and do not discard
+it: record it in `out_of_lane_observations[]` (below) with a concrete
+`failure_scenario`. The orchestrator routes it to claim validation as a
+non-blocking candidate, so staying in your lane no longer kills the observation.
+Omit the field or return `[]` when there is nothing to hand off; `line` and
+`suggested_lane` are optional.
+
 ### Output
 Return ONLY this JSON object (no prose, no code fence). Every finding is a structured
 finding-schema object — do **not** emit a Conventional-Comment `label`; the orchestrator
@@ -2288,6 +2330,7 @@ computes the label from `severity` + `lens` in code.
     "suggested_patch": "optional replacement/patch text",
     "pre_merge_obligation": "optional: a condition that must hold before merge"
   }],
+  "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "authz-on-new-endpoint", "state": "ran|not-applicable|found"}]
 }
 Schema rules: `schema_version` is `2`; `lens` is exactly `security-auth`; `id` is unique
@@ -2364,6 +2407,15 @@ emits a finding whose `producing_hunt` is the hunt name.
 - **`pii-to-model-or-logs`** — PII/sensitive fields sent to a model or written to a
   generation log unredacted. `found` on real exposure.
 
+**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
+real concern **outside this lens's domain** — noticed while tracing a caller or
+reading surrounding context — do not force it into `findings[]` and do not discard
+it: record it in `out_of_lane_observations[]` (below) with a concrete
+`failure_scenario`. The orchestrator routes it to claim validation as a
+non-blocking candidate, so staying in your lane no longer kills the observation.
+Omit the field or return `[]` when there is nothing to hand off; `line` and
+`suggested_lane` are optional.
+
 ### Output
 Return ONLY the finding-schema JSON object below — no Conventional-Comment `label` (the
 orchestrator computes it from `severity` + `lens`):
@@ -2378,6 +2430,7 @@ orchestrator computes it from `severity` + `lens`):
     "model_authored_prose": "the comment the author will read",
     "suggested_patch": "optional", "pre_merge_obligation": "optional"
   }],
+  "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "unmoderated-model-output", "state": "ran|not-applicable|found"}]
 }
 Schema rules are identical to every specialist lens: `schema_version` `2`; `lens` exactly
@@ -2445,6 +2498,15 @@ finding whose `producing_hunt` is the hunt name.
 - **`unsubscribe-not-honored`** — a send that ignores opt-out / notification preferences.
   `found` when opt-out is bypassed.
 
+**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
+real concern **outside this lens's domain** — noticed while tracing a caller or
+reading surrounding context — do not force it into `findings[]` and do not discard
+it: record it in `out_of_lane_observations[]` (below) with a concrete
+`failure_scenario`. The orchestrator routes it to claim validation as a
+non-blocking candidate, so staying in your lane no longer kills the observation.
+Omit the field or return `[]` when there is nothing to hand off; `line` and
+`suggested_lane` are optional.
+
 ### Output
 Return ONLY the finding-schema JSON object below — no Conventional-Comment `label`:
 {
@@ -2458,6 +2520,7 @@ Return ONLY the finding-schema JSON object below — no Conventional-Comment `la
     "model_authored_prose": "the comment the author will read",
     "suggested_patch": "optional", "pre_merge_obligation": "optional"
   }],
+  "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "bulk-send-without-audience-filter", "state": "ran|not-applicable|found"}]
 }
 Schema rules are identical to every specialist lens (`lens` exactly `mass-comms-coppa`;
@@ -2525,6 +2588,15 @@ finding whose `producing_hunt` is the hunt name.
 - **`unbounded-cache-or-collection`** — a cache/collection with no eviction, TTL, or size
   bound. `found` when growth is unbounded.
 
+**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
+real concern **outside this lens's domain** — noticed while tracing a caller or
+reading surrounding context — do not force it into `findings[]` and do not discard
+it: record it in `out_of_lane_observations[]` (below) with a concrete
+`failure_scenario`. The orchestrator routes it to claim validation as a
+non-blocking candidate, so staying in your lane no longer kills the observation.
+Omit the field or return `[]` when there is nothing to hand off; `line` and
+`suggested_lane` are optional.
+
 ### Output
 Return ONLY the finding-schema JSON object below — no Conventional-Comment `label`:
 {
@@ -2538,6 +2610,7 @@ Return ONLY the finding-schema JSON object below — no Conventional-Comment `la
     "model_authored_prose": "the comment the author will read",
     "suggested_patch": "optional", "pre_merge_obligation": "optional"
   }],
+  "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "cache-key-missing-identifier", "state": "ran|not-applicable|found"}]
 }
 Schema rules are identical to every specialist lens (`lens` exactly `caching-resource`;
@@ -2605,6 +2678,15 @@ finding whose `producing_hunt` is the hunt name.
 - **`unbatched-backfill`** — a full-table `UPDATE`/backfill with no batching/chunking.
   `found` when the write is unbounded.
 
+**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
+real concern **outside this lens's domain** — noticed while tracing a caller or
+reading surrounding context — do not force it into `findings[]` and do not discard
+it: record it in `out_of_lane_observations[]` (below) with a concrete
+`failure_scenario`. The orchestrator routes it to claim validation as a
+non-blocking candidate, so staying in your lane no longer kills the observation.
+Omit the field or return `[]` when there is nothing to hand off; `line` and
+`suggested_lane` are optional.
+
 ### Output
 Return ONLY the finding-schema JSON object below — no Conventional-Comment `label`:
 {
@@ -2618,6 +2700,7 @@ Return ONLY the finding-schema JSON object below — no Conventional-Comment `la
     "model_authored_prose": "the comment the author will read",
     "suggested_patch": "optional", "pre_merge_obligation": "optional"
   }],
+  "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "non-nullable-column-without-default", "state": "ran|not-applicable|found"}]
 }
 Schema rules are identical to every specialist lens (`lens` exactly `data-migrations`;
@@ -2684,6 +2767,15 @@ finding whose `producing_hunt` is the hunt name.
 - **`missing-idempotency-on-retryable-handler`** — a redeliverable handler doing a
   side-effecting op with no idempotency guard. `found` when redelivery double-applies.
 
+**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
+real concern **outside this lens's domain** — noticed while tracing a caller or
+reading surrounding context — do not force it into `findings[]` and do not discard
+it: record it in `out_of_lane_observations[]` (below) with a concrete
+`failure_scenario`. The orchestrator routes it to claim validation as a
+non-blocking candidate, so staying in your lane no longer kills the observation.
+Omit the field or return `[]` when there is nothing to hand off; `line` and
+`suggested_lane` are optional.
+
 ### Output
 Return ONLY the finding-schema JSON object below — no Conventional-Comment `label`:
 {
@@ -2697,6 +2789,7 @@ Return ONLY the finding-schema JSON object below — no Conventional-Comment `la
     "model_authored_prose": "the comment the author will read",
     "suggested_patch": "optional", "pre_merge_obligation": "optional"
   }],
+  "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "unawaited-async", "state": "ran|not-applicable|found"}]
 }
 Schema rules are identical to every specialist lens (`lens` exactly `concurrency-async`;
@@ -2763,6 +2856,15 @@ finding whose `producing_hunt` is the hunt name.
 - **`federation-key-changed`** — a change to a federated key/reference/entity resolver
   that breaks composition. `found` when composition/resolution breaks.
 
+**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
+real concern **outside this lens's domain** — noticed while tracing a caller or
+reading surrounding context — do not force it into `findings[]` and do not discard
+it: record it in `out_of_lane_observations[]` (below) with a concrete
+`failure_scenario`. The orchestrator routes it to claim validation as a
+non-blocking candidate, so staying in your lane no longer kills the observation.
+Omit the field or return `[]` when there is nothing to hand off; `line` and
+`suggested_lane` are optional.
+
 ### Output
 Return ONLY the finding-schema JSON object below — no Conventional-Comment `label`:
 {
@@ -2776,6 +2878,7 @@ Return ONLY the finding-schema JSON object below — no Conventional-Comment `la
     "model_authored_prose": "the comment the author will read",
     "suggested_patch": "optional", "pre_merge_obligation": "optional"
   }],
+  "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "breaking-field-removal-or-retype", "state": "ran|not-applicable|found"}]
 }
 Schema rules are identical to every specialist lens (`lens` exactly
@@ -2846,6 +2949,15 @@ finding whose `producing_hunt` is the hunt name.
 - **`format-switch-single-deploy`** — a writer switched to a new format/encoding/key set
   while old readers are still deployed. `found` on a single-phase switch.
 
+**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
+real concern **outside this lens's domain** — noticed while tracing a caller or
+reading surrounding context — do not force it into `findings[]` and do not discard
+it: record it in `out_of_lane_observations[]` (below) with a concrete
+`failure_scenario`. The orchestrator routes it to claim validation as a
+non-blocking candidate, so staying in your lane no longer kills the observation.
+Omit the field or return `[]` when there is nothing to hand off; `line` and
+`suggested_lane` are optional.
+
 ### Output
 Return ONLY the finding-schema JSON object below — no Conventional-Comment `label`:
 {
@@ -2859,6 +2971,7 @@ Return ONLY the finding-schema JSON object below — no Conventional-Comment `la
     "model_authored_prose": "the comment the author will read",
     "suggested_patch": "optional", "pre_merge_obligation": "optional"
   }],
+  "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "serialized-shape-change", "state": "ran|not-applicable|found"}]
 }
 Schema rules are identical to every specialist lens (`lens` exactly
@@ -2927,6 +3040,15 @@ finding whose `producing_hunt` is the hunt name.
 - **`destructive-infra-change`** — an IaC change that destroys/replaces a stateful
   resource. `found` on an unguarded destructive change.
 
+**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
+real concern **outside this lens's domain** — noticed while tracing a caller or
+reading surrounding context — do not force it into `findings[]` and do not discard
+it: record it in `out_of_lane_observations[]` (below) with a concrete
+`failure_scenario`. The orchestrator routes it to claim validation as a
+non-blocking candidate, so staying in your lane no longer kills the observation.
+Omit the field or return `[]` when there is nothing to hand off; `line` and
+`suggested_lane` are optional.
+
 ### Output
 Return ONLY the finding-schema JSON object below — no Conventional-Comment `label`:
 {
@@ -2940,6 +3062,7 @@ Return ONLY the finding-schema JSON object below — no Conventional-Comment `la
     "model_authored_prose": "the comment the author will read",
     "suggested_patch": "optional", "pre_merge_obligation": "optional"
   }],
+  "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "flag-default-unsafe", "state": "ran|not-applicable|found"}]
 }
 Schema rules are identical to every specialist lens (`lens` exactly `deploy-infra-config`;
@@ -3006,6 +3129,15 @@ finding whose `producing_hunt` is the hunt name.
 - **`currency-mismatch-or-missing`** — an amount handled without a currency, or arithmetic
   mixing currencies. `found` on a real mismatch.
 
+**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
+real concern **outside this lens's domain** — noticed while tracing a caller or
+reading surrounding context — do not force it into `findings[]` and do not discard
+it: record it in `out_of_lane_observations[]` (below) with a concrete
+`failure_scenario`. The orchestrator routes it to claim validation as a
+non-blocking candidate, so staying in your lane no longer kills the observation.
+Omit the field or return `[]` when there is nothing to hand off; `line` and
+`suggested_lane` are optional.
+
 ### Output
 Return ONLY the finding-schema JSON object below — no Conventional-Comment `label`:
 {
@@ -3019,6 +3151,7 @@ Return ONLY the finding-schema JSON object below — no Conventional-Comment `la
     "model_authored_prose": "the comment the author will read",
     "suggested_patch": "optional", "pre_merge_obligation": "optional"
   }],
+  "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "float-money", "state": "ran|not-applicable|found"}]
 }
 Schema rules are identical to every specialist lens (`lens` exactly `money-payments`;
@@ -3088,6 +3221,15 @@ finding whose `producing_hunt` is the hunt name.
 - **`locale-unaware-formatting`** — a date/number/currency formatted without locale.
   `found` on locale-unaware formatting.
 
+**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
+real concern **outside this lens's domain** — noticed while tracing a caller or
+reading surrounding context — do not force it into `findings[]` and do not discard
+it: record it in `out_of_lane_observations[]` (below) with a concrete
+`failure_scenario`. The orchestrator routes it to claim validation as a
+non-blocking candidate, so staying in your lane no longer kills the observation.
+Omit the field or return `[]` when there is nothing to hand off; `line` and
+`suggested_lane` are optional.
+
 ### Output
 Return ONLY the finding-schema JSON object below — no Conventional-Comment `label`:
 {
@@ -3101,6 +3243,7 @@ Return ONLY the finding-schema JSON object below — no Conventional-Comment `la
     "model_authored_prose": "the comment the author will read",
     "suggested_patch": "optional", "pre_merge_obligation": "optional"
   }],
+  "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "hardcoded-user-facing-string", "state": "ran|not-applicable|found"}]
 }
 Schema rules are identical to every specialist lens (`lens` exactly `content-i18n`; unique

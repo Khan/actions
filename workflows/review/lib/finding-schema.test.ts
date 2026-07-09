@@ -10,6 +10,8 @@ import {
     validateFinding,
     isValidFinding,
     assertFinding,
+    validateOutOfLaneObservation,
+    isValidOutOfLaneObservation,
 } from "./finding-schema.ts";
 
 /**
@@ -382,5 +384,91 @@ describe("assertFinding", () => {
             expect(message).toMatch(/severity/);
             expect(message).toMatch(/confidence/);
         }
+    });
+});
+
+describe("validateOutOfLaneObservation", () => {
+    const makeValidObservation = (
+        overrides: Record<string, unknown> = {},
+    ): Record<string, unknown> => ({
+        path: "services/foo/dedup.go",
+        line: 42,
+        observation:
+            "Dedup reads via an eventually-consistent Query immediately after PutMulti.",
+        failure_scenario:
+            "Two rapid submissions race the index; the second Query misses the first PutMulti and both rows persist.",
+        suggested_lane: "correctness",
+        ...overrides,
+    });
+
+    it("accepts a well-formed observation", () => {
+        const result = validateOutOfLaneObservation(makeValidObservation());
+        expect(result.ok).toBe(true);
+    });
+
+    it("accepts the minimal shape (no line, no suggested_lane)", () => {
+        const minimal = makeValidObservation();
+        delete minimal["line"];
+        delete minimal["suggested_lane"];
+        expect(validateOutOfLaneObservation(minimal).ok).toBe(true);
+    });
+
+    it("rejects a non-object", () => {
+        const result = validateOutOfLaneObservation("nope");
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+            expect(result.errors).toEqual(["observation: must be an object"]);
+        }
+    });
+
+    it("requires path, observation, and failure_scenario", () => {
+        const result = validateOutOfLaneObservation({});
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+            expect(result.errors).toContain("path: required non-empty string");
+            expect(result.errors).toContain(
+                "observation: required non-empty string",
+            );
+            expect(result.errors).toContain(
+                "failure_scenario: required non-empty string",
+            );
+        }
+    });
+
+    it("collects every violation rather than failing on the first", () => {
+        const result = validateOutOfLaneObservation(
+            makeValidObservation({
+                path: "",
+                line: 0,
+                observation: "",
+                suggested_lane: "",
+            }),
+        );
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+            expect(result.errors.length).toBe(4);
+        }
+    });
+
+    it("rejects a non-integer or non-positive line when present", () => {
+        expect(
+            validateOutOfLaneObservation(makeValidObservation({line: 1.5})).ok,
+        ).toBe(false);
+        expect(
+            validateOutOfLaneObservation(makeValidObservation({line: -3})).ok,
+        ).toBe(false);
+    });
+});
+
+describe("isValidOutOfLaneObservation", () => {
+    it("narrows well-formed input and rejects malformed input", () => {
+        expect(
+            isValidOutOfLaneObservation({
+                path: "a.go",
+                observation: "A real concern.",
+                failure_scenario: "Input X produces wrong output Y.",
+            }),
+        ).toBe(true);
+        expect(isValidOutOfLaneObservation({path: "a.go"})).toBe(false);
     });
 });
