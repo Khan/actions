@@ -27,6 +27,10 @@
  *                             The baseline always runs full, so the report
  *                             prices the mode dial (recall and dollars, same
  *                             prompt, mode the only difference). Default full.
+ *     [--force-arms]          run both arms even when review.md is
+ *                             byte-identical (a deliberate wobble control);
+ *                             without it, identical arms short-circuit to a
+ *                             "no reviewable delta" report at zero cost.
  */
 
 /* eslint-disable no-console -- CLI entry point; console IS the interface. */
@@ -491,11 +495,38 @@ const main = async (): Promise<void> => {
         {encoding: "utf8", maxBuffer: 64 * 1024 * 1024},
     );
     const candidateMd = readFileSync(reviewMdPath, "utf8");
-    if (baselineMd === candidateMd) {
-        console.error(
-            "note: review.md is identical in both arms; the A/B measures " +
-                "only non-prompt variance this run.",
+    if (baselineMd === candidateMd && !process.argv.includes("--force-arms")) {
+        // Pre-flight identity short-circuit (the tuning memo's first item):
+        // byte-identical review.md means byte-identical extracted prompts and
+        // orchestrator body, so both arms would do the same thing and the run
+        // is pure spend. Post the no-delta verdict and run nothing.
+        // `--force-arms` bypasses this for deliberate wobble controls (two
+        // identical arms run to measure run-to-run variance).
+        const sha = createHash("sha256")
+            .update(candidateMd)
+            .digest("hex")
+            .slice(0, 12);
+        const markdown = [
+            "## Review live A/B",
+            "",
+            `No reviewable delta: review.md is byte-identical in both arms ` +
+                `(baseline \`${baseRef}\`, sha ${sha}), so the extracted ` +
+                `prompts and the orchestrator body match and no arms were ` +
+                `run. Pass \`--force-arms\` for a deliberate wobble control.`,
+            "",
+        ].join("\n");
+        mkdirSync(dirname(outPath), {recursive: true});
+        writeFileSync(
+            outPath,
+            JSON.stringify({noReviewableDelta: true, baseRef, sha}, null, 2),
         );
+        writeFileSync(outPath.replace(/\.json$/, ".md"), `${markdown}\n`);
+        const summaryPath = process.env["GITHUB_STEP_SUMMARY"];
+        if (summaryPath) {
+            writeFileSync(summaryPath, `${markdown}\n`, {flag: "a"});
+        }
+        console.log(markdown);
+        return;
     }
 
     const allCases = loadLiveCorpus().filter(

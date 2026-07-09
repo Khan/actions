@@ -1,19 +1,22 @@
 # Review eval — the re-review mode sweep, on demand.
 #
-# Runs the working tree's reviewer over the corpus's open-PR (rereview) cases
-# at each requested dial setting and prices the dial in one table: recall,
+# Runs the branch's reviewer over the corpus's open-PR (rereview) cases at
+# each requested dial setting and prices the dial in one table: recall,
 # thread resolution, flip-gate correctness, duplicates, and dollars per mode,
 # with the EXECUTED depth per case (the tripwire may override the dial).
 #
 # Sweeps dispatch real model calls (ballpark: rereview cases x modes x a few
-# agents, low tens of dollars at the default budget), so this never runs on a
-# PR trigger: dispatch it manually against the branch you want priced (for a
-# stacked PR, pick its head branch), and read the table in the job summary.
-# The JSON report is uploaded as an artifact for the tuning loop.
+# agents, low tens of dollars at the default budget), so this never runs
+# automatically: trigger it by adding the `rereview-sweep` label to a PR (the
+# table lands in a sticky PR comment, the job summary, and the run artifact),
+# or dispatch it manually against any branch. Remove and re-add the label to
+# re-run after a push.
 
 name: Review Re-review Mode Sweep
 
 on:
+  pull_request:
+    types: [labeled]
   workflow_dispatch:
     inputs:
       modes:
@@ -29,19 +32,30 @@ on:
         required: false
         default: "30"
 
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: review-rereview-sweep-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   rereview-sweep:
     name: Sweep the re-review dial over the rereview corpus
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.label.name == 'rereview-sweep'
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: ./actions/shared-node-cache
       - name: Run the sweep
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          MODES: ${{ inputs.modes }}
-          CASES: ${{ inputs.cases }}
-          MAX_USD: ${{ inputs.max_usd }}
+          MODES: ${{ inputs.modes || 'full,scoped,flip-gated,fast' }}
+          CASES: ${{ inputs.cases || '' }}
+          MAX_USD: ${{ inputs.max_usd || '30' }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "ANTHROPIC_API_KEY secret not configured; skipping the sweep." >&2
@@ -52,7 +66,7 @@ jobs:
             ARGS="$ARGS --cases $CASES"
           fi
           pnpm dlx tsx workflows/review/eval/rereview-sweep.ts $ARGS \
-            | tee -a "$GITHUB_STEP_SUMMARY"
+            | tee sweep-report.md | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Upload the JSON report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -60,3 +74,32 @@ jobs:
           name: rereview-sweep-report
           path: out/rereview-sweep.json
           if-no-files-found: ignore
+      - name: Post the sticky PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const fs = require("fs");
+            const path = "sweep-report.md";
+            if (!fs.existsSync(path)) {
+              core.info("no sweep report; nothing to post");
+              return;
+            }
+            const marker = "<!-- review-rereview-sweep -->";
+            const body = `${marker}\n${fs.readFileSync(path, "utf8")}`;
+            const {owner, repo} = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {owner, repo, issue_number, per_page: 100},
+            );
+            const prior = comments.find((c) => c.body?.startsWith(marker));
+            if (prior) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: prior.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number, body,
+              });
+            }

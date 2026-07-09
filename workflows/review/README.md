@@ -254,10 +254,19 @@ To price every dial setting in one command, `eval/rereview-sweep.ts` runs the
 working tree's reviewer over the rereview cases at each mode
 (`--modes full,scoped,flip-gated,fast` by default) and reports recall, thread
 resolution, flip-gate correctness, duplicates, and dollars per mode. It
-dispatches real model calls, so it never runs on a PR trigger: dispatch the
-`Review Re-review Mode Sweep` workflow against the branch to price (the table
-lands in the job summary, the JSON report in the run artifact), or run the
-CLI locally with `ANTHROPIC_API_KEY` set. The mode
+dispatches real model calls, so it never runs automatically: add the
+`rereview-sweep` label to a PR (the table lands in a sticky PR comment, the
+job summary, and the run artifact), dispatch the `Review Re-review Mode
+Sweep` workflow against any branch, or run the CLI locally with
+`ANTHROPIC_API_KEY` set.
+
+Every model-spending eval has the same manual trigger surface: a PR label
+(`full-eval` lifts the A/B to the whole live corpus and now triggers on the
+labeling itself, `rereview-sweep` runs the dial sweep, `live-judge` runs the
+judged corpus pass, `skip-live-eval` opts a PR out) plus `workflow_dispatch`
+for off-PR runs. The A/B also short-circuits before spending: byte-identical
+`review.md` in both arms posts a "no reviewable delta" verdict and runs
+nothing (`--force-arms` bypasses this for deliberate wobble controls). The mode
 is a run parameter, so no special case format exists; three realities the
 sweep reports instead: the tripwire can override the dial (each row shows the
 EXECUTED depth), pricing the cheap paths needs at least one under-threshold

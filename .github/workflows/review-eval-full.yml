@@ -12,6 +12,11 @@
 # the committed script `workflows/review/eval/live-judge.ts` (lint/typecheck/
 # test-covered like any other source file); it appends the metrics/gates/judge
 # report to the job summary so results are visible without opening the log.
+#
+# Manual triggers: workflow_dispatch against any branch, or the `live-judge`
+# label on a PR (runs the judged pass against the PR head; useful when a PR
+# changes the corpus or the judge itself). Remove and re-add the label to
+# re-run after a push.
 
 name: Review Eval Live Judge
 
@@ -20,11 +25,16 @@ on:
     # Weekly, Monday 09:00 UTC.
     - cron: "0 9 * * 1"
   workflow_dispatch: {}
+  pull_request:
+    types: [labeled]
 
 jobs:
   live-judge:
     name: Live judge over the full corpus
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.label.name == 'live-judge'
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: ./actions/shared-node-cache
