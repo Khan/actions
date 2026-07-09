@@ -229,13 +229,15 @@ helpful. State facts, not opinions about code taste.
 
 ## Step 1: Gather Context
 
-1. Get the PR details (title, description, author, base branch, draft status) with
+1. Record the run start: `date +%s`. The budget guardrail (Step 3, Phase 3)
+   measures elapsed wall-clock against this at each later checkpoint.
+2. Get the PR details (title, description, author, base branch, draft status) with
    `pull_requests` `get`.
-2. Get the changed files and their per-file patches with `pull_requests` `get_files`.
+3. Get the changed files and their per-file patches with `pull_requests` `get_files`.
    This is the single source for both the diff and the fingerprint below — do **not**
    also call `get_diff` or `get_commit` with a diff; both re-fetch the same content
    and waste the context budget.
-3. If cache memory exists from a prior review of this PR, recall what you previously
+4. If cache memory exists from a prior review of this PR, recall what you previously
    flagged. Focus on changes since then and any unresolved issues.
 
 **Read repo files from disk.** The PR branch is checked out in the Actions workspace —
@@ -716,10 +718,10 @@ ceiling must never be what stops you: treat the router's soft targets
 credit spend (nothing reports credits consumed back to you mid-run), so never
 estimate dollars; watch the signals you can observe, as spend proxies:
 
-- **Elapsed wall-clock** vs `runBudget.maxWallClockMinutes`: capture epoch seconds
-  (`date +%s`) the first time you use the shell in Step 1 and diff against it at
-  each later checkpoint. This is the sharpest proxy, and the job-timeout ceiling
-  it guards is just as fatal as the credits cap.
+- **Elapsed wall-clock** vs `runBudget.maxWallClockMinutes`: diff `date +%s`
+  against the run start you recorded in Step 1 at each later checkpoint. This is
+  the sharpest proxy, and the job-timeout ceiling it guards is just as fatal as
+  the credits cap.
 - **Dispatch count** vs `runBudget.maxReviewerInvocations`: reviewers and lenses
   already dispatched plus still pending.
 - **Run-wide investigation usage** vs `runBudget.maxTotalToolCalls`: one line per
@@ -727,8 +729,9 @@ estimate dollars; watch the signals you can observe, as spend proxies:
 - **Trajectory**: an unusually large diff, many sub-agents still pending, many
   turns already spent.
 
-When these proxies say the run is nearing a soft target, stop starting new work and
-shed remaining work in this order:
+When any proxy passes roughly three-quarters of its soft target (or the trajectory
+is clearly expensive), stop starting new work and shed remaining work in this
+order:
 
 1. Skip any not-yet-dispatched opt-in reviewers and specialist lenses; each becomes
    a skipped dimension (Step 6 note).
