@@ -1,10 +1,11 @@
 # Plan: live A/B evals for review-bot changes
 
-Status (2026-07-09): Phase 1 implemented in Khan/actions#233 (draft) except the
-trial-case port, which runs as a follow-up on top of it; this plan doc is
-Khan/actions#232. Phases 2a/2b (prompt extraction, case staging) are
-Khan/actions#234, stacked on #233; phase 2c (model dispatch) and phases 3 to 5 not
-started. Each phase is scoped so a separate
+Status (2026-07-09): this plan doc is Khan/actions#232. Phase 1 is
+Khan/actions#233 (draft), with the trial-case port stacked on it as
+Khan/actions#235 (13 live cases total). Phase 2 is complete in Khan/actions#234
+(stacked on #233): extraction, staging, the producer behind its runner seam, and
+the SDK runner + CLI; the live CLI smoke run still needs an ANTHROPIC_API_KEY
+environment. Phases 3 to 5 not started. Each phase is scoped so a separate
 agent can execute it with only this document plus the repo. Phases 1 and 2 are
 independent of each other; Phase 3 needs both; Phase 4 needs Phase 3; Phase 5 (the
 trial-runner skill) is independent of all of them.
@@ -105,8 +106,8 @@ playbook's standing rule); gating thresholds are a later human ratification (doc
 
 ## Phase 1: live-enabled corpus cases
 
-> Status: shipped in Khan/actions#233 except the trial-case port (the
-> Khan/webapp#40690 cases), tracked as a follow-up PR on top of #233. Notes for
+> Status: shipped in Khan/actions#233; the trial-case port is
+> Khan/actions#235 (three sanitized cases covering all ten #40678 seeds). Notes for
 > whoever touches this next: the live half of the format lives in
 > `corpus/live.ts` (the loader re-exports it; `loader.ts` sits near its
 > 1000-line lint cap), and case anchors were REWRITTEN to the authored defect
