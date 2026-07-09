@@ -1,10 +1,14 @@
 import {describe, it, expect} from "vitest";
 
 import {
-    ALWAYS_ON_LENSES,
     clampBudgetToCreditCap,
-    computeRunBudget,
     DEFAULT_MAX_AI_CREDITS,
+    resolveCreditCap,
+} from "./credit-cap";
+
+import {
+    ALWAYS_ON_LENSES,
+    computeRunBudget,
     DEFAULT_MISROUTED_FLOOR_TIER,
     DEFAULT_TIER_BUDGETS,
     isGenerated,
@@ -13,7 +17,6 @@ import {
     parseReviewers,
     parseRoutingConfig,
     patternSpecificity,
-    resolveCreditCap,
     RISK_TIERS,
     route,
     ROUTING_CONFIG_PATH,
@@ -468,9 +471,7 @@ describe("resolveCreditCap", () => {
     });
 
     it("falls back to GH_AW_MAX_AI_CREDITS", () => {
-        expect(resolveCreditCap({GH_AW_MAX_AI_CREDITS: "400"}, noFs)).toBe(
-            400,
-        );
+        expect(resolveCreditCap({GH_AW_MAX_AI_CREDITS: "400"}, noFs)).toBe(400);
     });
 
     it("ignores non-numeric and empty env values and keeps looking", () => {
