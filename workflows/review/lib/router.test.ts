@@ -812,3 +812,60 @@ describe("runCli: enabled reviewers", () => {
         expect(runCli(fs).enabledReviewers).toEqual([]);
     });
 });
+
+describe("parseRoutingConfig: re-review directive", () => {
+    it("defaults to full", () => {
+        expect(parseRoutingConfig("docs/** tier=trivial").reReviewMode).toBe(
+            "full",
+        );
+    });
+
+    it("parses each known mode", () => {
+        for (const mode of ["full", "scoped", "flip-gated", "fast"] as const) {
+            const config = parseRoutingConfig(`re-review ${mode}`);
+            expect(config.reReviewMode).toBe(mode);
+            expect(config.warnings).toEqual([]);
+        }
+    });
+
+    it("degrades an unknown mode to full with a warning; toward more review", () => {
+        const config = parseRoutingConfig("re-review turbo");
+        expect(config.reReviewMode).toBe("full");
+        expect(config.warnings.join("\n")).toContain(
+            'unknown re-review mode "turbo"',
+        );
+    });
+
+    it("skips a re-review line with the wrong arity", () => {
+        const config = parseRoutingConfig("re-review scoped fast");
+        expect(config.reReviewMode).toBe("full");
+        expect(config.warnings.join("\n")).toContain("exactly one mode");
+    });
+
+    it("lets the last of duplicate lines win, with a warning", () => {
+        const config = parseRoutingConfig("re-review scoped\nre-review fast");
+        expect(config.reReviewMode).toBe("fast");
+        expect(config.warnings.join("\n")).toContain("duplicate re-review");
+    });
+});
+
+describe("runCli: re-review mode", () => {
+    it("surfaces the configured mode in routing.json", () => {
+        const {fs} = fakeFs({
+            ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
+                {path: "a.ts", status: "modified"},
+            ]),
+            [ROUTING_CONFIG_PATH]: "re-review scoped",
+        });
+        expect(runCli(fs).reReviewMode).toBe("scoped");
+    });
+
+    it("defaults to full without a ROUTING config", () => {
+        const {fs} = fakeFs({
+            ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
+                {path: "a.ts", status: "modified"},
+            ]),
+        });
+        expect(runCli(fs).reReviewMode).toBe("full");
+    });
+});

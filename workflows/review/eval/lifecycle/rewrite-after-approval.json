@@ -1,0 +1,63 @@
+{
+    "id": "rereview-rewrite-after-approval",
+    "tags": ["rereview", "adversarial"],
+    "description": "A PR is fully reviewed and approved, then force-pushed as a near-total rewrite. Under every reduced re-review mode the divergence tripwire must re-arm and the rewrite must get a full review; an approval must never ride forward onto content no full review has seen. (Branch protection may also dismiss the stale approval; the fingerprint lives in the review body's hidden stamp, which survives dismissal, so the comparison still runs.)",
+    "modes": ["scoped", "flip-gated", "fast"],
+    "scoring": "payload-full-review",
+    "pushes": [
+        {
+            "name": "initial",
+            "isDraft": false,
+            "verdict": "APPROVE",
+            "diff": [
+                "diff --git a/src/service/handler.ts b/src/service/handler.ts",
+                "--- a/src/service/handler.ts",
+                "+++ b/src/service/handler.ts",
+                "@@ -10,2 +10,4 @@",
+                " export const handle = (req: Request) => {",
+                "+    const user = requireUser(req);",
+                "+    audit(user.id, \"handle\");",
+                "     return respond(req);",
+                "@@ -40,2 +42,3 @@",
+                " const respond = (req: Request) => {",
+                "+    validate(req.body);",
+                "     return ok();",
+                "diff --git a/src/service/config.ts b/src/service/config.ts",
+                "--- a/src/service/config.ts",
+                "+++ b/src/service/config.ts",
+                "@@ -1,2 +1,3 @@",
+                " export const config = {",
+                "+    retries: 3,",
+                " };"
+            ],
+            "expected": {"depth": "full", "tripwireRearmed": false}
+        },
+        {
+            "name": "rewrite-payload",
+            "isDraft": false,
+            "verdict": "APPROVE",
+            "diff": [
+                "diff --git a/src/service/handler.ts b/src/service/handler.ts",
+                "--- a/src/service/handler.ts",
+                "+++ b/src/service/handler.ts",
+                "@@ -10,2 +10,4 @@",
+                " export const handle = (req: Request) => {",
+                "+    const user = maybeUser(req);",
+                "+    if (user) audit(user.id, \"handle\");",
+                "     return respond(req);",
+                "@@ -40,2 +42,3 @@",
+                " const respond = (req: Request) => {",
+                "+    validate(req.body, {lenient: true});",
+                "     return ok();",
+                "diff --git a/src/service/config.ts b/src/service/config.ts",
+                "--- a/src/service/config.ts",
+                "+++ b/src/service/config.ts",
+                "@@ -1,2 +1,3 @@",
+                " export const config = {",
+                "+    retries: 30, allowAnonymous: true,",
+                " };"
+            ],
+            "expected": {"depth": "full", "tripwireRearmed": true}
+        }
+    ]
+}

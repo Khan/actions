@@ -147,12 +147,14 @@ rule per line:
 ```
 # <pattern> [lens=<lens>,…] [tier=trivial|low|medium|high] [direction-dependent]
 # enable <reviewer>[,<reviewer>…]
+# re-review full|scoped|flip-gated|fast
 services/**/migrations/**  tier=high lens=data-migrations
 **/*.graphql               lens=api-federation-compat
 pkg/auth/**                tier=high direction-dependent lens=security-auth
 services/**/testdata/**    tier=trivial
 docs/**                    tier=trivial
 enable holistic,test-adequacy
+re-review scoped
 ```
 
 - `lens=` names the specialist lenses to spawn when the pattern is touched; when
@@ -170,6 +172,9 @@ enable holistic,test-adequacy
   (tightening vs. loosening a check); the router emits the file as a pending risk
   question instead of guessing, and it applies only when its own rule is the
   winning tier rule for the path.
+- `re-review` sets the repo's re-review mode (see the next section). Default
+  `full`; when several lines set it, the last one wins with a warning. An
+  unknown mode degrades to `full`: toward more review, never less.
 
 Glob semantics are a practical subset of gitignore/CODEOWNERS: `**` crosses
 directories, `*` and `?` stay within a segment, a trailing `/` matches everything
@@ -180,6 +185,49 @@ and are skipped; routing degrades to fewer lenses, never to a crashed review.
 `ROUTING` is the machine-readable complement to `risk-classification.md`, which
 stays the model-facing prose about file *contents*; team ownership stays in
 `.github/REVIEWERS`, unchanged.
+
+### Re-review modes (the runs-per-PR cost lever)
+
+The workflow reviews every push, so a PR's lifetime cost is runs-per-PR times
+cost-per-run, and measured lifecycles showed cost *rising* per run as review
+threads accumulate, with the final approval run the most expensive while
+emitting the least. The `re-review` line in `ROUTING` dials how much of the
+roster a *repeat* review runs; the first full review of a ready PR always runs
+everything, whatever the mode:
+
+| Mode | Repeat review runs | When to use |
+| --- | --- | --- |
+| `full` | The whole roster over the whole diff (today's behavior). **Default.** | Until the live A/B has priced a cheaper mode for the repo. |
+| `scoped` | The whole roster, staged only the hunks that are new since the last fully-reviewed fingerprint (`scoped.diff`); comments stay scoped to those hunks. | The recommended first step down: measured lifecycles caught fresh seeded defects on re-review pushes, which a reconcile-only path would miss. |
+| `flip-gated` | Thread reconciliation plus the correctness pass over the new hunks. A REQUEST_CHANGES→APPROVE flip is vetoed by any validated blocking finding from that pass; the pass gates the flip instead of being discarded. | Cheap re-reviews that still cannot flip to approval over a fresh validated defect. |
+| `fast` | Thread reconciliation only. | Maximum savings; fresh code on a re-push is guarded only by the tripwire below. |
+
+Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministic):
+
+- **Ready-for-review anchor.** A fingerprint taken while the PR was a draft
+  never anchors cheap re-reviews of the ready PR: the ready PR gets the one
+  full review the cheaper modes lean on.
+- **Flip gate.** In `flip-gated` mode the dispatched correctness pass's
+  validated blocking findings veto the approval flip.
+- **Divergence tripwire.** Every full-depth review stamps a content-hashed
+  hunk signature into its review body as a hidden comment (it survives cache
+  eviction and branch protection's dismiss-stale-approvals, and it (not the
+  review state) is what marks a full review as having happened, so a
+  COMMENTED-only or dismissed history never wedges the dial). Each push is
+  compared against that last fully-reviewed fingerprint; when the unreviewed
+  share reaches the threshold (default 0.4), full-review mode re-arms and the
+  divergent push gets the whole roster. This is what defeats
+  rewrite-after-approval and sparse-PR-then-payload
+  (`eval/lifecycle/`, replayed in `eval/lifecycle.test.ts`).
+
+The dial is a measured change, not a default change: it ships `full`
+everywhere, so no consumer's behavior moves until its repo adds a `re-review`
+line, and that line should be earned the way `enable` lines are, through the
+live A/B (arms identical except the ROUTING mode line, priced on recall and
+dollars; each run's executed depth lands in `out/rereview-plan.json`, and the
+counters aggregate `costByRereviewDepth`). Lifecycle-class changes like this
+one are trialed with the seeded-defect skill
+(`.claude/skills/review-trial/SKILL.md`).
 
 ### Models and effort per role
 

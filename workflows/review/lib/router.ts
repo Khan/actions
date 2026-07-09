@@ -33,14 +33,17 @@
 import {KNOWN_LENSES} from "./finding-schema";
 import type {Lens} from "./finding-schema";
 import {
+    DEFAULT_RE_REVIEW_MODE,
     ENABLEABLE_REVIEWERS,
     parseRoutingConfig,
+    RE_REVIEW_MODES,
     RISK_TIERS,
     ROUTING_CONFIG_PATH,
 } from "./routing-config";
 import type {
     EnableableReviewer,
     LensRule,
+    ReReviewMode,
     RiskRule,
     RiskTier,
     RoutingFileConfig,
@@ -49,14 +52,17 @@ import type {
 // Re-exported so consumers (and the tests) can treat the router as the single
 // entry point for routing vocabulary and the ROUTING parser.
 export {
+    DEFAULT_RE_REVIEW_MODE,
     ENABLEABLE_REVIEWERS,
     parseRoutingConfig,
+    RE_REVIEW_MODES,
     RISK_TIERS,
     ROUTING_CONFIG_PATH,
 };
 export type {
     EnableableReviewer,
     LensRule,
+    ReReviewMode,
     RiskRule,
     RiskTier,
     RoutingFileConfig,
@@ -791,6 +797,12 @@ export type RoutingJson = {
      */
     enabledReviewers: EnableableReviewer[];
     /**
+     * The repo's re-review mode (`re-review` line in `ROUTING`; `full` when
+     * absent or when the ROUTING file is missing). The re-review CLI
+     * (`rereview.ts`) reads this to decide how deep a repeat review runs.
+     */
+    reReviewMode: ReReviewMode;
+    /**
      * Whether the consumer `ROUTING` file was found, plus any parse warnings
      * (or the missing-file warning). The orchestrator surfaces these in the
      * review body's note lines so a silently-unconfigured repo is visible.
@@ -811,6 +823,7 @@ export const toRoutingJson = (
     result: RoutingResult,
     routingConfig: RoutingJson["routingConfig"] = {present: true, warnings: []},
     enabledReviewers: EnableableReviewer[] = [],
+    reReviewMode: ReReviewMode = DEFAULT_RE_REVIEW_MODE,
 ): RoutingJson => {
     const owners: Record<string, string[]> = {};
     const generatedFiles: string[] = [];
@@ -835,6 +848,7 @@ export const toRoutingJson = (
         runBudget: result.runBudget,
         pendingRiskQuestions: result.pendingRiskQuestions,
         enabledReviewers,
+        reReviewMode,
         routingConfig,
     };
 };
@@ -914,6 +928,7 @@ export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
               lensRules: [],
               riskRules: [],
               enabledReviewers: [],
+              reReviewMode: DEFAULT_RE_REVIEW_MODE,
               warnings: [
                   `routing config missing (${ROUTING_CONFIG_PATH}): no ` +
                       `specialist lenses will run; always-on reviewers only ` +
@@ -946,6 +961,7 @@ export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
             warnings: routingFileConfig.warnings,
         },
         routingFileConfig.enabledReviewers,
+        routingFileConfig.reReviewMode,
     );
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});
