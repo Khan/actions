@@ -8,7 +8,7 @@ type PullRequestSummary = {
 };
 
 const makeCore = () => ({
-    warn: vi.fn(),
+    warning: vi.fn(),
     info: vi.fn(),
     setFailed: vi.fn(),
     setOutput: vi.fn(),
@@ -161,7 +161,7 @@ describe("getChangedFiles", () => {
             prLookupArgs:
                 github.rest.repos.listPullRequestsAssociatedWithCommit.mock
                     .calls[0]?.[0],
-            warnCalls: core.warn.mock.calls.length,
+            warnCalls: core.warning.mock.calls.length,
             compareArgs: github.rest.repos.compareCommits.mock.calls[0]?.[0],
         }).toEqual({
             prLookupArgs: {

@@ -54,7 +54,7 @@ type ContextLike = {
 };
 
 type CoreLike = {
-    warn: (message: string) => void;
+    warning: (message: string) => void;
     info: (message: string) => void;
     setFailed: (message: string) => void;
     setOutput: (name: string, value: string) => void;
@@ -113,7 +113,7 @@ const getBaseAndHead = async (
                         `Could not determine base ref for '${context.eventName}' event.`,
                     );
                 }
-                core.warn(
+                core.warning(
                     `Found ${pullRequests.length} PRs with the pushed commit (${afterSha}). ` +
                         `Proceeding on a hunch with the first one (#${first.number} - ${first.title})`,
                 );
