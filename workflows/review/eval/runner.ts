@@ -9,6 +9,9 @@
  *
  *   1. `router.route`          — deterministic lens/team/tier routing + budget
  *   2. `labelForFinding`       — code-owned Conventional-Comment label per finding
+ *   2b. the change-provenance gate (`provenance.ts`): a finding whose anchor
+ *       is not an added/modified line of the case's diff is set aside as a
+ *       pre-existing observation and never posts
  *   3. the newly-changed-code scope filter (review.md Step 3)
  *   3b. the three-state validation gate's apply rules (review.md Step 3
  *       Phase 3: refuted drops, plausible downgrades to non-blocking, only a
@@ -42,6 +45,7 @@ import {
     type SkippedDimension,
     type VerdictEvent,
 } from "../lib/render-comment";
+import {applyProvenanceGate, computeDiffProvenance} from "../lib/provenance";
 import {route, type RoutingResult, type RouterConfig} from "../lib/router";
 import {
     computeVerdict,
@@ -110,6 +114,14 @@ export type RunResult = {
     allCandidates: RunCandidate[];
     /** Candidates that survive the scope filter AND the validation replay. */
     postedCandidates: RunCandidate[];
+    /**
+     * Pre-existing observations the change-provenance gate set aside (their
+     * anchor is not an added/modified line of the case's `diff`). Demoted to
+     * advisory by the gate (they can never carry a blocking label) and never
+     * posted: they exist only here, for inspection (in production, the run
+     * artifact), not in {@link RunResult.plannedReview}.
+     */
+    droppedByProvenance: RunCandidate[];
     /** Candidates dropped by the scope filter (out-of-scope, non-blocking). */
     droppedByScope: RunCandidate[];
     /** Candidates dropped as `refuted` by the validation replay (Phase 3). */
@@ -325,9 +337,37 @@ export const runCase = (
     );
     const allCandidates = recorded.map(toCandidate);
 
+    // 2b. Change-provenance gate (review.md Step 3): when the case carries a
+    // diff, a finding whose anchor is not an added/modified line is set aside
+    // as a pre-existing observation and never posts (artifact-only in
+    // production). Without a diff the gate is skipped (pre-gate behavior).
+    let changeAnchored = allCandidates;
+    let droppedByProvenance: RunCandidate[] = [];
+    if (corpusCase.diff !== undefined) {
+        const provenance = computeDiffProvenance(corpusCase.diff);
+        const gate = applyProvenanceGate(
+            allCandidates.map((c) => c.finding),
+            provenance,
+        );
+        const keptIds = new Set(gate.kept.map((f) => f.id));
+        changeAnchored = allCandidates.filter((c) => keptIds.has(c.id));
+        // Re-normalise the demoted findings so their candidates carry the
+        // gate-coerced (never blocking) label.
+        droppedByProvenance = allCandidates
+            .filter((c) => !keptIds.has(c.id))
+            .map((c) => {
+                const demoted = gate.preExisting.find(
+                    (f) => f.id === c.finding.id,
+                );
+                return demoted === undefined
+                    ? c
+                    : toCandidate({source: c.source, finding: demoted});
+            });
+    }
+
     // 3. Scope filter to newly-changed code.
     const {posted: inScopeCandidates, dropped: droppedByScope} =
-        applyScopeFilter(allCandidates, corpusCase.scope);
+        applyScopeFilter(changeAnchored, corpusCase.scope);
 
     // 3b. Replay the recorded claim-validator verifications (three-state gate:
     // refuted drops, plausible downgrades to non-blocking, confirmed keeps).
@@ -367,6 +407,7 @@ export const runCase = (
         routing,
         allCandidates,
         postedCandidates,
+        droppedByProvenance,
         droppedByScope,
         droppedByValidation,
         postedLabels,

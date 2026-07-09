@@ -71,14 +71,15 @@ export const checkExpectation = (run: EvalRun): ExpectationFailure[] => {
         failures.push({code: "must-not-post-emitted", ids: leaked});
     }
 
+    const postedCount = run.result.postedCandidates.length;
     if (
         expected.postedCommentCount !== undefined &&
-        run.result.postedCandidates.length !== expected.postedCommentCount
+        postedCount !== expected.postedCommentCount
     ) {
         failures.push({
             code: "comment-count-mismatch",
             expected: expected.postedCommentCount,
-            actual: run.result.postedCandidates.length,
+            actual: postedCount,
         });
     }
 

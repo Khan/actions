@@ -777,6 +777,12 @@ export type RoutingJson = {
         fallback: {team: string; files: number}[];
     };
     perFileTier: Record<string, DisplayTier>;
+    /**
+     * Changed files classified `generated` (linguist-generated patterns from
+     * `.gitattributes`). The provenance CLI (`provenance.ts`) strips these
+     * from the whole-change diff it stages.
+     */
+    generatedFiles: string[];
     runBudget: RunBudget;
     pendingRiskQuestions: RiskQuestion[];
     /**
@@ -807,9 +813,12 @@ export const toRoutingJson = (
     enabledReviewers: EnableableReviewer[] = [],
 ): RoutingJson => {
     const owners: Record<string, string[]> = {};
+    const generatedFiles: string[] = [];
     for (const file of result.perFile) {
         if (file.classification === "source") {
             owners[file.path] = file.teams;
+        } else {
+            generatedFiles.push(file.path);
         }
     }
 
@@ -822,6 +831,7 @@ export const toRoutingJson = (
         lensesToSpawn: result.lensesToSpawn,
         teams: {owners, fallback: result.fallbackTeams},
         perFileTier,
+        generatedFiles,
         runBudget: result.runBudget,
         pendingRiskQuestions: result.pendingRiskQuestions,
         enabledReviewers,

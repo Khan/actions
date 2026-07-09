@@ -10,7 +10,7 @@
         {
             "source": "conventions",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "conv-a11y-h1-1",
                 "lens": "conventions",
                 "anchor": {"type": "line", "path": "src/dashboard/components/teacher-dashboard.tsx", "line": 91, "side": "RIGHT"},
@@ -20,6 +20,7 @@
                     "src/dashboard/components/teacher-dashboard.tsx:91 removes the Heading tag=h1 wrapper",
                     "neither layout wrapper in the mount path renders a heading"
                 ],
+                "failure_scenario": "With the wrapper removed, assistive tech lands on an `<h2>` as the page's first heading and the document outline starts below level 1.",
                 "producing_hunt": "conventions:accessibility",
                 "model_authored_prose": "Accessibility - removing this wrapper drops the page's only `<h1>`; the first heading is now an `<h2>`."
             }

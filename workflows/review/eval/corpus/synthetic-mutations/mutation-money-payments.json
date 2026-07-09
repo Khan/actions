@@ -10,7 +10,7 @@
         {
             "source": "money-payments",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "mutation-money-float-rounding",
                 "lens": "money-payments",
                 "anchor": {"type": "line", "path": "src/billing/charge.ts", "line": 29, "side": "RIGHT"},
@@ -21,6 +21,7 @@
                     "the result is passed to the charge API without rounding to integer cents",
                     "float arithmetic on money accumulates rounding error across line items"
                 ],
+                "failure_scenario": "Float arithmetic on the charge amount drifts by a cent, so the customer is charged an amount that disagrees with the invoice.",
                 "producing_hunt": "money-payments:float-currency",
                 "model_authored_prose": "This charge amount is computed in floating point, which drifts on cents. Compute in integer cents (or a decimal type) and round explicitly before charging."
             }

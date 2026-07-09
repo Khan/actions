@@ -15,7 +15,7 @@
         {
             "source": "money-payments",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "money-fp-rounding-1",
                 "lens": "money-payments",
                 "anchor": {"type": "line", "path": "src/payments/pricing.ts", "line": 88, "side": "RIGHT"},
@@ -26,6 +26,7 @@
                     "float accumulation loses cents on carts with many line items",
                     "the ledger stores integer cents, so the drift surfaces as a reconciliation mismatch"
                 ],
+                "failure_scenario": "A large cart accumulates binary float error, so the charged total disagrees with the per-line ledger sum by a cent.",
                 "producing_hunt": "money-payments:decimal-safety",
                 "model_authored_prose": "Compute this total in integer cents (or a decimal type) and round per line item — float accumulation here drifts by a cent on large carts and breaks ledger reconciliation."
             }

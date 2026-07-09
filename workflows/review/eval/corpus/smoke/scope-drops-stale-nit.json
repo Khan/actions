@@ -21,7 +21,7 @@
         {
             "source": "conventions",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "scope-stale-nit-1",
                 "lens": "conventions",
                 "anchor": {"type": "line", "path": "src/services/report.ts", "line": 40, "side": "RIGHT"},
@@ -31,6 +31,7 @@
                     "src/services/report.ts:40 is unchanged since the previous review (not in new-scope)",
                     "a non-blocking style suggestion on already-reviewed code is exactly the re-flag noise the scope filter removes"
                 ],
+                "failure_scenario": "No runtime misbehavior; the unnamed constant just leaves its meaning to the next reader.",
                 "producing_hunt": "conventions:style",
                 "model_authored_prose": "Minor: this block could use a named constant — non-blocking style note."
             }
@@ -38,7 +39,7 @@
         {
             "source": "correctness",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "scope-blocking-kept-1",
                 "lens": "correctness",
                 "anchor": {"type": "line", "path": "src/services/report.ts", "line": 205, "side": "RIGHT"},
@@ -49,6 +50,7 @@
                     "an off-by-one truncates the last row of every report",
                     "the blocking-label exception keeps a real blocking bug even on unchanged lines"
                 ],
+                "failure_scenario": "With `i < rows.length - 1` the loop exits early and the final report row is silently dropped from the output.",
                 "producing_hunt": "correctness:off-by-one",
                 "model_authored_prose": "Off-by-one here drops the final report row (`i < rows.length - 1` should be `i < rows.length`)."
             }

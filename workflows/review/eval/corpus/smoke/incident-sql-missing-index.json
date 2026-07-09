@@ -16,7 +16,7 @@
         {
             "source": "data-migrations",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "dm-missing-index-1",
                 "lens": "data-migrations",
                 "anchor": {"type": "line", "path": "db/migrations/20260601_add_status.sql", "line": 3, "side": "RIGHT"},
@@ -27,6 +27,7 @@
                     "src/models/order.ts filters `WHERE status = ?` on a table with millions of rows",
                     "no CREATE INDEX accompanies the column, so the query degrades to a full table scan"
                 ],
+                "failure_scenario": "Once the table grows, the `status` filter in order.ts runs as a full table scan and the hot query times out under load.",
                 "producing_hunt": "data-migrations:index-coverage",
                 "model_authored_prose": "This migration adds `status` but no index, yet `order.ts` filters on it — add an index for `status` or the hot query will table-scan under load.",
                 "suggested_patch": "CREATE INDEX CONCURRENTLY idx_orders_status ON orders (status);"

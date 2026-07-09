@@ -9,7 +9,12 @@ import {
     renderReviewBody,
     type ReviewBodyInput,
 } from "./render-comment.ts";
-import {assertFinding, type Finding, type Lens} from "./finding-schema.ts";
+import {
+    FINDING_SCHEMA_VERSION,
+    assertFinding,
+    type Finding,
+    type Lens,
+} from "./finding-schema.ts";
 
 /**
  * Rendering tests. The renderer sits on the determinism
@@ -23,13 +28,15 @@ import {assertFinding, type Finding, type Lens} from "./finding-schema.ts";
 // never pass against a finding the rest of the pipeline would reject.
 const makeFinding = (overrides: Record<string, unknown> = {}): Finding =>
     assertFinding({
-        schema_version: 1,
+        schema_version: FINDING_SCHEMA_VERSION,
         id: "finding-1",
         lens: "security-auth",
         anchor: {type: "line", path: "src/app.ts", line: 42},
         severity: "blocking",
         confidence: 0.9,
         evidence_trace: ["src/app.ts:42 flows unsanitized input into exec()"],
+        failure_scenario:
+            "A request param containing shell metacharacters reaches exec() unescaped and runs arbitrary commands.",
         producing_hunt: "security-auth/command-injection",
         model_authored_prose:
             "User input flows unsanitized into a shell command.",

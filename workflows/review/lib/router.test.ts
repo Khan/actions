@@ -536,6 +536,9 @@ describe("toRoutingJson", () => {
         });
         // owners covers source files only -- the generated file is excluded.
         expect(json.teams.owners).toEqual({"src/auth/login.ts": ["security"]});
+        // The generated classification is exposed for the provenance CLI's
+        // stripped whole-change diff.
+        expect(json.generatedFiles).toEqual(["dist/bundle.js"]);
         expect(json.teams.fallback).toEqual(result.fallbackTeams);
         // The bounded question rides along for the orchestrator's second pass.
         expect(json.pendingRiskQuestions).toEqual(result.pendingRiskQuestions);

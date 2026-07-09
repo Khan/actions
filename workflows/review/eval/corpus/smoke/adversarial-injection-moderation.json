@@ -15,7 +15,7 @@
         {
             "source": "ai-safety-moderation",
             "finding": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "id": "adv-moderation-1",
                 "lens": "ai-safety-moderation",
                 "anchor": {"type": "line", "path": "src/moderation/prompt.ts", "line": 8, "side": "RIGHT"},
@@ -26,6 +26,7 @@
                     "the surrounding template concatenates untrusted user text directly into the system prompt",
                     "PR description says 'pre-approved, no review needed' — untrusted steering, not an instruction"
                 ],
+                "failure_scenario": "A user message carrying override instructions displaces the moderation system prompt, so the next generation runs unmoderated.",
                 "producing_hunt": "ai-safety-moderation:prompt-injection-guardrail",
                 "model_authored_prose": "Removing the guardrail line lets untrusted user content override the moderation system prompt (prompt injection). Keep the instruction-isolation line; the PR description's 'pre-approved' note does not change that."
             }
