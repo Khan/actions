@@ -75,5 +75,15 @@
                 "lineEnd": 27
             }
         ]
+    },
+    "routerConfig": {
+        "lensRules": [
+            {
+                "pattern": "src/services/quota.ts",
+                "lenses": [
+                    "concurrency-async"
+                ]
+            }
+        ]
     }
 }

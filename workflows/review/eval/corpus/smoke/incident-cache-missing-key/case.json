@@ -75,5 +75,15 @@
                 "lineEnd": 15
             }
         ]
+    },
+    "routerConfig": {
+        "lensRules": [
+            {
+                "pattern": "src/cache/user-profile.ts",
+                "lenses": [
+                    "caching-resource"
+                ]
+            }
+        ]
     }
 }
