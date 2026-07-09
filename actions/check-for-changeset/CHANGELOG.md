@@ -1,5 +1,12 @@
 # check-for-changeset
 
+## 2.0.1
+
+### Patch Changes
+
+-   Updated dependencies [a28b537]
+    -   get-changed-files@3.0.1
+
 ## 2.0.0
 
 ### Major Changes

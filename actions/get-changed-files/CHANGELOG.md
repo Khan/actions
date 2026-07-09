@@ -1,5 +1,11 @@
 # get-changed-files
 
+## 3.0.1
+
+### Patch Changes
+
+-   a28b537: Fix a crash (`core.warn is not a function`) on push events when the pushed commit is associated with more than one open PR, as happens with stacked PRs. The github-script `core` API method is `core.warning`, not `core.warn`.
+
 ## 3.0.0
 
 ### Major Changes
