@@ -74,6 +74,8 @@ export type ArmRunReport = {
         failedAgents: string[];
     }[];
     judge?: {meanQuality: number; verdictCounts: Record<string, number>};
+    /** Fixed-format note when judge scoring failed; metrics still stand. */
+    judgeError?: string;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -339,6 +341,22 @@ export const renderMarkdownReport = (report: AbReport): string => {
             "",
         );
     }
+    const judgeErrors = [
+        ...(baseline.judgeError !== undefined
+            ? [`baseline: ${baseline.judgeError}`]
+            : []),
+        ...(candidate.judgeError !== undefined
+            ? [`candidate: ${candidate.judgeError}`]
+            : []),
+    ];
+    if (judgeErrors.length > 0) {
+        lines.push(
+            "### Judge scoring failed (metrics above still stand)",
+            "",
+            ...judgeErrors.map((e) => `- ${e}`),
+            "",
+        );
+    }
     const failedAgents = [...baseline.perCase, ...candidate.perCase].flatMap(
         (c) => c.failedAgents.map((agent) => `${c.caseId}: ${agent} failed`),
     );
@@ -445,8 +463,21 @@ const main = async (): Promise<void> => {
         {maxUsd: maxUsd / 2},
     );
     if (withJudge) {
-        await judgeArm(baseline);
-        await judgeArm(candidate);
+        // Judge scoring is additive: a failure here must degrade to a
+        // report without quality scores, never kill a run whose arms have
+        // already spent their budget (the plan's standing rule).
+        for (const arm of [baseline, candidate]) {
+            try {
+                await judgeArm(arm);
+            } catch (error) {
+                arm.judgeError = String(
+                    error instanceof Error ? error.message : error,
+                );
+                console.error(
+                    `judge scoring failed on the ${arm.arm} arm: ${arm.judgeError}`,
+                );
+            }
+        }
     }
 
     const report: AbReport = {
