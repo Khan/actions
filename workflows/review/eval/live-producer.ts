@@ -258,11 +258,18 @@ const fromLabelShape = (
     };
 };
 
-/** Parse one agent's output into live findings, per its contract. */
+/**
+ * Parse one agent's output into live findings, per its contract. Every id is
+ * namespaced with the case id (`<caseId>:<id>`): live agents choose their own
+ * ids, so without the namespace two cases produce colliding ids (every case's
+ * first correctness finding would be `live-correctness-reviewer-1`), and the
+ * judge's score join requires ids unique across the whole arm.
+ */
 const parseAgentFindings = (
     agent: ExtractedAgent,
     output: string,
     usedIds: Set<string>,
+    caseId: string,
 ): LiveFinding[] => {
     const parsed = parseJsonObject(output);
     const rawFindings = parsed["findings"];
@@ -294,9 +301,11 @@ const parseAgentFindings = (
         return {source: agent.name, finding: result.finding};
     });
 
-    // Ids must be unique across the whole case: prefix a collision with the
-    // producing agent's name rather than dropping a real finding.
+    // Namespace with the case id (see the function doc), then dedupe within
+    // the case: prefix a collision with the producing agent's name rather
+    // than dropping a real finding.
     for (const live of findings) {
+        live.finding = {...live.finding, id: `${caseId}:${live.finding.id}`};
         if (usedIds.has(live.finding.id)) {
             live.finding = {
                 ...live.finding,
@@ -533,7 +542,8 @@ export const produceLive = async (
                     timeoutMs,
                 },
                 runner,
-                (output) => parseAgentFindings(agent, output, usedIds),
+                (output) =>
+                    parseAgentFindings(agent, output, usedIds, corpusCase.id),
             ),
     );
     for (const {report, parsed} of finderResults) {
