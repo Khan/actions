@@ -1255,8 +1255,9 @@ Read from disk:
 - The diff: `/tmp/gh-aw/review/pr.diff`. The file list: `/tmp/gh-aw/review/review-files.json`.
 - For surrounding context, read any changed or related file directly from the checkout.
 
-Read **every line** of the diff you are given — this review must be comprehensive; do
-not skim or sample.
+Skim the diff quickly; deep reading is not required. Report a finding only when you
+are absolutely certain, and prefer staying silent when in doubt — at most one or two
+findings per review.
 
 **Bounded investigation.** Before you commit to a finding, investigate it on the
 checkout instead of guessing from the diff alone. You still have **no GitHub access** and
