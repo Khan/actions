@@ -1,0 +1,78 @@
+{
+    "id": "trial-erasure-suite-flag-mock",
+    "tags": [
+        "incident",
+        "trial",
+        "live"
+    ],
+    "category": "incident-repro",
+    "description": "Sanitized structural rewrite of a v1.4.0 re-run miss (first push): the new erasure test suite pins the retention rollout flag on inside the shared test-env constructor, so no test exercises the flag-off path, where EraseUser (unchanged in this PR) silently skips the compliance deletion; flag off is the production default while the rollout is in progress. The pre-existing flag gate itself sits outside the diff, so under the change-provenance discipline it belongs in the artifact, not the posted review; the postable defect is the test gap.",
+    "changedFiles": [
+        {
+            "path": "services/notes/erasure_test.go",
+            "status": "added"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "test-adequacy",
+            "finding": {
+                "schema_version": 2,
+                "id": "erasure-suite-flag-mock",
+                "lens": "test-adequacy",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/erasure_test.go",
+                    "line": 75,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "services/notes/erasure_test.go:75 forces notes-retention-enabled on inside newEraseTestEnv, which every test in the suite uses",
+                    "the flag-off early return in EraseUser is therefore never executed by any test",
+                    "flag off is the production default while the rollout is in progress, and on this path EraseUser silently skips account-erasure deletion"
+                ],
+                "failure_scenario": "Every erasure test runs with the flag forced on, so no test observes that flag-off makes EraseUser return nil without deleting anything; the production-default path of a compliance deletion ships unexercised, and a regression that widens the gate stays invisible to the suite.",
+                "producing_hunt": "test-adequacy:flag-coverage",
+                "model_authored_prose": "newEraseTestEnv pins notes-retention-enabled on for every erasure test, hiding the flag-off path, which is the production default during rollout and where EraseUser silently skips deletion. At least one test should run with the flag off and assert what is (and is not) supposed to happen."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "erasure-suite-flag-mock"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/services/notes/erasure_test.go b/services/notes/erasure_test.go\nnew file mode 100644\n--- /dev/null\n+++ b/services/notes/erasure_test.go\n@@ -0,0 +1,105 @@\n+package notes\n+\n+import (\n+\t\"context\"\n+\t\"fmt\"\n+\t\"testing\"\n+)\n+\n+// eraseFlags is the FlagSet the erasure tests run under.\n+type eraseFlags struct {\n+\tforced map[string]bool\n+}\n+\n+func (f *eraseFlags) Enabled(_ context.Context, name string) bool {\n+\treturn f.forced[name]\n+}\n+\n+// eraseStore is an in-memory Store for the erasure tests.\n+type eraseStore struct {\n+\tnotes []Note\n+}\n+\n+func (s *eraseStore) Run(_ context.Context, q Query) ([]Note, error) {\n+\tlimit := q.Limit\n+\tif limit == 0 {\n+\t\tlimit = 1\n+\t}\n+\tvar out []Note\n+\tfor _, note := range s.notes {\n+\t\tif note.UserID != q.UserID {\n+\t\t\tcontinue\n+\t\t}\n+\t\tif q.KeysOnly {\n+\t\t\tnote = Note{ID: note.ID}\n+\t\t}\n+\t\tout = append(out, note)\n+\t\tif len(out) == limit {\n+\t\t\tbreak\n+\t\t}\n+\t}\n+\treturn out, nil\n+}\n+\n+func (s *eraseStore) Delete(_ context.Context, ids []string) error {\n+\tdrop := make(map[string]bool, len(ids))\n+\tfor _, id := range ids {\n+\t\tdrop[id] = true\n+\t}\n+\tkept := s.notes[:0]\n+\tfor _, note := range s.notes {\n+\t\tif !drop[note.ID] {\n+\t\t\tkept = append(kept, note)\n+\t\t}\n+\t}\n+\ts.notes = kept\n+\treturn nil\n+}\n+\n+// eraseTestEnv bundles the fakes behind the eraseEnv interface.\n+type eraseTestEnv struct {\n+\tstore *eraseStore\n+\tflags *eraseFlags\n+}\n+\n+func (e *eraseTestEnv) Store() Store { return e.store }\n+\n+func (e *eraseTestEnv) Flags() FlagSet { return e.flags }\n+\n+// newEraseTestEnv returns the env every erasure test runs under.\n+// Retention is rolling out everywhere; run the suite with the flag\n+// on, as production will be.\n+func newEraseTestEnv() *eraseTestEnv {\n+\treturn &eraseTestEnv{\n+\t\tstore: &eraseStore{},\n+\t\tflags: &eraseFlags{forced: map[string]bool{retentionFlag: true}},\n+\t}\n+}\n+\n+func seedNotes(env *eraseTestEnv, n int) {\n+\tfor i := 0; i < n; i++ {\n+\t\tenv.store.notes = append(env.store.notes, Note{\n+\t\t\tID:     fmt.Sprintf(\"note-%d\", i),\n+\t\t\tUserID: \"user-1\",\n+\t\t})\n+\t}\n+}\n+\n+func TestEraseUserRemovesAllNotes(t *testing.T) {\n+\tenv := newEraseTestEnv()\n+\t// Enough notes to span two deletion pages.\n+\tseedNotes(env, erasePageSize+250)\n+\tif err := EraseUser(context.Background(), env, \"user-1\"); err != nil {\n+\t\tt.Fatalf(\"EraseUser: %v\", err)\n+\t}\n+\tif got := len(env.store.notes); got != 0 {\n+\t\tt.Fatalf(\"erasure left %d notes, want 0\", got)\n+\t}\n+}\n+\n+func TestEraseUserNoNotes(t *testing.T) {\n+\tenv := newEraseTestEnv()\n+\tif err := EraseUser(context.Background(), env, \"user-1\"); err != nil {\n+\t\tt.Fatalf(\"EraseUser: %v\", err)\n+\t}\n+}\n",
+    "live": {
+        "prContext": {
+            "title": "notes: cover account erasure with tests",
+            "description": "Adds tests for EraseUser: full multi-page deletion for a user whose notes span more than one deletion page, and the no-notes case. Uses in-memory store and flag fakes.",
+            "author": "dev-notes",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "erasure-suite-flag-mock",
+                "path": "services/notes/erasure_test.go",
+                "mechanism": [
+                    "(constructor|helper|newEraseTestEnv|every test|suite[- ]wide|whole suite).{0,40}(pins?|forces?|mocks?|hard[- ]?codes?).{0,20}flag",
+                    "flag[- ]off (path|branch|behavior).{0,40}(never|not) (run|exercised|tested|executed|covered)",
+                    "hid(es|ing|den).{0,20}flag.?off",
+                    "silently skips?.{0,40}(erasure|deletion)"
+                ],
+                "lens": "test-adequacy",
+                "lineStart": 70,
+                "lineEnd": 80
+            }
+        ]
+    }
+}
