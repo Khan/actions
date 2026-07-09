@@ -4,8 +4,13 @@ Status (2026-07-09): this plan doc is Khan/actions#232. Phase 1 is
 Khan/actions#233 (draft), with the trial-case port stacked on it as
 Khan/actions#235 (13 live cases total). Phase 2 is complete in Khan/actions#234
 (stacked on #233): extraction, staging, the producer behind its runner seam, and
-the SDK runner + CLI; the live CLI smoke run still needs an ANTHROPIC_API_KEY
-environment. Phases 3 to 5 not started. Each phase is scoped so a separate
+the SDK runner + CLI. Phase 3 is Khan/actions#236 (matcher, live metrics, A/B
+runner) and Phase 4 is Khan/actions#237 (the Review Eval A/B workflow), each
+stacked on its predecessor. Everything model-free is tested and green; the
+first ANTHROPIC_API_KEY environment to touch this stack should run the Phase 2
+CLI smoke (`live-runner.ts --case <id>`), then a small `live-ab.ts` run, then
+the two Phase 4 acceptance PRs. Phase 5 (the trial-runner skill) is not
+started; its section below is the spec to hand off. Each phase is scoped so a separate
 agent can execute it with only this document plus the repo. Phases 1 and 2 are
 independent of each other; Phase 3 needs both; Phase 4 needs Phase 3; Phase 5 (the
 trial-runner skill) is independent of all of them.
