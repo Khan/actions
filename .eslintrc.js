@@ -26,7 +26,14 @@ module.exports = {
         sourceType: "module",
         ecmaVersion: 2022,
     },
-    ignorePatterns: ["**/dist/", "actions/**/index.js"],
+    ignorePatterns: [
+        "**/dist/",
+        "actions/**/index.js",
+        // Live eval-corpus trees are byte-exact fixtures paired with each
+        // case's diff: linting (and especially prettier auto-formatting)
+        // would desync them from the diff the provenance gate parses.
+        "workflows/review/eval/corpus/**/tree/",
+    ],
     overrides: [
         {
             files: "**/*.ts",
