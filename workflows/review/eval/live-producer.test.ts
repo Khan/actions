@@ -143,12 +143,12 @@ describe("produceLive", () => {
             "claim-validator": [
                 validatorOutput([
                     {
-                        id: "live-correctness-reviewer-1",
+                        id: "produce-case:live-correctness-reviewer-1",
                         verification: "confirmed",
                         confidence: 0.9,
                     },
                     {
-                        id: "lens-money-1",
+                        id: "produce-case:lens-money-1",
                         verification: "plausible",
                         confidence: 0.3,
                     },
@@ -177,36 +177,45 @@ describe("produceLive", () => {
         const correctness = result.findings.find(
             (f) => f.source === "correctness",
         );
-        expect(correctness?.finding.id).toBe("live-correctness-reviewer-1");
+        expect(correctness?.finding.id).toBe(
+            "produce-case:live-correctness-reviewer-1",
+        );
         expect(correctness?.finding.severity).toBe("blocking");
         expect(correctness?.finding.lens).toBe("correctness");
         expect(correctness?.finding.confidence).toBe(0.7);
         // The lens finding passes through as-is.
         const lens = result.findings.find((f) => f.source === "money-payments");
-        expect(lens?.finding.id).toBe("lens-money-1");
+        expect(lens?.finding.id).toBe("produce-case:lens-money-1");
 
         // claims.json staged for the validator with code-owned labels.
         const claims = JSON.parse(
             vol.readFileSync("/stage/context/claims.json", "utf8") as string,
         );
-        expect(claims.map((c: {id: string}) => c.id).sort()).toEqual([
-            "lens-money-1",
-            "live-correctness-reviewer-1",
-        ]);
+        expect(claims.map((c: {id: string}) => c.id).sort()).toEqual(
+            [
+                "produce-case:lens-money-1",
+                "produce-case:live-correctness-reviewer-1",
+            ].sort(),
+        );
         expect(
             claims.find(
-                (c: {id: string}) => c.id === "live-correctness-reviewer-1",
+                (c: {id: string}) =>
+                    c.id === "produce-case:live-correctness-reviewer-1",
             ).label,
         ).toBe("issue (blocking)");
 
         // Verifications parsed into the corpus validation shape.
         expect(result.validation).toEqual([
             {
-                id: "live-correctness-reviewer-1",
+                id: "produce-case:live-correctness-reviewer-1",
                 verification: "confirmed",
                 confidence: 0.9,
             },
-            {id: "lens-money-1", verification: "plausible", confidence: 0.3},
+            {
+                id: "produce-case:lens-money-1",
+                verification: "plausible",
+                confidence: 0.3,
+            },
         ]);
 
         // Cost accounting: one entry per dispatched agent.
@@ -225,7 +234,7 @@ describe("produceLive", () => {
             "claim-validator": [
                 validatorOutput([
                     {
-                        id: "live-correctness-reviewer-1",
+                        id: "produce-case:live-correctness-reviewer-1",
                         verification: "confirmed",
                     },
                 ]),
@@ -267,7 +276,10 @@ describe("produceLive", () => {
             "money-payments": [JSON.stringify({findings: []})],
             "claim-validator": [
                 validatorOutput([
-                    {id: "live-skill-auditor-1", verification: "refuted"},
+                    {
+                        id: "produce-case:live-skill-auditor-1",
+                        verification: "refuted",
+                    },
                 ]),
             ],
         });
@@ -327,8 +339,8 @@ describe("produceLive", () => {
             fs: volFs(caseVol()),
         });
         expect(result.findings.map((f) => f.finding.id).sort()).toEqual([
-            "lens-money-1",
-            "money-payments:lens-money-1",
+            "money-payments:produce-case:lens-money-1",
+            "produce-case:lens-money-1",
         ]);
     });
 
