@@ -119,9 +119,9 @@ describe("re-review lifecycle dataset", () => {
         const ids = CASES.map((c) => c.id);
         expect(ids).toContain("rereview-rewrite-after-approval");
         expect(ids).toContain("rereview-sparse-pr-then-payload");
-        expect(
-            CASES.some((c) => c.scoring === "reduced-path-taken"),
-        ).toBe(true);
+        expect(CASES.some((c) => c.scoring === "reduced-path-taken")).toBe(
+            true,
+        );
     });
 });
 

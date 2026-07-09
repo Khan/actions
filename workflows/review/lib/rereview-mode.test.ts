@@ -21,11 +21,7 @@ import type {HunkSignature, ReReviewStamp} from "./rereview-mode";
 /* -------------------------------------------------------------------------- */
 
 /** A one-file, one-hunk diff with the given added line, at the given offset. */
-const diffFor = (
-    path: string,
-    addedLine: string,
-    startLine = 1,
-): string =>
+const diffFor = (path: string, addedLine: string, startLine = 1): string =>
     [
         `diff --git a/${path} b/${path}`,
         `--- a/${path}`,
@@ -138,7 +134,10 @@ describe("computeDivergence", () => {
 
     it("ignores fingerprint hunks that are gone from the current diff", () => {
         const reviewed: HunkSignature = {
-            "src/handler.ts": [...current["src/handler.ts"], "deadbeef00000000"],
+            "src/handler.ts": [
+                ...current["src/handler.ts"],
+                "deadbeef00000000",
+            ],
             "src/deleted.ts": ["cafecafe00000000"],
         };
         const d = computeDivergence(current, reviewed);
@@ -170,7 +169,9 @@ const stampOf = (over: Partial<ReReviewStamp> = {}): ReReviewStamp => ({
 describe("stamp render/parse", () => {
     it("round-trips through a review body", () => {
         const stamp = stampOf();
-        const body = `Approved — no blocking issues found.\n\n${renderRereviewStamp(stamp)}`;
+        const body = `Approved — no blocking issues found.\n\n${renderRereviewStamp(
+            stamp,
+        )}`;
         expect(parseRereviewStamp(body)).toEqual(stamp);
     });
 
@@ -220,7 +221,9 @@ describe("stamp render/parse", () => {
 
 describe("findLatestStamp", () => {
     it("prefers the newest stamped review by submittedAt", () => {
-        const older = renderRereviewStamp(stampOf({verdict: "REQUEST_CHANGES"}));
+        const older = renderRereviewStamp(
+            stampOf({verdict: "REQUEST_CHANGES"}),
+        );
         const newer = renderRereviewStamp(stampOf({verdict: "APPROVE"}));
         const found = findLatestStamp([
             {body: newer, submittedAt: "2026-07-09T10:00:00Z"},
@@ -424,7 +427,9 @@ describe("buildScopedDiff", () => {
         const scoped = buildScopedDiff(TWO_HUNK_DIFF, reviewed);
         expect(scoped).toContain("second hunk line");
         expect(scoped).not.toContain("first hunk line");
-        expect(scoped).toContain("diff --git a/src/handler.ts b/src/handler.ts");
+        expect(scoped).toContain(
+            "diff --git a/src/handler.ts b/src/handler.ts",
+        );
     });
 
     it("drops files that are fully reviewed", () => {
@@ -468,7 +473,9 @@ const fakeFs = (seed: Record<string, string>): FakeFs => {
 
 const REVIEW_DIR = "/tmp/gh-aw/review";
 
-const stagedInputs = (over: Record<string, string> = {}): Record<string, string> => ({
+const stagedInputs = (
+    over: Record<string, string> = {},
+): Record<string, string> => ({
     [`${REVIEW_DIR}/full.diff`]: TWO_HUNK_DIFF,
     [`${REVIEW_DIR}/routing.json`]: JSON.stringify({reReviewMode: "fast"}),
     [`${REVIEW_DIR}/pr-context.json`]: JSON.stringify({isDraft: false}),

@@ -43,7 +43,10 @@ describe("normalizeRunArtifacts: re-review depth", () => {
         const run = normalizeRunArtifacts(
             {
                 summary: {verdict: "APPROVE"},
-                rereviewPlan: {depth: "flip-gated", dispatch: "reconcile+correctness"},
+                rereviewPlan: {
+                    depth: "flip-gated",
+                    dispatch: "reconcile+correctness",
+                },
             },
             "fallback",
         );

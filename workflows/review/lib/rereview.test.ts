@@ -318,11 +318,7 @@ describe("runRereviewCli", () => {
 });
 
 describe("keptBlockingCount (the mode dial's flip-gate input)", () => {
-    const thread = (
-        id: string,
-        label: string,
-        line: number,
-    ): StagedThread => ({
+    const thread = (id: string, label: string, line: number): StagedThread => ({
         thread_id: id,
         path: "src/handler.ts",
         line,

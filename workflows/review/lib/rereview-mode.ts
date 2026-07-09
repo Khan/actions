@@ -228,7 +228,11 @@ const decodeSignature = (encoded: string): HunkSignature | null => {
     } catch {
         return null;
     }
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (
+        parsed === null ||
+        typeof parsed !== "object" ||
+        Array.isArray(parsed)
+    ) {
         return null;
     }
     const signature: HunkSignature = {};
@@ -357,7 +361,10 @@ export type ReReviewDecisionInput = {
 };
 
 /** Which sub-agents a depth dispatches (the prompt maps this to the roster). */
-export type ReReviewDispatch = "all" | "reconcile+correctness" | "reconcile-only";
+export type ReReviewDispatch =
+    | "all"
+    | "reconcile+correctness"
+    | "reconcile-only";
 
 /** Which diff the finding-producing reviewers are staged. */
 export type ReReviewStaging = "whole-diff" | "new-hunks" | "none";
