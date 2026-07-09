@@ -69,6 +69,30 @@ describe("computeDiffProvenance", () => {
     it("treats an empty diff as valid and empty", () => {
         expect(computeDiffProvenance("")).toEqual({files: {}, warnings: []});
     });
+
+    it("flags a partially garbled diff (orphan hunks) so the gate fails open", () => {
+        const partiallyGarbled = [
+            "dfif --git a/src/lost.ts b/src/lost.ts",
+            "@@ -1 +1 @@",
+            "-old",
+            "+new",
+            DIFF,
+        ].join("\n");
+        const prov = computeDiffProvenance(partiallyGarbled);
+        // The intact section still parses, so zero-sections cannot catch
+        // this; the orphan-hunk tripwire is what does.
+        expect(Object.keys(prov.files)).toEqual(["src/app.ts"]);
+        expect(prov.warnings).toHaveLength(1);
+        expect(prov.warnings[0]).toMatch(/not attributable/);
+
+        // And the gate honors it: nothing is demoted on a partial parse.
+        const offAnchor = makeFinding({
+            anchor: {type: "line", path: "src/app.ts", line: 13},
+        });
+        const {kept, preExisting} = applyProvenanceGate([offAnchor], prov);
+        expect(kept).toEqual([offAnchor]);
+        expect(preExisting).toEqual([]);
+    });
 });
 
 describe("isAnchorInProvenance", () => {
@@ -241,6 +265,38 @@ describe("runProvenanceCli", () => {
         expect(written["/tmp/gh-aw/review/full-stripped.diff"]).toBe(
             GENERATED_DIFF,
         );
+    });
+
+    it("flags a changed file with a patch that is missing from the parsed diff", () => {
+        const {fs, written} = makeFs({
+            "/tmp/gh-aw/review/full.diff": DIFF,
+            "/tmp/gh-aw/review/files.json": JSON.stringify([
+                {path: "src/app.ts", status: "modified", hasPatch: true},
+                {path: "src/absorbed.ts", status: "modified", hasPatch: true},
+                {path: "assets/logo.png", status: "added", hasPatch: false},
+            ]),
+        });
+        const result = runProvenanceCli(fs);
+        expect(result.provenance.warnings).toHaveLength(1);
+        expect(result.provenance.warnings[0]).toMatch(/src\/absorbed\.ts/);
+        // The binary (hasPatch: false) file is legitimately absent from the
+        // diff and must not trigger the fail-open.
+        expect(result.provenance.warnings[0]).not.toMatch(/logo\.png/);
+        const provJson = JSON.parse(
+            written["/tmp/gh-aw/review/provenance.json"] ?? "{}",
+        ) as DiffProvenance;
+        expect(provJson.warnings).toHaveLength(1);
+    });
+
+    it("skips the completeness check for entries without hasPatch (older staging)", () => {
+        const {fs} = makeFs({
+            "/tmp/gh-aw/review/full.diff": DIFF,
+            "/tmp/gh-aw/review/files.json": JSON.stringify([
+                {path: "src/app.ts", status: "modified"},
+                {path: "src/not-in-diff.ts", status: "modified"},
+            ]),
+        });
+        expect(runProvenanceCli(fs).provenance.warnings).toEqual([]);
     });
 
     it("emits a fail-open warning when the full diff was never staged", () => {

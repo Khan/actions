@@ -2,6 +2,7 @@ import {describe, it, expect} from "vitest";
 
 import {
     computeChangedLines,
+    countOrphanHunkLines,
     splitUnifiedDiff,
     stripDiffFiles,
 } from "./diff.ts";
@@ -138,6 +139,36 @@ describe("computeChangedLines", () => {
             "\\ No newline at end of file",
         ].join("\n");
         expect(computeChangedLines(diff)["a.ts"].added).toEqual([1]);
+    });
+});
+
+describe("countOrphanHunkLines", () => {
+    it("is zero for a fully attributable diff", () => {
+        expect(countOrphanHunkLines(GIT_DIFF)).toBe(0);
+        expect(countOrphanHunkLines("")).toBe(0);
+    });
+
+    it("counts hunk headers stranded before the first file section", () => {
+        const partiallyGarbled = [
+            // First file's headers were mangled, so its hunk is preamble.
+            "dfif --git a/src/lost.ts b/src/lost.ts",
+            "@@ -1,2 +1,2 @@",
+            "-old",
+            "+new",
+            " keep",
+            "diff --git a/src/kept.ts b/src/kept.ts",
+            "--- a/src/kept.ts",
+            "+++ b/src/kept.ts",
+            "@@ -1 +1 @@",
+            "-x",
+            "+y",
+        ].join("\n");
+        expect(countOrphanHunkLines(partiallyGarbled)).toBe(1);
+        // The garbled file never becomes a section, which is exactly why the
+        // orphan count must be surfaced.
+        expect(splitUnifiedDiff(partiallyGarbled).map((s) => s.path)).toEqual([
+            "src/kept.ts",
+        ]);
     });
 });
 

@@ -40,7 +40,11 @@
  * code under review.
  */
 
-import {computeChangedLines, stripDiffFiles} from "./diff";
+import {
+    computeChangedLines,
+    countOrphanHunkLines,
+    stripDiffFiles,
+} from "./diff";
 import type {DiffChangedLines} from "./diff";
 import type {Anchor, Finding} from "./finding-schema";
 
@@ -57,8 +61,11 @@ export type DiffProvenance = {
 
 /**
  * Compute the provenance map for a diff. Pure. An empty diff produces an
- * empty (and valid) map; a non-empty diff that parses to zero file sections
- * is a staging-format failure and is flagged so consumers fail open.
+ * empty (and valid) map. Two staging-format failures are flagged so
+ * consumers fail open: a non-empty diff that parses to zero file sections,
+ * and a diff with hunk headers the splitter could not attribute to any file
+ * section (a partially garbled staging — the map would silently miss that
+ * file's lines and wrongly demote its findings).
  */
 export const computeDiffProvenance = (diffText: string): DiffProvenance => {
     const files = computeChangedLines(diffText);
@@ -67,6 +74,13 @@ export const computeDiffProvenance = (diffText: string): DiffProvenance => {
         warnings.push(
             "diff parsed to zero file sections (staging format?): " +
                 "provenance unusable, gate must fail open",
+        );
+    }
+    const orphans = countOrphanHunkLines(diffText);
+    if (orphans > 0 && Object.keys(files).length > 0) {
+        warnings.push(
+            `${orphans} hunk header(s) not attributable to any file section ` +
+                "(staging format?): provenance incomplete, gate must fail open",
         );
     }
     return {files, warnings};
@@ -144,7 +158,8 @@ export const applyProvenanceGate = (
 
 /**
  * On-disk contract, extending the run's staging convention: reads the staged
- * `full.diff` and the router's `routing.json` (for its `generatedFiles`
+ * `full.diff`, `files.json` (whose `hasPatch` flags feed the completeness
+ * cross-check), and the router's `routing.json` (for its `generatedFiles`
  * list); writes `provenance.json` (the {@link DiffProvenance} map the
  * orchestrator's blocking-label gate reads) and `full-stripped.diff` (the
  * full diff minus generated-file sections, for the whole-change reviewers).
@@ -153,6 +168,7 @@ export const applyProvenanceGate = (
  */
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const FULL_DIFF_PATH = `${REVIEW_DIR}/full.diff`;
+const FILES_PATH = `${REVIEW_DIR}/files.json`;
 const ROUTING_PATH = `${REVIEW_DIR}/routing.json`;
 const PROVENANCE_OUT = `${REVIEW_DIR}/provenance.json`;
 const STRIPPED_DIFF_OUT = `${REVIEW_DIR}/full-stripped.diff`;
@@ -185,6 +201,40 @@ export const runProvenanceCli = (fs: ProvenanceCliFs): ProvenanceCliResult => {
             `full diff not staged (${FULL_DIFF_PATH}): provenance unusable, ` +
                 "gate must fail open",
         );
+    }
+
+    // Completeness cross-check: every changed file `get_files` returned a
+    // patch for (`hasPatch` in files.json) must appear in the parsed map. A
+    // file that is missing means its section was garbled or absorbed into a
+    // neighbor, and working from the incomplete map would wrongly demote
+    // that file's findings — so this too is a fail-open warning. Entries
+    // without a `hasPatch` field (older staging) are not checked.
+    if (fs.existsSync(FILES_PATH)) {
+        const raw: unknown = JSON.parse(fs.readFileSync(FILES_PATH, "utf8"));
+        const entries: unknown[] = Array.isArray(raw)
+            ? raw
+            : ((raw as {files?: unknown[]})?.files ?? []);
+        const missing: string[] = [];
+        for (const entry of entries) {
+            const rec = entry as {path?: unknown; hasPatch?: unknown};
+            if (
+                rec.hasPatch === true &&
+                typeof rec.path === "string" &&
+                provenance.files[rec.path] === undefined
+            ) {
+                missing.push(rec.path);
+            }
+        }
+        if (missing.length > 0) {
+            const shown = missing.slice(0, 5).join(", ");
+            const more =
+                missing.length > 5 ? ` and ${missing.length - 5} more` : "";
+            provenance.warnings.push(
+                `changed files with patches missing from the parsed diff ` +
+                    `(${shown}${more}): provenance incomplete, gate must ` +
+                    "fail open",
+            );
+        }
     }
 
     let generatedFiles: string[] = [];

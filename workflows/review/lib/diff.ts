@@ -228,6 +228,27 @@ export const computeChangedLines = (diff: string): DiffChangedLines => {
     return result;
 };
 
+const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/;
+
+const countHunkHeaders = (text: string): number =>
+    text.split("\n").filter((line) => HUNK_HEADER_RE.test(line)).length;
+
+/**
+ * Count hunk-header lines the section splitter could not attribute to any
+ * file section (they sat in preamble before the first recognisable header).
+ * Non-zero means the diff is only partially parseable; consumers treat that
+ * as a staging failure and fail open rather than working from an incomplete
+ * changed-line map.
+ */
+export const countOrphanHunkLines = (diff: string): number => {
+    const total = countHunkHeaders(diff);
+    const sectioned = splitUnifiedDiff(diff).reduce(
+        (count, section) => count + countHunkHeaders(section.text),
+        0,
+    );
+    return total - sectioned;
+};
+
 /**
  * Return the diff with the sections of the given paths removed: the
  * generated-stripped diff the whole-change reviewers read. Section order and
