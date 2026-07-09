@@ -22,7 +22,7 @@ on:
   # forks and automated branches are excluded by the `if:` condition below.
   roles: all
 
-# Skip automated deploy PRs (`deploy/*`) and the changeset release PR — branch conventions
+# Skip automated deploy PRs (`deploy/*`) and the changeset release PR. — branch conventions
 # shared across the repos this workflow runs in. Everything else is reviewed, including
 # pushes from our bots (`khan-actions-bot` and `github-actions[bot]`), since even automated
 # commits can carry real code changes worth reviewing.
