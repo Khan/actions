@@ -291,7 +291,9 @@ export const renderPreExistingNote = (
 
     const count = preExisting.length;
     const summary =
-        count === 1 ? "1 pre-existing observation" : `${count} pre-existing observations`;
+        count === 1
+            ? "1 pre-existing observation"
+            : `${count} pre-existing observations`;
 
     const items = preExisting.map(
         // Model-authored prose, copied verbatim after the code-owned token.

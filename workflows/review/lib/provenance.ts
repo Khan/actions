@@ -213,7 +213,7 @@ export const runProvenanceCli = (fs: ProvenanceCliFs): ProvenanceCliResult => {
         const raw: unknown = JSON.parse(fs.readFileSync(FILES_PATH, "utf8"));
         const entries: unknown[] = Array.isArray(raw)
             ? raw
-            : ((raw as {files?: unknown[]})?.files ?? []);
+            : (raw as {files?: unknown[]})?.files ?? [];
         const missing: string[] = [];
         for (const entry of entries) {
             const rec = entry as {path?: unknown; hasPatch?: unknown};
