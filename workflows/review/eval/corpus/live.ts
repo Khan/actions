@@ -37,6 +37,16 @@ export type LivePrContext = {
     baseBranch: string;
 };
 
+/** One anchor location a spec accepts (see {@link LiveDefectSpec}). */
+export type LiveSpecLocation = {
+    /** Changed-file path (must appear in the diff). */
+    path: string;
+    /** First line of the window a matching finding may anchor in (1-based). */
+    lineStart?: number;
+    /** Last line of the window (inclusive). Required iff lineStart is. */
+    lineEnd?: number;
+};
+
 /**
  * One labeled defect (or non-defect trap) in a live-enabled case. Live model
  * runs choose their own finding ids, so ground truth cannot key on ids the way
@@ -62,6 +72,16 @@ export type LiveDefectSpec = {
     mechanism: string[];
     /** Producing lens, when the defect is lens-specific (advisory only). */
     lens?: string;
+    /**
+     * Alternate anchor locations the spec ALSO accepts. A defect that spans
+     * files has more than one correct anchor site — a migration missing an
+     * index surfaces at the migration AND at the hot query that needs it —
+     * and a spec that names only one turns the reviewer's anchor-site choice
+     * into recall noise (incident-sql-missing-index read 8/16 in the 07-09
+     * wave; every "miss" was the same finding anchored at the query). The
+     * mechanism alternates still have to agree wherever the finding anchors.
+     */
+    altLocations?: LiveSpecLocation[];
 };
 
 /**
@@ -214,6 +234,74 @@ const parseDefectSpecs = (
             errors.push(`${at}.lens: must be a non-empty string when present`);
             return;
         }
+        const rawAlt = entry["altLocations"];
+        let altLocations: LiveSpecLocation[] | undefined;
+        if (rawAlt !== undefined) {
+            if (!Array.isArray(rawAlt) || rawAlt.length === 0) {
+                errors.push(
+                    `${at}.altLocations: must be a non-empty array when present`,
+                );
+                return;
+            }
+            altLocations = [];
+            let altBroken = false;
+            rawAlt.forEach((alt, j) => {
+                const altAt = `${at}.altLocations[${j}]`;
+                if (!isRecord(alt)) {
+                    errors.push(`${altAt}: must be an object`);
+                    altBroken = true;
+                    return;
+                }
+                const altPath = alt["path"];
+                if (!isNonEmptyString(altPath)) {
+                    errors.push(`${altAt}.path: required non-empty string`);
+                    altBroken = true;
+                    return;
+                }
+                if (!changedPaths.has(altPath)) {
+                    errors.push(
+                        `${altAt}.path: "${altPath}" is not in changedFiles`,
+                    );
+                }
+                if (diffPaths !== undefined && !diffPaths.has(altPath)) {
+                    errors.push(
+                        `${altAt}.path: "${altPath}" has no section in the diff`,
+                    );
+                }
+                const altStart = alt["lineStart"];
+                const altEnd = alt["lineEnd"];
+                if ((altStart === undefined) !== (altEnd === undefined)) {
+                    errors.push(
+                        `${altAt}: lineStart and lineEnd must be set together`,
+                    );
+                    altBroken = true;
+                    return;
+                }
+                if (altStart !== undefined) {
+                    if (
+                        !Number.isInteger(altStart) ||
+                        !Number.isInteger(altEnd) ||
+                        (altStart as number) < 1 ||
+                        (altEnd as number) < (altStart as number)
+                    ) {
+                        errors.push(
+                            `${altAt}: lineStart/lineEnd must be positive integers with lineStart <= lineEnd`,
+                        );
+                        altBroken = true;
+                        return;
+                    }
+                }
+                const location: LiveSpecLocation = {path: altPath};
+                if (altStart !== undefined) {
+                    location.lineStart = altStart as number;
+                    location.lineEnd = altEnd as number;
+                }
+                altLocations?.push(location);
+            });
+            if (altBroken) {
+                return;
+            }
+        }
         const spec: LiveDefectSpec = {
             key: specKey,
             path,
@@ -225,6 +313,9 @@ const parseDefectSpecs = (
         }
         if (isNonEmptyString(lens)) {
             spec.lens = lens;
+        }
+        if (altLocations !== undefined) {
+            spec.altLocations = altLocations;
         }
         specs.push(spec);
     });

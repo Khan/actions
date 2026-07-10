@@ -1,0 +1,79 @@
+# Review eval drift watch — the tuning memo's "cumulative drift watch".
+#
+# The per-PR A/B only ever prices one PR's marginal review.md delta against
+# its base branch; nothing in that chain notices the reviewer slowly drifting
+# on main (model updates, API behavior, corpus rot). This scheduled run is
+# the memo's answer: the FULL live corpus, 3 repeats per arm, both arms
+# pinned to main's review.md (`--force-arms` past the identity
+# short-circuit), aggregated into per-case pass rates with binomial
+# intervals. Week-over-week comparison happens across artifacts; within one
+# run the two identical arms double as a rolling noise-floor measurement
+# (the aggregate report renders the per-metric bands).
+#
+# Template: the 2026-07-10 manual cumulative dispatches (runs 29065968954 /
+# 29065976210 / 29065977160, $42.83 for 3 repeats of both arms), now one
+# dispatch via --repeats. Report-only: the aggregate lands in the job summary
+# and the artifact; the adversarial gate still fails the job on a
+# strict-majority regression, which for a main-vs-main run means production
+# itself regressed and someone should look.
+
+name: Review Eval Drift
+
+on:
+  schedule:
+    # Weekly, Monday 06:23 UTC (off the top of the hour; scheduled-run
+    # dispatch is throttled at :00).
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      repeats:
+        description: "Repeats per arm"
+        required: false
+        default: "3"
+      max_usd:
+        description: "Total hard budget across both arms and all repeats"
+        required: false
+        default: "60"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: review-eval-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: Full corpus x repeats against main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          # The baseline arm reads review.md from the base ref via
+          # `git show`, so the full history is needed.
+          fetch-depth: 0
+      - uses: ./actions/shared-node-cache
+      - name: Run the drift watch
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          REPEATS: ${{ inputs.repeats || '3' }}
+          MAX_USD: ${{ inputs.max_usd || '60' }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY secret not configured; skipping the drift run." >&2
+            exit 0
+          fi
+          pnpm dlx tsx workflows/review/eval/live-ab.ts \
+            --base-ref "origin/${{ github.ref_name }}" \
+            --force-arms \
+            --repeats "$REPEATS" \
+            --max-usd "$MAX_USD" \
+            --out out/live-ab-report.json
+      - name: Upload the report artifact
+        # always(): a partial or gate-failing run still uploads what it wrote.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: live-ab-report
+          path: out/live-ab-report.*
+          if-no-files-found: ignore

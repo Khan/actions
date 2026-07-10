@@ -87,6 +87,51 @@ describe("matchesSpec", () => {
         );
     });
 
+    it("accepts an anchor at any altLocation, window and mechanism intact", () => {
+        // The defect spans files (migration + hot query): an anchor at the
+        // alternate site is a catch, not a miss.
+        const alt = spec({
+            path: "src/other.ts",
+            lineStart: 1,
+            lineEnd: 3,
+            altLocations: [{path: "src/a.ts", lineStart: 1, lineEnd: 3}],
+        });
+        expect(matchesSpec(candidate(), alt)).toBe(true);
+        // The alternate window still binds...
+        expect(
+            matchesSpec(
+                candidate(),
+                spec({
+                    path: "src/other.ts",
+                    altLocations: [
+                        {path: "src/a.ts", lineStart: 10, lineEnd: 12},
+                    ],
+                }),
+            ),
+        ).toBe(false);
+        // ...and so does the mechanism, wherever the finding anchors.
+        expect(
+            matchesSpec(candidate(), {...alt, mechanism: ["sql injection"]}),
+        ).toBe(false);
+        // An altLocation without a window accepts any line on its file.
+        expect(
+            matchesSpec(
+                candidate({
+                    anchor: {
+                        type: "line",
+                        path: "src/a.ts",
+                        line: 99,
+                        side: "RIGHT",
+                    },
+                }),
+                spec({
+                    path: "src/other.ts",
+                    altLocations: [{path: "src/a.ts"}],
+                }),
+            ),
+        ).toBe(true);
+    });
+
     it("treats a malformed regex alternate as a literal substring", () => {
         expect(
             matchesSpec(candidate(), spec({mechanism: ["float math and ("]})),

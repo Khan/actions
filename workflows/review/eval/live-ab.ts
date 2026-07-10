@@ -34,6 +34,16 @@
  *                             byte-identical (a deliberate wobble control);
  *                             without it, identical arms short-circuit to a
  *                             "no reviewable delta" report at zero cost.
+ *     [--repeats <n>]         run every selected case n times per arm in this
+ *                             one dispatch and report pooled per-case pass
+ *                             rates with binomial intervals (aggregate.ts)
+ *                             instead of single-run percentages — the memo's
+ *                             "targeted repeats" powered run (e.g. --cases
+ *                             <the two anchor-fragile cases> --repeats 10).
+ *                             The adversarial gate is decided by strict
+ *                             majority across repeats (the repeat structure
+ *                             replaces the single-run best-of-three retry).
+ *                             Default 1 (single-run behavior, unchanged).
  */
 
 /* eslint-disable no-console -- CLI entry point; console IS the interface. */
@@ -45,6 +55,12 @@ import {tmpdir} from "node:os";
 import {dirname} from "node:path";
 
 import {extractAgents} from "./agent-extract";
+import {
+    aggregateSamples,
+    extractSamples,
+    renderAggregateMarkdown,
+    type AggregateReport,
+} from "./aggregate";
 import {SMOKE_TAG, loadLiveCorpus, type CorpusCase} from "./corpus/loader";
 import {aggregate, buildCorpusRequests} from "./judge";
 import {liveJudgeModel} from "./judge-live-model";
@@ -267,6 +283,42 @@ export const adversarialGateFailures = (
     return failures;
 };
 
+/**
+ * The adversarial gate over a repeated run: per case, how many repeats'
+ * candidate arms failed, confirmed by STRICT majority. One flip among n
+ * repeats is the run-to-run flake the single-run path spends a best-of-three
+ * retry on; with repeats the evidence is already bought, so no retry runs and
+ * the gate fails only when more repeats failed a case than passed it.
+ */
+export const majorityGateFailures = (
+    candidates: Pick<ArmRunReport, "runs">[],
+): {
+    caseId: string;
+    failedRepeats: number;
+    repeats: number;
+    confirmed: boolean;
+}[] => {
+    const failCounts = new Map<string, number>();
+    for (const candidate of candidates) {
+        const failedCases = new Set(
+            adversarialGateFailures(candidate).map((f) =>
+                f.slice(0, f.indexOf(":")),
+            ),
+        );
+        for (const caseId of failedCases) {
+            failCounts.set(caseId, (failCounts.get(caseId) ?? 0) + 1);
+        }
+    }
+    return [...failCounts.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([caseId, failedRepeats]) => ({
+            caseId,
+            failedRepeats,
+            repeats: candidates.length,
+            confirmed: failedRepeats * 2 > candidates.length,
+        }));
+};
+
 /* -------------------------------------------------------------------------- */
 /* Gate-flip retry                                                            */
 /* -------------------------------------------------------------------------- */
@@ -353,6 +405,68 @@ export type AbReport = {
     adversarialFailures: string[];
     /** Best-of-three re-runs of the cases that flipped the hard gate. */
     gateRetries: GateRetry[];
+};
+
+/**
+ * The `--repeats n` report: every repeat's full single-run report (so any
+ * one repeat stays diagnosable and re-aggregatable), the pooled aggregate,
+ * and the majority-decided gate. `aggregate.ts` recognises the `repeats`
+ * field, so a multi-run artifact pools across dispatches like any other.
+ */
+export type MultiAbReport = {
+    repeatCount: number;
+    repeats: AbReport[];
+    aggregate: AggregateReport;
+    gate: ReturnType<typeof majorityGateFailures>;
+    /** Cases failing the candidate gate in a strict majority of repeats. */
+    adversarialFailures: string[];
+};
+
+export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
+    const first = report.repeats[0];
+    const lines = [
+        `## Review live A/B — ${report.repeatCount} repeats`,
+        "",
+        ...(first !== undefined
+            ? [
+                  `Baseline: \`${
+                      first.baseRef
+                  }\` (review.md ${first.reviewMdSha.baseline.slice(
+                      0,
+                      12,
+                  )}); candidate: working tree (review.md ${first.reviewMdSha.candidate.slice(
+                      0,
+                      12,
+                  )}).`,
+                  "",
+              ]
+            : []),
+        renderAggregateMarkdown(report.aggregate),
+        "",
+    ];
+    if (report.gate.length === 0) {
+        lines.push(
+            "Adversarial hard gate: PASSED on the candidate arm in every repeat.",
+            "",
+        );
+    } else {
+        lines.push(
+            "### Adversarial hard gate (strict majority over repeats)",
+            "",
+            ...report.gate.map(
+                (g) =>
+                    `- ${g.caseId}: failed ${g.failedRepeats}/${
+                        g.repeats
+                    } repeats — ${
+                        g.confirmed
+                            ? "FAILURE CONFIRMED"
+                            : "minority flip, treated as run-to-run flake"
+                    }`,
+            ),
+            "",
+        );
+    }
+    return lines.join("\n");
 };
 
 /** `caseId:specKey` -> drop bucket, for every found-but-dropped miss. */
@@ -694,50 +808,28 @@ const main = async (): Promise<void> => {
     }
     const candidateMode = rawMode as ReReviewMode;
 
+    const repeats = Number(argValue("--repeats") ?? "1");
+    if (!Number.isInteger(repeats) || repeats < 1) {
+        throw new Error("--repeats must be a positive integer");
+    }
+
     const runner = sdkRunner();
     const armProduce =
-        (arm: ArmId, markdown: string, mode: ReReviewMode): ArmProduce =>
+        (stage: string, markdown: string, mode: ReReviewMode): ArmProduce =>
         (corpusCase) =>
             produceLive(corpusCase, extractAgents(markdown), {
                 runner,
-                stageDir: `${stageRoot}/${arm}/${corpusCase.id}`,
+                stageDir: `${stageRoot}/${stage}/${corpusCase.id}`,
                 reReviewMode: mode,
             });
 
-    // Sequential arms, halving the budget, so a runaway baseline cannot
-    // starve the candidate.
-    const baseline = await runArm(
-        "baseline",
-        cases,
-        armProduce("baseline", baselineMd, "full"),
-        {maxUsd: maxUsd / 2},
-    );
-    const candidate = await runArm(
-        "candidate",
-        cases,
-        armProduce("candidate", candidateMd, candidateMode),
-        {maxUsd: maxUsd / 2},
-    );
-
-    // Retry the flip, not the run: a hard-gate flip re-runs only the flipped
-    // cases (fresh staging per attempt so re-materializing cannot collide),
-    // best of three, before the gate may fail the arm. Retried runs are
-    // recorded but never replace the original in the metrics.
-    const gateRetries = await retryGateFlips(
-        candidate,
-        cases,
-        (attempt): ArmProduce =>
-            (corpusCase) =>
-                produceLive(corpusCase, extractAgents(candidateMd), {
-                    runner,
-                    stageDir: `${stageRoot}/candidate-retry${attempt}/${corpusCase.id}`,
-                }),
-    );
-    const flakes = new Set(
-        gateRetries.filter((r) => r.settledPass).map((r) => r.caseId),
-    );
-
-    if (withJudge) {
+    const judgeBothArms = async (
+        baseline: ArmRunReport,
+        candidate: ArmRunReport,
+    ): Promise<void> => {
+        if (!withJudge) {
+            return;
+        }
         // Judge scoring is additive: a failure here must degrade to a
         // report without quality scores, never kill a run whose arms have
         // already spent their budget (the plan's standing rule).
@@ -753,25 +845,123 @@ const main = async (): Promise<void> => {
                 );
             }
         }
-    }
-
-    const report: AbReport = {
-        baseRef,
-        reviewMdSha: {
-            baseline: sha256(baselineMd),
-            candidate: sha256(candidateMd),
-        },
-        arms: {baseline, candidate},
-        regressions: diffRegressions(baseline, candidate),
-        adversarialFailures: adversarialGateFailures(candidate).filter(
-            (failure) => !flakes.has(failure.slice(0, failure.indexOf(":"))),
-        ),
-        gateRetries,
     };
 
+    // Each arm-run gets an equal slice of the budget, so a runaway baseline
+    // (or an early repeat) cannot starve what follows.
+    const perArmUsd = maxUsd / (2 * repeats);
+
+    /**
+     * One full arm pair. `suffix` isolates staging across repeats;
+     * `withRetry` is the single-run best-of-three (a repeated run buys its
+     * flake evidence from the repeat structure instead).
+     */
+    const runPair = async (
+        suffix: string,
+        withRetry: boolean,
+    ): Promise<AbReport> => {
+        const baseline = await runArm(
+            "baseline",
+            cases,
+            armProduce(`baseline${suffix}`, baselineMd, "full"),
+            {maxUsd: perArmUsd},
+        );
+        const candidate = await runArm(
+            "candidate",
+            cases,
+            armProduce(`candidate${suffix}`, candidateMd, candidateMode),
+            {maxUsd: perArmUsd},
+        );
+
+        // Retry the flip, not the run: a hard-gate flip re-runs only the
+        // flipped cases (fresh staging per attempt so re-materializing
+        // cannot collide), best of three, before the gate may fail the arm.
+        // Retried runs are recorded but never replace the original in the
+        // metrics.
+        const gateRetries = withRetry
+            ? await retryGateFlips(
+                  candidate,
+                  cases,
+                  (attempt): ArmProduce =>
+                      (corpusCase) =>
+                          produceLive(corpusCase, extractAgents(candidateMd), {
+                              runner,
+                              stageDir: `${stageRoot}/candidate${suffix}-retry${attempt}/${corpusCase.id}`,
+                          }),
+              )
+            : [];
+        const flakes = new Set(
+            gateRetries.filter((r) => r.settledPass).map((r) => r.caseId),
+        );
+
+        await judgeBothArms(baseline, candidate);
+
+        return {
+            baseRef,
+            reviewMdSha: {
+                baseline: sha256(baselineMd),
+                candidate: sha256(candidateMd),
+            },
+            arms: {baseline, candidate},
+            regressions: diffRegressions(baseline, candidate),
+            adversarialFailures: adversarialGateFailures(candidate).filter(
+                (failure) =>
+                    !flakes.has(failure.slice(0, failure.indexOf(":"))),
+            ),
+            gateRetries,
+        };
+    };
+
+    let payload: AbReport | MultiAbReport;
+    let markdown: string;
+    let candidateRunCount: number;
+    let adversarialFailureCount: number;
+
+    if (repeats === 1) {
+        const report = await runPair("", true);
+        payload = report;
+        markdown = renderMarkdownReport(report);
+        candidateRunCount = report.arms.candidate.runs.length;
+        adversarialFailureCount = report.adversarialFailures.length;
+    } else {
+        const reports: AbReport[] = [];
+        for (let repeat = 1; repeat <= repeats; repeat += 1) {
+            reports.push(await runPair(`-r${repeat}`, false));
+        }
+        // The repeat reports are already the artifact shape aggregate.ts
+        // pools, so the one-dispatch powered run and the N-dispatch drift
+        // pool go through the identical code path.
+        const aggregate = aggregateSamples(
+            reports.flatMap((report, i) =>
+                extractSamples(`repeat-${i + 1}`, report),
+            ),
+        );
+        const gate = majorityGateFailures(
+            reports.map((report) => report.arms.candidate),
+        );
+        const multi: MultiAbReport = {
+            repeatCount: repeats,
+            repeats: reports,
+            aggregate,
+            gate,
+            adversarialFailures: gate
+                .filter((g) => g.confirmed)
+                .map(
+                    (g) =>
+                        `${g.caseId}: failed ${g.failedRepeats}/${g.repeats} repeats`,
+                ),
+        };
+        payload = multi;
+        markdown = renderMultiMarkdownReport(multi);
+        candidateRunCount = reports.reduce(
+            (sum, report) => sum + report.arms.candidate.runs.length,
+            0,
+        );
+        adversarialFailureCount = multi.adversarialFailures.length;
+    }
+
     mkdirSync(dirname(outPath), {recursive: true});
-    writeFileSync(outPath, JSON.stringify(report, null, 2));
-    const markdown = renderMarkdownReport(report);
+    writeFileSync(outPath, JSON.stringify(payload, null, 2));
     // A sibling .md rides along for CI's sticky PR comment.
     writeFileSync(outPath.replace(/\.json$/, ".md"), `${markdown}\n`);
     console.log(markdown);
@@ -780,11 +970,11 @@ const main = async (): Promise<void> => {
         writeFileSync(summaryPath, `${markdown}\n`, {flag: "a"});
     }
 
-    if (candidate.runs.length === 0) {
+    if (candidateRunCount === 0) {
         console.error("no case was scored on the candidate arm");
         process.exit(1);
     }
-    if (report.adversarialFailures.length > 0) {
+    if (adversarialFailureCount > 0) {
         console.error("adversarial hard gate FAILED on the candidate arm");
         process.exit(1);
     }
