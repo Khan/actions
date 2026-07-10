@@ -12,10 +12,10 @@
 #
 # Template: the 2026-07-10 manual cumulative dispatches (runs 29065968954 /
 # 29065976210 / 29065977160, $42.83 for 3 repeats of both arms), now one
-# dispatch via --repeats. Report-only: the aggregate lands in the job summary
-# and the artifact; the adversarial gate still fails the job on a
-# strict-majority regression, which for a main-vs-main run means production
-# itself regressed and someone should look.
+# dispatch via --repeats. Report-only: the aggregate lands in the job
+# summary, the artifact, and a visibility PR (below); the adversarial gate
+# still fails the job on a strict-majority regression, which for a
+# main-vs-main run means production itself regressed and someone should look.
 
 name: Review Eval Drift
 
@@ -36,7 +36,10 @@ on:
         default: "85"
 
 permissions:
-  contents: read
+  # write: the report step commits the aggregate under
+  # .github/review-eval/drift/ on a fresh branch and opens a visibility PR.
+  contents: write
+  pull-requests: write
 
 concurrency:
   group: review-eval-drift
@@ -77,3 +80,44 @@ jobs:
           name: live-ab-report
           path: out/live-ab-report.*
           if-no-files-found: ignore
+      - name: Open the visibility PR
+        # A job summary nobody opens is not a drift watch. Commit the report
+        # markdown plus the compact aggregate (never the full multi-MB run
+        # payload) under .github/review-eval/drift/ and open a PR: it lands
+        # in review queues, holds discussion, and merging accumulates an
+        # in-repo time series. The path sits under .github/ deliberately:
+        # the changeset gate excludes it and it cannot re-trigger the A/B's
+        # workflows/review/** filter. Note: GITHUB_TOKEN-created PRs do not
+        # trigger CI workflows; the PR is report-only, so merge it directly.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f out/live-ab-report.md ]; then
+            echo "no report markdown; nothing to publish" >&2
+            exit 0
+          fi
+          STAMP="$(date -u +%Y-%m-%d)"
+          DIR=".github/review-eval/drift"
+          BRANCH="drift-report/${STAMP}-${{ github.run_id }}"
+          mkdir -p "$DIR"
+          cp out/live-ab-report.md "$DIR/$STAMP-run${{ github.run_id }}.md"
+          # The compact aggregate only; a single-run report has no .aggregate
+          # and its full payload (embedded corpus trees) must never be
+          # committed, so it gets a pointer at the run artifact instead.
+          jq 'if .aggregate then .aggregate
+              else {note: "single-run report; full payload in the run artifact",
+                    runId: "${{ github.run_id }}"} end' \
+            out/live-ab-report.json \
+            > "$DIR/$STAMP-run${{ github.run_id }}.json" || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add "$DIR"
+          git commit -m "review: eval drift report $STAMP (run ${{ github.run_id }})"
+          git push origin "$BRANCH"
+          gh pr create \
+            --base "${{ github.event.repository.default_branch }}" \
+            --head "$BRANCH" \
+            --title "review: eval drift report $STAMP" \
+            --body-file out/live-ab-report.md
