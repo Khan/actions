@@ -26,8 +26,13 @@ workflows/review/eval/**     tier=low
 **/*.test.ts                 tier=low
 
 # Docs are trivial; agentic-workflow .md files are executable, not docs, so they
-# are re-raised after the broad docs rule (last match wins).
+# are re-raised after the broad docs rule (last match wins). Any shared workflow's
+# prompt (and prompt imports beside it) is high; the docs living in the same
+# directory drop back to trivial. Single-star segments do not cross into
+# subdirectories, so nothing under eval/ gets re-raised.
 **/*.md                      tier=trivial
 .changeset/*.md              tier=trivial
-workflows/review/review.md   tier=high
+workflows/*/*.md             tier=high
+workflows/*/README.md        tier=trivial
+workflows/*/CHANGELOG.md     tier=trivial
 .github/workflows/*.md       tier=high
