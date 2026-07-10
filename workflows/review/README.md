@@ -10,6 +10,11 @@ best-practice skill catalog, the CI-tooling exclusions, and the reviewer team
 allowlist) is supplied by the consuming repo through imports — see
 [Consumer configuration](#consumer-configuration) below.
 
+Changes to the reviewer are gated by an eval system (deterministic replay
+suite, live A/B on every PR touching this directory, powered and scheduled
+measurement runs). To run or extend it, start at
+[`eval/README.md`](eval/README.md).
+
 ## How it works
 
 On each run the workflow gathers the PR diff, then delegates the analysis to a set of
