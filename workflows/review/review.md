@@ -196,16 +196,21 @@ models:
 # repo, so the job fetches the code itself: check out Khan/actions at the pinned
 # release below. The `ref` is the single version
 # surface for prompt + code: it names the Khan/actions release this file ships in
-# (changesets tag, `review-v<version>`), and any release that changes the prompt or
-# the lib bumps it. Steps that run lib scripts invoke them from `gh-aw-review-lib/`
-# via `npx -y tsx <script>`; npx fetches the runner on first use, so the checkout
-# needs no install step.
+# (changesets tag, `review-v<version>`). The bump is automated, not manual: the
+# release flow's version step (utils/sync-workflow-versions.ts, run alongside
+# `changeset version` by release.yml) rewrites every workflow's pinned
+# `<name>-v<semver>` literals, this ref included, to the version being
+# released, in the same Version Packages commit that gets tagged, and
+# workflows/review/version-sync.test.ts fails CI if the ref ever diverges from
+# the `review` package version. Steps that run lib scripts invoke them from
+# `gh-aw-review-lib/` via `npx -y tsx <script>`; npx fetches the runner on first
+# use, so the checkout needs no install step.
 pre-agent-steps:
   - name: Check out shared review lib (Khan/actions)
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: review-v1.2.2
+      ref: review-v1.4.0
       path: gh-aw-review-lib
       persist-credentials: false
 
