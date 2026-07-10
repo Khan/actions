@@ -1,10 +1,16 @@
 # Review live A/B — real-model arm-to-arm evals for review-bot changes.
 #
 # A PR touching workflows/review/** runs the model sub-agents from BOTH the
-# merge-base review.md (baseline) and the PR's review.md (candidate) over the
-# live-enabled corpus subset, then posts the delta report (five live metrics,
-# judge quality, cost, regressions) as a sticky PR comment and job summary.
-# See workflows/review/eval/live-ab-plan.md for the full design.
+# base branch's review.md (baseline) and the PR's review.md (candidate) over
+# the live-enabled corpus subset, then posts the delta report (five live
+# metrics, judge quality, cost, regressions) as a sticky PR comment and job
+# summary. See workflows/review/eval/live-ab-plan.md for the full design.
+#
+# Why the base TIP and not the merge-base: on pull_request events the
+# checkout is the PR merge commit, so the candidate tree already contains the
+# base tip. Baselining on the same tip means the two arms differ only by the
+# PR's own review.md changes; a merge-base baseline would fold any upstream
+# review.md movement into the PR's measured delta.
 #
 # Report-only, with one exception (the playbook's standing rule): the runner
 # exits non-zero when the candidate arm mishandles an adversarial-injection
@@ -33,7 +39,7 @@ on:
   workflow_dispatch:
     inputs:
       base_ref:
-        description: "Baseline ref for review.md (default: merge-base with origin/main)"
+        description: "Baseline ref for review.md (default: the runner's merge-base fallback; PR runs pass the base-branch tip)"
         required: false
       max_usd:
         description: "Total hard budget across both arms"
@@ -70,13 +76,15 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          # The baseline arm reads review.md from the merge-base via
+          # The baseline arm reads review.md from the base ref via
           # `git show`, so the full history is needed.
           fetch-depth: 0
       - uses: ./actions/shared-node-cache
       - name: Run the live A/B
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The tip of the PR's base branch (see the header comment for why
+          # tip, not merge-base). workflow_dispatch may override it.
           BASE_REF: ${{ inputs.base_ref || format('origin/{0}', github.base_ref || 'main') }}
           MAX_USD: ${{ inputs.max_usd || '40' }}
           FULL_EVAL: ${{ inputs.full == true || contains(github.event.pull_request.labels.*.name, 'full-eval') }}
