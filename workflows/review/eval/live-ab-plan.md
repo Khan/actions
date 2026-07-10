@@ -1,19 +1,17 @@
 # Plan: live A/B evals for review-bot changes
 
-Status (2026-07-09): this plan doc is Khan/actions#232. Phase 1 is
-Khan/actions#233 (draft), with the trial-case port stacked on it as
-Khan/actions#235 (13 live cases total). Phase 2 is complete in Khan/actions#234
-(stacked on #233): extraction, staging, the producer behind its runner seam, and
-the SDK runner + CLI. Phase 3 is Khan/actions#236 (matcher, live metrics, A/B
-runner) and Phase 4 is Khan/actions#237 (the Review Eval A/B workflow), each
-stacked on its predecessor. Everything model-free is tested and green. Phase 5
-(the trial-runner skill) is Khan/actions#238
-(`.claude/skills/review-trial/SKILL.md`, off main); its acceptance run
-(reproducing the #40678 table via the skill) needs a consumer-repo trial. All
-five phases are now in draft PRs. Each phase is scoped so a separate agent can
-execute it with only this document plus the repo. Phases 1 and 2 are
-independent of each other; Phase 3 needs both; Phase 4 needs Phase 3; Phase 5
-(the trial-runner skill) is independent of all of them.
+This is the design record for the live A/B eval machinery under
+`workflows/review/eval/`: the live-enabled corpus format, the producer that
+runs the real sub-agent roster over a case, the A/B runner and delta report,
+the per-PR CI wiring, and the review-trial skill. All five phases shipped in
+July 2026 (Phase 1 in Khan/actions#233 with the trial-case port stacked as
+Khan/actions#235, Phase 2 in Khan/actions#234, Phase 3 in Khan/actions#236,
+Phase 4 in Khan/actions#237, Phase 5 in Khan/actions#238). The eval code and
+the review-trial skill cite this document by phase name, so it stays as the
+long-lived description of what was built and why; the PR numbers, dates, and
+per-phase status callouts below are historical citations, not live status.
+Instrument tuning after this plan (noise floors, repeat aggregation, the
+drift watch) is tracked outside this document.
 
 **Phase 4 acceptance: PASSED (2026-07-09).** The two do-not-merge acceptance
 PRs ran the Review Eval A/B workflow end to end with a real key (runs
@@ -66,10 +64,10 @@ predecessor "Improving the review agent" is
 https://claude.ai/code/artifact/367b68e3-c077-459d-8b37-2fe092427c97) defines an eval
 playbook in which behavior-shifting prompt changes require "full suite before/after on
 all four datasets; the five metrics compared arm to arm", and cost-affecting changes
-additionally require measured dollars and wall clock. That machinery does not exist
-yet. The decision (2026-07-09) is to build it: **changes to the review bot are
-infrequent enough to justify real LLM calls on every change, diffed arm-to-arm against
-the prior version in the same CI run.**
+additionally require measured dollars and wall clock. That machinery did not exist
+when this plan was written. The decision (2026-07-09) was to build it: **changes to
+the review bot are infrequent enough to justify real LLM calls on every change,
+diffed arm-to-arm against the prior version in the same CI run.**
 
 The intended end state: a PR touching `workflows/review/**` triggers a workflow that
 runs the model sub-agents from both the merge-base version and the PR version of
