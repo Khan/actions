@@ -197,8 +197,9 @@ models:
 # release below. The `ref` is the single version
 # surface for prompt + code: it names the Khan/actions release this file ships in
 # (changesets tag, `review-v<version>`). The bump is automated, not manual: the
-# release flow's version step (utils/sync-review-version.ts, run alongside
-# `changeset version` by release.yml) rewrites this ref to the version being
+# release flow's version step (utils/sync-workflow-versions.ts, run alongside
+# `changeset version` by release.yml) rewrites every workflow's pinned
+# `<name>-v<semver>` literals, this ref included, to the version being
 # released, in the same Version Packages commit that gets tagged, and
 # workflows/review/version-sync.test.ts fails CI if the ref ever diverges from
 # the `review` package version. Steps that run lib scripts invoke them from

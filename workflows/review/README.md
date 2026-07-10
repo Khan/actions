@@ -221,8 +221,9 @@ resolves for `gh aw add`.
 
 The pinned checkout `ref:` inside `review.md` is part of the release: the version
 command (`pnpm run version-packages`, wired into `release.yml`) runs
-`utils/sync-review-version.ts` after `changeset version`, rewriting every
-`review-v<semver>` literal in `review.md` to the version being released, so the
+`utils/sync-workflow-versions.ts` after `changeset version`, rewriting every
+`<workflow>-v<semver>` literal in each workflow's markdown (for this workflow,
+every `review-v<semver>` in `review.md`) to the version being released, so the
 bump lands in the same Version Packages commit that gets tagged.
 `version-sync.test.ts` here is the CI backstop: it fails any PR where those
 literals do not match the `review` package version (releases v1.3.0 through

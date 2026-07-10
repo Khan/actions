@@ -6,7 +6,7 @@
  * release the file ships in, or consumers get a prompt from one version
  * running code from another (review-v1.3.0 through v1.4.0 shipped this way,
  * still pointing at v1.2.2). The release flow keeps the ref true by running
- * utils/sync-review-version.ts alongside `changeset version`; this test fails
+ * utils/sync-workflow-versions.ts alongside `changeset version`; this test fails
  * any PR (the Version Packages PR included) where the literals in review.md
  * do not match the "review" package version.
  */

@@ -2,7 +2,7 @@
     "repository": "git@github.com:Khan/actions.git",
     "private": true,
     "scripts": {
-        "version-packages": "changeset version && node -r @swc-node/register utils/sync-review-version.ts",
+        "version-packages": "changeset version && node -r @swc-node/register utils/sync-workflow-versions.ts",
         "lint": "eslint --ext .js,.mjs,.ts .",
         "fix": "pnpm run lint --fix",
         "test": "vitest",
