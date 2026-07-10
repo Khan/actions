@@ -211,20 +211,25 @@ models:
 # repo, so the job fetches the code itself: check out Khan/actions at the pinned
 # release below. The `ref` is the single version
 # surface for prompt + code: it names the Khan/actions release this file ships in
-# (changesets tag, `review-v<version>`), and any release that changes the prompt or
-# the lib bumps it. Steps that run lib scripts invoke them from `gh-aw-review-lib/`
-# via `npx -y tsx <script>`; npx fetches the runner on first use, so the checkout
-# needs no install step.
+# (changesets tag, `review-v<version>`). The bump is automated, not manual: the
+# release flow's version step (utils/sync-workflow-versions.ts, run alongside
+# `changeset version` by release.yml) rewrites every workflow's pinned
+# `<name>-v<semver>` literals, this ref included, to the version being
+# released, in the same Version Packages commit that gets tagged, and
+# workflows/review/version-sync.test.ts fails CI if the ref ever diverges from
+# the `review` package version. Steps that run lib scripts invoke them from
+# `gh-aw-review-lib/` via `npx -y tsx <script>`; npx fetches the runner on first
+# use, so the checkout needs no install step.
 pre-agent-steps:
   - name: Check out shared review lib (Khan/actions)
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      # KHAN/ACTIONS LOCAL OVERRIDE: pinned to the same release as `source:` below,
-      # so the prompt and the lib it invokes come from one version. Even though this
-      # IS Khan/actions, the reviewer runs the released lib, not the PR head; a PR
-      # must not be able to change the code that reviews it.
-      ref: review-v1.4.0
+      # KHAN/ACTIONS LOCAL OVERRIDE (comment only): pinned to the same release as
+      # `source:` below, so the prompt and the lib it invokes come from one version.
+      # Even though this IS Khan/actions, the reviewer runs the released lib, not
+      # the PR head; a PR must not be able to change the code that reviews it.
+      ref: review-v1.4.1
       path: gh-aw-review-lib
       persist-credentials: false
 
@@ -233,7 +238,7 @@ pre-agent-steps:
 # (-1) so reviews are never skipped on a busy PR day; the per-run cap below
 # still bounds the cost of any single review.
 max-daily-ai-credits: -1
-source: Khan/actions/workflows/review/review.md@review-v1.4.0
+source: Khan/actions/workflows/review/review.md@review-v1.4.1
 ---
 
 # PR Reviewer
