@@ -1,0 +1,37 @@
+{
+    "id": "false-block-convention-misread",
+    "tags": ["smoke", "clean", "validation", "false-block"],
+    "category": "clean",
+    "description": "Production-derived false block (frontend audit 2026-07-07): a best-practice reviewer blocked on 'every test file must contain a toMatchInlineSnapshot assertion' - a misread of the skill, which recommends inline snapshots for complex hand-built object assertions, not one per file; the codebase pattern for these assertions is toHaveBeenCalledWith. The validator must check the actual rule text and return refuted, so the clean PR approves.",
+    "changedFiles": [
+        {"path": "src/hooks/use-streaming-transcription.test.ts", "status": "modified"}
+    ],
+    "findings": [
+        {
+            "source": "conventions",
+            "finding": {
+                "schema_version": 2,
+                "id": "conv-inline-snapshot-1",
+                "lens": "conventions",
+                "anchor": {"type": "file", "path": "src/hooks/use-streaming-transcription.test.ts"},
+                "severity": "blocking",
+                "confidence": 0.7,
+                "evidence_trace": [
+                    "src/hooks/use-streaming-transcription.test.ts contains no toMatchInlineSnapshot",
+                    "unit-test skill discusses inline snapshots for complex assertions"
+                ],
+                "failure_scenario": "Without inline snapshots, a drift in the emitted analytics payload passes review because the assertion diff never shows the payload.",
+                "producing_hunt": "conventions:unit-test",
+                "model_authored_prose": "Unit-test conventions - this file has no `toMatchInlineSnapshot` assertion; the analytics-payload assertions should use inline snapshots."
+            }
+        }
+    ],
+    "validation": [
+        {"id": "conv-inline-snapshot-1", "verification": "refuted"}
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustNotPost": ["conv-inline-snapshot-1"],
+        "postedCommentCount": 0
+    }
+}

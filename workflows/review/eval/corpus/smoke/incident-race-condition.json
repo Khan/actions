@@ -1,0 +1,40 @@
+{
+    "id": "incident-race-condition",
+    "tags": ["smoke", "incident", "concurrency-async"],
+    "category": "incident-repro",
+    "description": "Repro of a concurrency incident: a read-modify-write on a shared counter is not atomic, so concurrent requests lose updates. The concurrency-async lens must catch it and block.",
+    "changedFiles": [
+        {"path": "src/services/quota.ts", "status": "modified"}
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "concurrency-async",
+            "finding": {
+                "schema_version": 2,
+                "id": "conc-lost-update-1",
+                "lens": "concurrency-async",
+                "anchor": {"type": "line", "path": "src/services/quota.ts", "line": 34, "side": "RIGHT"},
+                "severity": "blocking",
+                "confidence": 0.85,
+                "evidence_trace": [
+                    "src/services/quota.ts:34 reads `count`, adds 1 in JS, then writes it back",
+                    "the handler runs per-request with no lock or atomic increment",
+                    "two concurrent requests read the same value and one increment is lost"
+                ],
+                "failure_scenario": "Two concurrent requests read count=N, both write N+1, and one increment is silently lost.",
+                "producing_hunt": "concurrency-async:read-modify-write",
+                "model_authored_prose": "This read-modify-write on `count` is not atomic — concurrent requests will lose increments. Use an atomic DB increment (`UPDATE ... SET count = count + 1`) instead."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": ["conc-lost-update-1"]
+    }
+}

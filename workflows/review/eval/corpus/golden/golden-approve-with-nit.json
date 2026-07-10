@@ -1,0 +1,51 @@
+{
+    "id": "golden-approve-with-nit",
+    "tags": ["golden", "content-i18n"],
+    "category": "golden",
+    "description": "Golden case from a merged webapp PR: a human left one advisory i18n comment (an untranslated user-facing string) and approved. Ground truth = that one comment; the run also posts an extra advisory nit the human did not, so precision is exercised.",
+    "changedFiles": [
+        {"path": "src/components/banner.tsx", "status": "modified"}
+    ],
+    "findings": [
+        {
+            "source": "content-i18n",
+            "finding": {
+                "schema_version": 2,
+                "id": "golden-i18n-untranslated",
+                "lens": "content-i18n",
+                "anchor": {"type": "line", "path": "src/components/banner.tsx", "line": 42, "side": "RIGHT"},
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/components/banner.tsx:42 renders the literal string \"Welcome back!\" directly",
+                    "no i18n() wrapper; sibling strings in this file are wrapped"
+                ],
+                "failure_scenario": "A user on a non-English locale sees this string in English, because it never enters the message catalog.",
+                "producing_hunt": "content-i18n:untranslated-literal",
+                "model_authored_prose": "This user-facing string is not wrapped for translation. Wrap it with the i18n helper as the surrounding strings are."
+            }
+        },
+        {
+            "source": "conventions",
+            "finding": {
+                "schema_version": 2,
+                "id": "golden-conv-import-order",
+                "lens": "conventions",
+                "anchor": {"type": "line", "path": "src/components/banner.tsx", "line": 3, "side": "RIGHT"},
+                "severity": "advisory",
+                "confidence": 0.4,
+                "evidence_trace": [
+                    "src/components/banner.tsx:3 imports are not alphabetised"
+                ],
+                "failure_scenario": "No runtime effect; the file drifts from the repo's import-order convention until the next touch re-sorts it.",
+                "producing_hunt": "conventions:import-order",
+                "model_authored_prose": "Import order is not alphabetical here. Optional tidy-up."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 2,
+        "mustCatch": ["golden-i18n-untranslated"]
+    }
+}

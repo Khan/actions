@@ -1,0 +1,40 @@
+# Review smoke benchmark (R5, task-9-4)
+#
+# STAGED FILE — NOT YET ACTIVE. It lives under `.github-staging/` because no
+# producer role in this pipeline may push to `.github/` directly (gateway phase
+# restriction, #2508). A human must move it into place for it to run:
+#
+#     git mv .github-staging/review-smoke.yml .github/workflows/review-smoke.yml
+#
+# (See the PR body's "Pre-merge obligations" note.) Until then the smoke set is
+# still enforced by the repo-wide `pnpm run test` gate in node-ci.yml, which runs
+# the same vitest suite; this dedicated entry point just makes the smoke gate
+# explicit and independently visible on every PR, and does not assume the
+# existing CI wiring.
+#
+# It runs the slice-9 smoke benchmark: the tagged smoke subset of the eval corpus
+# replayed through the no-post runner (workflows/review/eval/runner.ts), which
+# exercises the real deterministic review path (router -> labels -> scope filter
+# -> verdict -> render) and performs NO GitHub write. The vitest gate lives with
+# the eval harness (workflows/review/eval/) and asserts each smoke case's computed
+# verdict against its `expected` block.
+
+name: Review Smoke
+
+on:
+  pull_request:
+    paths:
+      - "workflows/review/**"
+      - ".github/workflows/review-smoke.yml"
+
+jobs:
+  smoke:
+    name: PR-reviewer smoke benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: ./actions/shared-node-cache
+      # Run only the review eval harness (loader + no-post runner + smoke cases).
+      # `--run` forces a single non-watch run; the path filter scopes vitest to
+      # the smoke gate so this job stays fast and focused.
+      - run: pnpm run test --run workflows/review/eval

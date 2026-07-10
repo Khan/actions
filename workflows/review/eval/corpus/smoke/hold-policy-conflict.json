@@ -1,0 +1,45 @@
+{
+    "id": "hold-policy-conflict",
+    "tags": ["smoke", "hold", "policy-conflict"],
+    "category": "incident-repro",
+    "description": "A lens surfaces two named policies that disagree about the change (a COPPA data-minimization rule vs. a retention requirement) and cannot adjudicate. The verdict must HOLD_FOR_HUMAN so a human decides, dominating any label.",
+    "changedFiles": [
+        {"path": "src/comms/email-collect.ts", "status": "modified"}
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "mass-comms-coppa",
+            "finding": {
+                "schema_version": 2,
+                "id": "coppa-retention-note-1",
+                "lens": "mass-comms-coppa",
+                "anchor": {"type": "file", "path": "src/comms/email-collect.ts"},
+                "severity": "advisory",
+                "confidence": 0.6,
+                "evidence_trace": [
+                    "src/comms/email-collect.ts stores a child user's email for a marketing send",
+                    "COPPA data-minimization policy discourages retaining child contact data",
+                    "the audit-retention policy requires keeping contact records for 7 years"
+                ],
+                "failure_scenario": "Whichever policy this code follows, the other is breached: deleting satisfies COPPA minimization but violates audit retention, and keeping does the reverse.",
+                "producing_hunt": "mass-comms-coppa:policy-conflict",
+                "model_authored_prose": "This change sits between two policies that pull in opposite directions (COPPA minimization vs. audit retention); a human should decide which governs here."
+            }
+        }
+    ],
+    "policyConflicts": [
+        {
+            "policy": "COPPA data-minimization vs. audit-retention",
+            "detail": "Storing a child user's email for marketing conflicts with COPPA minimization but the 7-year audit-retention policy requires keeping contact records; the two cannot both be satisfied here."
+        }
+    ],
+    "expected": {
+        "verdict": "HOLD_FOR_HUMAN",
+        "postedCommentCount": 1
+    }
+}

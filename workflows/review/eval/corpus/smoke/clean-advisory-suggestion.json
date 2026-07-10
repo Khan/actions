@@ -1,0 +1,39 @@
+{
+    "id": "clean-advisory-suggestion",
+    "tags": ["smoke", "clean", "conventions"],
+    "category": "clean",
+    "description": "A correct change that trips one advisory best-practice convention. The reviewer may post a single non-blocking suggestion and must still APPROVE — a non-blocking comment never drives REQUEST_CHANGES.",
+    "changedFiles": [
+        {"path": "src/widgets/card.tsx", "status": "modified"}
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "conventions",
+            "finding": {
+                "schema_version": 2,
+                "id": "conv-naming-1",
+                "lens": "conventions",
+                "anchor": {"type": "line", "path": "src/widgets/card.tsx", "line": 42, "side": "RIGHT"},
+                "severity": "advisory",
+                "confidence": 0.7,
+                "evidence_trace": [
+                    "src/widgets/card.tsx:42 introduces a component prop named `data`",
+                    "repo skill conventions/naming.md prefers a domain-specific prop name over `data`"
+                ],
+                "failure_scenario": "No runtime failure; call sites read `data` and give the next reader no signal about what the prop holds.",
+                "producing_hunt": "conventions:prop-naming",
+                "model_authored_prose": "Prefer a domain-specific prop name over the generic `data` here so call sites read clearly."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 1,
+        "mustNotPost": []
+    }
+}

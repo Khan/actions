@@ -1,0 +1,37 @@
+{
+    "id": "false-block-author-disputed-h1",
+    "tags": ["smoke", "clean", "validation", "false-block", "author-dispute"],
+    "category": "clean",
+    "description": "Production-derived false block (frontend #13214 shape): an a11y claim that removing a component dropped the page's only h1 was disputed by the author ('a parent renders the h1'), yet re-blocked after two checks that each traced one parent short of the page that actually mounts the layout and renders the h1. Under the author-dispute usage-depth rule the validator must trace to actual usage; here that trace finds the h1, so the verification is refuted and the clean PR approves.",
+    "changedFiles": [
+        {"path": "src/dashboard/components/teacher-dashboard.tsx", "status": "modified"}
+    ],
+    "findings": [
+        {
+            "source": "conventions",
+            "finding": {
+                "schema_version": 2,
+                "id": "conv-a11y-h1-1",
+                "lens": "conventions",
+                "anchor": {"type": "line", "path": "src/dashboard/components/teacher-dashboard.tsx", "line": 91, "side": "RIGHT"},
+                "severity": "blocking",
+                "confidence": 0.75,
+                "evidence_trace": [
+                    "src/dashboard/components/teacher-dashboard.tsx:91 removes the Heading tag=h1 wrapper",
+                    "neither layout wrapper in the mount path renders a heading"
+                ],
+                "failure_scenario": "With the wrapper removed, assistive tech lands on an `<h2>` as the page's first heading and the document outline starts below level 1.",
+                "producing_hunt": "conventions:accessibility",
+                "model_authored_prose": "Accessibility - removing this wrapper drops the page's only `<h1>`; the first heading is now an `<h2>`."
+            }
+        }
+    ],
+    "validation": [
+        {"id": "conv-a11y-h1-1", "verification": "refuted"}
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustNotPost": ["conv-a11y-h1-1"],
+        "postedCommentCount": 0
+    }
+}

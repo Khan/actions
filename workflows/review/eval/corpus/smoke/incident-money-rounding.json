@@ -1,0 +1,40 @@
+{
+    "id": "incident-money-rounding",
+    "tags": ["smoke", "incident", "money-payments"],
+    "category": "incident-repro",
+    "description": "Repro of a billing incident: a price is computed in floating point and rounded late, so totals drift by a cent on large carts. The money-payments lens must catch it and block.",
+    "changedFiles": [
+        {"path": "src/payments/pricing.ts", "status": "modified"}
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "money-payments",
+            "finding": {
+                "schema_version": 2,
+                "id": "money-fp-rounding-1",
+                "lens": "money-payments",
+                "anchor": {"type": "line", "path": "src/payments/pricing.ts", "line": 88, "side": "RIGHT"},
+                "severity": "blocking",
+                "confidence": 0.88,
+                "evidence_trace": [
+                    "src/payments/pricing.ts:88 multiplies a float unit price by quantity, then rounds the running total once at the end",
+                    "float accumulation loses cents on carts with many line items",
+                    "the ledger stores integer cents, so the drift surfaces as a reconciliation mismatch"
+                ],
+                "failure_scenario": "A large cart accumulates binary float error, so the charged total disagrees with the per-line ledger sum by a cent.",
+                "producing_hunt": "money-payments:decimal-safety",
+                "model_authored_prose": "Compute this total in integer cents (or a decimal type) and round per line item — float accumulation here drifts by a cent on large carts and breaks ledger reconciliation."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": ["money-fp-rounding-1"]
+    }
+}

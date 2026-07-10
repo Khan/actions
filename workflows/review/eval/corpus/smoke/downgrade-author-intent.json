@@ -1,0 +1,36 @@
+{
+    "id": "downgrade-author-intent",
+    "tags": ["smoke", "clean", "validation", "downgrade"],
+    "category": "clean",
+    "description": "Production-derived intent question (frontend audit 2026-07-07): a correctness reviewer blocked on 'the Lock/Unlock button state is inverted' when the truth lives in the design spec, not the code - the author's 'the implementation matches the design' cannot be refuted or confirmed from the repo. The validator must return plausible, so the claim posts as a non-blocking suggestion (never a block) and the PR approves with one comment.",
+    "changedFiles": [
+        {"path": "src/classroom/lock-toggle.tsx", "status": "modified"}
+    ],
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "corr-lock-inverted-1",
+                "lens": "correctness",
+                "anchor": {"type": "line", "path": "src/classroom/lock-toggle.tsx", "line": 24, "side": "RIGHT"},
+                "severity": "blocking",
+                "confidence": 0.7,
+                "evidence_trace": [
+                    "src/classroom/lock-toggle.tsx:24 renders the Lock action with lockIcon when isLocked is true",
+                    "an already-locked classroom arguably should offer Unlock"
+                ],
+                "failure_scenario": "With `isLocked` true the button reads `Lock`, so a teacher clicking an already-locked classroom issues another lock instead of the intended unlock.",
+                "producing_hunt": "correctness:state-handling",
+                "model_authored_prose": "The Lock/Unlock button looks inverted: when `isLocked` is true it renders `Lock` with `lockIcon`, but an already-locked classroom should offer `Unlock`. If the design intends a state label rather than an action label, ignore this."
+            }
+        }
+    ],
+    "validation": [
+        {"id": "corr-lock-inverted-1", "verification": "plausible", "confidence": 0.55}
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 1
+    }
+}
