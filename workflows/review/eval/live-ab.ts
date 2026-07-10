@@ -58,78 +58,53 @@ import {tmpdir} from "node:os";
 import {dirname} from "node:path";
 
 import {extractAgents} from "./agent-extract";
-import {
-    aggregateSamples,
-    extractSamples,
-    renderAggregateMarkdown,
-    type AggregateReport,
-} from "./aggregate";
+import {aggregateSamples, extractSamples} from "./aggregate";
 import {SMOKE_TAG, loadLiveCorpus, type CorpusCase} from "./corpus/loader";
 import {aggregate, buildCorpusRequests} from "./judge";
 import {liveJudgeModel} from "./judge-live-model";
 import {
+    renderMarkdownReport,
+    renderMultiMarkdownReport,
+    type AbReport,
+    type ArmId,
+    type ArmProduce,
+    type ArmRunReport,
+    type GateMajority,
+    type GateRetry,
+    type GateRetryAttempt,
+    type MultiAbReport,
+} from "./live-ab-report";
+import {
     computeLiveMetrics,
     matchCase,
     type LiveCaseRun,
-    type LiveMetricsReport,
     type MatchOptions,
 } from "./live-match";
-import {
-    produceLive,
-    type LiveReconciliation,
-    type PerAgentReport,
-} from "./live-producer";
+import {produceLive} from "./live-producer";
 import {sdkRunner} from "./live-runner";
 import {haikuMatchArbiter} from "./match-arbiter";
 import {
     computeRereviewMetrics,
     scoreRereview,
     type RereviewCaseScore,
-    type RereviewMetricsReport,
 } from "./rereview-match";
 import {runCase} from "./runner";
-import type {CaseVerification, RecordedFinding} from "./corpus/loader";
 import type {ReReviewMode} from "../lib/routing-config";
 
-export type ArmId = "baseline" | "candidate";
-
-/** What an arm's producer must return per case (the produceLive subset). */
-export type ArmProduceResult = {
-    findings: RecordedFinding[];
-    validation: CaseVerification[];
-    perAgent: PerAgentReport[];
-    /** The reconciler's decision, for open-PR (rereview) cases. */
-    reconciliation?: LiveReconciliation;
-};
-
-export type ArmProduce = (corpusCase: CorpusCase) => Promise<ArmProduceResult>;
-
-export type ArmRunReport = {
-    arm: ArmId;
-    runs: LiveCaseRun[];
-    metrics: LiveMetricsReport;
-    /** Case ids never dispatched because the budget ran out. */
-    skippedCases: string[];
-    usd: number;
-    wallMs: number;
-    perCase: {
-        caseId: string;
-        usd: number;
-        verdict: string;
-        expected: string;
-        caught: number;
-        missed: string[];
-        /** `<agent>: <reason>` per failed agent (diagnosable from the report). */
-        failedAgents: string[];
-        /** Present iff the case is an open-PR (rereview) case. */
-        rereview?: RereviewCaseScore;
-    }[];
-    /** Aggregated re-review scoring, when the corpus carried rereview cases. */
-    rereview?: RereviewMetricsReport;
-    judge?: {meanQuality: number; verdictCounts: Record<string, number>};
-    /** Fixed-format note when judge scoring failed; metrics still stand. */
-    judgeError?: string;
-};
+// The report shapes and renderers live in ./live-ab-report; re-exported so
+// existing consumers keep one import surface for the runner.
+export {renderMarkdownReport, renderMultiMarkdownReport};
+export type {
+    AbReport,
+    ArmId,
+    ArmProduce,
+    ArmProduceResult,
+    ArmRunReport,
+    GateMajority,
+    GateRetry,
+    GateRetryAttempt,
+    MultiAbReport,
+} from "./live-ab-report";
 
 /* -------------------------------------------------------------------------- */
 /* One arm                                                                    */
@@ -297,12 +272,7 @@ export const adversarialGateFailures = (
  */
 export const majorityGateFailures = (
     candidates: Pick<ArmRunReport, "runs">[],
-): {
-    caseId: string;
-    failedRepeats: number;
-    repeats: number;
-    confirmed: boolean;
-}[] => {
+): GateMajority[] => {
     const failCounts = new Map<string, number>();
     for (const candidate of candidates) {
         const failedCases = new Set(
@@ -327,21 +297,6 @@ export const majorityGateFailures = (
 /* -------------------------------------------------------------------------- */
 /* Gate-flip retry                                                            */
 /* -------------------------------------------------------------------------- */
-
-export type GateRetryAttempt = {
-    pass: boolean;
-    /** Gate failures this attempt produced (empty when pass). */
-    failures: string[];
-    usd: number;
-};
-
-export type GateRetry = {
-    caseId: string;
-    /** Re-run attempts, in order; the second is skipped once majority-fail is settled. */
-    attempts: GateRetryAttempt[];
-    /** True when 2 of 3 runs (original + retries) passed: a run-to-run flake. */
-    settledPass: boolean;
-};
 
 /**
  * Best-of-three retry over the cases that flipped the adversarial hard gate,
@@ -396,315 +351,6 @@ export const retryGateFlips = async (
         });
     }
     return retries;
-};
-
-/* -------------------------------------------------------------------------- */
-/* Report rendering                                                           */
-/* -------------------------------------------------------------------------- */
-
-export type AbReport = {
-    baseRef: string;
-    reviewMdSha: {baseline: string; candidate: string};
-    arms: {baseline: ArmRunReport; candidate: ArmRunReport};
-    regressions: {lost: string[]; gained: string[]};
-    /** Confirmed failures only: flips settled as flakes by retry are removed. */
-    adversarialFailures: string[];
-    /** Best-of-three re-runs of the cases that flipped the hard gate. */
-    gateRetries: GateRetry[];
-};
-
-/**
- * The `--repeats n` report: every repeat's full single-run report (so any
- * one repeat stays diagnosable and re-aggregatable), the pooled aggregate,
- * and the majority-decided gate. `aggregate.ts` recognises the `repeats`
- * field, so a multi-run artifact pools across dispatches like any other.
- */
-export type MultiAbReport = {
-    repeatCount: number;
-    repeats: AbReport[];
-    aggregate: AggregateReport;
-    gate: ReturnType<typeof majorityGateFailures>;
-    /** Cases failing the candidate gate in a strict majority of repeats. */
-    adversarialFailures: string[];
-};
-
-export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
-    const first = report.repeats[0];
-    const lines = [
-        `## Review live A/B: ${report.repeatCount} repeats`,
-        "",
-        ...(first !== undefined
-            ? [
-                  `Baseline: \`${
-                      first.baseRef
-                  }\` (review.md ${first.reviewMdSha.baseline.slice(
-                      0,
-                      12,
-                  )}); candidate: working tree (review.md ${first.reviewMdSha.candidate.slice(
-                      0,
-                      12,
-                  )}).`,
-                  "",
-              ]
-            : []),
-        renderAggregateMarkdown(report.aggregate),
-        "",
-    ];
-    if (report.gate.length === 0) {
-        lines.push(
-            "Adversarial hard gate: PASSED on the candidate arm in every repeat.",
-            "",
-        );
-    } else {
-        lines.push(
-            "### Adversarial hard gate (strict majority over repeats)",
-            "",
-            ...report.gate.map(
-                (g) =>
-                    `- ${g.caseId}: failed ${g.failedRepeats}/${
-                        g.repeats
-                    } repeats: ${
-                        g.confirmed
-                            ? "FAILURE CONFIRMED"
-                            : "minority flip, treated as run-to-run flake"
-                    }`,
-            ),
-            "",
-        );
-    }
-    return lines.join("\n");
-};
-
-/** `caseId:specKey` -> drop bucket, for every found-but-dropped miss. */
-const dropClassByKey = (arm: ArmRunReport): Map<string, string> => {
-    const map = new Map<string, string>();
-    for (const {corpusCase, match} of arm.runs) {
-        for (const detail of match.missedDetail) {
-            if (detail.droppedBy !== undefined) {
-                map.set(`${corpusCase.id}:${detail.specKey}`, detail.droppedBy);
-            }
-        }
-    }
-    return map;
-};
-
-const pct = (value: number): string => `${(value * 100).toFixed(0)}%`;
-
-/**
- * Which report rows a reader may act on from ONE run. Measured on the phase 4
- * acceptance pair: on the no-op control, recall, verdict agreement, the
- * regression lists, and the adversarial gate reproduced exactly while judge
- * quality moved 0.11 and noise 5 points on live-agent jitter alone; on the
- * weakened-reviewer arm, judge quality went UP 0.16 while recall fell 17
- * points (fewer, surer comments each score better). So judge quality is not
- * just jittery, it can move opposite to review health; recall against the
- * labeled specs is the load-bearing metric.
- */
-const STABILITY_FOOTER =
-    "*Single-run-stable rows: recall, verdict agreement, regressions, " +
-    "adversarial gate. Judge quality and noise are not: they jitter " +
-    "run-to-run at this corpus size, and a regressed reviewer can score " +
-    "HIGHER on judge quality (fewer, surer comments each read better). " +
-    "Recall against the labeled specs is the load-bearing metric.*";
-
-export const renderMarkdownReport = (report: AbReport): string => {
-    const {baseline, candidate} = report.arms;
-    const row = (
-        label: string,
-        base: string,
-        cand: string,
-        delta = "",
-    ): string => `| ${label} | ${base} | ${cand} | ${delta} |`;
-    const metric = (
-        label: string,
-        pick: (arm: ArmRunReport) => number,
-        format: (v: number) => string = pct,
-    ): string =>
-        row(
-            label,
-            format(pick(baseline)),
-            format(pick(candidate)),
-            (pick(candidate) - pick(baseline) >= 0 ? "+" : "") +
-                format(pick(candidate) - pick(baseline)),
-        );
-
-    const lines = [
-        "## Review live A/B",
-        "",
-        `Baseline: \`${
-            report.baseRef
-        }\` (review.md ${report.reviewMdSha.baseline.slice(0, 12)}); ` +
-            `candidate: working tree (review.md ${report.reviewMdSha.candidate.slice(
-                0,
-                12,
-            )}).`,
-        "",
-        "| Metric | Baseline | Candidate | Delta |",
-        "| --- | --- | --- | --- |",
-        metric("Must-catch recall", (a) => a.metrics.mustCatchRecall.rate),
-        metric("Verdict agreement", (a) => a.metrics.verdictAgreement.rate),
-        metric("Noise (unmatched posted)", (a) => a.metrics.noise.rate),
-        row(
-            "Clean false flags",
-            String(baseline.metrics.cleanFalseFlag.count),
-            String(candidate.metrics.cleanFalseFlag.count),
-        ),
-        ...(baseline.judge && candidate.judge
-            ? [
-                  row(
-                      "Judge mean quality",
-                      baseline.judge.meanQuality.toFixed(2),
-                      candidate.judge.meanQuality.toFixed(2),
-                      (candidate.judge.meanQuality -
-                          baseline.judge.meanQuality >=
-                      0
-                          ? "+"
-                          : "") +
-                          (
-                              candidate.judge.meanQuality -
-                              baseline.judge.meanQuality
-                          ).toFixed(2),
-                  ),
-              ]
-            : []),
-        row(
-            "Cost",
-            `$${baseline.usd.toFixed(2)}`,
-            `$${candidate.usd.toFixed(2)}`,
-        ),
-        row(
-            "Wall clock",
-            `${Math.round(baseline.wallMs / 1000)}s`,
-            `${Math.round(candidate.wallMs / 1000)}s`,
-        ),
-        row(
-            "Cases run / skipped",
-            `${baseline.runs.length} / ${baseline.skippedCases.length}`,
-            `${candidate.runs.length} / ${candidate.skippedCases.length}`,
-        ),
-        ...(baseline.rereview || candidate.rereview
-            ? [
-                  row(
-                      "Re-review thread resolution",
-                      baseline.rereview
-                          ? pct(baseline.rereview.resolutionAccuracy)
-                          : "n/a",
-                      candidate.rereview
-                          ? pct(candidate.rereview.resolutionAccuracy)
-                          : "n/a",
-                  ),
-                  row(
-                      "Re-review flip-gate wrong / dup comments",
-                      baseline.rereview
-                          ? `${baseline.rereview.flipGateWrongCases.length} / ${baseline.rereview.duplicateComments}`
-                          : "n/a",
-                      candidate.rereview
-                          ? `${candidate.rereview.flipGateWrongCases.length} / ${candidate.rereview.duplicateComments}`
-                          : "n/a",
-                  ),
-              ]
-            : []),
-        row(
-            "Misses found-but-dropped",
-            String(dropClassByKey(baseline).size),
-            String(dropClassByKey(candidate).size),
-        ),
-        "",
-    ];
-
-    // A regression that was PRODUCED and then died at a gate is a different
-    // defect class (anchoring discipline, gate calibration) than a true miss
-    // (recall); annotate each lost spec so it routes to the right fix.
-    const candidateDrops = dropClassByKey(candidate);
-    if (report.regressions.lost.length > 0) {
-        lines.push(
-            "### Regressions (baseline caught, candidate missed)",
-            "",
-            ...report.regressions.lost.map((key) => {
-                const bucket = candidateDrops.get(key);
-                return bucket === undefined
-                    ? `- ${key} (not found)`
-                    : `- ${key} (found but dropped at the ${bucket} gate)`;
-            }),
-            "",
-        );
-    }
-    if (report.regressions.gained.length > 0) {
-        lines.push(
-            "### Improvements (candidate caught, baseline missed)",
-            "",
-            ...report.regressions.gained.map((key) => `- ${key}`),
-            "",
-        );
-    }
-    lines.push(
-        report.adversarialFailures.length === 0
-            ? "Adversarial hard gate: PASSED on the candidate arm."
-            : [
-                  "### Adversarial hard gate: FAILED on the candidate arm",
-                  "",
-                  ...report.adversarialFailures.map((f) => `- ${f}`),
-              ].join("\n"),
-        "",
-    );
-    if (report.gateRetries.length > 0) {
-        lines.push(
-            "### Gate flips retried (best of three, flipped cases only)",
-            "",
-            ...report.gateRetries.map((retry) => {
-                const passes = retry.attempts.filter((a) => a.pass).length;
-                const usd = retry.attempts.reduce((sum, a) => sum + a.usd, 0);
-                const outcome = retry.settledPass
-                    ? "settled as a run-to-run flake; the gate does not fail on this case"
-                    : "failure confirmed";
-                return `- ${retry.caseId}: original run failed, ${passes}/${
-                    retry.attempts.length
-                } retries passed; ${outcome} ($${usd.toFixed(2)} retry spend)`;
-            }),
-            "",
-        );
-    }
-    const skipped = [
-        ...baseline.skippedCases.map((id) => `baseline:${id}`),
-        ...candidate.skippedCases.map((id) => `candidate:${id}`),
-    ];
-    if (skipped.length > 0) {
-        lines.push(
-            "### SKIPPED (budget exhausted before dispatch)",
-            "",
-            ...skipped.map((s) => `- ${s}`),
-            "",
-        );
-    }
-    const judgeErrors = [
-        ...(baseline.judgeError !== undefined
-            ? [`baseline: ${baseline.judgeError}`]
-            : []),
-        ...(candidate.judgeError !== undefined
-            ? [`candidate: ${candidate.judgeError}`]
-            : []),
-    ];
-    if (judgeErrors.length > 0) {
-        lines.push(
-            "### Judge scoring failed (metrics above still stand)",
-            "",
-            ...judgeErrors.map((e) => `- ${e}`),
-            "",
-        );
-    }
-    const failedAgents = [...baseline.perCase, ...candidate.perCase].flatMap(
-        (c) => c.failedAgents.map((agent) => `${c.caseId}: ${agent} failed`),
-    );
-    if (failedAgents.length > 0) {
-        lines.push(
-            "### Agent failures",
-            "",
-            ...failedAgents.map((f) => `- ${f}`),
-            "",
-        );
-    }
-    lines.push(STABILITY_FOOTER, "");
-    return lines.join("\n");
 };
 
 /* -------------------------------------------------------------------------- */
