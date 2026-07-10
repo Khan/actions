@@ -402,20 +402,39 @@ describe("clampBudgetToCreditCap", () => {
         expect(clamped.capClamped).toBeUndefined();
     });
 
-    it("scales every soft target proportionally under a tight cap", () => {
+    it("scales every soft target to the reserve-adjusted cap, not the cap", () => {
         // The budget-shed incident shape: the high tier ($10) planned inside a
         // 400-credit ($4) cap, so the run died at the api-proxy mid-validation.
+        // The soft dollar target is 75% of the cap (the landing reserve): the
+        // acceptance re-run showed a soft target equal to the hard cap still
+        // dies at it (416/400), because spend is unobservable mid-run and
+        // in-flight work bills after the last observable checkpoint.
         const clamped = clampBudgetToCreditCap(DEFAULT_TIER_BUDGETS.high, 400);
         expect(clamped).toEqual({
             ...DEFAULT_TIER_BUDGETS.high,
-            maxReviewerInvocations: 4, // floor(12 * 0.4)
-            maxToolCallsPerFinding: 3, // floor(8 * 0.4)
-            maxTotalToolCalls: 48, // floor(120 * 0.4)
-            maxWallClockMinutes: 8, // floor(20 * 0.4)
-            maxUsd: 4,
+            maxReviewerInvocations: 3, // floor(12 * 0.3)
+            maxToolCallsPerFinding: 2, // floor(8 * 0.3)
+            maxTotalToolCalls: 36, // floor(120 * 0.3)
+            maxWallClockMinutes: 6, // floor(20 * 0.3)
+            maxUsd: 3, // 4 * 0.75
             effectiveCreditCap: 400,
             capClamped: true,
         });
+    });
+
+    it("leaves a tier alone only when its target clears the reserve", () => {
+        // $10 tier under a 1400-credit ($14) cap: 75% of the cap is $10.50,
+        // above the tier's own $10 target, so nothing needs resizing.
+        const clamped = clampBudgetToCreditCap(DEFAULT_TIER_BUDGETS.high, 1400);
+        expect(clamped).toEqual({
+            ...DEFAULT_TIER_BUDGETS.high,
+            effectiveCreditCap: 1400,
+        });
+        // $10 tier under a 1200-credit ($12) cap: the reserve-adjusted target
+        // ($9) is below the tier's $10, so the clamp engages.
+        const tight = clampBudgetToCreditCap(DEFAULT_TIER_BUDGETS.high, 1200);
+        expect(tight.capClamped).toBe(true);
+        expect(tight.maxUsd).toBe(9);
     });
 
     it("never drops below the trivial tier's floors", () => {
@@ -429,7 +448,9 @@ describe("clampBudgetToCreditCap", () => {
         );
         expect(clamped.maxTotalToolCalls).toBe(floor.maxTotalToolCalls);
         expect(clamped.maxWallClockMinutes).toBe(floor.maxWallClockMinutes);
-        expect(clamped.maxUsd).toBe(0.1);
+        // The dollar target has no floor: a floor above the cap would defeat
+        // the cap. 75% of the $0.10 cap, within float precision.
+        expect(clamped.maxUsd).toBeCloseTo(0.075, 10);
         expect(clamped.capClamped).toBe(true);
     });
 
@@ -449,7 +470,7 @@ describe("clampBudgetToCreditCap", () => {
         });
         expect(budget.tier).toBe("high");
         expect(budget.capClamped).toBe(true);
-        expect(budget.maxUsd).toBe(4);
+        expect(budget.maxUsd).toBe(3);
     });
 });
 
@@ -747,7 +768,7 @@ describe("runCli", () => {
         const json = runCli(fs, ".", {REVIEW_MAX_AI_CREDITS: "400"});
         expect(json.runBudget.tier).toBe("high");
         expect(json.runBudget.capClamped).toBe(true);
-        expect(json.runBudget.maxUsd).toBe(4);
+        expect(json.runBudget.maxUsd).toBe(3);
         expect(json.runBudget.effectiveCreditCap).toBe(400);
     });
 

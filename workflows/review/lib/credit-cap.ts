@@ -21,15 +21,30 @@ export type CreditCapFs = {
 export const DEFAULT_MAX_AI_CREDITS = 1000;
 
 /**
+ * The landing reserve: a clamped budget's soft targets aim at this fraction
+ * of the effective cap, never the cap itself. Spend is unobservable mid-run
+ * (the orchestrator works from proxies), and requests already in flight when
+ * a checkpoint passes still bill after it, so a soft target equal to the hard
+ * cap leaves no room to land: the second budget-shed acceptance run engaged
+ * the clamp and still died at 416/400 credits mid-skill-audit. A quarter of
+ * the cap is sized to absorb both the proxy estimation error and the
+ * in-flight overshoot observed there.
+ */
+export const LANDING_RESERVE_RATIO = 0.75;
+
+/**
  * Clamp a tier budget to the effective per-run credit cap. The tier table is
  * sized inside the workflow's assumed $10 ceiling; when a consumer sets a
  * tighter `max-ai-credits`, the un-clamped soft targets promise more work
  * than the hard cap can pay for, and the run dies at the api-proxy with
  * findings in hand instead of shedding early (observed: a 400-credit run
  * planned against the high tier's $10 targets and was killed mid-validation).
- * Scaling is proportional to spend, floored at the trivial tier's values so
- * even a tiny cap yields the smallest designed review rather than zero work.
- * A zero/negative cap means explicitly uncapped; undefined means unknown.
+ * The clamped soft dollar target is {@link LANDING_RESERVE_RATIO} of the cap,
+ * not the cap itself, so a run that sheds against its targets lands inside
+ * the hard ceiling. Scaling is proportional to spend, floored at the trivial
+ * tier's values so even a tiny cap yields the smallest designed review rather
+ * than zero work. A zero/negative cap means explicitly uncapped; undefined
+ * means unknown.
  */
 export const clampBudgetToCreditCap = (
     budget: RunBudget,
@@ -43,10 +58,13 @@ export const clampBudgetToCreditCap = (
         return budget;
     }
     const capUsd = capCredits / 100;
-    if (capUsd >= budget.maxUsd) {
+    const softCapUsd = capUsd * LANDING_RESERVE_RATIO;
+    if (softCapUsd >= budget.maxUsd) {
+        // The tier's own soft target already leaves at least the reserve
+        // under the hard cap; record the cap and change nothing.
         return {...budget, effectiveCreditCap: capCredits};
     }
-    const ratio = capUsd / budget.maxUsd;
+    const ratio = softCapUsd / budget.maxUsd;
     const floor = DEFAULT_TIER_BUDGETS.trivial;
     const scale = (value: number, min: number): number =>
         Math.max(min, Math.floor(value * ratio));
@@ -68,7 +86,7 @@ export const clampBudgetToCreditCap = (
             budget.maxWallClockMinutes,
             floor.maxWallClockMinutes,
         ),
-        maxUsd: capUsd,
+        maxUsd: softCapUsd,
         effectiveCreditCap: capCredits,
         capClamped: true,
     };

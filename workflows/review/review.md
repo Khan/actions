@@ -784,10 +784,13 @@ run that overruns: the per-run AI-credits cap (the frontmatter's
 delivers nothing, so a hard ceiling must never be what stops you: treat the
 router's soft targets (`runBudget`, Step 3) as the point to start landing. The
 router clamps those targets to the effective credit cap (the
-`REVIEW_MAX_AI_CREDITS` mirror of `max-ai-credits`), so they already reflect
-what the run can actually pay for; when `runBudget.capClamped` is true the cap
-is tighter than the tier's normal budget — dispatch conservatively from the
-start and expect to shed. Nothing reports exact credits consumed back to you
+`REVIEW_MAX_AI_CREDITS` mirror of `max-ai-credits`) with a landing reserve
+held back: the clamped `maxUsd` is 75% of the cap, not the cap itself, because
+spend is unobservable mid-run and work already in flight bills after your last
+checkpoint, so a run that sheds exactly at the cap still dies at it. When
+`runBudget.capClamped` is true the cap is tighter than the tier's normal
+budget — dispatch conservatively from the start and expect to shed. Treat
+`maxUsd` as the landing target, never as money you may finish spending. Nothing reports exact credits consumed back to you
 mid-run, so watch the signals you can observe, as spend proxies:
 
 - **Elapsed wall-clock** vs `runBudget.maxWallClockMinutes`: diff `date +%s`
