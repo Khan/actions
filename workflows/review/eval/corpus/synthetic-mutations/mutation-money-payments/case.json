@@ -71,5 +71,15 @@
                 "lineEnd": 21
             }
         ]
+    },
+    "routerConfig": {
+        "lensRules": [
+            {
+                "pattern": "src/billing/charge.ts",
+                "lenses": [
+                    "money-payments"
+                ]
+            }
+        ]
     }
 }

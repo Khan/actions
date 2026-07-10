@@ -28,8 +28,17 @@
 
 import type {EvalRun} from "./run-types";
 
-/** The pinned judge model — Opus 4.8, the workhorse (review.md model table). */
-export const PINNED_JUDGE_MODEL = "claude-opus-4-8";
+/**
+ * The pinned judge model. The judge's job is a 512-token good/borderline/bad
+ * grade of one comment's prose; the load-bearing eval numbers (recall,
+ * verdict agreement, regressions, the adversarial gate) are deterministic and
+ * never touch the judge, and the acceptance runs showed judge quality is not
+ * single-run-stable on any model. Haiku prices that non-load-bearing signal
+ * at a fifth of Opus. Pinned to the dated snapshot so week-over-week judge
+ * scores stay comparable; both A/B arms always share one judge, so within-run
+ * deltas are unaffected by the model choice.
+ */
+export const PINNED_JUDGE_MODEL = "claude-haiku-4-5-20251001";
 
 /* -------------------------------------------------------------------------- */
 /* Request / score shapes                                                     */

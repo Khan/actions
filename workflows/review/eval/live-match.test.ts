@@ -223,6 +223,36 @@ describe("matchCase", () => {
         });
         expect(capped.missed).toEqual(["subtle"]);
     });
+
+    it("classifies a produced-then-dropped miss by its gate bucket", async () => {
+        // The finding names the right mechanism but anchors off the diff, so
+        // the provenance gate drops it before posting: a found-but-dropped
+        // miss, not a true recall miss.
+        const offDiff = {
+            ...finding("f-dropped", "floating point totals round late."),
+            anchor: {type: "line", path: "src/a.ts", line: 40, side: "RIGHT"},
+        };
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [
+                spec({key: "float-bug"}),
+                spec({key: "never-found", mechanism: ["deadlock"]}),
+            ],
+            findings: [offDiff],
+        });
+        expect(result.droppedByProvenance.map((c) => c.id)).toEqual([
+            "f-dropped",
+        ]);
+        const match = await matchCase(corpusCase, result);
+        expect(match.missed).toEqual(["float-bug", "never-found"]);
+        expect(match.missedDetail).toEqual([
+            {
+                specKey: "float-bug",
+                droppedBy: "provenance",
+                findingId: "f-dropped",
+            },
+            {specKey: "never-found"},
+        ]);
+    });
 });
 
 describe("computeLiveMetrics", () => {

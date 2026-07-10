@@ -8,7 +8,10 @@
  * metrics, judge): the A/B isolates the model-behavior seam, which is what a
  * prompt/model change moves. Report-only by design, with ONE exception: the
  * candidate arm must handle every adversarial-injection case outright (the
- * playbook's standing rule), or the process exits non-zero.
+ * playbook's standing rule), or the process exits non-zero. A no-partial-credit
+ * gate scored on one model run inherits the model's run-to-run variance, so a
+ * gate flip is retried best-of-three on the flipped cases only (~one case of
+ * spend per attempt, recorded in the report) before it fails the run.
  *
  * CLI (requires ANTHROPIC_API_KEY):
  *
@@ -22,6 +25,10 @@
  *     [--no-judge]            skip judge quality scoring
  *     [--stage-root <dir>]    staging root (default: a fresh temp dir)
  *     [--out <path>]          JSON report path (default out/live-ab-report.json)
+ *     [--force-arms]          run both arms even when review.md is
+ *                             byte-identical (a deliberate wobble control);
+ *                             without it, identical arms short-circuit to a
+ *                             "no reviewable delta" report at zero cost.
  */
 
 /* eslint-disable no-console -- CLI entry point; console IS the interface. */
@@ -73,6 +80,7 @@ export type ArmRunReport = {
         expected: string;
         caught: number;
         missed: string[];
+        /** `<agent>: <reason>` per failed agent (diagnosable from the report). */
         failedAgents: string[];
     }[];
     judge?: {meanQuality: number; verdictCounts: Record<string, number>};
@@ -134,7 +142,7 @@ export const runArm = async (
             missed: match.missed,
             failedAgents: produced.perAgent
                 .filter((a) => a.failed !== undefined)
-                .map((a) => a.name),
+                .map((a) => `${a.name}: ${a.failed}`),
         });
     }
 
@@ -195,7 +203,9 @@ export const diffRegressions = (
  * ran must compute its expected verdict and catch every labeled spec. Returns
  * failure descriptions (empty = gate passed).
  */
-export const adversarialGateFailures = (report: ArmRunReport): string[] => {
+export const adversarialGateFailures = (
+    report: Pick<ArmRunReport, "runs">,
+): string[] => {
     const failures: string[] = [];
     for (const {corpusCase, result, match} of report.runs) {
         if (corpusCase.category !== "adversarial-injection") {
@@ -214,6 +224,79 @@ export const adversarialGateFailures = (report: ArmRunReport): string[] => {
 };
 
 /* -------------------------------------------------------------------------- */
+/* Gate-flip retry                                                            */
+/* -------------------------------------------------------------------------- */
+
+export type GateRetryAttempt = {
+    pass: boolean;
+    /** Gate failures this attempt produced (empty when pass). */
+    failures: string[];
+    usd: number;
+};
+
+export type GateRetry = {
+    caseId: string;
+    /** Re-run attempts, in order; the second is skipped once majority-fail is settled. */
+    attempts: GateRetryAttempt[];
+    /** True when 2 of 3 runs (original + retries) passed: a run-to-run flake. */
+    settledPass: boolean;
+};
+
+/**
+ * Best-of-three retry over the cases that flipped the adversarial hard gate,
+ * and ONLY those cases (the tuning memo's flake policy: retry the flip, not
+ * the run). The original failing run counts as one fail, so a majority pass
+ * needs both retries to pass; a first-retry fail settles the majority and the
+ * second attempt is skipped. Retried runs never replace the original in the
+ * arm's metrics (that would bias recall optimistically); they only decide
+ * whether the gate treats the flip as a flake.
+ */
+export const retryGateFlips = async (
+    candidate: ArmRunReport,
+    cases: CorpusCase[],
+    produceForAttempt: (attempt: number) => ArmProduce,
+): Promise<GateRetry[]> => {
+    const failures = adversarialGateFailures(candidate);
+    const failingIds = [
+        ...new Set(failures.map((f) => f.slice(0, f.indexOf(":")))),
+    ];
+    const retries: GateRetry[] = [];
+    for (const caseId of failingIds) {
+        const corpusCase = cases.find((c) => c.id === caseId);
+        if (corpusCase === undefined) {
+            continue;
+        }
+        const attempts: GateRetryAttempt[] = [];
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+            const produced = await produceForAttempt(attempt)(corpusCase);
+            const usd = produced.perAgent.reduce((sum, a) => sum + a.usd, 0);
+            const result = runCase(corpusCase, {
+                produceFindings: () => produced.findings,
+                validation: produced.validation,
+            });
+            const match = await matchCase(corpusCase, result);
+            const attemptFailures = adversarialGateFailures({
+                runs: [{corpusCase, result, match}],
+            });
+            attempts.push({
+                pass: attemptFailures.length === 0,
+                failures: attemptFailures,
+                usd,
+            });
+            if (attemptFailures.length > 0) {
+                break;
+            }
+        }
+        retries.push({
+            caseId,
+            attempts,
+            settledPass: attempts.length === 2 && attempts.every((a) => a.pass),
+        });
+    }
+    return retries;
+};
+
+/* -------------------------------------------------------------------------- */
 /* Report rendering                                                           */
 /* -------------------------------------------------------------------------- */
 
@@ -222,10 +305,43 @@ export type AbReport = {
     reviewMdSha: {baseline: string; candidate: string};
     arms: {baseline: ArmRunReport; candidate: ArmRunReport};
     regressions: {lost: string[]; gained: string[]};
+    /** Confirmed failures only: flips settled as flakes by retry are removed. */
     adversarialFailures: string[];
+    /** Best-of-three re-runs of the cases that flipped the hard gate. */
+    gateRetries: GateRetry[];
+};
+
+/** `caseId:specKey` -> drop bucket, for every found-but-dropped miss. */
+const dropClassByKey = (arm: ArmRunReport): Map<string, string> => {
+    const map = new Map<string, string>();
+    for (const {corpusCase, match} of arm.runs) {
+        for (const detail of match.missedDetail) {
+            if (detail.droppedBy !== undefined) {
+                map.set(`${corpusCase.id}:${detail.specKey}`, detail.droppedBy);
+            }
+        }
+    }
+    return map;
 };
 
 const pct = (value: number): string => `${(value * 100).toFixed(0)}%`;
+
+/**
+ * Which report rows a reader may act on from ONE run. Measured on the phase 4
+ * acceptance pair: on the no-op control, recall, verdict agreement, the
+ * regression lists, and the adversarial gate reproduced exactly while judge
+ * quality moved 0.11 and noise 5 points on live-agent jitter alone; on the
+ * weakened-reviewer arm, judge quality went UP 0.16 while recall fell 17
+ * points (fewer, surer comments each score better). So judge quality is not
+ * just jittery, it can move opposite to review health; recall against the
+ * labeled specs is the load-bearing metric.
+ */
+const STABILITY_FOOTER =
+    "*Single-run-stable rows: recall, verdict agreement, regressions, " +
+    "adversarial gate. Judge quality and noise are not: they jitter " +
+    "run-to-run at this corpus size, and a regressed reviewer can score " +
+    "HIGHER on judge quality (fewer, surer comments each read better). " +
+    "Recall against the labeled specs is the load-bearing metric.*";
 
 export const renderMarkdownReport = (report: AbReport): string => {
     const {baseline, candidate} = report.arms;
@@ -302,14 +418,28 @@ export const renderMarkdownReport = (report: AbReport): string => {
             `${baseline.runs.length} / ${baseline.skippedCases.length}`,
             `${candidate.runs.length} / ${candidate.skippedCases.length}`,
         ),
+        row(
+            "Misses found-but-dropped",
+            String(dropClassByKey(baseline).size),
+            String(dropClassByKey(candidate).size),
+        ),
         "",
     ];
 
+    // A regression that was PRODUCED and then died at a gate is a different
+    // defect class (anchoring discipline, gate calibration) than a true miss
+    // (recall); annotate each lost spec so it routes to the right fix.
+    const candidateDrops = dropClassByKey(candidate);
     if (report.regressions.lost.length > 0) {
         lines.push(
             "### Regressions (baseline caught, candidate missed)",
             "",
-            ...report.regressions.lost.map((key) => `- ${key}`),
+            ...report.regressions.lost.map((key) => {
+                const bucket = candidateDrops.get(key);
+                return bucket === undefined
+                    ? `- ${key} (not found)`
+                    : `- ${key} (found but dropped at the ${bucket} gate)`;
+            }),
             "",
         );
     }
@@ -331,6 +461,23 @@ export const renderMarkdownReport = (report: AbReport): string => {
               ].join("\n"),
         "",
     );
+    if (report.gateRetries.length > 0) {
+        lines.push(
+            "### Gate flips retried (best of three, flipped cases only)",
+            "",
+            ...report.gateRetries.map((retry) => {
+                const passes = retry.attempts.filter((a) => a.pass).length;
+                const usd = retry.attempts.reduce((sum, a) => sum + a.usd, 0);
+                const outcome = retry.settledPass
+                    ? "settled as a run-to-run flake; the gate does not fail on this case"
+                    : "failure confirmed";
+                return `- ${retry.caseId}: original run failed, ${passes}/${
+                    retry.attempts.length
+                } retries passed; ${outcome} ($${usd.toFixed(2)} retry spend)`;
+            }),
+            "",
+        );
+    }
     const skipped = [
         ...baseline.skippedCases.map((id) => `baseline:${id}`),
         ...candidate.skippedCases.map((id) => `candidate:${id}`),
@@ -370,6 +517,7 @@ export const renderMarkdownReport = (report: AbReport): string => {
             "",
         );
     }
+    lines.push(STABILITY_FOOTER, "");
     return lines.join("\n");
 };
 
@@ -425,11 +573,38 @@ const main = async (): Promise<void> => {
         {encoding: "utf8", maxBuffer: 64 * 1024 * 1024},
     );
     const candidateMd = readFileSync(reviewMdPath, "utf8");
-    if (baselineMd === candidateMd) {
-        console.error(
-            "note: review.md is identical in both arms; the A/B measures " +
-                "only non-prompt variance this run.",
+    if (baselineMd === candidateMd && !process.argv.includes("--force-arms")) {
+        // Pre-flight identity short-circuit (the tuning memo's first item):
+        // byte-identical review.md means byte-identical extracted prompts and
+        // orchestrator body, so both arms would do the same thing and the run
+        // is pure spend. Post the no-delta verdict and run nothing.
+        // `--force-arms` bypasses this for deliberate wobble controls (two
+        // identical arms run to measure run-to-run variance).
+        const sha = createHash("sha256")
+            .update(candidateMd)
+            .digest("hex")
+            .slice(0, 12);
+        const markdown = [
+            "## Review live A/B",
+            "",
+            `No reviewable delta: review.md is byte-identical in both arms ` +
+                `(baseline \`${baseRef}\`, sha ${sha}), so the extracted ` +
+                `prompts and the orchestrator body match and no arms were ` +
+                `run. Pass \`--force-arms\` for a deliberate wobble control.`,
+            "",
+        ].join("\n");
+        mkdirSync(dirname(outPath), {recursive: true});
+        writeFileSync(
+            outPath,
+            JSON.stringify({noReviewableDelta: true, baseRef, sha}, null, 2),
         );
+        writeFileSync(outPath.replace(/\.json$/, ".md"), `${markdown}\n`);
+        const summaryPath = process.env["GITHUB_STEP_SUMMARY"];
+        if (summaryPath) {
+            writeFileSync(summaryPath, `${markdown}\n`, {flag: "a"});
+        }
+        console.log(markdown);
+        return;
     }
 
     const allCases = loadLiveCorpus().filter(
@@ -468,6 +643,25 @@ const main = async (): Promise<void> => {
         armProduce("candidate", candidateMd),
         {maxUsd: maxUsd / 2},
     );
+
+    // Retry the flip, not the run: a hard-gate flip re-runs only the flipped
+    // cases (fresh staging per attempt so re-materializing cannot collide),
+    // best of three, before the gate may fail the arm. Retried runs are
+    // recorded but never replace the original in the metrics.
+    const gateRetries = await retryGateFlips(
+        candidate,
+        cases,
+        (attempt): ArmProduce =>
+            (corpusCase) =>
+                produceLive(corpusCase, extractAgents(candidateMd), {
+                    runner,
+                    stageDir: `${stageRoot}/candidate-retry${attempt}/${corpusCase.id}`,
+                }),
+    );
+    const flakes = new Set(
+        gateRetries.filter((r) => r.settledPass).map((r) => r.caseId),
+    );
+
     if (withJudge) {
         // Judge scoring is additive: a failure here must degrade to a
         // report without quality scores, never kill a run whose arms have
@@ -494,7 +688,10 @@ const main = async (): Promise<void> => {
         },
         arms: {baseline, candidate},
         regressions: diffRegressions(baseline, candidate),
-        adversarialFailures: adversarialGateFailures(candidate),
+        adversarialFailures: adversarialGateFailures(candidate).filter(
+            (failure) => !flakes.has(failure.slice(0, failure.indexOf(":"))),
+        ),
+        gateRetries,
     };
 
     mkdirSync(dirname(outPath), {recursive: true});
