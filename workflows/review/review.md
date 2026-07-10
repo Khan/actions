@@ -527,7 +527,11 @@ either run by default; a reviewer earns its `enable` line through the eval suite
 not by shipping). Dispatch the default reviewers (`correctness-reviewer`,
 `skill-auditor`, `thread-reconciler`) **plus** every reviewer named in
 `enabledReviewers` **plus** every lens named in `lensesToSpawn`, all **in parallel**
-(one turn), and wait for all.
+(one turn), and wait for all. If `runBudget.maxReviewerInvocations` cannot fit
+that whole set, fill the slots by the dispatch ranking (the budget rule below,
+Step 3 Phase 3): defaults first, then matched lenses, then the targeted opt-in
+dimensions, then the generic ones. Never choose arbitrarily, and record every
+reviewer left undispatched as a planned shed (Step 6 note).
 
 **One candidate contract.** Every finding-producing reviewer returns `findings[]`
 in the same shape (a `label` per finding, from the fixed label set in Step 4); a
@@ -740,10 +744,21 @@ When any proxy passes roughly three-quarters of its soft target (or the trajecto
 is clearly expensive), stop starting new work and shed remaining work in this
 order:
 
-1. Skip any not-yet-dispatched opt-in reviewers and specialist lenses; each becomes
-   a skipped dimension (Step 6 note).
-2. Skip the risks/patterns comment and reviewer requests (Steps 7-8) if they have
-   not happened yet.
+1. Skip not-yet-dispatched opt-in reviewers and specialist lenses in value
+   order, lowest value first; each becomes a skipped dimension (Step 6 note).
+   The ranking, from first-shed to last-shed: `conventions`, then
+   `first-principles`, then `holistic`, then `completeness` and
+   `test-adequacy`, and only then any path-triggered specialist lens from
+   `lensesToSpawn`. A matched lens is the most targeted signal in the run (the
+   router chose it for the specific files this PR touches), so it outranks
+   every generic dimension; shedding `security-auth` on an auth-path diff to
+   afford `conventions` is exactly backwards. This same ranking, read from the
+   other end (defaults, lenses, targeted opt-ins, generic opt-ins), is the
+   dispatch order when the invocation cap cannot fit the roster (Phase 2).
+2. Skip the risks/patterns comment (Step 7) if it has not happened yet.
+   Reviewer requests (Step 8) are **never** shed: a request is a single tool
+   call, and pulling a human in matters most on exactly the run whose own
+   coverage is partial.
 3. Last, and never at the soft targets alone: the `claim-validator`. It is the
    false-positive gate, and its cost scales with the candidate count (which you
    can already see when deciding), not with the diff, so validating a small
