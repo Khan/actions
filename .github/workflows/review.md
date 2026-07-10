@@ -17,9 +17,10 @@ on:
   status-comment: false
   # Disable gh-aw's pre-activation permission + confused-deputy gate so a same-repo
   # collaborator pushing to a PR they didn't open still triggers the review (the
-  # gate otherwise blocks `synchronize` when the pusher != the PR author). This is
-  # safe in a private repo where "all" is effectively any trusted collaborator;
-  # forks and automated branches are excluded by the `if:` condition below.
+  # gate otherwise blocks `synchronize` when the pusher != the PR author).
+  # KHAN/ACTIONS LOCAL OVERRIDE (comment only): unlike webapp, this repo is PUBLIC,
+  # so "all" is safe only because the fork guard added to the `if:` condition below
+  # restricts runs to same-repo branches, which require write access to create.
   roles: all
 
 # Skip automated deploy PRs (`deploy/*`) and the changeset release PR — branch conventions
@@ -27,12 +28,18 @@ on:
 # pushes from our bots (`khan-actions-bot` and `github-actions[bot]`), since even automated
 # commits can carry real code changes worth reviewing.
 #
+# KHAN/ACTIONS LOCAL OVERRIDE: the first condition below skips PRs from forks. This
+# repo is public; a fork PR gets no secrets anyway (the agent job would just fail),
+# and with `roles: all` disabling gh-aw's own actor gate, this `if:` is the guard
+# that keeps untrusted fork heads from triggering the workflow at all.
+#
 # Also skip any PR carrying the `skip-ai-review` label, so a human can opt a specific PR
 # out of automated review. This is a job-level gate: a labeled PR never starts the agent
 # (zero AI credits) and posts nothing. The label is evaluated on each trigger event
 # (open/synchronize/reopen/ready), so adding it prevents the *next* run — it does not
 # retroactively dismiss a review already left on an earlier push.
 if: >-
+  github.event.pull_request.head.repo.full_name == github.repository &&
   !startsWith(github.event.pull_request.head.ref, 'deploy/') &&
   github.event.pull_request.head.ref != 'changeset-release/main' &&
   !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
@@ -115,27 +122,13 @@ safe-outputs:
   # the reviewer after the fact — this is the only place that reasoning is captured
   # as clean structured data (the Actions logs and OTLP traces are harder to mine).
   # The orchestrator writes each result to `/tmp/gh-aw/review/out/` (Step 3) and
-  # uploads that directory in one call (Step 9); 30-day retention gives a useful
+  # uploads only that directory (`allowed-paths`); 30-day retention gives a useful
   # window for post-hoc review.
-  #
-  # `allowed-paths` patterns match STAGING-RELATIVE paths, not original absolute
-  # paths. gh-aw's upload_artifact tool copies an uploaded directory into its
-  # staging area under the directory's basename and records only that relative
-  # name (`out`), and the safe_outputs job then filters the staged files
-  # (`out/<agent>.json`) against these patterns with a fully anchored matcher
-  # (gh-aw `upload_artifact.cjs` `resolveFiles` + `glob_pattern_helpers.cjs`).
-  # An absolute pattern like "/tmp/gh-aw/review/out/**" therefore matches
-  # nothing, ever, and fails the upload with "no files matched the selection
-  # criteria" — observed on every review run under gh-aw v0.81.6. "out/**"
-  # matches the staged layout; the absolute form is kept alongside it so the
-  # upload keeps working if a future gh-aw release matches against the original
-  # path instead (the filter is an OR across patterns).
   upload-artifact:
     max-uploads: 1
     retention-days: 30
     allowed-paths:
-      - "out/**"                    # staging-relative layout (what v0.81.6 matches)
-      - "/tmp/gh-aw/review/out/**"  # original absolute path (future-proofing)
+      - "/tmp/gh-aw/review/out/**"
   # NOTE: `add-reviewer` is intentionally defined only in the imported
   # .github/aw/review/config.md (see the `imports:` note above), because its
   # `allowed-team-reviewers` allowlist is repo-specific. Defining it here would override
@@ -155,12 +148,20 @@ network:
 # (Settings → Secrets and variables → Actions): GH_AW_OTEL_SENTRY_ENDPOINT — the Sentry
 # OTLP traces endpoint with `/v1/traces` stripped (…/api/<project>/integration/otlp) — and
 # GH_AW_OTEL_SENTRY_AUTHORIZATION — the `sentry sentry_key=<public-key>` header value.
-observability:
-  otlp:
-    endpoint:
-      - url: ${{ secrets.GH_AW_OTEL_SENTRY_ENDPOINT }}
-        headers:
-          x-sentry-auth: ${{ secrets.GH_AW_OTEL_SENTRY_AUTHORIZATION }}
+#
+# KHAN/ACTIONS LOCAL OVERRIDE: the shared source's `observability:` block is disabled
+# here because this repo has no GH_AW_OTEL_SENTRY_* secrets configured, and a missing
+# endpoint is NOT a graceful degrade: the compiled lock feeds the empty value into the
+# MCP gateway's OTLP config, whose schema requires a non-empty https:// URL, so the
+# agent job fails at startup (observed on the first run of PR #241). Restore the block
+# below verbatim once the two secrets exist in this repo.
+#
+# observability:
+#   otlp:
+#     endpoint:
+#       - url: ${{ secrets.GH_AW_OTEL_SENTRY_ENDPOINT }}
+#         headers:
+#           x-sentry-auth: ${{ secrets.GH_AW_OTEL_SENTRY_AUTHORIZATION }}
 
 # Pin the orchestrator to a specific model version rather than a floating tier alias, so
 # the review doesn't silently change behavior when a new Opus ships. If we use Opus, we
@@ -224,6 +225,10 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
+      # KHAN/ACTIONS LOCAL OVERRIDE (comment only): pinned to the same release as
+      # `source:` below, so the prompt and the lib it invokes come from one version.
+      # Even though this IS Khan/actions, the reviewer runs the released lib, not
+      # the PR head; a PR must not be able to change the code that reviews it.
       ref: review-v1.4.1
       path: gh-aw-review-lib
       persist-credentials: false
@@ -233,6 +238,13 @@ pre-agent-steps:
 # (-1) so reviews are never skipped on a busy PR day; the per-run cap below
 # still bounds the cost of any single review.
 max-daily-ai-credits: -1
+# KHAN/ACTIONS LOCAL OVERRIDE: nearly every file in this repo routes to tier=high
+# (supply-chain surface), so a full review of even a modest PR sits right at the
+# 1000-credit default; two runs on PR #241 died at 1001 and 1024 credits after
+# computing their verdict but before posting it. 2500 matches webapp's measured
+# override and bounds a single review at $25.
+max-ai-credits: 2500
+source: Khan/actions/workflows/review/review.md@review-v1.4.1
 ---
 
 # PR Reviewer
@@ -1287,19 +1299,13 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
 
 Finally, if you wrote any sub-agent outputs to `/tmp/gh-aw/review/out/` this run
 (Step 3), upload that directory as a run-scoped artifact with the `upload-artifact`
-safe output. First copy the claim-audit input in beside the sub-agent outputs, so
-the artifact carries the whole audit trail: if Phase 3 ran, copy
-`/tmp/gh-aw/review/claims.json` to `/tmp/gh-aw/review/out/claims.json` (the
-candidate claims the validator was handed; `out/claim-validator.json` already
-records its verdicts, and `out/pre-existing.json` the provenance gate's
-set-asides). Then upload with **one** call whose `path` is the absolute directory
-path `/tmp/gh-aw/review/out/` — always the whole directory, never an individual
-file: the tool copies what you pass into its staging area under its basename, and
-the workflow's `allowed-paths` match that staged `out/**` layout, so a single-file
-upload (staged under the bare filename, with no `out/` prefix) fails validation
-with "no files matched" even though the file exists. This captures each reviewer's
-structured result for later inspection. Skip the upload only on an early exit
-(Step 2) where no sub-agents ran and the directory is empty.
+safe output. The `path` you pass MUST be the absolute path `/tmp/gh-aw/review/out/` —
+never a relative path like `out`, whatever your current working directory is: the
+safe-outputs processor validates the recorded path against the workflow's
+`allowed-paths` (`/tmp/gh-aw/review/out/**`), so a relative path fails validation with
+"no files matched" even when the files exist. This captures each reviewer's structured
+result for later inspection. Skip it only on an early exit (Step 2) where no sub-agents
+ran and the directory is empty.
 
 ## Tone Guidelines
 
