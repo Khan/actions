@@ -33,7 +33,7 @@ on:
       max_usd:
         description: "Total hard budget across both arms and all repeats"
         required: false
-        default: "60"
+        default: "85"
 
 permissions:
   contents: read
@@ -57,7 +57,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           REPEATS: ${{ inputs.repeats || '3' }}
-          MAX_USD: ${{ inputs.max_usd || '60' }}
+          MAX_USD: ${{ inputs.max_usd || '85' }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "ANTHROPIC_API_KEY secret not configured; skipping the drift run." >&2
