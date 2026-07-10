@@ -28,8 +28,8 @@ pnpm test --run workflows/review/eval/
 ```sh
 pnpm dlx tsx workflows/review/eval/live-ab.ts \
   [--base-ref <ref>]        # baseline review.md source (default: merge-base with origin/main)
-  [--cases <id,id>]         # subset of live cases
-  [--smoke-only]            # only live cases also tagged smoke (the per-PR default)
+  [--cases <id,id>]         # EXACT selection: bypasses --smoke-only; unknown ids fail before spend
+  [--smoke-only]            # only live cases also tagged smoke (the per-PR default; ignored under --cases)
   [--repeats <n>]           # n runs per arm in one invocation; pooled pass-rate report
   [--force-arms]            # run identical arms anyway (wobble control / noise floor)
   [--max-usd <n>]           # hard budget across all arm-runs (default 40)
