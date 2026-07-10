@@ -29,13 +29,21 @@ workflows/review/eval/**     tier=low
 # are re-raised after the broad docs rule (last match wins). Any shared workflow's
 # prompt (and prompt imports beside it) is high; the docs living in the same
 # directory drop back to trivial. Single-star segments do not cross into
-# subdirectories, so nothing under eval/ gets re-raised.
+# subdirectories.
 **/*.md                      tier=trivial
 .changeset/*.md              tier=trivial
 workflows/*/*.md             tier=high
 workflows/*/README.md        tier=trivial
 workflows/*/CHANGELOG.md     tier=trivial
 .github/workflows/*.md       tier=high
+
+# More executable-not-docs prose the broad docs rule would drop to trivial:
+# skills steer the Claude agents that operate on this repo, and eval plan docs
+# drive the eval suite's implementation, so they keep the eval dir's dev-only
+# tier. (The 2026-07-10 reviews on #232/#238 routed both as trivial docs and
+# shed review dimensions for it.)
+.claude/skills/**            tier=medium
+workflows/review/eval/**/*.md tier=low
 
 # The reviewer's own consumer config: config.md carries the add-reviewer team
 # allowlist and bot token, ROUTING sets these tiers, and the prose imports steer

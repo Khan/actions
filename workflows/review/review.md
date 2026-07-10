@@ -727,8 +727,10 @@ estimate dollars; watch the signals you can observe, as spend proxies:
   against the run start you recorded in Step 1 at each later checkpoint. This is
   the sharpest proxy, and the job-timeout ceiling it guards is just as fatal as
   the credits cap.
-- **Dispatch count** vs `runBudget.maxReviewerInvocations`: reviewers and lenses
-  already dispatched plus still pending.
+- **Dispatch count** vs `runBudget.maxReviewerInvocations`: finding-producing
+  reviewers and lenses already dispatched plus still pending. Only those count.
+  `pattern-triage`, `thread-reconciler`, and the `claim-validator` are pipeline
+  steps, not reviewers; they never consume a slot of this cap.
 - **Run-wide investigation usage** vs `runBudget.maxTotalToolCalls`: one line per
   authorised call in `/tmp/gh-aw/review/investigation-journal.log` (`wc -l`).
 - **Trajectory**: an unusually large diff, many sub-agents still pending, many
@@ -742,8 +744,16 @@ order:
    a skipped dimension (Step 6 note).
 2. Skip the risks/patterns comment and reviewer requests (Steps 7-8) if they have
    not happened yet.
-3. If the `claim-validator` has not run, post the unvalidated candidates under the
-   existing missing-validator rule (Phase 3) with its skipped-dimension note.
+3. Last, and never at the soft targets alone: the `claim-validator`. It is the
+   false-positive gate, and its cost scales with the candidate count (which you
+   can already see when deciding), not with the diff, so validating a small
+   candidate set costs less than one reviewer dispatch. Shed it only when a
+   hard ceiling is genuinely close (elapsed wall clock past three-quarters of
+   the job's `timeout-minutes`, or an equally direct signal that the credits
+   cap is near); at a mere soft-target breach, dispatch it anyway and shed
+   elsewhere. When it is shed, post the unvalidated candidates under the
+   missing-validator rule (Phase 3), using the planned-shed wording of the
+   skipped-dimension note (Step 6).
 
 Then go straight to Steps 4-6: compute the verdict from the findings already
 validated, post the surviving comments, and submit the review with one
@@ -1017,10 +1027,20 @@ keep the body to a single line:
 Changes requested — see inline comments.
 ```
 
-**Skipped dimensions (either verdict).** If a sub-agent's output was unavailable this
-run so a dimension could not be assessed (Step 3), append to the review body — after
-any verdict-specific text above — one line per skipped dimension, exactly:
-`Note: <dimension> not assessed this run (<sub-agent> output unavailable).` If the
+**Skipped dimensions (either verdict).** If a dimension could not be assessed this
+run (Step 3), append to the review body — after
+any verdict-specific text above — one line per skipped dimension, choosing the
+wording by cause:
+
+- Planned shed (the budget rule stopped the sub-agent from being dispatched):
+  `Note: <dimension> not assessed this run (shed under the <tier>-tier run budget).`
+- The sub-agent was dispatched but its output was missing or unparseable:
+  `Note: <dimension> not assessed this run (<sub-agent> output unavailable).`
+
+The two read very differently to an operator (a shed is budget arithmetic and
+expected on small-tier runs; an unavailable output is a failure worth
+investigating), so never use the `unavailable` wording for work you chose not
+to start. If the
 change-provenance gate was skipped because `provenance.json` was missing or carried
 warnings (Step 3), also append exactly:
 `Note: change-provenance gate skipped this run (diff staging unparseable).`
