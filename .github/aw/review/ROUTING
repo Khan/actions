@@ -36,3 +36,9 @@ workflows/*/*.md             tier=high
 workflows/*/README.md        tier=trivial
 workflows/*/CHANGELOG.md     tier=trivial
 .github/workflows/*.md       tier=high
+
+# The reviewer's own consumer config: config.md carries the add-reviewer team
+# allowlist and bot token, ROUTING sets these tiers, and the prose imports steer
+# every sub-agent. A PR tampering with any of them must not run at the trivial
+# or default budget.
+.github/aw/review/**         tier=high
