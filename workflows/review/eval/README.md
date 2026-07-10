@@ -117,7 +117,19 @@ reviewer, was wrong).
   power). Repeats are the cheap axis: no authoring, no review.
 - **Miss classes:** a true miss is a recall problem; found-but-dropped
   (provenance/scope/validation buckets) is an anchoring or gate-calibration
-  problem. They route to different fixes; never collapse them.
+  problem. They route to different fixes; never collapse them. The
+  provenance bucket's near-miss class (right file, right mechanism, anchor
+  a few lines off or past a short file's end) is what the gate's
+  anchor-snap fallback repairs; a finding still landing in this bucket was
+  outside both snap windows.
+- **Anchor-snap and the arms:** the deterministic pipeline is shared by
+  both arms, but the provenance gate emulates each arm's OWN review.md gate
+  version, keyed on the literal `anchor-snap` marker in the gate step. A
+  baseline built from a pre-snap prompt replays the pre-snap gate, which is
+  what let the snap change itself be priced by a powered run; once both
+  prompts carry the rule, both arms snap and the A/B is back to measuring
+  prompt deltas alone. Snaps are recorded per run (`snappedByProvenance`
+  in the report's runs) for audit.
 - **Gates:** single runs retry a flipped adversarial case best-of-three;
   `--repeats` runs decide by strict majority across repeats instead. Only
   confirmed failures exit non-zero.

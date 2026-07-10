@@ -25,6 +25,34 @@
  *   - LEFT-side `line` anchors are change-anchored when the line is a
  *     removed line.
  *
+ * Anchor-snap fallback (the "anchor-snap" rule): reviewers sometimes produce
+ * a right-file, right-mechanism finding at a slightly wrong line — observed
+ * live as anchors counted against the unified-diff TEXT instead of the file
+ * (line 24 of an 18-line file; line 8 of a 3-line file), each one dropped
+ * here and occasionally flipping a verdict. Before setting a line-anchored
+ * finding aside, the gate tries to snap it to the nearest changed line in
+ * the same file, under two windows:
+ *
+ *   - Near-miss window (`ANCHOR_SNAP_WINDOW`, ±3): the anchor sits within
+ *     three lines of a changed line. Three is the unified diff's context
+ *     width — a reviewer describing a change it just read anchors at most
+ *     one context block away from it.
+ *   - Overflow window: the anchor points past every line the diff showed
+ *     (`lastShownLine`) by no more than the file's diff-text overhead
+ *     (`textOverhead`: headers + hunk headers + removed lines). That is
+ *     exactly the amount by which counting diff text lines overshoots real
+ *     file lines, so such an anchor can only be the counting mis-anchor and
+ *     its intended line can only be a shown line; it snaps to the last
+ *     changed line. RIGHT side only (the observed pathology).
+ *
+ * A snapped finding keeps its severity and continues through the pipeline at
+ * the snapped anchor; every snap is reported ({@link ProvenanceGateResult}
+ * `snapped`) so the run artifact records the rewrite for audit. Snapping is
+ * deliberately narrow: a finding in an untouched region (outside both
+ * windows) still demotes to advisory and never posts — the gate's purpose
+ * (no blocking reviews of code the PR did not touch) is unchanged; only
+ * near-miss anchors are repaired.
+ *
  * Fail-open guarantee: when the diff cannot be parsed into file sections at
  * all (a staging-format problem, not a property of the findings), the gate
  * keeps everything and reports the warning; a broken artifact must degrade
@@ -45,8 +73,29 @@ import {
     countOrphanHunkLines,
     stripDiffFiles,
 } from "./diff";
-import type {DiffChangedLines} from "./diff";
-import type {Anchor, Finding} from "./finding-schema";
+import type {DiffChangedLines, FileChangedLines} from "./diff";
+import type {Anchor, Finding, LineAnchor, Side} from "./finding-schema";
+
+/**
+ * The near-miss snap window, in lines: a mis-anchored finding snaps to a
+ * changed line at most this far away. Three is the unified diff's context
+ * width, so the window never reaches past the context block the reviewer was
+ * actually reading when it anchored.
+ */
+export const ANCHOR_SNAP_WINDOW = 3;
+
+/**
+ * The literal token review.md's gate step carries once it documents the
+ * anchor-snap rule. The live A/B keys each arm's deterministic gate
+ * emulation on {@link reviewMdHasAnchorSnap} over the arm's own review.md,
+ * so a baseline arm built from a pre-snap prompt replays the pre-snap gate
+ * and the A/B prices the change.
+ */
+export const ANCHOR_SNAP_MARKER = "anchor-snap";
+
+/** Whether a review.md version documents the anchor-snap gate rule. */
+export const reviewMdHasAnchorSnap = (markdown: string): boolean =>
+    markdown.includes(ANCHOR_SNAP_MARKER);
 
 /**
  * The changed-line map for a run's diff, plus any warnings from computing it.
@@ -55,8 +104,149 @@ import type {Anchor, Finding} from "./finding-schema";
 export type DiffProvenance = {
     /** Per-file changed lines, keyed by new-side path. */
     files: DiffChangedLines;
+    /**
+     * Per-file RIGHT-side anchor-snap lookup, keyed by new-side path: for
+     * every line that is NOT change-anchored but sits inside a snap window
+     * (see the module doc), the changed line a mis-anchored finding snaps
+     * to. Precomputed so the orchestrator's gate (review.md Step 3) applies
+     * anchor-snap as a pure dictionary lookup on `provenance.json` — no
+     * model-side line arithmetic. Files with nothing to snap are omitted.
+     */
+    snap: Record<string, Record<number, number>>;
     /** Fixed-format staging problems (never prose about the code). */
     warnings: string[];
+};
+
+/** The RIGHT-side change-anchored lines of one file, sorted ascending. */
+const rightTargets = (entry: FileChangedLines): number[] =>
+    [...new Set([...entry.added, ...entry.removedAdjacent])].sort(
+        (a, b) => a - b,
+    );
+
+/**
+ * Snap one line to the nearest changed line of its file, or `null` when no
+ * window admits it. Ties (equidistant changed lines above and below) break
+ * toward the LOWER line: the observed mis-anchor pathology overshoots (diff
+ * text counts past the file line), so the intended line is the earlier one.
+ */
+export const snapLineToChanged = (
+    line: number,
+    entry: FileChangedLines,
+    side: Side = "RIGHT",
+): number | null => {
+    const targets = side === "LEFT" ? entry.removed : rightTargets(entry);
+    if (targets.length === 0) {
+        return null;
+    }
+    let best: number | null = null;
+    for (const target of targets) {
+        const distance = Math.abs(line - target);
+        if (distance > ANCHOR_SNAP_WINDOW) {
+            continue;
+        }
+        if (best === null || distance < Math.abs(line - best)) {
+            best = target;
+        }
+    }
+    if (best !== null) {
+        return best;
+    }
+    // Overflow: an anchor past every shown line, by no more than the
+    // diff-text overhead, is the counting mis-anchor (module doc); its
+    // nearest changed line is the file's last one. RIGHT side only.
+    const last = targets[targets.length - 1];
+    if (
+        side !== "LEFT" &&
+        last !== undefined &&
+        line > entry.lastShownLine &&
+        line - last <= entry.textOverhead
+    ) {
+        return last;
+    }
+    return null;
+};
+
+/**
+ * Anchor-snap an out-of-provenance line anchor: the snapped single-line
+ * anchor, or `null` when the anchor is not a near-miss (kept out of
+ * provenance). A range anchor scans its lines ascending and snaps on the
+ * first line any window admits — the same order review.md's gate walks the
+ * `snap` lookup. Only `line` anchors snap; `file`/`pr` anchors have no line
+ * to repair.
+ */
+export const snapAnchorToProvenance = (
+    anchor: Anchor,
+    provenance: DiffProvenance,
+): LineAnchor | null => {
+    if (anchor.type !== "line") {
+        return null;
+    }
+    const entry = provenance.files[anchor.path];
+    if (entry === undefined) {
+        return null;
+    }
+    const side = anchor.side ?? "RIGHT";
+    const start = anchor.start_line ?? anchor.line;
+    for (let line = start; line <= anchor.line; line++) {
+        const target = snapLineToChanged(line, entry, side);
+        if (target !== null) {
+            return {
+                type: "line",
+                path: anchor.path,
+                line: target,
+                ...(anchor.side !== undefined ? {side: anchor.side} : {}),
+            };
+        }
+    }
+    return null;
+};
+
+/**
+ * Precompute one file's RIGHT-side snap lookup: every candidate line either
+ * window admits (near-miss lines around each changed line, overflow lines
+ * past `lastShownLine`), minus the lines that are already change-anchored.
+ * The table and {@link snapLineToChanged} agree by construction — the table
+ * is built by calling it.
+ */
+const buildFileSnapTable = (
+    entry: FileChangedLines,
+): Record<number, number> => {
+    const targets = rightTargets(entry);
+    const table: Record<number, number> = {};
+    if (targets.length === 0) {
+        return table;
+    }
+    const candidates = new Set<number>();
+    for (const target of targets) {
+        for (
+            let line = target - ANCHOR_SNAP_WINDOW;
+            line <= target + ANCHOR_SNAP_WINDOW;
+            line++
+        ) {
+            if (line >= 1) {
+                candidates.add(line);
+            }
+        }
+    }
+    const last = targets[targets.length - 1] ?? 0;
+    for (
+        let line = entry.lastShownLine + 1;
+        line <= last + entry.textOverhead;
+        line++
+    ) {
+        candidates.add(line);
+    }
+    const anchored = new Set(targets);
+    for (const line of [...candidates].sort((a, b) => a - b)) {
+        if (anchored.has(line)) {
+            continue;
+        }
+        const target = snapLineToChanged(line, entry, "RIGHT");
+        if (target !== null) {
+            table[line] = target;
+        }
+    }
+    return table;
 };
 
 /**
@@ -83,7 +273,14 @@ export const computeDiffProvenance = (diffText: string): DiffProvenance => {
                 "(staging format?): provenance incomplete, gate must fail open",
         );
     }
-    return {files, warnings};
+    const snap: Record<string, Record<number, number>> = {};
+    for (const [path, entry] of Object.entries(files)) {
+        const table = buildFileSnapTable(entry);
+        if (Object.keys(table).length > 0) {
+            snap[path] = table;
+        }
+    }
+    return {files, snap, warnings};
 };
 
 /**
@@ -117,8 +314,19 @@ export const isAnchorInProvenance = (
     return false;
 };
 
+/** One anchor-snap the gate performed, recorded for the run artifact. */
+export type SnappedFinding = {
+    /** The finding as kept: anchor rewritten to the snapped line. */
+    finding: Finding;
+    /** The anchor the finding arrived with, before the snap. */
+    originalAnchor: Anchor;
+};
+
 export type ProvenanceGateResult = {
-    /** Change-anchored findings, unchanged: the set the pipeline posts. */
+    /**
+     * Change-anchored findings: the set the pipeline posts. Snapped findings
+     * appear here with their rewritten anchor (and again in `snapped`).
+     */
     kept: Finding[];
     /**
      * Pre-existing observations: out-of-provenance findings with `severity`
@@ -127,29 +335,60 @@ export type ProvenanceGateResult = {
      * artifact only, so the gate stays inspectable without adding comments.
      */
     preExisting: Finding[];
+    /**
+     * The anchor-snaps performed (module doc): near-miss mis-anchors kept at
+     * a rewritten anchor. Every entry is also in `kept`; this list is the
+     * audit trail the run artifact records.
+     */
+    snapped: SnappedFinding[];
+};
+
+export type ProvenanceGateOptions = {
+    /**
+     * Whether the anchor-snap fallback runs before a finding is set aside.
+     * Defaults to true (production behavior). The live A/B's baseline arm
+     * passes false when its review.md predates the anchor-snap rule, so the
+     * deterministic gate emulates each arm's own prompt version.
+     */
+    anchorSnap?: boolean;
 };
 
 /**
  * Partition findings by change provenance. Pure. When the provenance map is
- * unusable (`warnings` non-empty), every finding is kept (fail open).
+ * unusable (`warnings` non-empty), every finding is kept (fail open). A
+ * line-anchored finding that is out of provenance but inside a snap window
+ * is kept at the snapped anchor instead of set aside (module doc), unless
+ * `anchorSnap: false`.
  */
 export const applyProvenanceGate = (
     findings: readonly Finding[],
     provenance: DiffProvenance,
+    options: ProvenanceGateOptions = {},
 ): ProvenanceGateResult => {
+    const anchorSnap = options.anchorSnap ?? true;
     if (provenance.warnings.length > 0) {
-        return {kept: [...findings], preExisting: []};
+        return {kept: [...findings], preExisting: [], snapped: []};
     }
     const kept: Finding[] = [];
     const preExisting: Finding[] = [];
+    const snapped: SnappedFinding[] = [];
     for (const finding of findings) {
         if (isAnchorInProvenance(finding.anchor, provenance)) {
             kept.push(finding);
+            continue;
+        }
+        const snappedAnchor = anchorSnap
+            ? snapAnchorToProvenance(finding.anchor, provenance)
+            : null;
+        if (snappedAnchor !== null) {
+            const rewritten = {...finding, anchor: snappedAnchor};
+            kept.push(rewritten);
+            snapped.push({finding: rewritten, originalAnchor: finding.anchor});
         } else {
             preExisting.push({...finding, severity: "advisory"});
         }
     }
-    return {kept, preExisting};
+    return {kept, preExisting, snapped};
 };
 
 /* -------------------------------------------------------------------------- */
@@ -269,6 +508,10 @@ if (typeof require !== "undefined" && require.main === module) {
     console.log(
         JSON.stringify({
             files: Object.keys(result.provenance.files).length,
+            snapLines: Object.values(result.provenance.snap).reduce(
+                (count, table) => count + Object.keys(table).length,
+                0,
+            ),
             strippedFiles: result.strippedFiles,
             warnings: result.provenance.warnings,
         }),

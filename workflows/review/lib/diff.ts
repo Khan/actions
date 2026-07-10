@@ -35,11 +35,21 @@ export type DiffFileSection = {
  *     before it. A pure deletion leaves no `+` line to anchor on, so a
  *     finding about a dropped guard anchors on one of these; the provenance
  *     gate treats them as change-anchored.
+ *   - `lastShownLine`: the highest RIGHT-side line any of the file's hunks
+ *     covers (from the hunk headers). An anchor above it names a line the
+ *     diff never showed the reviewer.
+ *   - `textOverhead`: how many of the file's diff-section text lines are NOT
+ *     RIGHT-side content: file headers, hunk headers, removed lines, and
+ *     no-newline markers. This is the maximum amount by which an anchor that
+ *     was (wrongly) counted against the diff TEXT overshoots the real file
+ *     line — the bound the provenance gate's anchor-snap overflow rule uses.
  */
 export type FileChangedLines = {
     added: number[];
     removed: number[];
     removedAdjacent: number[];
+    lastShownLine: number;
+    textOverhead: number;
 };
 
 /** Per-file changed-line map for a whole diff, keyed by new-side path. */
@@ -184,18 +194,26 @@ export const computeChangedLines = (diff: string): DiffChangedLines => {
         let oldLine = 0;
         let newLine = 0;
         let inHunk = false;
+        let lastShownLine = 0;
+        let textOverhead = 0;
 
         for (const line of lines) {
-            const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+            const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
             if (hunk !== null) {
                 oldLine = Number(hunk[1] ?? "1");
                 newLine = Number(hunk[2] ?? "1");
                 inHunk = true;
+                textOverhead++;
+                // The hunk header states its RIGHT-side extent; a zero-count
+                // hunk (pure deletion) covers nothing past newStart - 1.
+                const newCount = Number(hunk[3] ?? "1");
+                lastShownLine = Math.max(lastShownLine, newLine + newCount - 1);
                 continue;
             }
             if (!inHunk) {
                 // File headers (`diff --git`, `index`, `---`/`+++`) precede
                 // the first hunk; nothing before an `@@` is content.
+                textOverhead++;
                 continue;
             }
             if (line.startsWith("+")) {
@@ -204,6 +222,7 @@ export const computeChangedLines = (diff: string): DiffChangedLines => {
             } else if (line.startsWith("-")) {
                 removed.add(oldLine);
                 oldLine++;
+                textOverhead++;
                 // The deletion sits between new-file lines newLine-1 and
                 // newLine; both bracket lines are change-adjacent anchors.
                 if (newLine > 1) {
@@ -212,6 +231,7 @@ export const computeChangedLines = (diff: string): DiffChangedLines => {
                 removedAdjacent.add(newLine);
             } else if (line.startsWith("\\")) {
                 // "\ No newline at end of file" consumes nothing.
+                textOverhead++;
             } else {
                 oldLine++;
                 newLine++;
@@ -222,6 +242,8 @@ export const computeChangedLines = (diff: string): DiffChangedLines => {
             added: [...added].sort((a, b) => a - b),
             removed: [...removed].sort((a, b) => a - b),
             removedAdjacent: [...removedAdjacent].sort((a, b) => a - b),
+            lastShownLine,
+            textOverhead,
         };
     }
 

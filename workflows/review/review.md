@@ -517,13 +517,18 @@ two files:
 - `/tmp/gh-aw/review/provenance.json`: per changed file, exactly which lines the
   diff touches: `added` (RIGHT-side line numbers of `+` lines), `removedAdjacent`
   (the RIGHT-side lines bracketing each removal, where a deletion finding anchors),
-  and `removed` (LEFT-side `-` lines), plus a `warnings` list. The CLI also
+  and `removed` (LEFT-side `-` lines), plus a `warnings` list. It also carries a
+  top-level `snap` map (keyed by path, then by line): for every RIGHT-side line
+  that is NOT change-anchored but sits inside the anchor-snap windows (within 3
+  lines of a changed line, or past the end of the file's hunks by no more than
+  the file's diff-text overhead — the counting mis-anchor), the changed line a
+  mis-anchored finding snaps to. The CLI also
   cross-checks the parse for completeness (every `files.json` entry with
   `hasPatch: true` must appear in the map; stray hunks must all be attributable
   to a file) and records any shortfall as a warning, which makes the gate below
   fail open. This is the
   code-computed fact the change-provenance gate below reads; you never derive
-  changed lines yourself.
+  changed lines (or snap targets) yourself.
 - `/tmp/gh-aw/review/full-stripped.diff`: the full diff with the sections of every
   file the router classified generated (`routing.json` `generatedFiles`) removed.
   The whole-change reviewers and specialist lenses read this file, never `full.diff`,
@@ -706,6 +711,21 @@ by the provenance CLI above), before the scope filter below:
   entry's `added` or `removedAdjacent` list (candidates carry RIGHT-side lines;
   `removedAdjacent` is what lets a deletion finding, anchored beside the removed
   code, pass). Change-anchored candidates continue through the pipeline untouched.
+- A candidate that is not change-anchored but whose `line` has an entry in
+  `provenance.json`'s `snap` map (`snap[<path>][<line>]`) is a **near-miss
+  mis-anchor**; apply the **anchor-snap** fallback. Reviewers sometimes anchor a
+  finding about a changed line a few lines off, or count unified-diff text lines
+  instead of file lines and land just past a short file's end; the `snap` map
+  precomputes exactly which lines that pathology can produce and where each one
+  belongs. Rewrite the candidate's `line` to the mapped value, then treat it as
+  change-anchored from here on (it continues through the pipeline and posts at
+  the snapped line, keeping its severity). Record every snap in
+  `/tmp/gh-aw/review/out/snapped.json` (one entry per snapped candidate: the
+  finding's `id`, `path`, the original line as `from`, the snapped line as `to`)
+  so the run artifact keeps each rewrite auditable. For a range candidate
+  (`start_line` set), check each line of the range ascending and use the first
+  mapped entry; the snapped candidate becomes single-line. The map is the entire
+  rule: never snap by judgment, and a line with no entry does not snap.
 - Every other candidate is a **pre-existing observation**. It does not count
   toward the verdict and it does not post to the PR at all — not as its own
   comment and not in any collapsed section: remove it from the candidate set now,
@@ -1450,8 +1470,9 @@ safe output. First copy the claim-audit input in beside the sub-agent outputs, s
 the artifact carries the whole audit trail: if Phase 3 ran, copy
 `/tmp/gh-aw/review/claims.json` to `/tmp/gh-aw/review/out/claims.json` (the
 candidate claims the validator was handed; `out/claim-validator.json` already
-records its verdicts, and `out/pre-existing.json` the provenance gate's
-set-asides). Then upload with **one** call whose `path` is the absolute directory
+records its verdicts, `out/pre-existing.json` the provenance gate's
+set-asides, and `out/snapped.json` its anchor-snap rewrites, when any
+occurred). Then upload with **one** call whose `path` is the absolute directory
 path `/tmp/gh-aw/review/out/` — always the whole directory, never an individual
 file: the tool copies what you pass into its staging area under its basename, and
 the workflow's `allowed-paths` match that staged `out/**` layout, so a single-file
