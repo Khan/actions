@@ -209,6 +209,15 @@ measurements to run after the suite exists.
 - `ANTHROPIC_API_KEY` — used by the `claude` engine.
 - `KHAN_ACTIONS_BOT_TOKEN` — referenced by `config.md`'s `add-reviewer` (the default
   `GITHUB_TOKEN` cannot request organization teams as reviewers).
+- `GH_AW_OTEL_SENTRY_ENDPOINT` and `GH_AW_OTEL_SENTRY_AUTHORIZATION` — the Sentry
+  OTLP traces endpoint and `x-sentry-auth` header value read by the
+  `observability:` block (value formats are documented at the block in
+  `review.md`). Hard-required while that block is present: a missing secret
+  compiles to an empty endpoint URL, the MCP gateway's OTLP config schema
+  rejects it, and the agent job dies at startup instead of skipping trace
+  export (observed on Khan/actions#241). A repo without these secrets must
+  comment out the `observability:` block in its installed `review.md` as a
+  local edit (which `gh aw update` preserves) and recompile.
 
 ## Versioning
 
