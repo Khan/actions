@@ -1,0 +1,133 @@
+# Review live A/B — real-model arm-to-arm evals for review-bot changes.
+#
+# A PR touching workflows/review/** runs the model sub-agents from BOTH the
+# base branch's review.md (baseline) and the PR's review.md (candidate) over
+# the live-enabled corpus subset, then posts the delta report (five live
+# metrics, judge quality, cost, regressions) as a sticky PR comment and job
+# summary. See workflows/review/eval/live-ab-plan.md for the full design.
+#
+# Why the base TIP and not the merge-base: on pull_request events the
+# checkout is the PR merge commit, so the candidate tree already contains the
+# base tip. Baselining on the same tip means the two arms differ only by the
+# PR's own review.md changes; a merge-base baseline would fold any upstream
+# review.md movement into the PR's measured delta.
+#
+# Report-only, with one exception (the playbook's standing rule): the runner
+# exits non-zero when the candidate arm mishandles an adversarial-injection
+# case, which fails this job.
+#
+# Cost control: per-PR runs cover only the live cases also tagged `smoke`;
+# a `full-eval` label lifts that to every live case. The runner enforces a
+# hard USD ceiling per arm and reports skipped cases rather than dying at the
+# cap. A new push cancels a superseded run (concurrency below). A
+# `skip-live-eval` label skips the job entirely.
+#
+# NOTE: this workflow's name must stay distinct from any gh-aw workflow a
+# consumer runs (same-named workflows share a gh-aw concurrency group per PR
+# and cancel each other; see the round-two doc's operational floor).
+
+name: Review Eval A/B
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "workflows/review/**"
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: "Baseline ref for review.md (default: the runner's merge-base fallback; PR runs pass the base-branch tip)"
+        required: false
+      max_usd:
+        description: "Total hard budget across both arms"
+        required: false
+        default: "40"
+      full:
+        description: "Run every live case (not just the smoke subset)"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: review-eval-ab-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  live-ab:
+    name: Live A/B over the eval corpus
+    runs-on: ubuntu-latest
+    # Drafts wait until ready; the changeset release PR matches the path
+    # filter (it bumps workflows/review/package.json) but changes no
+    # behavior; skip-live-eval opts a PR out.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.draft == false &&
+       github.head_ref != 'changeset-release/main' &&
+       !contains(github.event.pull_request.labels.*.name, 'skip-live-eval'))
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          # The baseline arm reads review.md from the base ref via
+          # `git show`, so the full history is needed.
+          fetch-depth: 0
+      - uses: ./actions/shared-node-cache
+      - name: Run the live A/B
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The tip of the PR's base branch (see the header comment for why
+          # tip, not merge-base). workflow_dispatch may override it.
+          BASE_REF: ${{ inputs.base_ref || format('origin/{0}', github.base_ref || 'main') }}
+          MAX_USD: ${{ inputs.max_usd || '40' }}
+          FULL_EVAL: ${{ inputs.full == true || contains(github.event.pull_request.labels.*.name, 'full-eval') }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY secret not configured; skipping the live A/B." >&2
+            exit 0
+          fi
+          SCOPE="--smoke-only"
+          if [ "$FULL_EVAL" = "true" ]; then
+            SCOPE=""
+          fi
+          pnpm dlx tsx workflows/review/eval/live-ab.ts \
+            --base-ref "$BASE_REF" --max-usd "$MAX_USD" $SCOPE
+      - name: Upload the report artifact
+        # always(): a partial or gate-failing run still uploads what it wrote.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: live-ab-report
+          path: out/live-ab-report.*
+          if-no-files-found: ignore
+      - name: Post the sticky PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const fs = require("fs");
+            const path = "out/live-ab-report.md";
+            if (!fs.existsSync(path)) {
+              core.info("no report markdown; nothing to post");
+              return;
+            }
+            const marker = "<!-- review-eval-ab -->";
+            const body = `${marker}\n${fs.readFileSync(path, "utf8")}`;
+            const {owner, repo} = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {owner, repo, issue_number, per_page: 100},
+            );
+            const prior = comments.find((c) => c.body?.startsWith(marker));
+            if (prior) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: prior.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number, body,
+              });
+            }

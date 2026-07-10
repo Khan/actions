@@ -19,6 +19,8 @@
  *     [--base-ref <ref>]      baseline review.md source (default: merge-base
  *                             of HEAD and origin/main)
  *     [--cases <id,id,...>]   subset of live cases (default: every live case)
+ *     [--smoke-only]          only live cases also tagged smoke (the per-PR
+ *                             default in CI; a full-eval label lifts it)
  *     [--max-usd <n>]         total hard budget across both arms (default 40)
  *     [--no-judge]            skip judge quality scoring
  *     [--stage-root <dir>]    staging root (default: a fresh temp dir)
@@ -38,7 +40,7 @@ import {tmpdir} from "node:os";
 import {dirname} from "node:path";
 
 import {extractAgents} from "./agent-extract";
-import {loadLiveCorpus, type CorpusCase} from "./corpus/loader";
+import {SMOKE_TAG, loadLiveCorpus, type CorpusCase} from "./corpus/loader";
 import {aggregate, buildCorpusRequests} from "./judge";
 import {liveJudgeModel} from "./judge-live-model";
 import {
@@ -605,7 +607,11 @@ const main = async (): Promise<void> => {
         return;
     }
 
-    const allCases = loadLiveCorpus();
+    const allCases = loadLiveCorpus().filter(
+        (c) =>
+            !process.argv.includes("--smoke-only") ||
+            c.tags.includes(SMOKE_TAG),
+    );
     const cases =
         caseFilter === undefined
             ? allCases
@@ -691,6 +697,8 @@ const main = async (): Promise<void> => {
     mkdirSync(dirname(outPath), {recursive: true});
     writeFileSync(outPath, JSON.stringify(report, null, 2));
     const markdown = renderMarkdownReport(report);
+    // A sibling .md rides along for CI's sticky PR comment.
+    writeFileSync(outPath.replace(/\.json$/, ".md"), `${markdown}\n`);
     console.log(markdown);
     const summaryPath = process.env["GITHUB_STEP_SUMMARY"];
     if (summaryPath !== undefined && summaryPath !== "") {
