@@ -210,7 +210,7 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: review-v1.4.0
+      ref: review-v1.4.1
       path: gh-aw-review-lib
       persist-credentials: false
 
