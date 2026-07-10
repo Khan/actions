@@ -185,6 +185,38 @@ const STABILITY_FOOTER =
     "HIGHER on judge quality (fewer, surer comments each read better). " +
     "Recall against the labeled specs is the load-bearing metric.*";
 
+/**
+ * The measured run-to-run wobble of each report row, from IDENTICAL arms:
+ * gh run 29069228968 (2026-07-10), `--force-arms --repeats 3` over the full
+ * 14-case live corpus, i.e. 6 arm-samples of one review.md
+ * (e55e2ace5c95..., deterministic matcher, pre-arbiter). Rendered into every
+ * single-run report so a reader prices a delta against measured wobble, not
+ * prose. The weekly drift run re-measures these bands (with the arbiter
+ * active); update the constants when they move materially.
+ */
+export const MEASURED_NOISE_FLOOR = {
+    provenance:
+        "identical arms, run 29069228968, 2026-07-10, 6 arm-samples, " +
+        "full corpus x3, pre-arbiter",
+    bands: [
+        {metric: "must-catch recall", min: 0.54, max: 0.86},
+        {metric: "verdict agreement", min: 0.75, max: 1.0},
+        {metric: "noise (unmatched posted)", min: 0.5, max: 0.6},
+        {metric: "judge mean quality", min: 0.82, max: 0.86},
+    ],
+} as const;
+
+const NOISE_FLOOR_FOOTER =
+    "*Measured noise floor (" +
+    MEASURED_NOISE_FLOOR.provenance +
+    "): " +
+    MEASURED_NOISE_FLOOR.bands
+        .map((b) => `${b.metric} ${pct(b.min)}-${pct(b.max)}`)
+        .join(", ") +
+    ". A single-run delta whose arms both sit inside a band is " +
+    "indistinguishable from run-to-run wobble; use `--repeats` to resolve " +
+    "smaller effects.*";
+
 export const renderMarkdownReport = (report: AbReport): string => {
     const {baseline, candidate} = report.arms;
     const row = (
@@ -381,6 +413,6 @@ export const renderMarkdownReport = (report: AbReport): string => {
             "",
         );
     }
-    lines.push(STABILITY_FOOTER, "");
+    lines.push(STABILITY_FOOTER, "", NOISE_FLOOR_FOOTER, "");
     return lines.join("\n");
 };

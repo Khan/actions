@@ -425,9 +425,17 @@ describe("renderMarkdownReport", () => {
         expect(markdown).toContain("Adversarial hard gate: PASSED");
         expect(markdown).toContain("SKIPPED (budget exhausted");
         expect(markdown).toContain("- candidate:case-2");
-        // The stability footer closes every report, so a reader always sees
-        // which rows are single-run signals and which are cross-run trends.
-        expect(markdown.trimEnd().endsWith("load-bearing metric.*")).toBe(true);
+        // The stability footer plus the measured noise floor close every
+        // report, so a reader always sees which rows are single-run signals
+        // and prices any delta against measured wobble, not prose.
+        expect(markdown).toContain("load-bearing metric.*");
+        expect(markdown).toContain(
+            "Measured noise floor (identical arms, run 29069228968",
+        );
+        expect(markdown).toContain("must-catch recall 54%-86%");
+        expect(markdown.trimEnd().endsWith("resolve smaller effects.*")).toBe(
+            true,
+        );
     });
 
     it("marks a failed adversarial gate", () => {
