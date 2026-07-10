@@ -75,5 +75,15 @@
                 "lineEnd": 22
             }
         ]
+    },
+    "routerConfig": {
+        "lensRules": [
+            {
+                "pattern": "src/auth/middleware.ts",
+                "lenses": [
+                    "security-auth"
+                ]
+            }
+        ]
     }
 }
