@@ -238,6 +238,12 @@ pre-agent-steps:
 # (-1) so reviews are never skipped on a busy PR day; the per-run cap below
 # still bounds the cost of any single review.
 max-daily-ai-credits: -1
+# KHAN/ACTIONS LOCAL OVERRIDE: nearly every file in this repo routes to tier=high
+# (supply-chain surface), so a full review of even a modest PR sits right at the
+# 1000-credit default; two runs on PR #241 died at 1001 and 1024 credits after
+# computing their verdict but before posting it. 2500 matches webapp's measured
+# override and bounds a single review at $25.
+max-ai-credits: 2500
 source: Khan/actions/workflows/review/review.md@review-v1.4.1
 ---
 
