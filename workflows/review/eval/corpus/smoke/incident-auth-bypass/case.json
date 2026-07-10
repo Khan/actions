@@ -1,0 +1,89 @@
+{
+    "id": "incident-auth-bypass",
+    "tags": [
+        "smoke",
+        "incident",
+        "security-auth",
+        "live"
+    ],
+    "category": "incident-repro",
+    "description": "Repro of an auth-bypass incident: a permission check is short-circuited so an unauthenticated caller reaches a privileged path. The security-auth lens must catch it and block.",
+    "changedFiles": [
+        {
+            "path": "src/auth/middleware.ts",
+            "status": "modified"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "security-auth",
+            "finding": {
+                "schema_version": 2,
+                "id": "sec-auth-bypass-1",
+                "lens": "security-auth",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/auth/middleware.ts",
+                    "line": 17,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.95,
+                "evidence_trace": [
+                    "src/auth/middleware.ts:57 changes the guard from `if (!user.isAdmin) return 403` to `if (!user.isAdmin) {}`",
+                    "the empty body means the admin check no longer short-circuits the handler",
+                    "downstream handler mutates billing settings without any remaining authorization gate"
+                ],
+                "failure_scenario": "A request from a non-admin passes the guard (no early return on `!user.isAdmin`) and executes the privileged handler.",
+                "producing_hunt": "security-auth:authz-guard",
+                "model_authored_prose": "The admin guard here no longer returns on failure, so a non-admin reaches the privileged handler. Restore the early `return 403` when `!user.isAdmin`."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": [
+            "sec-auth-bypass-1"
+        ]
+    },
+    "diff": "diff --git a/src/auth/middleware.ts b/src/auth/middleware.ts\n--- a/src/auth/middleware.ts\n+++ b/src/auth/middleware.ts\n@@ -12,6 +12,12 @@\n     res: Response,\n     next: NextFunction,\n ): Promise<void> => {\n+    // Fast path for internal service calls: the gateway strips this header\n+    // from external traffic, so its presence means the caller is trusted.\n+    if (req.headers[\"x-internal-call\"] !== undefined) {\n+        next();\n+        return;\n+    }\n     const token = req.headers[\"authorization\"];\n     if (typeof token !== \"string\" || token.length === 0) {\n         res.status(401).json({error: \"missing credentials\"});\n",
+    "live": {
+        "prContext": {
+            "title": "auth: skip session verification for internal service calls",
+            "description": "Internal callers already authenticate at the gateway; re-verifying the session doubles p50 latency on service-to-service calls.",
+            "author": "dev-platform",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "sec-auth-bypass-1",
+                "path": "src/auth/middleware.ts",
+                "mechanism": [
+                    "unauthenticated",
+                    "spoof|forge|attacker.controlled|client.controlled",
+                    "bypass",
+                    "x-internal-call"
+                ],
+                "lens": "security-auth",
+                "lineStart": 12,
+                "lineEnd": 22
+            }
+        ]
+    },
+    "routerConfig": {
+        "lensRules": [
+            {
+                "pattern": "src/auth/middleware.ts",
+                "lenses": [
+                    "security-auth"
+                ]
+            }
+        ]
+    }
+}
