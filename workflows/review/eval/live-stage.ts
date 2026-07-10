@@ -13,6 +13,9 @@
  *                                       generated files to strip)
  *   <dest>/context/pr.diff            = full.diff (no pattern-triage pass:
  *                                       every changed file is a review file)
+ *   <dest>/context/full-stripped-annotated.diff, pr-annotated.diff
+ *                                     line-number-annotated copies (read by
+ *                                     review.md versions that name them)
  *   <dest>/context/files.json         path/status/hasPatch per changed file
  *   <dest>/context/review-files.json  = files.json entries (see pr.diff)
  *   <dest>/context/provenance.json    the diff's changed-line map
@@ -32,6 +35,7 @@ import {
     writeFileSync,
 } from "node:fs";
 
+import {annotateDiffLineNumbers} from "../lib/diff";
 import {computeDiffProvenance} from "../lib/provenance";
 import {
     buildScopedDiff,
@@ -192,9 +196,15 @@ const stageRereview = (
 
     if (plan.staging === "new-hunks") {
         const scoped = buildScopedDiff(currentDiff, anchorHunks);
+        const scopedAnnotated = annotateDiffLineNumbers(scoped);
         fs.writeFileSync(`${contextDir}/scoped.diff`, scoped);
         fs.writeFileSync(`${contextDir}/full-stripped.diff`, scoped);
         fs.writeFileSync(`${contextDir}/pr.diff`, scoped);
+        fs.writeFileSync(
+            `${contextDir}/full-stripped-annotated.diff`,
+            scopedAnnotated,
+        );
+        fs.writeFileSync(`${contextDir}/pr-annotated.diff`, scopedAnnotated);
     }
     return plan;
 };
@@ -226,10 +236,16 @@ export const stageCase = (
 
     // The diff surfaces. Corpus diffs carry no generated files, so the
     // stripped diff equals the full one; with no pattern-triage pass, the
-    // review diff does too.
+    // review diff does too. The annotated siblings are staged for BOTH arms
+    // unconditionally: only a review.md version that names them reads them,
+    // so an A/B between a pre-annotation baseline and an annotated candidate
+    // is a pure prompt delta with no staging flag.
+    const annotated = annotateDiffLineNumbers(diff);
     fs.writeFileSync(`${contextDir}/full.diff`, diff);
     fs.writeFileSync(`${contextDir}/full-stripped.diff`, diff);
     fs.writeFileSync(`${contextDir}/pr.diff`, diff);
+    fs.writeFileSync(`${contextDir}/full-stripped-annotated.diff`, annotated);
+    fs.writeFileSync(`${contextDir}/pr-annotated.diff`, annotated);
 
     // files.json + review-files.json: path/status/hasPatch. `hasPatch` is
     // whether the diff carries a section for the path (the completeness

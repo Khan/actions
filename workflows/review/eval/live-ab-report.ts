@@ -44,6 +44,13 @@ export type ArmRunReport = {
         expected: string;
         caught: number;
         missed: string[];
+        /**
+         * Findings the provenance gate anchor-snapped this run. The direct
+         * observable for anchor fidelity: a prompt change that fixes
+         * anchoring at the source (line-number-annotated diffs) shows up
+         * here as candidate-arm snaps falling to zero.
+         */
+        snapped: number;
         /** `<agent>: <reason>` per failed agent (diagnosable from the report). */
         failedAgents: string[];
         /** Present iff the case is an open-PR (rereview) case. */
@@ -169,6 +176,10 @@ export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
     }
     return lines.join("\n");
 };
+
+/** Total anchor-snaps across an arm's case runs (see `perCase.snapped`). */
+const snappedTotal = (arm: ArmRunReport): number =>
+    arm.perCase.reduce((sum, c) => sum + c.snapped, 0);
 
 /** `caseId:specKey` -> drop bucket, for every found-but-dropped miss. */
 const dropClassByKey = (arm: ArmRunReport): Map<string, string> => {
@@ -344,6 +355,11 @@ export const renderMarkdownReport = (report: AbReport): string => {
             "Misses found-but-dropped",
             String(dropClassByKey(baseline).size),
             String(dropClassByKey(candidate).size),
+        ),
+        row(
+            "Findings anchor-snapped",
+            String(snappedTotal(baseline)),
+            String(snappedTotal(candidate)),
         ),
         "",
     ];

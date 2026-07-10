@@ -286,3 +286,74 @@ export const stripDiffFiles = (
         .map((section) => section.text);
     return kept.join("\n");
 };
+
+/**
+ * Annotate a unified diff with explicit line numbers, for the model-read
+ * staged copies (`full-stripped-annotated.diff`, `pr-annotated.diff`).
+ *
+ * The observed anchor pathology is reviewers counting diff TEXT lines
+ * instead of file lines; printing the real number on every line removes the
+ * counting entirely. Format, per hunk content line:
+ *
+ *     `+  16| added line`      RIGHT-side (new file) line number
+ *     `   17| context line`    RIGHT-side (new file) line number
+ *     `-  12| removed line`    LEFT-side (old file) line number
+ *
+ * The diff marker stays in column one, so annotated text still splits into
+ * file sections ({@link splitUnifiedDiff} recognises the same headers and
+ * the same `+`/`-`/space first columns). Headers, hunk headers, and
+ * `\ No newline` markers pass through untouched. The annotated copy is for
+ * model eyes only: every code parser (provenance, fingerprints, scoped
+ * staging) keeps reading the raw diff.
+ */
+export const annotateDiffLineNumbers = (diff: string): string => {
+    const out: string[] = [];
+    let oldLine = 0;
+    let newLine = 0;
+    /** Remaining old/new line counts of the hunk being consumed. */
+    let hunkOld = 0;
+    let hunkNew = 0;
+    let width = 3;
+
+    for (const line of diff.split("\n")) {
+        const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+        if (hunk !== null) {
+            oldLine = Number(hunk[1] ?? "1");
+            newLine = Number(hunk[3] ?? "1");
+            hunkOld = Number(hunk[2] ?? "1");
+            hunkNew = Number(hunk[4] ?? "1");
+            width = Math.max(
+                width,
+                String(Math.max(oldLine + hunkOld, newLine + hunkNew)).length,
+            );
+            out.push(line);
+            continue;
+        }
+        if (hunkOld <= 0 && hunkNew <= 0) {
+            // Outside hunk content (file headers, preamble, trailing text):
+            // pass through verbatim. The countdown, not a flag, decides —
+            // so a `--- ` header after an exhausted hunk is never mistaken
+            // for a removed line.
+            out.push(line);
+            continue;
+        }
+        if (line.startsWith("+")) {
+            out.push(`+${String(newLine).padStart(width)}| ${line.slice(1)}`);
+            newLine++;
+            hunkNew--;
+        } else if (line.startsWith("-")) {
+            out.push(`-${String(oldLine).padStart(width)}| ${line.slice(1)}`);
+            oldLine++;
+            hunkOld--;
+        } else if (line.startsWith("\\")) {
+            out.push(line);
+        } else {
+            out.push(` ${String(newLine).padStart(width)}| ${line.slice(1)}`);
+            oldLine++;
+            newLine++;
+            hunkOld--;
+            hunkNew--;
+        }
+    }
+    return out.join("\n");
+};

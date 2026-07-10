@@ -187,6 +187,7 @@ export const runArm = async (
             expected: corpusCase.expected.verdict,
             caught: match.caught.length,
             missed: match.missed,
+            snapped: result.snappedByProvenance.length,
             failedAgents: produced.perAgent
                 .filter((a) => a.failed !== undefined)
                 .map((a) => `${a.name}: ${a.failed}`),
