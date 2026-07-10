@@ -3,7 +3,8 @@
     "tags": [
         "incident",
         "trial",
-        "live"
+        "live",
+        "smoke"
     ],
     "category": "incident-repro",
     "description": "Sanitized structural rewrite of a v1.4.0 re-run miss (first push): the new erasure test suite pins the retention rollout flag on inside the shared test-env constructor, so no test exercises the flag-off path, where EraseUser (unchanged in this PR) silently skips the compliance deletion; flag off is the production default while the rollout is in progress. The pre-existing flag gate itself sits outside the diff, so under the change-provenance discipline it belongs in the artifact, not the posted review; the postable defect is the test gap.",

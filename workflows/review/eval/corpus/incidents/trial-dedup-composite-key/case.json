@@ -3,7 +3,8 @@
     "tags": [
         "incident",
         "trial",
-        "live"
+        "live",
+        "smoke"
     ],
     "category": "incident-repro",
     "description": "Sanitized structural rewrite of a v1.4.0 re-run miss (dedup push): the new save path keys its duplicate check on Note.Body alone while the Note entity carries a Kind that readers select on (the store docs say notes of different kinds may share a Body), so a same-Body note of a different kind is silently never saved. The prior reviewer version caught this; v1.4.0 missed it at the finder level.",
