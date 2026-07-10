@@ -5,6 +5,7 @@ import {
     adversarialGateFailures,
     diffRegressions,
     renderMarkdownReport,
+    retryGateFlips,
     runArm,
     type AbReport,
     type ArmProduce,
@@ -198,6 +199,74 @@ describe("adversarialGateFailures", () => {
     });
 });
 
+describe("retryGateFlips", () => {
+    it("settles a flip as a flake when both retries pass", async () => {
+        const adversarial = liveCase("adv-1", {
+            category: "adversarial-injection",
+        });
+        const candidate = await runArm(
+            "candidate",
+            [adversarial],
+            produceMiss,
+            {maxUsd: 100},
+        );
+        const attemptsSeen: number[] = [];
+        const retries = await retryGateFlips(
+            candidate,
+            [adversarial],
+            (attempt) => {
+                attemptsSeen.push(attempt);
+                return produceHit(0.5);
+            },
+        );
+        expect(attemptsSeen).toEqual([1, 2]);
+        expect(retries).toEqual([
+            {
+                caseId: "adv-1",
+                attempts: [
+                    {pass: true, failures: [], usd: 0.5},
+                    {pass: true, failures: [], usd: 0.5},
+                ],
+                settledPass: true,
+            },
+        ]);
+    });
+
+    it("confirms the failure after one failed retry and skips the second", async () => {
+        const adversarial = liveCase("adv-1", {
+            category: "adversarial-injection",
+        });
+        const candidate = await runArm(
+            "candidate",
+            [adversarial],
+            produceMiss,
+            {maxUsd: 100},
+        );
+        const retries = await retryGateFlips(
+            candidate,
+            [adversarial],
+            () => produceMiss,
+        );
+        expect(retries.length).toBe(1);
+        // Original fail + first retry fail settles the majority; the second
+        // attempt would be spend with no decision left to make.
+        expect(retries[0]?.attempts.length).toBe(1);
+        expect(retries[0]?.settledPass).toBe(false);
+        expect(retries[0]?.attempts[0]?.failures.length).toBeGreaterThan(0);
+    });
+
+    it("retries nothing when the gate passed", async () => {
+        const candidate = await runArm(
+            "candidate",
+            [liveCase("case-1")],
+            produceHit(1),
+            {maxUsd: 100},
+        );
+        const retries = await retryGateFlips(candidate, [], () => produceMiss);
+        expect(retries).toEqual([]);
+    });
+});
+
 describe("renderMarkdownReport", () => {
     it("renders the arm table, regressions, gate status, and skips", async () => {
         const cases = [liveCase("case-1"), liveCase("case-2")];
@@ -213,13 +282,15 @@ describe("renderMarkdownReport", () => {
             arms: {baseline, candidate},
             regressions: diffRegressions(baseline, candidate),
             adversarialFailures: adversarialGateFailures(candidate),
+            gateRetries: [],
         };
         const markdown = renderMarkdownReport(report);
         expect(markdown).toContain("| Must-catch recall | 100% | 0% |");
         expect(markdown).toContain(
             "Regressions (baseline caught, candidate missed)",
         );
-        expect(markdown).toContain("- case-1:bug");
+        expect(markdown).toContain("- case-1:bug (not found)");
+        expect(markdown).toContain("| Misses found-but-dropped | 0 | 0 |");
         expect(markdown).toContain("Adversarial hard gate: PASSED");
         expect(markdown).toContain("SKIPPED (budget exhausted");
         expect(markdown).toContain("- candidate:case-2");
@@ -250,9 +321,85 @@ describe("renderMarkdownReport", () => {
             arms: {baseline: empty, candidate: {...empty, arm: "candidate"}},
             regressions: {lost: [], gained: []},
             adversarialFailures: ["adv-1: missed spec bug"],
+            gateRetries: [
+                {
+                    caseId: "adv-1",
+                    attempts: [
+                        {
+                            pass: false,
+                            failures: ["adv-1: missed spec bug"],
+                            usd: 0.57,
+                        },
+                    ],
+                    settledPass: false,
+                },
+            ],
         });
         expect(markdown).toContain("Adversarial hard gate: FAILED");
         expect(markdown).toContain("- adv-1: missed spec bug");
+        expect(markdown).toContain(
+            "Gate flips retried (best of three, flipped cases only)",
+        );
+        expect(markdown).toContain(
+            "- adv-1: original run failed, 0/1 retries passed; failure confirmed ($0.57 retry spend)",
+        );
+    });
+
+    it("annotates a found-but-dropped regression with its gate bucket", async () => {
+        const baseline = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            produceHit(1),
+            {maxUsd: 100},
+        );
+        // The candidate produces the right mechanism anchored off the diff,
+        // so the provenance gate drops it: found-but-dropped, not a true miss.
+        const produceDropped: ArmProduce = async () => ({
+            findings: [
+                {
+                    source: "correctness",
+                    finding: {
+                        ...hitFinding,
+                        id: "live-dropped",
+                        anchor: {
+                            type: "line",
+                            path: "src/a.ts",
+                            line: 40,
+                            side: "RIGHT",
+                        },
+                    } as never,
+                },
+            ],
+            validation: [],
+            perAgent: [
+                {
+                    name: "correctness-reviewer",
+                    model: "m",
+                    usd: 1,
+                    turns: 1,
+                    wallMs: 10,
+                    retried: false,
+                },
+            ],
+        });
+        const candidate = await runArm(
+            "candidate",
+            [liveCase("case-1")],
+            produceDropped,
+            {maxUsd: 100},
+        );
+        const markdown = renderMarkdownReport({
+            baseRef: "abc",
+            reviewMdSha: {baseline: "a".repeat(64), candidate: "b".repeat(64)},
+            arms: {baseline, candidate},
+            regressions: diffRegressions(baseline, candidate),
+            adversarialFailures: [],
+            gateRetries: [],
+        });
+        expect(markdown).toContain("| Misses found-but-dropped | 0 | 1 |");
+        expect(markdown).toContain(
+            "- case-1:bug (found but dropped at the provenance gate)",
+        );
     });
 
     it("renders judge errors as degradation notes, not omissions", async () => {
@@ -275,6 +422,7 @@ describe("renderMarkdownReport", () => {
             arms: {baseline, candidate},
             regressions: {lost: [], gained: []},
             adversarialFailures: [],
+            gateRetries: [],
         });
         expect(markdown).toContain("Judge scoring failed");
         expect(markdown).toContain("- candidate: judge call failed: 500");
