@@ -6,5 +6,8 @@ actions/**/*.js
 !actions/secure-network/post.js
 coverage
 
-.claude
+# Local agent state (settings, worktrees) stays untracked, but project
+# skills are shared tooling and are committed.
+.claude/*
+!.claude/skills/
 .mcp.json
