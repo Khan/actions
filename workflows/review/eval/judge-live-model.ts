@@ -45,7 +45,9 @@ const scoreOne = async (request: JudgeRequest): Promise<JudgeScore> => {
         "",
         `Evidence trace:\n${request.evidenceTrace.join("\n")}`,
     ].join("\n");
-    let response: Response | undefined;
+    // Typed via the fetch signature: the repo's eslint no-undef does not
+    // know the fetch-API globals in type position.
+    let response: Awaited<ReturnType<typeof fetch>> | undefined;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
         try {
             response = await fetch(API_URL, {
