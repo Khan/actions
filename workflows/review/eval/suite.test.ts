@@ -494,8 +494,13 @@ const stubModel =
         });
 
 describe("judge self-tests: pure aggregation around a stubbed model", () => {
-    it("pins the judge model to Opus 4.8 (operator direction 4)", () => {
-        expect(PINNED_JUDGE_MODEL).toBe("claude-opus-4-8");
+    it("pins the judge model to a dated Haiku snapshot", () => {
+        // Supersedes operator direction 4 (Opus 4.8): the judge grades prose
+        // quality only, every load-bearing metric is deterministic, and the
+        // acceptance runs showed the judge signal is not single-run-stable on
+        // any model, so it is priced at the Haiku tier (eval-tuning pass,
+        // 2026-07-09). Dated snapshot so week-over-week scores compare.
+        expect(PINNED_JUDGE_MODEL).toBe("claude-haiku-4-5-20251001");
     });
 
     it("builds one request per posted comment across the corpus", () => {
