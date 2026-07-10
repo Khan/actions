@@ -595,6 +595,24 @@ const main = async (): Promise<void> => {
         const reports: AbReport[] = [];
         for (let repeat = 1; repeat <= repeats; repeat += 1) {
             reports.push(await runPair(`-r${repeat}`, false));
+            // Checkpoint after every repeat: a multi-repeat run carries tens
+            // of dollars of spend, and a crash or cancellation on repeat n
+            // must not forfeit repeats 1..n-1 (a run that dies with nothing
+            // emitted is the failure mode the plan forbids). The final write
+            // below replaces this with the full report.
+            mkdirSync(dirname(outPath), {recursive: true});
+            writeFileSync(
+                outPath,
+                JSON.stringify(
+                    {
+                        repeatCount: repeats,
+                        completedRepeats: reports.length,
+                        repeats,
+                    },
+                    null,
+                    2,
+                ),
+            );
         }
         // The repeat reports are already the artifact shape aggregate.ts
         // pools, so the one-dispatch powered run and the N-dispatch drift
