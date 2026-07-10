@@ -69,5 +69,15 @@
                 "lineEnd": 25
             }
         ]
+    },
+    "routerConfig": {
+        "lensRules": [
+            {
+                "pattern": "src/api/admin_routes.py",
+                "lenses": [
+                    "security-auth"
+                ]
+            }
+        ]
     }
 }
