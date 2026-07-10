@@ -17,9 +17,10 @@ on:
   status-comment: false
   # Disable gh-aw's pre-activation permission + confused-deputy gate so a same-repo
   # collaborator pushing to a PR they didn't open still triggers the review (the
-  # gate otherwise blocks `synchronize` when the pusher != the PR author). This is
-  # safe in a private repo where "all" is effectively any trusted collaborator;
-  # forks and automated branches are excluded by the `if:` condition below.
+  # gate otherwise blocks `synchronize` when the pusher != the PR author).
+  # KHAN/ACTIONS LOCAL OVERRIDE (comment only): unlike webapp, this repo is PUBLIC,
+  # so "all" is safe only because the fork guard added to the `if:` condition below
+  # restricts runs to same-repo branches, which require write access to create.
   roles: all
 
 # Skip automated deploy PRs (`deploy/*`) and the changeset release PR — branch conventions
@@ -27,12 +28,18 @@ on:
 # pushes from our bots (`khan-actions-bot` and `github-actions[bot]`), since even automated
 # commits can carry real code changes worth reviewing.
 #
+# KHAN/ACTIONS LOCAL OVERRIDE: the first condition below skips PRs from forks. This
+# repo is public; a fork PR gets no secrets anyway (the agent job would just fail),
+# and with `roles: all` disabling gh-aw's own actor gate, this `if:` is the guard
+# that keeps untrusted fork heads from triggering the workflow at all.
+#
 # Also skip any PR carrying the `skip-ai-review` label, so a human can opt a specific PR
 # out of automated review. This is a job-level gate: a labeled PR never starts the agent
 # (zero AI credits) and posts nothing. The label is evaluated on each trigger event
 # (open/synchronize/reopen/ready), so adding it prevents the *next* run — it does not
 # retroactively dismiss a review already left on an earlier push.
 if: >-
+  github.event.pull_request.head.repo.full_name == github.repository &&
   !startsWith(github.event.pull_request.head.ref, 'deploy/') &&
   github.event.pull_request.head.ref != 'changeset-release/main' &&
   !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
@@ -141,12 +148,20 @@ network:
 # (Settings → Secrets and variables → Actions): GH_AW_OTEL_SENTRY_ENDPOINT — the Sentry
 # OTLP traces endpoint with `/v1/traces` stripped (…/api/<project>/integration/otlp) — and
 # GH_AW_OTEL_SENTRY_AUTHORIZATION — the `sentry sentry_key=<public-key>` header value.
-observability:
-  otlp:
-    endpoint:
-      - url: ${{ secrets.GH_AW_OTEL_SENTRY_ENDPOINT }}
-        headers:
-          x-sentry-auth: ${{ secrets.GH_AW_OTEL_SENTRY_AUTHORIZATION }}
+#
+# KHAN/ACTIONS LOCAL OVERRIDE: the shared source's `observability:` block is disabled
+# here because this repo has no GH_AW_OTEL_SENTRY_* secrets configured, and a missing
+# endpoint is NOT a graceful degrade: the compiled lock feeds the empty value into the
+# MCP gateway's OTLP config, whose schema requires a non-empty https:// URL, so the
+# agent job fails at startup (observed on the first run of PR #241). Restore the block
+# below verbatim once the two secrets exist in this repo.
+#
+# observability:
+#   otlp:
+#     endpoint:
+#       - url: ${{ secrets.GH_AW_OTEL_SENTRY_ENDPOINT }}
+#         headers:
+#           x-sentry-auth: ${{ secrets.GH_AW_OTEL_SENTRY_AUTHORIZATION }}
 
 # Pin the orchestrator to a specific model version rather than a floating tier alias, so
 # the review doesn't silently change behavior when a new Opus ships. If we use Opus, we
@@ -210,6 +225,10 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
+      # KHAN/ACTIONS LOCAL OVERRIDE (comment only): pinned to the same release as
+      # `source:` below, so the prompt and the lib it invokes come from one version.
+      # Even though this IS Khan/actions, the reviewer runs the released lib, not
+      # the PR head; a PR must not be able to change the code that reviews it.
       ref: review-v1.4.1
       path: gh-aw-review-lib
       persist-credentials: false
@@ -219,6 +238,13 @@ pre-agent-steps:
 # (-1) so reviews are never skipped on a busy PR day; the per-run cap below
 # still bounds the cost of any single review.
 max-daily-ai-credits: -1
+# KHAN/ACTIONS LOCAL OVERRIDE: nearly every file in this repo routes to tier=high
+# (supply-chain surface), so a full review of even a modest PR sits right at the
+# 1000-credit default; two runs on PR #241 died at 1001 and 1024 credits after
+# computing their verdict but before posting it. 2500 matches webapp's measured
+# override and bounds a single review at $25.
+max-ai-credits: 2500
+source: Khan/actions/workflows/review/review.md@review-v1.4.1
 ---
 
 # PR Reviewer

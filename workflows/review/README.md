@@ -67,14 +67,20 @@ ceiling with everything spent and nothing posted.
 gh aw add Khan/actions/workflows/review/review.md
 
 # Or pin to a published version (recommended for stability):
-gh aw add Khan/actions/workflows/review/review.md@review-v0
-gh aw add Khan/actions/workflows/review/review.md@review-v0.1.0
+gh aw add Khan/actions/workflows/review/review.md@review-v<major>
+gh aw add Khan/actions/workflows/review/review.md@review-v<major>.<minor>.<patch>
 ```
 
 This copies `review.md` into the consuming repo's `.github/workflows/`, records a
 `source:` field pointing back here, and compiles `review.lock.yml`. Commit both,
 plus the consumer config files below. Pull future updates with `gh aw update`
 (a 3-way merge that preserves your local edits).
+
+The tag is self-consistent: the `review.md` inside each `review-v<version>` tag
+pins its own `pre-agent-steps` checkout `ref:` to that same version (the release
+flow rewrites it; see [Versioning](#versioning)), so after `gh aw add` or
+`gh aw update` the imported file already fetches the matching lib code and needs
+no manual fix-up of the ref.
 
 ## Consumer configuration
 
@@ -212,6 +218,16 @@ on release a `review-v<major>.<minor>.<patch>` tag (and a moving `review-v<major
 tag) is cut **at the real commit tree** (not the rewritten-subtree bare tags that
 the `actions/` packages use), so the nested `workflows/review/review.md@<ref>` path
 resolves for `gh aw add`.
+
+The pinned checkout `ref:` inside `review.md` is part of the release: the version
+command (`pnpm run version-packages`, wired into `release.yml`) runs
+`utils/sync-workflow-versions.ts` after `changeset version`, rewriting every
+`<workflow>-v<semver>` literal in each workflow's markdown (for this workflow,
+every `review-v<semver>` in `review.md`) to the version being released, so the
+bump lands in the same Version Packages commit that gets tagged.
+`version-sync.test.ts` here is the CI backstop: it fails any PR where those
+literals do not match the `review` package version (releases v1.3.0 through
+v1.4.0 shipped still pointing at v1.2.2, before the sync existed).
 
 ### Version attribution
 

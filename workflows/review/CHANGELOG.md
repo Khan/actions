@@ -1,5 +1,31 @@
 # review
 
+## 1.4.1
+
+### Patch Changes
+
+-   0fd89cb: Keep the pinned `ref:` inside review.md in sync with the released version. The release flow's version command now runs `utils/sync-workflow-versions.ts` after `changeset version`, rewriting every workflow's pinned `<name>-v<semver>` literals (for this workflow, the `ref:` inside review.md) to the version being released so the bump lands in the same Version Packages commit that gets tagged; `workflows/review/version-sync.test.ts` fails CI whenever the ref and the `review` package version diverge. Also bumps the currently stale ref from review-v1.2.2 to review-v1.4.0 (v1.3.0 through v1.4.0 shipped with the lagging ref, so an un-overridden consumer checked out a lib without `lib/provenance.ts`).
+
+## 1.4.0
+
+### Minor Changes
+
+-   4a57d01: Failure scenario required on every finding. Each finding (not just blocking ones) now carries a concrete `failure_scenario`: the specific inputs or state and the wrong outcome they produce. The field is required in the structured finding schema (`FINDING_SCHEMA_VERSION` 2), emitted by every producer (label-shape reviewers and all 11 specialist lenses), and carried verbatim into `claims.json`; the `claim-validator` attacks exactly that stated scenario, and a scenario too vague to check caps at `plausible`. Every corpus fixture is migrated with a hand-written failure scenario.
+-   11666ee: Reviewer prompt disciplines plus measured cost fixes.
+
+    -   **Quote-the-rule discipline.** A skill or conventions violation may only be flagged when the exact rule text and the exact violating line can both be quoted (skill-auditor, conventions reviewer, and every lens-owned skill application); the validator never confirms a skill claim that cannot quote its rule. No spirit-of-the-doc inference.
+    -   **Amplification nuance.** A claim about a mechanism that predates the diff confirms only when the diff materially amplifies its consequence, and the finding must say so explicitly; the correctness reviewer states introduce-vs-amplify on every pre-existing-bug finding.
+    -   **Method-angle procedures.** The correctness reviewer works the diff through three named procedures instead of one flat checklist: a line scan, a removed-behavior audit (name the invariant every deleted line enforced; find where the new code re-establishes it), and a cross-file trace of changed symbols' callers and callees.
+    -   **Graceful budget exhaustion.** Nearing the run's hard ceilings (per-run AI-credits cap, job timeout), tracked via observable proxies since the agent cannot see its own credit spend (elapsed wall-clock, dispatch counts, the investigation journal), the orchestrator sheds remaining work in a fixed order (opt-in reviewers/lenses first, then the risks/patterns comment, then validation) and submits the verdict from findings validated so far plus skipped-dimension notes, instead of dying at a ceiling with everything spent and nothing posted.
+    -   **Batched safe-output tail.** The orchestrator emits same-kind safe outputs together in as few calls and turns as possible; thread resolutions especially, which previously went out one turn apiece.
+
+-   0892c8d: Change-provenance gate, enforced in code, plus generated-stripped whole-change diffs. New `lib/diff.ts` (unified-diff parsing) and `lib/provenance.ts` (gate + CLI) compute a per-file changed-line map (`provenance.json`); a finding whose anchor is not an added or modified line of the diff cannot carry a blocking label and does not post to the PR at all; the set-aside pre-existing observations are recorded in the run artifact (`out/pre-existing.json`) only. Deletion findings pass via `removedAdjacent` lines. The gate fails open (gates nothing, with a review-body note) whenever the parsed map cannot be trusted: an unparseable diff, hunks not attributable to a file section, or a changed file whose patch is missing from the parse (`files.json` now carries `hasPatch` for this cross-check). The provenance CLI also stages `full-stripped.diff` (the full diff minus files the router classifies `linguist-generated`; `routing.json` now exposes `generatedFiles`), and every whole-change reviewer and specialist lens reads it instead of the full diff; `pattern-triage` keeps the full diff since classification is its job. Wired through the no-post eval runner and covered by unit tests plus a smoke corpus case.
+-   2cdee74: Thumbs-sweep: opt-in reaction seeding and self-reaction filtering. With `seedReactions: true` in the sweep config, each sweep seeds one thumbs-up and one thumbs-down (from the bot) on any reviewer comment lacking them, so readers see the feedback affordance without opening the reaction picker. Feedback counts now exclude the bot's own reactions everywhere, so seeded nudges never trigger follow-ups or count as signal; a reaction with no attributed login still counts as a real user's. The port gains an optional `addReactions` method, required only when seeding is enabled (enabling it without an implementation fails loudly).
+
+### Patch Changes
+
+-   8b68f13: Expand the `allowed-domains` allowlist for the review workflow's safe outputs so links we routinely use in PRs survive gh-aw's text-sanitization. Chosen from the domains that actually appear in our PR bodies and comments (surveyed across recent Khan/frontend PRs): GitHub, khanacademy.org (incl. per-PR deploy previews), khanacademy.dev, Jira/Confluence, Slack, Claude (claude.ai + claude.com), Figma, Google Docs, and Cursor. Entries are bare hosts, which match the host and all of its subdomains.
+
 ## 1.3.1
 
 ### Patch Changes

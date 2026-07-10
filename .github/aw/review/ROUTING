@@ -1,0 +1,44 @@
+# Machine-readable routing for the PR-reviewer workflow. Parsed deterministically by
+# the shared router (workflows/review/lib in this repo; format spec in
+# workflows/review/README.md). One rule per line:
+#   <pattern> [lens=<lens>,...] [tier=trivial|low|medium|high] [direction-dependent]
+#   enable <reviewer>[,<reviewer>...]
+# Later tier rules override earlier ones (gitignore-style); lenses union across
+# matching rules. This file complements risk-classification.md (model-facing prose);
+# team ownership stays in .github/REVIEWERS.
+#
+# No specialist lenses are enabled: the eleven lens prompts target webapp's backend
+# domains (auth resolvers, migrations, federation, ...) and none maps to this repo's
+# supply-chain surface. Whole-change reviewers mirror webapp's eval-justified roster.
+
+enable holistic,completeness,test-adequacy,first-principles,conventions
+
+# Shipped composite actions run inside consuming repos' CI with their credentials.
+actions/**                   tier=high
+# This repo's own CI, the publish pipeline, and the compiled agentic workflows.
+.github/workflows/**         tier=high
+utils/**                     tier=high
+# The shared reviewer's deterministic enforcement layer.
+workflows/review/lib/**      tier=high
+
+# Dev-only surfaces.
+workflows/review/eval/**     tier=low
+**/*.test.ts                 tier=low
+
+# Docs are trivial; agentic-workflow .md files are executable, not docs, so they
+# are re-raised after the broad docs rule (last match wins). Any shared workflow's
+# prompt (and prompt imports beside it) is high; the docs living in the same
+# directory drop back to trivial. Single-star segments do not cross into
+# subdirectories, so nothing under eval/ gets re-raised.
+**/*.md                      tier=trivial
+.changeset/*.md              tier=trivial
+workflows/*/*.md             tier=high
+workflows/*/README.md        tier=trivial
+workflows/*/CHANGELOG.md     tier=trivial
+.github/workflows/*.md       tier=high
+
+# The reviewer's own consumer config: config.md carries the add-reviewer team
+# allowlist and bot token, ROUTING sets these tiers, and the prose imports steer
+# every sub-agent. A PR tampering with any of them must not run at the trivial
+# or default budget.
+.github/aw/review/**         tier=high
