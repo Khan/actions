@@ -21,8 +21,7 @@
  * false-flag, noise, and verdict agreement.
  */
 
-import type {LiveDefectSpec} from "./corpus/loader";
-import type {CorpusCase} from "./corpus/loader";
+import type {CorpusCase, LiveDefectSpec} from "./corpus/loader";
 import type {RunCandidate, RunResult} from "./runner";
 
 /* -------------------------------------------------------------------------- */
