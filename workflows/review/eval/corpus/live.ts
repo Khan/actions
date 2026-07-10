@@ -74,8 +74,8 @@ export type LiveDefectSpec = {
     lens?: string;
     /**
      * Alternate anchor locations the spec ALSO accepts. A defect that spans
-     * files has more than one correct anchor site — a migration missing an
-     * index surfaces at the migration AND at the hot query that needs it —
+     * files has more than one correct anchor site (a migration missing an
+     * index surfaces at the migration AND at the hot query that needs it),
      * and a spec that names only one turns the reviewer's anchor-site choice
      * into recall noise (incident-sql-missing-index read 8/16 in the 07-09
      * wave; every "miss" was the same finding anchored at the query). The

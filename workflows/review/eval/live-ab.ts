@@ -23,6 +23,9 @@
  *                             default in CI; a full-eval label lifts it)
  *     [--max-usd <n>]         total hard budget across both arms (default 40)
  *     [--no-judge]            skip judge quality scoring
+ *     [--no-match-arbiter]    deterministic spec matching only (skip the
+ *                             capped Haiku fallback arbiter on unmatched
+ *                             specs; see match-arbiter.ts)
  *     [--stage-root <dir>]    staging root (default: a fresh temp dir)
  *     [--out <path>]          JSON report path (default out/live-ab-report.json)
  *     [--re-review-mode <m>]  re-review mode for the CANDIDATE arm on open-PR
@@ -37,7 +40,7 @@
  *     [--repeats <n>]         run every selected case n times per arm in this
  *                             one dispatch and report pooled per-case pass
  *                             rates with binomial intervals (aggregate.ts)
- *                             instead of single-run percentages — the memo's
+ *                             instead of single-run percentages; the memo's
  *                             "targeted repeats" powered run (e.g. --cases
  *                             <the two anchor-fragile cases> --repeats 10).
  *                             The adversarial gate is decided by strict
@@ -69,6 +72,7 @@ import {
     matchCase,
     type LiveCaseRun,
     type LiveMetricsReport,
+    type MatchOptions,
 } from "./live-match";
 import {
     produceLive,
@@ -76,6 +80,7 @@ import {
     type PerAgentReport,
 } from "./live-producer";
 import {sdkRunner} from "./live-runner";
+import {haikuMatchArbiter} from "./match-arbiter";
 import {
     computeRereviewMetrics,
     scoreRereview,
@@ -141,7 +146,7 @@ export const runArm = async (
     arm: ArmId,
     cases: CorpusCase[],
     produce: ArmProduce,
-    options: {maxUsd: number},
+    options: {maxUsd: number; match?: MatchOptions},
 ): Promise<ArmRunReport> => {
     const started = Date.now();
     const runs: LiveCaseRun[] = [];
@@ -170,7 +175,7 @@ export const runArm = async (
             produceFindings: () => produced.findings,
             validation: produced.validation,
         });
-        const match = await matchCase(corpusCase, result);
+        const match = await matchCase(corpusCase, result, options.match);
         runs.push({corpusCase, result, match});
 
         // Open-PR (rereview) cases: score the reconciler's decision and the
@@ -351,6 +356,7 @@ export const retryGateFlips = async (
     candidate: ArmRunReport,
     cases: CorpusCase[],
     produceForAttempt: (attempt: number) => ArmProduce,
+    match?: MatchOptions,
 ): Promise<GateRetry[]> => {
     const failures = adversarialGateFailures(candidate);
     const failingIds = [
@@ -370,9 +376,9 @@ export const retryGateFlips = async (
                 produceFindings: () => produced.findings,
                 validation: produced.validation,
             });
-            const match = await matchCase(corpusCase, result);
+            const matched = await matchCase(corpusCase, result, match);
             const attemptFailures = adversarialGateFailures({
-                runs: [{corpusCase, result, match}],
+                runs: [{corpusCase, result, match: matched}],
             });
             attempts.push({
                 pass: attemptFailures.length === 0,
@@ -425,7 +431,7 @@ export type MultiAbReport = {
 export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
     const first = report.repeats[0];
     const lines = [
-        `## Review live A/B — ${report.repeatCount} repeats`,
+        `## Review live A/B: ${report.repeatCount} repeats`,
         "",
         ...(first !== undefined
             ? [
@@ -457,7 +463,7 @@ export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
                 (g) =>
                     `- ${g.caseId}: failed ${g.failedRepeats}/${
                         g.repeats
-                    } repeats — ${
+                    } repeats: ${
                         g.confirmed
                             ? "FAILURE CONFIRMED"
                             : "minority flip, treated as run-to-run flake"
@@ -813,6 +819,21 @@ const main = async (): Promise<void> => {
         throw new Error("--repeats must be a positive integer");
     }
 
+    // The fallback match arbiter (Haiku, capped, same-file, audited via
+    // `via: "fallback"`), on unless opted out: it only runs for specs the
+    // deterministic matcher left unmatched, and an arbiter failure degrades
+    // to a non-match. Both arms share the one matcher, so it never biases
+    // the A/B delta.
+    const match: MatchOptions | undefined = process.argv.includes(
+        "--no-match-arbiter",
+    )
+        ? undefined
+        : {
+              fallback: haikuMatchArbiter({
+                  onError: (message) => console.error(message),
+              }),
+          };
+
     const runner = sdkRunner();
     const armProduce =
         (stage: string, markdown: string, mode: ReReviewMode): ArmProduce =>
@@ -864,13 +885,13 @@ const main = async (): Promise<void> => {
             "baseline",
             cases,
             armProduce(`baseline${suffix}`, baselineMd, "full"),
-            {maxUsd: perArmUsd},
+            {maxUsd: perArmUsd, ...(match !== undefined ? {match} : {})},
         );
         const candidate = await runArm(
             "candidate",
             cases,
             armProduce(`candidate${suffix}`, candidateMd, candidateMode),
-            {maxUsd: perArmUsd},
+            {maxUsd: perArmUsd, ...(match !== undefined ? {match} : {})},
         );
 
         // Retry the flip, not the run: a hard-gate flip re-runs only the
@@ -888,6 +909,7 @@ const main = async (): Promise<void> => {
                               runner,
                               stageDir: `${stageRoot}/candidate${suffix}-retry${attempt}/${corpusCase.id}`,
                           }),
+                  match,
               )
             : [];
         const flakes = new Set(

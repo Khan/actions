@@ -1,4 +1,4 @@
-# Review eval drift watch — the tuning memo's "cumulative drift watch".
+# Review eval drift watch: the tuning memo's "cumulative drift watch".
 #
 # The per-PR A/B only ever prices one PR's marginal review.md delta against
 # its base branch; nothing in that chain notices the reviewer slowly drifting

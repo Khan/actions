@@ -343,7 +343,7 @@ describe("renderMultiMarkdownReport", () => {
     it("renders pooled pass rates with intervals instead of single-run deltas", async () => {
         const multi = await multiReport([produceHit(1), produceMiss]);
         const markdown = renderMultiMarkdownReport(multi);
-        expect(markdown).toContain("## Review live A/B — 2 repeats");
+        expect(markdown).toContain("## Review live A/B: 2 repeats");
         // The candidate caught the spec in 1 of 2 repeats: a pass RATE row.
         expect(markdown).toContain("| case-1:bug | 2/2 (100%)");
         expect(markdown).toContain("| 1/2 (50%)");
@@ -370,7 +370,7 @@ describe("renderMultiMarkdownReport", () => {
             adversarialFailures: [],
         });
         expect(markdown).toContain(
-            "- adv-1: failed 1/3 repeats — minority flip, treated as run-to-run flake",
+            "- adv-1: failed 1/3 repeats: minority flip, treated as run-to-run flake",
         );
         const confirmed = majorityGateFailures([fail, fail, pass]);
         expect(
@@ -381,7 +381,7 @@ describe("renderMultiMarkdownReport", () => {
                 gate: confirmed,
                 adversarialFailures: ["adv-1: failed 2/3 repeats"],
             }),
-        ).toContain("- adv-1: failed 2/3 repeats — FAILURE CONFIRMED");
+        ).toContain("- adv-1: failed 2/3 repeats: FAILURE CONFIRMED");
     });
 
     it("round-trips a MultiAbReport through the aggregate extractor", async () => {

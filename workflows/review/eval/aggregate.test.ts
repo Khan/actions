@@ -388,7 +388,7 @@ describe("renderAggregateMarkdown", () => {
         expect(markdown).toContain("Pooled 2 run(s) per arm");
         expect(markdown).toContain("| case-1:spec-1 | 2/2 (100%)");
         expect(markdown).toContain("cand: 2 dropped at provenance");
-        expect(markdown).toContain("| case-1 — verdict | 2/2 (100%)");
+        expect(markdown).toContain("| case-1 (verdict) | 2/2 (100%)");
         expect(markdown).toContain("| Must-catch recall | 2/2 (100%)");
         expect(markdown).toContain("| 0/2 (0%)");
         expect(markdown).toContain(

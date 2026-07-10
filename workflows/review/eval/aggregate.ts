@@ -16,7 +16,7 @@
  * When every pooled report ran IDENTICAL arms (`--force-arms` wobble
  * controls, or the scheduled drift run on main), the two arms are 2N samples
  * of the same prompt, and the aggregate additionally reports per-metric
- * noise-floor bands (min/max/mean across arm-samples) — the memo's "buy the
+ * noise-floor bands (min/max/mean across arm-samples); the memo's "buy the
  * noise floor" item, rendered as data instead of prose.
  *
  * CLI:
@@ -554,7 +554,7 @@ const dropNote = (spec: SpecAggregate): string => {
 export const renderAggregateMarkdown = (report: AggregateReport): string => {
     const {baseline, candidate} = report.arms;
     const lines = [
-        "## Review live A/B — repeat aggregation",
+        "## Review live A/B: repeat aggregation",
         "",
         `Pooled ${report.samples} run(s) per arm from: ${report.sources.join(
             ", ",
@@ -618,7 +618,7 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
             );
         }
         lines.push(
-            `| ${caseId} — verdict | ${
+            `| ${caseId} (verdict) | ${
                 base ? statCell(base.verdictOk) : "n/a"
             } | ${base ? intervalCell(base.verdictOk) : ""} | ${
                 cand ? statCell(cand.verdictOk) : "n/a"
