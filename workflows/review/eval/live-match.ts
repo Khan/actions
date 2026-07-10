@@ -39,12 +39,31 @@ export type SpecMatch = {
     via: MatchVia;
 };
 
+/** The deterministic gate a produced-but-not-posted candidate died at. */
+export type DroppedBucket = "provenance" | "scope" | "validation";
+
+export type MissedSpecDetail = {
+    specKey: string;
+    /**
+     * Set when the run PRODUCED a finding describing the spec's defect but a
+     * deterministic gate dropped it before posting. A found-but-dropped miss
+     * is a different defect class (anchoring discipline, gate calibration)
+     * than a true miss (recall); they route to different fixes, so the
+     * report must not collapse them.
+     */
+    droppedBy?: DroppedBucket;
+    /** The dropped candidate that matched, when droppedBy is set. */
+    findingId?: string;
+};
+
 export type CaseMatchReport = {
     caseId: string;
     /** mustCatchSpecs satisfied by a posted candidate. */
     caught: SpecMatch[];
     /** mustCatchSpecs no posted candidate satisfied. */
     missed: string[];
+    /** Every missed spec, classified true-miss vs found-but-dropped. */
+    missedDetail: MissedSpecDetail[];
     /** mustNotFlagSpecs a posted candidate satisfied (false flags). */
     falseFlags: SpecMatch[];
     /** Posted candidate ids that satisfied no spec (the noise numerator). */
@@ -187,6 +206,33 @@ export const matchCase = async (
             caught.push(match);
         }
     }
+
+    // Classify each miss: did the run produce a matching finding that a
+    // deterministic gate then dropped? Location is relaxed to the file (a
+    // mis-anchored real finding is exactly the provenance-drop case this
+    // exists to surface); mechanism still has to agree.
+    const droppedBuckets: [DroppedBucket, RunCandidate[]][] = [
+        ["provenance", result.droppedByProvenance],
+        ["scope", result.droppedByScope],
+        ["validation", result.droppedByValidation],
+    ];
+    const missedDetail = missed.map((specKey): MissedSpecDetail => {
+        const spec = mustCatch.find((s) => s.key === specKey);
+        if (spec === undefined) {
+            return {specKey};
+        }
+        for (const [bucket, candidates] of droppedBuckets) {
+            const hit = candidates.find(
+                (candidate) =>
+                    candidate.path === spec.path &&
+                    mechanismAgrees(candidate, spec),
+            );
+            if (hit !== undefined) {
+                return {specKey, droppedBy: bucket, findingId: hit.id};
+            }
+        }
+        return {specKey};
+    });
     // A false flag is a real posting failure; the deterministic rule alone
     // decides it (the fallback exists to rescue recall, not to indict).
     for (const spec of mustNotFlag) {
@@ -210,6 +256,7 @@ export const matchCase = async (
         caseId: corpusCase.id,
         caught,
         missed,
+        missedDetail,
         falseFlags,
         unmatchedFindingIds: posted
             .filter((candidate) => !claimed.has(candidate.id))
