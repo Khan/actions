@@ -1,0 +1,206 @@
+{
+    "id": "trial-retention-prune-tests",
+    "tags": [
+        "incident",
+        "trial",
+        "live"
+    ],
+    "category": "incident-repro",
+    "description": "Sanitized structural rewrite of a seeded-defect trial PR, prune-and-tests path: the retention prune retains 199 notes where the documented cap is 200, its test seeds below the cap so a no-op prune also passes, TestMain forces the rollout flag on for the whole suite so the flag-off path is never exercised, and the prune fetches full entities where a keys-only query suffices.",
+    "changedFiles": [
+        {
+            "path": "services/notes/prune.go",
+            "status": "added"
+        },
+        {
+            "path": "services/notes/prune_test.go",
+            "status": "added"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "prune-off-by-one-cap",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/prune.go",
+                    "line": 44,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.75,
+                "evidence_trace": [
+                    "services/notes/prune.go:44 slices the stale set from index maxRetainedNotes-1",
+                    "notes are newest first, so index 199 is the 200th-newest note and it lands in the stale slice",
+                    "the documented cap says pruning keeps the newest 200 notes"
+                ],
+                "failure_scenario": "A user with 300 notes is pruned: the slice starts at index 199, deleting 101 notes and retaining 199 where the documented cap is 200; the 200th-newest note is wrongly deleted on every pass.",
+                "producing_hunt": "correctness:boundary-conditions",
+                "model_authored_prose": "Off by one: `notes[maxRetainedNotes-1:]` puts the 200th-newest note into the stale slice, so the cap actually retains 199. `notes[maxRetainedNotes:]` matches the documented keep-the-newest-200 behavior."
+            }
+        },
+        {
+            "source": "test-adequacy",
+            "finding": {
+                "schema_version": 2,
+                "id": "prune-test-vacuous-cap",
+                "lens": "test-adequacy",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/prune_test.go",
+                    "line": 87,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.85,
+                "evidence_trace": [
+                    "services/notes/prune_test.go:87 seeds 5 notes, far below maxRetainedNotes (200)",
+                    "PruneUserNotes returns early when len(notes) <= maxRetainedNotes, so the deletion path never runs",
+                    "the assertion kept == 5 also holds for a PruneUserNotes body of `return nil`"
+                ],
+                "failure_scenario": "Replace PruneUserNotes's body with `return nil` and TestPruneKeepsRecentNotes still passes: with 5 seeded notes the early return fires before any retention logic, so the cap (including its boundary behavior) is never exercised by the suite.",
+                "producing_hunt": "test-adequacy:under-exercised-path",
+                "model_authored_prose": "This test never crosses the retention cap: 5 seeded notes hit the early return, so it passes even if PruneUserNotes is a no-op. Seed more than maxRetainedNotes and assert both the retained count and which notes survive."
+            }
+        },
+        {
+            "source": "test-adequacy",
+            "finding": {
+                "schema_version": 2,
+                "id": "prune-suite-flag-mock",
+                "lens": "test-adequacy",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/prune_test.go",
+                    "line": 24,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "services/notes/prune_test.go:24 forces notes-retention-enabled on for the whole suite in TestMain",
+                    "the flag-off early return in PruneUserNotes is therefore never executed by any test",
+                    "flag off is the production default while the rollout is in progress"
+                ],
+                "failure_scenario": "Every test runs with the flag forced on, so no test observes that flag-off makes retention (and any deletion behavior gated on the same flag) silently skip; the production-default path ships unexercised.",
+                "producing_hunt": "test-adequacy:flag-coverage",
+                "model_authored_prose": "TestMain pins notes-retention-enabled on for the entire suite, hiding the flag-off path, which is the production default during rollout. At least one test should run with the flag off and assert what is (and is not) supposed to happen."
+            }
+        },
+        {
+            "source": "caching-resource",
+            "finding": {
+                "schema_version": 2,
+                "id": "prune-full-entity-fetch",
+                "lens": "caching-resource",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/prune.go",
+                    "line": 33,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.7,
+                "evidence_trace": [
+                    "services/notes/prune.go:33 fetches up to pruneFetchLimit full notes",
+                    "the function only reads note.ID from the results",
+                    "Query.KeysOnly exists and skips entity bodies for exactly this shape of call"
+                ],
+                "failure_scenario": "Each prune pass for an active user loads up to 5000 full note bodies to collect ids for deletion, paying entity deserialization and memory for data it never reads.",
+                "producing_hunt": "caching-resource:keys-only-query",
+                "model_authored_prose": "Per the datastore-efficiency skill, use a keys-only query when only identifiers are needed: this pass reads nothing but note.ID, so set KeysOnly and skip fetching up to 5000 note bodies."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "prune-off-by-one-cap",
+            "prune-test-vacuous-cap",
+            "prune-suite-flag-mock",
+            "prune-full-entity-fetch"
+        ],
+        "postedCommentCount": 4
+    },
+    "diff": "diff --git a/services/notes/prune.go b/services/notes/prune.go\nnew file mode 100644\n--- /dev/null\n+++ b/services/notes/prune.go\n@@ -0,0 +1,53 @@\n+package notes\n+\n+import (\n+\t\"context\"\n+\t\"fmt\"\n+)\n+\n+// maxRetainedNotes is the documented retention cap: pruning keeps the\n+// newest 200 notes per user and deletes everything older.\n+const maxRetainedNotes = 200\n+\n+// pruneFetchLimit bounds one prune pass, well above any real user.\n+const pruneFetchLimit = 5000\n+\n+// retentionFlag gates the notes-retention feature while it rolls out.\n+const retentionFlag = \"notes-retention-enabled\"\n+\n+// pruneEnv is the slice of the request environment pruning needs,\n+// kept local so this file names only what it uses.\n+type pruneEnv interface {\n+\tStore() Store\n+\tFlags() FlagSet\n+}\n+\n+// PruneUserNotes enforces the retention cap for one user: it keeps\n+// the newest maxRetainedNotes notes and deletes the rest. The\n+// background retention job calls it for every active user.\n+func PruneUserNotes(ctx context.Context, env pruneEnv, userID string) error {\n+\tif !env.Flags().Enabled(ctx, retentionFlag) {\n+\t\t// Retention is still rolling out; skip until the flag is on.\n+\t\treturn nil\n+\t}\n+\tnotes, err := env.Store().Run(ctx, Query{\n+\t\tUserID: userID,\n+\t\tLimit:  pruneFetchLimit,\n+\t})\n+\tif err != nil {\n+\t\treturn fmt.Errorf(\"list notes to prune for %s: %w\", userID, err)\n+\t}\n+\tif len(notes) <= maxRetainedNotes {\n+\t\treturn nil\n+\t}\n+\t// Run returns notes newest first; everything past the cap is stale.\n+\tstale := notes[maxRetainedNotes-1:]\n+\tids := make([]string, 0, len(stale))\n+\tfor _, note := range stale {\n+\t\tids = append(ids, note.ID)\n+\t}\n+\tif err := env.Store().Delete(ctx, ids); err != nil {\n+\t\treturn fmt.Errorf(\"prune notes for %s: %w\", userID, err)\n+\t}\n+\treturn nil\n+}\ndiff --git a/services/notes/prune_test.go b/services/notes/prune_test.go\nnew file mode 100644\n--- /dev/null\n+++ b/services/notes/prune_test.go\n@@ -0,0 +1,94 @@\n+package notes\n+\n+import (\n+\t\"context\"\n+\t\"fmt\"\n+\t\"os\"\n+\t\"testing\"\n+)\n+\n+// suiteFlags is the FlagSet every prune test runs under.\n+type suiteFlags struct {\n+\tforced map[string]bool\n+}\n+\n+func (f *suiteFlags) Enabled(_ context.Context, name string) bool {\n+\treturn f.forced[name]\n+}\n+\n+var testFlags = &suiteFlags{forced: map[string]bool{}}\n+\n+func TestMain(m *testing.M) {\n+\t// Retention is rolling out everywhere; run the whole suite with\n+\t// the flag on, as production will be.\n+\ttestFlags.forced[retentionFlag] = true\n+\tos.Exit(m.Run())\n+}\n+\n+// pruneStore is an in-memory Store for the prune tests.\n+type pruneStore struct {\n+\tnotes []Note\n+}\n+\n+func (s *pruneStore) Run(_ context.Context, q Query) ([]Note, error) {\n+\tlimit := q.Limit\n+\tif limit == 0 {\n+\t\tlimit = 1\n+\t}\n+\tvar out []Note\n+\tfor _, note := range s.notes {\n+\t\tif note.UserID != q.UserID {\n+\t\t\tcontinue\n+\t\t}\n+\t\tout = append(out, note)\n+\t\tif len(out) == limit {\n+\t\t\tbreak\n+\t\t}\n+\t}\n+\treturn out, nil\n+}\n+\n+func (s *pruneStore) Delete(_ context.Context, ids []string) error {\n+\tdrop := make(map[string]bool, len(ids))\n+\tfor _, id := range ids {\n+\t\tdrop[id] = true\n+\t}\n+\tkept := s.notes[:0]\n+\tfor _, note := range s.notes {\n+\t\tif !drop[note.ID] {\n+\t\t\tkept = append(kept, note)\n+\t\t}\n+\t}\n+\ts.notes = kept\n+\treturn nil\n+}\n+\n+// pruneTestEnv bundles the fakes behind the pruneEnv interface.\n+type pruneTestEnv struct {\n+\tstore *pruneStore\n+}\n+\n+func (e *pruneTestEnv) Store() Store { return e.store }\n+\n+func (e *pruneTestEnv) Flags() FlagSet { return testFlags }\n+\n+func seedStore(n int) *pruneStore {\n+\ts := &pruneStore{}\n+\tfor i := 0; i < n; i++ {\n+\t\ts.notes = append(s.notes, Note{\n+\t\t\tID:     fmt.Sprintf(\"note-%d\", i),\n+\t\t\tUserID: \"user-1\",\n+\t\t})\n+\t}\n+\treturn s\n+}\n+\n+func TestPruneKeepsRecentNotes(t *testing.T) {\n+\tenv := &pruneTestEnv{store: seedStore(5)}\n+\tif err := PruneUserNotes(context.Background(), env, \"user-1\"); err != nil {\n+\t\tt.Fatalf(\"PruneUserNotes: %v\", err)\n+\t}\n+\tif got := len(env.store.notes); got != 5 {\n+\t\tt.Fatalf(\"prune touched recent notes: kept %d, want 5\", got)\n+\t}\n+}\n",
+    "live": {
+        "prContext": {
+            "title": "notes: prune stored notes to the retention cap",
+            "description": "Adds the background prune for the notes retention policy: PruneUserNotes keeps the newest 200 notes per user and deletes the rest, behind the notes-retention-enabled rollout flag. Includes tests against an in-memory store.",
+            "author": "dev-notes",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "prune-off-by-one-cap",
+                "path": "services/notes/prune.go",
+                "mechanism": [
+                    "off.?by.?one",
+                    "maxRetainedNotes-1",
+                    "retains? (only )?199",
+                    "200th[- ]newest note.*deleted"
+                ],
+                "lens": "correctness",
+                "lineStart": 39,
+                "lineEnd": 49
+            },
+            {
+                "key": "prune-test-vacuous-cap",
+                "path": "services/notes/prune_test.go",
+                "mechanism": [
+                    "(vacuous|never (exercises?|crosses|reaches)).*(cap|retention|deletion)",
+                    "passes even (if|when).*(no-?op|return nil)",
+                    "early return.*(before|skips).*(deletion|retention)",
+                    "seeds? (only )?5 notes.*below the cap"
+                ],
+                "lens": "test-adequacy",
+                "lineStart": 82,
+                "lineEnd": 92
+            },
+            {
+                "key": "prune-suite-flag-mock",
+                "path": "services/notes/prune_test.go",
+                "mechanism": [
+                    "TestMain.*(forces?|pins?|mocks?|overrides?).*flag",
+                    "flag[- ]off (path|behavior|branch).*(never|not) (run|exercised|tested|executed)",
+                    "suite[- ]wide.*flag.*on",
+                    "hid(es|ing|den).*flag.?off"
+                ],
+                "lens": "test-adequacy",
+                "lineStart": 19,
+                "lineEnd": 29
+            },
+            {
+                "key": "prune-full-entity-fetch",
+                "path": "services/notes/prune.go",
+                "mechanism": [
+                    "keys.?only",
+                    "full (note |entity )?(bodies|entities|fetch)",
+                    "only (reads?|needs?) (note\\.)?ids?",
+                    "KeysOnly"
+                ],
+                "lens": "caching-resource",
+                "lineStart": 28,
+                "lineEnd": 38
+            }
+        ]
+    },
+    "routerConfig": {
+        "lensRules": [
+            {
+                "pattern": "services/notes/prune.go",
+                "lenses": [
+                    "caching-resource"
+                ]
+            }
+        ]
+    }
+}
