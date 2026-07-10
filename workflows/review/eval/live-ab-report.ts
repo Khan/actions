@@ -80,9 +80,26 @@ export type GateMajority = {
     confirmed: boolean;
 };
 
+/**
+ * The ruler this report was scored with. Two runs are only comparable when
+ * BOTH the prompt (reviewMdSha) and the ruler match: a matcher-config change
+ * (arbiter on/off) or a corpus change moves every rate without the reviewer
+ * changing at all. aggregate.ts warns when a pool mixes rulers, which is
+ * what keeps the weekly drift series honest across instrument upgrades.
+ */
+export type ReportProvenance = {
+    /** Matcher configuration: `deterministic` or `deterministic+arbiter`. */
+    matcher: string;
+    /** Content hash of the loaded corpus cases this run was scored against. */
+    corpusSha: string;
+    caseCount: number;
+};
+
 export type AbReport = {
     baseRef: string;
     reviewMdSha: {baseline: string; candidate: string};
+    /** Absent only on artifacts predating the ruler stamp. */
+    provenance?: ReportProvenance;
     arms: {baseline: ArmRunReport; candidate: ArmRunReport};
     regressions: {lost: string[]; gained: string[]};
     /** Confirmed failures only: flips settled as flakes by retry are removed. */
@@ -197,12 +214,13 @@ const STABILITY_FOOTER =
 export const MEASURED_NOISE_FLOOR = {
     provenance:
         "identical arms, run 29069228968, 2026-07-10, 6 arm-samples, " +
-        "full corpus x3, pre-arbiter",
+        "full corpus x3, pre-arbiter; budget skips left the samples on " +
+        "unequal case sets, so these v1 bands also carry case-mix variance",
     bands: [
-        {metric: "must-catch recall", min: 0.54, max: 0.86},
-        {metric: "verdict agreement", min: 0.75, max: 1.0},
-        {metric: "noise (unmatched posted)", min: 0.5, max: 0.6},
-        {metric: "judge mean quality", min: 0.82, max: 0.86},
+        {metric: "must-catch recall", min: 0.54, max: 0.86, sd: 0.1},
+        {metric: "verdict agreement", min: 0.75, max: 1.0, sd: 0.09},
+        {metric: "noise (unmatched posted)", min: 0.5, max: 0.6, sd: 0.03},
+        {metric: "judge mean quality", min: 0.82, max: 0.86, sd: 0.02},
     ],
 } as const;
 
@@ -211,7 +229,7 @@ const NOISE_FLOOR_FOOTER =
     MEASURED_NOISE_FLOOR.provenance +
     "): " +
     MEASURED_NOISE_FLOOR.bands
-        .map((b) => `${b.metric} ${pct(b.min)}-${pct(b.max)}`)
+        .map((b) => `${b.metric} ${pct(b.min)}-${pct(b.max)} (sd ${pct(b.sd)})`)
         .join(", ") +
     ". A single-run delta whose arms both sit inside a band is " +
     "indistinguishable from run-to-run wobble; use `--repeats` to resolve " +
@@ -249,6 +267,14 @@ export const renderMarkdownReport = (report: AbReport): string => {
                 12,
             )}).`,
         "",
+        ...(report.provenance !== undefined
+            ? [
+                  `Ruler: matcher ${report.provenance.matcher}; corpus ` +
+                      `${report.provenance.corpusSha.slice(0, 12)} ` +
+                      `(${report.provenance.caseCount} cases).`,
+                  "",
+              ]
+            : []),
         "| Metric | Baseline | Candidate | Delta |",
         "| --- | --- | --- | --- |",
         metric("Must-catch recall", (a) => a.metrics.mustCatchRecall.rate),

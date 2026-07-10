@@ -146,6 +146,47 @@ describe("extractSamples", () => {
         expect(samples.map((s) => s.source)).toEqual(["r#1", "r#2"]);
     });
 
+    it("carries the ruler stamp through, and tolerates its absence", () => {
+        const stamped = {
+            ...rawReport({
+                baselineRuns: [rawRun("case-1")],
+                candidateRuns: [rawRun("case-1")],
+            }),
+            provenance: {
+                matcher: "deterministic+arbiter",
+                corpusSha: "c".repeat(64),
+                caseCount: 14,
+            },
+        };
+        const sample = extractSamples("r1", stamped)[0]!;
+        expect(sample.matcher).toBe("deterministic+arbiter");
+        expect(sample.corpusSha).toBe("c".repeat(64));
+        // Pre-stamp artifacts still parse; the stamp fields stay absent.
+        const legacy = extractSamples(
+            "r0",
+            rawReport({
+                baselineRuns: [rawRun("case-1")],
+                candidateRuns: [rawRun("case-1")],
+            }),
+        )[0]!;
+        expect(legacy.matcher).toBeUndefined();
+        expect(legacy.corpusSha).toBeUndefined();
+    });
+
+    it("counts budget skips into the arm sample", () => {
+        const raw = rawReport({
+            baselineRuns: [rawRun("case-1")],
+            candidateRuns: [rawRun("case-1")],
+        });
+        (raw.arms.baseline as Record<string, unknown>)["skippedCases"] = [
+            "case-2",
+            "case-3",
+        ];
+        const sample = extractSamples("r1", raw)[0]!;
+        expect(sample.baseline.skippedCount).toBe(2);
+        expect(sample.candidate.skippedCount).toBe(0);
+    });
+
     it("contributes nothing for a no-reviewable-delta report", () => {
         expect(
             extractSamples("r", {noReviewableDelta: true, baseRef: "x"}),
@@ -195,6 +236,7 @@ describe("aggregateSamples", () => {
         arm: armId,
         reviewMdSha: armId === "baseline" ? "a".repeat(64) : "b".repeat(64),
         runs,
+        skippedCount: 0,
         usd: 1,
         ...over,
     });
@@ -324,7 +366,10 @@ describe("aggregateSamples", () => {
             min: 0,
             max: 1,
             mean: 0.5,
+            sd: 0.5,
         });
+        // Same corpus in every sample, no skips: bands are clean.
+        expect(report.noiseFloor?.caseAsymmetry).toBe(false);
 
         const differing = sample([run()], [run()]);
         expect(aggregateSamples([differing]).noiseFloor).toBeUndefined();
@@ -337,6 +382,7 @@ describe("computeNoiseFloor", () => {
         const mk = (caught: boolean, judge: number | undefined): ArmSample => ({
             arm: "baseline",
             reviewMdSha: "a".repeat(64),
+            skippedCount: 0,
             runs: [
                 {
                     caseId: "case-1",
@@ -356,13 +402,46 @@ describe("computeNoiseFloor", () => {
             min: 0,
             max: 1,
             mean: 0.5,
+            sd: 0.5,
         });
+        expect(floor.caseAsymmetry).toBe(false);
         expect(floor.bands["noise (unmatched posted)"]?.mean).toBe(0.5);
-        expect(floor.bands["judge mean quality"]).toEqual({
-            min: 0.8,
-            max: 0.9,
-            mean: 0.8500000000000001,
+        expect(floor.bands["judge mean quality"]?.min).toBe(0.8);
+        expect(floor.bands["judge mean quality"]?.max).toBe(0.9);
+        expect(floor.bands["judge mean quality"]?.mean).toBeCloseTo(0.85);
+        expect(floor.bands["judge mean quality"]?.sd).toBeCloseTo(0.05);
+    });
+
+    it("flags case asymmetry on budget skips or mismatched case sets", () => {
+        const mk = (over: Partial<ArmSample>): ArmSample => ({
+            arm: "baseline",
+            reviewMdSha: "a".repeat(64),
+            skippedCount: 0,
+            runs: [
+                {
+                    caseId: "case-1",
+                    expectedVerdict: "REQUEST_CHANGES",
+                    verdict: "REQUEST_CHANGES",
+                    caughtSpecKeys: ["s"],
+                    missedSpecs: [],
+                    unmatchedPosted: 0,
+                    posted: 1,
+                },
+            ],
+            usd: 1,
+            ...over,
         });
+        // A budget skip means the sample scored a partial corpus: the bands
+        // fold case-mix variance in, and the renderer must say so loudly.
+        expect(
+            computeNoiseFloor([mk({}), mk({skippedCount: 2})]).caseAsymmetry,
+        ).toBe(true);
+        // Same skip-free samples but scoring different case sets: also
+        // asymmetric (e.g. a pool mixing corpus versions).
+        const otherCase = mk({});
+        otherCase.runs = [{...otherCase.runs[0]!, caseId: "case-2"}];
+        expect(computeNoiseFloor([mk({}), otherCase]).caseAsymmetry).toBe(true);
+        expect(computeNoiseFloor([mk({}), mk({})]).caseAsymmetry).toBe(false);
     });
 });
 
@@ -399,6 +478,55 @@ describe("renderAggregateMarkdown", () => {
         expect(markdown).not.toContain("Noise floor");
     });
 
+    it("prints the ruler line and warns when a pool mixes rulers", () => {
+        const withRuler = (matcher: string, corpusSha: string) => ({
+            ...rawReport({
+                baselineRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+                candidateRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+            }),
+            provenance: {matcher, corpusSha, caseCount: 1},
+        });
+        const uniform = aggregateSamples([
+            ...extractSamples("r1", withRuler("deterministic", "c".repeat(64))),
+            ...extractSamples("r2", withRuler("deterministic", "c".repeat(64))),
+        ]);
+        const uniformMd = renderAggregateMarkdown(uniform);
+        expect(uniformMd).toContain(
+            "Ruler: matcher deterministic; corpus cccccccccccc.",
+        );
+        expect(uniformMd).not.toContain("mix rulers");
+
+        const mixed = aggregateSamples([
+            ...extractSamples("r1", withRuler("deterministic", "c".repeat(64))),
+            ...extractSamples(
+                "r2",
+                withRuler("deterministic+arbiter", "d".repeat(64)),
+            ),
+        ]);
+        expect(renderAggregateMarkdown(mixed)).toContain(
+            "WARNING: pooled runs mix rulers",
+        );
+    });
+
+    it("warns on asymmetric samples under the noise-floor bands", () => {
+        const raw = rawReport({
+            baselineRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+            candidateRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+            baselineSha: "a".repeat(64),
+            candidateSha: "a".repeat(64),
+        });
+        (raw.arms.candidate as Record<string, unknown>)["skippedCases"] = [
+            "case-2",
+        ];
+        const markdown = renderAggregateMarkdown(
+            aggregateSamples(extractSamples("r1", raw)),
+        );
+        expect(markdown).toContain("### Noise floor");
+        expect(markdown).toContain(
+            "WARNING: the samples did not all score the same case set",
+        );
+    });
+
     it("renders the noise-floor bands for an identical-arm pool", () => {
         const raw = rawReport({
             baselineRuns: [rawRun("case-1", {caught: ["spec-1"]})],
@@ -411,7 +539,7 @@ describe("renderAggregateMarkdown", () => {
         );
         expect(markdown).toContain("### Noise floor");
         expect(markdown).toContain(
-            "| must-catch recall | 100% | 100% | 100% | 0% |",
+            "| must-catch recall | 100% | 100% | 100% | 0% | 0% |",
         );
     });
 });

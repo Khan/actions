@@ -432,7 +432,7 @@ describe("renderMarkdownReport", () => {
         expect(markdown).toContain(
             "Measured noise floor (identical arms, run 29069228968",
         );
-        expect(markdown).toContain("must-catch recall 54%-86%");
+        expect(markdown).toContain("must-catch recall 54%-86% (sd 10%)");
         expect(markdown.trimEnd().endsWith("resolve smaller effects.*")).toBe(
             true,
         );

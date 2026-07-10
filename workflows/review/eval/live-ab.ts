@@ -514,9 +514,32 @@ const main = async (): Promise<void> => {
         }
     };
 
-    // Each arm-run gets an equal slice of the budget, so a runaway baseline
-    // (or an early repeat) cannot starve what follows.
-    const perArmUsd = maxUsd / (2 * repeats);
+    // Rolling budget: each arm-run's slice is the REMAINING budget divided
+    // by the arm-runs still to go. A runaway early arm still cannot starve
+    // what follows (its slice is capped), but a cheap early arm donates its
+    // headroom forward instead of stranding it; equal fixed slices caused
+    // budget-skip asymmetry on the first noise-floor run (38/36 of 42
+    // case-runs), which inflates the very bands that run existed to measure.
+    const totalArmRuns = 2 * repeats;
+    let armRunsDone = 0;
+    let spentUsd = 0;
+    const nextArmBudget = (): number =>
+        Math.max(0, maxUsd - spentUsd) / (totalArmRuns - armRunsDone);
+    const trackArm = (report: ArmRunReport): ArmRunReport => {
+        armRunsDone += 1;
+        spentUsd += report.usd;
+        return report;
+    };
+
+    // The ruler stamp: which matcher and which corpus produced this
+    // report's rates. Comparisons across runs are only valid when the stamp
+    // matches (see ReportProvenance in live-ab-report.ts).
+    const provenance = {
+        matcher:
+            match !== undefined ? "deterministic+arbiter" : "deterministic",
+        corpusSha: sha256(JSON.stringify(cases)),
+        caseCount: cases.length,
+    };
 
     /**
      * One full arm pair. `suffix` isolates staging across repeats;
@@ -527,17 +550,27 @@ const main = async (): Promise<void> => {
         suffix: string,
         withRetry: boolean,
     ): Promise<AbReport> => {
-        const baseline = await runArm(
-            "baseline",
-            cases,
-            armProduce(`baseline${suffix}`, baselineMd, "full"),
-            {maxUsd: perArmUsd, ...(match !== undefined ? {match} : {})},
+        const baseline = trackArm(
+            await runArm(
+                "baseline",
+                cases,
+                armProduce(`baseline${suffix}`, baselineMd, "full"),
+                {
+                    maxUsd: nextArmBudget(),
+                    ...(match !== undefined ? {match} : {}),
+                },
+            ),
         );
-        const candidate = await runArm(
-            "candidate",
-            cases,
-            armProduce(`candidate${suffix}`, candidateMd, candidateMode),
-            {maxUsd: perArmUsd, ...(match !== undefined ? {match} : {})},
+        const candidate = trackArm(
+            await runArm(
+                "candidate",
+                cases,
+                armProduce(`candidate${suffix}`, candidateMd, candidateMode),
+                {
+                    maxUsd: nextArmBudget(),
+                    ...(match !== undefined ? {match} : {}),
+                },
+            ),
         );
 
         // Retry the flip, not the run: a hard-gate flip re-runs only the
@@ -570,6 +603,7 @@ const main = async (): Promise<void> => {
                 baseline: sha256(baselineMd),
                 candidate: sha256(candidateMd),
             },
+            provenance,
             arms: {baseline, candidate},
             regressions: diffRegressions(baseline, candidate),
             adversarialFailures: adversarialGateFailures(candidate).filter(

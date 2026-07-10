@@ -58,6 +58,8 @@ export type ArmSample = {
     arm: "baseline" | "candidate";
     reviewMdSha: string;
     runs: SampleRun[];
+    /** Cases never dispatched (budget skips); asymmetric samples bias bands. */
+    skippedCount: number;
     usd: number;
     judgeMeanQuality?: number;
 };
@@ -66,6 +68,14 @@ export type ArmSample = {
 export type ReportSample = {
     source: string;
     baseRef: string;
+    /**
+     * Ruler provenance, when the report carries it (reports predating the
+     * stamps parse with both undefined): the matcher configuration and a
+     * content hash of the loaded corpus. Rates are only comparable across
+     * runs whose ruler matches; the aggregate warns on a mixed pool.
+     */
+    matcher?: string;
+    corpusSha?: string;
     baseline: ArmSample;
     candidate: ArmSample;
 };
@@ -152,6 +162,9 @@ const parseArm = (
         arm,
         reviewMdSha,
         runs,
+        skippedCount: Array.isArray(raw["skippedCases"])
+            ? raw["skippedCases"].length
+            : 0,
         usd: asNumber(raw["usd"]),
         ...(isRecord(judge) && typeof judge["meanQuality"] === "number"
             ? {judgeMeanQuality: judge["meanQuality"]}
@@ -187,10 +200,15 @@ export const extractSamples = (
     }
     const sha = (key: string): string =>
         isRecord(shas) ? asString(shas[key]) : "";
+    const provenance = isRecord(raw["provenance"]) ? raw["provenance"] : {};
+    const matcher = asString(provenance["matcher"]);
+    const corpusSha = asString(provenance["corpusSha"]);
     return [
         {
             source,
             baseRef: asString(raw["baseRef"]),
+            ...(matcher !== "" ? {matcher} : {}),
+            ...(corpusSha !== "" ? {corpusSha} : {}),
             baseline: parseArm(arms["baseline"], "baseline", sha("baseline")),
             candidate: parseArm(
                 arms["candidate"],
@@ -281,12 +299,22 @@ export type ArmAggregate = {
 
 /**
  * Per-metric wobble bands over identical-arm samples (the noise floor).
- * Each band is computed across the 2N arm-samples of the same prompt.
+ * Each band is computed across the 2N arm-samples of the same prompt. Min
+ * and max are extreme-value statistics (they only widen as samples
+ * accumulate); mean plus/minus sd is the stable band to track week to week.
  */
 export type NoiseFloor = {
     armSamples: number;
-    /** metric -> {min, max, mean} of the per-arm-sample rate. */
-    bands: Record<string, {min: number; max: number; mean: number}>;
+    /** metric -> spread of the per-arm-sample rate. */
+    bands: Record<string, {min: number; max: number; mean: number; sd: number}>;
+    /**
+     * True when the samples did not all score the same case set (budget
+     * skips, or pools mixing corpora). Asymmetric samples fold case-mix
+     * variance into the bands, inflating them beyond pure run-to-run
+     * wobble; the renderer surfaces this loudly because clean samples are
+     * the entire point of an identical-arms run.
+     */
+    caseAsymmetry: boolean;
 };
 
 export type AggregateReport = {
@@ -295,6 +323,9 @@ export type AggregateReport = {
     skippedSources: {source: string; reason: string}[];
     samples: number;
     baseRefs: string[];
+    /** Distinct ruler stamps across the pool (empty for legacy reports). */
+    matchers: string[];
+    corpusShas: string[];
     arms: {baseline: ArmAggregate; candidate: ArmAggregate};
     /** Set iff every sample ran byte-identical arms. */
     noiseFloor?: NoiseFloor;
@@ -465,7 +496,7 @@ const sampleRates = (sample: ArmSample): Record<string, number> => {
 
 /** Noise-floor bands across arm-samples (call only on identical-arm pools). */
 export const computeNoiseFloor = (armSamples: ArmSample[]): NoiseFloor => {
-    const bands: Record<string, {min: number; max: number; mean: number}> = {};
+    const bands: NoiseFloor["bands"] = {};
     const values = new Map<string, number[]>();
     for (const sample of armSamples) {
         for (const [metric, value] of Object.entries(sampleRates(sample))) {
@@ -473,13 +504,31 @@ export const computeNoiseFloor = (armSamples: ArmSample[]): NoiseFloor => {
         }
     }
     for (const [metric, list] of values) {
+        const mean = list.reduce((sum, v) => sum + v, 0) / list.length;
         bands[metric] = {
             min: Math.min(...list),
             max: Math.max(...list),
-            mean: list.reduce((sum, v) => sum + v, 0) / list.length,
+            mean,
+            // Population sd: the samples ARE the population being described,
+            // and n is small enough that the n-1 debate is noise about noise.
+            sd: Math.sqrt(
+                list.reduce((sum, v) => sum + (v - mean) ** 2, 0) / list.length,
+            ),
         };
     }
-    return {armSamples: armSamples.length, bands};
+    // Case asymmetry: any budget skip, or samples scoring different case
+    // sets (e.g. a pool mixing corpus versions), folds case-mix variance
+    // into the bands.
+    const caseIdSets = armSamples.map((sample) =>
+        sample.runs
+            .map((run) => run.caseId)
+            .sort()
+            .join(","),
+    );
+    const caseAsymmetry =
+        armSamples.some((sample) => sample.skippedCount > 0) ||
+        new Set(caseIdSets).size > 1;
+    return {armSamples: armSamples.length, bands, caseAsymmetry};
 };
 
 /**
@@ -503,6 +552,20 @@ export const aggregateSamples = (
         skippedSources,
         samples: samples.length,
         baseRefs: [...new Set(samples.map((s) => s.baseRef))].sort(),
+        matchers: [
+            ...new Set(
+                samples
+                    .map((s) => s.matcher)
+                    .filter((m): m is string => m !== undefined),
+            ),
+        ].sort(),
+        corpusShas: [
+            ...new Set(
+                samples
+                    .map((s) => s.corpusSha)
+                    .filter((c): c is string => c !== undefined),
+            ),
+        ].sort(),
         arms: {
             baseline: aggregateArm(
                 "baseline",
@@ -570,6 +633,24 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
         lines.push(
             "**WARNING: pooled runs carry more than one review.md sha per " +
                 "arm; these rates mix different prompts.**",
+            "",
+        );
+    }
+    if (report.matchers.length > 0 || report.corpusShas.length > 0) {
+        lines.push(
+            `Ruler: matcher ${report.matchers.join(", ") || "unstamped"}; ` +
+                `corpus ${
+                    report.corpusShas
+                        .map((sha) => sha.slice(0, 12))
+                        .join(", ") || "unstamped"
+                }.`,
+            "",
+        );
+    }
+    if (report.matchers.length > 1 || report.corpusShas.length > 1) {
+        lines.push(
+            "**WARNING: pooled runs mix rulers (matcher config or corpus " +
+                "content differ); rates are not comparable across them.**",
             "",
         );
     }
@@ -673,15 +754,26 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
             "",
             `Bands across ${report.noiseFloor.armSamples} arm-samples of one review.md; ` +
                 "any A/B delta inside a band is indistinguishable from " +
-                "run-to-run wobble.",
+                "run-to-run wobble. Min/max only widen as samples accumulate; " +
+                "mean +/- sd is the band to track week to week.",
             "",
-            "| Metric | Min | Mean | Max | Spread |",
-            "| --- | --- | --- | --- | --- |",
+            ...(report.noiseFloor.caseAsymmetry
+                ? [
+                      "**WARNING: the samples did not all score the same " +
+                          "case set (budget skips or mixed corpora), so " +
+                          "these bands fold case-mix variance in on top of " +
+                          "run-to-run wobble. Re-run with a budget that " +
+                          "clears the full corpus before trusting them.**",
+                      "",
+                  ]
+                : []),
+            "| Metric | Min | Mean | Max | SD | Spread |",
+            "| --- | --- | --- | --- | --- | --- |",
             ...Object.entries(report.noiseFloor.bands).map(
                 ([metric, band]) =>
                     `| ${metric} | ${pct(band.min)} | ${pct(band.mean)} | ${pct(
                         band.max,
-                    )} | ${pct(band.max - band.min)} |`,
+                    )} | ${pct(band.sd)} | ${pct(band.max - band.min)} |`,
             ),
             "",
         );

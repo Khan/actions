@@ -124,6 +124,39 @@ reviewer, was wrong).
 - **Stacked PRs:** a per-PR report's baseline is the PR's base branch tip
   (the parent PR in a stack), so it prices the marginal delta only.
   Absolute columns do not compare across reports.
+- **Ruler provenance:** every report stamps the matcher configuration and a
+  corpus content hash (`provenance` in the JSON, the "Ruler" line in the
+  markdown). Rates are only comparable when BOTH the review.md sha and the
+  ruler match; `aggregate.ts` warns loudly on mixed pools. Instrument
+  changes (arbiter on/off, corpus growth) move every rate without the
+  reviewer changing, and the stamps are what keep the drift series honest
+  across them.
+
+### Statistical honesty (limits to keep in mind)
+
+- **Pooled intervals are optimistic.** The Wilson intervals treat spec
+  catches as independent draws; specs within a case and cases within an
+  arm-run are correlated, so true pooled intervals are somewhat wider than
+  printed. Per-case rows are close to valid; treat the pooled CI as a lower
+  bound on uncertainty.
+- **The v1 noise-floor bands carry case-mix variance.** The 2026-07-10
+  measurement ran into budget skips (38/36 of 42 case-runs), so its bands
+  fold corpus-composition variance in on top of run-to-run wobble. The
+  aggregate now flags asymmetric samples and reports SD alongside min/max
+  (min/max only widen as samples accumulate; mean +/- sd is the band to
+  track). Weekly drift runs at the $85 default refresh the bands cleanly.
+- **The repeats-mode gate is more permissive than single-run mode.** A
+  single run fail-biases (a flipped adversarial case must pass both
+  retries); `--repeats` confirms only on a strict majority, so a case
+  failing under half the time passes a powered run. Deliberate (the repeat
+  structure is the evidence), but it IS a relaxation of "handle every
+  adversarial case outright"; per-case fail counts print either way, read
+  them.
+- **The arbiter's refuse bias is a prompt, not a calibration.** Its rescues
+  inflate recall, the load-bearing metric, and its false-positive rate has
+  not been measured against known non-matches. Audit `via: "fallback"`
+  matches when a recall claim is close, and prefer `--no-match-arbiter`
+  when reproducing pre-arbiter numbers.
 
 ## Costs and models
 
