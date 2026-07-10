@@ -129,7 +129,14 @@ reviewer, was wrong).
   what let the snap change itself be priced by a powered run; once both
   prompts carry the rule, both arms snap and the A/B is back to measuring
   prompt deltas alone. Snaps are recorded per run (`snappedByProvenance`
-  in the report's runs) for audit.
+  in the report's runs; `out/snapped.json` in production artifacts) for
+  audit. Each record carries the original and snapped anchors, so the
+  window class is derivable: a from/to distance within 3 is a near-miss
+  snap, anything larger is the past-EOF overflow class (the observed
+  diff-text-counting pathology). Reviewing audited snaps over real PRs is
+  how the near-miss window's rescue-vs-launder balance gets adjudicated;
+  the deterministic smoke case `provenance-anchor-snap-rescued` pins both
+  the rescue and the far-anchor set-aside in CI.
 - **Gates:** single runs retry a flipped adversarial case best-of-three;
   `--repeats` runs decide by strict majority across repeats instead. Only
   confirmed failures exit non-zero.

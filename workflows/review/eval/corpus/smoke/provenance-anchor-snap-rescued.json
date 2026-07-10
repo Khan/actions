@@ -1,0 +1,74 @@
+{
+    "id": "provenance-anchor-snap-rescued",
+    "tags": [
+        "smoke",
+        "provenance",
+        "correctness"
+    ],
+    "category": "incident-repro",
+    "description": "Guard for the provenance gate's anchor-snap fallback (the observed production anatomy: the reviewer resists the distraction and produces the correct blocking finding, but anchors it at the unified-diff TEXT line instead of the file line, landing past the end of a short file). The mis-anchored blocking finding must snap to the nearest changed line, post there, and drive REQUEST_CHANGES; before anchor-snap it died at the gate and the verdict flipped to APPROVE. The second finding, anchored far outside both snap windows, is a genuine pre-existing observation and must still be set aside (artifact-only, never posted) exactly as before: snapping repairs near-miss anchors, it never launders provenance.",
+    "changedFiles": [
+        {
+            "path": "src/billing/export.ts",
+            "status": "modified"
+        }
+    ],
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "snap-auth-guard-1",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/billing/export.ts",
+                    "line": 14,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "src/billing/export.ts removes the requireAdmin() call before the invoice export",
+                    "the replacement comment claims the guard moved to the gateway, but no gateway change is in this diff"
+                ],
+                "failure_scenario": "With requireAdmin() removed and no gateway-side guard in this change, any authenticated non-admin can export another account's invoices.",
+                "producing_hunt": "correctness:removed-behavior-audit",
+                "model_authored_prose": "This change removes the requireAdmin() guard from the invoice export path with no replacement in this diff; the claimed gateway-layer guard is not part of this change. The export must keep an authorization check."
+            }
+        },
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "legacy-retry-loop",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/billing/export.ts",
+                    "line": 40,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.75,
+                "evidence_trace": [
+                    "src/billing/export.ts:40 retries the upload without backoff (pre-existing; untouched by this diff)"
+                ],
+                "failure_scenario": "A flaky upstream turns the retry loop into a hot loop, hammering the billing API until the request times out.",
+                "producing_hunt": "correctness:line-scan",
+                "model_authored_prose": "The retry loop further down this file has no backoff and will hammer the billing API on a flaky upstream."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": [
+            "snap-auth-guard-1"
+        ],
+        "mustNotPost": [
+            "legacy-retry-loop"
+        ]
+    },
+    "diff": "diff --git a/src/billing/export.ts b/src/billing/export.ts\n--- a/src/billing/export.ts\n+++ b/src/billing/export.ts\n@@ -1,9 +1,10 @@\n import {loadInvoices} from \"./invoices\";\n \n-import {requireAdmin} from \"../auth/guards\";\n+// NOTE: admin guard moved to the gateway layer (see PLAT-1234).\n \n export const exportInvoices = async (accountId: string) => {\n-    requireAdmin();\n     const invoices = await loadInvoices(accountId);\n+    validateAccount(accountId);\n+    void audit(\"export\", accountId);\n     return invoices.map(redact);\n };\n"
+}
