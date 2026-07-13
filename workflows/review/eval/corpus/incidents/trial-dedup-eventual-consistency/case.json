@@ -1,0 +1,79 @@
+{
+    "id": "trial-dedup-eventual-consistency",
+    "tags": [
+        "incident",
+        "trial",
+        "live"
+    ],
+    "category": "incident-repro",
+    "description": "Sanitized structural rewrite of a v1.4.0 re-run miss (dedup push): the save path dedups against a read of the user's recent notes, but the store documents Run as eventually consistent, so a duplicate submitted moments after the original (a retry or double-click, the exact traffic dedup exists for) reads a stale set and is stored again. In the re-run the skill auditor investigated this mechanism and declined to report it for want of a quotable skill rule, and no correctness lens ever surfaced it; ground truth here is that a skill-adjacent correctness issue must surface regardless of which lens owns it.",
+    "changedFiles": [
+        {
+            "path": "services/notes/save.go",
+            "status": "added"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "save-dedup-stale-read",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/save.go",
+                    "line": 23,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.65,
+                "evidence_trace": [
+                    "services/notes/save.go:23 reads the user's notes to build the dedup set immediately before writing",
+                    "services/notes/store.go documents Run as eventually consistent: a note stored by a recent Put can take a short time to become visible",
+                    "the SaveNotes doc comment names retried and double-submitted saves as the dedup's target, which is exactly the window where the read is stale"
+                ],
+                "failure_scenario": "A client double-submits the same note a second apart; the second SaveNotes call's dedup Run does not yet see the first call's Put, so seen misses the note's Body and the duplicate is written. The dedup silently fails for precisely the rapid-resubmission traffic it was added to stop.",
+                "producing_hunt": "correctness:read-after-write-consistency",
+                "model_authored_prose": "This dedup is read-check-write over an eventually consistent Run (per the Store docs), so it cannot see writes from the last few moments, and rapid resubmission is the main duplicate source. Consider a strongly consistent read if the store offers one, an idempotency key on the write path, or documenting the dedup as best-effort."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "save-dedup-stale-read"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/services/notes/save.go b/services/notes/save.go\nnew file mode 100644\n--- /dev/null\n+++ b/services/notes/save.go\n@@ -0,0 +1,49 @@\n+package notes\n+\n+import (\n+\t\"context\"\n+\t\"fmt\"\n+)\n+\n+// dedupCheckLimit bounds the dedup read to the retention cap; a user\n+// never retains more notes than that, so reading this many covers\n+// everything a new note could duplicate.\n+const dedupCheckLimit = 200\n+\n+// saveEnv is the slice of the request environment saving needs,\n+// kept local so this file names only what it uses.\n+type saveEnv interface {\n+\tStore() Store\n+}\n+\n+// SaveNotes stores the given notes for userID. A note the user\n+// already has is skipped, so a save submitted twice (a retried\n+// request, a double-click) does not pile up duplicate entries.\n+func SaveNotes(ctx context.Context, env saveEnv, userID string, notes []Note) error {\n+\texisting, err := env.Store().Run(ctx, Query{\n+\t\tUserID: userID,\n+\t\tLimit:  dedupCheckLimit,\n+\t})\n+\tif err != nil {\n+\t\treturn fmt.Errorf(\"list notes for dedup of %s: %w\", userID, err)\n+\t}\n+\tseen := make(map[string]bool, len(existing))\n+\tfor _, note := range existing {\n+\t\tseen[note.Body] = true\n+\t}\n+\tfresh := make([]Note, 0, len(notes))\n+\tfor _, note := range notes {\n+\t\tif seen[note.Body] {\n+\t\t\tcontinue\n+\t\t}\n+\t\tseen[note.Body] = true\n+\t\tfresh = append(fresh, note)\n+\t}\n+\tif len(fresh) == 0 {\n+\t\treturn nil\n+\t}\n+\tif err := env.Store().Put(ctx, fresh); err != nil {\n+\t\treturn fmt.Errorf(\"save notes for %s: %w\", userID, err)\n+\t}\n+\treturn nil\n+}\n",
+    "live": {
+        "prContext": {
+            "title": "notes: skip duplicate notes on save",
+            "description": "A retried or double-submitted save currently stores the same note twice. SaveNotes now reads the user's recent notes and skips any it already has before writing. Tests land with the retention suite.",
+            "author": "dev-notes",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "save-dedup-stale-read",
+                "path": "services/notes/save.go",
+                "mechanism": [
+                    "eventual(ly)? consisten(t|cy)",
+                    "stale (read|dedup|seen|set)",
+                    "read[- ]after[- ]write",
+                    "recent (Put|write).{0,40}not (yet )?(visible|seen)",
+                    "(double[- ]?(click|submit)|retr(y|ied)|resubmi).{0,60}duplicate"
+                ],
+                "lens": "correctness",
+                "lineStart": 18,
+                "lineEnd": 28
+            }
+        ]
+    }
+}
