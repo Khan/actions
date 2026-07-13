@@ -31,6 +31,12 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
    routing, plus a reconciler that resolves earlier bot threads the changes have addressed.
    Every finding names a concrete `failure_scenario`: the specific inputs or state
    and the wrong outcome they produce.
+   On a re-review the verdict body carries a code-rendered accountability section
+   (`lib/rereview.ts`, built from the reconciler's keep/resolve lists): every
+   still-unaddressed prior thread is enumerated as a link to its earlier comment,
+   blocking first, with the resolved count, and an approval that resolved the last
+   open threads states that every prior thread is resolved — resolving some threads
+   never leaves the rest silently open.
 3. If those reviewers proposed any comments, **`claim-validator`** re-checks each one
    against the actual code (attacking the finding's stated failure scenario) and,
    for best-practice claims, against the relevant skill's
@@ -209,6 +215,15 @@ measurements to run after the suite exists.
 - `ANTHROPIC_API_KEY` — used by the `claude` engine.
 - `KHAN_ACTIONS_BOT_TOKEN` — referenced by `config.md`'s `add-reviewer` (the default
   `GITHUB_TOKEN` cannot request organization teams as reviewers).
+- `GH_AW_OTEL_SENTRY_ENDPOINT` and `GH_AW_OTEL_SENTRY_AUTHORIZATION` — the Sentry
+  OTLP traces endpoint and `x-sentry-auth` header value read by the
+  `observability:` block (value formats are documented at the block in
+  `review.md`). Hard-required while that block is present: a missing secret
+  compiles to an empty endpoint URL, the MCP gateway's OTLP config schema
+  rejects it, and the agent job dies at startup instead of skipping trace
+  export (observed on Khan/actions#241). A repo without these secrets must
+  comment out the `observability:` block in its installed `review.md` as a
+  local edit (which `gh aw update` preserves) and recompile.
 
 ## Versioning
 

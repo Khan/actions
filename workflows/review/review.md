@@ -115,13 +115,27 @@ safe-outputs:
   # the reviewer after the fact — this is the only place that reasoning is captured
   # as clean structured data (the Actions logs and OTLP traces are harder to mine).
   # The orchestrator writes each result to `/tmp/gh-aw/review/out/` (Step 3) and
-  # uploads only that directory (`allowed-paths`); 30-day retention gives a useful
+  # uploads that directory in one call (Step 9); 30-day retention gives a useful
   # window for post-hoc review.
+  #
+  # `allowed-paths` patterns match STAGING-RELATIVE paths, not original absolute
+  # paths. gh-aw's upload_artifact tool copies an uploaded directory into its
+  # staging area under the directory's basename and records only that relative
+  # name (`out`), and the safe_outputs job then filters the staged files
+  # (`out/<agent>.json`) against these patterns with a fully anchored matcher
+  # (gh-aw `upload_artifact.cjs` `resolveFiles` + `glob_pattern_helpers.cjs`).
+  # An absolute pattern like "/tmp/gh-aw/review/out/**" therefore matches
+  # nothing, ever, and fails the upload with "no files matched the selection
+  # criteria" — observed on every review run under gh-aw v0.81.6. "out/**"
+  # matches the staged layout; the absolute form is kept alongside it so the
+  # upload keeps working if a future gh-aw release matches against the original
+  # path instead (the filter is an OR across patterns).
   upload-artifact:
     max-uploads: 1
     retention-days: 30
     allowed-paths:
-      - "/tmp/gh-aw/review/out/**"
+      - "out/**"                    # staging-relative layout (what v0.81.6 matches)
+      - "/tmp/gh-aw/review/out/**"  # original absolute path (future-proofing)
   # NOTE: `add-reviewer` is intentionally defined only in the imported
   # .github/aw/review/config.md (see the `imports:` note above), because its
   # `allowed-team-reviewers` allowlist is repo-specific. Defining it here would override
@@ -141,6 +155,11 @@ network:
 # (Settings → Secrets and variables → Actions): GH_AW_OTEL_SENTRY_ENDPOINT — the Sentry
 # OTLP traces endpoint with `/v1/traces` stripped (…/api/<project>/integration/otlp) — and
 # GH_AW_OTEL_SENTRY_AUTHORIZATION — the `sentry sentry_key=<public-key>` header value.
+# Both secrets are hard-required while this block is present: a missing one compiles to
+# an empty value that the MCP gateway's OTLP config schema rejects, so the agent job
+# dies at startup instead of skipping trace export. A repo without them must comment
+# this block out in its installed review.md (a local edit `gh aw update` preserves)
+# and recompile.
 observability:
   otlp:
     endpoint:
@@ -510,10 +529,14 @@ rate.
 (`pull_request_read` `get_review_comments`) and stage two files from them (leave all
 other threads untouched):
 - `/tmp/gh-aw/review/threads.json` — the unresolved `github-actions[bot]` threads. For
-  each write `thread_id`, `path`, `line`, and its **full reply chain** as
+  each write `thread_id`, `path`, `line`, `url` — the `html_url` of the thread's
+  **first** comment, from the same `get_review_comments` output (omit the field if the
+  output carries none) — and its **full reply chain** as
   `comments`: every comment in the thread in order, each `{author, body}` — including
   the author's replies, not just the bot's opening comment. The reply chain is what
-  lets the `thread-reconciler` weigh the author's response.
+  lets the `thread-reconciler` weigh the author's response, and `url` is what lets the
+  re-review accountability section (Step 6) link each still-open thread to its prior
+  comment.
 - `/tmp/gh-aw/review/human-threads.json` — the `{path, line}` of every **unresolved
   thread started by a human** (any author other than `github-actions[bot]`). These
   are never resolved or replied to; they mark lines where a human review conversation
@@ -982,7 +1005,8 @@ section rather than dropping them. Within the cap the ranking order is:
 
 Before submitting, check whether this review would be a no-op repeat of the PR's
 current state: the verdict (Step 4) is APPROVE, you left **no** inline comments in
-Step 5, and there are **no** skipped-dimension notes to add (below) — i.e. the review
+Step 5, there are **no** skipped-dimension notes to add (below), and the code-rendered
+re-review accountability section (below) is empty — i.e. the review
 body would be exactly the plain `Approved — no blocking issues found.` text with nothing
 else. Only when all of those hold, fetch the PR's existing reviews
 (`pull_requests` `get_pull_request_reviews`) and find the most recent one authored by
@@ -1027,10 +1051,29 @@ keep the body to a single line:
 Changes requested — see inline comments.
 ```
 
+**Re-review accountability (either verdict; code-rendered).** When
+`threads.json` (Step 3 Phase 2) staged at least one unresolved bot thread this run,
+the review body must account for every one of them — a re-review must never resolve
+a few threads and stay silent about the rest. The section is rendered by code, never
+composed by you: after the reconciler's resolutions are decided, run
+```
+cd gh-aw-review-lib && npx -y tsx workflows/review/lib/rereview.ts
+```
+It reads `threads.json`, the reconciler's `out/thread-reconciler.json`, and
+`pr-context.json`, and writes `/tmp/gh-aw/review/rereview.json`:
+`{"section": "<markdown>", "keptCount": <n>, "resolvedCount": <n>}`. Append
+`section` **verbatim** to the review body, after any verdict-specific text above —
+it enumerates each still-unaddressed prior thread as a link to its prior comment
+(blocking first) and states the resolved count, and on a run that resolved the last
+open threads it says every prior thread is resolved. When `section` is empty,
+append nothing. Never rephrase, reorder, or summarize it; if `rereview.json` is
+missing or unparseable, submit the body without the section (do not hand-compose a
+replacement).
+
 **Skipped dimensions (either verdict).** If a dimension could not be assessed this
 run (Step 3), append to the review body — after
-any verdict-specific text above — one line per skipped dimension, choosing the
-wording by cause:
+any verdict-specific text and the re-review accountability section above — one line
+per skipped dimension, choosing the wording by cause:
 
 - Planned shed (the budget rule stopped the sub-agent from being dispatched):
   `Note: <dimension> not assessed this run (shed under the <tier>-tier run budget).`
@@ -1044,10 +1087,10 @@ to start. If the
 change-provenance gate was skipped because `provenance.json` was missing or carried
 warnings (Step 3), also append exactly:
 `Note: change-provenance gate skipped this run (diff staging unparseable).`
-These note lines are the
+These note lines and the code-rendered re-review accountability section are the
 only text permitted beyond the verdict bodies above, and they apply to both APPROVE
 and REQUEST_CHANGES, including the empty-body cases: when the body is otherwise
-empty, the note lines are the entire body.
+empty, they are the entire body.
 
 Do NOT put the risk summary or common patterns in the review body. On approval
 they go in a separate PR comment (Step 7).
@@ -1293,13 +1336,19 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
 
 Finally, if you wrote any sub-agent outputs to `/tmp/gh-aw/review/out/` this run
 (Step 3), upload that directory as a run-scoped artifact with the `upload-artifact`
-safe output. The `path` you pass MUST be the absolute path `/tmp/gh-aw/review/out/` —
-never a relative path like `out`, whatever your current working directory is: the
-safe-outputs processor validates the recorded path against the workflow's
-`allowed-paths` (`/tmp/gh-aw/review/out/**`), so a relative path fails validation with
-"no files matched" even when the files exist. This captures each reviewer's structured
-result for later inspection. Skip it only on an early exit (Step 2) where no sub-agents
-ran and the directory is empty.
+safe output. First copy the claim-audit input in beside the sub-agent outputs, so
+the artifact carries the whole audit trail: if Phase 3 ran, copy
+`/tmp/gh-aw/review/claims.json` to `/tmp/gh-aw/review/out/claims.json` (the
+candidate claims the validator was handed; `out/claim-validator.json` already
+records its verdicts, and `out/pre-existing.json` the provenance gate's
+set-asides). Then upload with **one** call whose `path` is the absolute directory
+path `/tmp/gh-aw/review/out/` — always the whole directory, never an individual
+file: the tool copies what you pass into its staging area under its basename, and
+the workflow's `allowed-paths` match that staged `out/**` layout, so a single-file
+upload (staged under the bare filename, with no `out/` prefix) fails validation
+with "no files matched" even though the file exists. This captures each reviewer's
+structured result for later inspection. Skip the upload only on an early exit
+(Step 2) where no sub-agents ran and the directory is empty.
 
 ## Tone Guidelines
 

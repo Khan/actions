@@ -1,0 +1,36 @@
+{
+    "id": "clean-no-findings",
+    "tags": [
+        "smoke",
+        "clean",
+        "live"
+    ],
+    "category": "clean",
+    "description": "A small, correct refactor with no defects. The reviewer must stay silent and APPROVE with no inline comments \u2014 the clean false-block guard.",
+    "changedFiles": [
+        {
+            "path": "src/util/format.ts",
+            "status": "modified"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 0,
+        "mustNotPost": []
+    },
+    "diff": "diff --git a/src/util/format.ts b/src/util/format.ts\n--- a/src/util/format.ts\n+++ b/src/util/format.ts\n@@ -1,13 +1,17 @@\n /** Shared display formatting helpers. */\n+\n+const BYTES_PER_KIB = 1024;\n \n /** Format a fractional amount as a fixed two-decimal string. */\n export const formatAmount = (amount: number): string => amount.toFixed(2);\n \n /** Format a byte count using binary units. */\n export const formatBytes = (bytes: number): string => {\n-    if (bytes < 1024) {\n+    if (bytes < BYTES_PER_KIB) {\n         return `${bytes} B`;\n     }\n-    const kib = bytes / 1024;\n-    return kib < 1024 ? `${kib.toFixed(1)} KiB` : `${(kib / 1024).toFixed(1)} MiB`;\n+    const kib = bytes / BYTES_PER_KIB;\n+    return kib < BYTES_PER_KIB\n+        ? `${kib.toFixed(1)} KiB`\n+        : `${(kib / BYTES_PER_KIB).toFixed(1)} MiB`;\n };\n",
+    "live": {
+        "prContext": {
+            "title": "util: name the KiB constant in formatBytes",
+            "description": "Replaces the magic 1024 with a named constant. No behavior change.",
+            "author": "dev-web",
+            "baseBranch": "main"
+        }
+    }
+}

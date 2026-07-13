@@ -1,0 +1,5 @@
+---
+"review": patch
+---
+
+Fix the out/ run-artifact upload, which failed on every run under gh-aw v0.81.6. The orchestrator passed the absolute path `/tmp/gh-aw/review/out/` exactly as instructed, but gh-aw's upload_artifact tool stages an uploaded directory under its basename and records only the staging-relative name (`out`), and the safe_outputs job then filters the staged files (`out/<agent>.json`) against `allowed-paths` with a fully anchored matcher; the absolute pattern `/tmp/gh-aw/review/out/**` therefore matched nothing, every run annotated `ERR_VALIDATION: upload_artifact: no files matched the selection criteria`, and no sub-agent outputs or `pre-existing.json` reached the run artifacts, blocking post-hoc claim auditing, the live counters, and the A/B runner, which all read them. `allowed-paths` now lists the staging-relative `out/**` (plus the absolute form, since the filter is an OR, in case a future gh-aw matches original paths). Step 9 also copies `claims.json` into `out/` before uploading, so the artifact carries the validator's input alongside its verdicts (`claim-validator.json`) and the provenance gate's set-asides (`pre-existing.json`).
