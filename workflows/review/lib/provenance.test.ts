@@ -10,6 +10,7 @@ import {
     computeDiffProvenance,
     isAnchorInProvenance,
     reviewMdHasAnchorSnap,
+    runAnnotateCli,
     runProvenanceCli,
     snapAnchorToProvenance,
     snapLineToChanged,
@@ -603,6 +604,14 @@ describe("runProvenanceCli", () => {
         const result = runProvenanceCli(fs);
         expect(result.strippedFiles).toEqual(["pnpm-lock.yaml"]);
 
+        // The line-number-annotated sibling of the stripped diff: same
+        // sections, content lines prefixed with real line numbers.
+        const annotated =
+            written["/tmp/gh-aw/review/full-stripped-annotated.diff"];
+        expect(annotated).toContain("+ 11| newGuard();");
+        expect(annotated).toContain("- 11| oldGuard();");
+        expect(annotated).not.toContain("pnpm-lock.yaml");
+
         const provJson = JSON.parse(
             written["/tmp/gh-aw/review/provenance.json"],
         ) as DiffProvenance;
@@ -658,6 +667,21 @@ describe("runProvenanceCli", () => {
             ]),
         });
         expect(runProvenanceCli(fs).provenance.warnings).toEqual([]);
+    });
+
+    it("annotate subcommand writes a line-numbered copy of a staged diff", () => {
+        const {fs, written} = makeFs({
+            "/tmp/gh-aw/review/pr.diff": DIFF,
+        });
+        runAnnotateCli(
+            fs,
+            "/tmp/gh-aw/review/pr.diff",
+            "/tmp/gh-aw/review/pr-annotated.diff",
+        );
+        const annotated = written["/tmp/gh-aw/review/pr-annotated.diff"];
+        expect(annotated).toContain("+ 11| newGuard();");
+        expect(annotated).toContain("- 11| oldGuard();");
+        expect(annotated).toContain("  13| tail();");
     });
 
     it("emits a fail-open warning when the full diff was never staged", () => {

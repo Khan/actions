@@ -130,7 +130,14 @@ reviewer, was wrong).
   prompts carry the rule, both arms snap and the A/B is back to measuring
   prompt deltas alone. Snaps are recorded per run (`snappedByProvenance`
   in the report's runs; `out/snapped.json` in production artifacts) for
-  audit. Each record carries the original and snapped anchors, so the
+  audit, counted per case in the report (`perCase.snapped`), and pooled in
+  the aggregate ("Findings anchor-snapped"). The snap count is the direct
+  anchor-fidelity observable: the line-number-annotated staged diffs exist
+  to drive it to zero at the source, with the snap as backstop. Staging
+  writes the annotated copies (`pr-annotated.diff`,
+  `full-stripped-annotated.diff`) for both arms unconditionally; only a
+  review.md version that names them reads them, so annotation A/Bs are
+  pure prompt deltas with no staging flag. Each record carries the original and snapped anchors, so the
   window class is derivable: a from/to distance within 3 is a near-miss
   snap, anything larger is the past-EOF overflow class (the observed
   diff-text-counting pathology). Reviewing audited snaps over real PRs is

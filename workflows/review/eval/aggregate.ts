@@ -51,6 +51,12 @@ export type SampleRun = {
     missedSpecs: {specKey: string; droppedBy?: string}[];
     unmatchedPosted: number;
     posted: number;
+    /**
+     * Findings the provenance gate anchor-snapped (0 for reports predating
+     * the field). The anchor-fidelity observable: a prompt fix that anchors
+     * correctly at the source drives this to zero.
+     */
+    snapped: number;
 };
 
 /** One arm-run: a single pass of one arm over its cases. */
@@ -155,6 +161,9 @@ const parseArm = (
             missedSpecs,
             unmatchedPosted: unmatched,
             posted: asNumber(match["postedCount"]),
+            snapped: Array.isArray(result["snappedByProvenance"])
+                ? result["snappedByProvenance"].length
+                : 0,
         };
     });
     const judge = raw["judge"];
@@ -291,6 +300,8 @@ export type ArmAggregate = {
         noise: RateStat;
         trueMisses: number;
         foundButDropped: Record<string, number>;
+        /** Total anchor-snapped findings across the arm's case-runs. */
+        snapped: number;
         usd: number;
     };
     /** Mean of per-sample judge means, when any sample carried one. */
@@ -352,6 +363,7 @@ const aggregateArm = (
     let caseRuns = 0;
     let unmatched = 0;
     let posted = 0;
+    let snapped = 0;
     let usd = 0;
     const judgeMeans: number[] = [];
 
@@ -374,6 +386,7 @@ const aggregateArm = (
             }
             unmatched += run.unmatchedPosted;
             posted += run.posted;
+            snapped += run.snapped;
             const spec = (key: string) => {
                 const s = entry.specs.get(key) ?? {
                     caught: 0,
@@ -455,6 +468,7 @@ const aggregateArm = (
             noise: rateStat(unmatched, posted),
             trueMisses,
             foundButDropped,
+            snapped,
             usd,
         },
         ...(judgeMeans.length > 0
@@ -734,6 +748,7 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
         `| Misses (true / dropped) | ${dropSummary(
             baseline,
         )} |  | ${dropSummary(candidate)} |  |`,
+        `| Findings anchor-snapped | ${baseline.pooled.snapped} |  | ${candidate.pooled.snapped} |  |`,
         ...(baseline.judgeMeanQuality !== undefined &&
         candidate.judgeMeanQuality !== undefined
             ? [

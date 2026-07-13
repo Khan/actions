@@ -78,6 +78,7 @@
  */
 
 import {
+    annotateDiffLineNumbers,
     computeChangedLines,
     countOrphanHunkLines,
     stripDiffFiles,
@@ -471,6 +472,7 @@ const FILES_PATH = `${REVIEW_DIR}/files.json`;
 const ROUTING_PATH = `${REVIEW_DIR}/routing.json`;
 const PROVENANCE_OUT = `${REVIEW_DIR}/provenance.json`;
 const STRIPPED_DIFF_OUT = `${REVIEW_DIR}/full-stripped.diff`;
+const ANNOTATED_DIFF_OUT = `${REVIEW_DIR}/full-stripped-annotated.diff`;
 
 type ProvenanceCliFs = {
     readFileSync: (p: string, enc: "utf8") => string;
@@ -581,14 +583,46 @@ export const runProvenanceCli = (
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});
     fs.writeFileSync(PROVENANCE_OUT, JSON.stringify(provenance, null, 2));
-    fs.writeFileSync(STRIPPED_DIFF_OUT, stripDiffFiles(diffText, strip));
+    const stripped = stripDiffFiles(diffText, strip);
+    fs.writeFileSync(STRIPPED_DIFF_OUT, stripped);
+    // The line-number-annotated sibling the finding-producing reviewers
+    // read. Prompt-facing only: everything that PARSES a diff (this module,
+    // re-review fingerprints, scoped staging) keeps reading the raw files,
+    // so hunk signatures and the changed-line map never see annotations.
+    fs.writeFileSync(ANNOTATED_DIFF_OUT, annotateDiffLineNumbers(stripped));
 
     return {provenance, strippedFiles};
+};
+
+/**
+ * `annotate <in> <out>` subcommand: write a line-number-annotated copy of a
+ * staged diff (review.md Phase 1 runs it on `pr.diff`, and the scoped depth
+ * re-runs it after overwriting the stripped diff). Factored for tests.
+ */
+export const runAnnotateCli = (
+    fs: Pick<ProvenanceCliFs, "readFileSync" | "writeFileSync">,
+    inPath: string,
+    outPath: string,
+): void => {
+    fs.writeFileSync(
+        outPath,
+        annotateDiffLineNumbers(fs.readFileSync(inPath, "utf8")),
+    );
 };
 
 // Run only when executed directly (review.md Step 3), never on import (tests).
 if (typeof require !== "undefined" && require.main === module) {
     const fs = require("node:fs") as ProvenanceCliFs;
+    if (process.argv[2] === "annotate") {
+        const [inPath, outPath] = process.argv.slice(3);
+        if (inPath === undefined || outPath === undefined) {
+            throw new Error("usage: provenance.ts annotate <in> <out>");
+        }
+        runAnnotateCli(fs, inPath, outPath);
+        // eslint-disable-next-line no-console
+        console.log(JSON.stringify({annotated: outPath}));
+        process.exit(0);
+    }
     const result = runProvenanceCli(fs, process.env.GITHUB_WORKSPACE);
     // eslint-disable-next-line no-console
     console.log(
