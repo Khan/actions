@@ -174,6 +174,13 @@ export type ReviewBodyInput = {
      * `0` leaves the APPROVE body exactly as #194 rendered it.
      */
     obligationCount?: number;
+    /**
+     * The code-rendered re-review accountability section
+     * (`rereview.ts`'s `renderRereviewSection`), spliced verbatim between the
+     * verdict head and the note lines. Empty or absent leaves the body exactly
+     * as before — a first review has no prior threads to account for.
+     */
+    rereviewSection?: string;
 };
 
 /**
@@ -251,7 +258,7 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             `Note: ${dimension} not assessed this run (${subAgent} output unavailable).`,
     );
 
-    const lines = [head, ...notes];
+    const lines = [head, input.rereviewSection ?? "", ...notes];
 
     if (input.event === "HOLD_FOR_HUMAN") {
         lines.push(

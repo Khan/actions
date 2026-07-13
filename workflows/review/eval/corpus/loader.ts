@@ -25,6 +25,7 @@ import {
     type Finding,
     type Severity,
 } from "../../lib/finding-schema";
+import {LIVE_TAG, liveTreeErrors, parseLive, type CaseLive} from "./live";
 import type {ChangedFile, FileStatus, RiskTier} from "../../lib/router";
 import type {VerdictEvent} from "../../lib/render-comment";
 import type {DimensionStatus} from "../../lib/verdict";
@@ -35,6 +36,11 @@ import type {DimensionStatus} from "../../lib/verdict";
 
 /** The tag that marks a case as part of the smoke subset . */
 export const SMOKE_TAG = "smoke";
+
+/** The live-enabled half of the case format lives in `./live`; re-exported
+ * here so the loader stays the single public surface of the corpus format. */
+export {LIVE_TAG} from "./live";
+export type {CaseLive, LiveDefectSpec, LivePrContext} from "./live";
 
 /** Default corpus root, relative to the repo checkout (the workflow's cwd). */
 export const CORPUS_ROOT = "workflows/review/eval/corpus";
@@ -177,6 +183,12 @@ export type CorpusCase = {
      * pre-gate behavior).
      */
     diff?: string;
+    /**
+     * Present iff the case is live-enabled (tagged {@link LIVE_TAG}): the
+     * change content a real model run reviews. Ignored by the deterministic
+     * replay path.
+     */
+    live?: CaseLive;
     expected: CaseExpectation;
     /** Absolute or repo-relative path the case was loaded from (provenance). */
     sourcePath: string;
@@ -597,6 +609,22 @@ export const parseCase = (raw: unknown, sourcePath: string): CorpusCase => {
         errors.push("diff: must be a non-empty string when present");
     }
 
+    const live = parseLive(
+        raw["live"],
+        changedFiles,
+        isNonEmptyString(raw["diff"]) ? raw["diff"] : undefined,
+        errors,
+    );
+    const tagList = Array.isArray(tags) ? tags.filter(isNonEmptyString) : [];
+    if (raw["live"] !== undefined && !tagList.includes(LIVE_TAG)) {
+        errors.push(
+            `tags: a case with a live block must carry the "${LIVE_TAG}" tag`,
+        );
+    }
+    if (raw["live"] === undefined && tagList.includes(LIVE_TAG)) {
+        errors.push(`tags: the "${LIVE_TAG}" tag requires a live block`);
+    }
+
     if (errors.length > 0) {
         throw new CorpusCaseError(sourcePath, errors);
     }
@@ -625,6 +653,9 @@ export const parseCase = (raw: unknown, sourcePath: string): CorpusCase => {
     if (isNonEmptyString(raw["diff"])) {
         result.diff = raw["diff"];
     }
+    if (live !== undefined) {
+        result.live = live;
+    }
     return result;
 };
 
@@ -632,11 +663,24 @@ export const parseCase = (raw: unknown, sourcePath: string): CorpusCase => {
 /* Loading from disk                                                         */
 /* -------------------------------------------------------------------------- */
 
-/** Recursively collect every `*.json` file path under `dir` (sorted). */
+/**
+ * Recursively collect every corpus case file path under `dir` (sorted).
+ *
+ * Two layouts coexist: a flat `<id>.json`, and a case directory
+ * `<id>/case.json` whose siblings (a live case's `tree/`) are data, not corpus
+ * JSON. A directory containing `case.json` is therefore taken as exactly that
+ * one case and never recursed into — a `package.json` inside a live tree must
+ * not be parsed as a corpus case.
+ */
 const collectJsonFiles = (dir: string, fs: LoaderFs): string[] => {
     const out: string[] = [];
     const walk = (current: string): void => {
-        for (const entry of fs.readdirSync(current, {withFileTypes: true})) {
+        const entries = fs.readdirSync(current, {withFileTypes: true});
+        if (entries.some((e) => e.isFile() && e.name === "case.json")) {
+            out.push(`${current}/case.json`);
+            return;
+        }
+        for (const entry of entries) {
             const full = `${current}/${entry.name}`;
             if (entry.isDirectory()) {
                 walk(full);
@@ -647,6 +691,29 @@ const collectJsonFiles = (dir: string, fs: LoaderFs): string[] => {
     };
     walk(dir);
     return out.sort();
+};
+
+/**
+ * Check a live case's on-disk tree (see `liveTreeErrors` in `./live` for the
+ * rules). Throws {@link CorpusCaseError} listing every problem. Exported for
+ * reuse by live tooling that loads a single case outside {@link loadCorpus}.
+ */
+export const validateLiveTree = (
+    corpusCase: CorpusCase,
+    fs: LoaderFs = DEFAULT_FS,
+): void => {
+    if (corpusCase.live === undefined) {
+        return;
+    }
+    const errors = liveTreeErrors(
+        corpusCase.live,
+        corpusCase.changedFiles,
+        corpusCase.sourcePath,
+        fs.existsSync,
+    );
+    if (errors.length > 0) {
+        throw new CorpusCaseError(corpusCase.sourcePath, errors);
+    }
 };
 
 /**
@@ -677,6 +744,9 @@ export const loadCorpus = (
     const cases = collectJsonFiles(dir, fs).map((path) =>
         parseCase(JSON.parse(fs.readFileSync(path, "utf8")), path),
     );
+    for (const c of cases) {
+        validateLiveTree(c, fs);
+    }
 
     const seen = new Map<string, string>();
     for (const c of cases) {
@@ -706,6 +776,16 @@ export const loadSmokeCorpus = (
     dir: string = CORPUS_ROOT,
     fs: LoaderFs = DEFAULT_FS,
 ): CorpusCase[] => filterByTag(loadCorpus(dir, fs), SMOKE_TAG);
+
+/**
+ * Load the live-enabled subset: every case tagged {@link LIVE_TAG}, i.e. every
+ * case carrying the change content a real model run needs. The live A/B
+ * runner reads exactly this subset (`live-ab-plan.md`).
+ */
+export const loadLiveCorpus = (
+    dir: string = CORPUS_ROOT,
+    fs: LoaderFs = DEFAULT_FS,
+): CorpusCase[] => filterByTag(loadCorpus(dir, fs), LIVE_TAG);
 
 /** Re-exported for callers assembling expectations against finding severity. */
 export type {Severity, RiskTier};

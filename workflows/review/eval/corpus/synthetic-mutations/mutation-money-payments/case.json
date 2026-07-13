@@ -1,0 +1,85 @@
+{
+    "id": "mutation-money-payments",
+    "tags": [
+        "synthetic-mutation",
+        "fresh",
+        "money-payments",
+        "holdout",
+        "live"
+    ],
+    "category": "synthetic-mutation",
+    "description": "Synthetic HOLDOUT mutation mapped to the money-payments lens: a currency amount is handled as a float instead of integer cents, so rounding drifts. The money-payments lens must catch it.",
+    "changedFiles": [
+        {
+            "path": "src/billing/charge.ts",
+            "status": "modified"
+        }
+    ],
+    "findings": [
+        {
+            "source": "money-payments",
+            "finding": {
+                "schema_version": 2,
+                "id": "mutation-money-float-rounding",
+                "lens": "money-payments",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/billing/charge.ts",
+                    "line": 15,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.86,
+                "evidence_trace": [
+                    "src/billing/charge.ts:29 computes `total = price * 1.075` in floating point",
+                    "the result is passed to the charge API without rounding to integer cents",
+                    "float arithmetic on money accumulates rounding error across line items"
+                ],
+                "failure_scenario": "Float arithmetic on the charge amount drifts by a cent, so the customer is charged an amount that disagrees with the invoice.",
+                "producing_hunt": "money-payments:float-currency",
+                "model_authored_prose": "This charge amount is computed in floating point, which drifts on cents. Compute in integer cents (or a decimal type) and round explicitly before charging."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": [
+            "mutation-money-float-rounding"
+        ]
+    },
+    "diff": "diff --git a/src/billing/charge.ts b/src/billing/charge.ts\n--- a/src/billing/charge.ts\n+++ b/src/billing/charge.ts\n@@ -1,17 +1,18 @@\n import {createPaymentIntent} from \"./gateway\";\n \n-/** Sales tax rate applied to every charge (integer basis points). */\n-const TAX_BASIS_POINTS = 825;\n+/** Sales tax rate applied to every charge. */\n+const TAX_RATE = 0.0825;\n \n /**\n- * Charge a customer. `subtotalCents` is an integer number of cents; tax is\n- * computed in integer cents with banker-safe integer math.\n+ * Charge a customer. Amounts are handled in dollars for readability and\n+ * converted to cents at the gateway boundary.\n  */\n export const chargeCustomer = async (\n     customerId: string,\n     subtotalCents: number,\n ): Promise<string> => {\n-    const taxCents = Math.round((subtotalCents * TAX_BASIS_POINTS) / 10_000);\n-    const totalCents = subtotalCents + taxCents;\n+    const subtotal = subtotalCents / 100;\n+    const total = subtotal * (1 + TAX_RATE);\n+    const totalCents = Number((total * 100).toFixed(0));\n     return createPaymentIntent(customerId, totalCents);\n };\n",
+    "live": {
+        "prContext": {
+            "title": "billing: simplify tax computation in chargeCustomer",
+            "description": "Replaces the basis-points integer math with a plain rate for readability.",
+            "author": "dev-billing",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "mutation-money-float-rounding",
+                "path": "src/billing/charge.ts",
+                "mechanism": [
+                    "float(ing)?[- ]?point",
+                    "integer cents|basis.points",
+                    "round|toFixed",
+                    "drift|off.by.one.cent|penny"
+                ],
+                "lens": "money-payments",
+                "lineStart": 9,
+                "lineEnd": 21
+            }
+        ]
+    },
+    "routerConfig": {
+        "lensRules": [
+            {
+                "pattern": "src/billing/charge.ts",
+                "lenses": [
+                    "money-payments"
+                ]
+            }
+        ]
+    }
+}
