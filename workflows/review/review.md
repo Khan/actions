@@ -612,7 +612,12 @@ the model: `blocking` → `issue (blocking)`, `advisory` → `suggestion (non-bl
 lens is a correctness/risk lens, so it renders as a plain label, not a `, best-practice`
 variant). Take the candidate's `path`/`line` from the finding's `anchor` (a `line` anchor →
 `path`+`line`; a `pr` anchor → a top-level review comment with no line), its comment
-text from `model_authored_prose` (with `suggested_patch` as the fix block), and its
+text from `model_authored_prose` (with `suggested_patch` as the fix block; for a skill
+finding carrying `rule_quote`, append the quoted rule to the candidate's `discussion`
+as a `> **Rule:** <rule_quote>` blockquote between the prose and the fix block,
+matching the shared lib's `renderComment` — the quote is skill-file text copied
+verbatim, and it is what lets the author read the actual rule instead of a
+paraphrase), and its
 `failure_scenario` verbatim (it rides into `claims.json` for the validator). After this
 normalization a lens finding is a candidate in the **same** shape as every other
 reviewer's, so it flows through the identical scope-filter → `claims.json` → verdict →
@@ -1463,7 +1468,10 @@ skill-level default or a per-rule `must`/`never`/`blocking` vs `should`/`advisor
 annotation) sets the finding's `severity`; when the skill declares none, judge by
 impact. Flag a skill violation only when you can quote **both** the exact rule
 text from the skill file **and** the exact violating line; put both quotes in
-`evidence_trace`, with no spirit-of-the-doc inference.
+`evidence_trace`, with no spirit-of-the-doc inference. Also copy the exact rule
+text, verbatim, into the finding's `rule_quote` field: evidence traces never reach
+the author, and `rule_quote` is rendered into the comment they read, so the author
+sees the actual rule, not a paraphrase.
 
 ## Out-of-lane handoff
 
@@ -1489,7 +1497,9 @@ entry; `failure_scenario` names the concrete failing scenario (specific
 inputs/state, then the wrong outcome) — it is the specific claim the
 claim-validator attacks, so make it checkable; `producing_hunt` names the hunt
 that produced the finding; `model_authored_prose` carries the entire human-read
-comment. Omit `suggested_patch`/`pre_merge_obligation` unless they apply.
+comment. Omit `suggested_patch`/`pre_merge_obligation` unless they apply; a skill
+finding also carries `rule_quote` (the Lens-owned skills section above), which the
+orchestrator renders into the posted comment.
 
 Run **every** incident-derived hunt in your definition, even when the diff looks
 clean, and record each hunt's state in `hunts[]` as exactly one of: `found` (the
@@ -2437,7 +2447,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "producing_hunt": "authz-on-new-endpoint",
     "model_authored_prose": "the one- or two-sentence comment the author will read",
     "suggested_patch": "optional replacement/patch text",
-    "pre_merge_obligation": "optional: a condition that must hold before merge"
+    "pre_merge_obligation": "optional: a condition that must hold before merge",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "authz-on-new-endpoint", "state": "ran|not-applicable|found"}]
@@ -2498,7 +2509,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "unmoderated-model-output",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "unmoderated-model-output", "state": "ran|not-applicable|found"}]
@@ -2557,7 +2569,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "bulk-send-without-audience-filter",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "bulk-send-without-audience-filter", "state": "ran|not-applicable|found"}]
@@ -2617,7 +2630,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "cache-key-missing-identifier",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "cache-key-missing-identifier", "state": "ran|not-applicable|found"}]
@@ -2678,7 +2692,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "non-nullable-column-without-default",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "non-nullable-column-without-default", "state": "ran|not-applicable|found"}]
@@ -2738,7 +2753,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "unawaited-async",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "unawaited-async", "state": "ran|not-applicable|found"}]
@@ -2798,7 +2814,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "breaking-field-removal-or-retype",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "breaking-field-removal-or-retype", "state": "ran|not-applicable|found"}]
@@ -2862,7 +2879,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "serialized-shape-change",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "serialized-shape-change", "state": "ran|not-applicable|found"}]
@@ -2924,7 +2942,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "flag-default-unsafe",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "flag-default-unsafe", "state": "ran|not-applicable|found"}]
@@ -2984,7 +3003,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "float-money",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "float-money", "state": "ran|not-applicable|found"}]
@@ -3047,7 +3067,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "hardcoded-user-facing-string",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "hardcoded-user-facing-string", "state": "ran|not-applicable|found"}]
