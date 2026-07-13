@@ -46,6 +46,7 @@ import {
     type VerdictEvent,
 } from "../lib/render-comment";
 import {applyProvenanceGate, computeDiffProvenance} from "../lib/provenance";
+import {renderRereviewSection, type StagedThread} from "../lib/rereview";
 import {route, type RoutingResult, type RouterConfig} from "../lib/router";
 import {
     computeVerdict,
@@ -123,6 +124,14 @@ export type RunResult = {
      * artifact), not in {@link RunResult.plannedReview}.
      */
     droppedByProvenance: RunCandidate[];
+    /**
+     * Near-miss mis-anchors the gate snapped to a changed line instead of
+     * dropping (anchor-snap; see `lib/provenance.ts`). Each entry's candidate
+     * carries the snapped anchor and ALSO flows through the pipeline (it is
+     * not a drop); this list is the audit trail — in production, the run
+     * artifact's `out/snapped.json`.
+     */
+    snappedByProvenance: {candidate: RunCandidate; originalAnchor: Anchor}[];
     /** Candidates dropped by the scope filter (out-of-scope, non-blocking). */
     droppedByScope: RunCandidate[];
     /** Candidates dropped as `refuted` by the validation replay (Phase 3). */
@@ -158,6 +167,13 @@ export type RunOptions = {
      * `[]` explicitly to replay a live run whose validator produced nothing.
      */
     validation?: CaseVerification[];
+    /**
+     * Whether the change-provenance gate runs its anchor-snap fallback
+     * (default true: production behavior). The live A/B passes false for an
+     * arm whose review.md predates the rule, so the deterministic gate
+     * emulates each arm's own prompt version and the A/B prices the change.
+     */
+    anchorSnap?: boolean;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -351,14 +367,39 @@ export const runCase = (
     // production). Without a diff the gate is skipped (pre-gate behavior).
     let changeAnchored = allCandidates;
     let droppedByProvenance: RunCandidate[] = [];
+    let snappedByProvenance: RunResult["snappedByProvenance"] = [];
     if (corpusCase.diff !== undefined) {
-        const provenance = computeDiffProvenance(corpusCase.diff);
+        const provenance = computeDiffProvenance(
+            corpusCase.diff,
+            corpusCase.fileLineCounts,
+        );
         const gate = applyProvenanceGate(
             allCandidates.map((c) => c.finding),
             provenance,
+            options.anchorSnap === undefined
+                ? {}
+                : {anchorSnap: options.anchorSnap},
         );
         const keptIds = new Set(gate.kept.map((f) => f.id));
-        changeAnchored = allCandidates.filter((c) => keptIds.has(c.id));
+        const snappedById = new Map(
+            gate.snapped.map((snap) => [snap.finding.id, snap]),
+        );
+        // Re-normalise the snapped findings so their candidates carry the
+        // rewritten (snapped) anchor through the rest of the pipeline.
+        changeAnchored = allCandidates
+            .filter((c) => keptIds.has(c.id))
+            .map((c) => {
+                const snap = snappedById.get(c.id);
+                return snap === undefined
+                    ? c
+                    : toCandidate({source: c.source, finding: snap.finding});
+            });
+        snappedByProvenance = changeAnchored.flatMap((candidate) => {
+            const snap = snappedById.get(candidate.id);
+            return snap === undefined
+                ? []
+                : [{candidate, originalAnchor: snap.originalAnchor}];
+        });
         // Re-normalise the demoted findings so their candidates carry the
         // gate-coerced (never blocking) label.
         droppedByProvenance = allCandidates
@@ -386,12 +427,44 @@ export const runCase = (
             options.validation ?? corpusCase.validation,
         );
 
+    // 3c. Re-review (open-PR) cases: the deterministic replay assumes a
+    // correct reconciler and takes each prior thread's `expect` as its
+    // decision, mirroring what production computes from the reconciler's
+    // keep-list — the kept-blocking verdict floor (the flip rule) and the
+    // code-rendered accountability section. The LIVE path scores the real
+    // reconciler against the same ground truth (`rereview-match.ts`).
+    const rereview = corpusCase.live?.rereview;
+    let keptBlockingCount = 0;
+    let rereviewSection: string | undefined;
+    if (rereview !== undefined) {
+        const threads: StagedThread[] = rereview.priorThreads.map((thread) => ({
+            thread_id: `t-${thread.key}`,
+            path: thread.path,
+            line: thread.line,
+            comments: [{author: "github-actions[bot]", body: thread.body}],
+        }));
+        const reconciler = {
+            resolve: rereview.priorThreads
+                .filter((t) => t.expect === "resolve")
+                .map((t) => `t-${t.key}`),
+            keep: rereview.priorThreads
+                .filter((t) => t.expect === "keep")
+                .map((t) => `t-${t.key}`),
+        };
+        const section = renderRereviewSection({threads, reconciler});
+        keptBlockingCount = section.keptBlockingCount;
+        if (section.section !== "") {
+            rereviewSection = section.section;
+        }
+    }
+
     // 4. Mechanical verdict from the posted labels + dimension gate + conflicts.
     const postedLabels = postedCandidates.map((c) => c.label);
     const verdict = computeVerdict({
         postedLabels,
         dimensions: toDimensionReport(corpusCase.dimensions),
         policyConflicts: corpusCase.policyConflicts,
+        keptBlockingCount,
         ...(options.blockingThreshold !== undefined
             ? {blockingThreshold: options.blockingThreshold}
             : {}),
@@ -401,6 +474,7 @@ export const runCase = (
     const reviewBody = renderReviewBody({
         event: verdict.event,
         hasInlineComments: postedCandidates.length > 0,
+        ...(rereviewSection !== undefined ? {rereviewSection} : {}),
         skippedDimensions: skippedDimensions(corpusCase.dimensions),
     });
 
@@ -420,6 +494,7 @@ export const runCase = (
         allCandidates,
         postedCandidates,
         droppedByProvenance,
+        snappedByProvenance,
         droppedByScope,
         droppedByValidation,
         postedLabels,

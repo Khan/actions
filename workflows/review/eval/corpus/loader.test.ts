@@ -131,6 +131,56 @@ describe("parseCase: the live block", () => {
         expect(parsed.live?.mustNotFlagSpecs?.[0]?.lineStart).toBeUndefined();
     });
 
+    it("parses and validates altLocations like the primary location", () => {
+        const withAlt = (altLocations: unknown) =>
+            liveCase({
+                changedFiles: [
+                    {path: "src/a.ts", status: "modified"},
+                    {path: "src/only-listed.ts", status: "modified"},
+                ],
+                live: {
+                    prContext: {
+                        title: "t",
+                        description: "d",
+                        author: "a",
+                        baseBranch: "main",
+                    },
+                    mustCatchSpecs: [
+                        {
+                            key: "k",
+                            path: "src/a.ts",
+                            mechanism: ["m"],
+                            altLocations,
+                        },
+                    ],
+                },
+            });
+        const parsed = parseCase(
+            withAlt([{path: "src/a.ts", lineStart: 1, lineEnd: 2}]),
+            "test://case",
+        );
+        expect(parsed.live?.mustCatchSpecs?.[0]?.altLocations).toEqual([
+            {path: "src/a.ts", lineStart: 1, lineEnd: 2},
+        ]);
+        expect(parseErrors(withAlt([]))).toMatch(
+            /altLocations: must be a non-empty array/,
+        );
+        expect(parseErrors(withAlt([{path: "src/nope.ts"}]))).toMatch(
+            /altLocations\[0\]\.path: "src\/nope\.ts" is not in changedFiles/,
+        );
+        expect(parseErrors(withAlt([{path: "src/only-listed.ts"}]))).toMatch(
+            /no section in the diff/,
+        );
+        expect(
+            parseErrors(withAlt([{path: "src/a.ts", lineStart: 3}])),
+        ).toMatch(/must be set together/);
+        expect(
+            parseErrors(
+                withAlt([{path: "src/a.ts", lineStart: 5, lineEnd: 3}]),
+            ),
+        ).toMatch(/lineStart <= lineEnd/);
+    });
+
     it("requires a diff on a live case", () => {
         const raw = liveCase();
         delete (raw as Record<string, unknown>)["diff"];
@@ -284,6 +334,38 @@ describe("case-directory layout and tree validation", () => {
         const live = loadLiveCorpus("/corpus", volFs(corpus()));
         expect(live.map((c) => c.id)).toEqual(["live-case"]);
         expect(live[0]?.live).toBeDefined();
+    });
+
+    it("hydrates a live case's fileLineCounts from its tree", () => {
+        const cases = loadCorpus("/corpus", volFs(corpus()));
+        const live = cases.find((c) => c.id === "live-case");
+        // The fixture tree file has two lines (trailing newline does not
+        // start a third); the flat case has no tree and no explicit counts.
+        expect(live?.fileLineCounts).toEqual({"src/a.ts": 2});
+        const flat = cases.find((c) => c.id === "flat-case");
+        expect(flat?.fileLineCounts).toBeUndefined();
+    });
+
+    it("lets an explicit fileLineCounts field win over tree hydration", () => {
+        const files = corpus({
+            "/corpus/smoke/live-case/case.json": JSON.stringify({
+                ...liveCase({id: "live-case"}),
+                fileLineCounts: {"src/a.ts": 99},
+            }),
+        });
+        const cases = loadCorpus("/corpus", volFs(files));
+        const live = cases.find((c) => c.id === "live-case");
+        expect(live?.fileLineCounts).toEqual({"src/a.ts": 99});
+    });
+
+    it("rejects a non-integer fileLineCounts entry", () => {
+        const raw = {
+            ...recordedCase({id: "bad-counts"}),
+            fileLineCounts: {"src/a.ts": 1.5},
+        };
+        expect(() => parseCase(raw, "bad-counts.json")).toThrow(
+            /fileLineCounts/,
+        );
     });
 
     it("rejects a live case whose tree directory is missing", () => {

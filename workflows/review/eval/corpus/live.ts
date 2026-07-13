@@ -10,7 +10,7 @@
  * validation error.
  */
 
-import {computeDiffProvenance} from "../../lib/provenance";
+import {computeDiffProvenance, countFileLines} from "../../lib/provenance";
 import type {ChangedFile} from "../../lib/router";
 
 /**
@@ -35,6 +35,16 @@ export type LivePrContext = {
     description: string;
     author: string;
     baseBranch: string;
+};
+
+/** One anchor location a spec accepts (see {@link LiveDefectSpec}). */
+export type LiveSpecLocation = {
+    /** Changed-file path (must appear in the diff). */
+    path: string;
+    /** First line of the window a matching finding may anchor in (1-based). */
+    lineStart?: number;
+    /** Last line of the window (inclusive). Required iff lineStart is. */
+    lineEnd?: number;
 };
 
 /**
@@ -62,6 +72,64 @@ export type LiveDefectSpec = {
     mechanism: string[];
     /** Producing lens, when the defect is lens-specific (advisory only). */
     lens?: string;
+    /**
+     * Alternate anchor locations the spec ALSO accepts. A defect that spans
+     * files has more than one correct anchor site (a migration missing an
+     * index surfaces at the migration AND at the hot query that needs it),
+     * and a spec that names only one turns the reviewer's anchor-site choice
+     * into recall noise (incident-sql-missing-index read 8/16 in the 07-09
+     * wave; every "miss" was the same finding anchored at the query). The
+     * mechanism alternates still have to agree wherever the finding anchors.
+     */
+    altLocations?: LiveSpecLocation[];
+};
+
+/**
+ * One prior review thread a re-review case stages (an "open PR" snapshot).
+ * `body` is the bot's opening comment from the earlier review, in the
+ * production label template (`**<label>:** …`), quoted as data; `expect` is
+ * the reconciliation ground truth for THIS push's diff.
+ */
+export type RereviewPriorThread = {
+    /** Stable key for staging (`t-<key>` thread id) and scoring. */
+    key: string;
+    /** Path the thread anchors on. */
+    path: string;
+    /** RIGHT-side line, or null for a file-level thread. */
+    line: number | null;
+    /** The opening bot comment, label template included. */
+    body: string;
+    /** The author's reply on the thread, when they left one. */
+    authorReply?: string;
+    /** Ground truth: this push fixed the thread (`resolve`) or not (`keep`). */
+    expect: "resolve" | "keep";
+    /**
+     * Case-insensitive keyword/regex alternates for the thread's mechanism,
+     * used to score duplicate suppression: a fresh finding matching a KEPT
+     * thread's path/window and mechanism is a duplicate comment. Optional;
+     * without it dup detection falls back to path + line proximity.
+     */
+    mechanism?: string[];
+};
+
+/**
+ * The re-review block: what makes a live case an OPEN-PR snapshot (a push
+ * onto an already-reviewed PR) rather than a first review. `priorDiff` is the
+ * diff the last full-depth review reviewed — the anchor fingerprint and the
+ * body stamp are derived from it, exactly as production derives them — and
+ * `priorThreads` are the unresolved bot threads that review left, with
+ * per-thread reconciliation ground truth. The case's own top-level `diff` and
+ * `tree` are the state AFTER this push.
+ */
+export type CaseRereview = {
+    /** The previously fully-reviewed unified diff (anchor fingerprint). */
+    priorDiff: string;
+    /** The prior review's submitted event (rides into the staged stamp). */
+    priorVerdict: "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+    /** The depth the prior review executed (staged stamp; default `full`). */
+    priorDepth: "full" | "scoped" | "flip-gated" | "fast";
+    /** Unresolved bot threads at this push, with reconciliation ground truth. */
+    priorThreads: RereviewPriorThread[];
 };
 
 /**
@@ -90,6 +158,8 @@ export type CaseLive = {
     mustCatchSpecs?: LiveDefectSpec[];
     /** Labeled traps a live run must NOT flag (clean-case ground truth). */
     mustNotFlagSpecs?: LiveDefectSpec[];
+    /** Present iff the case is a re-review (open-PR) snapshot. */
+    rereview?: CaseRereview;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -176,6 +246,74 @@ const parseDefectSpecs = (
             errors.push(`${at}.lens: must be a non-empty string when present`);
             return;
         }
+        const rawAlt = entry["altLocations"];
+        let altLocations: LiveSpecLocation[] | undefined;
+        if (rawAlt !== undefined) {
+            if (!Array.isArray(rawAlt) || rawAlt.length === 0) {
+                errors.push(
+                    `${at}.altLocations: must be a non-empty array when present`,
+                );
+                return;
+            }
+            altLocations = [];
+            let altBroken = false;
+            rawAlt.forEach((alt, j) => {
+                const altAt = `${at}.altLocations[${j}]`;
+                if (!isRecord(alt)) {
+                    errors.push(`${altAt}: must be an object`);
+                    altBroken = true;
+                    return;
+                }
+                const altPath = alt["path"];
+                if (!isNonEmptyString(altPath)) {
+                    errors.push(`${altAt}.path: required non-empty string`);
+                    altBroken = true;
+                    return;
+                }
+                if (!changedPaths.has(altPath)) {
+                    errors.push(
+                        `${altAt}.path: "${altPath}" is not in changedFiles`,
+                    );
+                }
+                if (diffPaths !== undefined && !diffPaths.has(altPath)) {
+                    errors.push(
+                        `${altAt}.path: "${altPath}" has no section in the diff`,
+                    );
+                }
+                const altStart = alt["lineStart"];
+                const altEnd = alt["lineEnd"];
+                if ((altStart === undefined) !== (altEnd === undefined)) {
+                    errors.push(
+                        `${altAt}: lineStart and lineEnd must be set together`,
+                    );
+                    altBroken = true;
+                    return;
+                }
+                if (altStart !== undefined) {
+                    if (
+                        !Number.isInteger(altStart) ||
+                        !Number.isInteger(altEnd) ||
+                        (altStart as number) < 1 ||
+                        (altEnd as number) < (altStart as number)
+                    ) {
+                        errors.push(
+                            `${altAt}: lineStart/lineEnd must be positive integers with lineStart <= lineEnd`,
+                        );
+                        altBroken = true;
+                        return;
+                    }
+                }
+                const location: LiveSpecLocation = {path: altPath};
+                if (altStart !== undefined) {
+                    location.lineStart = altStart as number;
+                    location.lineEnd = altEnd as number;
+                }
+                altLocations?.push(location);
+            });
+            if (altBroken) {
+                return;
+            }
+        }
         const spec: LiveDefectSpec = {
             key: specKey,
             path,
@@ -188,9 +326,163 @@ const parseDefectSpecs = (
         if (isNonEmptyString(lens)) {
             spec.lens = lens;
         }
+        if (altLocations !== undefined) {
+            spec.altLocations = altLocations;
+        }
         specs.push(spec);
     });
     return specs;
+};
+
+const RE_REVIEW_VERDICTS = ["APPROVE", "REQUEST_CHANGES", "COMMENT"] as const;
+const RE_REVIEW_DEPTHS = ["full", "scoped", "flip-gated", "fast"] as const;
+
+/** Parse + validate the `rereview` block (see {@link CaseRereview}). */
+const parseRereview = (
+    raw: unknown,
+    errors: string[],
+): CaseRereview | undefined => {
+    if (raw === undefined) {
+        return undefined;
+    }
+    if (!isRecord(raw)) {
+        errors.push("live.rereview: must be an object when present");
+        return undefined;
+    }
+
+    const priorDiff = raw["priorDiff"];
+    if (!isNonEmptyString(priorDiff)) {
+        errors.push("live.rereview.priorDiff: required non-empty string");
+    } else {
+        const provenance = computeDiffProvenance(priorDiff);
+        if (provenance.warnings.length > 0) {
+            errors.push(
+                `live.rereview.priorDiff: must parse cleanly (${provenance.warnings.join(
+                    "; ",
+                )})`,
+            );
+        }
+    }
+
+    const priorVerdict = raw["priorVerdict"];
+    if (
+        !(RE_REVIEW_VERDICTS as readonly string[]).includes(
+            priorVerdict as string,
+        )
+    ) {
+        errors.push(
+            `live.rereview.priorVerdict: must be one of ${RE_REVIEW_VERDICTS.join(
+                ", ",
+            )}`,
+        );
+    }
+
+    const rawDepth = raw["priorDepth"] ?? "full";
+    if (!(RE_REVIEW_DEPTHS as readonly string[]).includes(rawDepth as string)) {
+        errors.push(
+            `live.rereview.priorDepth: must be one of ${RE_REVIEW_DEPTHS.join(
+                ", ",
+            )}`,
+        );
+    }
+
+    const rawThreads = raw["priorThreads"];
+    const threads: RereviewPriorThread[] = [];
+    if (!Array.isArray(rawThreads) || rawThreads.length === 0) {
+        errors.push(
+            "live.rereview.priorThreads: required non-empty array " +
+                "(a re-review with no prior threads is a plain live case)",
+        );
+    } else {
+        const seen = new Set<string>();
+        rawThreads.forEach((entry, i) => {
+            const at = `live.rereview.priorThreads[${i}]`;
+            if (!isRecord(entry)) {
+                errors.push(`${at}: must be an object`);
+                return;
+            }
+            const key = entry["key"];
+            if (!isNonEmptyString(key)) {
+                errors.push(`${at}.key: required non-empty string`);
+                return;
+            }
+            if (seen.has(key)) {
+                errors.push(`${at}.key: duplicate thread key "${key}"`);
+                return;
+            }
+            seen.add(key);
+            const path = entry["path"];
+            const body = entry["body"];
+            const line = entry["line"];
+            const expect = entry["expect"];
+            if (!isNonEmptyString(path)) {
+                errors.push(`${at}.path: required non-empty string`);
+                return;
+            }
+            if (!isNonEmptyString(body)) {
+                errors.push(`${at}.body: required non-empty string`);
+                return;
+            }
+            if (line !== null && !Number.isInteger(line)) {
+                errors.push(`${at}.line: must be an integer or null`);
+                return;
+            }
+            if (expect !== "resolve" && expect !== "keep") {
+                errors.push(`${at}.expect: must be "resolve" or "keep"`);
+                return;
+            }
+            const authorReply = entry["authorReply"];
+            if (authorReply !== undefined && !isNonEmptyString(authorReply)) {
+                errors.push(
+                    `${at}.authorReply: must be a non-empty string when present`,
+                );
+                return;
+            }
+            const mechanism = entry["mechanism"];
+            if (
+                mechanism !== undefined &&
+                (!Array.isArray(mechanism) ||
+                    mechanism.length === 0 ||
+                    !mechanism.every(isNonEmptyString))
+            ) {
+                errors.push(
+                    `${at}.mechanism: must be a non-empty array of non-empty strings when present`,
+                );
+                return;
+            }
+            const thread: RereviewPriorThread = {
+                key,
+                path,
+                line: line as number | null,
+                body,
+                expect,
+            };
+            if (authorReply !== undefined) {
+                thread.authorReply = authorReply as string;
+            }
+            if (mechanism !== undefined) {
+                thread.mechanism = mechanism as string[];
+            }
+            threads.push(thread);
+        });
+    }
+
+    if (
+        !isNonEmptyString(priorDiff) ||
+        !(RE_REVIEW_VERDICTS as readonly string[]).includes(
+            priorVerdict as string,
+        ) ||
+        !(RE_REVIEW_DEPTHS as readonly string[]).includes(rawDepth as string) ||
+        threads.length === 0
+    ) {
+        return undefined;
+    }
+    return {
+        priorDiff,
+        priorVerdict: priorVerdict as CaseRereview["priorVerdict"],
+        priorDepth: rawDepth as CaseRereview["priorDepth"],
+        priorThreads: threads,
+    };
 };
 
 /**
@@ -300,6 +592,8 @@ export const parseLive = (
         errors,
     );
 
+    const rereview = parseRereview(raw["rereview"], errors);
+
     if (prContext === undefined) {
         return undefined;
     }
@@ -310,6 +604,9 @@ export const parseLive = (
     if (mustNotFlagSpecs !== undefined) {
         live.mustNotFlagSpecs = mustNotFlagSpecs;
     }
+    if (rereview !== undefined) {
+        live.rereview = rereview;
+    }
     return live;
 };
 
@@ -319,6 +616,38 @@ export const parseLive = (
  * (the post-change snapshot the sub-agents read). Returns fixed-format error
  * strings; the loader wraps them in its case error type.
  */
+/**
+ * Derive the post-change line counts of a live case's changed files from its
+ * on-disk tree (the snapshot next to the case file). Feeds the provenance
+ * gate's overflow snap window. Removed or missing files are skipped: they
+ * simply get no overflow window.
+ */
+export const liveTreeFileLineCounts = (
+    live: CaseLive,
+    changedFiles: ChangedFile[],
+    sourcePath: string,
+    fs: {
+        existsSync: (p: string) => boolean;
+        readFileSync: (p: string, enc: "utf8") => string;
+    },
+): Record<string, number> => {
+    const lastSlash = sourcePath.lastIndexOf("/");
+    const caseDir = lastSlash === -1 ? "." : sourcePath.slice(0, lastSlash);
+    const treeDir = `${caseDir}/${live.tree}`;
+    const counts: Record<string, number> = {};
+    for (const file of changedFiles) {
+        if (file.status === "removed") {
+            continue;
+        }
+        const onDisk = `${treeDir}/${file.path}`;
+        if (!fs.existsSync(onDisk)) {
+            continue;
+        }
+        counts[file.path] = countFileLines(fs.readFileSync(onDisk, "utf8"));
+    }
+    return counts;
+};
+
 export const liveTreeErrors = (
     live: CaseLive,
     changedFiles: ChangedFile[],

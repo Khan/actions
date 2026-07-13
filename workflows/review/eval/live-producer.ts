@@ -45,6 +45,7 @@ import {
     type VerificationState,
 } from "./corpus/loader";
 import type {ExtractedAgent} from "./agent-extract";
+import type {ReReviewMode} from "../lib/routing-config";
 import {
     rewriteAgentPrompt,
     stageCase,
@@ -106,6 +107,14 @@ export type PerAgentReport = {
     failed?: string;
 };
 
+/** The thread-reconciler's parsed decision over the staged prior threads. */
+export type LiveReconciliation = {
+    /** Thread ids to resolve (the staged synthetic `t-<key>` ids). */
+    resolve: string[];
+    /** Thread ids to keep open. */
+    keep: string[];
+};
+
 export type ProduceLiveResult = {
     /** Schema-valid findings, in the corpus `RecordedFinding` shape. */
     findings: RecordedFinding[];
@@ -113,6 +122,13 @@ export type ProduceLiveResult = {
     validation: CaseVerification[];
     perAgent: PerAgentReport[];
     staged: StagedCase;
+    /**
+     * The reconciler's decision, present iff the case carries a
+     * `live.rereview` block and the reconciler dispatch produced parseable
+     * output (a failed reconciler is reported in `perAgent` and leaves this
+     * absent — the scorer then counts every prior thread unaccounted).
+     */
+    reconciliation?: LiveReconciliation;
 };
 
 export type ProduceLiveOptions = {
@@ -124,6 +140,15 @@ export type ProduceLiveOptions = {
     timeoutMs?: number;
     /** Concurrent sub-agent dispatches within the case. */
     concurrency?: number;
+    /**
+     * Re-review mode for cases carrying a `live.rereview` block (the ROUTING
+     * `re-review` line in production; an arm parameter here so the A/B can
+     * price a mode). The staged depth plan sizes the roster: `scoped` keeps
+     * the full roster over the scoped diff, `flip-gated` keeps only the
+     * correctness pass, `fast` dispatches the reconciler alone. Default
+     * `full`.
+     */
+    reReviewMode?: ReReviewMode;
 };
 
 const DEFAULT_MAX_TURNS = 30;
@@ -151,6 +176,26 @@ const LABEL_SHAPE_CONFIDENCE = 0.7;
 const DEFAULT_FINDERS = ["correctness-reviewer", "skill-auditor"] as const;
 
 const VALIDATOR = "claim-validator";
+
+const RECONCILER = "thread-reconciler";
+
+/** Parse the reconciler's `{resolve, keep}` output (thread-id arrays). */
+const parseReconciliation = (output: string): LiveReconciliation => {
+    const parsed = parseJsonObject(output);
+    const ids = (value: unknown, key: string): string[] => {
+        if (
+            !Array.isArray(value) ||
+            !value.every((v) => typeof v === "string")
+        ) {
+            throw new Error(`${key} is not a string array`);
+        }
+        return value;
+    };
+    return {
+        resolve: ids(parsed["resolve"], "resolve"),
+        keep: ids(parsed["keep"], "keep"),
+    };
+};
 
 /* -------------------------------------------------------------------------- */
 /* Prompt resolution                                                          */
@@ -498,15 +543,26 @@ export const produceLive = async (
     const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
 
     const fs = options.fs ?? NODE_FS;
-    const staged = stageCase(corpusCase, options.stageDir, fs);
+    const staged = stageCase(corpusCase, options.stageDir, fs, {
+        reReviewMode: options.reReviewMode ?? "full",
+    });
 
-    // Roster: default finders + routed specialist lenses.
+    // Roster: default finders + routed specialist lenses — sized by the
+    // re-review depth plan when the case is an open-PR snapshot. `scoped`
+    // keeps the full roster (over the scoped diff the staging already wrote);
+    // `flip-gated` keeps only the correctness pass; `fast` keeps none.
     const routerConfig: RouterConfig = {
         generatedPatterns: [],
         ...(corpusCase.routerConfig as Partial<RouterConfig>),
     };
     const routing = route({files: corpusCase.changedFiles}, routerConfig);
-    const rosterNames = [...DEFAULT_FINDERS, ...routing.lensesToSpawn];
+    const dispatch = staged.rereviewPlan?.dispatch ?? "all";
+    const rosterNames =
+        dispatch === "all"
+            ? [...DEFAULT_FINDERS, ...routing.lensesToSpawn]
+            : dispatch === "reconcile+correctness"
+            ? ["correctness-reviewer"]
+            : [];
     const roster = rosterNames.map((name) => {
         const agent = agents.get(name);
         if (agent === undefined) {
@@ -586,6 +642,33 @@ export const produceLive = async (
         validation = parsed ?? [];
     }
 
+    // Re-review cases: dispatch the reconciler over the staged threads (it
+    // runs at EVERY depth — reconciliation is the fast path's whole job).
+    let reconciliation: LiveReconciliation | undefined;
+    if (corpusCase.live?.rereview !== undefined) {
+        const reconciler = agents.get(RECONCILER);
+        if (reconciler === undefined) {
+            throw new Error(
+                `sub-agent "${RECONCILER}" is not defined in the extracted review.md`,
+            );
+        }
+        const {report, parsed} = await dispatchWithRetry(
+            reconciler,
+            resolvePrompt(reconciler),
+            {
+                name: reconciler.name,
+                model: reconciler.model,
+                cwd: staged.checkoutDir,
+                maxTurns,
+                timeoutMs,
+            },
+            runner,
+            parseReconciliation,
+        );
+        perAgent.push(report);
+        reconciliation = parsed;
+    }
+
     return {
         findings: findings.map(
             ({source, finding}): RecordedFinding => ({source, finding}),
@@ -593,6 +676,7 @@ export const produceLive = async (
         validation,
         perAgent,
         staged,
+        ...(reconciliation !== undefined ? {reconciliation} : {}),
     };
 };
 

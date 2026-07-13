@@ -373,6 +373,15 @@ Write the result to `/tmp/gh-aw/review/new-scope.json` as
 RIGHT-side line numbers of the added lines inside in-scope hunks. Step 3 uses this to
 filter candidate comments.
 
+**Stage the bot's prior reviews.** Fetch the PR's reviews (`pull_requests`
+`get_pull_request_reviews`) and write `/tmp/gh-aw/review/prior-reviews.json`: every
+review authored by `github-actions[bot]`, **whatever its state** (APPROVED,
+CHANGES_REQUESTED, COMMENTED, DISMISSED), each `{"body": "...",
+"submittedAt": "<ISO timestamp>"}`. The re-review plan CLI (Step 3) reads the hidden
+fingerprint stamp from these bodies; a review that branch protection dismissed, or
+that was submitted comment-only, still carries its stamp, which is exactly why the
+state is ignored here. Do not filter or truncate the bodies.
+
 ## Step 2: Early-Exit Check
 
 This workflow runs on every push. Decide here — using the context gathered in Step 1 —
@@ -527,18 +536,72 @@ two files:
 - `/tmp/gh-aw/review/provenance.json`: per changed file, exactly which lines the
   diff touches: `added` (RIGHT-side line numbers of `+` lines), `removedAdjacent`
   (the RIGHT-side lines bracketing each removal, where a deletion finding anchors),
-  and `removed` (LEFT-side `-` lines), plus a `warnings` list. The CLI also
+  and `removed` (LEFT-side `-` lines), plus a `warnings` list. It also carries a
+  top-level `snap` map (keyed by path, then by line): for every RIGHT-side line
+  that is NOT change-anchored but sits inside the anchor-snap windows (within 3
+  lines of a changed line, or past the end of the file itself by no more than
+  the file's diff-text overhead — the counting mis-anchor; the CLI reads each
+  changed file's real length from the checkout, so a line that exists in the
+  file never overflow-snaps), the changed line a
+  mis-anchored finding snaps to. The CLI also
   cross-checks the parse for completeness (every `files.json` entry with
   `hasPatch: true` must appear in the map; stray hunks must all be attributable
   to a file) and records any shortfall as a warning, which makes the gate below
   fail open. This is the
   code-computed fact the change-provenance gate below reads; you never derive
-  changed lines yourself.
+  changed lines (or snap targets) yourself.
 - `/tmp/gh-aw/review/full-stripped.diff`: the full diff with the sections of every
   file the router classified generated (`routing.json` `generatedFiles`) removed.
   The whole-change reviewers and specialist lenses read this file, never `full.diff`,
   so a lock-file-heavy PR cannot balloon their context; `pattern-triage` still reads
   `full.diff` because classifying every changed file is its job.
+
+**Decide the re-review depth (deterministic code).** After the provenance CLI, run
+the re-review mode CLI from the shared lib checkout, once:
+```
+cd gh-aw-review-lib && npx -y tsx workflows/review/lib/rereview-mode.ts
+```
+It reads `routing.json` (the repo's `re-review` mode line, default `full`),
+`pr-context.json`, the staged diff (preferring `full-stripped.diff`), and
+`prior-reviews.json` (Step 1), and writes `/tmp/gh-aw/review/rereview-plan.json`:
+`{"depth": "full|scoped|flip-gated|fast", "dispatch", "staging", "flipGate",
+"reasons", "divergence", "tripwireRearmed", …}`, plus `/tmp/gh-aw/review/scoped.diff`
+(the hunks no fully-reviewed fingerprint has seen) when `staging` is `new-hunks`.
+Copy `rereview-plan.json` to `/tmp/gh-aw/review/out/rereview-plan.json` now, so the
+run artifact records the executed depth (the cost counters price the mode dial from
+it). The plan is deterministic and final: never deepen or shallow it yourself, and
+never re-run the CLI later in the review. Its three guards are code, not your
+judgment: the one anchoring full review is taken at ready-for-review, a fingerprint
+overflow or a missing input forces `full`, and the divergence tripwire re-arms
+`full` when too much of the diff is unreviewed. What each depth means for the phases
+below:
+
+- **`depth: full`**: proceed exactly as written below; nothing changes.
+- **`depth: scoped`**: the full roster runs, but over only the unseen hunks. Before
+  Phase 1, overwrite `/tmp/gh-aw/review/full-stripped.diff` with the contents of
+  `scoped.diff`, and in Phase 1 build `pr.diff` from the `scoped.diff` sections of
+  the triage `reviewFiles` (a `reviewFiles` entry absent from `scoped.diff` is
+  already reviewed; leave it out of `pr.diff`). Everything else, the provenance
+  gate, the scope filter, threads, and validation, runs as written.
+- **`depth: flip-gated`**: skip `pattern-triage` and dispatch in Phase 2 only
+  `thread-reconciler` and `correctness-reviewer` (no enabled reviewers, no lenses).
+  Stage `pr.diff` as a copy of `scoped.diff` and `review-files.json` as the files
+  appearing in it. The correctness candidates still flow through the provenance
+  gate, the scope filter, and Phase 3 validation exactly as written; the flip rule
+  in Step 4 is what makes their validated blocking findings veto an approval flip.
+- **`depth: fast`**: skip `pattern-triage` and dispatch in Phase 2 only
+  `thread-reconciler`. There are no finding-producing reviewers, so Phase 3 is
+  skipped; Steps 4 to 6 run on the reconciler's result and the flip rule (Step 4).
+
+On a reduced depth (`scoped`, `flip-gated`, `fast`), Step 7 posts no new
+risks/patterns comment and Step 9 carries `risksPatternsKey` forward unchanged (the
+reduced run computed no triage or risk data to compare), and Step 8 requests no new
+reviewers when `correctness-reviewer` did not run. Also queue one note line for the
+review body (Step 6), exactly:
+`Note: re-review ran at <depth> depth (re-review mode <mode>).`
+When the plan's `tripwireRearmed` is true, queue instead, exactly:
+`Note: divergence tripwire re-armed a full review (unreviewed share <share rounded
+to 2 decimals>).`
 
 **Phase 1 — triage (first, alone).** Dispatch **`pattern-triage`**. It returns
 `patterns[]` (common cross-file change patterns; on approval they go in the
@@ -678,6 +741,23 @@ by the provenance CLI above), before the scope filter below:
   entry's `added` or `removedAdjacent` list (candidates carry RIGHT-side lines;
   `removedAdjacent` is what lets a deletion finding, anchored beside the removed
   code, pass). Change-anchored candidates continue through the pipeline untouched.
+- A RIGHT-side (or side-less) candidate that is not change-anchored but whose
+  `line` has an entry in
+  `provenance.json`'s `snap` map (`snap[<path>][<line>]`) is a **near-miss
+  mis-anchor**; apply the **anchor-snap** fallback. Reviewers sometimes anchor a
+  finding about a changed line a few lines off, or count unified-diff text lines
+  instead of file lines and land past the file's actual end; the `snap` map
+  precomputes exactly which lines that pathology can produce and where each one
+  belongs. A LEFT-side candidate never snaps (the map is RIGHT-side only).
+  Rewrite the candidate's `line` to the mapped value, then treat it as
+  change-anchored from here on (it continues through the pipeline and posts at
+  the snapped line, keeping its severity). Record every snap in
+  `/tmp/gh-aw/review/out/snapped.json` (one entry per snapped candidate: the
+  finding's `id`, `path`, the original line as `from`, the snapped line as `to`)
+  so the run artifact keeps each rewrite auditable. For a range candidate
+  (`start_line` set), check each line of the range ascending and use the first
+  mapped entry; the snapped candidate becomes single-line. The map is the entire
+  rule: never snap by judgment, and a line with no entry does not snap.
 - Every other candidate is a **pre-existing observation**. It does not count
   toward the verdict and it does not post to the PR at all — not as its own
   comment and not in any collapsed section: remove it from the candidate set now,
@@ -903,6 +983,22 @@ label (see below), but the verdict follows the labels on the actual posted comme
 a category call. Count the blocking labels in your final comment set; zero blocking
 labels means APPROVE.
 
+**The re-review flip rule (reduced depths only).** One addition to the rule above
+when `rereview-plan.json` (Step 3) says `depth` is `flip-gated` or `fast` and the
+latest fingerprint stamp's `verdict` was `REQUEST_CHANGES`: read the stamp, not the
+review state, since branch protection may have dismissed that review. A reduced-depth
+run reviews little or nothing new, so its APPROVE would mean "the prior objections
+are resolved"; it may flip to APPROVE only when the code-rendered accountability
+result (`/tmp/gh-aw/review/rereview.json`, Step 6) has `keptBlockingCount: 0`, that
+is, the reconciler resolved every blocking thread. If `keptBlockingCount` is greater
+than zero, the verdict is REQUEST_CHANGES even though this run posted no new blocking
+comment; the accountability section lists the surviving threads, so the author sees
+exactly what still blocks. In `flip-gated` depth the dispatched correctness pass adds
+the second half of the gate mechanically: any validated blocking finding it produced
+posts and blocks under the rule above, so a fresh defect vetoes the flip instead of
+being discarded. This rule never applies to `full` or `scoped` depth, where the whole
+roster re-reviews and the plain rule above stands alone.
+
 ### What should carry a blocking label
 
 **Blocking requires a concrete failing scenario.** A finding may carry a blocking
@@ -1092,10 +1188,14 @@ section rather than dropping them. Within the cap the ranking order is:
 
 Before submitting, check whether this review would be a no-op repeat of the PR's
 current state: the verdict (Step 4) is APPROVE, you left **no** inline comments in
-Step 5, there are **no** skipped-dimension notes to add (below), and the code-rendered
+Step 5, there are **no** skipped-dimension notes to add (below), **no** re-review
+depth or tripwire note was queued (Step 3), and the code-rendered
 re-review accountability section (below) is empty — i.e. the review
 body would be exactly the plain `Approved — no blocking issues found.` text with nothing
-else. Only when all of those hold, fetch the PR's existing reviews
+else. (The hidden fingerprint stamp below is invisible and does not count as text for
+this check; when the skip applies, no review is submitted, so the stamp is simply not
+refreshed and the prior one stays authoritative, which can only make the next run more
+thorough.) Only when all of those hold, fetch the PR's existing reviews
 (`pull_requests` `get_pull_request_reviews`) and find the most recent one authored by
 `github-actions[bot]`. If its `state` is `APPROVED`, the PR is already sitting at an
 approved, no-comment state and posting an identical approval again adds nothing —
@@ -1148,7 +1248,9 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/rereview.ts
 ```
 It reads `threads.json`, the reconciler's `out/thread-reconciler.json`, and
 `pr-context.json`, and writes `/tmp/gh-aw/review/rereview.json`:
-`{"section": "<markdown>", "keptCount": <n>, "resolvedCount": <n>}`. Append
+`{"section": "<markdown>", "keptCount": <n>, "resolvedCount": <n>,
+"keptBlockingCount": <n>}` (`keptBlockingCount` also feeds the re-review flip rule,
+Step 4). Append
 `section` **verbatim** to the review body, after any verdict-specific text above —
 it enumerates each still-unaddressed prior thread as a link to its prior comment
 (blocking first) and states the resolved count, and on a run that resolved the last
@@ -1174,10 +1276,26 @@ to start. If the
 change-provenance gate was skipped because `provenance.json` was missing or carried
 warnings (Step 3), also append exactly:
 `Note: change-provenance gate skipped this run (diff staging unparseable).`
-These note lines and the code-rendered re-review accountability section are the
+Also append here the re-review depth or tripwire note queued in Step 3, when there
+is one. These note lines, the code-rendered re-review accountability section, and
+the hidden fingerprint stamp below are the
 only text permitted beyond the verdict bodies above, and they apply to both APPROVE
 and REQUEST_CHANGES, including the empty-body cases: when the body is otherwise
 empty, they are the entire body.
+
+**The re-review fingerprint stamp (every submitted review; code-rendered).** Last,
+render this run's stamp with the verdict event you are about to submit:
+```
+cd gh-aw-review-lib && npx -y tsx workflows/review/lib/rereview-mode.ts stamp \
+  --verdict <APPROVE|REQUEST_CHANGES>
+```
+Append its single output line **verbatim** as the final line of the review body. It
+is a hidden HTML comment and renders as nothing; it is how the next run finds the
+last fully-reviewed fingerprint and the prior verdict, surviving cache eviction,
+branch protection's dismiss-stale-approvals, and comment-only submissions. Every
+submitted review carries it, whatever the depth and verdict, on first reviews and
+re-reviews alike. If the CLI prints nothing (the plan was not staged), submit
+without it; the next run then degrades to a full review, never to a cheaper one.
 
 Do NOT put the risk summary or common patterns in the review body. On approval
 they go in a separate PR comment (Step 7).
@@ -1185,7 +1303,10 @@ they go in a separate PR comment (Step 7).
 ## Step 7: On Approval — Post Risk and Patterns as a PR Comment
 
 **Only run this step when the verdict is APPROVE.** When requesting changes, skip
-it entirely and post no comment.
+it entirely and post no comment. Also skip it entirely on a reduced re-review
+depth (`scoped`, `flip-gated`, `fast`; Step 3): the reduced run computed no triage
+or risk data to compare, so the existing comment stands and `risksPatternsKey`
+carries forward unchanged (Step 9).
 
 When this PR has moderate- or high-risk files **or** common patterns (both from
 Step 3), post a single standalone PR comment — separate from the review and
@@ -1330,7 +1451,10 @@ fully explained by a common pattern above:
 ## Step 8: On Approval — Request the Owning Teams as Reviewers
 
 **Only run this step when the verdict is APPROVE.** Skip it entirely when
-requesting changes.
+requesting changes. Also skip it entirely when `correctness-reviewer` did not run
+this run (a `flip-gated` or `fast` re-review depth, Step 3): there are no fresh
+risk classifications to route on, and the anchoring full review already requested
+the owning teams.
 
 **Only request reviewers when the PR is not a draft** — that is, when the PR's
 `draft` field (from the PR details you fetched in Step 1) is `false`. Drafts are
@@ -1415,7 +1539,10 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
   lines only). Always record this, on every review, so the next run can scope its
   comments to hunks whose content is new since this review (Step 1 → Step 3). Record
   the full current signature, not just the hunks you commented on — "already reviewed"
-  means every hunk you looked at this run.
+  means every hunk you looked at this run. (This cache entry serves comment scoping
+  only; the divergence tripwire's authoritative fingerprint is the hidden stamp in
+  the review body, Step 6, which is exactly why the stamp exists: cache memory can
+  be evicted, the review body cannot.)
 - `wasDraft`: whether the PR was a draft at this review (its `draft` field).
   Record it on every review so Step 2 can compare it against the current draft
   status to detect the draft→ready transition and bypass the early-exit check
@@ -1427,8 +1554,9 @@ safe output. First copy the claim-audit input in beside the sub-agent outputs, s
 the artifact carries the whole audit trail: if Phase 3 ran, copy
 `/tmp/gh-aw/review/claims.json` to `/tmp/gh-aw/review/out/claims.json` (the
 candidate claims the validator was handed; `out/claim-validator.json` already
-records its verdicts, and `out/pre-existing.json` the provenance gate's
-set-asides). Then upload with **one** call whose `path` is the absolute directory
+records its verdicts, `out/pre-existing.json` the provenance gate's
+set-asides, and `out/snapped.json` its anchor-snap rewrites, when any
+occurred). Then upload with **one** call whose `path` is the absolute directory
 path `/tmp/gh-aw/review/out/` — always the whole directory, never an individual
 file: the tool copies what you pass into its staging area under its basename, and
 the workflow's `allowed-paths` match that staged `out/**` layout, so a single-file

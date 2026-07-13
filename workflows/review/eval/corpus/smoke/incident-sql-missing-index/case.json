@@ -7,7 +7,7 @@
         "live"
     ],
     "category": "incident-repro",
-    "description": "Repro of a production incident: a migration adds a column filtered by a hot query but no index, causing a table scan under load. The data-migrations lens must catch it and block.",
+    "description": "Repro of a production incident: a migration adds a column filtered by a hot query but no index, causing a table scan under load. The data-migrations lens must catch it and block. The defect spans two files, so the spec accepts an anchor at the migration OR at the hot query in order.ts (the 07-09 wave read 8/16 on this case, and every 'miss' was the same blocking finding anchored at the query site; a single-location spec measured anchor-site preference, not recall).",
     "changedFiles": [
         {
             "path": "db/migrations/20260601_add_status.sql",
@@ -76,7 +76,14 @@
                 ],
                 "lens": "data-migrations",
                 "lineStart": 1,
-                "lineEnd": 5
+                "lineEnd": 5,
+                "altLocations": [
+                    {
+                        "path": "src/models/order.ts",
+                        "lineStart": 10,
+                        "lineEnd": 18
+                    }
+                ]
             }
         ]
     },

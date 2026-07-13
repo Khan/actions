@@ -31,6 +31,13 @@ missing, stop and ask; do not improvise a defect table from the branch diff.
    - `workflow @ <ref>`: the shared review workflow pinned to a tag/branch
      (a candidate build or a prior release).
    - `hosted`: the Claude Code GitHub app review (`@claude review`).
+
+   A `workflow` arm may also carry a **ROUTING override**: extra or changed
+   lines for the arm branch's `.github/aw/review/ROUTING`. This is how the
+   re-review mode dial is priced; two arms at the SAME ref, one with
+   `re-review full` (control) and one with `re-review scoped` (or
+   `flip-gated`/`fast`), differ only in the mode line, so the lifecycle
+   tables isolate the dial's recall and dollar deltas.
 4. **Lifecycle plan** (optional): the push-2 content (fixes mixed with fresh
    seeds, plus their defect-table rows) and the push-3 content (everything
    fixed).
@@ -84,6 +91,15 @@ Push the operator's push-2 content to EVERY arm branch (identical commits),
 let each arm re-review, and collect again; repeat for push-3. Score each push
 separately: re-review behavior (thread resolution, duplicate suppression,
 scoping to new hunks) is half the point of the lifecycle.
+
+When an arm runs a reduced re-review mode (`re-review` in ROUTING), also
+record per push: the executed depth and tripwire fields from the run's
+`out/rereview-plan.json` artifact, and the billed cost, so the report can
+price depth against recall. If the lifecycle plan includes an adversarial
+push (a rewrite-after-approval or a payload onto a sparse PR; the
+`eval/lifecycle/` cases), score it as: the tripwire re-armed AND the payload
+got a full review; a reduced-mode arm that approves such a push without
+re-arming has failed the trial whatever it cost.
 
 ## Step 4: score
 

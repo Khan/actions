@@ -54,6 +54,14 @@ export type RereviewSection = {
     section: string;
     keptCount: number;
     resolvedCount: number;
+    /**
+     * How many kept threads carry a blocking opening label. The re-review
+     * mode dial's flip gate reads this: a reduced-depth run may flip a prior
+     * REQUEST_CHANGES to APPROVE only when it is zero (and, in `flip-gated`
+     * mode, no validated blocking finding survived), so the check is a number
+     * comparison, not a label judgment re-made at verdict time.
+     */
+    keptBlockingCount: number;
 };
 
 /**
@@ -173,7 +181,7 @@ export const renderRereviewSection = (
     const total = resolvedCount + keptCount;
 
     if (total === 0) {
-        return {section: "", keptCount, resolvedCount};
+        return {section: "", keptCount, resolvedCount, keptBlockingCount: 0};
     }
 
     if (keptCount === 0) {
@@ -181,7 +189,7 @@ export const renderRereviewSection = (
             resolvedCount === 1
                 ? "The 1 prior review thread is resolved."
                 : `All ${resolvedCount} prior review threads are resolved.`;
-        return {section, keptCount, resolvedCount};
+        return {section, keptCount, resolvedCount, keptBlockingCount: 0};
     }
 
     const asOf =
@@ -204,6 +212,7 @@ export const renderRereviewSection = (
         section: [header, ...entries.map(renderKeptLine)].join("\n"),
         keptCount,
         resolvedCount,
+        keptBlockingCount: entries.filter((entry) => entry.blocking).length,
     };
 };
 
@@ -296,7 +305,12 @@ export const runRereviewCli = (fs: RereviewCliFs): RereviewSection => {
 
     let result: RereviewSection;
     if (reconciler === undefined) {
-        result = {section: "", keptCount: 0, resolvedCount: 0};
+        result = {
+            section: "",
+            keptCount: 0,
+            resolvedCount: 0,
+            keptBlockingCount: 0,
+        };
     } else {
         const prContext = readJson(fs, PR_CONTEXT_PATH);
         const headSha =

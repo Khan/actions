@@ -25,7 +25,13 @@ import {
     type Finding,
     type Severity,
 } from "../../lib/finding-schema";
-import {LIVE_TAG, liveTreeErrors, parseLive, type CaseLive} from "./live";
+import {
+    LIVE_TAG,
+    liveTreeErrors,
+    liveTreeFileLineCounts,
+    parseLive,
+    type CaseLive,
+} from "./live";
 import type {ChangedFile, FileStatus, RiskTier} from "../../lib/router";
 import type {VerdictEvent} from "../../lib/render-comment";
 import type {DimensionStatus} from "../../lib/verdict";
@@ -40,7 +46,14 @@ export const SMOKE_TAG = "smoke";
 /** The live-enabled half of the case format lives in `./live`; re-exported
  * here so the loader stays the single public surface of the corpus format. */
 export {LIVE_TAG} from "./live";
-export type {CaseLive, LiveDefectSpec, LivePrContext} from "./live";
+export type {
+    CaseLive,
+    CaseRereview,
+    LiveDefectSpec,
+    LivePrContext,
+    LiveSpecLocation,
+    RereviewPriorThread,
+} from "./live";
 
 /** Default corpus root, relative to the repo checkout (the workflow's cwd). */
 export const CORPUS_ROOT = "workflows/review/eval/corpus";
@@ -183,6 +196,15 @@ export type CorpusCase = {
      * pre-gate behavior).
      */
     diff?: string;
+    /**
+     * Real (post-change) line counts of the changed files, keyed by path.
+     * Feeds the provenance gate's overflow snap window, whose past-the-end
+     * condition needs to know where each file actually ends. Live cases get
+     * this derived from their `tree/` at load time; a deterministic case
+     * that exercises overflow snapping declares it explicitly. Absent →
+     * near-miss snapping only.
+     */
+    fileLineCounts?: Record<string, number>;
     /**
      * Present iff the case is live-enabled (tagged {@link LIVE_TAG}): the
      * change content a real model run reviews. Ignored by the deterministic
@@ -609,6 +631,21 @@ export const parseCase = (raw: unknown, sourcePath: string): CorpusCase => {
         errors.push("diff: must be a non-empty string when present");
     }
 
+    const rawCounts = raw["fileLineCounts"];
+    if (rawCounts !== undefined) {
+        if (!isRecord(rawCounts)) {
+            errors.push("fileLineCounts: must be an object when present");
+        } else {
+            for (const [path, count] of Object.entries(rawCounts)) {
+                if (!Number.isInteger(count) || (count as number) < 1) {
+                    errors.push(
+                        `fileLineCounts["${path}"]: must be a positive integer`,
+                    );
+                }
+            }
+        }
+    }
+
     const live = parseLive(
         raw["live"],
         changedFiles,
@@ -652,6 +689,9 @@ export const parseCase = (raw: unknown, sourcePath: string): CorpusCase => {
     }
     if (isNonEmptyString(raw["diff"])) {
         result.diff = raw["diff"];
+    }
+    if (isRecord(rawCounts)) {
+        result.fileLineCounts = {...(rawCounts as Record<string, number>)};
     }
     if (live !== undefined) {
         result.live = live;
@@ -746,6 +786,19 @@ export const loadCorpus = (
     );
     for (const c of cases) {
         validateLiveTree(c, fs);
+        // A live case's real file line counts come from its tree (an explicit
+        // fileLineCounts field wins, for cases that pin them deliberately).
+        if (c.live !== undefined && c.fileLineCounts === undefined) {
+            const counts = liveTreeFileLineCounts(
+                c.live,
+                c.changedFiles,
+                c.sourcePath,
+                fs,
+            );
+            if (Object.keys(counts).length > 0) {
+                c.fileLineCounts = counts;
+            }
+        }
     }
 
     const seen = new Map<string, string>();

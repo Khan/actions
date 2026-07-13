@@ -1,15 +1,19 @@
 import {describe, it, expect} from "vitest";
 
+import {aggregateSamples, extractSamples} from "./aggregate";
 import {parseCase, type CorpusCase} from "./corpus/loader";
 import {
     adversarialGateFailures,
     diffRegressions,
+    majorityGateFailures,
     renderMarkdownReport,
+    renderMultiMarkdownReport,
     retryGateFlips,
     runArm,
     type AbReport,
     type ArmProduce,
     type ArmRunReport,
+    type MultiAbReport,
 } from "./live-ab";
 
 const DIFF = [
@@ -267,6 +271,133 @@ describe("retryGateFlips", () => {
     });
 });
 
+describe("majorityGateFailures", () => {
+    const adversarial = liveCase("adv-1", {
+        category: "adversarial-injection",
+    });
+
+    it("confirms a failure only on a strict majority of repeats", async () => {
+        const fail = await runArm("candidate", [adversarial], produceMiss, {
+            maxUsd: 100,
+        });
+        const pass = await runArm("candidate", [adversarial], produceHit(1), {
+            maxUsd: 100,
+        });
+        // 1/3 failed: a flake, not a confirmed failure.
+        expect(majorityGateFailures([fail, pass, pass])).toEqual([
+            {caseId: "adv-1", failedRepeats: 1, repeats: 3, confirmed: false},
+        ]);
+        // 2/3 failed: confirmed.
+        expect(majorityGateFailures([fail, fail, pass])[0]?.confirmed).toBe(
+            true,
+        );
+        // Exactly half (1/2) is NOT a strict majority.
+        expect(majorityGateFailures([fail, pass])[0]?.confirmed).toBe(false);
+        // No failures anywhere: nothing to report.
+        expect(majorityGateFailures([pass, pass])).toEqual([]);
+    });
+});
+
+describe("renderMultiMarkdownReport", () => {
+    const multiReport = async (
+        produces: ArmProduce[],
+    ): Promise<MultiAbReport> => {
+        const cases = [liveCase("case-1")];
+        const reports: AbReport[] = [];
+        for (const produce of produces) {
+            const baseline = await runArm("baseline", cases, produceHit(1), {
+                maxUsd: 100,
+            });
+            const candidate = await runArm("candidate", cases, produce, {
+                maxUsd: 100,
+            });
+            reports.push({
+                baseRef: "origin/main",
+                reviewMdSha: {
+                    baseline: "a".repeat(64),
+                    candidate: "b".repeat(64),
+                },
+                arms: {baseline, candidate},
+                regressions: diffRegressions(baseline, candidate),
+                adversarialFailures: [],
+                gateRetries: [],
+            });
+        }
+        const gate = majorityGateFailures(reports.map((r) => r.arms.candidate));
+        return {
+            repeatCount: reports.length,
+            repeats: reports,
+            aggregate: aggregateSamples(
+                reports.flatMap((r, i) => extractSamples(`repeat-${i + 1}`, r)),
+            ),
+            gate,
+            adversarialFailures: gate
+                .filter((g) => g.confirmed)
+                .map(
+                    (g) =>
+                        `${g.caseId}: failed ${g.failedRepeats}/${g.repeats} repeats`,
+                ),
+        };
+    };
+
+    it("renders pooled pass rates with intervals instead of single-run deltas", async () => {
+        const multi = await multiReport([produceHit(1), produceMiss]);
+        const markdown = renderMultiMarkdownReport(multi);
+        expect(markdown).toContain("## Review live A/B: 2 repeats");
+        // The candidate caught the spec in 1 of 2 repeats: a pass RATE row.
+        expect(markdown).toContain("| case-1:bug | 2/2 (100%)");
+        expect(markdown).toContain("| 1/2 (50%)");
+        expect(markdown).toContain("### Pooled");
+        expect(markdown).toContain(
+            "Adversarial hard gate: PASSED on the candidate arm in every repeat.",
+        );
+    });
+
+    it("reports minority gate flips as flakes and majorities as confirmed", async () => {
+        const adversarial = liveCase("adv-1", {
+            category: "adversarial-injection",
+        });
+        const armFor = async (produce: ArmProduce): Promise<ArmRunReport> =>
+            runArm("candidate", [adversarial], produce, {maxUsd: 100});
+        const fail = await armFor(produceMiss);
+        const pass = await armFor(produceHit(1));
+        const gate = majorityGateFailures([fail, pass, pass]);
+        const markdown = renderMultiMarkdownReport({
+            repeatCount: 3,
+            repeats: [],
+            aggregate: aggregateSamples([]),
+            gate,
+            adversarialFailures: [],
+        });
+        expect(markdown).toContain(
+            "- adv-1: failed 1/3 repeats: minority flip, treated as run-to-run flake",
+        );
+        const confirmed = majorityGateFailures([fail, fail, pass]);
+        expect(
+            renderMultiMarkdownReport({
+                repeatCount: 3,
+                repeats: [],
+                aggregate: aggregateSamples([]),
+                gate: confirmed,
+                adversarialFailures: ["adv-1: failed 2/3 repeats"],
+            }),
+        ).toContain("- adv-1: failed 2/3 repeats: FAILURE CONFIRMED");
+    });
+
+    it("round-trips a MultiAbReport through the aggregate extractor", async () => {
+        // The --repeats artifact must stay poolable across dispatches: the
+        // aggregate CLI reads the `repeats` field of a multi-run report.
+        const multi = await multiReport([produceHit(1), produceHit(1)]);
+        const samples = extractSamples(
+            "multi.json",
+            JSON.parse(JSON.stringify(multi)),
+        );
+        expect(samples.length).toBe(2);
+        const pooled = aggregateSamples(samples);
+        expect(pooled.arms.candidate.pooled.recall.numerator).toBe(2);
+    });
+});
+
 describe("renderMarkdownReport", () => {
     it("renders the arm table, regressions, gate status, and skips", async () => {
         const cases = [liveCase("case-1"), liveCase("case-2")];
@@ -294,9 +425,17 @@ describe("renderMarkdownReport", () => {
         expect(markdown).toContain("Adversarial hard gate: PASSED");
         expect(markdown).toContain("SKIPPED (budget exhausted");
         expect(markdown).toContain("- candidate:case-2");
-        // The stability footer closes every report, so a reader always sees
-        // which rows are single-run signals and which are cross-run trends.
-        expect(markdown.trimEnd().endsWith("load-bearing metric.*")).toBe(true);
+        // The stability footer plus the measured noise floor close every
+        // report, so a reader always sees which rows are single-run signals
+        // and prices any delta against measured wobble, not prose.
+        expect(markdown).toContain("load-bearing metric.*");
+        expect(markdown).toContain(
+            "Measured noise floor (identical arms, run 29069228968",
+        );
+        expect(markdown).toContain("must-catch recall 54%-86% (sd 10%)");
+        expect(markdown.trimEnd().endsWith("resolve smaller effects.*")).toBe(
+            true,
+        );
     });
 
     it("marks a failed adversarial gate", () => {

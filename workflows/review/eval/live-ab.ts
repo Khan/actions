@@ -23,12 +23,30 @@
  *                             default in CI; a full-eval label lifts it)
  *     [--max-usd <n>]         total hard budget across both arms (default 40)
  *     [--no-judge]            skip judge quality scoring
+ *     [--no-match-arbiter]    deterministic spec matching only (skip the
+ *                             capped Haiku fallback arbiter on unmatched
+ *                             specs; see match-arbiter.ts)
  *     [--stage-root <dir>]    staging root (default: a fresh temp dir)
  *     [--out <path>]          JSON report path (default out/live-ab-report.json)
+ *     [--re-review-mode <m>]  re-review mode for the CANDIDATE arm on open-PR
+ *                             (rereview) cases: full|scoped|flip-gated|fast.
+ *                             The baseline always runs full, so the report
+ *                             prices the mode dial (recall and dollars, same
+ *                             prompt, mode the only difference). Default full.
  *     [--force-arms]          run both arms even when review.md is
  *                             byte-identical (a deliberate wobble control);
  *                             without it, identical arms short-circuit to a
  *                             "no reviewable delta" report at zero cost.
+ *     [--repeats <n>]         run every selected case n times per arm in this
+ *                             one dispatch and report pooled per-case pass
+ *                             rates with binomial intervals (aggregate.ts)
+ *                             instead of single-run percentages; the memo's
+ *                             "targeted repeats" powered run (e.g. --cases
+ *                             <the two anchor-fragile cases> --repeats 10).
+ *                             The adversarial gate is decided by strict
+ *                             majority across repeats (the repeat structure
+ *                             replaces the single-run best-of-three retry).
+ *                             Default 1 (single-run behavior, unchanged).
  */
 
 /* eslint-disable no-console -- CLI entry point; console IS the interface. */
@@ -40,53 +58,54 @@ import {tmpdir} from "node:os";
 import {dirname} from "node:path";
 
 import {extractAgents} from "./agent-extract";
+import {aggregateSamples, extractSamples} from "./aggregate";
 import {SMOKE_TAG, loadLiveCorpus, type CorpusCase} from "./corpus/loader";
 import {aggregate, buildCorpusRequests} from "./judge";
 import {liveJudgeModel} from "./judge-live-model";
 import {
+    renderMarkdownReport,
+    renderMultiMarkdownReport,
+    type AbReport,
+    type ArmId,
+    type ArmProduce,
+    type ArmRunReport,
+    type GateMajority,
+    type GateRetry,
+    type GateRetryAttempt,
+    type MultiAbReport,
+} from "./live-ab-report";
+import {
     computeLiveMetrics,
     matchCase,
     type LiveCaseRun,
-    type LiveMetricsReport,
+    type MatchOptions,
 } from "./live-match";
-import {produceLive, type PerAgentReport} from "./live-producer";
+import {produceLive} from "./live-producer";
 import {sdkRunner} from "./live-runner";
+import {haikuMatchArbiter} from "./match-arbiter";
+import {
+    computeRereviewMetrics,
+    scoreRereview,
+    type RereviewCaseScore,
+} from "./rereview-match";
 import {runCase} from "./runner";
-import type {CaseVerification, RecordedFinding} from "./corpus/loader";
+import {reviewMdHasAnchorSnap} from "../lib/provenance";
+import type {ReReviewMode} from "../lib/routing-config";
 
-export type ArmId = "baseline" | "candidate";
-
-/** What an arm's producer must return per case (the produceLive subset). */
-export type ArmProduceResult = {
-    findings: RecordedFinding[];
-    validation: CaseVerification[];
-    perAgent: PerAgentReport[];
-};
-
-export type ArmProduce = (corpusCase: CorpusCase) => Promise<ArmProduceResult>;
-
-export type ArmRunReport = {
-    arm: ArmId;
-    runs: LiveCaseRun[];
-    metrics: LiveMetricsReport;
-    /** Case ids never dispatched because the budget ran out. */
-    skippedCases: string[];
-    usd: number;
-    wallMs: number;
-    perCase: {
-        caseId: string;
-        usd: number;
-        verdict: string;
-        expected: string;
-        caught: number;
-        missed: string[];
-        /** `<agent>: <reason>` per failed agent (diagnosable from the report). */
-        failedAgents: string[];
-    }[];
-    judge?: {meanQuality: number; verdictCounts: Record<string, number>};
-    /** Fixed-format note when judge scoring failed; metrics still stand. */
-    judgeError?: string;
-};
+// The report shapes and renderers live in ./live-ab-report; re-exported so
+// existing consumers keep one import surface for the runner.
+export {renderMarkdownReport, renderMultiMarkdownReport};
+export type {
+    AbReport,
+    ArmId,
+    ArmProduce,
+    ArmProduceResult,
+    ArmRunReport,
+    GateMajority,
+    GateRetry,
+    GateRetryAttempt,
+    MultiAbReport,
+} from "./live-ab-report";
 
 /* -------------------------------------------------------------------------- */
 /* One arm                                                                    */
@@ -98,17 +117,25 @@ export type ArmRunReport = {
  * the remaining cases are recorded as skipped and the arm still reports (a
  * run that dies at a cap with nothing emitted is the failure mode the plan
  * forbids).
+ *
+ * `anchorSnap` sets the arm's provenance-gate emulation (see
+ * {@link reviewMdHasAnchorSnap}): the deterministic pipeline is shared by
+ * both arms, so the gate's anchor-snap fallback follows each arm's OWN
+ * review.md version — the one deliberate exception to "everything but
+ * review.md is the candidate's", and what lets the A/B price the snap change
+ * itself (baseline pre-snap, candidate snapping).
  */
 export const runArm = async (
     arm: ArmId,
     cases: CorpusCase[],
     produce: ArmProduce,
-    options: {maxUsd: number},
+    options: {maxUsd: number; match?: MatchOptions; anchorSnap?: boolean},
 ): Promise<ArmRunReport> => {
     const started = Date.now();
     const runs: LiveCaseRun[] = [];
     const perCase: ArmRunReport["perCase"] = [];
     const skippedCases: string[] = [];
+    const scoredRereviews: {caseId: string; score: RereviewCaseScore}[] = [];
     let usd = 0;
     let stopped = false;
 
@@ -130,9 +157,29 @@ export const runArm = async (
         const result = runCase(corpusCase, {
             produceFindings: () => produced.findings,
             validation: produced.validation,
+            ...(options.anchorSnap !== undefined
+                ? {anchorSnap: options.anchorSnap}
+                : {}),
         });
-        const match = await matchCase(corpusCase, result);
+        const match = await matchCase(corpusCase, result, options.match);
         runs.push({corpusCase, result, match});
+
+        // Open-PR (rereview) cases: score the reconciler's decision and the
+        // fresh findings' duplicate rate against the case's ground truth.
+        let rereviewScore: RereviewCaseScore | undefined;
+        const rereview = corpusCase.live?.rereview;
+        if (rereview !== undefined) {
+            rereviewScore = scoreRereview(
+                rereview,
+                produced.reconciliation,
+                produced.findings.map((recorded) => recorded.finding),
+            );
+            scoredRereviews.push({
+                caseId: corpusCase.id,
+                score: rereviewScore,
+            });
+        }
+
         perCase.push({
             caseId: corpusCase.id,
             usd: caseUsd,
@@ -143,6 +190,7 @@ export const runArm = async (
             failedAgents: produced.perAgent
                 .filter((a) => a.failed !== undefined)
                 .map((a) => `${a.name}: ${a.failed}`),
+            ...(rereviewScore !== undefined ? {rereview: rereviewScore} : {}),
         });
     }
 
@@ -154,6 +202,9 @@ export const runArm = async (
         usd,
         wallMs: Date.now() - started,
         perCase,
+        ...(scoredRereviews.length > 0
+            ? {rereview: computeRereviewMetrics(scoredRereviews)}
+            : {}),
     };
 };
 
@@ -223,24 +274,40 @@ export const adversarialGateFailures = (
     return failures;
 };
 
+/**
+ * The adversarial gate over a repeated run: per case, how many repeats'
+ * candidate arms failed, confirmed by STRICT majority. One flip among n
+ * repeats is the run-to-run flake the single-run path spends a best-of-three
+ * retry on; with repeats the evidence is already bought, so no retry runs and
+ * the gate fails only when more repeats failed a case than passed it.
+ */
+export const majorityGateFailures = (
+    candidates: Pick<ArmRunReport, "runs">[],
+): GateMajority[] => {
+    const failCounts = new Map<string, number>();
+    for (const candidate of candidates) {
+        const failedCases = new Set(
+            adversarialGateFailures(candidate).map((f) =>
+                f.slice(0, f.indexOf(":")),
+            ),
+        );
+        for (const caseId of failedCases) {
+            failCounts.set(caseId, (failCounts.get(caseId) ?? 0) + 1);
+        }
+    }
+    return [...failCounts.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([caseId, failedRepeats]) => ({
+            caseId,
+            failedRepeats,
+            repeats: candidates.length,
+            confirmed: failedRepeats * 2 > candidates.length,
+        }));
+};
+
 /* -------------------------------------------------------------------------- */
 /* Gate-flip retry                                                            */
 /* -------------------------------------------------------------------------- */
-
-export type GateRetryAttempt = {
-    pass: boolean;
-    /** Gate failures this attempt produced (empty when pass). */
-    failures: string[];
-    usd: number;
-};
-
-export type GateRetry = {
-    caseId: string;
-    /** Re-run attempts, in order; the second is skipped once majority-fail is settled. */
-    attempts: GateRetryAttempt[];
-    /** True when 2 of 3 runs (original + retries) passed: a run-to-run flake. */
-    settledPass: boolean;
-};
 
 /**
  * Best-of-three retry over the cases that flipped the adversarial hard gate,
@@ -255,6 +322,8 @@ export const retryGateFlips = async (
     candidate: ArmRunReport,
     cases: CorpusCase[],
     produceForAttempt: (attempt: number) => ArmProduce,
+    match?: MatchOptions,
+    anchorSnap?: boolean,
 ): Promise<GateRetry[]> => {
     const failures = adversarialGateFailures(candidate);
     const failingIds = [
@@ -273,10 +342,11 @@ export const retryGateFlips = async (
             const result = runCase(corpusCase, {
                 produceFindings: () => produced.findings,
                 validation: produced.validation,
+                ...(anchorSnap !== undefined ? {anchorSnap} : {}),
             });
-            const match = await matchCase(corpusCase, result);
+            const matched = await matchCase(corpusCase, result, match);
             const attemptFailures = adversarialGateFailures({
-                runs: [{corpusCase, result, match}],
+                runs: [{corpusCase, result, match: matched}],
             });
             attempts.push({
                 pass: attemptFailures.length === 0,
@@ -294,231 +364,6 @@ export const retryGateFlips = async (
         });
     }
     return retries;
-};
-
-/* -------------------------------------------------------------------------- */
-/* Report rendering                                                           */
-/* -------------------------------------------------------------------------- */
-
-export type AbReport = {
-    baseRef: string;
-    reviewMdSha: {baseline: string; candidate: string};
-    arms: {baseline: ArmRunReport; candidate: ArmRunReport};
-    regressions: {lost: string[]; gained: string[]};
-    /** Confirmed failures only: flips settled as flakes by retry are removed. */
-    adversarialFailures: string[];
-    /** Best-of-three re-runs of the cases that flipped the hard gate. */
-    gateRetries: GateRetry[];
-};
-
-/** `caseId:specKey` -> drop bucket, for every found-but-dropped miss. */
-const dropClassByKey = (arm: ArmRunReport): Map<string, string> => {
-    const map = new Map<string, string>();
-    for (const {corpusCase, match} of arm.runs) {
-        for (const detail of match.missedDetail) {
-            if (detail.droppedBy !== undefined) {
-                map.set(`${corpusCase.id}:${detail.specKey}`, detail.droppedBy);
-            }
-        }
-    }
-    return map;
-};
-
-const pct = (value: number): string => `${(value * 100).toFixed(0)}%`;
-
-/**
- * Which report rows a reader may act on from ONE run. Measured on the phase 4
- * acceptance pair: on the no-op control, recall, verdict agreement, the
- * regression lists, and the adversarial gate reproduced exactly while judge
- * quality moved 0.11 and noise 5 points on live-agent jitter alone; on the
- * weakened-reviewer arm, judge quality went UP 0.16 while recall fell 17
- * points (fewer, surer comments each score better). So judge quality is not
- * just jittery, it can move opposite to review health; recall against the
- * labeled specs is the load-bearing metric.
- */
-const STABILITY_FOOTER =
-    "*Single-run-stable rows: recall, verdict agreement, regressions, " +
-    "adversarial gate. Judge quality and noise are not: they jitter " +
-    "run-to-run at this corpus size, and a regressed reviewer can score " +
-    "HIGHER on judge quality (fewer, surer comments each read better). " +
-    "Recall against the labeled specs is the load-bearing metric.*";
-
-export const renderMarkdownReport = (report: AbReport): string => {
-    const {baseline, candidate} = report.arms;
-    const row = (
-        label: string,
-        base: string,
-        cand: string,
-        delta = "",
-    ): string => `| ${label} | ${base} | ${cand} | ${delta} |`;
-    const metric = (
-        label: string,
-        pick: (arm: ArmRunReport) => number,
-        format: (v: number) => string = pct,
-    ): string =>
-        row(
-            label,
-            format(pick(baseline)),
-            format(pick(candidate)),
-            (pick(candidate) - pick(baseline) >= 0 ? "+" : "") +
-                format(pick(candidate) - pick(baseline)),
-        );
-
-    const lines = [
-        "## Review live A/B",
-        "",
-        `Baseline: \`${
-            report.baseRef
-        }\` (review.md ${report.reviewMdSha.baseline.slice(0, 12)}); ` +
-            `candidate: working tree (review.md ${report.reviewMdSha.candidate.slice(
-                0,
-                12,
-            )}).`,
-        "",
-        "| Metric | Baseline | Candidate | Delta |",
-        "| --- | --- | --- | --- |",
-        metric("Must-catch recall", (a) => a.metrics.mustCatchRecall.rate),
-        metric("Verdict agreement", (a) => a.metrics.verdictAgreement.rate),
-        metric("Noise (unmatched posted)", (a) => a.metrics.noise.rate),
-        row(
-            "Clean false flags",
-            String(baseline.metrics.cleanFalseFlag.count),
-            String(candidate.metrics.cleanFalseFlag.count),
-        ),
-        ...(baseline.judge && candidate.judge
-            ? [
-                  row(
-                      "Judge mean quality",
-                      baseline.judge.meanQuality.toFixed(2),
-                      candidate.judge.meanQuality.toFixed(2),
-                      (candidate.judge.meanQuality -
-                          baseline.judge.meanQuality >=
-                      0
-                          ? "+"
-                          : "") +
-                          (
-                              candidate.judge.meanQuality -
-                              baseline.judge.meanQuality
-                          ).toFixed(2),
-                  ),
-              ]
-            : []),
-        row(
-            "Cost",
-            `$${baseline.usd.toFixed(2)}`,
-            `$${candidate.usd.toFixed(2)}`,
-        ),
-        row(
-            "Wall clock",
-            `${Math.round(baseline.wallMs / 1000)}s`,
-            `${Math.round(candidate.wallMs / 1000)}s`,
-        ),
-        row(
-            "Cases run / skipped",
-            `${baseline.runs.length} / ${baseline.skippedCases.length}`,
-            `${candidate.runs.length} / ${candidate.skippedCases.length}`,
-        ),
-        row(
-            "Misses found-but-dropped",
-            String(dropClassByKey(baseline).size),
-            String(dropClassByKey(candidate).size),
-        ),
-        "",
-    ];
-
-    // A regression that was PRODUCED and then died at a gate is a different
-    // defect class (anchoring discipline, gate calibration) than a true miss
-    // (recall); annotate each lost spec so it routes to the right fix.
-    const candidateDrops = dropClassByKey(candidate);
-    if (report.regressions.lost.length > 0) {
-        lines.push(
-            "### Regressions (baseline caught, candidate missed)",
-            "",
-            ...report.regressions.lost.map((key) => {
-                const bucket = candidateDrops.get(key);
-                return bucket === undefined
-                    ? `- ${key} (not found)`
-                    : `- ${key} (found but dropped at the ${bucket} gate)`;
-            }),
-            "",
-        );
-    }
-    if (report.regressions.gained.length > 0) {
-        lines.push(
-            "### Improvements (candidate caught, baseline missed)",
-            "",
-            ...report.regressions.gained.map((key) => `- ${key}`),
-            "",
-        );
-    }
-    lines.push(
-        report.adversarialFailures.length === 0
-            ? "Adversarial hard gate: PASSED on the candidate arm."
-            : [
-                  "### Adversarial hard gate: FAILED on the candidate arm",
-                  "",
-                  ...report.adversarialFailures.map((f) => `- ${f}`),
-              ].join("\n"),
-        "",
-    );
-    if (report.gateRetries.length > 0) {
-        lines.push(
-            "### Gate flips retried (best of three, flipped cases only)",
-            "",
-            ...report.gateRetries.map((retry) => {
-                const passes = retry.attempts.filter((a) => a.pass).length;
-                const usd = retry.attempts.reduce((sum, a) => sum + a.usd, 0);
-                const outcome = retry.settledPass
-                    ? "settled as a run-to-run flake; the gate does not fail on this case"
-                    : "failure confirmed";
-                return `- ${retry.caseId}: original run failed, ${passes}/${
-                    retry.attempts.length
-                } retries passed; ${outcome} ($${usd.toFixed(2)} retry spend)`;
-            }),
-            "",
-        );
-    }
-    const skipped = [
-        ...baseline.skippedCases.map((id) => `baseline:${id}`),
-        ...candidate.skippedCases.map((id) => `candidate:${id}`),
-    ];
-    if (skipped.length > 0) {
-        lines.push(
-            "### SKIPPED (budget exhausted before dispatch)",
-            "",
-            ...skipped.map((s) => `- ${s}`),
-            "",
-        );
-    }
-    const judgeErrors = [
-        ...(baseline.judgeError !== undefined
-            ? [`baseline: ${baseline.judgeError}`]
-            : []),
-        ...(candidate.judgeError !== undefined
-            ? [`candidate: ${candidate.judgeError}`]
-            : []),
-    ];
-    if (judgeErrors.length > 0) {
-        lines.push(
-            "### Judge scoring failed (metrics above still stand)",
-            "",
-            ...judgeErrors.map((e) => `- ${e}`),
-            "",
-        );
-    }
-    const failedAgents = [...baseline.perCase, ...candidate.perCase].flatMap(
-        (c) => c.failedAgents.map((agent) => `${c.caseId}: ${agent} failed`),
-    );
-    if (failedAgents.length > 0) {
-        lines.push(
-            "### Agent failures",
-            "",
-            ...failedAgents.map((f) => `- ${f}`),
-            "",
-        );
-    }
-    lines.push(STABILITY_FOOTER, "");
-    return lines.join("\n");
 };
 
 /* -------------------------------------------------------------------------- */
@@ -620,49 +465,62 @@ const main = async (): Promise<void> => {
         throw new Error("no live cases selected");
     }
 
+    // The candidate arm's re-review mode on open-PR (rereview) cases; the
+    // baseline always runs full, so a non-full flag prices the mode dial.
+    const rawMode = argValue("--re-review-mode") ?? "full";
+    if (!["full", "scoped", "flip-gated", "fast"].includes(rawMode)) {
+        throw new Error(`unknown --re-review-mode "${rawMode}"`);
+    }
+    const candidateMode = rawMode as ReReviewMode;
+
+    const repeats = Number(argValue("--repeats") ?? "1");
+    if (!Number.isInteger(repeats) || repeats < 1) {
+        throw new Error("--repeats must be a positive integer");
+    }
+
+    // The fallback match arbiter (Haiku, capped, same-file, audited via
+    // `via: "fallback"`), on unless opted out: it only runs for specs the
+    // deterministic matcher left unmatched, and an arbiter failure degrades
+    // to a non-match. Both arms share the one matcher, so it never biases
+    // the A/B delta.
+    const match: MatchOptions | undefined = process.argv.includes(
+        "--no-match-arbiter",
+    )
+        ? undefined
+        : {
+              fallback: haikuMatchArbiter({
+                  onError: (message) => console.error(message),
+              }),
+          };
+
+    // Each arm's provenance gate emulates that arm's OWN review.md version:
+    // the anchor-snap fallback is keyed on the marker the gate step carries
+    // once it documents the rule. A baseline built from a pre-snap prompt
+    // replays the pre-snap gate, so the snap change itself is priceable by
+    // the A/B; once both prompts carry the rule, both arms snap and the A/B
+    // is back to measuring prompt deltas alone.
+    const armSnap = {
+        baseline: reviewMdHasAnchorSnap(baselineMd),
+        candidate: reviewMdHasAnchorSnap(candidateMd),
+    };
+
     const runner = sdkRunner();
     const armProduce =
-        (arm: ArmId, markdown: string): ArmProduce =>
+        (stage: string, markdown: string, mode: ReReviewMode): ArmProduce =>
         (corpusCase) =>
             produceLive(corpusCase, extractAgents(markdown), {
                 runner,
-                stageDir: `${stageRoot}/${arm}/${corpusCase.id}`,
+                stageDir: `${stageRoot}/${stage}/${corpusCase.id}`,
+                reReviewMode: mode,
             });
 
-    // Sequential arms, halving the budget, so a runaway baseline cannot
-    // starve the candidate.
-    const baseline = await runArm(
-        "baseline",
-        cases,
-        armProduce("baseline", baselineMd),
-        {maxUsd: maxUsd / 2},
-    );
-    const candidate = await runArm(
-        "candidate",
-        cases,
-        armProduce("candidate", candidateMd),
-        {maxUsd: maxUsd / 2},
-    );
-
-    // Retry the flip, not the run: a hard-gate flip re-runs only the flipped
-    // cases (fresh staging per attempt so re-materializing cannot collide),
-    // best of three, before the gate may fail the arm. Retried runs are
-    // recorded but never replace the original in the metrics.
-    const gateRetries = await retryGateFlips(
-        candidate,
-        cases,
-        (attempt): ArmProduce =>
-            (corpusCase) =>
-                produceLive(corpusCase, extractAgents(candidateMd), {
-                    runner,
-                    stageDir: `${stageRoot}/candidate-retry${attempt}/${corpusCase.id}`,
-                }),
-    );
-    const flakes = new Set(
-        gateRetries.filter((r) => r.settledPass).map((r) => r.caseId),
-    );
-
-    if (withJudge) {
+    const judgeBothArms = async (
+        baseline: ArmRunReport,
+        candidate: ArmRunReport,
+    ): Promise<void> => {
+        if (!withJudge) {
+            return;
+        }
         // Judge scoring is additive: a failure here must degrade to a
         // report without quality scores, never kill a run whose arms have
         // already spent their budget (the plan's standing rule).
@@ -678,25 +536,179 @@ const main = async (): Promise<void> => {
                 );
             }
         }
-    }
-
-    const report: AbReport = {
-        baseRef,
-        reviewMdSha: {
-            baseline: sha256(baselineMd),
-            candidate: sha256(candidateMd),
-        },
-        arms: {baseline, candidate},
-        regressions: diffRegressions(baseline, candidate),
-        adversarialFailures: adversarialGateFailures(candidate).filter(
-            (failure) => !flakes.has(failure.slice(0, failure.indexOf(":"))),
-        ),
-        gateRetries,
     };
 
+    // Rolling budget: each arm-run's slice is the REMAINING budget divided
+    // by the arm-runs still to go. A runaway early arm still cannot starve
+    // what follows (its slice is capped), but a cheap early arm donates its
+    // headroom forward instead of stranding it; equal fixed slices caused
+    // budget-skip asymmetry on the first noise-floor run (38/36 of 42
+    // case-runs), which inflates the very bands that run existed to measure.
+    const totalArmRuns = 2 * repeats;
+    let armRunsDone = 0;
+    let spentUsd = 0;
+    const nextArmBudget = (): number =>
+        Math.max(0, maxUsd - spentUsd) / (totalArmRuns - armRunsDone);
+    const trackArm = (report: ArmRunReport): ArmRunReport => {
+        armRunsDone += 1;
+        spentUsd += report.usd;
+        return report;
+    };
+
+    // The ruler stamp: which matcher and which corpus produced this
+    // report's rates. Comparisons across runs are only valid when the stamp
+    // matches (see ReportProvenance in live-ab-report.ts).
+    const provenance = {
+        matcher:
+            match !== undefined ? "deterministic+arbiter" : "deterministic",
+        corpusSha: sha256(JSON.stringify(cases)),
+        caseCount: cases.length,
+    };
+
+    /**
+     * One full arm pair. `suffix` isolates staging across repeats;
+     * `withRetry` is the single-run best-of-three (a repeated run buys its
+     * flake evidence from the repeat structure instead).
+     */
+    const runPair = async (
+        suffix: string,
+        withRetry: boolean,
+    ): Promise<AbReport> => {
+        const baseline = trackArm(
+            await runArm(
+                "baseline",
+                cases,
+                armProduce(`baseline${suffix}`, baselineMd, "full"),
+                {
+                    maxUsd: nextArmBudget(),
+                    anchorSnap: armSnap.baseline,
+                    ...(match !== undefined ? {match} : {}),
+                },
+            ),
+        );
+        const candidate = trackArm(
+            await runArm(
+                "candidate",
+                cases,
+                armProduce(`candidate${suffix}`, candidateMd, candidateMode),
+                {
+                    maxUsd: nextArmBudget(),
+                    anchorSnap: armSnap.candidate,
+                    ...(match !== undefined ? {match} : {}),
+                },
+            ),
+        );
+
+        // Retry the flip, not the run: a hard-gate flip re-runs only the
+        // flipped cases (fresh staging per attempt so re-materializing
+        // cannot collide), best of three, before the gate may fail the arm.
+        // Retried runs are recorded but never replace the original in the
+        // metrics.
+        const gateRetries = withRetry
+            ? await retryGateFlips(
+                  candidate,
+                  cases,
+                  (attempt): ArmProduce =>
+                      (corpusCase) =>
+                          produceLive(corpusCase, extractAgents(candidateMd), {
+                              runner,
+                              stageDir: `${stageRoot}/candidate${suffix}-retry${attempt}/${corpusCase.id}`,
+                          }),
+                  match,
+                  armSnap.candidate,
+              )
+            : [];
+        const flakes = new Set(
+            gateRetries.filter((r) => r.settledPass).map((r) => r.caseId),
+        );
+
+        await judgeBothArms(baseline, candidate);
+
+        return {
+            baseRef,
+            reviewMdSha: {
+                baseline: sha256(baselineMd),
+                candidate: sha256(candidateMd),
+            },
+            provenance,
+            arms: {baseline, candidate},
+            regressions: diffRegressions(baseline, candidate),
+            adversarialFailures: adversarialGateFailures(candidate).filter(
+                (failure) =>
+                    !flakes.has(failure.slice(0, failure.indexOf(":"))),
+            ),
+            gateRetries,
+        };
+    };
+
+    let payload: AbReport | MultiAbReport;
+    let markdown: string;
+    let candidateRunCount: number;
+    let adversarialFailureCount: number;
+
+    if (repeats === 1) {
+        const report = await runPair("", true);
+        payload = report;
+        markdown = renderMarkdownReport(report);
+        candidateRunCount = report.arms.candidate.runs.length;
+        adversarialFailureCount = report.adversarialFailures.length;
+    } else {
+        const reports: AbReport[] = [];
+        for (let repeat = 1; repeat <= repeats; repeat += 1) {
+            reports.push(await runPair(`-r${repeat}`, false));
+            // Checkpoint after every repeat: a multi-repeat run carries tens
+            // of dollars of spend, and a crash or cancellation on repeat n
+            // must not forfeit repeats 1..n-1 (a run that dies with nothing
+            // emitted is the failure mode the plan forbids). The final write
+            // below replaces this with the full report.
+            mkdirSync(dirname(outPath), {recursive: true});
+            writeFileSync(
+                outPath,
+                JSON.stringify(
+                    {
+                        repeatCount: repeats,
+                        completedRepeats: reports.length,
+                        repeats: reports,
+                    },
+                    null,
+                    2,
+                ),
+            );
+        }
+        // The repeat reports are already the artifact shape aggregate.ts
+        // pools, so the one-dispatch powered run and the N-dispatch drift
+        // pool go through the identical code path.
+        const aggregate = aggregateSamples(
+            reports.flatMap((report, i) =>
+                extractSamples(`repeat-${i + 1}`, report),
+            ),
+        );
+        const gate = majorityGateFailures(
+            reports.map((report) => report.arms.candidate),
+        );
+        const multi: MultiAbReport = {
+            repeatCount: repeats,
+            repeats: reports,
+            aggregate,
+            gate,
+            adversarialFailures: gate
+                .filter((g) => g.confirmed)
+                .map(
+                    (g) =>
+                        `${g.caseId}: failed ${g.failedRepeats}/${g.repeats} repeats`,
+                ),
+        };
+        payload = multi;
+        markdown = renderMultiMarkdownReport(multi);
+        candidateRunCount = reports.reduce(
+            (sum, report) => sum + report.arms.candidate.runs.length,
+            0,
+        );
+        adversarialFailureCount = multi.adversarialFailures.length;
+    }
+
     mkdirSync(dirname(outPath), {recursive: true});
-    writeFileSync(outPath, JSON.stringify(report, null, 2));
-    const markdown = renderMarkdownReport(report);
+    writeFileSync(outPath, JSON.stringify(payload, null, 2));
     // A sibling .md rides along for CI's sticky PR comment.
     writeFileSync(outPath.replace(/\.json$/, ".md"), `${markdown}\n`);
     console.log(markdown);
@@ -705,11 +717,11 @@ const main = async (): Promise<void> => {
         writeFileSync(summaryPath, `${markdown}\n`, {flag: "a"});
     }
 
-    if (candidate.runs.length === 0) {
+    if (candidateRunCount === 0) {
         console.error("no case was scored on the candidate arm");
         process.exit(1);
     }
-    if (report.adversarialFailures.length > 0) {
+    if (adversarialFailureCount > 0) {
         console.error("adversarial hard gate FAILED on the candidate arm");
         process.exit(1);
     }

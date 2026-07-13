@@ -286,7 +286,12 @@ describe("runRereviewCli", () => {
             [THREADS]: JSON.stringify([]),
         });
         const result = runRereviewCli(fs);
-        expect(result).toEqual({section: "", keptCount: 0, resolvedCount: 0});
+        expect(result).toEqual({
+            section: "",
+            keptCount: 0,
+            resolvedCount: 0,
+            keptBlockingCount: 0,
+        });
         expect(JSON.parse(written[RESULT])).toEqual(result);
     });
 
@@ -309,5 +314,43 @@ describe("runRereviewCli", () => {
         const result = runRereviewCli(fs);
         expect(result.keptCount).toBe(1);
         expect(result.section).toContain("still unaddressed");
+    });
+});
+
+describe("keptBlockingCount (the mode dial's flip-gate input)", () => {
+    const thread = (id: string, label: string, line: number): StagedThread => ({
+        thread_id: id,
+        path: "src/handler.ts",
+        line,
+        comments: [{author: "github-actions[bot]", body: `**${label}:** x`}],
+    });
+
+    it("counts only kept threads whose opening label blocks", () => {
+        const result = renderRereviewSection({
+            threads: [
+                thread("t1", "issue (blocking)", 10),
+                thread("t2", "suggestion (non-blocking)", 20),
+                thread("t3", "todo (blocking)", 30),
+            ],
+            reconciler: {resolve: ["t2"], keep: ["t1", "t3"]},
+        });
+        expect(result.keptCount).toBe(2);
+        expect(result.keptBlockingCount).toBe(2);
+    });
+
+    it("is zero when every kept thread is non-blocking (flip may proceed)", () => {
+        const result = renderRereviewSection({
+            threads: [thread("t1", "nitpick (non-blocking)", 5)],
+            reconciler: {resolve: [], keep: ["t1"]},
+        });
+        expect(result.keptBlockingCount).toBe(0);
+    });
+
+    it("is zero when everything is resolved", () => {
+        const result = renderRereviewSection({
+            threads: [thread("t1", "issue (blocking)", 5)],
+            reconciler: {resolve: ["t1"], keep: []},
+        });
+        expect(result.keptBlockingCount).toBe(0);
     });
 });
