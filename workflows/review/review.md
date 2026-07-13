@@ -155,6 +155,11 @@ network:
 # (Settings → Secrets and variables → Actions): GH_AW_OTEL_SENTRY_ENDPOINT — the Sentry
 # OTLP traces endpoint with `/v1/traces` stripped (…/api/<project>/integration/otlp) — and
 # GH_AW_OTEL_SENTRY_AUTHORIZATION — the `sentry sentry_key=<public-key>` header value.
+# Both secrets are hard-required while this block is present: a missing one compiles to
+# an empty value that the MCP gateway's OTLP config schema rejects, so the agent job
+# dies at startup instead of skipping trace export. A repo without them must comment
+# this block out in its installed review.md (a local edit `gh aw update` preserves)
+# and recompile.
 observability:
   otlp:
     endpoint:
@@ -210,16 +215,21 @@ models:
 # repo, so the job fetches the code itself: check out Khan/actions at the pinned
 # release below. The `ref` is the single version
 # surface for prompt + code: it names the Khan/actions release this file ships in
-# (changesets tag, `review-v<version>`), and any release that changes the prompt or
-# the lib bumps it. Steps that run lib scripts invoke them from `gh-aw-review-lib/`
-# via `npx -y tsx <script>`; npx fetches the runner on first use, so the checkout
-# needs no install step.
+# (changesets tag, `review-v<version>`). The bump is automated, not manual: the
+# release flow's version step (utils/sync-workflow-versions.ts, run alongside
+# `changeset version` by release.yml) rewrites every workflow's pinned
+# `<name>-v<semver>` literals, this ref included, to the version being
+# released, in the same Version Packages commit that gets tagged, and
+# workflows/review/version-sync.test.ts fails CI if the ref ever diverges from
+# the `review` package version. Steps that run lib scripts invoke them from
+# `gh-aw-review-lib/` via `npx -y tsx <script>`; npx fetches the runner on first
+# use, so the checkout needs no install step.
 pre-agent-steps:
   - name: Check out shared review lib (Khan/actions)
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: review-v1.2.2
+      ref: review-v1.4.1
       path: gh-aw-review-lib
       persist-credentials: false
 
@@ -520,8 +530,10 @@ two files:
   and `removed` (LEFT-side `-` lines), plus a `warnings` list. It also carries a
   top-level `snap` map (keyed by path, then by line): for every RIGHT-side line
   that is NOT change-anchored but sits inside the anchor-snap windows (within 3
-  lines of a changed line, or past the end of the file's hunks by no more than
-  the file's diff-text overhead — the counting mis-anchor), the changed line a
+  lines of a changed line, or past the end of the file itself by no more than
+  the file's diff-text overhead — the counting mis-anchor; the CLI reads each
+  changed file's real length from the checkout, so a line that exists in the
+  file never overflow-snaps), the changed line a
   mis-anchored finding snaps to. The CLI also
   cross-checks the parse for completeness (every `files.json` entry with
   `hasPatch: true` must appear in the map; stray hunks must all be attributable
@@ -621,7 +633,11 @@ either run by default; a reviewer earns its `enable` line through the eval suite
 not by shipping). Dispatch the default reviewers (`correctness-reviewer`,
 `skill-auditor`, `thread-reconciler`) **plus** every reviewer named in
 `enabledReviewers` **plus** every lens named in `lensesToSpawn`, all **in parallel**
-(one turn), and wait for all.
+(one turn), and wait for all. If `runBudget.maxReviewerInvocations` cannot fit
+that whole set, fill the slots by the dispatch ranking (the budget rule below:
+Step 3, graceful-landing bucket 1): defaults first, then matched lenses, then
+the targeted opt-in dimensions, then the generic ones. Never choose arbitrarily, and record every
+reviewer left undispatched as a planned shed (Step 6 note).
 
 **One candidate contract.** Every finding-producing reviewer returns `findings[]`
 in the same shape (a `label` per finding, from the fixed label set in Step 4); a
@@ -663,7 +679,12 @@ the model: `blocking` → `issue (blocking)`, `advisory` → `suggestion (non-bl
 lens is a correctness/risk lens, so it renders as a plain label, not a `, best-practice`
 variant). Take the candidate's `path`/`line` from the finding's `anchor` (a `line` anchor →
 `path`+`line`; a `pr` anchor → a top-level review comment with no line), its comment
-text from `model_authored_prose` (with `suggested_patch` as the fix block), and its
+text from `model_authored_prose` (with `suggested_patch` as the fix block; for a skill
+finding carrying `rule_quote`, append the quoted rule to the candidate's `discussion`
+as a `> **Rule:** <rule_quote>` blockquote between the prose and the fix block,
+matching the shared lib's `renderComment` — the quote is skill-file text copied
+verbatim, and it is what lets the author read the actual rule instead of a
+paraphrase), and its
 `failure_scenario` verbatim (it rides into `claims.json` for the validator). After this
 normalization a lens finding is a candidate in the **same** shape as every other
 reviewer's, so it flows through the identical scope-filter → `claims.json` → verdict →
@@ -711,13 +732,15 @@ by the provenance CLI above), before the scope filter below:
   entry's `added` or `removedAdjacent` list (candidates carry RIGHT-side lines;
   `removedAdjacent` is what lets a deletion finding, anchored beside the removed
   code, pass). Change-anchored candidates continue through the pipeline untouched.
-- A candidate that is not change-anchored but whose `line` has an entry in
+- A RIGHT-side (or side-less) candidate that is not change-anchored but whose
+  `line` has an entry in
   `provenance.json`'s `snap` map (`snap[<path>][<line>]`) is a **near-miss
   mis-anchor**; apply the **anchor-snap** fallback. Reviewers sometimes anchor a
   finding about a changed line a few lines off, or count unified-diff text lines
-  instead of file lines and land just past a short file's end; the `snap` map
+  instead of file lines and land past the file's actual end; the `snap` map
   precomputes exactly which lines that pathology can produce and where each one
-  belongs. Rewrite the candidate's `line` to the mapped value, then treat it as
+  belongs. A LEFT-side candidate never snaps (the map is RIGHT-side only).
+  Rewrite the candidate's `line` to the mapped value, then treat it as
   change-anchored from here on (it continues through the pipeline and posts at
   the snapped line, keeping its severity). Record every snap in
   `/tmp/gh-aw/review/out/snapped.json` (one entry per snapped candidate: the
@@ -852,8 +875,10 @@ estimate dollars; watch the signals you can observe, as spend proxies:
   against the run start you recorded in Step 1 at each later checkpoint. This is
   the sharpest proxy, and the job-timeout ceiling it guards is just as fatal as
   the credits cap.
-- **Dispatch count** vs `runBudget.maxReviewerInvocations`: reviewers and lenses
-  already dispatched plus still pending.
+- **Dispatch count** vs `runBudget.maxReviewerInvocations`: finding-producing
+  reviewers and lenses already dispatched plus still pending. Only those count.
+  `pattern-triage`, `thread-reconciler`, and the `claim-validator` are pipeline
+  steps, not reviewers; they never consume a slot of this cap.
 - **Run-wide investigation usage** vs `runBudget.maxTotalToolCalls`: one line per
   authorised call in `/tmp/gh-aw/review/investigation-journal.log` (`wc -l`).
 - **Trajectory**: an unusually large diff, many sub-agents still pending, many
@@ -863,12 +888,33 @@ When any proxy passes roughly three-quarters of its soft target (or the trajecto
 is clearly expensive), stop starting new work and shed remaining work in this
 order:
 
-1. Skip any not-yet-dispatched opt-in reviewers and specialist lenses; each becomes
-   a skipped dimension (Step 6 note).
-2. Skip the risks/patterns comment and reviewer requests (Steps 7-8) if they have
-   not happened yet.
-3. If the `claim-validator` has not run, post the unvalidated candidates under the
-   existing missing-validator rule (Phase 3) with its skipped-dimension note.
+1. Skip not-yet-dispatched opt-in reviewers and specialist lenses in value
+   order, lowest value first; each becomes a skipped dimension (Step 6 note).
+   The ranking, from first-shed to last-shed: `conventions`, then
+   `first-principles`, then `holistic`, then `completeness` and
+   `test-adequacy`, and only then any path-triggered specialist lens from
+   `lensesToSpawn`. A matched lens is the most targeted signal in the run (the
+   router chose it for the specific files this PR touches), so it outranks
+   every generic dimension; shedding `security-auth` on an auth-path diff to
+   afford `conventions` is exactly backwards. This same ranking, read from the
+   other end (defaults, lenses, targeted opt-ins, generic opt-ins), is the
+   dispatch order when the invocation cap cannot fit the roster (Phase 2).
+   The interior order is a first-cut editorial ranking; replace it with
+   measured per-dimension must-catch contribution once the eval corpus
+   yields that data.
+2. Skip the risks/patterns comment (Step 7) if it has not happened yet.
+   Reviewer requests (Step 8) are **never** shed: pulling a human in matters
+   most on exactly the run whose own coverage is partial.
+3. Last, and never at the soft targets alone: the `claim-validator`. It is the
+   false-positive gate, and its cost scales with the candidate count (which you
+   can already see when deciding), not with the diff, so validating a small
+   candidate set costs less than one reviewer dispatch. Shed it only when a
+   hard ceiling is genuinely close (elapsed wall clock past three-quarters of
+   the job's `timeout-minutes`, or an equally direct signal that the credits
+   cap is near); at a mere soft-target breach, dispatch it anyway and shed
+   elsewhere. When it is shed, post the unvalidated candidates under the
+   missing-validator rule (Phase 3), using the planned-shed wording of the
+   skipped-dimension note (Step 6).
 
 Then go straight to Steps 4-6: compute the verdict from the findings already
 validated, post the surviving comments, and submit the review with one
@@ -1184,11 +1230,20 @@ append nothing. Never rephrase, reorder, or summarize it; if `rereview.json` is
 missing or unparseable, submit the body without the section (do not hand-compose a
 replacement).
 
-**Skipped dimensions (either verdict).** If a sub-agent's output was unavailable this
-run so a dimension could not be assessed (Step 3), append to the review body — after
+**Skipped dimensions (either verdict).** If a dimension could not be assessed this
+run (Step 3), append to the review body — after
 any verdict-specific text and the re-review accountability section above — one line
-per skipped dimension, exactly:
-`Note: <dimension> not assessed this run (<sub-agent> output unavailable).` If the
+per skipped dimension, choosing the wording by cause:
+
+- Planned shed (the budget rule stopped the sub-agent from being dispatched):
+  `Note: <dimension> not assessed this run (shed under the <tier>-tier run budget).`
+- The sub-agent was dispatched but its output was missing or unparseable:
+  `Note: <dimension> not assessed this run (<sub-agent> output unavailable).`
+
+The two read very differently to an operator (a shed is budget arithmetic and
+expected on small-tier runs; an unavailable output is a failure worth
+investigating), so never use the `unavailable` wording for work you chose not
+to start. If the
 change-provenance gate was skipped because `provenance.json` was missing or carried
 warnings (Step 3), also append exactly:
 `Note: change-provenance gate skipped this run (diff staging unparseable).`
@@ -1558,7 +1613,10 @@ skill-level default or a per-rule `must`/`never`/`blocking` vs `should`/`advisor
 annotation) sets the finding's `severity`; when the skill declares none, judge by
 impact. Flag a skill violation only when you can quote **both** the exact rule
 text from the skill file **and** the exact violating line; put both quotes in
-`evidence_trace`, with no spirit-of-the-doc inference.
+`evidence_trace`, with no spirit-of-the-doc inference. Also copy the exact rule
+text, verbatim, into the finding's `rule_quote` field: evidence traces never reach
+the author, and `rule_quote` is rendered into the comment they read, so the author
+sees the actual rule, not a paraphrase.
 
 ## Out-of-lane handoff
 
@@ -1584,7 +1642,9 @@ entry; `failure_scenario` names the concrete failing scenario (specific
 inputs/state, then the wrong outcome) — it is the specific claim the
 claim-validator attacks, so make it checkable; `producing_hunt` names the hunt
 that produced the finding; `model_authored_prose` carries the entire human-read
-comment. Omit `suggested_patch`/`pre_merge_obligation` unless they apply.
+comment. Omit `suggested_patch`/`pre_merge_obligation` unless they apply; a skill
+finding also carries `rule_quote` (the Lens-owned skills section above), which the
+orchestrator renders into the posted comment.
 
 Run **every** incident-derived hunt in your definition, even when the diff looks
 clean, and record each hunt's state in `hunts[]` as exactly one of: `found` (the
@@ -2532,7 +2592,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "producing_hunt": "authz-on-new-endpoint",
     "model_authored_prose": "the one- or two-sentence comment the author will read",
     "suggested_patch": "optional replacement/patch text",
-    "pre_merge_obligation": "optional: a condition that must hold before merge"
+    "pre_merge_obligation": "optional: a condition that must hold before merge",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "authz-on-new-endpoint", "state": "ran|not-applicable|found"}]
@@ -2593,7 +2654,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "unmoderated-model-output",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "unmoderated-model-output", "state": "ran|not-applicable|found"}]
@@ -2652,7 +2714,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "bulk-send-without-audience-filter",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "bulk-send-without-audience-filter", "state": "ran|not-applicable|found"}]
@@ -2712,7 +2775,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "cache-key-missing-identifier",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "cache-key-missing-identifier", "state": "ran|not-applicable|found"}]
@@ -2773,7 +2837,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "non-nullable-column-without-default",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "non-nullable-column-without-default", "state": "ran|not-applicable|found"}]
@@ -2833,7 +2898,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "unawaited-async",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "unawaited-async", "state": "ran|not-applicable|found"}]
@@ -2893,7 +2959,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "breaking-field-removal-or-retype",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "breaking-field-removal-or-retype", "state": "ran|not-applicable|found"}]
@@ -2957,7 +3024,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "serialized-shape-change",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "serialized-shape-change", "state": "ran|not-applicable|found"}]
@@ -3019,7 +3087,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "flag-default-unsafe",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "flag-default-unsafe", "state": "ran|not-applicable|found"}]
@@ -3079,7 +3148,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "float-money",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "float-money", "state": "ran|not-applicable|found"}]
@@ -3142,7 +3212,8 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "hardcoded-user-facing-string",
     "model_authored_prose": "the comment the author will read",
-    "suggested_patch": "optional", "pre_merge_obligation": "optional"
+    "suggested_patch": "optional", "pre_merge_obligation": "optional",
+    "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
   "out_of_lane_observations": [{"path": "...", "line": 0, "observation": "one sentence: the concern, stated concretely", "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce", "suggested_lane": "correctness"}],
   "hunts": [{"hunt": "hardcoded-user-facing-string", "state": "ran|not-applicable|found"}]

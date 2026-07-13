@@ -1,0 +1,84 @@
+{
+    "id": "trial-amplified-default-limit",
+    "tags": [
+        "incident",
+        "trial",
+        "live"
+    ],
+    "category": "incident-repro",
+    "description": "Sanitized structural rewrite of the amplification/provenance behavior test (Khan/webapp#40736): the PR drops an 'unnecessary' Limit from the digest read, routing it into a pre-existing store default of one row (store.go documents Query.Limit zero as 1, NOT unlimited), so every digest silently shrinks from five notes to one. The defect mechanism predates the diff; the removal is what amplifies it, and the finding must attribute the regression to the removal (the sibling RecentPins read keeps its explicit Limit, and the PR description mischaracterizes the dropped limit as redundant). The same diff also cosmetically rewords the default-limit doc lines in store.go: a touched, non-amplified pre-existing mechanism that must NOT draw a blocking finding; the expected posted-comment count enforces that. The v1.4.0-era live run passed this shape; the case locks the amplification confirm rule, the provenance gate, and the introduce-vs-amplify prose labeling (Khan/actions#250) in regression.",
+    "changedFiles": [
+        {
+            "path": "services/notes/digest.go",
+            "status": "modified"
+        },
+        {
+            "path": "services/notes/store.go",
+            "status": "modified"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "digest-amplified-default-limit",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/digest.go",
+                    "line": 23,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "services/notes/digest.go:21-24 drops Limit from the digest read; Query.Limit is now zero",
+                    "services/notes/store.go documents the pre-existing default: Limit zero means 1 (NOT unlimited)",
+                    "services/notes/digest.go:38-42: the sibling RecentPins read keeps Limit: digestSize, so the removal changes behavior rather than removing redundancy",
+                    "the PR description calls the limit redundant; Kind narrows which notes match, not how many return"
+                ],
+                "failure_scenario": "Any user with more than one summary note opens the home surface after this change: BuildDigest's query falls back to the store's default limit of one, and the digest renders a single note instead of the five the feature promises, with no error anywhere.",
+                "producing_hunt": "correctness:removed-behavior-audit",
+                "model_authored_prose": "Removing `Limit: digestSize` does not remove a redundancy; it amplifies a pre-existing mechanism. `Query.Limit` zero falls back to the store default of one (store.go), a default that predates this change; the removal is what routes the digest read into it, silently shrinking every digest from five notes to one. The sibling `RecentPins` read keeps its explicit limit. Restore `Limit: digestSize` here."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "digest-amplified-default-limit"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/services/notes/digest.go b/services/notes/digest.go\nindex 39c2b1c..4ffbbcd 100644\n--- a/services/notes/digest.go\n+++ b/services/notes/digest.go\n@@ -21,7 +21,6 @@ func BuildDigest(ctx context.Context, env digestEnv, userID string) (string, err\n \tsummaries, err := env.Store().Run(ctx, Query{\n \t\tUserID: userID,\n \t\tKind:   \"summary\",\n-\t\tLimit:  digestSize,\n \t})\n \tif err != nil {\n \t\treturn \"\", fmt.Errorf(\"list summaries for digest of %s: %w\", userID, err)\ndiff --git a/services/notes/store.go b/services/notes/store.go\nindex 6f47ef1..ef64ca2 100644\n--- a/services/notes/store.go\n+++ b/services/notes/store.go\n@@ -25,8 +25,9 @@ type Query struct {\n \t// Kind, when non-empty, selects only notes of that kind.\n \tKind string\n \t// Limit caps the number of rows returned. Zero means 1 (the\n-\t// store's default, tuned for the common latest-note lookup),\n-\t// NOT unlimited; callers that want more must set it.\n+\t// store's default, tuned for the common latest-note lookup and\n+\t// the cheapest read), NOT unlimited; callers that want more\n+\t// must set it explicitly.\n \tLimit int\n \t// KeysOnly returns notes with only ID populated, skipping the\n \t// entity bodies. Much cheaper when the caller needs keys alone.\n",
+    "live": {
+        "prContext": {
+            "title": "notes: tidy digest query defaults; drop a redundant limit",
+            "description": "The digest read already narrows to Kind=\"summary\", so the explicit Limit duplicated what the query narrows anyway; drop it. Also tightens the Query.Limit doc wording while in the area.",
+            "author": "dev-notes",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "digest-amplified-default-limit",
+                "path": "services/notes/digest.go",
+                "mechanism": [
+                    "remov(e[sd]?|al|ing).{0,40}[Ll]imit",
+                    "default.{0,40}(limit.{0,12}(of )?(one|1)|(one|1|single) (row|note|result))",
+                    "(digest|summar(y|ies)).{0,60}(one|1|single) (note|row|result)",
+                    "amplif|pre-?existing|predates|already (there|present|defaulted)",
+                    "not (a )?redundan|behavio(r|ur) change|does not preserve"
+                ],
+                "lens": "correctness",
+                "lineStart": 19,
+                "lineEnd": 27
+            }
+        ]
+    }
+}

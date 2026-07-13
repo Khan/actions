@@ -162,6 +162,28 @@ describe("validateFinding — well-formed findings", () => {
         expect(result.ok).toBe(true);
     });
 
+    it("accepts the optional rule_quote when present and non-empty", () => {
+        const result = validateFinding(
+            makeValidFinding({
+                rule_quote:
+                    "Always wrap errors with errors.Wrap before returning them.",
+            }),
+        );
+        expect(result.ok).toBe(true);
+    });
+
+    it("rejects an empty or non-string rule_quote", () => {
+        for (const bad of ["", 42]) {
+            const result = validateFinding(makeValidFinding({rule_quote: bad}));
+            expect(result.ok).toBe(false);
+            if (!result.ok) {
+                expect(
+                    result.errors.some((e) => e.startsWith("rule_quote:")),
+                ).toBe(true);
+            }
+        }
+    });
+
     it("accepts every KNOWN_LENSES value", () => {
         for (const lens of KNOWN_LENSES) {
             expect(validateFinding(makeValidFinding({lens})).ok).toBe(true);

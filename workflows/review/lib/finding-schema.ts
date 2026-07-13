@@ -157,6 +157,16 @@ export type Finding = {
     /** Optional unified-diff patch the author suggests (rendered as a suggestion). */
     suggested_patch?: string;
     /**
+     * For a skill (best-practice) finding: the exact rule text, quoted
+     * verbatim from the skill file, that the finding asserts is violated.
+     * Quote-the-rule already requires the quote in `evidence_trace`, but
+     * authors never see evidence traces — this field is what the renderer
+     * surfaces into the comment (as a `> **Rule:** …` blockquote), so the
+     * author reads the actual rule, not a paraphrase. Optional: only skill
+     * findings carry it.
+     */
+    rule_quote?: string;
+    /**
      * Optional pre-merge obligation text. Drives the conditional-approval
      * (APPROVE-with-obligations) rendering.
      */
@@ -350,6 +360,13 @@ export const validateFinding = (input: unknown): ValidationResult => {
         !isNonEmptyString(input["suggested_patch"])
     ) {
         errors.push("suggested_patch: must be a non-empty string when present");
+    }
+
+    if (
+        input["rule_quote"] !== undefined &&
+        !isNonEmptyString(input["rule_quote"])
+    ) {
+        errors.push("rule_quote: must be a non-empty string when present");
     }
 
     if (

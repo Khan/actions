@@ -146,6 +146,23 @@ describe("extractSamples", () => {
         expect(samples.map((s) => s.source)).toEqual(["r#1", "r#2"]);
     });
 
+    it("pools the completed repeats from a mid-run checkpoint artifact", () => {
+        const single = rawReport({
+            baselineRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+            candidateRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+        });
+        // The shape live-ab.ts writes after each repeat, before the final
+        // report replaces it: the run died on repeat 3 of 3.
+        const checkpoint = {
+            repeatCount: 3,
+            completedRepeats: 2,
+            repeats: [single, single],
+        };
+        const samples = extractSamples("r", checkpoint);
+        expect(samples.length).toBe(2);
+        expect(samples.map((s) => s.source)).toEqual(["r#1", "r#2"]);
+    });
+
     it("carries the ruler stamp through, and tolerates its absence", () => {
         const stamped = {
             ...rawReport({
