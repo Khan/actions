@@ -274,7 +274,11 @@ export type RouteInput = {
  * both current consumers enable), so an invocation cap of 4 deterministically
  * shed dimensions on every low-tier run. Low and medium now fit the roster;
  * trivial stays deliberately small (a trivial-only PR gets the two default
- * reviewers, with the rest declared as budget sheds).
+ * reviewers, with the rest declared as budget sheds). Raising the low cap to
+ * 8 is deliberate: a low-tier run can dispatch the full roster, so only
+ * trivial sheds by design. `maxUsd` is deliberately left uncalibrated
+ * (per-run cost measurement is deferred to #249), so the dollar column is
+ * still the original estimate, not a re-measured figure.
  */
 export const DEFAULT_TIER_BUDGETS: Record<RiskTier, RunBudget> = {
     trivial: {
