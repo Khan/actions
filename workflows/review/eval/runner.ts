@@ -369,7 +369,10 @@ export const runCase = (
     let droppedByProvenance: RunCandidate[] = [];
     let snappedByProvenance: RunResult["snappedByProvenance"] = [];
     if (corpusCase.diff !== undefined) {
-        const provenance = computeDiffProvenance(corpusCase.diff);
+        const provenance = computeDiffProvenance(
+            corpusCase.diff,
+            corpusCase.fileLineCounts,
+        );
         const gate = applyProvenanceGate(
             allCandidates.map((c) => c.finding),
             provenance,

@@ -336,6 +336,38 @@ describe("case-directory layout and tree validation", () => {
         expect(live[0]?.live).toBeDefined();
     });
 
+    it("hydrates a live case's fileLineCounts from its tree", () => {
+        const cases = loadCorpus("/corpus", volFs(corpus()));
+        const live = cases.find((c) => c.id === "live-case");
+        // The fixture tree file has two lines (trailing newline does not
+        // start a third); the flat case has no tree and no explicit counts.
+        expect(live?.fileLineCounts).toEqual({"src/a.ts": 2});
+        const flat = cases.find((c) => c.id === "flat-case");
+        expect(flat?.fileLineCounts).toBeUndefined();
+    });
+
+    it("lets an explicit fileLineCounts field win over tree hydration", () => {
+        const files = corpus({
+            "/corpus/smoke/live-case/case.json": JSON.stringify({
+                ...liveCase({id: "live-case"}),
+                fileLineCounts: {"src/a.ts": 99},
+            }),
+        });
+        const cases = loadCorpus("/corpus", volFs(files));
+        const live = cases.find((c) => c.id === "live-case");
+        expect(live?.fileLineCounts).toEqual({"src/a.ts": 99});
+    });
+
+    it("rejects a non-integer fileLineCounts entry", () => {
+        const raw = {
+            ...recordedCase({id: "bad-counts"}),
+            fileLineCounts: {"src/a.ts": 1.5},
+        };
+        expect(() => parseCase(raw, "bad-counts.json")).toThrow(
+            /fileLineCounts/,
+        );
+    });
+
     it("rejects a live case whose tree directory is missing", () => {
         const files = corpus();
         delete files["/corpus/smoke/live-case/tree/src/a.ts"];

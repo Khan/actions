@@ -10,7 +10,7 @@
  * validation error.
  */
 
-import {computeDiffProvenance} from "../../lib/provenance";
+import {computeDiffProvenance, countFileLines} from "../../lib/provenance";
 import type {ChangedFile} from "../../lib/router";
 
 /**
@@ -604,6 +604,38 @@ export const parseLive = (
  * (the post-change snapshot the sub-agents read). Returns fixed-format error
  * strings; the loader wraps them in its case error type.
  */
+/**
+ * Derive the post-change line counts of a live case's changed files from its
+ * on-disk tree (the snapshot next to the case file). Feeds the provenance
+ * gate's overflow snap window. Removed or missing files are skipped: they
+ * simply get no overflow window.
+ */
+export const liveTreeFileLineCounts = (
+    live: CaseLive,
+    changedFiles: ChangedFile[],
+    sourcePath: string,
+    fs: {
+        existsSync: (p: string) => boolean;
+        readFileSync: (p: string, enc: "utf8") => string;
+    },
+): Record<string, number> => {
+    const lastSlash = sourcePath.lastIndexOf("/");
+    const caseDir = lastSlash === -1 ? "." : sourcePath.slice(0, lastSlash);
+    const treeDir = `${caseDir}/${live.tree}`;
+    const counts: Record<string, number> = {};
+    for (const file of changedFiles) {
+        if (file.status === "removed") {
+            continue;
+        }
+        const onDisk = `${treeDir}/${file.path}`;
+        if (!fs.existsSync(onDisk)) {
+            continue;
+        }
+        counts[file.path] = countFileLines(fs.readFileSync(onDisk, "utf8"));
+    }
+    return counts;
+};
+
 export const liveTreeErrors = (
     live: CaseLive,
     changedFiles: ChangedFile[],

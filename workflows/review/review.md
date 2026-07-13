@@ -520,8 +520,10 @@ two files:
   and `removed` (LEFT-side `-` lines), plus a `warnings` list. It also carries a
   top-level `snap` map (keyed by path, then by line): for every RIGHT-side line
   that is NOT change-anchored but sits inside the anchor-snap windows (within 3
-  lines of a changed line, or past the end of the file's hunks by no more than
-  the file's diff-text overhead — the counting mis-anchor), the changed line a
+  lines of a changed line, or past the end of the file itself by no more than
+  the file's diff-text overhead — the counting mis-anchor; the CLI reads each
+  changed file's real length from the checkout, so a line that exists in the
+  file never overflow-snaps), the changed line a
   mis-anchored finding snaps to. The CLI also
   cross-checks the parse for completeness (every `files.json` entry with
   `hasPatch: true` must appear in the map; stray hunks must all be attributable
@@ -711,13 +713,15 @@ by the provenance CLI above), before the scope filter below:
   entry's `added` or `removedAdjacent` list (candidates carry RIGHT-side lines;
   `removedAdjacent` is what lets a deletion finding, anchored beside the removed
   code, pass). Change-anchored candidates continue through the pipeline untouched.
-- A candidate that is not change-anchored but whose `line` has an entry in
+- A RIGHT-side (or side-less) candidate that is not change-anchored but whose
+  `line` has an entry in
   `provenance.json`'s `snap` map (`snap[<path>][<line>]`) is a **near-miss
   mis-anchor**; apply the **anchor-snap** fallback. Reviewers sometimes anchor a
   finding about a changed line a few lines off, or count unified-diff text lines
-  instead of file lines and land just past a short file's end; the `snap` map
+  instead of file lines and land past the file's actual end; the `snap` map
   precomputes exactly which lines that pathology can produce and where each one
-  belongs. Rewrite the candidate's `line` to the mapped value, then treat it as
+  belongs. A LEFT-side candidate never snaps (the map is RIGHT-side only).
+  Rewrite the candidate's `line` to the mapped value, then treat it as
   change-anchored from here on (it continues through the pipeline and posts at
   the snapped line, keeping its severity). Record every snap in
   `/tmp/gh-aw/review/out/snapped.json` (one entry per snapped candidate: the

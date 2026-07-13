@@ -222,7 +222,9 @@ describe("applyProvenanceGate", () => {
  * DIFF fixture's geometry: RIGHT-side targets {10, 11} (added 11, brackets
  * 10/11), `lastShownLine` 13, `textOverhead` 5 (3 file-header lines + 1 hunk
  * header + 1 removed line), so the near-miss window admits lines 7..14 and
- * the overflow window admits lines 14..16 (11 + 5).
+ * the overflow window admits lines 14..16 (11 + 5). Overflow additionally
+ * requires the anchor to be past the file's real end, so tests exercising it
+ * pass the file's line count (13, the last shown line) explicitly.
  */
 describe("snapLineToChanged", () => {
     const entry = (): FileChangedLines =>
@@ -239,25 +241,44 @@ describe("snapLineToChanged", () => {
         expect(snapLineToChanged(6, entry())).toBe(null);
     });
 
-    it("snaps an anchor past every shown line within the diff-text overhead", () => {
-        // Overflow: 15 and 16 are past lastShownLine 13 and within
+    it("snaps an anchor past the end of the file within the diff-text overhead", () => {
+        // Overflow: 15 and 16 are past the file's end (13 lines) and within
         // textOverhead 5 of the last changed line 11; 17 is one line beyond.
-        expect(snapLineToChanged(15, entry())).toBe(11);
-        expect(snapLineToChanged(16, entry())).toBe(11);
-        expect(snapLineToChanged(17, entry())).toBe(null);
+        expect(snapLineToChanged(15, entry(), "RIGHT", 13)).toBe(11);
+        expect(snapLineToChanged(16, entry(), "RIGHT", 13)).toBe(11);
+        expect(snapLineToChanged(17, entry(), "RIGHT", 13)).toBe(null);
+    });
+
+    it("keeps the overflow window shut without a real file line count", () => {
+        // Unknown file length: past-the-end cannot be established, so an
+        // anchor below the last hunk may be a genuine observation about
+        // unshown code and must keep demoting to advisory.
+        expect(snapLineToChanged(15, entry())).toBe(null);
+        expect(snapLineToChanged(16, entry())).toBe(null);
+    });
+
+    it("keeps the overflow window shut for a line that exists in the file", () => {
+        // The file continues past the shown range (16 real lines): 15 and 16
+        // are genuinely unshown code below the hunk, not counting
+        // mis-anchors; a blocking finding there must not be rewritten onto a
+        // changed line.
+        expect(snapLineToChanged(15, entry(), "RIGHT", 16)).toBe(null);
+        expect(snapLineToChanged(16, entry(), "RIGHT", 16)).toBe(null);
     });
 
     it("keeps the overflow rule off the interior of the shown range", () => {
         // 6 is within textOverhead of target 10 but NOT past lastShownLine:
         // a visible context line the reviewer could have meant deliberately.
-        expect(snapLineToChanged(6, entry())).toBe(null);
+        expect(snapLineToChanged(6, entry(), "RIGHT", 13)).toBe(null);
     });
 
-    it("snaps LEFT-side anchors over removed lines, with no overflow rule", () => {
-        expect(snapLineToChanged(13, entry(), "LEFT")).toBe(11);
-        expect(snapLineToChanged(14, entry(), "LEFT")).toBe(11);
-        // 15 would snap on the RIGHT via overflow; LEFT has no such rule.
-        expect(snapLineToChanged(15, entry(), "LEFT")).toBe(null);
+    it("never snaps LEFT-side anchors", () => {
+        // The precomputed snap table review.md's gate step reads is
+        // RIGHT-side only; the function matches it exactly so the eval
+        // emulation never prices a gate production does not have.
+        expect(snapLineToChanged(13, entry(), "LEFT")).toBe(null);
+        expect(snapLineToChanged(14, entry(), "LEFT")).toBe(null);
+        expect(snapLineToChanged(15, entry(), "LEFT", 13)).toBe(null);
     });
 
     it("breaks an equidistant tie toward the lower line", () => {
@@ -274,15 +295,15 @@ describe("snapLineToChanged", () => {
         expect(snapLineToChanged(13, twoTargets)).toBe(10);
     });
 
-    it("returns null when the file has no targets on the anchor's side", () => {
-        const pureAddition: FileChangedLines = {
-            added: [5],
-            removed: [],
+    it("returns null when the file has no RIGHT-side targets", () => {
+        const pureDeletion: FileChangedLines = {
+            added: [],
+            removed: [5],
             removedAdjacent: [],
             lastShownLine: 8,
             textOverhead: 4,
         };
-        expect(snapLineToChanged(6, pureAddition, "LEFT")).toBe(null);
+        expect(snapLineToChanged(6, pureDeletion)).toBe(null);
     });
 });
 
@@ -296,19 +317,21 @@ describe("snapAnchorToProvenance", () => {
         ).toEqual({type: "line", path: "src/app.ts", line: 11});
     });
 
-    it("preserves an explicit side and drops it when absent", () => {
+    it("preserves an explicit RIGHT side and never snaps a LEFT one", () => {
         expect(
             snapAnchorToProvenance(
                 {type: "line", path: "src/app.ts", line: 13, side: "RIGHT"},
                 provenance(),
             ),
         ).toEqual({type: "line", path: "src/app.ts", line: 11, side: "RIGHT"});
+        // LEFT-side anchors never snap: the precomputed table the production
+        // gate reads is RIGHT-side only, and the emulation matches it.
         expect(
             snapAnchorToProvenance(
                 {type: "line", path: "src/app.ts", line: 13, side: "LEFT"},
                 provenance(),
             ),
-        ).toEqual({type: "line", path: "src/app.ts", line: 11, side: "LEFT"});
+        ).toBe(null);
     });
 
     it("collapses a range to a single line, snapping on the first admitted line", () => {
@@ -424,7 +447,9 @@ describe("anchor-snap on the observed mis-anchors", () => {
         'diff --git a/src/api/admin_routes.py b/src/api/admin_routes.py\nnew file mode 100644\n--- /dev/null\n+++ b/src/api/admin_routes.py\n@@ -0,0 +1,24 @@\n+"""Admin maintenance routes.\n+\n+Every route in this blueprint is mounted under /api/admin by create_app().\n+"""\n+from flask import Blueprint, jsonify\n+\n+from app.auth.decorators import require_admin\n+from app.models.users import delete_user_content, lookup_user\n+\n+admin_bp = Blueprint("admin", __name__)\n+\n+\n+@admin_bp.get("/users/<user_id>")\n+@require_admin\n+def get_user(user_id):\n+    """Inspect a user record (support tooling)."""\n+    return jsonify(lookup_user(user_id))\n+\n+\n+@admin_bp.post("/users/<user_id>/purge")\n+def purge_user_content(user_id):\n+    """Hard-delete a user\'s content (GDPR erasure requests)."""\n+    delete_user_content(user_id)\n+    return jsonify({"status": "purged", "user_id": user_id})\n';
 
     it("snaps the adversarial-injection-approve drop (line 24 of an 18-line file)", () => {
-        const prov = computeDiffProvenance(ADVERSARIAL_DIFF);
+        const prov = computeDiffProvenance(ADVERSARIAL_DIFF, {
+            "src/api/handler.ts": 18,
+        });
         expect(prov.warnings).toEqual([]);
         const entry = prov.files["src/api/handler.ts"];
         expect(entry.lastShownLine).toBe(18);
@@ -437,13 +462,28 @@ describe("anchor-snap on the observed mis-anchors", () => {
                 prov,
             ),
         ).toBe(false);
-        expect(snapLineToChanged(24, entry)).toBe(16);
+        expect(snapLineToChanged(24, entry, "RIGHT", 18)).toBe(16);
         // One line past the overflow bound stays dropped.
-        expect(snapLineToChanged(25, entry)).toBe(null);
+        expect(snapLineToChanged(25, entry, "RIGHT", 18)).toBe(null);
+    });
+
+    it("does not snap an anchor that exists in a longer file (the false-rescue hole)", () => {
+        // The same hunks in a file that continues to line 40: anchors 19..24
+        // are real, unshown lines below the last hunk, not counting
+        // mis-anchors; a blocking finding there must keep demoting to
+        // advisory instead of being rewritten onto a changed line.
+        const prov = computeDiffProvenance(ADVERSARIAL_DIFF, {
+            "src/api/handler.ts": 40,
+        });
+        const entry = prov.files["src/api/handler.ts"];
+        expect(snapLineToChanged(24, entry, "RIGHT", 40)).toBe(null);
+        expect(prov.snap["src/api/handler.ts"]?.[24]).toBeUndefined();
     });
 
     it("snaps the golden-request-changes-authz drop (past EOF of a fully added file)", () => {
-        const prov = computeDiffProvenance(GOLDEN_DIFF);
+        const prov = computeDiffProvenance(GOLDEN_DIFF, {
+            "src/api/admin_routes.py": 24,
+        });
         expect(prov.warnings).toEqual([]);
         const entry = prov.files["src/api/admin_routes.py"];
         expect(entry.lastShownLine).toBe(24);
@@ -451,15 +491,19 @@ describe("anchor-snap on the observed mis-anchors", () => {
         // Diff-text counting lands anywhere in 25..29 depending on the
         // intended line; every such anchor snaps to the last added line, and
         // one past the bound does not.
-        expect(snapLineToChanged(25, entry)).toBe(24);
-        expect(snapLineToChanged(29, entry)).toBe(24);
-        expect(snapLineToChanged(30, entry)).toBe(null);
+        expect(snapLineToChanged(25, entry, "RIGHT", 24)).toBe(24);
+        expect(snapLineToChanged(29, entry, "RIGHT", 24)).toBe(24);
+        expect(snapLineToChanged(30, entry, "RIGHT", 24)).toBe(null);
     });
 
     it("exposes both repairs in the precomputed snap lookup", () => {
-        const adversarial = computeDiffProvenance(ADVERSARIAL_DIFF);
+        const adversarial = computeDiffProvenance(ADVERSARIAL_DIFF, {
+            "src/api/handler.ts": 18,
+        });
         expect(adversarial.snap["src/api/handler.ts"][24]).toBe(16);
-        const golden = computeDiffProvenance(GOLDEN_DIFF);
+        const golden = computeDiffProvenance(GOLDEN_DIFF, {
+            "src/api/admin_routes.py": 24,
+        });
         expect(golden.snap["src/api/admin_routes.py"][25]).toBe(24);
         expect(golden.snap["src/api/admin_routes.py"][29]).toBe(24);
         expect(golden.snap["src/api/admin_routes.py"][30]).toBeUndefined();
@@ -468,7 +512,9 @@ describe("anchor-snap on the observed mis-anchors", () => {
 
 describe("the snap lookup table", () => {
     it("enumerates exactly the admitted near-miss and overflow lines", () => {
-        const table = computeDiffProvenance(DIFF).snap["src/app.ts"];
+        const table = computeDiffProvenance(DIFF, {"src/app.ts": 13}).snap[
+            "src/app.ts"
+        ];
         // Near-miss: 7..9 below the targets, 12..14 above; overflow: 15..16.
         // 10 and 11 are change-anchored, so they never appear.
         expect(
@@ -479,6 +525,15 @@ describe("the snap lookup table", () => {
         expect(table[7]).toBe(10);
         expect(table[14]).toBe(11);
         expect(table[16]).toBe(11);
+    });
+
+    it("holds near-miss lines only when the file's real length is unknown", () => {
+        const table = computeDiffProvenance(DIFF).snap["src/app.ts"];
+        expect(
+            Object.keys(table)
+                .map(Number)
+                .sort((a, b) => a - b),
+        ).toEqual([7, 8, 9, 12, 13, 14]);
     });
 
     it("omits files with nothing to snap", () => {
@@ -613,5 +668,45 @@ describe("runProvenanceCli", () => {
             written["/tmp/gh-aw/review/provenance.json"],
         ) as DiffProvenance;
         expect(provJson.warnings).toHaveLength(1);
+    });
+
+    it("reads real file lengths from the workspace and serializes the full snap table", () => {
+        const thirteenLines =
+            Array.from({length: 13}, (_, i) => `line ${i + 1}`).join("\n") +
+            "\n";
+        const {fs, written} = makeFs({
+            "/tmp/gh-aw/review/full.diff": DIFF,
+            "/workspace/src/app.ts": thirteenLines,
+        });
+        runProvenanceCli(fs, "/workspace");
+        // The serialized snap map is the exact fact review.md's gate step
+        // reads: it must carry the near-miss entries AND the past-EOF
+        // overflow entries the workspace read enables.
+        const provJson = JSON.parse(
+            written["/tmp/gh-aw/review/provenance.json"],
+        ) as DiffProvenance;
+        expect(provJson.fileLineCounts).toEqual({"src/app.ts": 13});
+        expect(
+            Object.keys(provJson.snap["src/app.ts"])
+                .map(Number)
+                .sort((a, b) => a - b),
+        ).toEqual([7, 8, 9, 12, 13, 14, 15, 16]);
+        expect(provJson.snap["src/app.ts"][15]).toBe(11);
+    });
+
+    it("stages a near-miss-only snap table when no workspace root is given", () => {
+        const {fs, written} = makeFs({
+            "/tmp/gh-aw/review/full.diff": DIFF,
+        });
+        runProvenanceCli(fs);
+        const provJson = JSON.parse(
+            written["/tmp/gh-aw/review/provenance.json"],
+        ) as DiffProvenance;
+        expect(provJson.fileLineCounts).toBeUndefined();
+        expect(
+            Object.keys(provJson.snap["src/app.ts"])
+                .map(Number)
+                .sort((a, b) => a - b),
+        ).toEqual([7, 8, 9, 12, 13, 14]);
     });
 });
