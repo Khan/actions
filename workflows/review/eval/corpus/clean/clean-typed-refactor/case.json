@@ -1,0 +1,33 @@
+{
+    "id": "clean-typed-refactor",
+    "tags": [
+        "clean",
+        "live"
+    ],
+    "category": "clean",
+    "description": "Known-clean PR: a mechanical rename of a helper across a few files with no behaviour change. No lens produces a finding; the run must approve without posting.",
+    "changedFiles": [
+        {
+            "path": "src/util/format.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/util/format.test.ts",
+            "status": "modified"
+        }
+    ],
+    "findings": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 0
+    },
+    "diff": "diff --git a/src/util/format.ts b/src/util/format.ts\n--- a/src/util/format.ts\n+++ b/src/util/format.ts\n@@ -1,7 +1,7 @@\n /** Shared display formatting helpers. */\n \n /** Format a fractional amount as a fixed two-decimal string. */\n-export const fmt = (amount: number): string => amount.toFixed(2);\n+export const formatAmount = (amount: number): string => amount.toFixed(2);\n \n /** Format a byte count using binary units. */\n export const formatBytes = (bytes: number): string => {\ndiff --git a/src/util/format.test.ts b/src/util/format.test.ts\n--- a/src/util/format.test.ts\n+++ b/src/util/format.test.ts\n@@ -1,11 +1,11 @@\n import {describe, expect, it} from \"vitest\";\n \n-import {fmt, formatBytes} from \"./format\";\n+import {formatAmount, formatBytes} from \"./format\";\n \n-describe(\"fmt\", () => {\n+describe(\"formatAmount\", () => {\n     it(\"renders two decimals\", () => {\n-        expect(fmt(3)).toBe(\"3.00\");\n-        expect(fmt(3.456)).toBe(\"3.46\");\n+        expect(formatAmount(3)).toBe(\"3.00\");\n+        expect(formatAmount(3.456)).toBe(\"3.46\");\n     });\n });\n \n",
+    "live": {
+        "prContext": {
+            "title": "util: rename fmt to formatAmount",
+            "description": "Mechanical rename; fmt was too terse to grep for. No behavior change.",
+            "author": "dev-web",
+            "baseBranch": "main"
+        }
+    }
+}

@@ -1,0 +1,89 @@
+{
+    "id": "incident-money-rounding",
+    "tags": [
+        "smoke",
+        "incident",
+        "money-payments",
+        "live"
+    ],
+    "category": "incident-repro",
+    "description": "Repro of a billing incident: a price is computed in floating point and rounded late, so totals drift by a cent on large carts. The money-payments lens must catch it and block.",
+    "changedFiles": [
+        {
+            "path": "src/payments/pricing.ts",
+            "status": "modified"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "money-payments",
+            "finding": {
+                "schema_version": 2,
+                "id": "money-fp-rounding-1",
+                "lens": "money-payments",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/payments/pricing.ts",
+                    "line": 37,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.88,
+                "evidence_trace": [
+                    "src/payments/pricing.ts:88 multiplies a float unit price by quantity, then rounds the running total once at the end",
+                    "float accumulation loses cents on carts with many line items",
+                    "the ledger stores integer cents, so the drift surfaces as a reconciliation mismatch"
+                ],
+                "failure_scenario": "A large cart accumulates binary float error, so the charged total disagrees with the per-line ledger sum by a cent.",
+                "producing_hunt": "money-payments:decimal-safety",
+                "model_authored_prose": "Compute this total in integer cents (or a decimal type) and round per line item \u2014 float accumulation here drifts by a cent on large carts and breaks ledger reconciliation."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": [
+            "money-fp-rounding-1"
+        ]
+    },
+    "diff": "diff --git a/src/payments/pricing.ts b/src/payments/pricing.ts\n--- a/src/payments/pricing.ts\n+++ b/src/payments/pricing.ts\n@@ -10,20 +10,31 @@\n     quantity: number;\n };\n \n+export type Discount = {\n+    code: string;\n+    /** Fractional rate in [0, 1], e.g. 0.15 for 15% off. */\n+    rate: number;\n+};\n+\n export type CartTotal = {\n     /** Sum in integer cents. */\n     totalCents: number;\n     itemCount: number;\n };\n \n-/** Sum a cart in integer cents. */\n-export const computeCartTotal = (items: CartItem[]): CartTotal => {\n-    let totalCents = 0;\n+/** Sum a cart in integer cents, applying an optional cart-level discount. */\n+export const computeCartTotal = (\n+    items: CartItem[],\n+    discount?: Discount,\n+): CartTotal => {\n     let itemCount = 0;\n+    let subtotal = 0;\n     for (const item of items) {\n-        totalCents += item.unitPriceCents * item.quantity;\n+        subtotal += (item.unitPriceCents / 100) * item.quantity;\n         itemCount += item.quantity;\n     }\n+    const rate = discount === undefined ? 0 : discount.rate;\n+    const totalCents = Math.round(subtotal * (1 - rate) * 100);\n     return {totalCents, itemCount};\n };\n \n",
+    "live": {
+        "prContext": {
+            "title": "pricing: support cart-level discount codes",
+            "description": "Adds an optional Discount to computeCartTotal so checkout can apply promo codes.",
+            "author": "dev-checkout",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "money-fp-rounding-1",
+                "path": "src/payments/pricing.ts",
+                "mechanism": [
+                    "float(ing)?[- ]?point",
+                    "rounds? (late|once|at the end)",
+                    "drift",
+                    "unitPriceCents / 100"
+                ],
+                "lens": "money-payments",
+                "lineStart": 29,
+                "lineEnd": 45
+            }
+        ]
+    },
+    "routerConfig": {
+        "lensRules": [
+            {
+                "pattern": "src/payments/pricing.ts",
+                "lenses": [
+                    "money-payments"
+                ]
+            }
+        ]
+    }
+}

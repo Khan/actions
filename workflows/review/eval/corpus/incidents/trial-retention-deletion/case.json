@@ -1,0 +1,274 @@
+{
+    "id": "trial-retention-deletion",
+    "tags": [
+        "incident",
+        "trial",
+        "live"
+    ],
+    "category": "incident-repro",
+    "description": "Sanitized structural rewrite of a seeded-defect trial PR, deletion path: account erasure of stored notes is gated behind a rollout flag, fetches with the store's default limit of 1, reimplements an existing deletion helper per-note, widens the request-env interface in two files for the buggy gate alone, and swallows the tail-prune error.",
+    "changedFiles": [
+        {
+            "path": "services/notes/erasure.go",
+            "status": "modified"
+        },
+        {
+            "path": "services/notes/erasure_test.go",
+            "status": "added"
+        },
+        {
+            "path": "services/notes/store.go",
+            "status": "modified"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "erasure-flag-gated-deletion",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/erasure.go",
+                    "line": 52,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "services/notes/erasure.go:52 returns nil from EraseUser when notes-retention-enabled is off",
+                    "retentionFlag is a rollout flag and defaults off until the launch completes",
+                    "EraseUser is the account-erasure entry point; no other path deletes the user's notes"
+                ],
+                "failure_scenario": "With notes-retention-enabled off (the rollout default), EraseUser returns nil before deleting anything: the account-erasure pipeline records success while every stored note survives.",
+                "producing_hunt": "correctness:flag-gating",
+                "model_authored_prose": "The account-erasure deletion is gated behind the rollout flag: with notes-retention-enabled off, EraseUser silently skips and the user's notes survive erasure. Compliance deletion has to run regardless of rollout state; only the new retention behavior should be flag-gated."
+            }
+        },
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "erasure-default-limit-one",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/erasure.go",
+                    "line": 56,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.88,
+                "evidence_trace": [
+                    "services/notes/erasure.go:56 runs Query{UserID: userID} with Limit unset",
+                    "services/notes/store.go documents Query.Limit: zero means 1 (the store default), not unlimited",
+                    "the erasure loop deletes only what this single query returned"
+                ],
+                "failure_scenario": "A user with 50 stored notes requests account erasure: the query returns exactly one note (the store's zero-value Limit default), so one note is deleted and 49 persist, run after run.",
+                "producing_hunt": "correctness:query-limits",
+                "model_authored_prose": "Query.Limit is unset here and the store's documented default is 1, so this erasure pass deletes at most one note per call. Page through with an explicit limit (or use the existing helper) so the whole set is removed."
+            }
+        },
+        {
+            "source": "conventions",
+            "finding": {
+                "schema_version": 2,
+                "id": "erasure-ignores-delete-helper",
+                "lens": "conventions",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/erasure.go",
+                    "line": 61,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.7,
+                "evidence_trace": [
+                    "services/notes/erasure.go:61 deletes one note per Delete call inside a new loop",
+                    "deleteAllForUser in the same file already pages through the store and batch-deletes ids",
+                    "the new loop neither pages nor batches, so it does strictly less than the helper it shadows"
+                ],
+                "failure_scenario": "The two deletion paths drift: a fix to deleteAllForUser (paging, batching, retries) never reaches the erasure loop, and the loop issues one Delete call per note instead of one per page.",
+                "producing_hunt": "conventions:reuse-existing-helper",
+                "model_authored_prose": "deleteAllForUser a few lines up already does this deletion correctly: it pages through the store and deletes ids in batches. Reusing it instead of this per-note loop keeps one deletion path and drops a round-trip per note."
+            }
+        },
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "erasure-env-widening",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/erasure.go",
+                    "line": 19,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.65,
+                "evidence_trace": [
+                    "services/notes/erasure.go:19 widens eraseEnv with Flags()",
+                    "the only caller of Flags() in this file is the rollout gate in EraseUser",
+                    "the same widening is applied to Env in services/notes/store.go"
+                ],
+                "failure_scenario": "Every eraseEnv implementation (and every test fake) must now provide Flags() solely to serve the flag gate on the compliance deletion; when that gate is removed, the widened interface remains with no caller.",
+                "producing_hunt": "correctness:interface-scope",
+                "model_authored_prose": "This widens eraseEnv just for the flag gate in EraseUser, which itself should not exist for a compliance deletion. If the gate goes away, the widening (here and on Env in store.go) can go with it."
+            }
+        },
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "store-env-widening",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/store.go",
+                    "line": 50,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.65,
+                "evidence_trace": [
+                    "services/notes/store.go:50 widens Env with Flags()",
+                    "no store-side code reads Flags(); the only consumer is the erasure rollout gate",
+                    "the parallel widening of eraseEnv in services/notes/erasure.go serves the same single call"
+                ],
+                "failure_scenario": "Every Env implementation across the service now carries a Flags() method that only the erasure path's flag gate uses; the package-level contract grows for one questionable call site.",
+                "producing_hunt": "correctness:interface-scope",
+                "model_authored_prose": "Env gains Flags() here although nothing in this file uses it; the sole consumer is the erasure gate. Keeping the request-env contract minimal argues for scoping the flag lookup to the one caller, or dropping it together with the gate."
+            }
+        },
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "erasure-prune-error-swallowed",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/erasure.go",
+                    "line": 66,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.86,
+                "evidence_trace": [
+                    "services/notes/erasure.go:66 assigns the PruneUserNotes error to the blank identifier",
+                    "PruneUserNotes returns an error precisely when its store calls fail",
+                    "EraseUser then returns nil, so the caller cannot distinguish a clean erasure from a failed tail prune"
+                ],
+                "failure_scenario": "PruneUserNotes fails mid-delete (a store timeout) and EraseUser still returns nil: the erasure pipeline marks the account done while notes written during the erasure remain stored.",
+                "producing_hunt": "correctness:error-handling",
+                "model_authored_prose": "Per the error-handling skill, a returned error is handled or propagated, never discarded: `_ = PruneUserNotes(...)` swallows a real failure and EraseUser reports success anyway. Propagate it, or at minimum log it and surface a retry."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "erasure-flag-gated-deletion",
+            "erasure-default-limit-one",
+            "erasure-ignores-delete-helper",
+            "erasure-env-widening",
+            "store-env-widening",
+            "erasure-prune-error-swallowed"
+        ],
+        "postedCommentCount": 6
+    },
+    "diff": "diff --git a/services/notes/erasure.go b/services/notes/erasure.go\n--- a/services/notes/erasure.go\n+++ b/services/notes/erasure.go\n@@ -8,10 +8,15 @@\n // erasePageSize is how many notes each deletion page fetches.\n const erasePageSize = 500\n \n+// retentionFlag gates the notes-retention feature while it rolls out.\n+const retentionFlag = \"notes-retention-enabled\"\n+\n // eraseEnv is the slice of the request environment the erasure path\n // needs, kept local so this file names only what it uses.\n type eraseEnv interface {\n \tStore() Store\n+\t// Flags exposes feature-flag lookups for the rollout gate.\n+\tFlags() FlagSet\n }\n \n // deleteAllForUser removes every stored note for userID, paging\n@@ -39,3 +44,25 @@\n \t\t}\n \t}\n }\n+\n+// EraseUser removes every note a user has stored. The account-erasure\n+// pipeline calls this after the user record is tombstoned; nothing the\n+// user wrote may survive it.\n+func EraseUser(ctx context.Context, env eraseEnv, userID string) error {\n+\tif !env.Flags().Enabled(ctx, retentionFlag) {\n+\t\t// Retention is still rolling out; skip until the flag is on.\n+\t\treturn nil\n+\t}\n+\tnotes, err := env.Store().Run(ctx, Query{UserID: userID})\n+\tif err != nil {\n+\t\treturn fmt.Errorf(\"list notes for erasure of %s: %w\", userID, err)\n+\t}\n+\tfor _, note := range notes {\n+\t\tif err := env.Store().Delete(ctx, []string{note.ID}); err != nil {\n+\t\t\treturn fmt.Errorf(\"erase note %s: %w\", note.ID, err)\n+\t\t}\n+\t}\n+\t// Best-effort tail prune in case new notes landed mid-erasure.\n+\t_ = PruneUserNotes(ctx, env, userID)\n+\treturn nil\n+}\ndiff --git a/services/notes/erasure_test.go b/services/notes/erasure_test.go\nnew file mode 100644\n--- /dev/null\n+++ b/services/notes/erasure_test.go\n@@ -0,0 +1,90 @@\n+package notes\n+\n+import (\n+\t\"context\"\n+\t\"fmt\"\n+\t\"testing\"\n+)\n+\n+// fakeStore is an in-memory Store for the erasure tests.\n+type fakeStore struct {\n+\tnotes []Note\n+}\n+\n+func (s *fakeStore) Run(_ context.Context, q Query) ([]Note, error) {\n+\tlimit := q.Limit\n+\tif limit == 0 {\n+\t\tlimit = 1\n+\t}\n+\tvar out []Note\n+\tfor _, note := range s.notes {\n+\t\tif note.UserID != q.UserID {\n+\t\t\tcontinue\n+\t\t}\n+\t\tout = append(out, note)\n+\t\tif len(out) == limit {\n+\t\t\tbreak\n+\t\t}\n+\t}\n+\treturn out, nil\n+}\n+\n+func (s *fakeStore) Delete(_ context.Context, ids []string) error {\n+\tdrop := make(map[string]bool, len(ids))\n+\tfor _, id := range ids {\n+\t\tdrop[id] = true\n+\t}\n+\tkept := s.notes[:0]\n+\tfor _, note := range s.notes {\n+\t\tif !drop[note.ID] {\n+\t\t\tkept = append(kept, note)\n+\t\t}\n+\t}\n+\ts.notes = kept\n+\treturn nil\n+}\n+\n+// fakeFlags is a FlagSet with every flag forced on.\n+type fakeFlags struct{}\n+\n+func (fakeFlags) Enabled(context.Context, string) bool { return true }\n+\n+// fakeEnv bundles the fakes behind the eraseEnv interface.\n+type fakeEnv struct {\n+\tstore *fakeStore\n+}\n+\n+func (e *fakeEnv) Store() Store { return e.store }\n+\n+func (e *fakeEnv) Flags() FlagSet { return fakeFlags{} }\n+\n+func seedNotes(n int) *fakeStore {\n+\ts := &fakeStore{}\n+\tfor i := 0; i < n; i++ {\n+\t\ts.notes = append(s.notes, Note{\n+\t\t\tID:     fmt.Sprintf(\"note-%d\", i),\n+\t\t\tUserID: \"user-1\",\n+\t\t})\n+\t}\n+\treturn s\n+}\n+\n+func TestEraseUserRemovesStoredNote(t *testing.T) {\n+\tenv := &fakeEnv{store: seedNotes(1)}\n+\tif err := EraseUser(context.Background(), env, \"user-1\"); err != nil {\n+\t\tt.Fatalf(\"EraseUser: %v\", err)\n+\t}\n+\tif got := len(env.store.notes); got != 0 {\n+\t\tt.Fatalf(\"EraseUser left %d notes, want 0\", got)\n+\t}\n+}\n+\n+func TestDeleteAllForUserPagesToEmpty(t *testing.T) {\n+\tstore := seedNotes(7)\n+\tif err := deleteAllForUser(context.Background(), store, \"user-1\"); err != nil {\n+\t\tt.Fatalf(\"deleteAllForUser: %v\", err)\n+\t}\n+\tif got := len(store.notes); got != 0 {\n+\t\tt.Fatalf(\"deleteAllForUser left %d notes, want 0\", got)\n+\t}\n+}\ndiff --git a/services/notes/store.go b/services/notes/store.go\n--- a/services/notes/store.go\n+++ b/services/notes/store.go\n@@ -35,8 +35,17 @@\n \tDelete(ctx context.Context, ids []string) error\n }\n \n+// FlagSet reports feature-flag state for a request.\n+type FlagSet interface {\n+\t// Enabled reports whether the named flag is on for this request.\n+\tEnabled(ctx context.Context, name string) bool\n+}\n+\n // Env is the request environment the notes package reads.\n type Env interface {\n \t// Store returns the notes persistence surface for this request.\n \tStore() Store\n+\t// Flags exposes feature-flag lookups. Added for the erasure\n+\t// path's rollout gate.\n+\tFlags() FlagSet\n }\n",
+    "live": {
+        "prContext": {
+            "title": "notes: delete stored notes on account erasure",
+            "description": "Wires the notes service into the account-erasure pipeline: EraseUser removes a user's stored notes after the user record is tombstoned, behind the notes-retention-enabled rollout flag. Adds a best-effort tail prune so notes written mid-erasure are cleaned up.",
+            "author": "dev-notes",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "erasure-flag-gated-deletion",
+                "path": "services/notes/erasure.go",
+                "mechanism": [
+                    "feature.?flag.*(gate|gating|gated|skips?).*(erasure|deletion|delete)",
+                    "flag.*(off|disabled).*(survive|remain|skip)",
+                    "compliance deletion.*(flag|rollout)",
+                    "EraseUser returns nil.*flag"
+                ],
+                "lens": "correctness",
+                "lineStart": 47,
+                "lineEnd": 57
+            },
+            {
+                "key": "erasure-default-limit-one",
+                "path": "services/notes/erasure.go",
+                "mechanism": [
+                    "limit.*(defaults? to|zero (value|means)).*1",
+                    "at most one (note|row|item).*(deleted|removed|returned)",
+                    "Limit (unset|not set|omitted|missing)",
+                    "deletes? only (one|a single) (note|row|item)"
+                ],
+                "lens": "correctness",
+                "lineStart": 51,
+                "lineEnd": 61
+            },
+            {
+                "key": "erasure-ignores-delete-helper",
+                "path": "services/notes/erasure.go",
+                "mechanism": [
+                    "deleteAllForUser",
+                    "existing (deletion )?helper",
+                    "re-?implement",
+                    "duplicat(es|ed|ing).*(deletion|helper)"
+                ],
+                "lens": "conventions",
+                "lineStart": 56,
+                "lineEnd": 66
+            },
+            {
+                "key": "erasure-env-widening",
+                "path": "services/notes/erasure.go",
+                "mechanism": [
+                    "widen(s|ed|ing)?.*(eraseEnv|interface)",
+                    "Flags\\(\\).*(only|single|one) (call|caller|consumer)",
+                    "interface.*(grows|widened).*flag"
+                ],
+                "lens": "correctness",
+                "lineStart": 14,
+                "lineEnd": 24
+            },
+            {
+                "key": "store-env-widening",
+                "path": "services/notes/store.go",
+                "mechanism": [
+                    "widen(s|ed|ing)?.*(Env|interface)",
+                    "Flags\\(\\).*(unused|nothing in (this|the) file|no (store|other) (code|caller))",
+                    "Env.*(gains|widened).*Flags"
+                ],
+                "lens": "correctness",
+                "lineStart": 45,
+                "lineEnd": 55
+            },
+            {
+                "key": "erasure-prune-error-swallowed",
+                "path": "services/notes/erasure.go",
+                "mechanism": [
+                    "_ = PruneUserNotes",
+                    "swallow(s|ed|ing).*error",
+                    "(ignores?|discard(s|ed)?).*(returned )?error",
+                    "blank identifier.*error"
+                ],
+                "lens": "correctness",
+                "lineStart": 61,
+                "lineEnd": 71
+            }
+        ]
+    }
+}

@@ -55,6 +55,7 @@ import {
 import {
     loadSmokeCorpus,
     type CaseDimensions,
+    type CaseVerification,
     type CorpusCase,
     type RecordedFinding,
 } from "./corpus/loader";
@@ -150,6 +151,13 @@ export type RunOptions = {
      * the module default (a single blocking label blocks).
      */
     blockingThreshold?: number;
+    /**
+     * Optional claim-validator verifications to replay INSTEAD of the case's
+     * recorded `validation` block, for a live arm whose validator ran for
+     * real (`live-ab-plan.md` Phase 3). Defaults to the recorded block; pass
+     * `[]` explicitly to replay a live run whose validator produced nothing.
+     */
+    validation?: CaseVerification[];
 };
 
 /* -------------------------------------------------------------------------- */
@@ -369,10 +377,14 @@ export const runCase = (
     const {posted: inScopeCandidates, dropped: droppedByScope} =
         applyScopeFilter(changeAnchored, corpusCase.scope);
 
-    // 3b. Replay the recorded claim-validator verifications (three-state gate:
-    // refuted drops, plausible downgrades to non-blocking, confirmed keeps).
+    // 3b. Replay the claim-validator verifications (three-state gate: refuted
+    // drops, plausible downgrades to non-blocking, confirmed keeps) — the
+    // recorded block by default, or a live arm's real validator output.
     const {validated: postedCandidates, dropped: droppedByValidation} =
-        applyValidation(inScopeCandidates, corpusCase.validation);
+        applyValidation(
+            inScopeCandidates,
+            options.validation ?? corpusCase.validation,
+        );
 
     // 4. Mechanical verdict from the posted labels + dimension gate + conflicts.
     const postedLabels = postedCandidates.map((c) => c.label);
