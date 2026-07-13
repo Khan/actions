@@ -45,6 +45,7 @@ export type {
     CaseRereview,
     LiveDefectSpec,
     LivePrContext,
+    LiveSpecLocation,
     RereviewPriorThread,
 } from "./live";
 

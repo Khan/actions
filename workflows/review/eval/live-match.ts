@@ -21,8 +21,7 @@
  * false-flag, noise, and verdict agreement.
  */
 
-import type {LiveDefectSpec} from "./corpus/loader";
-import type {CorpusCase} from "./corpus/loader";
+import type {CorpusCase, LiveDefectSpec} from "./corpus/loader";
 import type {RunCandidate, RunResult} from "./runner";
 
 /* -------------------------------------------------------------------------- */
@@ -90,7 +89,28 @@ export type MatchOptions = {
 
 const DEFAULT_MAX_FALLBACK_CALLS = 10;
 
-/** Whether a candidate's anchor agrees with a spec's location. */
+/**
+ * Every location a spec accepts: the primary path/window plus any
+ * `altLocations` (a defect that spans files has more than one correct anchor
+ * site; see the type's doc).
+ */
+const specLocations = (
+    spec: LiveDefectSpec,
+): {path: string; lineStart?: number; lineEnd?: number}[] => [
+    {
+        path: spec.path,
+        ...(spec.lineStart !== undefined
+            ? {lineStart: spec.lineStart, lineEnd: spec.lineEnd}
+            : {}),
+    },
+    ...(spec.altLocations ?? []),
+];
+
+/** Whether a candidate shares a file with any of the spec's locations. */
+const onSpecFile = (candidate: RunCandidate, spec: LiveDefectSpec): boolean =>
+    specLocations(spec).some((location) => location.path === candidate.path);
+
+/** Whether a candidate's anchor agrees with any of a spec's locations. */
 const anchorAgrees = (
     candidate: RunCandidate,
     spec: LiveDefectSpec,
@@ -100,16 +120,22 @@ const anchorAgrees = (
         // A PR-level comment names no location; mechanism alone decides.
         return true;
     }
-    if (anchor.path !== spec.path) {
-        return false;
-    }
-    if (anchor.type === "file" || spec.lineStart === undefined) {
-        return true;
-    }
-    const start = anchor.type === "line" ? anchor.start_line ?? anchor.line : 0;
-    const end = anchor.type === "line" ? anchor.line : 0;
-    // Overlap between the anchor's line range and the spec window.
-    return end >= spec.lineStart && start <= (spec.lineEnd ?? spec.lineStart);
+    return specLocations(spec).some((location) => {
+        if (anchor.path !== location.path) {
+            return false;
+        }
+        if (anchor.type === "file" || location.lineStart === undefined) {
+            return true;
+        }
+        const start =
+            anchor.type === "line" ? anchor.start_line ?? anchor.line : 0;
+        const end = anchor.type === "line" ? anchor.line : 0;
+        // Overlap between the anchor's line range and the location window.
+        return (
+            end >= location.lineStart &&
+            start <= (location.lineEnd ?? location.lineStart)
+        );
+    });
 };
 
 /** Whether any mechanism alternate matches the finding's own description. */
@@ -177,9 +203,9 @@ export const matchCase = async (
         if (options.fallback === undefined) {
             return undefined;
         }
-        // Fallback: only candidates sharing the spec's file, in posted order.
+        // Fallback: only candidates sharing a spec file, in posted order.
         for (const candidate of posted) {
-            if (claimed.has(candidate.id) || candidate.path !== spec.path) {
+            if (claimed.has(candidate.id) || !onSpecFile(candidate, spec)) {
                 continue;
             }
             if (fallbackCalls >= maxFallbackCalls) {
@@ -224,7 +250,7 @@ export const matchCase = async (
         for (const [bucket, candidates] of droppedBuckets) {
             const hit = candidates.find(
                 (candidate) =>
-                    candidate.path === spec.path &&
+                    onSpecFile(candidate, spec) &&
                     mechanismAgrees(candidate, spec),
             );
             if (hit !== undefined) {

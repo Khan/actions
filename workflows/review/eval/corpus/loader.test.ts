@@ -131,6 +131,56 @@ describe("parseCase: the live block", () => {
         expect(parsed.live?.mustNotFlagSpecs?.[0]?.lineStart).toBeUndefined();
     });
 
+    it("parses and validates altLocations like the primary location", () => {
+        const withAlt = (altLocations: unknown) =>
+            liveCase({
+                changedFiles: [
+                    {path: "src/a.ts", status: "modified"},
+                    {path: "src/only-listed.ts", status: "modified"},
+                ],
+                live: {
+                    prContext: {
+                        title: "t",
+                        description: "d",
+                        author: "a",
+                        baseBranch: "main",
+                    },
+                    mustCatchSpecs: [
+                        {
+                            key: "k",
+                            path: "src/a.ts",
+                            mechanism: ["m"],
+                            altLocations,
+                        },
+                    ],
+                },
+            });
+        const parsed = parseCase(
+            withAlt([{path: "src/a.ts", lineStart: 1, lineEnd: 2}]),
+            "test://case",
+        );
+        expect(parsed.live?.mustCatchSpecs?.[0]?.altLocations).toEqual([
+            {path: "src/a.ts", lineStart: 1, lineEnd: 2},
+        ]);
+        expect(parseErrors(withAlt([]))).toMatch(
+            /altLocations: must be a non-empty array/,
+        );
+        expect(parseErrors(withAlt([{path: "src/nope.ts"}]))).toMatch(
+            /altLocations\[0\]\.path: "src\/nope\.ts" is not in changedFiles/,
+        );
+        expect(parseErrors(withAlt([{path: "src/only-listed.ts"}]))).toMatch(
+            /no section in the diff/,
+        );
+        expect(
+            parseErrors(withAlt([{path: "src/a.ts", lineStart: 3}])),
+        ).toMatch(/must be set together/);
+        expect(
+            parseErrors(
+                withAlt([{path: "src/a.ts", lineStart: 5, lineEnd: 3}]),
+            ),
+        ).toMatch(/lineStart <= lineEnd/);
+    });
+
     it("requires a diff on a live case", () => {
         const raw = liveCase();
         delete (raw as Record<string, unknown>)["diff"];
