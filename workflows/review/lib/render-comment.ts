@@ -129,7 +129,8 @@ export const labelForFinding = (finding: Finding): ConventionalLabel => {
  * rule text is surfaced as a blockquote — quote-the-rule already puts it in
  * `evidence_trace`, but authors never see evidence traces, so the comment is
  * where the actual rule must appear (the quote itself is skill-file text copied
- * verbatim; only the `> **Rule:**` wrapping is code-owned). The suggestion
+ * verbatim; only the `> **Rule:**` wrapping and the per-line `> ` prefixes that
+ * keep a multi-line quote inside the blockquote are code-owned). The suggestion
  * block is appended only when the finding carries a `suggested_patch`, again
  * copied verbatim. No other text is emitted.
  */
@@ -138,7 +139,15 @@ export const renderComment = (finding: Finding): string => {
     const lines: string[] = [`**${label}:** ${finding.model_authored_prose}`];
 
     if (finding.rule_quote !== undefined) {
-        lines.push("", `> **Rule:** ${finding.rule_quote}`);
+        // Prefix every line of the quote so a multi-line rule (including one
+        // with a blank line) stays inside a single blockquote; an unprefixed
+        // line would escape it.
+        const [first, ...rest] = finding.rule_quote.split("\n");
+        lines.push(
+            "",
+            `> **Rule:** ${first}`,
+            ...rest.map((line) => (line === "" ? ">" : `> ${line}`)),
+        );
     }
 
     if (finding.suggested_patch !== undefined) {

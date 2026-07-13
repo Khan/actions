@@ -156,6 +156,46 @@ describe("renderComment — templated Conventional Comment", () => {
         `);
     });
 
+    it("keeps a multi-line rule_quote fully inside the blockquote", () => {
+        const rendered = renderComment(
+            makeFinding({
+                severity: "advisory",
+                lens: "conventions",
+                rule_quote:
+                    "Always wrap errors with errors.Wrap\nbefore returning them.",
+            }),
+        );
+        expect(rendered).toMatchInlineSnapshot(`
+          "**suggestion (non-blocking, best-practice):** User input flows unsanitized into a shell command.
+
+          > **Rule:** Always wrap errors with errors.Wrap
+          > before returning them."
+        `);
+    });
+
+    it("keeps a rule_quote containing a blank line as one blockquote", () => {
+        const rendered = renderComment(
+            makeFinding({
+                severity: "advisory",
+                lens: "conventions",
+                rule_quote: "First paragraph of the rule.\n\nSecond paragraph.",
+            }),
+        );
+        // The blank line renders as a bare `>` so the blockquote never breaks:
+        // every line after the prose (and its separating blank) is quoted.
+        expect(rendered).toMatchInlineSnapshot(`
+          "**suggestion (non-blocking, best-practice):** User input flows unsanitized into a shell command.
+
+          > **Rule:** First paragraph of the rule.
+          >
+          > Second paragraph."
+        `);
+        const quoteLines = rendered.split("\n").slice(2);
+        for (const line of quoteLines) {
+            expect(line.startsWith(">")).toBe(true);
+        }
+    });
+
     it("orders prose, rule blockquote, then suggestion block", () => {
         const rendered = renderComment(
             makeFinding({

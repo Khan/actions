@@ -155,6 +155,11 @@ network:
 # (Settings → Secrets and variables → Actions): GH_AW_OTEL_SENTRY_ENDPOINT — the Sentry
 # OTLP traces endpoint with `/v1/traces` stripped (…/api/<project>/integration/otlp) — and
 # GH_AW_OTEL_SENTRY_AUTHORIZATION — the `sentry sentry_key=<public-key>` header value.
+# Both secrets are hard-required while this block is present: a missing one compiles to
+# an empty value that the MCP gateway's OTLP config schema rejects, so the agent job
+# dies at startup instead of skipping trace export. A repo without them must comment
+# this block out in its installed review.md (a local edit `gh aw update` preserves)
+# and recompile.
 observability:
   otlp:
     endpoint:
@@ -574,7 +579,11 @@ either run by default; a reviewer earns its `enable` line through the eval suite
 not by shipping). Dispatch the default reviewers (`correctness-reviewer`,
 `skill-auditor`, `thread-reconciler`) **plus** every reviewer named in
 `enabledReviewers` **plus** every lens named in `lensesToSpawn`, all **in parallel**
-(one turn), and wait for all.
+(one turn), and wait for all. If `runBudget.maxReviewerInvocations` cannot fit
+that whole set, fill the slots by the dispatch ranking (the budget rule below:
+Step 3, graceful-landing bucket 1): defaults first, then matched lenses, then
+the targeted opt-in dimensions, then the generic ones. Never choose arbitrarily, and record every
+reviewer left undispatched as a planned shed (Step 6 note).
 
 **One candidate contract.** Every finding-producing reviewer returns `findings[]`
 in the same shape (a `label` per finding, from the fixed label set in Step 4); a
@@ -802,8 +811,10 @@ mid-run, so watch the signals you can observe, as spend proxies:
   against the run start you recorded in Step 1 at each later checkpoint. This is
   the sharpest proxy, and the job-timeout ceiling it guards is just as fatal as
   the credits cap.
-- **Dispatch count** vs `runBudget.maxReviewerInvocations`: reviewers and lenses
-  already dispatched plus still pending.
+- **Dispatch count** vs `runBudget.maxReviewerInvocations`: finding-producing
+  reviewers and lenses already dispatched plus still pending. Only those count.
+  `pattern-triage`, `thread-reconciler`, and the `claim-validator` are pipeline
+  steps, not reviewers; they never consume a slot of this cap.
 - **Estimated credits** vs `runBudget.maxUsd × 100`: every finished sub-agent
   reports its tokens in-band (the `subagent_tokens` line of its result's
   `<usage>` block). Estimated run credits ≈ the sum of `subagent_tokens` over
@@ -826,12 +837,33 @@ When any proxy passes roughly three-quarters of its soft target (or the trajecto
 is clearly expensive), stop starting new work and shed remaining work in this
 order:
 
-1. Skip any not-yet-dispatched opt-in reviewers and specialist lenses; each becomes
-   a skipped dimension (Step 6 note).
-2. Skip the risks/patterns comment and reviewer requests (Steps 7-8) if they have
-   not happened yet.
-3. If the `claim-validator` has not run, post the unvalidated candidates under the
-   existing missing-validator rule (Phase 3) with its skipped-dimension note.
+1. Skip not-yet-dispatched opt-in reviewers and specialist lenses in value
+   order, lowest value first; each becomes a skipped dimension (Step 6 note).
+   The ranking, from first-shed to last-shed: `conventions`, then
+   `first-principles`, then `holistic`, then `completeness` and
+   `test-adequacy`, and only then any path-triggered specialist lens from
+   `lensesToSpawn`. A matched lens is the most targeted signal in the run (the
+   router chose it for the specific files this PR touches), so it outranks
+   every generic dimension; shedding `security-auth` on an auth-path diff to
+   afford `conventions` is exactly backwards. This same ranking, read from the
+   other end (defaults, lenses, targeted opt-ins, generic opt-ins), is the
+   dispatch order when the invocation cap cannot fit the roster (Phase 2).
+   The interior order is a first-cut editorial ranking; replace it with
+   measured per-dimension must-catch contribution once the eval corpus
+   yields that data.
+2. Skip the risks/patterns comment (Step 7) if it has not happened yet.
+   Reviewer requests (Step 8) are **never** shed: pulling a human in matters
+   most on exactly the run whose own coverage is partial.
+3. Last, and never at the soft targets alone: the `claim-validator`. It is the
+   false-positive gate, and its cost scales with the candidate count (which you
+   can already see when deciding), not with the diff, so validating a small
+   candidate set costs less than one reviewer dispatch. Shed it only when a
+   hard ceiling is genuinely close (elapsed wall clock past three-quarters of
+   the job's `timeout-minutes`, or an equally direct signal that the credits
+   cap is near); at a mere soft-target breach, dispatch it anyway and shed
+   elsewhere. When it is shed, post the unvalidated candidates under the
+   missing-validator rule (Phase 3), using the planned-shed wording of the
+   skipped-dimension note (Step 6).
 
 Then go straight to Steps 4-6: compute the verdict from the findings already
 validated, post the surviving comments, and submit the review with one
@@ -1125,11 +1157,20 @@ append nothing. Never rephrase, reorder, or summarize it; if `rereview.json` is
 missing or unparseable, submit the body without the section (do not hand-compose a
 replacement).
 
-**Skipped dimensions (either verdict).** If a sub-agent's output was unavailable this
-run so a dimension could not be assessed (Step 3), append to the review body — after
+**Skipped dimensions (either verdict).** If a dimension could not be assessed this
+run (Step 3), append to the review body — after
 any verdict-specific text and the re-review accountability section above — one line
-per skipped dimension, exactly:
-`Note: <dimension> not assessed this run (<sub-agent> output unavailable).` If the
+per skipped dimension, choosing the wording by cause:
+
+- Planned shed (the budget rule stopped the sub-agent from being dispatched):
+  `Note: <dimension> not assessed this run (shed under the <tier>-tier run budget).`
+- The sub-agent was dispatched but its output was missing or unparseable:
+  `Note: <dimension> not assessed this run (<sub-agent> output unavailable).`
+
+The two read very differently to an operator (a shed is budget arithmetic and
+expected on small-tier runs; an unavailable output is a failure worth
+investigating), so never use the `unavailable` wording for work you chose not
+to start. If the
 change-provenance gate was skipped because `provenance.json` was missing or carried
 warnings (Step 3), also append exactly:
 `Note: change-provenance gate skipped this run (diff staging unparseable).`
@@ -1475,9 +1516,8 @@ impact. Flag a skill violation only when you can quote **both** the exact rule
 text from the skill file **and** the exact violating line; put both quotes in
 `evidence_trace`, with no spirit-of-the-doc inference. Also copy the exact rule
 text, verbatim, into the finding's `rule_quote` field: evidence traces never reach
-the author, and `rule_quote` is what gets rendered into the comment they read (as
-a `> **Rule:** …` blockquote), so the author sees the actual rule, not a
-paraphrase.
+the author, and `rule_quote` is rendered into the comment they read, so the author
+sees the actual rule, not a paraphrase.
 
 ## Out-of-lane handoff
 
@@ -1504,8 +1544,8 @@ inputs/state, then the wrong outcome) — it is the specific claim the
 claim-validator attacks, so make it checkable; `producing_hunt` names the hunt
 that produced the finding; `model_authored_prose` carries the entire human-read
 comment. Omit `suggested_patch`/`pre_merge_obligation` unless they apply; a skill
-finding also carries `rule_quote` (§Lens-owned skills), which the orchestrator
-renders into the posted comment.
+finding also carries `rule_quote` (the Lens-owned skills section above), which the
+orchestrator renders into the posted comment.
 
 Run **every** incident-derived hunt in your definition, even when the diff looks
 clean, and record each hunt's state in `hunts[]` as exactly one of: `found` (the
