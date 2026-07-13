@@ -529,10 +529,14 @@ rate.
 (`pull_request_read` `get_review_comments`) and stage two files from them (leave all
 other threads untouched):
 - `/tmp/gh-aw/review/threads.json` — the unresolved `github-actions[bot]` threads. For
-  each write `thread_id`, `path`, `line`, and its **full reply chain** as
+  each write `thread_id`, `path`, `line`, `url` — the `html_url` of the thread's
+  **first** comment, from the same `get_review_comments` output (omit the field if the
+  output carries none) — and its **full reply chain** as
   `comments`: every comment in the thread in order, each `{author, body}` — including
   the author's replies, not just the bot's opening comment. The reply chain is what
-  lets the `thread-reconciler` weigh the author's response.
+  lets the `thread-reconciler` weigh the author's response, and `url` is what lets the
+  re-review accountability section (Step 6) link each still-open thread to its prior
+  comment.
 - `/tmp/gh-aw/review/human-threads.json` — the `{path, line}` of every **unresolved
   thread started by a human** (any author other than `github-actions[bot]`). These
   are never resolved or replied to; they mark lines where a human review conversation
@@ -991,7 +995,8 @@ section rather than dropping them. Within the cap the ranking order is:
 
 Before submitting, check whether this review would be a no-op repeat of the PR's
 current state: the verdict (Step 4) is APPROVE, you left **no** inline comments in
-Step 5, and there are **no** skipped-dimension notes to add (below) — i.e. the review
+Step 5, there are **no** skipped-dimension notes to add (below), and the code-rendered
+re-review accountability section (below) is empty — i.e. the review
 body would be exactly the plain `Approved — no blocking issues found.` text with nothing
 else. Only when all of those hold, fetch the PR's existing reviews
 (`pull_requests` `get_pull_request_reviews`) and find the most recent one authored by
@@ -1036,17 +1041,37 @@ keep the body to a single line:
 Changes requested — see inline comments.
 ```
 
+**Re-review accountability (either verdict; code-rendered).** When
+`threads.json` (Step 3 Phase 2) staged at least one unresolved bot thread this run,
+the review body must account for every one of them — a re-review must never resolve
+a few threads and stay silent about the rest. The section is rendered by code, never
+composed by you: after the reconciler's resolutions are decided, run
+```
+cd gh-aw-review-lib && npx -y tsx workflows/review/lib/rereview.ts
+```
+It reads `threads.json`, the reconciler's `out/thread-reconciler.json`, and
+`pr-context.json`, and writes `/tmp/gh-aw/review/rereview.json`:
+`{"section": "<markdown>", "keptCount": <n>, "resolvedCount": <n>}`. Append
+`section` **verbatim** to the review body, after any verdict-specific text above —
+it enumerates each still-unaddressed prior thread as a link to its prior comment
+(blocking first) and states the resolved count, and on a run that resolved the last
+open threads it says every prior thread is resolved. When `section` is empty,
+append nothing. Never rephrase, reorder, or summarize it; if `rereview.json` is
+missing or unparseable, submit the body without the section (do not hand-compose a
+replacement).
+
 **Skipped dimensions (either verdict).** If a sub-agent's output was unavailable this
 run so a dimension could not be assessed (Step 3), append to the review body — after
-any verdict-specific text above — one line per skipped dimension, exactly:
+any verdict-specific text and the re-review accountability section above — one line
+per skipped dimension, exactly:
 `Note: <dimension> not assessed this run (<sub-agent> output unavailable).` If the
 change-provenance gate was skipped because `provenance.json` was missing or carried
 warnings (Step 3), also append exactly:
 `Note: change-provenance gate skipped this run (diff staging unparseable).`
-These note lines are the
+These note lines and the code-rendered re-review accountability section are the
 only text permitted beyond the verdict bodies above, and they apply to both APPROVE
 and REQUEST_CHANGES, including the empty-body cases: when the body is otherwise
-empty, the note lines are the entire body.
+empty, they are the entire body.
 
 Do NOT put the risk summary or common patterns in the review body. On approval
 they go in a separate PR comment (Step 7).
