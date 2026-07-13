@@ -48,25 +48,11 @@ const down = (): {content: string} => ({content: "-1"});
  */
 class FakePort implements ThumbsSweepPort {
     posted: PostedFollowup[] = [];
-    seededCalls: Array<{
-        grain: FeedbackGrain;
-        commentId: number;
-        contents: readonly string[];
-    }> = [];
 
     constructor(
         private readonly commentsByGrain: Record<FeedbackGrain, BotComment[]>,
         private readonly existingFollowups: string[] = [],
     ) {}
-
-    addReactions(
-        grain: FeedbackGrain,
-        commentId: number,
-        contents: readonly string[],
-    ): Promise<void> {
-        this.seededCalls.push({grain, commentId, contents});
-        return Promise.resolve();
-    }
 
     listBotComments(grain: FeedbackGrain): Promise<BotComment[]> {
         return Promise.resolve(this.commentsByGrain[grain] ?? []);
@@ -96,73 +82,23 @@ const noComments = (): Record<FeedbackGrain, BotComment[]> => ({
     summary: [],
 });
 
-describe("reaction seeding and self-reaction filtering", () => {
+describe("self-reaction filtering", () => {
     const BOT = VALID_CONFIG.botLogin;
-    const seedingConfig: ThumbsSweepConfig = {
-        ...VALID_CONFIG,
-        seedReactions: true,
-    };
 
-    it("seeds one thumbs-up and one thumbs-down on an unseeded comment", async () => {
-        const port = new FakePort({
-            inline: [makeComment("inline", 1)],
-            summary: [],
-        });
-        const result = await sweepThumbs(port, seedingConfig);
-        expect(port.seededCalls).toEqual([
-            {grain: "inline", commentId: 1, contents: ["+1", "-1"]},
-        ]);
-        expect(result.reactionsSeeded).toBe(2);
-    });
-
-    it("is idempotent: an already-seeded comment gets nothing", async () => {
-        const port = new FakePort({
-            inline: [
-                makeComment("inline", 1, [
-                    {content: "+1", user: BOT},
-                    {content: "-1", user: BOT},
-                ]),
-            ],
-            summary: [],
-        });
-        const result = await sweepThumbs(port, seedingConfig);
-        expect(port.seededCalls).toEqual([]);
-        expect(result.reactionsSeeded).toBe(0);
-    });
-
-    it("adds only the missing seed when one is already placed", async () => {
-        const port = new FakePort({
-            inline: [makeComment("inline", 1, [{content: "+1", user: BOT}])],
-            summary: [],
-        });
-        await sweepThumbs(port, seedingConfig);
-        expect(port.seededCalls).toEqual([
-            {grain: "inline", commentId: 1, contents: ["-1"]},
-        ]);
-    });
-
-    it("never seeds when seedReactions is off (the default)", async () => {
-        const port = new FakePort({
-            inline: [makeComment("inline", 1)],
-            summary: [],
-        });
-        const result = await sweepThumbs(port, VALID_CONFIG);
-        expect(port.seededCalls).toEqual([]);
-        expect(result.reactionsSeeded).toBe(0);
-    });
-
-    it("the bot's own seeded thumbs-down never triggers a follow-up", async () => {
+    it("the bot's own thumbs-down never triggers a follow-up", async () => {
+        // The bot's reactions exist on real comments: the review workflow
+        // seeds the 👍/👎 nudge pair on its comments at post time.
         const port = new FakePort({
             inline: [makeComment("inline", 1, [{content: "-1", user: BOT}])],
             summary: [],
         });
-        const result = await sweepThumbs(port, seedingConfig);
+        const result = await sweepThumbs(port, VALID_CONFIG);
         expect(port.posted).toEqual([]);
         expect(result.actions[0]?.downvotes).toBe(0);
         expect(result.actions[0]?.reason).toBe("no-downvote");
     });
 
-    it("a real user's thumbs-down still triggers alongside the bot's seeds", async () => {
+    it("a real user's thumbs-down still triggers alongside the bot's reactions", async () => {
         const port = new FakePort({
             inline: [
                 makeComment("inline", 1, [
@@ -173,7 +109,7 @@ describe("reaction seeding and self-reaction filtering", () => {
             ],
             summary: [],
         });
-        const result = await sweepThumbs(port, seedingConfig);
+        const result = await sweepThumbs(port, VALID_CONFIG);
         expect(port.posted).toHaveLength(1);
         expect(result.actions[0]?.downvotes).toBe(1);
     });
@@ -185,22 +121,6 @@ describe("reaction seeding and self-reaction filtering", () => {
         });
         const result = await sweepThumbs(port, VALID_CONFIG);
         expect(result.actions[0]?.downvotes).toBe(1);
-    });
-
-    it("rejects a non-boolean seedReactions in config", () => {
-        const validation = validateSweepConfig({
-            ...VALID_CONFIG,
-            seedReactions: "yes",
-        });
-        expect(validation.ok).toBe(false);
-    });
-
-    it("throws when seeding is enabled but the port lacks addReactions", async () => {
-        const port = new FakePort({inline: [], summary: []});
-        (port as {addReactions?: unknown}).addReactions = undefined;
-        await expect(sweepThumbs(port, seedingConfig)).rejects.toThrow(
-            /does not implement addReactions/,
-        );
     });
 });
 

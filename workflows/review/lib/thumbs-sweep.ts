@@ -64,14 +64,12 @@ export type Reaction = {
     /** GitHub reaction content, e.g. `"+1"` / `"-1"` (other emoji are ignored). */
     content: string;
     /**
-     * Reactor login. Used to exclude the bot's own seeded reactions from
+     * Reactor login. Used to exclude the bot's own reactions (e.g. the 👍/👎
+     * nudge pair the review workflow seeds on its comments at post time) from
      * feedback counts; a reaction with no login is treated as a real user's.
      */
     user?: string;
 };
-
-/** The two reactions the sweep can seed on a bot comment as a feedback nudge. */
-export const SEED_REACTIONS = ["+1", "-1"] as const;
 
 /** A bot-authored comment (at one grain) together with its current reactions. */
 export type BotComment = {
@@ -96,13 +94,6 @@ export type ThumbsSweepConfig = {
     owner: string;
     repo: string;
     botLogin: string;
-    /**
-     * When true, the sweep seeds one 👍 and one 👎 (from the bot itself) on any
-     * of its comments that lack them, so readers see the feedback affordance.
-     * Seeded reactions are the bot's own and never count as feedback: every
-     * count in this module excludes reactions whose `user` is `botLogin`.
-     */
-    seedReactions?: boolean;
 };
 
 /**
@@ -113,16 +104,6 @@ export type ThumbsSweepConfig = {
 export interface ThumbsSweepPort {
     /** Bot-authored comments at `grain`, each carrying its current reactions. */
     listBotComments(grain: FeedbackGrain): Promise<BotComment[]>;
-    /**
-     * Add the given reactions (as the bot) to a comment. Only called when the
-     * config enables `seedReactions`, and only with reactions from
-     * {@link SEED_REACTIONS} that the bot has not already placed.
-     */
-    addReactions?(
-        grain: FeedbackGrain,
-        commentId: number,
-        contents: readonly string[],
-    ): Promise<void>;
     /**
      * Bodies of every follow-up already posted by prior sweeps. The sweep scans
      * these for its marker to decide what has already been pinged — this is the
@@ -152,13 +133,11 @@ export type SweepActionReason =
 export type SweepAction = {
     grain: FeedbackGrain;
     commentId: number;
-    /** Number of 👎 currently on the comment (0 when none; the bot's own seeded 👎 never counts). */
+    /** Number of 👎 currently on the comment (0 when none; the bot's own 👎 never counts). */
     downvotes: number;
     /** Whether a follow-up was posted this sweep. */
     posted: boolean;
     reason: SweepActionReason;
-    /** Nudge reactions seeded on this comment this sweep (empty when none). */
-    seeded: readonly string[];
 };
 
 /** Aggregate outcome of one sweep. */
@@ -166,8 +145,6 @@ export type SweepResult = {
     actions: SweepAction[];
     /** Count of follow-ups posted this sweep (invariant: <= new-downvote count). */
     followupsPosted: number;
-    /** Count of nudge reactions seeded this sweep (0 unless `seedReactions`). */
-    reactionsSeeded: number;
 };
 
 /**
@@ -236,7 +213,8 @@ const key = (grain: FeedbackGrain, commentId: number): string =>
 
 /**
  * Count the negative reactions (👎/😕, per {@link NEGATIVE_REACTIONS}) on a
- * comment. The bot's own reactions (its seeded nudges) are never feedback.
+ * comment. The bot's own reactions (e.g. post-time seeded nudges) are never
+ * feedback.
  */
 const countDownvotes = (comment: BotComment, botLogin: string): number =>
     comment.reactions.filter(
@@ -244,19 +222,6 @@ const countDownvotes = (comment: BotComment, botLogin: string): number =>
             r.user !== botLogin &&
             (NEGATIVE_REACTIONS as readonly string[]).includes(r.content),
     ).length;
-
-/** The seed reactions the bot has not yet placed on this comment. */
-const missingSeeds = (
-    comment: BotComment,
-    botLogin: string,
-): readonly string[] => {
-    const placed = new Set(
-        comment.reactions
-            .filter((r) => r.user === botLogin)
-            .map((r) => r.content),
-    );
-    return SEED_REACTIONS.filter((s) => !placed.has(s));
-};
 
 /**
  * Validate a {@link ThumbsSweepConfig}. Returns every problem (like the finding
@@ -282,12 +247,6 @@ export const validateSweepConfig = (input: unknown): ConfigValidation => {
     }
     if (!isNonEmptyString(cfg["repo"])) {
         errors.push("repo: required non-empty string");
-    }
-    if (
-        cfg["seedReactions"] !== undefined &&
-        typeof cfg["seedReactions"] !== "boolean"
-    ) {
-        errors.push("seedReactions: must be a boolean when present");
     }
     if (!isNonEmptyString(cfg["botLogin"])) {
         errors.push("botLogin: required non-empty string");
@@ -337,27 +296,9 @@ export const sweepThumbs = async (
 
     const actions: SweepAction[] = [];
 
-    const seedingEnabled = config.seedReactions === true;
-    if (seedingEnabled && typeof port.addReactions !== "function") {
-        throw new Error(
-            "seedReactions is enabled but the port does not implement addReactions",
-        );
-    }
-
     for (const grain of FEEDBACK_GRAINS) {
         const comments = await port.listBotComments(grain);
         for (const comment of comments) {
-            // Seed the feedback nudge (one 👍 + one 👎 from the bot) on any of
-            // its comments that lack them. Idempotent: only the missing seeds
-            // are added, and the counts below never see the bot's reactions.
-            let seeded: readonly string[] = [];
-            if (seedingEnabled) {
-                seeded = missingSeeds(comment, config.botLogin);
-                if (seeded.length > 0) {
-                    await port.addReactions?.(grain, comment.id, seeded);
-                }
-            }
-
             const downvotes = countDownvotes(comment, config.botLogin);
 
             if (downvotes === 0) {
@@ -367,7 +308,6 @@ export const sweepThumbs = async (
                     downvotes,
                     posted: false,
                     reason: "no-downvote",
-                    seeded,
                 });
                 continue;
             }
@@ -380,7 +320,6 @@ export const sweepThumbs = async (
                     downvotes,
                     posted: false,
                     reason: "already-followed-up",
-                    seeded,
                 });
                 continue;
             }
@@ -398,7 +337,6 @@ export const sweepThumbs = async (
                 downvotes,
                 posted: true,
                 reason: "posted",
-                seeded,
             });
         }
     }
@@ -406,6 +344,5 @@ export const sweepThumbs = async (
     return {
         actions,
         followupsPosted: actions.filter((a) => a.posted).length,
-        reactionsSeeded: actions.reduce((n, a) => n + a.seeded.length, 0),
     };
 };
