@@ -528,9 +528,9 @@ not by shipping). Dispatch the default reviewers (`correctness-reviewer`,
 `skill-auditor`, `thread-reconciler`) **plus** every reviewer named in
 `enabledReviewers` **plus** every lens named in `lensesToSpawn`, all **in parallel**
 (one turn), and wait for all. If `runBudget.maxReviewerInvocations` cannot fit
-that whole set, fill the slots by the dispatch ranking (the budget rule below,
-Step 3 Phase 3): defaults first, then matched lenses, then the targeted opt-in
-dimensions, then the generic ones. Never choose arbitrarily, and record every
+that whole set, fill the slots by the dispatch ranking (the budget rule below:
+Step 3, graceful-landing bucket 1): defaults first, then matched lenses, then
+the targeted opt-in dimensions, then the generic ones. Never choose arbitrarily, and record every
 reviewer left undispatched as a planned shed (Step 6 note).
 
 **One candidate contract.** Every finding-producing reviewer returns `findings[]`
@@ -755,10 +755,12 @@ order:
    afford `conventions` is exactly backwards. This same ranking, read from the
    other end (defaults, lenses, targeted opt-ins, generic opt-ins), is the
    dispatch order when the invocation cap cannot fit the roster (Phase 2).
+   The interior order is a first-cut editorial ranking; replace it with
+   measured per-dimension must-catch contribution once the eval corpus
+   yields that data.
 2. Skip the risks/patterns comment (Step 7) if it has not happened yet.
-   Reviewer requests (Step 8) are **never** shed: a request is a single tool
-   call, and pulling a human in matters most on exactly the run whose own
-   coverage is partial.
+   Reviewer requests (Step 8) are **never** shed: pulling a human in matters
+   most on exactly the run whose own coverage is partial.
 3. Last, and never at the soft targets alone: the `claim-validator`. It is the
    false-positive gate, and its cost scales with the candidate count (which you
    can already see when deciding), not with the diff, so validating a small
