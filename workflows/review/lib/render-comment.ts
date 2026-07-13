@@ -130,7 +130,7 @@ export const labelForFinding = (finding: Finding): ConventionalLabel => {
  * `evidence_trace`, but authors never see evidence traces, so the comment is
  * where the actual rule must appear (the quote itself is skill-file text copied
  * verbatim; only the `> **Rule:**` wrapping and the per-line `> ` prefixes that
-keep a multi-line quote inside the blockquote are code-owned). The suggestion
+ * keep a multi-line quote inside the blockquote are code-owned). The suggestion
  * block is appended only when the finding carries a `suggested_patch`, again
  * copied verbatim. No other text is emitted.
  */
