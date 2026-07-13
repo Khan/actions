@@ -82,6 +82,17 @@ describe("stageCase", () => {
         expect(read("/stage/context/pr.diff")).toBe(DIFF);
         expect(read("/stage/context/full-stripped.diff")).toBe(DIFF);
 
+        // The annotated siblings are staged unconditionally; only a
+        // review.md version that names them reads them, so an A/B against a
+        // pre-annotation baseline is a pure prompt delta.
+        const annotated = read("/stage/context/pr-annotated.diff");
+        expect(annotated).toContain("+  1| const a = 2;");
+        expect(annotated).toContain("-  1| const a = 1;");
+        expect(annotated).toContain("   2| export {a};");
+        expect(read("/stage/context/full-stripped-annotated.diff")).toBe(
+            annotated,
+        );
+
         const files = JSON.parse(read("/stage/context/files.json"));
         expect(files).toEqual([
             {path: "src/a.ts", status: "modified", hasPatch: true},

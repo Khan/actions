@@ -30,17 +30,22 @@
  * sentence about the change itself. Prose stays with the lens sub-agents.
  */
 
+import {DEFAULT_MISROUTED_FLOOR_TIER, DEFAULT_TIER_BUDGETS} from "./budgets";
+import {clampBudgetToCreditCap, resolveCreditCap} from "./credit-cap";
 import {KNOWN_LENSES} from "./finding-schema";
 import type {Lens} from "./finding-schema";
 import {
+    DEFAULT_RE_REVIEW_MODE,
     ENABLEABLE_REVIEWERS,
     parseRoutingConfig,
+    RE_REVIEW_MODES,
     RISK_TIERS,
     ROUTING_CONFIG_PATH,
 } from "./routing-config";
 import type {
     EnableableReviewer,
     LensRule,
+    ReReviewMode,
     RiskRule,
     RiskTier,
     RoutingFileConfig,
@@ -48,15 +53,19 @@ import type {
 
 // Re-exported so consumers (and the tests) can treat the router as the single
 // entry point for routing vocabulary and the ROUTING parser.
+export {DEFAULT_MISROUTED_FLOOR_TIER, DEFAULT_TIER_BUDGETS};
 export {
+    DEFAULT_RE_REVIEW_MODE,
     ENABLEABLE_REVIEWERS,
     parseRoutingConfig,
+    RE_REVIEW_MODES,
     RISK_TIERS,
     ROUTING_CONFIG_PATH,
 };
 export type {
     EnableableReviewer,
     LensRule,
+    ReReviewMode,
     RiskRule,
     RiskTier,
     RoutingFileConfig,
@@ -157,16 +166,39 @@ export type RunBudget = {
     tier: RiskTier;
     /** True when the misrouted floor lifted the budget above the touched tier. */
     floored: boolean;
-    /** Upper bound on specialist+whole-change reviewer invocations for the run. */
+    /**
+     * Upper bound on specialist+whole-change reviewer invocations for the
+     * run. Only finding-producing dispatches count; pipeline steps
+     * (`pattern-triage`, `thread-reconciler`, `claim-validator`) never
+     * consume a slot.
+     */
     maxReviewerInvocations: number;
     /** Upper bound on investigation tool calls a single finding may spend. */
     maxToolCallsPerFinding: number;
     /** Upper bound on investigation tool calls across the whole run. */
     maxTotalToolCalls: number;
-    /** Soft wall-clock ceiling (minutes) the orchestrator should target. */
+    /**
+     * Soft wall-clock ceiling (minutes) the orchestrator should target,
+     * measured from run start; it therefore includes the run's fixed
+     * staging/router/triage overhead (~3 minutes measured), not just
+     * reviewer time.
+     */
     maxWallClockMinutes: number;
     /** Soft spend ceiling (USD) the orchestrator should target. */
     maxUsd: number;
+    /**
+     * The effective per-run AI-credit cap this budget was checked against
+     * (credits; 1 credit = $0.01), when one was known. Absent when the cap
+     * was unknown or explicitly uncapped.
+     */
+    effectiveCreditCap?: number;
+    /**
+     * True when {@link effectiveCreditCap} is tighter than the tier's table
+     * budget and the soft targets above were scaled down to fit it. The
+     * orchestrator treats a clamped budget as already-tight: dispatch
+     * conservatively and expect to shed (review.md Step 3 Phase 3).
+     */
+    capClamped?: boolean;
 };
 
 export type RouterConfig = {
@@ -188,6 +220,15 @@ export type RouterConfig = {
     misroutedFloorTier?: RiskTier;
     /** Tier assigned to a source file that matches no risk rule. Defaults to "low". */
     defaultTier?: RiskTier;
+    /**
+     * Effective per-run AI-credit cap (credits; 1 credit = $0.01). When set
+     * and positive, the selected tier budget is clamped so the soft targets
+     * never promise more work than the hard cap can pay for
+     * ({@link clampBudgetToCreditCap}). Zero or negative means explicitly
+     * uncapped; undefined means unknown (no clamp). The CLI resolves this
+     * from the environment via {@link resolveCreditCap}.
+     */
+    maxAiCredits?: number;
 };
 
 /** Per-file routing decision. */
@@ -244,63 +285,6 @@ export type RouteInput = {
      */
     resolvedTiers?: Record<string, RiskTier>;
 };
-
-/* -------------------------------------------------------------------------- */
-/* Documented defaults (tunable later)                                        */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Default budget table, sized inside the workflow's assumed 20-minute / $10
- * per-run ceiling. Every field scales monotonically with the tier, and the
- * table is exported so the eval suite and consumers can override it without a
- * code change.
- */
-export const DEFAULT_TIER_BUDGETS: Record<RiskTier, RunBudget> = {
-    trivial: {
-        tier: "trivial",
-        floored: false,
-        maxReviewerInvocations: 2,
-        maxToolCallsPerFinding: 2,
-        maxTotalToolCalls: 10,
-        maxWallClockMinutes: 3,
-        maxUsd: 0.5,
-    },
-    low: {
-        tier: "low",
-        floored: false,
-        maxReviewerInvocations: 4,
-        maxToolCallsPerFinding: 3,
-        maxTotalToolCalls: 20,
-        maxWallClockMinutes: 6,
-        maxUsd: 1.5,
-    },
-    medium: {
-        tier: "medium",
-        floored: false,
-        maxReviewerInvocations: 8,
-        maxToolCallsPerFinding: 5,
-        maxTotalToolCalls: 60,
-        maxWallClockMinutes: 12,
-        maxUsd: 4,
-    },
-    high: {
-        tier: "high",
-        floored: false,
-        maxReviewerInvocations: 12,
-        maxToolCallsPerFinding: 8,
-        maxTotalToolCalls: 120,
-        maxWallClockMinutes: 20,
-        maxUsd: 10,
-    },
-};
-
-/**
- * Tier a misrouted PR (source files touched, but no specialist lens matched) is
- * floored to. A misrouted PR still gets a real review from the always-on
- * reviewers, so it must not fall to the trivial budget just because no path
- * pattern claimed it. "low" is the documented default floor.
- */
-export const DEFAULT_MISROUTED_FLOOR_TIER: RiskTier = "low";
 
 /* -------------------------------------------------------------------------- */
 /* Glob matching (self-contained; CODEOWNERS/gitattributes-style)            */
@@ -588,6 +572,7 @@ const tierForFile = (
  * The single budget rule: scale by the highest touched tier, with one
  * floor for misrouted PRs. No per-lens knobs. When misrouted and the floor tier
  * outranks the touched tier, the floor's budget is used and `floored` is set.
+ * The selected budget is then clamped to `config.maxAiCredits` when known.
  */
 export const computeRunBudget = (
     highestTier: RiskTier,
@@ -604,7 +589,10 @@ export const computeRunBudget = (
         floored = true;
     }
 
-    return {...table[effectiveTier], tier: effectiveTier, floored};
+    return clampBudgetToCreditCap(
+        {...table[effectiveTier], tier: effectiveTier, floored},
+        config.maxAiCredits,
+    );
 };
 
 /* -------------------------------------------------------------------------- */
@@ -791,6 +779,12 @@ export type RoutingJson = {
      */
     enabledReviewers: EnableableReviewer[];
     /**
+     * The repo's re-review mode (`re-review` line in `ROUTING`; `full` when
+     * absent or when the ROUTING file is missing). The re-review CLI
+     * (`rereview.ts`) reads this to decide how deep a repeat review runs.
+     */
+    reReviewMode: ReReviewMode;
+    /**
      * Whether the consumer `ROUTING` file was found, plus any parse warnings
      * (or the missing-file warning). The orchestrator surfaces these in the
      * review body's note lines so a silently-unconfigured repo is visible.
@@ -811,6 +805,7 @@ export const toRoutingJson = (
     result: RoutingResult,
     routingConfig: RoutingJson["routingConfig"] = {present: true, warnings: []},
     enabledReviewers: EnableableReviewer[] = [],
+    reReviewMode: ReReviewMode = DEFAULT_RE_REVIEW_MODE,
 ): RoutingJson => {
     const owners: Record<string, string[]> = {};
     const generatedFiles: string[] = [];
@@ -835,6 +830,7 @@ export const toRoutingJson = (
         runBudget: result.runBudget,
         pendingRiskQuestions: result.pendingRiskQuestions,
         enabledReviewers,
+        reReviewMode,
         routingConfig,
     };
 };
@@ -873,6 +869,7 @@ type FsLike = {
  * the {@link RoutingJson} shape. Factored out (fs injected) so it is testable
  * without touching the real filesystem. Returns the written JSON.
  */
+
 /** Accept either a bare `[{path,status}]` array or a `{files:[…]}` wrapper. */
 const extractFileList = (raw: unknown): unknown[] => {
     if (Array.isArray(raw)) {
@@ -882,7 +879,11 @@ const extractFileList = (raw: unknown): unknown[] => {
     return Array.isArray(wrapped) ? wrapped : [];
 };
 
-export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
+export const runCli = (
+    fs: FsLike,
+    repoRoot = ".",
+    env: Record<string, string | undefined> = {},
+): RoutingJson => {
     const readText = (p: string): string => fs.readFileSync(p, "utf8");
     const repoPath = (p: string): string =>
         repoRoot === "." ? p : `${repoRoot}/${p}`;
@@ -914,6 +915,7 @@ export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
               lensRules: [],
               riskRules: [],
               enabledReviewers: [],
+              reReviewMode: DEFAULT_RE_REVIEW_MODE,
               warnings: [
                   `routing config missing (${ROUTING_CONFIG_PATH}): no ` +
                       `specialist lenses will run; always-on reviewers only ` +
@@ -938,6 +940,7 @@ export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
         reviewerRules,
         lensRules: routingFileConfig.lensRules,
         riskRules: routingFileConfig.riskRules,
+        maxAiCredits: resolveCreditCap(env, fs),
     });
     const json = toRoutingJson(
         result,
@@ -946,6 +949,7 @@ export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
             warnings: routingFileConfig.warnings,
         },
         routingFileConfig.enabledReviewers,
+        routingFileConfig.reReviewMode,
     );
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});
@@ -956,5 +960,5 @@ export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
 // Run only when executed directly (review.md Step 3), never on import (tests).
 if (typeof require !== "undefined" && require.main === module) {
     const fs = require("node:fs") as FsLike;
-    runCli(fs, process.env.REVIEW_REPO_ROOT ?? ".");
+    runCli(fs, process.env.REVIEW_REPO_ROOT ?? ".", process.env);
 }

@@ -78,6 +78,13 @@ export type RunArtifacts = {
     thumbs?: ThumbsTally;
     /** Model cost/usage for the run (absent when the log has none). */
     cost?: RunCost;
+    /**
+     * The re-review depth the run executed (`rereview-plan.json`:
+     * `full`/`scoped`/`flip-gated`/`fast`; absent for a run that predates the
+     * mode dial). This is what lets the cost counters price the dial: the
+     * runs-per-PR lever is judged in dollars per depth, not per run.
+     */
+    rereviewDepth?: string;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -114,6 +121,19 @@ export type CostCounter = {
     tokensPerRun: number | null;
 };
 
+/**
+ * Cost per executed re-review depth: the measurement surface for the
+ * re-review mode dial (price `scoped` against `full` in dollars; recall is
+ * the eval suite's half). Runs that recorded no depth (older reviewer
+ * versions) are grouped under `unrecorded` so the window still adds up.
+ */
+export type DepthCostCounter = {
+    depth: string;
+    runs: number;
+    totalUsd: number | null;
+    usdPerRun: number | null;
+};
+
 /** The full set of live counters over a window of runs. */
 export type RunCounters = {
     /** Number of runs aggregated. */
@@ -132,6 +152,8 @@ export type RunCounters = {
     thumbs: ThumbsCounter;
     /** Cost across the window. */
     cost: CostCounter;
+    /** Cost grouped by executed re-review depth, sorted by `depth`. */
+    costByRereviewDepth: DepthCostCounter[];
 };
 
 /** A fresh verdict histogram with every event key initialised to `0`. */
@@ -241,6 +263,37 @@ export const computeRunCounters = (
         tokensPerRun: tokensSeen && runCount > 0 ? tokensSum / runCount : null,
     };
 
+    // Cost per executed re-review depth (the mode-dial pricing surface).
+    const perDepth = new Map<
+        string,
+        {runs: number; usdSum: number; usdSeen: boolean}
+    >();
+    for (const run of runs) {
+        const depth = run.rereviewDepth ?? "unrecorded";
+        const entry = perDepth.get(depth) ?? {
+            runs: 0,
+            usdSum: 0,
+            usdSeen: false,
+        };
+        entry.runs += 1;
+        if (run.cost?.usd !== undefined) {
+            entry.usdSum += run.cost.usd;
+            entry.usdSeen = true;
+        }
+        perDepth.set(depth, entry);
+    }
+    const costByRereviewDepth: DepthCostCounter[] = [...perDepth.entries()]
+        .map(([depth, entry]) => ({
+            depth,
+            runs: entry.runs,
+            totalUsd: entry.usdSeen ? entry.usdSum : null,
+            usdPerRun:
+                entry.usdSeen && entry.runs > 0
+                    ? entry.usdSum / entry.runs
+                    : null,
+        }))
+        .sort((a, b) => (a.depth < b.depth ? -1 : a.depth > b.depth ? 1 : 0));
+
     return {
         runCount,
         validatorDropBySource,
@@ -250,6 +303,7 @@ export const computeRunCounters = (
         verdictMix,
         thumbs,
         cost,
+        costByRereviewDepth,
     };
 };
 
@@ -288,6 +342,8 @@ export type RawRunArtifacts = {
     validator?: unknown;
     /** The run summary: verdict, posted-comment count, thumbs, cost. */
     summary?: unknown;
+    /** `out/rereview-plan.json`: the executed re-review plan (mode dial). */
+    rereviewPlan?: unknown;
 };
 
 const extractValidatorEntries = (validator: unknown): unknown[] => {
@@ -455,6 +511,21 @@ export const normalizeRunArtifacts = (
     const thumbs = normalizeThumbs(summary);
     const cost = normalizeCost(summary);
 
+    // The executed re-review depth: the staged plan artifact is
+    // authoritative; a summary-recorded depth is the fallback for arms that
+    // upload no plan. Any non-string (or missing) value leaves the field
+    // absent, which the counters group as `unrecorded`.
+    const planDepth = isRecord(raw.rereviewPlan)
+        ? raw.rereviewPlan["depth"]
+        : undefined;
+    const summaryDepth = summary["rereviewDepth"];
+    const rereviewDepth =
+        typeof planDepth === "string" && planDepth.length > 0
+            ? planDepth
+            : typeof summaryDepth === "string" && summaryDepth.length > 0
+            ? summaryDepth
+            : undefined;
+
     const run: RunArtifacts = {
         runId,
         verdict,
@@ -466,6 +537,9 @@ export const normalizeRunArtifacts = (
     }
     if (cost !== undefined) {
         run.cost = cost;
+    }
+    if (rereviewDepth !== undefined) {
+        run.rereviewDepth = rereviewDepth;
     }
     return run;
 };
@@ -482,6 +556,8 @@ export type RunArtifactLayout = {
     validator: string;
     /** The run summary (verdict, comments, thumbs, cost), relative to the run dir. */
     summary: string;
+    /** The executed re-review plan (mode dial), relative to the run dir. */
+    rereviewPlan: string;
 };
 
 /**
@@ -495,6 +571,7 @@ export const DEFAULT_RUN_ARTIFACT_LAYOUT: RunArtifactLayout = {
     claims: "claims.json",
     validator: "out/claim-validator.json",
     summary: "summary.json",
+    rereviewPlan: "out/rereview-plan.json",
 };
 
 const readJsonIfPresent = (path: string): unknown => {
@@ -524,6 +601,7 @@ export const readRunArtifactsFromDir = (
         claims: readJsonIfPresent(join(dir, layout.claims)),
         validator: readJsonIfPresent(join(dir, layout.validator)),
         summary: readJsonIfPresent(join(dir, layout.summary)),
+        rereviewPlan: readJsonIfPresent(join(dir, layout.rereviewPlan)),
     };
     return normalizeRunArtifacts(raw, dir);
 };

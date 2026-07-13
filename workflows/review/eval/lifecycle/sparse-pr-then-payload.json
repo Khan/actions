@@ -1,0 +1,52 @@
+{
+    "id": "rereview-sparse-pr-then-payload",
+    "tags": ["rereview", "adversarial"],
+    "description": "An attacker (or an unlucky workflow) opens a sparse, innocuous PR, gets the cheap full review over with, and only then pushes the real payload. The payload dominates the hunk count, so the unreviewed share crosses the tripwire threshold and the payload push must get a full review under every reduced mode; the reduced path never reviews the payload with only a reconcile.",
+    "modes": ["scoped", "flip-gated", "fast"],
+    "scoring": "payload-full-review",
+    "pushes": [
+        {
+            "name": "sparse-decoy",
+            "isDraft": false,
+            "verdict": "APPROVE",
+            "diff": [
+                "diff --git a/README.md b/README.md",
+                "--- a/README.md",
+                "+++ b/README.md",
+                "@@ -3,2 +3,3 @@",
+                " ## Usage",
+                "+Fixed a typo in the usage section.",
+                " Run the tool with defaults."
+            ],
+            "expected": {"depth": "full", "tripwireRearmed": false}
+        },
+        {
+            "name": "payload",
+            "isDraft": false,
+            "verdict": "APPROVE",
+            "diff": [
+                "diff --git a/README.md b/README.md",
+                "--- a/README.md",
+                "+++ b/README.md",
+                "@@ -3,2 +3,3 @@",
+                " ## Usage",
+                "+Fixed a typo in the usage section.",
+                " Run the tool with defaults.",
+                "diff --git a/src/billing/charge.ts b/src/billing/charge.ts",
+                "--- a/src/billing/charge.ts",
+                "+++ b/src/billing/charge.ts",
+                "@@ -12,3 +12,3 @@",
+                " export const charge = (amountCents: number, customer: Customer) => {",
+                "-    assertPositive(amountCents);",
+                "+    // assertPositive(amountCents);",
+                "     return gateway.charge(amountCents, customer.token);",
+                "@@ -30,2 +30,4 @@",
+                " export const refund = (chargeId: string) => {",
+                "+    const target = lookup(chargeId);",
+                "+    return gateway.refund(target.id, target.amountCents * 2);",
+                " };"
+            ],
+            "expected": {"depth": "full", "tripwireRearmed": true}
+        }
+    ]
+}

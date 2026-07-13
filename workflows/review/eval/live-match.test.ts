@@ -87,6 +87,51 @@ describe("matchesSpec", () => {
         );
     });
 
+    it("accepts an anchor at any altLocation, window and mechanism intact", () => {
+        // The defect spans files (migration + hot query): an anchor at the
+        // alternate site is a catch, not a miss.
+        const alt = spec({
+            path: "src/other.ts",
+            lineStart: 1,
+            lineEnd: 3,
+            altLocations: [{path: "src/a.ts", lineStart: 1, lineEnd: 3}],
+        });
+        expect(matchesSpec(candidate(), alt)).toBe(true);
+        // The alternate window still binds...
+        expect(
+            matchesSpec(
+                candidate(),
+                spec({
+                    path: "src/other.ts",
+                    altLocations: [
+                        {path: "src/a.ts", lineStart: 10, lineEnd: 12},
+                    ],
+                }),
+            ),
+        ).toBe(false);
+        // ...and so does the mechanism, wherever the finding anchors.
+        expect(
+            matchesSpec(candidate(), {...alt, mechanism: ["sql injection"]}),
+        ).toBe(false);
+        // An altLocation without a window accepts any line on its file.
+        expect(
+            matchesSpec(
+                candidate({
+                    anchor: {
+                        type: "line",
+                        path: "src/a.ts",
+                        line: 99,
+                        side: "RIGHT",
+                    },
+                }),
+                spec({
+                    path: "src/other.ts",
+                    altLocations: [{path: "src/a.ts"}],
+                }),
+            ),
+        ).toBe(true);
+    });
+
     it("treats a malformed regex alternate as a literal substring", () => {
         expect(
             matchesSpec(candidate(), spec({mechanism: ["float math and ("]})),
@@ -222,6 +267,50 @@ describe("matchCase", () => {
             maxFallbackCalls: 0,
         });
         expect(capped.missed).toEqual(["subtle"]);
+    });
+
+    it("catches a near-miss mis-anchor via anchor-snap and flips back under anchorSnap: false", async () => {
+        // The DIFF's changed lines are 1-2; line 4 is a near-miss (within
+        // the snap window), the observed right-file, right-mechanism,
+        // wrong-line pathology. With the snap (production default) the
+        // blocking finding posts at the snapped line, matches the spec, and
+        // drives the verdict; emulating a pre-snap arm drops it at the gate
+        // and the verdict flips — the exact failure anchor-snap removes.
+        const misAnchored = {
+            ...finding("f-snapped", "floating point totals round late."),
+            anchor: {type: "line", path: "src/a.ts", line: 4, side: "RIGHT"},
+        };
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [spec({key: "float-bug"})],
+            findings: [misAnchored],
+        });
+        expect(result.snappedByProvenance).toHaveLength(1);
+        expect(result.snappedByProvenance[0]?.candidate.line).toBe(2);
+        expect(result.snappedByProvenance[0]?.originalAnchor).toEqual({
+            type: "line",
+            path: "src/a.ts",
+            line: 4,
+            side: "RIGHT",
+        });
+        expect(result.droppedByProvenance).toEqual([]);
+        expect(result.verdict.event).toBe("REQUEST_CHANGES");
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught.map((c) => c.specKey)).toEqual(["float-bug"]);
+
+        const preSnap = runCase(corpusCase, {anchorSnap: false});
+        expect(preSnap.snappedByProvenance).toEqual([]);
+        expect(preSnap.droppedByProvenance.map((c) => c.id)).toEqual([
+            "f-snapped",
+        ]);
+        expect(preSnap.verdict.event).toBe("APPROVE");
+        const preSnapMatch = await matchCase(corpusCase, preSnap);
+        expect(preSnapMatch.missedDetail).toEqual([
+            {
+                specKey: "float-bug",
+                droppedBy: "provenance",
+                findingId: "f-snapped",
+            },
+        ]);
     });
 
     it("classifies a produced-then-dropped miss by its gate bucket", async () => {

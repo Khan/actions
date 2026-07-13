@@ -35,11 +35,21 @@ export type DiffFileSection = {
  *     before it. A pure deletion leaves no `+` line to anchor on, so a
  *     finding about a dropped guard anchors on one of these; the provenance
  *     gate treats them as change-anchored.
+ *   - `lastShownLine`: the highest RIGHT-side line any of the file's hunks
+ *     covers (from the hunk headers). An anchor above it names a line the
+ *     diff never showed the reviewer.
+ *   - `textOverhead`: how many of the file's diff-section text lines are NOT
+ *     RIGHT-side content: file headers, hunk headers, removed lines, and
+ *     no-newline markers. This is the maximum amount by which an anchor that
+ *     was (wrongly) counted against the diff TEXT overshoots the real file
+ *     line — the bound the provenance gate's anchor-snap overflow rule uses.
  */
 export type FileChangedLines = {
     added: number[];
     removed: number[];
     removedAdjacent: number[];
+    lastShownLine: number;
+    textOverhead: number;
 };
 
 /** Per-file changed-line map for a whole diff, keyed by new-side path. */
@@ -184,18 +194,26 @@ export const computeChangedLines = (diff: string): DiffChangedLines => {
         let oldLine = 0;
         let newLine = 0;
         let inHunk = false;
+        let lastShownLine = 0;
+        let textOverhead = 0;
 
         for (const line of lines) {
-            const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+            const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
             if (hunk !== null) {
                 oldLine = Number(hunk[1] ?? "1");
                 newLine = Number(hunk[2] ?? "1");
                 inHunk = true;
+                textOverhead++;
+                // The hunk header states its RIGHT-side extent; a zero-count
+                // hunk (pure deletion) covers nothing past newStart - 1.
+                const newCount = Number(hunk[3] ?? "1");
+                lastShownLine = Math.max(lastShownLine, newLine + newCount - 1);
                 continue;
             }
             if (!inHunk) {
                 // File headers (`diff --git`, `index`, `---`/`+++`) precede
                 // the first hunk; nothing before an `@@` is content.
+                textOverhead++;
                 continue;
             }
             if (line.startsWith("+")) {
@@ -204,6 +222,7 @@ export const computeChangedLines = (diff: string): DiffChangedLines => {
             } else if (line.startsWith("-")) {
                 removed.add(oldLine);
                 oldLine++;
+                textOverhead++;
                 // The deletion sits between new-file lines newLine-1 and
                 // newLine; both bracket lines are change-adjacent anchors.
                 if (newLine > 1) {
@@ -212,6 +231,7 @@ export const computeChangedLines = (diff: string): DiffChangedLines => {
                 removedAdjacent.add(newLine);
             } else if (line.startsWith("\\")) {
                 // "\ No newline at end of file" consumes nothing.
+                textOverhead++;
             } else {
                 oldLine++;
                 newLine++;
@@ -222,6 +242,8 @@ export const computeChangedLines = (diff: string): DiffChangedLines => {
             added: [...added].sort((a, b) => a - b),
             removed: [...removed].sort((a, b) => a - b),
             removedAdjacent: [...removedAdjacent].sort((a, b) => a - b),
+            lastShownLine,
+            textOverhead,
         };
     }
 
@@ -263,4 +285,75 @@ export const stripDiffFiles = (
         .filter((section) => !pathsToStrip.has(section.path))
         .map((section) => section.text);
     return kept.join("\n");
+};
+
+/**
+ * Annotate a unified diff with explicit line numbers, for the model-read
+ * staged copies (`full-stripped-annotated.diff`, `pr-annotated.diff`).
+ *
+ * The observed anchor pathology is reviewers counting diff TEXT lines
+ * instead of file lines; printing the real number on every line removes the
+ * counting entirely. Format, per hunk content line:
+ *
+ *     `+  16| added line`      RIGHT-side (new file) line number
+ *     `   17| context line`    RIGHT-side (new file) line number
+ *     `-  12| removed line`    LEFT-side (old file) line number
+ *
+ * The diff marker stays in column one, so annotated text still splits into
+ * file sections ({@link splitUnifiedDiff} recognises the same headers and
+ * the same `+`/`-`/space first columns). Headers, hunk headers, and
+ * `\ No newline` markers pass through untouched. The annotated copy is for
+ * model eyes only: every code parser (provenance, fingerprints, scoped
+ * staging) keeps reading the raw diff.
+ */
+export const annotateDiffLineNumbers = (diff: string): string => {
+    const out: string[] = [];
+    let oldLine = 0;
+    let newLine = 0;
+    /** Remaining old/new line counts of the hunk being consumed. */
+    let hunkOld = 0;
+    let hunkNew = 0;
+    let width = 3;
+
+    for (const line of diff.split("\n")) {
+        const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+        if (hunk !== null) {
+            oldLine = Number(hunk[1] ?? "1");
+            newLine = Number(hunk[3] ?? "1");
+            hunkOld = Number(hunk[2] ?? "1");
+            hunkNew = Number(hunk[4] ?? "1");
+            width = Math.max(
+                width,
+                String(Math.max(oldLine + hunkOld, newLine + hunkNew)).length,
+            );
+            out.push(line);
+            continue;
+        }
+        if (hunkOld <= 0 && hunkNew <= 0) {
+            // Outside hunk content (file headers, preamble, trailing text):
+            // pass through verbatim. The countdown, not a flag, decides —
+            // so a `--- ` header after an exhausted hunk is never mistaken
+            // for a removed line.
+            out.push(line);
+            continue;
+        }
+        if (line.startsWith("+")) {
+            out.push(`+${String(newLine).padStart(width)}| ${line.slice(1)}`);
+            newLine++;
+            hunkNew--;
+        } else if (line.startsWith("-")) {
+            out.push(`-${String(oldLine).padStart(width)}| ${line.slice(1)}`);
+            oldLine++;
+            hunkOld--;
+        } else if (line.startsWith("\\")) {
+            out.push(line);
+        } else {
+            out.push(` ${String(newLine).padStart(width)}| ${line.slice(1)}`);
+            oldLine++;
+            newLine++;
+            hunkOld--;
+            hunkNew--;
+        }
+    }
+    return out.join("\n");
 };

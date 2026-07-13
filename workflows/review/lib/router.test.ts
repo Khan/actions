@@ -5,6 +5,7 @@ import {
     computeRunBudget,
     DEFAULT_MISROUTED_FLOOR_TIER,
     DEFAULT_TIER_BUDGETS,
+    ENABLEABLE_REVIEWERS,
     isGenerated,
     matchesGlob,
     parseGitattributesGenerated,
@@ -384,6 +385,21 @@ describe("computeRunBudget: scaling", () => {
         expect(result.runBudget.tier).toBe("high");
         expect(result.runBudget.floored).toBe(false);
     });
+
+    it("fits the whole-change roster within the low and medium caps", () => {
+        // Two always-on defaults (correctness-reviewer, skill-auditor; the
+        // other pipeline steps never consume a slot) plus every opt-in
+        // reviewer. Pinned to the roster size, not a literal: if a reviewer
+        // joins ENABLEABLE_REVIEWERS without a cap bump, low/medium runs
+        // would silently shed dimensions again while the suite stayed green.
+        const rosterSize = 2 + ENABLEABLE_REVIEWERS.length;
+        expect(
+            DEFAULT_TIER_BUDGETS.low.maxReviewerInvocations,
+        ).toBeGreaterThanOrEqual(rosterSize);
+        expect(
+            DEFAULT_TIER_BUDGETS.medium.maxReviewerInvocations,
+        ).toBeGreaterThanOrEqual(rosterSize);
+    });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -606,6 +622,21 @@ describe("runCli", () => {
         expect(JSON.parse(written[ROUTING_OUT])).toEqual(json);
     });
 
+    it("clamps the run budget to the credit cap from the environment", () => {
+        const {fs} = fakeFs({
+            [FILES_PATH]: JSON.stringify([
+                {path: "db/migrations/0001.sql", status: "added"},
+            ]),
+            [ROUTING_CONFIG_PATH]:
+                "**/migrations/** tier=high lens=data-migrations",
+        });
+        const json = runCli(fs, ".", {REVIEW_MAX_AI_CREDITS: "400"});
+        expect(json.runBudget.tier).toBe("high");
+        expect(json.runBudget.capClamped).toBe(true);
+        expect(json.runBudget.maxUsd).toBe(3);
+        expect(json.runBudget.effectiveCreditCap).toBe(400);
+    });
+
     it("accepts the {files:[...]} wrapper and degrades safely without a ROUTING config", () => {
         const {fs, written} = fakeFs({
             [FILES_PATH]: JSON.stringify({
@@ -810,5 +841,62 @@ describe("runCli: enabled reviewers", () => {
             ]),
         });
         expect(runCli(fs).enabledReviewers).toEqual([]);
+    });
+});
+
+describe("parseRoutingConfig: re-review directive", () => {
+    it("defaults to full", () => {
+        expect(parseRoutingConfig("docs/** tier=trivial").reReviewMode).toBe(
+            "full",
+        );
+    });
+
+    it("parses each known mode", () => {
+        for (const mode of ["full", "scoped", "flip-gated", "fast"] as const) {
+            const config = parseRoutingConfig(`re-review ${mode}`);
+            expect(config.reReviewMode).toBe(mode);
+            expect(config.warnings).toEqual([]);
+        }
+    });
+
+    it("degrades an unknown mode to full with a warning; toward more review", () => {
+        const config = parseRoutingConfig("re-review turbo");
+        expect(config.reReviewMode).toBe("full");
+        expect(config.warnings.join("\n")).toContain(
+            'unknown re-review mode "turbo"',
+        );
+    });
+
+    it("skips a re-review line with the wrong arity", () => {
+        const config = parseRoutingConfig("re-review scoped fast");
+        expect(config.reReviewMode).toBe("full");
+        expect(config.warnings.join("\n")).toContain("exactly one mode");
+    });
+
+    it("lets the last of duplicate lines win, with a warning", () => {
+        const config = parseRoutingConfig("re-review scoped\nre-review fast");
+        expect(config.reReviewMode).toBe("fast");
+        expect(config.warnings.join("\n")).toContain("duplicate re-review");
+    });
+});
+
+describe("runCli: re-review mode", () => {
+    it("surfaces the configured mode in routing.json", () => {
+        const {fs} = fakeFs({
+            ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
+                {path: "a.ts", status: "modified"},
+            ]),
+            [ROUTING_CONFIG_PATH]: "re-review scoped",
+        });
+        expect(runCli(fs).reReviewMode).toBe("scoped");
+    });
+
+    it("defaults to full without a ROUTING config", () => {
+        const {fs} = fakeFs({
+            ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
+                {path: "a.ts", status: "modified"},
+            ]),
+        });
+        expect(runCli(fs).reReviewMode).toBe("full");
     });
 });

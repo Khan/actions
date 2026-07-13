@@ -157,6 +157,16 @@ export type Finding = {
     /** Optional unified-diff patch the author suggests (rendered as a suggestion). */
     suggested_patch?: string;
     /**
+     * For a skill (best-practice) finding: the exact rule text, quoted
+     * verbatim from the skill file, that the finding asserts is violated.
+     * Quote-the-rule already requires the quote in `evidence_trace`, but
+     * authors never see evidence traces — this field is what the renderer
+     * surfaces into the comment (as a `> **Rule:** …` blockquote), so the
+     * author reads the actual rule, not a paraphrase. Optional: only skill
+     * findings carry it.
+     */
+    rule_quote?: string;
+    /**
      * Optional pre-merge obligation text. Drives the conditional-approval
      * (APPROVE-with-obligations) rendering.
      */
@@ -169,6 +179,46 @@ export type Finding = {
     /** The single human-read sentence(s) authored by the model. */
     model_authored_prose: string;
 };
+
+/**
+ * An out-of-lane observation: a real concern a reviewer surfaced that its own
+ * mandate does not let it report as a finding — e.g. the skill-auditor notices
+ * a correctness problem while checking a rule, but quote-the-rule rightly
+ * forbids reporting it as a skill violation. Production motivation: on the
+ * review-v1.4.0 re-run lifecycle the skill-auditor found a real
+ * eventual-consistency bug (dedup reads via a Query immediately after
+ * PutMulti) and dropped it — "that's a correctness concern, not a quotable
+ * skill-rule violation, so I'll leave it". Correct per quote-the-rule, but the
+ * observation died.
+ *
+ * The skill-auditor and every specialist lens may return these alongside
+ * `findings[]`; the orchestrator routes each one into claim validation as a
+ * non-blocking candidate (label code-assigned, never model-chosen), so a
+ * declined-as-out-of-lane observation is validated and surfaced rather than
+ * discarded. An observation is a handoff, not a vetted finding: it can never
+ * block on its own.
+ */
+export type OutOfLaneObservation = {
+    /** Repo-relative path the observation anchors on. */
+    path: string;
+    /** RIGHT-side diff line, when the concern is line-specific. */
+    line?: number;
+    /** One sentence: the concern, stated concretely. Model-authored. */
+    observation: string;
+    /**
+     * One sentence: the concrete inputs/state and the wrong outcome they
+     * produce — the claim the claim-validator attacks, exactly as on a
+     * finding. An observation whose scenario cannot be stated concretely is
+     * not worth handing off.
+     */
+    failure_scenario: string;
+    /** The lane the producer thinks owns this, e.g. `correctness`. Optional. */
+    suggested_lane?: string;
+};
+
+export type ObservationValidationResult =
+    | {ok: true; observation: OutOfLaneObservation}
+    | {ok: false; errors: string[]};
 
 export type ValidationResult =
     | {ok: true; finding: Finding}
@@ -313,6 +363,13 @@ export const validateFinding = (input: unknown): ValidationResult => {
     }
 
     if (
+        input["rule_quote"] !== undefined &&
+        !isNonEmptyString(input["rule_quote"])
+    ) {
+        errors.push("rule_quote: must be a non-empty string when present");
+    }
+
+    if (
         input["pre_merge_obligation"] !== undefined &&
         !isNonEmptyString(input["pre_merge_obligation"])
     ) {
@@ -327,6 +384,60 @@ export const validateFinding = (input: unknown): ValidationResult => {
 
     return {ok: true, finding: input as Finding};
 };
+
+/**
+ * Validate an untrusted value against the out-of-lane observation shape.
+ * Same error-collecting contract as {@link validateFinding}: every problem is
+ * returned, so a producer's malformed handoff is diagnosable from the run
+ * artifact rather than silently dropped.
+ */
+export const validateOutOfLaneObservation = (
+    input: unknown,
+): ObservationValidationResult => {
+    const errors: string[] = [];
+
+    if (!isRecord(input)) {
+        return {ok: false, errors: ["observation: must be an object"]};
+    }
+
+    if (!isNonEmptyString(input["path"])) {
+        errors.push("path: required non-empty string");
+    }
+
+    const line = input["line"];
+    if (
+        line !== undefined &&
+        (!Number.isInteger(line) || (line as number) < 1)
+    ) {
+        errors.push("line: must be a positive integer when present");
+    }
+
+    if (!isNonEmptyString(input["observation"])) {
+        errors.push("observation: required non-empty string");
+    }
+
+    if (!isNonEmptyString(input["failure_scenario"])) {
+        errors.push("failure_scenario: required non-empty string");
+    }
+
+    if (
+        input["suggested_lane"] !== undefined &&
+        !isNonEmptyString(input["suggested_lane"])
+    ) {
+        errors.push("suggested_lane: must be a non-empty string when present");
+    }
+
+    if (errors.length > 0) {
+        return {ok: false, errors};
+    }
+
+    return {ok: true, observation: input as OutOfLaneObservation};
+};
+
+/** Narrowing boolean wrapper around {@link validateOutOfLaneObservation}. */
+export const isValidOutOfLaneObservation = (
+    input: unknown,
+): input is OutOfLaneObservation => validateOutOfLaneObservation(input).ok;
 
 /** Narrowing boolean wrapper around {@link validateFinding}. */
 export const isValidFinding = (input: unknown): input is Finding =>

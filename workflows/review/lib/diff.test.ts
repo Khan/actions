@@ -1,6 +1,7 @@
 import {describe, it, expect} from "vitest";
 
 import {
+    annotateDiffLineNumbers,
     computeChangedLines,
     countOrphanHunkLines,
     splitUnifiedDiff,
@@ -140,6 +141,22 @@ describe("computeChangedLines", () => {
         ].join("\n");
         expect(computeChangedLines(diff)["a.ts"].added).toEqual([1]);
     });
+
+    it("records the last RIGHT-side line each file's hunks cover", () => {
+        const lines = computeChangedLines(GIT_DIFF);
+        // Hunk 2 covers new lines 41..43; the file's diff shows nothing past.
+        expect(lines["src/app.ts"].lastShownLine).toBe(43);
+        expect(lines["src/new.ts"].lastShownLine).toBe(2);
+    });
+
+    it("records each file's diff-text overhead", () => {
+        const lines = computeChangedLines(GIT_DIFF);
+        // 4 file-header lines + 2 hunk headers + 2 removed lines: the most a
+        // diff-text-counted anchor can overshoot the real file line.
+        expect(lines["src/app.ts"].textOverhead).toBe(8);
+        // 4 file-header lines + 1 hunk header, nothing removed.
+        expect(lines["src/new.ts"].textOverhead).toBe(5);
+    });
 });
 
 describe("countOrphanHunkLines", () => {
@@ -169,6 +186,82 @@ describe("countOrphanHunkLines", () => {
         expect(splitUnifiedDiff(partiallyGarbled).map((s) => s.path)).toEqual([
             "src/kept.ts",
         ]);
+    });
+});
+
+describe("annotateDiffLineNumbers", () => {
+    it("prefixes added and context lines with RIGHT-side numbers, removed with LEFT-side", () => {
+        const annotated = annotateDiffLineNumbers(GIT_DIFF).split("\n");
+        expect(annotated).toContain("  10| const a = 1;");
+        expect(annotated).toContain("- 11| const b = legacy(a);");
+        expect(annotated).toContain("+ 11| const b = modern(a);");
+        expect(annotated).toContain("+ 12| const c = b + 1;");
+        // Hunk 2 resumes at the header's stated positions.
+        expect(annotated).toContain("  41| cleanup();");
+        expect(annotated).toContain("- 41| releaseLock();");
+        expect(annotated).toContain("  42| done();");
+        // The new file numbers from 1.
+        expect(annotated).toContain("+  1| export const x = 1;");
+        expect(annotated).toContain("+  2| export const y = 2;");
+    });
+
+    it("passes headers, hunk headers, and no-newline markers through verbatim", () => {
+        const withMarker = [
+            "diff --git a/a.ts b/a.ts",
+            "--- a/a.ts",
+            "+++ b/a.ts",
+            "@@ -1 +1 @@",
+            "-x",
+            "\\ No newline at end of file",
+            "+y",
+            "\\ No newline at end of file",
+        ].join("\n");
+        const annotated = annotateDiffLineNumbers(withMarker).split("\n");
+        expect(annotated[0]).toBe("diff --git a/a.ts b/a.ts");
+        expect(annotated[1]).toBe("--- a/a.ts");
+        expect(annotated[3]).toBe("@@ -1 +1 @@");
+        expect(annotated[4]).toBe("-  1| x");
+        expect(annotated[5]).toBe("\\ No newline at end of file");
+        expect(annotated[6]).toBe("+  1| y");
+    });
+
+    it("keeps the diff marker in column one, so sections still split", () => {
+        const annotated = annotateDiffLineNumbers(GIT_DIFF);
+        expect(splitUnifiedDiff(annotated).map((s) => s.path)).toEqual(
+            splitUnifiedDiff(GIT_DIFF).map((s) => s.path),
+        );
+    });
+
+    it("does not annotate text after a hunk's stated extent (trailing lines)", () => {
+        const trailing = [
+            "--- a/a.ts",
+            "+++ b/a.ts",
+            "@@ -1 +1 @@",
+            "-x",
+            "+y",
+            "",
+        ].join("\n");
+        const annotated = annotateDiffLineNumbers(trailing).split("\n");
+        // The trailing empty line (a split artifact, outside the hunk's
+        // counted extent) stays empty instead of gaining a phantom number.
+        expect(annotated[annotated.length - 1]).toBe("");
+    });
+
+    it("widens the number column for large files and is empty-safe", () => {
+        const big = [
+            "--- a/a.ts",
+            "+++ b/a.ts",
+            "@@ -9998,3 +9998,3 @@",
+            " keep;",
+            "-old;",
+            "+new;",
+            " tail;",
+        ].join("\n");
+        const annotated = annotateDiffLineNumbers(big).split("\n");
+        expect(annotated).toContain("  9998| keep;");
+        expect(annotated).toContain("- 9999| old;");
+        expect(annotated).toContain("+ 9999| new;");
+        expect(annotateDiffLineNumbers("")).toBe("");
     });
 });
 

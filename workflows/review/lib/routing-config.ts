@@ -61,12 +61,47 @@ export const ENABLEABLE_REVIEWERS = [
 
 export type EnableableReviewer = typeof ENABLEABLE_REVIEWERS[number];
 
+/**
+ * The re-review mode dial: how much of the roster a *repeat* review of the
+ * same PR runs. The first full review of a ready-for-review PR always runs
+ * the whole roster whatever the mode; the dial governs the pushes after it.
+ * Ordered cheapest-last:
+ *
+ *   - `full`:       every push re-runs the whole roster (today's behavior).
+ *   - `scoped`:     every push re-runs the whole roster, but reviewers are
+ *                   staged only the hunks that are new since the last
+ *                   fully-reviewed fingerprint, and comments stay scoped to
+ *                   those hunks. Catches fresh defects in new code at a
+ *                   fraction of the input cost.
+ *   - `flip-gated`: reconcile-only fast path, plus the correctness pass over
+ *                   the new hunks; a REQUEST_CHANGES→APPROVE flip is vetoed
+ *                   by any validated blocking finding from that pass.
+ *   - `fast`:       reconcile-only: threads are verified and resolved,
+ *                   nothing new is reviewed (the divergence tripwire is the
+ *                   only fresh-code guard).
+ *
+ * `full` is the default everywhere: a repo pays for a cheaper mode only by
+ * writing a `re-review` line in its ROUTING file.
+ */
+export const RE_REVIEW_MODES = [
+    "full",
+    "scoped",
+    "flip-gated",
+    "fast",
+] as const;
+
+export type ReReviewMode = typeof RE_REVIEW_MODES[number];
+
+export const DEFAULT_RE_REVIEW_MODE: ReReviewMode = "full";
+
 /** Parsed `.github/aw/review/ROUTING` config. */
 export type RoutingFileConfig = {
     lensRules: LensRule[];
     riskRules: RiskRule[];
     /** Opt-in whole-change reviewers this repo enables (canonical order). */
     enabledReviewers: EnableableReviewer[];
+    /** The repo's re-review mode (`re-review` line; default `full`). */
+    reReviewMode: ReReviewMode;
     /** Fixed-format parse warnings (unknown lens/tier, no-op rule). */
     warnings: string[];
 };
@@ -79,6 +114,7 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  *
  *     <pattern> [lens=<lens>[,<lens>…]] [tier=trivial|low|medium|high] [direction-dependent]
  *     enable <reviewer>[,<reviewer>…]
+ *     re-review full|scoped|flip-gated|fast
  *
  * `lens=` names specialist lenses to spawn when the pattern is touched (multiple
  * matching rules union their lenses). `tier=` assigns a risk tier; when several
@@ -90,15 +126,21 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  * {@link RiskRule.diffDirectionDependent}) and requires `tier=`.
  * `enable` turns on an opt-in whole-change reviewer
  * ({@link ENABLEABLE_REVIEWERS}) for every review in this repo.
+ * `re-review` sets the repo's re-review mode ({@link RE_REVIEW_MODES}); when
+ * several lines set it the LAST one wins (with a warning), matching the
+ * file's last-rule-wins convention.
  *
  * Malformed fields and unknown lens/reviewer names produce a warning and skip
  * the lens or line rather than aborting the run: routing degrades to fewer
- * reviewers, never to a crashed review.
+ * reviewers, never to a crashed review. An unknown `re-review` mode degrades
+ * to `full`: toward more review, never less.
  */
 export const parseRoutingConfig = (content: string): RoutingFileConfig => {
     const lensRules: LensRule[] = [];
     const riskRules: RiskRule[] = [];
     const enabled = new Set<EnableableReviewer>();
+    let reReviewMode: ReReviewMode = DEFAULT_RE_REVIEW_MODE;
+    let reReviewLineSeen = false;
     const warnings: string[] = [];
 
     const lines = content.split(/\r?\n/);
@@ -132,6 +174,33 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
                     );
                 }
             }
+            continue;
+        }
+
+        if (pattern === "re-review") {
+            if (fields.length !== 1) {
+                warnings.push(
+                    `ROUTING line ${lineNo}: re-review takes exactly one ` +
+                        `mode (line skipped)`,
+                );
+                continue;
+            }
+            const mode = fields[0];
+            if (!(RE_REVIEW_MODES as readonly string[]).includes(mode)) {
+                warnings.push(
+                    `ROUTING line ${lineNo}: unknown re-review mode ` +
+                        `"${mode}" (kept ${reReviewMode})`,
+                );
+                continue;
+            }
+            if (reReviewLineSeen) {
+                warnings.push(
+                    `ROUTING line ${lineNo}: duplicate re-review line ` +
+                        `(last one wins)`,
+                );
+            }
+            reReviewMode = mode as ReReviewMode;
+            reReviewLineSeen = true;
             continue;
         }
 
@@ -208,6 +277,7 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
         enabledReviewers: ENABLEABLE_REVIEWERS.filter((reviewer) =>
             enabled.has(reviewer),
         ),
+        reReviewMode,
         warnings,
     };
 };

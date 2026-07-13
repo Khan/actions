@@ -30,7 +30,10 @@ name: Review Eval A/B
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # `labeled` is here so adding `full-eval` triggers the lifted run
+    # immediately instead of waiting for the next push; the job-level guard
+    # below ignores every other label.
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - "workflows/review/**"
   workflow_dispatch:
@@ -44,6 +47,18 @@ on:
         default: "40"
       full:
         description: "Run every live case (not just the smoke subset)"
+        type: boolean
+        required: false
+        default: false
+      cases:
+        description: "Comma-separated live case ids (targeted repeats; default: all selected cases)"
+        required: false
+      repeats:
+        description: "Repeats per arm in this one dispatch; >1 reports pooled pass rates with binomial intervals"
+        required: false
+        default: "1"
+      force_arms:
+        description: "Run both arms even when review.md is byte-identical (wobble control / noise floor)"
         type: boolean
         required: false
         default: false
@@ -67,7 +82,9 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.draft == false &&
        github.head_ref != 'changeset-release/main' &&
-       !contains(github.event.pull_request.labels.*.name, 'skip-live-eval'))
+       !contains(github.event.pull_request.labels.*.name, 'skip-live-eval') &&
+       (github.event.action != 'labeled' ||
+        github.event.label.name == 'full-eval'))
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -83,6 +100,9 @@ jobs:
           BASE_REF: ${{ inputs.base_ref || format('origin/{0}', github.base_ref || 'main') }}
           MAX_USD: ${{ inputs.max_usd || '40' }}
           FULL_EVAL: ${{ inputs.full == true || contains(github.event.pull_request.labels.*.name, 'full-eval') }}
+          CASES: ${{ inputs.cases || '' }}
+          REPEATS: ${{ inputs.repeats || '1' }}
+          FORCE_ARMS: ${{ inputs.force_arms == true }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "ANTHROPIC_API_KEY secret not configured; skipping the live A/B." >&2
@@ -92,8 +112,18 @@ jobs:
           if [ "$FULL_EVAL" = "true" ]; then
             SCOPE=""
           fi
+          EXTRA=""
+          if [ -n "$CASES" ]; then
+            EXTRA="$EXTRA --cases $CASES"
+          fi
+          if [ "$REPEATS" != "1" ]; then
+            EXTRA="$EXTRA --repeats $REPEATS"
+          fi
+          if [ "$FORCE_ARMS" = "true" ]; then
+            EXTRA="$EXTRA --force-arms"
+          fi
           pnpm dlx tsx workflows/review/eval/live-ab.ts \
-            --base-ref "$BASE_REF" --max-usd "$MAX_USD" $SCOPE
+            --base-ref "$BASE_REF" --max-usd "$MAX_USD" $SCOPE $EXTRA
       - name: Upload the report artifact
         # always(): a partial or gate-failing run still uploads what it wrote.
         if: always()
@@ -104,7 +134,7 @@ jobs:
           if-no-files-found: ignore
       - name: Post the sticky PR comment
         if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             const fs = require("fs");

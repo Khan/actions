@@ -1,5 +1,0 @@
----
-"review": minor
----
-
-Live-enabled corpus cases (live A/B eval plan, phase 1). The eval corpus gains an opt-in `live` block carrying what a REAL model run needs and the deterministic replay does not: the PR context (`prContext`, with the description treated as untrusted author text), a post-change file tree on disk next to the case (`<id>/case.json` + `<id>/tree/`, coexisting with the flat `<id>.json` layout), and labeled defect specs (`mustCatchSpecs` / `mustNotFlagSpecs`: path, line window, mechanism keyword alternates) so a live run's model-chosen finding ids can be matched to ground truth. A live case must carry the `live` tag, a cleanly-parseable diff, and every non-removed changed file in its tree; the loader enforces all of it and `loadLiveCorpus()` returns the subset. Ten cases are converted with hand-authored real diffs and trees (five smoke incidents, both clean cases, one adversarial injection whose payload lives in the diff, one golden holdout, one synthetic mutation); their recorded line anchors now point at the authored defect lines, and the deterministic suite runs them unchanged, provenance gate included.

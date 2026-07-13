@@ -1,0 +1,190 @@
+{
+    "id": "golden-retention-lifecycle-1",
+    "tags": [
+        "golden",
+        "rereview-lifecycle",
+        "live"
+    ],
+    "category": "golden",
+    "description": "Push 1 of the retention lifecycle (sanitized port of a seeded live trial): a per-user note cap with pruning, and note deletion wired into account deletion. Four planted defects: deletion removes at most one note (facade pageSize defaults to 1), the prune offset keeps one note fewer than the cap, the prune query loads the entire result set, and the prune test asserts nothing the cap needs.",
+    "changedFiles": [
+        {
+            "path": "src/notes/purge-user-data.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/notes/retention.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/notes/retention.test.ts",
+            "status": "added"
+        }
+    ],
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "retention-purge-limit",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/notes/purge-user-data.ts",
+                    "line": 8,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "src/notes/purge-user-data.ts: query() called with no pageSize",
+                    "src/notes/db.ts: `Rows per page. Defaults to 1`"
+                ],
+                "failure_scenario": "A user with more than one stored note requests account deletion; query() defaults pageSize to 1 (src/notes/db.ts), so deleteMulti receives one id and every other note survives the purge.",
+                "producing_hunt": "correctness:default-page-size",
+                "model_authored_prose": "Account deletion removes at most one note: `query(\"Note\", {userId})` uses the facade's default `pageSize` of 1 (src/notes/db.ts). Page through the results (or pass `pageSize: \"all\"`) and delete every note."
+            }
+        },
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "retention-cap-off-by-one",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/notes/retention.ts",
+                    "line": 16,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "src/notes/retention.ts: offset: MAX_NOTES_PER_USER - 1 under a newest-first order"
+                ],
+                "failure_scenario": "A user at exactly MAX_NOTES_PER_USER notes saves one more; with newest-first ordering, offset(MAX-1) skips only the newest 199, so the 200th-newest note is deleted and the user is capped at 199, not 200.",
+                "producing_hunt": "correctness:offset-window",
+                "model_authored_prose": "Off-by-one: with `orderDesc: \"createdAt\"` (newest first), `offset: MAX_NOTES_PER_USER - 1` keeps only `MAX_NOTES_PER_USER - 1` notes. Use `offset: MAX_NOTES_PER_USER`."
+            }
+        },
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "retention-unbounded-prune",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/notes/retention.ts",
+                    "line": 17,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "src/notes/retention.ts: pageSize \"all\" on the prune query"
+                ],
+                "failure_scenario": "A user far over the cap triggers prune; pageSize \"all\" loads every stale row into memory in one call, so a large backlog makes prune (and the save that fired it) balloon instead of deleting in bounded batches.",
+                "producing_hunt": "correctness:unbounded-read",
+                "model_authored_prose": "The prune query loads the entire stale result set at once (`pageSize: \"all\"`). Delete in bounded batches so a large backlog cannot balloon a save."
+            }
+        },
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "retention-test-asserts-nothing",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/notes/retention.test.ts",
+                    "line": 9,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "src/notes/retention.test.ts: two saves, no count assertion"
+                ],
+                "failure_scenario": "The only prune test saves 2 notes against a cap of 200 and asserts only that the promise resolves, so the off-by-one above (and any cap regression) passes CI silently.",
+                "producing_hunt": "correctness:test-adequacy",
+                "model_authored_prose": "This test saves 2 notes against a cap of 200 and asserts only `resolves` - it can never exercise the cap. Save past the cap and assert the retained count."
+            }
+        }
+    ],
+    "validation": [
+        {
+            "id": "retention-purge-limit",
+            "verification": "confirmed"
+        },
+        {
+            "id": "retention-cap-off-by-one",
+            "verification": "confirmed"
+        },
+        {
+            "id": "retention-unbounded-prune",
+            "verification": "confirmed"
+        },
+        {
+            "id": "retention-test-asserts-nothing",
+            "verification": "confirmed"
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 4,
+        "mustCatch": [
+            "retention-purge-limit",
+            "retention-cap-off-by-one",
+            "retention-unbounded-prune",
+            "retention-test-asserts-nothing"
+        ]
+    },
+    "diff": "diff --git a/src/notes/purge-user-data.ts b/src/notes/purge-user-data.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notes/purge-user-data.ts\n@@ -0,0 +1,10 @@\n+import type {Db} from \"./db\";\n+\n+/** Part of account deletion: remove every stored note for the user. */\n+export const purgeUserNotes = async (\n+    db: Db,\n+    userId: string,\n+): Promise<void> => {\n+    const notes = await db.query(\"Note\", {userId});\n+    await db.deleteMulti(notes.map((note) => note.id));\n+};\ndiff --git a/src/notes/retention.test.ts b/src/notes/retention.test.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notes/retention.test.ts\n@@ -0,0 +1,11 @@\n+import {memDb, note} from \"./testing\";\n+import {pruneNotes, saveNote} from \"./retention\";\n+\n+describe(\"pruneNotes\", () => {\n+    it(\"prunes old notes past the cap\", async () => {\n+        const db = memDb();\n+        await saveNote(db, note(\"u1\", \"first\"));\n+        await saveNote(db, note(\"u1\", \"second\"));\n+        await expect(pruneNotes(db, \"u1\")).resolves.toBeUndefined();\n+    });\n+});\ndiff --git a/src/notes/retention.ts b/src/notes/retention.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notes/retention.ts\n@@ -0,0 +1,22 @@\n+import type {Db, Note} from \"./db\";\n+\n+/** Hard cap on stored notes per user; prune enforces it on every save. */\n+export const MAX_NOTES_PER_USER = 200;\n+\n+export const saveNote = async (db: Db, note: Note): Promise<void> => {\n+    await db.put(note);\n+    // Intentionally fire-and-forget: a failing prune must not fail the save.\n+    void pruneNotes(db, note.userId);\n+};\n+\n+export const pruneNotes = async (db: Db, userId: string): Promise<void> => {\n+    const stale = await db.query(\"Note\", {\n+        userId,\n+        orderDesc: \"createdAt\",\n+        offset: MAX_NOTES_PER_USER - 1,\n+        pageSize: \"all\",\n+    });\n+    if (stale.length > 0) {\n+        await db.deleteMulti(stale.map((note) => note.id));\n+    }\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "notes: cap stored notes per user and delete them with user data",
+            "description": "Adds a per-user retention cap enforced on save, and wires note deletion into account deletion.",
+            "author": "dev-notes",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "retention-purge-limit",
+                "path": "src/notes/purge-user-data.ts",
+                "mechanism": [
+                    "pageSize.*(default|1)",
+                    "at most one|single (note|row|page)",
+                    "only.*(first|one).*(note|row)"
+                ]
+            },
+            {
+                "key": "retention-cap-off-by-one",
+                "path": "src/notes/retention.ts",
+                "mechanism": [
+                    "off.by.one",
+                    "MAX_NOTES_PER_USER - 1",
+                    "keeps (only )?199|one (note )?fewer"
+                ]
+            },
+            {
+                "key": "retention-unbounded-prune",
+                "path": "src/notes/retention.ts",
+                "mechanism": [
+                    "pageSize.*all",
+                    "entire result|unbounded|all (stale )?rows",
+                    "batch"
+                ]
+            },
+            {
+                "key": "retention-test-asserts-nothing",
+                "path": "src/notes/retention.test.ts",
+                "mechanism": [
+                    "asserts? (only|nothing)",
+                    "never.*(cap|exercise)|cap.*never",
+                    "resolves"
+                ]
+            }
+        ]
+    }
+}
