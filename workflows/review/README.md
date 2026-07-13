@@ -235,6 +235,51 @@ counters aggregate `costByRereviewDepth`). Lifecycle-class changes like this
 one are trialed with the seeded-defect skill
 (`.claude/skills/review-trial/SKILL.md`).
 
+Re-review behavior is evaluated at three layers, cheapest first:
+
+- **Depth decisions** (`eval/lifecycle/`, deterministic): push sequences
+  replayed through the tripwire and depth logic alone; the adversarial
+  rewrite-after-approval and sparse-PR-then-payload cases live here.
+- **Open-PR corpus cases** (`live.rereview` in a live-enabled case): a case
+  that is a mid-review snapshot, not a first review. It stages the prior
+  review's threads (with author replies), a stamped prior review derived from
+  `priorDiff`, and the depth plan; the live producer then dispatches the
+  reconciler (at every depth) plus the depth-sized finder roster, and
+  `eval/rereview-match.ts` scores thread-resolution accuracy against
+  per-thread ground truth, the flip-gate input (kept blocking count), and
+  duplicate comments on kept threads. The A/B runner prices a mode with
+  `--re-review-mode` (candidate arm only; baseline stays `full`), and the
+  deterministic replay of the same cases exercises the kept-blocking verdict
+  floor and the accountability section. The
+  `golden-retention-lifecycle-1/2/3` chain is the template: planted bugs, a
+  bad partial fix with added bugs, then the full fix.
+- **Live trials** (the review-trial skill): the same lifecycle against the
+  real workflow on real PRs, reserved for architecture-class changes.
+
+To price every dial setting in one command, `eval/rereview-sweep.ts` runs the
+working tree's reviewer over the rereview cases at each mode
+(`--modes full,scoped,flip-gated,fast` by default) and reports recall, thread
+resolution, flip-gate correctness, duplicates, and dollars per mode. It
+dispatches real model calls, so it never runs automatically: add the
+`rereview-sweep` label to a PR (the table lands in a sticky PR comment, the
+job summary, and the run artifact), dispatch the `Review Re-review Mode
+Sweep` workflow against any branch, or run the CLI locally with
+`ANTHROPIC_API_KEY` set.
+
+Every model-spending eval has the same manual trigger surface: a PR label
+(`full-eval` lifts the A/B to the whole live corpus and now triggers on the
+labeling itself, `rereview-sweep` runs the dial sweep, `live-judge` runs the
+judged corpus pass, `skip-live-eval` opts a PR out) plus `workflow_dispatch`
+for off-PR runs. The A/B also short-circuits before spending: byte-identical
+`review.md` in both arms posts a "no reviewable delta" verdict and runs
+nothing (`--force-arms` bypasses this for deliberate wobble controls). The mode
+is a run parameter, so no special case format exists; three realities the
+sweep reports instead: the tripwire can override the dial (each row shows the
+EXECUTED depth), pricing the cheap paths needs at least one under-threshold
+case (`golden-retention-fix-push`, a one-hunk fix push whose fix plants a
+fresh defect inside the new hunk), and `fast` has definitionally zero
+fresh-defect recall (its cost, shown as recall against dollars).
+
 ### Models and effort per role
 
 Each sub-agent pins its model in its own definition inside `review.md` (with a

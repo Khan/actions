@@ -46,6 +46,7 @@ import {
     type VerdictEvent,
 } from "../lib/render-comment";
 import {applyProvenanceGate, computeDiffProvenance} from "../lib/provenance";
+import {renderRereviewSection, type StagedThread} from "../lib/rereview";
 import {route, type RoutingResult, type RouterConfig} from "../lib/router";
 import {
     computeVerdict,
@@ -386,12 +387,44 @@ export const runCase = (
             options.validation ?? corpusCase.validation,
         );
 
+    // 3c. Re-review (open-PR) cases: the deterministic replay assumes a
+    // correct reconciler and takes each prior thread's `expect` as its
+    // decision, mirroring what production computes from the reconciler's
+    // keep-list — the kept-blocking verdict floor (the flip rule) and the
+    // code-rendered accountability section. The LIVE path scores the real
+    // reconciler against the same ground truth (`rereview-match.ts`).
+    const rereview = corpusCase.live?.rereview;
+    let keptBlockingCount = 0;
+    let rereviewSection: string | undefined;
+    if (rereview !== undefined) {
+        const threads: StagedThread[] = rereview.priorThreads.map((thread) => ({
+            thread_id: `t-${thread.key}`,
+            path: thread.path,
+            line: thread.line,
+            comments: [{author: "github-actions[bot]", body: thread.body}],
+        }));
+        const reconciler = {
+            resolve: rereview.priorThreads
+                .filter((t) => t.expect === "resolve")
+                .map((t) => `t-${t.key}`),
+            keep: rereview.priorThreads
+                .filter((t) => t.expect === "keep")
+                .map((t) => `t-${t.key}`),
+        };
+        const section = renderRereviewSection({threads, reconciler});
+        keptBlockingCount = section.keptBlockingCount;
+        if (section.section !== "") {
+            rereviewSection = section.section;
+        }
+    }
+
     // 4. Mechanical verdict from the posted labels + dimension gate + conflicts.
     const postedLabels = postedCandidates.map((c) => c.label);
     const verdict = computeVerdict({
         postedLabels,
         dimensions: toDimensionReport(corpusCase.dimensions),
         policyConflicts: corpusCase.policyConflicts,
+        keptBlockingCount,
         ...(options.blockingThreshold !== undefined
             ? {blockingThreshold: options.blockingThreshold}
             : {}),
@@ -401,6 +434,7 @@ export const runCase = (
     const reviewBody = renderReviewBody({
         event: verdict.event,
         hasInlineComments: postedCandidates.length > 0,
+        ...(rereviewSection !== undefined ? {rereviewSection} : {}),
         skippedDimensions: skippedDimensions(corpusCase.dimensions),
     });
 

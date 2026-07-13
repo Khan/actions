@@ -25,6 +25,11 @@
  *     [--no-judge]            skip judge quality scoring
  *     [--stage-root <dir>]    staging root (default: a fresh temp dir)
  *     [--out <path>]          JSON report path (default out/live-ab-report.json)
+ *     [--re-review-mode <m>]  re-review mode for the CANDIDATE arm on open-PR
+ *                             (rereview) cases: full|scoped|flip-gated|fast.
+ *                             The baseline always runs full, so the report
+ *                             prices the mode dial (recall and dollars, same
+ *                             prompt, mode the only difference). Default full.
  *     [--force-arms]          run both arms even when review.md is
  *                             byte-identical (a deliberate wobble control);
  *                             without it, identical arms short-circuit to a
@@ -49,10 +54,21 @@ import {
     type LiveCaseRun,
     type LiveMetricsReport,
 } from "./live-match";
-import {produceLive, type PerAgentReport} from "./live-producer";
+import {
+    produceLive,
+    type LiveReconciliation,
+    type PerAgentReport,
+} from "./live-producer";
 import {sdkRunner} from "./live-runner";
+import {
+    computeRereviewMetrics,
+    scoreRereview,
+    type RereviewCaseScore,
+    type RereviewMetricsReport,
+} from "./rereview-match";
 import {runCase} from "./runner";
 import type {CaseVerification, RecordedFinding} from "./corpus/loader";
+import type {ReReviewMode} from "../lib/routing-config";
 
 export type ArmId = "baseline" | "candidate";
 
@@ -61,6 +77,8 @@ export type ArmProduceResult = {
     findings: RecordedFinding[];
     validation: CaseVerification[];
     perAgent: PerAgentReport[];
+    /** The reconciler's decision, for open-PR (rereview) cases. */
+    reconciliation?: LiveReconciliation;
 };
 
 export type ArmProduce = (corpusCase: CorpusCase) => Promise<ArmProduceResult>;
@@ -82,7 +100,11 @@ export type ArmRunReport = {
         missed: string[];
         /** `<agent>: <reason>` per failed agent (diagnosable from the report). */
         failedAgents: string[];
+        /** Present iff the case is an open-PR (rereview) case. */
+        rereview?: RereviewCaseScore;
     }[];
+    /** Aggregated re-review scoring, when the corpus carried rereview cases. */
+    rereview?: RereviewMetricsReport;
     judge?: {meanQuality: number; verdictCounts: Record<string, number>};
     /** Fixed-format note when judge scoring failed; metrics still stand. */
     judgeError?: string;
@@ -109,6 +131,7 @@ export const runArm = async (
     const runs: LiveCaseRun[] = [];
     const perCase: ArmRunReport["perCase"] = [];
     const skippedCases: string[] = [];
+    const scoredRereviews: {caseId: string; score: RereviewCaseScore}[] = [];
     let usd = 0;
     let stopped = false;
 
@@ -133,6 +156,23 @@ export const runArm = async (
         });
         const match = await matchCase(corpusCase, result);
         runs.push({corpusCase, result, match});
+
+        // Open-PR (rereview) cases: score the reconciler's decision and the
+        // fresh findings' duplicate rate against the case's ground truth.
+        let rereviewScore: RereviewCaseScore | undefined;
+        const rereview = corpusCase.live?.rereview;
+        if (rereview !== undefined) {
+            rereviewScore = scoreRereview(
+                rereview,
+                produced.reconciliation,
+                produced.findings.map((recorded) => recorded.finding),
+            );
+            scoredRereviews.push({
+                caseId: corpusCase.id,
+                score: rereviewScore,
+            });
+        }
+
         perCase.push({
             caseId: corpusCase.id,
             usd: caseUsd,
@@ -143,6 +183,7 @@ export const runArm = async (
             failedAgents: produced.perAgent
                 .filter((a) => a.failed !== undefined)
                 .map((a) => `${a.name}: ${a.failed}`),
+            ...(rereviewScore !== undefined ? {rereview: rereviewScore} : {}),
         });
     }
 
@@ -154,6 +195,9 @@ export const runArm = async (
         usd,
         wallMs: Date.now() - started,
         perCase,
+        ...(scoredRereviews.length > 0
+            ? {rereview: computeRereviewMetrics(scoredRereviews)}
+            : {}),
     };
 };
 
@@ -418,6 +462,28 @@ export const renderMarkdownReport = (report: AbReport): string => {
             `${baseline.runs.length} / ${baseline.skippedCases.length}`,
             `${candidate.runs.length} / ${candidate.skippedCases.length}`,
         ),
+        ...(baseline.rereview || candidate.rereview
+            ? [
+                  row(
+                      "Re-review thread resolution",
+                      baseline.rereview
+                          ? pct(baseline.rereview.resolutionAccuracy)
+                          : "n/a",
+                      candidate.rereview
+                          ? pct(candidate.rereview.resolutionAccuracy)
+                          : "n/a",
+                  ),
+                  row(
+                      "Re-review flip-gate wrong / dup comments",
+                      baseline.rereview
+                          ? `${baseline.rereview.flipGateWrongCases.length} / ${baseline.rereview.duplicateComments}`
+                          : "n/a",
+                      candidate.rereview
+                          ? `${candidate.rereview.flipGateWrongCases.length} / ${candidate.rereview.duplicateComments}`
+                          : "n/a",
+                  ),
+              ]
+            : []),
         row(
             "Misses found-but-dropped",
             String(dropClassByKey(baseline).size),
@@ -620,13 +686,22 @@ const main = async (): Promise<void> => {
         throw new Error("no live cases selected");
     }
 
+    // The candidate arm's re-review mode on open-PR (rereview) cases; the
+    // baseline always runs full, so a non-full flag prices the mode dial.
+    const rawMode = argValue("--re-review-mode") ?? "full";
+    if (!["full", "scoped", "flip-gated", "fast"].includes(rawMode)) {
+        throw new Error(`unknown --re-review-mode "${rawMode}"`);
+    }
+    const candidateMode = rawMode as ReReviewMode;
+
     const runner = sdkRunner();
     const armProduce =
-        (arm: ArmId, markdown: string): ArmProduce =>
+        (arm: ArmId, markdown: string, mode: ReReviewMode): ArmProduce =>
         (corpusCase) =>
             produceLive(corpusCase, extractAgents(markdown), {
                 runner,
                 stageDir: `${stageRoot}/${arm}/${corpusCase.id}`,
+                reReviewMode: mode,
             });
 
     // Sequential arms, halving the budget, so a runaway baseline cannot
@@ -634,13 +709,13 @@ const main = async (): Promise<void> => {
     const baseline = await runArm(
         "baseline",
         cases,
-        armProduce("baseline", baselineMd),
+        armProduce("baseline", baselineMd, "full"),
         {maxUsd: maxUsd / 2},
     );
     const candidate = await runArm(
         "candidate",
         cases,
-        armProduce("candidate", candidateMd),
+        armProduce("candidate", candidateMd, candidateMode),
         {maxUsd: maxUsd / 2},
     );
 

@@ -30,7 +30,10 @@ name: Review Eval A/B
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # `labeled` is here so adding `full-eval` triggers the lifted run
+    # immediately instead of waiting for the next push; the job-level guard
+    # below ignores every other label.
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - "workflows/review/**"
   workflow_dispatch:
@@ -67,7 +70,9 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.draft == false &&
        github.head_ref != 'changeset-release/main' &&
-       !contains(github.event.pull_request.labels.*.name, 'skip-live-eval'))
+       !contains(github.event.pull_request.labels.*.name, 'skip-live-eval') &&
+       (github.event.action != 'labeled' ||
+        github.event.label.name == 'full-eval'))
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:

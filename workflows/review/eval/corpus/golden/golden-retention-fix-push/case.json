@@ -1,0 +1,93 @@
+{
+    "id": "golden-retention-fix-push",
+    "tags": [
+        "golden",
+        "rereview-lifecycle",
+        "live"
+    ],
+    "category": "golden",
+    "description": "The under-tripwire re-review pricing case: an open PR touched five regions of quota.ts and the prior full review blocked one (an off-by-one in the remaining-quota math). The fix push rewrites only that region (unreviewed share 0.2, below the tripwire threshold), so scoped/flip-gated/fast actually execute their reduced paths. The fix resolves the thread but plants a fresh defect in the same hunk: the remaining count is cached under a shared key with no user id, leaking quota across users. scoped and flip-gated stage exactly that hunk and must catch it; fast dispatches no finder and cannot, which is the recall cost the mode sweep prices.",
+    "changedFiles": [
+        {
+            "path": "src/notes/quota.ts",
+            "status": "modified"
+        }
+    ],
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "quota-cache-shared-key",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/notes/quota.ts",
+                    "line": 26,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    "src/notes/quota.ts: cache.set(\"quota-remaining\", remaining) keys on a constant",
+                    "src/notes/cache.ts: the cache is process-wide, not per user"
+                ],
+                "failure_scenario": "Two users hit remainingQuota in the same process; the second write overwrites the first under the shared \"quota-remaining\" key, so any reader of the cached value sees another user's remaining quota.",
+                "producing_hunt": "correctness:shared-cache-key",
+                "model_authored_prose": "The cached remaining count is stored under a constant key with no user id, so concurrent users overwrite each other and any cached read leaks one user's quota to another. Key the entry by userId (or drop the cache)."
+            }
+        }
+    ],
+    "validation": [
+        {
+            "id": "quota-cache-shared-key",
+            "verification": "confirmed"
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": [
+            "quota-cache-shared-key"
+        ]
+    },
+    "diff": "diff --git a/src/notes/quota.ts b/src/notes/quota.ts\n--- a/src/notes/quota.ts\n+++ b/src/notes/quota.ts\n@@ -1,15 +1,20 @@\n import type {Db} from \"./db\";\n import {cache} from \"./cache\";\n \n-export const QUOTA_LIMIT = 500;\n+/** Raised for the notes launch. */\n+export const QUOTA_LIMIT = 800;\n \n export const usedQuota = async (db: Db, userId: string): Promise<number> => {\n     const notes = await db.query(\"Note\", {userId, pageSize: \"all\"});\n-    return notes.length;\n+    // Drafts do not count against quota.\n+    return notes.filter((note) => !note.content.startsWith(\"draft:\")).length;\n };\n \n export const quotaHeaders = (remaining: number): Record<string, string> => {\n-    return {\"x-quota-remaining\": String(remaining)};\n+    return {\n+        \"x-quota-remaining\": String(remaining),\n+        \"x-quota-limit\": String(QUOTA_LIMIT),\n+    };\n };\n \n export const remainingQuota = async (\n@@ -17,14 +22,17 @@\n     userId: string,\n ): Promise<number> => {\n     const used = await usedQuota(db, userId);\n-    return QUOTA_LIMIT - used;\n+    const remaining = Math.max(0, QUOTA_LIMIT - used);\n+    cache.set(\"quota-remaining\", remaining);\n+    return remaining;\n };\n \n export const quotaExceeded = async (\n     db: Db,\n     userId: string,\n ): Promise<boolean> => {\n-    return (await remainingQuota(db, userId)) <= 0;\n+    // Exceeded only when nothing remains; equality still allows a save.\n+    return (await remainingQuota(db, userId)) < 0;\n };\n \n export const quotaSummary = async (\n@@ -32,5 +40,5 @@\n     userId: string,\n ): Promise<string> => {\n     const remaining = await remainingQuota(db, userId);\n-    return `quota: ${remaining} of ${QUOTA_LIMIT} remaining`;\n+    return `quota: ${remaining} of ${QUOTA_LIMIT} remaining (drafts excluded)`;\n };\n",
+    "live": {
+        "prContext": {
+            "title": "notes: raise the quota limit and exclude drafts from it",
+            "description": "Raises the per-user quota and excludes drafts from the count. Fix push: addresses the off-by-one from review.",
+            "author": "dev-notes",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "quota-cache-shared-key",
+                "path": "src/notes/quota.ts",
+                "mechanism": [
+                    "shared (cache )?key|constant key|no user ?id",
+                    "quota-remaining",
+                    "another user|cross.user|leak"
+                ]
+            }
+        ],
+        "rereview": {
+            "priorDiff": "diff --git a/src/notes/quota.ts b/src/notes/quota.ts\n--- a/src/notes/quota.ts\n+++ b/src/notes/quota.ts\n@@ -1,15 +1,20 @@\n import type {Db} from \"./db\";\n import {cache} from \"./cache\";\n \n-export const QUOTA_LIMIT = 500;\n+/** Raised for the notes launch. */\n+export const QUOTA_LIMIT = 800;\n \n export const usedQuota = async (db: Db, userId: string): Promise<number> => {\n     const notes = await db.query(\"Note\", {userId, pageSize: \"all\"});\n-    return notes.length;\n+    // Drafts do not count against quota.\n+    return notes.filter((note) => !note.content.startsWith(\"draft:\")).length;\n };\n \n export const quotaHeaders = (remaining: number): Record<string, string> => {\n-    return {\"x-quota-remaining\": String(remaining)};\n+    return {\n+        \"x-quota-remaining\": String(remaining),\n+        \"x-quota-limit\": String(QUOTA_LIMIT),\n+    };\n };\n \n export const remainingQuota = async (\n@@ -17,14 +22,15 @@\n     userId: string,\n ): Promise<number> => {\n     const used = await usedQuota(db, userId);\n-    return QUOTA_LIMIT - used;\n+    return QUOTA_LIMIT - used - 1;\n };\n \n export const quotaExceeded = async (\n     db: Db,\n     userId: string,\n ): Promise<boolean> => {\n-    return (await remainingQuota(db, userId)) <= 0;\n+    // Exceeded only when nothing remains; equality still allows a save.\n+    return (await remainingQuota(db, userId)) < 0;\n };\n \n export const quotaSummary = async (\n@@ -32,5 +38,5 @@\n     userId: string,\n ): Promise<string> => {\n     const remaining = await remainingQuota(db, userId);\n-    return `quota: ${remaining} of ${QUOTA_LIMIT} remaining`;\n+    return `quota: ${remaining} of ${QUOTA_LIMIT} remaining (drafts excluded)`;\n };\n",
+            "priorVerdict": "REQUEST_CHANGES",
+            "priorDepth": "full",
+            "priorThreads": [
+                {
+                    "key": "quota-off-by-one",
+                    "path": "src/notes/quota.ts",
+                    "line": 25,
+                    "body": "**issue (blocking):** Off-by-one: `QUOTA_LIMIT - used - 1` reports one fewer remaining slot than the user has, so the last legitimate save is rejected at the boundary.",
+                    "authorReply": "Fixed: remaining is now Math.max(0, QUOTA_LIMIT - used).",
+                    "expect": "resolve",
+                    "mechanism": [
+                        "off.by.one",
+                        "QUOTA_LIMIT - used"
+                    ]
+                }
+            ]
+        }
+    }
+}
