@@ -691,7 +691,7 @@ if (typeof require !== "undefined" && require.main === module) {
         const verdict = flagIndex >= 0 ? rest[flagIndex + 1] : undefined;
         if (verdict === undefined || !/^[A-Z_]+$/.test(verdict)) {
             // eslint-disable-next-line no-console
-            console.error("usage: rereview.ts stamp --verdict <EVENT>");
+            console.error("usage: rereview-mode.ts stamp --verdict <EVENT>");
             process.exit(2);
         }
         const stamp = runRereviewStampCli(fs, verdict);

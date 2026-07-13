@@ -669,7 +669,7 @@ const main = async (): Promise<void> => {
                     {
                         repeatCount: repeats,
                         completedRepeats: reports.length,
-                        repeats,
+                        repeats: reports,
                     },
                     null,
                     2,

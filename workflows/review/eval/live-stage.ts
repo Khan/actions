@@ -250,7 +250,7 @@ export const stageCase = (
     // files.json + review-files.json: path/status/hasPatch. `hasPatch` is
     // whether the diff carries a section for the path (the completeness
     // cross-check the provenance gate reads).
-    const provenance = computeDiffProvenance(diff);
+    const provenance = computeDiffProvenance(diff, corpusCase.fileLineCounts);
     const files = corpusCase.changedFiles.map((file) => ({
         path: file.path,
         status: file.status,

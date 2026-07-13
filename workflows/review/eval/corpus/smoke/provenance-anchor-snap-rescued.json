@@ -13,6 +13,9 @@
             "status": "modified"
         }
     ],
+    "fileLineCounts": {
+        "src/billing/export.ts": 10
+    },
     "findings": [
         {
             "source": "correctness",

@@ -139,6 +139,81 @@ describe("renderComment — templated Conventional Comment", () => {
         const rendered = renderComment(makeFinding({suggested_patch: patch}));
         expect(rendered).toContain(patch);
     });
+
+    it("surfaces a skill finding's rule_quote as a Rule blockquote", () => {
+        const rendered = renderComment(
+            makeFinding({
+                severity: "advisory",
+                lens: "conventions",
+                rule_quote:
+                    "Always wrap errors with errors.Wrap before returning them.",
+            }),
+        );
+        expect(rendered).toMatchInlineSnapshot(`
+          "**suggestion (non-blocking, best-practice):** User input flows unsanitized into a shell command.
+
+          > **Rule:** Always wrap errors with errors.Wrap before returning them."
+        `);
+    });
+
+    it("keeps a multi-line rule_quote fully inside the blockquote", () => {
+        const rendered = renderComment(
+            makeFinding({
+                severity: "advisory",
+                lens: "conventions",
+                rule_quote:
+                    "Always wrap errors with errors.Wrap\nbefore returning them.",
+            }),
+        );
+        expect(rendered).toMatchInlineSnapshot(`
+          "**suggestion (non-blocking, best-practice):** User input flows unsanitized into a shell command.
+
+          > **Rule:** Always wrap errors with errors.Wrap
+          > before returning them."
+        `);
+    });
+
+    it("keeps a rule_quote containing a blank line as one blockquote", () => {
+        const rendered = renderComment(
+            makeFinding({
+                severity: "advisory",
+                lens: "conventions",
+                rule_quote: "First paragraph of the rule.\n\nSecond paragraph.",
+            }),
+        );
+        // The blank line renders as a bare `>` so the blockquote never breaks:
+        // every line after the prose (and its separating blank) is quoted.
+        expect(rendered).toMatchInlineSnapshot(`
+          "**suggestion (non-blocking, best-practice):** User input flows unsanitized into a shell command.
+
+          > **Rule:** First paragraph of the rule.
+          >
+          > Second paragraph."
+        `);
+        const quoteLines = rendered.split("\n").slice(2);
+        for (const line of quoteLines) {
+            expect(line.startsWith(">")).toBe(true);
+        }
+    });
+
+    it("orders prose, rule blockquote, then suggestion block", () => {
+        const rendered = renderComment(
+            makeFinding({
+                rule_quote: "The exact rule text.",
+                suggested_patch: "-a\n+b",
+            }),
+        );
+        const proseAt = rendered.indexOf("User input flows");
+        const ruleAt = rendered.indexOf("> **Rule:** The exact rule text.");
+        const patchAt = rendered.indexOf("```suggestion");
+        expect(proseAt).toBeGreaterThan(-1);
+        expect(ruleAt).toBeGreaterThan(proseAt);
+        expect(patchAt).toBeGreaterThan(ruleAt);
+    });
+
+    it("emits no Rule blockquote when rule_quote is absent", () => {
+        expect(renderComment(makeFinding())).not.toContain("> **Rule:**");
+    });
 });
 
 describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => {
