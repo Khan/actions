@@ -1,5 +1,0 @@
----
-"review": minor
----
-
-Re-review accountability, code-rendered. Observed on the review-v1.4.0 re-run lifecycle (Khan/webapp#40730): run 2 resolved the fixed threads and said nothing about the three blocking threads it left open, under a bare "Changes requested" body; run 3 approved with an empty body while resolving 11 threads. The verdict body now accounts for every prior thread, rendered deterministically from the `thread-reconciler`'s keep/resolve lists by the new `lib/rereview.ts` (never composed by the model): each still-unaddressed prior thread is enumerated as a link to its earlier comment ("as of \<sha\>", blocking first, with a verbatim excerpt of the earlier comment's first line), with the resolved count stated; an approval that resolved the last open threads says every prior thread is resolved. `threads.json` staging gains a `url` field (the thread's first comment `html_url`) to power the links, `renderReviewBody` gains a `rereviewSection` slot, and the redundant-approval skip treats a non-empty section as content. Fail-open: a missing or unparseable staging input renders an empty section, leaving the body exactly as before.
