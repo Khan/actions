@@ -1,3 +1,4 @@
+import {execFileSync} from "node:child_process";
 import {readFileSync} from "node:fs";
 import {join} from "node:path";
 
@@ -24,10 +25,18 @@ import {SPECIALIST_LENSES} from "./router.ts";
  * variants differ materially) still carry theirs.
  */
 
-const reviewMd = readFileSync(join(__dirname, "..", "review.md"), "utf8");
+const reviewMdPath = join(__dirname, "..", "review.md");
+const reviewMd = readFileSync(reviewMdPath, "utf8");
 
 const BEGIN = "<!-- BEGIN REVIEW DISCIPLINES -->";
 const END = "<!-- END REVIEW DISCIPLINES -->";
+
+/**
+ * The exact sed range expression review.md Step 1 runs (whole-line anchored).
+ * The anchors are load-bearing: without `^...$`, the range would open at the
+ * first backticked *mention* of the marker in the prose, ~1075 lines early.
+ */
+const SED_RANGE = `/^${BEGIN}$/,/^${END}$/p`;
 
 /**
  * The sed range extraction from review.md Step 1, replicated line-for-line.
@@ -111,6 +120,25 @@ describe("the shared disciplines section", () => {
         expect(mainBody).toContain(
             "grep -q '## Structured finding schema and hunts'",
         );
+    });
+
+    it("extracts identically under real sed (not only the modeled replica)", () => {
+        // The replica above models the sed semantics; this runs the real
+        // thing, so a drift in the Step 1 command (say, dropped `^...$`
+        // anchors) fails here even if the model still passes. Pin the range
+        // expression to the one review.md actually documents, then run it
+        // against the real file.
+        expect(mainBody).toContain(`sed -n '${SED_RANGE}'`);
+        const staged = execFileSync("sed", ["-n", SED_RANGE, reviewMdPath], {
+            encoding: "utf8",
+        });
+        // sed prints each selected line with its newline; the replica joins
+        // without a trailing one.
+        expect(staged).toBe(`${sedRangeExtract(reviewMd)}\n`);
+        expect(staged.startsWith(BEGIN)).toBe(true);
+        for (const heading of DISCIPLINE_HEADINGS) {
+            expect(staged).toContain(`\n${heading}\n`);
+        }
     });
 });
 

@@ -1,0 +1,82 @@
+{
+    "id": "trial-batch-delete-wrapper",
+    "tags": [
+        "clean",
+        "trial",
+        "live"
+    ],
+    "category": "clean",
+    "description": "Sanitized structural rewrite of the trial's deliberate non-defect: purge collects every note key and issues one DeleteMulti call that looks like it exceeds the datastore's 500-entity per-call cap, but the repo's wrapper visibly chunks DeleteMulti into 500-key batches (internal/datastore/client.go, present unchanged in the tree). A reviewer must read the wrapper and stay silent; the recorded blocking claim is refuted by validation and the case must approve.",
+    "changedFiles": [
+        {
+            "path": "services/notes/purge.go",
+            "status": "modified"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "purge-batch-cap-false-block",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/notes/purge.go",
+                    "line": 44,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "services/notes/purge.go:44 passes every collected key to a single DeleteMulti call",
+                    "the hosted datastore's multi-entity operations are capped at 500 entities per call"
+                ],
+                "failure_scenario": "A user with more than 500 notes reaches DeleteMulti with an over-cap key slice; the call is rejected by the 500-entity per-call limit and account erasure fails for exactly the heaviest users.",
+                "producing_hunt": "correctness:batch-limits",
+                "model_authored_prose": "DeleteMulti receives an unbounded key slice here; above the datastore's 500-entity per-call cap the operation fails, breaking purge for heavy note-takers. Chunk the keys into batches of 500."
+            }
+        }
+    ],
+    "validation": [
+        {
+            "id": "purge-batch-cap-false-block",
+            "verification": "refuted"
+        }
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustNotPost": [
+            "purge-batch-cap-false-block"
+        ],
+        "postedCommentCount": 0
+    },
+    "diff": "diff --git a/services/notes/purge.go b/services/notes/purge.go\n--- a/services/notes/purge.go\n+++ b/services/notes/purge.go\n@@ -7,27 +7,39 @@\n \t\"example.dev/notesvc/internal/datastore\"\n )\n \n-// purgePageSize is how many keys each purge pass lists and deletes.\n-const purgePageSize = 100\n+// purgePageSize is how many keys each listing page fetches.\n+const purgePageSize = 1000\n \n // PurgeUserNotes hard-deletes every note entity a user has stored.\n // The account-erasure pipeline calls it after the retention window\n // closes; nothing the user wrote may survive it.\n+//\n+// Keys are collected up front and deleted in one call: re-listing\n+// between deletes raced the store's eventually-consistent index and\n+// made the loop spin on already-deleted keys.\n func PurgeUserNotes(ctx context.Context, client *datastore.Client, userID string) error {\n+\tvar keys []datastore.Key\n+\tcursor := \"\"\n \tfor {\n \t\tpage, err := client.ListKeys(ctx, datastore.KeyQuery{\n-\t\t\tKind:  \"Note\",\n-\t\t\tOwner: userID,\n-\t\t\tLimit: purgePageSize,\n+\t\t\tKind:   \"Note\",\n+\t\t\tOwner:  userID,\n+\t\t\tLimit:  purgePageSize,\n+\t\t\tCursor: cursor,\n \t\t})\n \t\tif err != nil {\n \t\t\treturn fmt.Errorf(\"list note keys for %s: %w\", userID, err)\n \t\t}\n-\t\tif len(page.Keys) == 0 {\n-\t\t\treturn nil\n+\t\tkeys = append(keys, page.Keys...)\n+\t\tif page.Cursor == \"\" {\n+\t\t\tbreak\n \t\t}\n-\t\tif err := client.DeleteMulti(ctx, page.Keys); err != nil {\n-\t\t\treturn fmt.Errorf(\"purge notes for %s: %w\", userID, err)\n-\t\t}\n+\t\tcursor = page.Cursor\n \t}\n+\tif len(keys) == 0 {\n+\t\treturn nil\n+\t}\n+\t// A heavy note-taker can hold tens of thousands of notes; delete\n+\t// them all in one DeleteMulti call.\n+\treturn client.DeleteMulti(ctx, keys)\n }\n",
+    "live": {
+        "prContext": {
+            "title": "notes: purge note entities in one DeleteMulti pass",
+            "description": "Collects every note key up front and deletes in a single DeleteMulti call. Re-listing between per-page deletes raced the eventually-consistent key index and made the purge loop spin on already-deleted keys.",
+            "author": "dev-notes",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "purge-batch-cap-false-block",
+                "path": "services/notes/purge.go",
+                "mechanism": [
+                    "500[- ](entity|key|item)?.?(cap|limit)",
+                    "exceeds? the (per[- ]call|batch|multi[- ]entity) (cap|limit)",
+                    "DeleteMulti.*(unbatched|unchunked|too (many|large)|over the (cap|limit))",
+                    "trap: the datastore wrapper chunks DeleteMulti into 500-key batches internally (internal/datastore/client.go); claiming the cap without reading the wrapper is a false block"
+                ],
+                "lineStart": 39,
+                "lineEnd": 49
+            }
+        ]
+    }
+}
