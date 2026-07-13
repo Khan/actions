@@ -10,6 +10,7 @@ import {
     renderMultiMarkdownReport,
     retryGateFlips,
     runArm,
+    selectCases,
     type AbReport,
     type ArmProduce,
     type ArmRunReport,
@@ -123,6 +124,52 @@ const produceMiss: ArmProduce = async () => ({
             retried: false,
         },
     ],
+});
+
+describe("selectCases", () => {
+    const corpus = () => [
+        liveCase("smoke-a", {tags: ["live", "smoke"]}),
+        liveCase("smoke-b", {tags: ["live", "smoke"]}),
+        liveCase("holdout-c", {tags: ["live", "holdout"]}),
+    ];
+
+    it("scopes unscoped runs by the smoke tag, or not at all", () => {
+        expect(
+            selectCases(corpus(), {smokeOnly: true}).map((c) => c.id),
+        ).toEqual(["smoke-a", "smoke-b"]);
+        expect(
+            selectCases(corpus(), {smokeOnly: false}).map((c) => c.id),
+        ).toEqual(["smoke-a", "smoke-b", "holdout-c"]);
+    });
+
+    it("treats an explicit case list as exact: it bypasses the smoke scope", () => {
+        // The 2026-07-10 footgun: a powered dispatch named a non-smoke case
+        // and the smoke scope silently dropped it from a paid measurement.
+        expect(
+            selectCases(corpus(), {
+                smokeOnly: true,
+                caseFilter: ["smoke-a", "holdout-c"],
+            }).map((c) => c.id),
+        ).toEqual(["smoke-a", "holdout-c"]);
+    });
+
+    it("preserves requested order and runs duplicate ids once", () => {
+        expect(
+            selectCases(corpus(), {
+                smokeOnly: false,
+                caseFilter: ["holdout-c", "smoke-a", "holdout-c"],
+            }).map((c) => c.id),
+        ).toEqual(["holdout-c", "smoke-a"]);
+    });
+
+    it("fails before any spend on an id that matches no live case", () => {
+        expect(() =>
+            selectCases(corpus(), {
+                smokeOnly: false,
+                caseFilter: ["smoke-a", "not-a-case"],
+            }),
+        ).toThrow(/not in the live corpus: not-a-case/);
+    });
 });
 
 describe("runArm", () => {

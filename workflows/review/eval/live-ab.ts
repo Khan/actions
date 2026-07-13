@@ -18,9 +18,13 @@
  *   pnpm dlx tsx workflows/review/eval/live-ab.ts
  *     [--base-ref <ref>]      baseline review.md source (default: merge-base
  *                             of HEAD and origin/main)
- *     [--cases <id,id,...>]   subset of live cases (default: every live case)
+ *     [--cases <id,id,...>]   EXACT selection of live cases: bypasses
+ *                             --smoke-only, and an id matching no live case
+ *                             fails the run before any model spend
  *     [--smoke-only]          only live cases also tagged smoke (the per-PR
- *                             default in CI; a full-eval label lifts it)
+ *                             default in CI; a full-eval label lifts it);
+ *                             scopes unscoped runs only — ignored when
+ *                             --cases names the selection
  *     [--max-usd <n>]         total hard budget across both arms (default 40)
  *     [--no-judge]            skip judge quality scoring
  *     [--no-match-arbiter]    deterministic spec matching only (skip the
@@ -106,6 +110,50 @@ export type {
     GateRetryAttempt,
     MultiAbReport,
 } from "./live-ab-report";
+
+/* -------------------------------------------------------------------------- */
+/* Case selection                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Select the cases a run scores. An explicit case list is an EXACT
+ * selection: it bypasses the smoke scope (naming a non-smoke case in
+ * `--cases` selects it; the smoke tag scopes only unscoped runs) and throws
+ * on any id that matches no live case. A typo'd or non-live id must fail
+ * the dispatch BEFORE any model spend — the alternative already happened:
+ * the 2026-07-10 anchor-snap powered run named two cases, the smoke scope
+ * silently dropped the non-smoke one, and the paid report covered half the
+ * measurement without saying so. Requested order is preserved; duplicate
+ * ids run once.
+ */
+export const selectCases = (
+    allLive: CorpusCase[],
+    options: {smokeOnly: boolean; caseFilter?: string[]},
+): CorpusCase[] => {
+    const {caseFilter} = options;
+    if (caseFilter !== undefined) {
+        const byId = new Map(allLive.map((c) => [c.id, c]));
+        const unknown = caseFilter.filter((id) => !byId.has(id));
+        if (unknown.length > 0) {
+            throw new Error(
+                `--cases: not in the live corpus: ${unknown.join(", ")} ` +
+                    `(live case ids: ${allLive.map((c) => c.id).join(", ")})`,
+            );
+        }
+        const seen = new Set<string>();
+        return caseFilter.flatMap((id) => {
+            if (seen.has(id)) {
+                return [];
+            }
+            seen.add(id);
+            const found = byId.get(id);
+            return found === undefined ? [] : [found];
+        });
+    }
+    return options.smokeOnly
+        ? allLive.filter((c) => c.tags.includes(SMOKE_TAG))
+        : [...allLive];
+};
 
 /* -------------------------------------------------------------------------- */
 /* One arm                                                                    */
@@ -409,7 +457,10 @@ const main = async (): Promise<void> => {
     const outPath = argValue("--out") ?? "out/live-ab-report.json";
     const stageRoot =
         argValue("--stage-root") ?? mkdtempSync(`${tmpdir()}/review-ab-`);
-    const caseFilter = argValue("--cases")?.split(",");
+    const caseFilter = argValue("--cases")
+        ?.split(",")
+        .map((id) => id.trim())
+        .filter((id) => id !== "");
     const withJudge = !process.argv.includes("--no-judge");
 
     const reviewMdPath = "workflows/review/review.md";
@@ -453,15 +504,10 @@ const main = async (): Promise<void> => {
         return;
     }
 
-    const allCases = loadLiveCorpus().filter(
-        (c) =>
-            !process.argv.includes("--smoke-only") ||
-            c.tags.includes(SMOKE_TAG),
-    );
-    const cases =
-        caseFilter === undefined
-            ? allCases
-            : allCases.filter((c) => caseFilter.includes(c.id));
+    const cases = selectCases(loadLiveCorpus(), {
+        smokeOnly: process.argv.includes("--smoke-only"),
+        ...(caseFilter !== undefined ? {caseFilter} : {}),
+    });
     if (cases.length === 0) {
         throw new Error("no live cases selected");
     }
