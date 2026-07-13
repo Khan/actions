@@ -37,6 +37,11 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
    blocking first, with the resolved count, and an approval that resolved the last
    open threads states that every prior thread is resolved — resolving some threads
    never leaves the rest silently open.
+   A reviewer that surfaces a real concern its own mandate does not let it report — a
+   correctness problem the skill-auditor cannot quote a rule for, or something outside
+   a specialist lens's domain — hands it off as an `out_of_lane_observations[]` entry
+   instead of dropping it; the orchestrator routes each one into claim validation as a
+   non-blocking candidate (label code-assigned, so a handoff can never block on its own).
 3. If those reviewers proposed any comments, **`claim-validator`** re-checks each one
    against the actual code (attacking the finding's stated failure scenario) and,
    for best-practice claims, against the relevant skill's
