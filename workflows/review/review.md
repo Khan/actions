@@ -1446,9 +1446,8 @@ impact. Flag a skill violation only when you can quote **both** the exact rule
 text from the skill file **and** the exact violating line; put both quotes in
 `evidence_trace`, with no spirit-of-the-doc inference. Also copy the exact rule
 text, verbatim, into the finding's `rule_quote` field: evidence traces never reach
-the author, and `rule_quote` is what gets rendered into the comment they read (as
-a `> **Rule:** …` blockquote), so the author sees the actual rule, not a
-paraphrase.
+the author, and `rule_quote` is rendered into the comment they read, so the author
+sees the actual rule, not a paraphrase.
 
 ## Out-of-lane handoff
 
@@ -1475,8 +1474,8 @@ inputs/state, then the wrong outcome) — it is the specific claim the
 claim-validator attacks, so make it checkable; `producing_hunt` names the hunt
 that produced the finding; `model_authored_prose` carries the entire human-read
 comment. Omit `suggested_patch`/`pre_merge_obligation` unless they apply; a skill
-finding also carries `rule_quote` (§Lens-owned skills), which the orchestrator
-renders into the posted comment.
+finding also carries `rule_quote` (the Lens-owned skills section above), which the
+orchestrator renders into the posted comment.
 
 Run **every** incident-derived hunt in your definition, even when the diff looks
 clean, and record each hunt's state in `hunts[]` as exactly one of: `found` (the
