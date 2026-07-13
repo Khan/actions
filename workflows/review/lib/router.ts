@@ -163,13 +163,23 @@ export type RunBudget = {
     tier: RiskTier;
     /** True when the misrouted floor lifted the budget above the touched tier. */
     floored: boolean;
-    /** Upper bound on specialist+whole-change reviewer invocations for the run. */
+    /**
+     * Upper bound on specialist+whole-change reviewer invocations for the
+     * run. Only finding-producing dispatches count; pipeline steps
+     * (`pattern-triage`, `thread-reconciler`, `claim-validator`) never
+     * consume a slot.
+     */
     maxReviewerInvocations: number;
     /** Upper bound on investigation tool calls a single finding may spend. */
     maxToolCallsPerFinding: number;
     /** Upper bound on investigation tool calls across the whole run. */
     maxTotalToolCalls: number;
-    /** Soft wall-clock ceiling (minutes) the orchestrator should target. */
+    /**
+     * Soft wall-clock ceiling (minutes) the orchestrator should target,
+     * measured from run start; it therefore includes the run's fixed
+     * staging/router/triage overhead (~3 minutes measured), not just
+     * reviewer time.
+     */
     maxWallClockMinutes: number;
     /** Soft spend ceiling (USD) the orchestrator should target. */
     maxUsd: number;
@@ -257,9 +267,23 @@ export type RouteInput = {
 
 /**
  * Default budget table, sized inside the workflow's assumed 20-minute / $10
- * per-run ceiling. Every field scales monotonically with the tier, and the
- * table is exported so the eval suite and consumers can override it without a
- * code change.
+ * per-run ceiling. Every field scales monotonically with the tier; the table
+ * is exported so the eval suite and consumers can override it.
+ *
+ * Calibration (re-measured 2026-07-10 against production runs on Khan/actions
+ * #232/#238): a run spends ~3 minutes of fixed overhead (staging, router,
+ * provenance, pattern-triage) before the first reviewer returns, so wall
+ * clocks below ~6 minutes hit the shed threshold before review work lands;
+ * and the standard enabled roster is seven whole-change reviewers (two
+ * defaults plus the five opt-ins both current consumers enable), so an
+ * invocation cap of 4 deterministically shed dimensions on every low run. Low and medium now fit the roster;
+ * trivial stays deliberately small (the two default reviewers; the rest are
+ * declared budget sheds). The low cap of 8 lets a lens-free low-tier run
+ * dispatch the full roster; path-matched lenses also consume slots, so a low
+ * PR matching two or more lenses still sheds from the bottom of the value
+ * ranking (that residual is sized when the modes are priced, not here).
+ * `maxUsd` is deliberately left uncalibrated (per-run cost measurement is
+ * deferred to #249): the dollar column is the original estimate.
  */
 export const DEFAULT_TIER_BUDGETS: Record<RiskTier, RunBudget> = {
     trivial: {
@@ -268,25 +292,25 @@ export const DEFAULT_TIER_BUDGETS: Record<RiskTier, RunBudget> = {
         maxReviewerInvocations: 2,
         maxToolCallsPerFinding: 2,
         maxTotalToolCalls: 10,
-        maxWallClockMinutes: 3,
+        maxWallClockMinutes: 6,
         maxUsd: 0.5,
     },
     low: {
         tier: "low",
         floored: false,
-        maxReviewerInvocations: 4,
+        maxReviewerInvocations: 8,
         maxToolCallsPerFinding: 3,
         maxTotalToolCalls: 20,
-        maxWallClockMinutes: 6,
+        maxWallClockMinutes: 10,
         maxUsd: 1.5,
     },
     medium: {
         tier: "medium",
         floored: false,
-        maxReviewerInvocations: 8,
+        maxReviewerInvocations: 10,
         maxToolCallsPerFinding: 5,
         maxTotalToolCalls: 60,
-        maxWallClockMinutes: 12,
+        maxWallClockMinutes: 15,
         maxUsd: 4,
     },
     high: {
