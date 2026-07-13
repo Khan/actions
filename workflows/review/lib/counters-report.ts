@@ -102,13 +102,17 @@ export const synthesizeSummaryFromGhAw = (
     // Verdict: the review-submission event the agent emitted. (The processed
     // items log records the posted review's URL but not its event, so the
     // emitted output is the only artifact that carries APPROVE vs
-    // REQUEST_CHANGES.)
+    // REQUEST_CHANGES.) The reviewer emits at most one submission; if a
+    // malformed artifact carries several, the stricter verdict wins.
     for (const entry of emitted) {
         if (entry["type"] !== "submit_pull_request_review") {
             continue;
         }
         const event = entry["event"];
-        if (event === "APPROVE" || event === "REQUEST_CHANGES") {
+        if (
+            (event === "APPROVE" || event === "REQUEST_CHANGES") &&
+            summary["verdict"] !== "REQUEST_CHANGES"
+        ) {
             summary["verdict"] = event;
         }
     }

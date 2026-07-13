@@ -46,6 +46,16 @@ describe("synthesizeSummaryFromGhAw", () => {
         expect(summary["cost"]).toEqual({usd: 4.30924, tokens: 1500});
     });
 
+    it("keeps REQUEST_CHANGES when a malformed artifact also carries APPROVE", () => {
+        const summary = synthesizeSummaryFromGhAw({
+            safeOutputs: [
+                '{"type":"submit_pull_request_review","event":"REQUEST_CHANGES"}',
+                '{"type":"submit_pull_request_review","event":"APPROVE"}',
+            ].join("\n"),
+        });
+        expect(summary["verdict"]).toBe("REQUEST_CHANGES");
+    });
+
     it("counts emitted intent when the handler log is absent", () => {
         const summary = synthesizeSummaryFromGhAw({
             safeOutputs: '{"type":"add_comment","body":"guidance"}',

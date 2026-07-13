@@ -2,12 +2,13 @@
  * CLI entry for the thumbs feedback sweep — the script the consumer repos'
  * scheduled `review-feedback` workflows run:
  *
- *     cd gh-aw-review-lib/workflows/review && npm install --omit=dev &&
+ *     cd gh-aw-review-lib/workflows/review && npm ci --omit=dev &&
  *       npx -y tsx lib/run-thumbs-sweep.ts
  *
- * (The `npm install` supplies `octokit`, this package's one runtime
+ * (The `npm ci` supplies `octokit`, this package's one runtime
  * dependency — unlike the router/investigation-cap scripts, the sweep talks to
- * the GitHub API. It is pinned exactly in `package.json`, so a consumer run
+ * the GitHub API. It is pinned exactly in `package.json` and its transitive
+ * tree is locked by the committed `package-lock.json`, so a consumer run
  * resolves the same client version this release was tested with.)
  *
  * All configuration is environment variables, so the consumer workflow is pure

@@ -226,9 +226,10 @@ out this repo at the pinned `review-v*` tag and run lib scripts with
   (`REVIEW_SWEEP_LOOKBACK_DAYS`), skipping PRs closed or merged more than 3
   days ago (`REVIEW_SWEEP_CLOSED_GRACE_DAYS`; feedback lands around merge time,
   after which a landed PR stops changing). Needs only `pull-requests: write`.
-  The sweep run needs `npm install --omit=dev` in the checked-out
+  The sweep run needs `npm ci --omit=dev` in the checked-out
   `workflows/review/` first (the sweep's `octokit` dependency is pinned exactly
-  in `package.json`); the other lib scripts remain dependency-free. Each run's
+  in `package.json`, with the transitive tree locked by the committed
+  `package-lock.json`); the other lib scripts remain dependency-free. Each run's
   `SweepResult` and API-request count land in the job summary.
 - **Live counters** (`lib/counters-report.ts`, weekly): the workflow downloads
   the review runs' per-run artifacts (bounded window), and the script
