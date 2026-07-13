@@ -140,7 +140,19 @@ export type CaseRereview = {
  */
 export type CaseLive = {
     prContext: LivePrContext;
-    /** Case-dir-relative path to the post-change tree (default `tree`). */
+    /**
+     * Case-dir-relative path to the post-change tree (default `tree`).
+     *
+     * Trees are deliberately minimal: validation requires only the changed
+     * files to exist. The staged copy of this tree is the sub-agent's whole
+     * world (its cwd, with no network), so the agent WILL often try to read
+     * an imported module or caller that is not there; that read returns an
+     * ordinary not-found tool error the agent tolerates and works around,
+     * not a run failure. The cost of a missing file is realism, not a crash:
+     * include the context files whose absence would change what a reviewer
+     * concludes (e.g. the decorator module a sibling handler imports), and
+     * nothing more.
+     */
     tree: string;
     /** Labeled defects a live run must catch. */
     mustCatchSpecs?: LiveDefectSpec[];
