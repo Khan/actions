@@ -238,6 +238,15 @@ pre-agent-steps:
 # (-1) so reviews are never skipped on a busy PR day; the per-run cap below
 # still bounds the cost of any single review.
 max-daily-ai-credits: -1
+# Explicit per-run cap (matches the gh-aw default). The cap is enforced by the
+# firewall api-proxy on the runner side and is not otherwise visible to the
+# agent process, so it is mirrored into the agent's environment below; the
+# router clamps its soft budget targets to the mirror so a run never plans
+# more work than the hard cap can pay for. KEEP THE TWO VALUES IN SYNC — here
+# and in any consumer override that changes `max-ai-credits`.
+max-ai-credits: 1000
+env:
+  REVIEW_MAX_AI_CREDITS: "1000"
 ---
 
 # PR Reviewer
@@ -884,13 +893,20 @@ claims anyway, and surface the gap as a skipped dimension (`claim validation`) w
 note in Step 6, so the author knows they were not double-checked this run.
 
 **Run out of budget gracefully: always land the review.** Two hard ceilings kill a
-run that overruns: the per-run AI-credits cap (gh-aw's baked-in default; the
-frontmatter only disables the *daily* cap) and the job's `timeout-minutes`. A run
-that dies at a hard ceiling costs everything and delivers nothing, so a hard
-ceiling must never be what stops you: treat the router's soft targets
-(`runBudget`, Step 3) as the point to start landing. You cannot observe your own
-credit spend (nothing reports credits consumed back to you mid-run), so never
-estimate dollars; watch the signals you can observe, as spend proxies:
+run that overruns: the per-run AI-credits cap (the frontmatter's
+`max-ai-credits`; the daily cap is disabled separately) and the job's
+`timeout-minutes`. A run that dies at a hard ceiling costs everything and
+delivers nothing, so a hard ceiling must never be what stops you: treat the
+router's soft targets (`runBudget`, Step 3) as the point to start landing. The
+router clamps those targets to the effective credit cap (the
+`REVIEW_MAX_AI_CREDITS` mirror of `max-ai-credits`) with a landing reserve
+held back: the clamped `maxUsd` is 75% of the cap, not the cap itself, because
+spend is unobservable mid-run and work already in flight bills after your last
+checkpoint, so a run that sheds exactly at the cap still dies at it. When
+`runBudget.capClamped` is true the cap is tighter than the tier's normal
+budget — dispatch conservatively from the start and expect to shed. Treat
+`maxUsd` as the landing target, never as money you may finish spending. Nothing reports exact credits consumed back to you
+mid-run, so watch the signals you can observe, as spend proxies:
 
 - **Elapsed wall-clock** vs `runBudget.maxWallClockMinutes`: diff `date +%s`
   against the run start you recorded in Step 1 at each later checkpoint. This is
@@ -900,10 +916,23 @@ estimate dollars; watch the signals you can observe, as spend proxies:
   reviewers and lenses already dispatched plus still pending. Only those count.
   `pattern-triage`, `thread-reconciler`, and the `claim-validator` are pipeline
   steps, not reviewers; they never consume a slot of this cap.
+- **Estimated credits** vs `runBudget.maxUsd × 100`: every finished sub-agent
+  reports its tokens in-band (the `subagent_tokens` line of its result's
+  `<usage>` block). Estimated run credits ≈ the sum of `subagent_tokens` over
+  completed sub-agents ÷ 5,000. (Derivation: measured runs average roughly
+  9,000 summed tokens per credit, and sub-agent tokens are only part of total
+  spend — your own orchestration turns are unmetered — so ÷5,000 folds in the
+  safety margin. An estimate, not an invoice: use it to shed, never to justify
+  spending more.)
 - **Run-wide investigation usage** vs `runBudget.maxTotalToolCalls`: one line per
   authorised call in `/tmp/gh-aw/review/investigation-journal.log` (`wc -l`).
 - **Trajectory**: an unusually large diff, many sub-agents still pending, many
   turns already spent.
+
+Two checkpoints are mandatory, not judgment calls: recompute every proxy (1)
+immediately after the last finder returns, BEFORE starting Phase 3 validation
+— validation is itself model work, and dying there wastes findings already in
+hand — and (2) before dispatching each additional wave of reviewers.
 
 When any proxy passes roughly three-quarters of its soft target (or the trajectory
 is clearly expensive), stop starting new work and shed remaining work in this

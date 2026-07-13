@@ -30,6 +30,8 @@
  * sentence about the change itself. Prose stays with the lens sub-agents.
  */
 
+import {DEFAULT_MISROUTED_FLOOR_TIER, DEFAULT_TIER_BUDGETS} from "./budgets";
+import {clampBudgetToCreditCap, resolveCreditCap} from "./credit-cap";
 import {KNOWN_LENSES} from "./finding-schema";
 import type {Lens} from "./finding-schema";
 import {
@@ -51,6 +53,7 @@ import type {
 
 // Re-exported so consumers (and the tests) can treat the router as the single
 // entry point for routing vocabulary and the ROUTING parser.
+export {DEFAULT_MISROUTED_FLOOR_TIER, DEFAULT_TIER_BUDGETS};
 export {
     DEFAULT_RE_REVIEW_MODE,
     ENABLEABLE_REVIEWERS,
@@ -183,6 +186,19 @@ export type RunBudget = {
     maxWallClockMinutes: number;
     /** Soft spend ceiling (USD) the orchestrator should target. */
     maxUsd: number;
+    /**
+     * The effective per-run AI-credit cap this budget was checked against
+     * (credits; 1 credit = $0.01), when one was known. Absent when the cap
+     * was unknown or explicitly uncapped.
+     */
+    effectiveCreditCap?: number;
+    /**
+     * True when {@link effectiveCreditCap} is tighter than the tier's table
+     * budget and the soft targets above were scaled down to fit it. The
+     * orchestrator treats a clamped budget as already-tight: dispatch
+     * conservatively and expect to shed (review.md Step 3 Phase 3).
+     */
+    capClamped?: boolean;
 };
 
 export type RouterConfig = {
@@ -204,6 +220,15 @@ export type RouterConfig = {
     misroutedFloorTier?: RiskTier;
     /** Tier assigned to a source file that matches no risk rule. Defaults to "low". */
     defaultTier?: RiskTier;
+    /**
+     * Effective per-run AI-credit cap (credits; 1 credit = $0.01). When set
+     * and positive, the selected tier budget is clamped so the soft targets
+     * never promise more work than the hard cap can pay for
+     * ({@link clampBudgetToCreditCap}). Zero or negative means explicitly
+     * uncapped; undefined means unknown (no clamp). The CLI resolves this
+     * from the environment via {@link resolveCreditCap}.
+     */
+    maxAiCredits?: number;
 };
 
 /** Per-file routing decision. */
@@ -260,77 +285,6 @@ export type RouteInput = {
      */
     resolvedTiers?: Record<string, RiskTier>;
 };
-
-/* -------------------------------------------------------------------------- */
-/* Documented defaults (tunable later)                                        */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Default budget table, sized inside the workflow's assumed 20-minute / $10
- * per-run ceiling. Every field scales monotonically with the tier; the table
- * is exported so the eval suite and consumers can override it.
- *
- * Calibration (re-measured 2026-07-10 against production runs on Khan/actions
- * #232/#238): a run spends ~3 minutes of fixed overhead (staging, router,
- * provenance, pattern-triage) before the first reviewer returns, so wall
- * clocks below ~6 minutes hit the shed threshold before review work lands;
- * and the standard enabled roster is seven whole-change reviewers (two
- * defaults plus the five opt-ins both current consumers enable), so an
- * invocation cap of 4 deterministically shed dimensions on every low run. Low and medium now fit the roster;
- * trivial stays deliberately small (the two default reviewers; the rest are
- * declared budget sheds). The low cap of 8 lets a lens-free low-tier run
- * dispatch the full roster; path-matched lenses also consume slots, so a low
- * PR matching two or more lenses still sheds from the bottom of the value
- * ranking (that residual is sized when the modes are priced, not here).
- * `maxUsd` is deliberately left uncalibrated (per-run cost measurement is
- * deferred to #249): the dollar column is the original estimate.
- */
-export const DEFAULT_TIER_BUDGETS: Record<RiskTier, RunBudget> = {
-    trivial: {
-        tier: "trivial",
-        floored: false,
-        maxReviewerInvocations: 2,
-        maxToolCallsPerFinding: 2,
-        maxTotalToolCalls: 10,
-        maxWallClockMinutes: 6,
-        maxUsd: 0.5,
-    },
-    low: {
-        tier: "low",
-        floored: false,
-        maxReviewerInvocations: 8,
-        maxToolCallsPerFinding: 3,
-        maxTotalToolCalls: 20,
-        maxWallClockMinutes: 10,
-        maxUsd: 1.5,
-    },
-    medium: {
-        tier: "medium",
-        floored: false,
-        maxReviewerInvocations: 10,
-        maxToolCallsPerFinding: 5,
-        maxTotalToolCalls: 60,
-        maxWallClockMinutes: 15,
-        maxUsd: 4,
-    },
-    high: {
-        tier: "high",
-        floored: false,
-        maxReviewerInvocations: 12,
-        maxToolCallsPerFinding: 8,
-        maxTotalToolCalls: 120,
-        maxWallClockMinutes: 20,
-        maxUsd: 10,
-    },
-};
-
-/**
- * Tier a misrouted PR (source files touched, but no specialist lens matched) is
- * floored to. A misrouted PR still gets a real review from the always-on
- * reviewers, so it must not fall to the trivial budget just because no path
- * pattern claimed it. "low" is the documented default floor.
- */
-export const DEFAULT_MISROUTED_FLOOR_TIER: RiskTier = "low";
 
 /* -------------------------------------------------------------------------- */
 /* Glob matching (self-contained; CODEOWNERS/gitattributes-style)            */
@@ -618,6 +572,7 @@ const tierForFile = (
  * The single budget rule: scale by the highest touched tier, with one
  * floor for misrouted PRs. No per-lens knobs. When misrouted and the floor tier
  * outranks the touched tier, the floor's budget is used and `floored` is set.
+ * The selected budget is then clamped to `config.maxAiCredits` when known.
  */
 export const computeRunBudget = (
     highestTier: RiskTier,
@@ -634,7 +589,10 @@ export const computeRunBudget = (
         floored = true;
     }
 
-    return {...table[effectiveTier], tier: effectiveTier, floored};
+    return clampBudgetToCreditCap(
+        {...table[effectiveTier], tier: effectiveTier, floored},
+        config.maxAiCredits,
+    );
 };
 
 /* -------------------------------------------------------------------------- */
@@ -911,6 +869,7 @@ type FsLike = {
  * the {@link RoutingJson} shape. Factored out (fs injected) so it is testable
  * without touching the real filesystem. Returns the written JSON.
  */
+
 /** Accept either a bare `[{path,status}]` array or a `{files:[…]}` wrapper. */
 const extractFileList = (raw: unknown): unknown[] => {
     if (Array.isArray(raw)) {
@@ -920,7 +879,11 @@ const extractFileList = (raw: unknown): unknown[] => {
     return Array.isArray(wrapped) ? wrapped : [];
 };
 
-export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
+export const runCli = (
+    fs: FsLike,
+    repoRoot = ".",
+    env: Record<string, string | undefined> = {},
+): RoutingJson => {
     const readText = (p: string): string => fs.readFileSync(p, "utf8");
     const repoPath = (p: string): string =>
         repoRoot === "." ? p : `${repoRoot}/${p}`;
@@ -977,6 +940,7 @@ export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
         reviewerRules,
         lensRules: routingFileConfig.lensRules,
         riskRules: routingFileConfig.riskRules,
+        maxAiCredits: resolveCreditCap(env, fs),
     });
     const json = toRoutingJson(
         result,
@@ -996,5 +960,5 @@ export const runCli = (fs: FsLike, repoRoot = "."): RoutingJson => {
 // Run only when executed directly (review.md Step 3), never on import (tests).
 if (typeof require !== "undefined" && require.main === module) {
     const fs = require("node:fs") as FsLike;
-    runCli(fs, process.env.REVIEW_REPO_ROOT ?? ".");
+    runCli(fs, process.env.REVIEW_REPO_ROOT ?? ".", process.env);
 }

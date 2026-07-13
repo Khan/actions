@@ -622,6 +622,21 @@ describe("runCli", () => {
         expect(JSON.parse(written[ROUTING_OUT])).toEqual(json);
     });
 
+    it("clamps the run budget to the credit cap from the environment", () => {
+        const {fs} = fakeFs({
+            [FILES_PATH]: JSON.stringify([
+                {path: "db/migrations/0001.sql", status: "added"},
+            ]),
+            [ROUTING_CONFIG_PATH]:
+                "**/migrations/** tier=high lens=data-migrations",
+        });
+        const json = runCli(fs, ".", {REVIEW_MAX_AI_CREDITS: "400"});
+        expect(json.runBudget.tier).toBe("high");
+        expect(json.runBudget.capClamped).toBe(true);
+        expect(json.runBudget.maxUsd).toBe(3);
+        expect(json.runBudget.effectiveCreditCap).toBe(400);
+    });
+
     it("accepts the {files:[...]} wrapper and degrades safely without a ROUTING config", () => {
         const {fs, written} = fakeFs({
             [FILES_PATH]: JSON.stringify({
