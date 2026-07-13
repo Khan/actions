@@ -5,6 +5,7 @@ import {
     computeRunBudget,
     DEFAULT_MISROUTED_FLOOR_TIER,
     DEFAULT_TIER_BUDGETS,
+    ENABLEABLE_REVIEWERS,
     isGenerated,
     matchesGlob,
     parseGitattributesGenerated,
@@ -383,6 +384,21 @@ describe("computeRunBudget: scaling", () => {
         );
         expect(result.runBudget.tier).toBe("high");
         expect(result.runBudget.floored).toBe(false);
+    });
+
+    it("fits the whole-change roster within the low and medium caps", () => {
+        // Two always-on defaults (correctness-reviewer, skill-auditor; the
+        // other pipeline steps never consume a slot) plus every opt-in
+        // reviewer. Pinned to the roster size, not a literal: if a reviewer
+        // joins ENABLEABLE_REVIEWERS without a cap bump, low/medium runs
+        // would silently shed dimensions again while the suite stayed green.
+        const rosterSize = 2 + ENABLEABLE_REVIEWERS.length;
+        expect(
+            DEFAULT_TIER_BUDGETS.low.maxReviewerInvocations,
+        ).toBeGreaterThanOrEqual(rosterSize);
+        expect(
+            DEFAULT_TIER_BUDGETS.medium.maxReviewerInvocations,
+        ).toBeGreaterThanOrEqual(rosterSize);
     });
 });
 
