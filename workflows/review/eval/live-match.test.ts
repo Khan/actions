@@ -269,6 +269,50 @@ describe("matchCase", () => {
         expect(capped.missed).toEqual(["subtle"]);
     });
 
+    it("catches a near-miss mis-anchor via anchor-snap and flips back under anchorSnap: false", async () => {
+        // The DIFF's changed lines are 1-2; line 4 is a near-miss (within
+        // the snap window), the observed right-file, right-mechanism,
+        // wrong-line pathology. With the snap (production default) the
+        // blocking finding posts at the snapped line, matches the spec, and
+        // drives the verdict; emulating a pre-snap arm drops it at the gate
+        // and the verdict flips — the exact failure anchor-snap removes.
+        const misAnchored = {
+            ...finding("f-snapped", "floating point totals round late."),
+            anchor: {type: "line", path: "src/a.ts", line: 4, side: "RIGHT"},
+        };
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [spec({key: "float-bug"})],
+            findings: [misAnchored],
+        });
+        expect(result.snappedByProvenance).toHaveLength(1);
+        expect(result.snappedByProvenance[0]?.candidate.line).toBe(2);
+        expect(result.snappedByProvenance[0]?.originalAnchor).toEqual({
+            type: "line",
+            path: "src/a.ts",
+            line: 4,
+            side: "RIGHT",
+        });
+        expect(result.droppedByProvenance).toEqual([]);
+        expect(result.verdict.event).toBe("REQUEST_CHANGES");
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught.map((c) => c.specKey)).toEqual(["float-bug"]);
+
+        const preSnap = runCase(corpusCase, {anchorSnap: false});
+        expect(preSnap.snappedByProvenance).toEqual([]);
+        expect(preSnap.droppedByProvenance.map((c) => c.id)).toEqual([
+            "f-snapped",
+        ]);
+        expect(preSnap.verdict.event).toBe("APPROVE");
+        const preSnapMatch = await matchCase(corpusCase, preSnap);
+        expect(preSnapMatch.missedDetail).toEqual([
+            {
+                specKey: "float-bug",
+                droppedBy: "provenance",
+                findingId: "f-snapped",
+            },
+        ]);
+    });
+
     it("classifies a produced-then-dropped miss by its gate bucket", async () => {
         // The finding names the right mechanism but anchors off the diff, so
         // the provenance gate drops it before posting: a found-but-dropped

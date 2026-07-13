@@ -89,6 +89,7 @@ import {
     type RereviewCaseScore,
 } from "./rereview-match";
 import {runCase} from "./runner";
+import {reviewMdHasAnchorSnap} from "../lib/provenance";
 import type {ReReviewMode} from "../lib/routing-config";
 
 // The report shapes and renderers live in ./live-ab-report; re-exported so
@@ -116,12 +117,19 @@ export type {
  * the remaining cases are recorded as skipped and the arm still reports (a
  * run that dies at a cap with nothing emitted is the failure mode the plan
  * forbids).
+ *
+ * `anchorSnap` sets the arm's provenance-gate emulation (see
+ * {@link reviewMdHasAnchorSnap}): the deterministic pipeline is shared by
+ * both arms, so the gate's anchor-snap fallback follows each arm's OWN
+ * review.md version — the one deliberate exception to "everything but
+ * review.md is the candidate's", and what lets the A/B price the snap change
+ * itself (baseline pre-snap, candidate snapping).
  */
 export const runArm = async (
     arm: ArmId,
     cases: CorpusCase[],
     produce: ArmProduce,
-    options: {maxUsd: number; match?: MatchOptions},
+    options: {maxUsd: number; match?: MatchOptions; anchorSnap?: boolean},
 ): Promise<ArmRunReport> => {
     const started = Date.now();
     const runs: LiveCaseRun[] = [];
@@ -149,6 +157,9 @@ export const runArm = async (
         const result = runCase(corpusCase, {
             produceFindings: () => produced.findings,
             validation: produced.validation,
+            ...(options.anchorSnap !== undefined
+                ? {anchorSnap: options.anchorSnap}
+                : {}),
         });
         const match = await matchCase(corpusCase, result, options.match);
         runs.push({corpusCase, result, match});
@@ -312,6 +323,7 @@ export const retryGateFlips = async (
     cases: CorpusCase[],
     produceForAttempt: (attempt: number) => ArmProduce,
     match?: MatchOptions,
+    anchorSnap?: boolean,
 ): Promise<GateRetry[]> => {
     const failures = adversarialGateFailures(candidate);
     const failingIds = [
@@ -330,6 +342,7 @@ export const retryGateFlips = async (
             const result = runCase(corpusCase, {
                 produceFindings: () => produced.findings,
                 validation: produced.validation,
+                ...(anchorSnap !== undefined ? {anchorSnap} : {}),
             });
             const matched = await matchCase(corpusCase, result, match);
             const attemptFailures = adversarialGateFailures({
@@ -480,6 +493,17 @@ const main = async (): Promise<void> => {
               }),
           };
 
+    // Each arm's provenance gate emulates that arm's OWN review.md version:
+    // the anchor-snap fallback is keyed on the marker the gate step carries
+    // once it documents the rule. A baseline built from a pre-snap prompt
+    // replays the pre-snap gate, so the snap change itself is priceable by
+    // the A/B; once both prompts carry the rule, both arms snap and the A/B
+    // is back to measuring prompt deltas alone.
+    const armSnap = {
+        baseline: reviewMdHasAnchorSnap(baselineMd),
+        candidate: reviewMdHasAnchorSnap(candidateMd),
+    };
+
     const runner = sdkRunner();
     const armProduce =
         (stage: string, markdown: string, mode: ReReviewMode): ArmProduce =>
@@ -557,6 +581,7 @@ const main = async (): Promise<void> => {
                 armProduce(`baseline${suffix}`, baselineMd, "full"),
                 {
                     maxUsd: nextArmBudget(),
+                    anchorSnap: armSnap.baseline,
                     ...(match !== undefined ? {match} : {}),
                 },
             ),
@@ -568,6 +593,7 @@ const main = async (): Promise<void> => {
                 armProduce(`candidate${suffix}`, candidateMd, candidateMode),
                 {
                     maxUsd: nextArmBudget(),
+                    anchorSnap: armSnap.candidate,
                     ...(match !== undefined ? {match} : {}),
                 },
             ),
@@ -589,6 +615,7 @@ const main = async (): Promise<void> => {
                               stageDir: `${stageRoot}/candidate${suffix}-retry${attempt}/${corpusCase.id}`,
                           }),
                   match,
+                  armSnap.candidate,
               )
             : [];
         const flakes = new Set(

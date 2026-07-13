@@ -140,6 +140,22 @@ describe("computeChangedLines", () => {
         ].join("\n");
         expect(computeChangedLines(diff)["a.ts"].added).toEqual([1]);
     });
+
+    it("records the last RIGHT-side line each file's hunks cover", () => {
+        const lines = computeChangedLines(GIT_DIFF);
+        // Hunk 2 covers new lines 41..43; the file's diff shows nothing past.
+        expect(lines["src/app.ts"].lastShownLine).toBe(43);
+        expect(lines["src/new.ts"].lastShownLine).toBe(2);
+    });
+
+    it("records each file's diff-text overhead", () => {
+        const lines = computeChangedLines(GIT_DIFF);
+        // 4 file-header lines + 2 hunk headers + 2 removed lines: the most a
+        // diff-text-counted anchor can overshoot the real file line.
+        expect(lines["src/app.ts"].textOverhead).toBe(8);
+        // 4 file-header lines + 1 hunk header, nothing removed.
+        expect(lines["src/new.ts"].textOverhead).toBe(5);
+    });
 });
 
 describe("countOrphanHunkLines", () => {

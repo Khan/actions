@@ -124,6 +124,14 @@ export type RunResult = {
      * artifact), not in {@link RunResult.plannedReview}.
      */
     droppedByProvenance: RunCandidate[];
+    /**
+     * Near-miss mis-anchors the gate snapped to a changed line instead of
+     * dropping (anchor-snap; see `lib/provenance.ts`). Each entry's candidate
+     * carries the snapped anchor and ALSO flows through the pipeline (it is
+     * not a drop); this list is the audit trail — in production, the run
+     * artifact's `out/snapped.json`.
+     */
+    snappedByProvenance: {candidate: RunCandidate; originalAnchor: Anchor}[];
     /** Candidates dropped by the scope filter (out-of-scope, non-blocking). */
     droppedByScope: RunCandidate[];
     /** Candidates dropped as `refuted` by the validation replay (Phase 3). */
@@ -159,6 +167,13 @@ export type RunOptions = {
      * `[]` explicitly to replay a live run whose validator produced nothing.
      */
     validation?: CaseVerification[];
+    /**
+     * Whether the change-provenance gate runs its anchor-snap fallback
+     * (default true: production behavior). The live A/B passes false for an
+     * arm whose review.md predates the rule, so the deterministic gate
+     * emulates each arm's own prompt version and the A/B prices the change.
+     */
+    anchorSnap?: boolean;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -352,14 +367,39 @@ export const runCase = (
     // production). Without a diff the gate is skipped (pre-gate behavior).
     let changeAnchored = allCandidates;
     let droppedByProvenance: RunCandidate[] = [];
+    let snappedByProvenance: RunResult["snappedByProvenance"] = [];
     if (corpusCase.diff !== undefined) {
-        const provenance = computeDiffProvenance(corpusCase.diff);
+        const provenance = computeDiffProvenance(
+            corpusCase.diff,
+            corpusCase.fileLineCounts,
+        );
         const gate = applyProvenanceGate(
             allCandidates.map((c) => c.finding),
             provenance,
+            options.anchorSnap === undefined
+                ? {}
+                : {anchorSnap: options.anchorSnap},
         );
         const keptIds = new Set(gate.kept.map((f) => f.id));
-        changeAnchored = allCandidates.filter((c) => keptIds.has(c.id));
+        const snappedById = new Map(
+            gate.snapped.map((snap) => [snap.finding.id, snap]),
+        );
+        // Re-normalise the snapped findings so their candidates carry the
+        // rewritten (snapped) anchor through the rest of the pipeline.
+        changeAnchored = allCandidates
+            .filter((c) => keptIds.has(c.id))
+            .map((c) => {
+                const snap = snappedById.get(c.id);
+                return snap === undefined
+                    ? c
+                    : toCandidate({source: c.source, finding: snap.finding});
+            });
+        snappedByProvenance = changeAnchored.flatMap((candidate) => {
+            const snap = snappedById.get(candidate.id);
+            return snap === undefined
+                ? []
+                : [{candidate, originalAnchor: snap.originalAnchor}];
+        });
         // Re-normalise the demoted findings so their candidates carry the
         // gate-coerced (never blocking) label.
         droppedByProvenance = allCandidates
@@ -454,6 +494,7 @@ export const runCase = (
         allCandidates,
         postedCandidates,
         droppedByProvenance,
+        snappedByProvenance,
         droppedByScope,
         droppedByValidation,
         postedLabels,
