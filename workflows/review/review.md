@@ -2400,15 +2400,6 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   deserialization sink without validation or parameterization. `found` on an unguarded
   sink.
 
-**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
-real concern **outside this lens's domain** — noticed while tracing a caller or
-reading surrounding context — do not force it into `findings[]` and do not discard
-it: record it in `out_of_lane_observations[]` (below) with a concrete
-`failure_scenario`. The orchestrator routes it to claim validation as a
-non-blocking candidate, so staying in your lane no longer kills the observation.
-Omit the field or return `[]` when there is nothing to hand off; `line` and
-`suggested_lane` are optional.
-
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
 §Structured finding schema and hunts; `lens` is exactly `security-auth`, and no
@@ -2474,15 +2465,6 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`pii-to-model-or-logs`** — PII/sensitive fields sent to a model or written to a
   generation log unredacted. `found` on real exposure.
 
-**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
-real concern **outside this lens's domain** — noticed while tracing a caller or
-reading surrounding context — do not force it into `findings[]` and do not discard
-it: record it in `out_of_lane_observations[]` (below) with a concrete
-`failure_scenario`. The orchestrator routes it to claim validation as a
-non-blocking candidate, so staying in your lane no longer kills the observation.
-Omit the field or return `[]` when there is nothing to hand off; `line` and
-`suggested_lane` are optional.
-
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
 §Structured finding schema and hunts; `lens` is exactly `ai-safety-moderation`, and no
@@ -2541,15 +2523,6 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   under-13 exclusion. `found` when the gate is absent.
 - **`unsubscribe-not-honored`** — a send that ignores opt-out / notification preferences.
   `found` when opt-out is bypassed.
-
-**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
-real concern **outside this lens's domain** — noticed while tracing a caller or
-reading surrounding context — do not force it into `findings[]` and do not discard
-it: record it in `out_of_lane_observations[]` (below) with a concrete
-`failure_scenario`. The orchestrator routes it to claim validation as a
-non-blocking candidate, so staying in your lane no longer kills the observation.
-Omit the field or return `[]` when there is nothing to hand off; `line` and
-`suggested_lane` are optional.
 
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
@@ -2610,15 +2583,6 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   cache it feeds. `found` when invalidation is missing.
 - **`unbounded-cache-or-collection`** — a cache/collection with no eviction, TTL, or size
   bound. `found` when growth is unbounded.
-
-**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
-real concern **outside this lens's domain** — noticed while tracing a caller or
-reading surrounding context — do not force it into `findings[]` and do not discard
-it: record it in `out_of_lane_observations[]` (below) with a concrete
-`failure_scenario`. The orchestrator routes it to claim validation as a
-non-blocking candidate, so staying in your lane no longer kills the observation.
-Omit the field or return `[]` when there is nothing to hand off; `line` and
-`suggested_lane` are optional.
 
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
@@ -2681,15 +2645,6 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`unbatched-backfill`** — a full-table `UPDATE`/backfill with no batching/chunking.
   `found` when the write is unbounded.
 
-**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
-real concern **outside this lens's domain** — noticed while tracing a caller or
-reading surrounding context — do not force it into `findings[]` and do not discard
-it: record it in `out_of_lane_observations[]` (below) with a concrete
-`failure_scenario`. The orchestrator routes it to claim validation as a
-non-blocking candidate, so staying in your lane no longer kills the observation.
-Omit the field or return `[]` when there is nothing to hand off; `line` and
-`suggested_lane` are optional.
-
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
 §Structured finding schema and hunts; `lens` is exactly `data-migrations`, and no
@@ -2750,15 +2705,6 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`missing-idempotency-on-retryable-handler`** — a redeliverable handler doing a
   side-effecting op with no idempotency guard. `found` when redelivery double-applies.
 
-**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
-real concern **outside this lens's domain** — noticed while tracing a caller or
-reading surrounding context — do not force it into `findings[]` and do not discard
-it: record it in `out_of_lane_observations[]` (below) with a concrete
-`failure_scenario`. The orchestrator routes it to claim validation as a
-non-blocking candidate, so staying in your lane no longer kills the observation.
-Omit the field or return `[]` when there is nothing to hand off; `line` and
-`suggested_lane` are optional.
-
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
 §Structured finding schema and hunts; `lens` is exactly `concurrency-async`, and no
@@ -2818,15 +2764,6 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   `found` when it is non-optional and undefaulted.
 - **`federation-key-changed`** — a change to a federated key/reference/entity resolver
   that breaks composition. `found` when composition/resolution breaks.
-
-**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
-real concern **outside this lens's domain** — noticed while tracing a caller or
-reading surrounding context — do not force it into `findings[]` and do not discard
-it: record it in `out_of_lane_observations[]` (below) with a concrete
-`failure_scenario`. The orchestrator routes it to claim validation as a
-non-blocking candidate, so staying in your lane no longer kills the observation.
-Omit the field or return `[]` when there is nothing to hand off; `line` and
-`suggested_lane` are optional.
 
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
@@ -2892,15 +2829,6 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`format-switch-single-deploy`** — a writer switched to a new format/encoding/key set
   while old readers are still deployed. `found` on a single-phase switch.
 
-**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
-real concern **outside this lens's domain** — noticed while tracing a caller or
-reading surrounding context — do not force it into `findings[]` and do not discard
-it: record it in `out_of_lane_observations[]` (below) with a concrete
-`failure_scenario`. The orchestrator routes it to claim validation as a
-non-blocking candidate, so staying in your lane no longer kills the observation.
-Omit the field or return `[]` when there is nothing to hand off; `line` and
-`suggested_lane` are optional.
-
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
 §Structured finding schema and hunts; `lens` is exactly `cross-deploy-serialization`, and no
@@ -2963,15 +2891,6 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`destructive-infra-change`** — an IaC change that destroys/replaces a stateful
   resource. `found` on an unguarded destructive change.
 
-**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
-real concern **outside this lens's domain** — noticed while tracing a caller or
-reading surrounding context — do not force it into `findings[]` and do not discard
-it: record it in `out_of_lane_observations[]` (below) with a concrete
-`failure_scenario`. The orchestrator routes it to claim validation as a
-non-blocking candidate, so staying in your lane no longer kills the observation.
-Omit the field or return `[]` when there is nothing to hand off; `line` and
-`suggested_lane` are optional.
-
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
 §Structured finding schema and hunts; `lens` is exactly `deploy-infra-config`, and no
@@ -3031,15 +2950,6 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   key. `found` when the guard is missing.
 - **`currency-mismatch-or-missing`** — an amount handled without a currency, or arithmetic
   mixing currencies. `found` on a real mismatch.
-
-**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
-real concern **outside this lens's domain** — noticed while tracing a caller or
-reading surrounding context — do not force it into `findings[]` and do not discard
-it: record it in `out_of_lane_observations[]` (below) with a concrete
-`failure_scenario`. The orchestrator routes it to claim validation as a
-non-blocking candidate, so staying in your lane no longer kills the observation.
-Omit the field or return `[]` when there is nothing to hand off; `line` and
-`suggested_lane` are optional.
 
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
@@ -3103,15 +3013,6 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   interpolation that breaks across locales. `found` on a real concatenation.
 - **`locale-unaware-formatting`** — a date/number/currency formatted without locale.
   `found` on locale-unaware formatting.
-
-**Hand off, never drop, an out-of-lane observation.** When your review surfaces a
-real concern **outside this lens's domain** — noticed while tracing a caller or
-reading surrounding context — do not force it into `findings[]` and do not discard
-it: record it in `out_of_lane_observations[]` (below) with a concrete
-`failure_scenario`. The orchestrator routes it to claim validation as a
-non-blocking candidate, so staying in your lane no longer kills the observation.
-Omit the field or return `[]` when there is nothing to hand off; `line` and
-`suggested_lane` are optional.
 
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
