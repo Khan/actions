@@ -21,16 +21,17 @@ export type CreditCapFs = {
 export const DEFAULT_MAX_AI_CREDITS = 1000;
 
 /**
- * The landing reserve: a clamped budget's soft targets aim at this fraction
- * of the effective cap, never the cap itself. Spend is unobservable mid-run
- * (the orchestrator works from proxies), and requests already in flight when
- * a checkpoint passes still bill after it, so a soft target equal to the hard
- * cap leaves no room to land: the second budget-shed acceptance run engaged
- * the clamp and still died at 416/400 credits mid-skill-audit. A quarter of
- * the cap is sized to absorb both the proxy estimation error and the
- * in-flight overshoot observed there.
+ * The landing target: a clamped budget's soft targets aim at this fraction
+ * of the effective cap, never the cap itself; the landing reserve is the
+ * complementary quarter. Spend is unobservable mid-run (the orchestrator
+ * works from proxies), and requests already in flight when a checkpoint
+ * passes still bill after it, so a soft target equal to the hard cap leaves
+ * no room to land: the second budget-shed acceptance run engaged the clamp
+ * and still died at 416/400 credits mid-skill-audit. The reserved quarter is
+ * sized to absorb both the proxy estimation error and the in-flight
+ * overshoot observed there.
  */
-export const LANDING_RESERVE_RATIO = 0.75;
+export const LANDING_TARGET_RATIO = 0.75;
 
 /**
  * Clamp a tier budget to the effective per-run credit cap. The tier table is
@@ -39,7 +40,7 @@ export const LANDING_RESERVE_RATIO = 0.75;
  * than the hard cap can pay for, and the run dies at the api-proxy with
  * findings in hand instead of shedding early (observed: a 400-credit run
  * planned against the high tier's $10 targets and was killed mid-validation).
- * The clamped soft dollar target is {@link LANDING_RESERVE_RATIO} of the cap,
+ * The clamped soft dollar target is {@link LANDING_TARGET_RATIO} of the cap,
  * not the cap itself, so a run that sheds against its targets lands inside
  * the hard ceiling. Scaling is proportional to spend, floored at the trivial
  * tier's values so even a tiny cap yields the smallest designed review rather
@@ -58,7 +59,7 @@ export const clampBudgetToCreditCap = (
         return budget;
     }
     const capUsd = capCredits / 100;
-    const softCapUsd = capUsd * LANDING_RESERVE_RATIO;
+    const softCapUsd = capUsd * LANDING_TARGET_RATIO;
     if (softCapUsd >= budget.maxUsd) {
         // The tier's own soft target already leaves at least the reserve
         // under the hard cap; record the cap and change nothing.

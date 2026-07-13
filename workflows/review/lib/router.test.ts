@@ -405,10 +405,11 @@ describe("clampBudgetToCreditCap", () => {
     it("scales every soft target to the reserve-adjusted cap, not the cap", () => {
         // The budget-shed incident shape: the high tier ($10) planned inside a
         // 400-credit ($4) cap, so the run died at the api-proxy mid-validation.
-        // The soft dollar target is 75% of the cap (the landing reserve): the
-        // acceptance re-run showed a soft target equal to the hard cap still
-        // dies at it (416/400), because spend is unobservable mid-run and
-        // in-flight work bills after the last observable checkpoint.
+        // The soft dollar target is 75% of the cap (the landing target; the
+        // remaining quarter is the landing reserve): the acceptance re-run
+        // showed a soft target equal to the hard cap still dies at it
+        // (416/400), because spend is unobservable mid-run and in-flight
+        // work bills after the last observable checkpoint.
         const clamped = clampBudgetToCreditCap(DEFAULT_TIER_BUDGETS.high, 400);
         expect(clamped).toEqual({
             ...DEFAULT_TIER_BUDGETS.high,
@@ -463,6 +464,15 @@ describe("clampBudgetToCreditCap", () => {
         );
     });
 
+    it("returns the budget unchanged for a non-finite cap", () => {
+        expect(
+            clampBudgetToCreditCap(DEFAULT_TIER_BUDGETS.high, Infinity),
+        ).toEqual(DEFAULT_TIER_BUDGETS.high);
+        expect(clampBudgetToCreditCap(DEFAULT_TIER_BUDGETS.high, NaN)).toEqual(
+            DEFAULT_TIER_BUDGETS.high,
+        );
+    });
+
     it("applies through computeRunBudget via config.maxAiCredits", () => {
         const budget = computeRunBudget("high", false, {
             ...baseConfig,
@@ -504,6 +514,17 @@ describe("resolveCreditCap", () => {
         ).toBe(DEFAULT_MAX_AI_CREDITS);
     });
 
+    it("ignores a non-finite env cap rather than returning it", () => {
+        // "Infinity" parses to a number, but a non-finite cap is useless to
+        // the clamp; treat it like any other unusable value and keep looking.
+        expect(
+            resolveCreditCap({REVIEW_MAX_AI_CREDITS: "Infinity"}, noFs),
+        ).toBe(DEFAULT_MAX_AI_CREDITS);
+        expect(
+            resolveCreditCap({GH_AW_MAX_AI_CREDITS: "-Infinity"}, noFs),
+        ).toBe(DEFAULT_MAX_AI_CREDITS);
+    });
+
     it("reads apiProxy.maxAiCredits from a visible awf config", () => {
         const {fs} = fakeFs({
             "/tmp/gh-aw/awf-config.json": JSON.stringify({
@@ -523,6 +544,22 @@ describe("resolveCreditCap", () => {
             }),
         });
         expect(resolveCreditCap({RUNNER_TEMP: "/rt"}, fs)).toBe(250);
+    });
+
+    it("falls through an awf config that omits maxAiCredits", () => {
+        const {fs} = fakeFs({
+            "/tmp/gh-aw/awf-config.json": JSON.stringify({apiProxy: {}}),
+        });
+        expect(resolveCreditCap({}, fs)).toBe(DEFAULT_MAX_AI_CREDITS);
+    });
+
+    it("falls through a non-numeric awf maxAiCredits", () => {
+        const {fs} = fakeFs({
+            "/tmp/gh-aw/awf-config.json": JSON.stringify({
+                apiProxy: {maxAiCredits: "400"},
+            }),
+        });
+        expect(resolveCreditCap({}, fs)).toBe(DEFAULT_MAX_AI_CREDITS);
     });
 
     it("survives an unparseable awf config and falls through", () => {
