@@ -1238,11 +1238,12 @@ succeeds. One call.
 
 The review body is NOT a status update — never say a review is "under way" or
 "completed". All specific feedback lives in the inline comments, and on approval
-the risk summary and common patterns live in a separate PR comment (Step 7). When you
-left at least one inline comment in Step 5, the inline comments ARE the review:
-submit the verdict with an **empty** body (GitHub requires a non-empty body only when
-a review has no comments). A non-empty body exists only to keep a comment-less review
-submittable, or to carry a skipped-dimension note (below).
+the risk summary and common patterns live in a separate PR comment (Step 7). On an
+APPROVE with at least one inline comment, the inline comments ARE the review and
+the body stays **empty**; a REQUEST_CHANGES body is **always non-empty** (GitHub
+rejects the event otherwise — the inline comments post separately and do not make
+it non-empty). Beyond those rules, body text exists only to keep a comment-less
+approval submittable or to carry a skipped-dimension note (below).
 
 **If APPROVE:**
 
@@ -1251,13 +1252,15 @@ submittable, or to carry a skipped-dimension note (below).
 - **If you left no inline comments**, submit the APPROVE event with the body set to
   exactly `Approved — no blocking issues found.` and nothing else.
 
-**If REQUEST_CHANGES:** a REQUEST_CHANGES verdict carries at least one blocking
-inline comment (the verdict follows from the comments you posted), so submit it with
-an **empty** body. Only if no inline comment was posted (which should not happen),
-keep the body to a single line:
+**If REQUEST_CHANGES:** always submit the event with a non-empty body whose first
+line is exactly:
 ```
 Changes requested — see inline comments.
 ```
+GitHub REJECTS a REQUEST_CHANGES review event with an empty body (the safe-output
+submission posts the event separately from the inline comments, so the comments do
+not make it non-empty); an empty body here loses the blocking verdict entirely
+while the inline comments post as a mere COMMENTED review.
 
 **Re-review accountability (either verdict; code-rendered).** When
 `threads.json` (Step 3 Phase 2) staged at least one unresolved bot thread this run,
@@ -1301,8 +1304,8 @@ Also append here the re-review depth or tripwire note queued in Step 3, when the
 is one. These note lines, the code-rendered re-review accountability section, and
 the hidden fingerprint stamp below are the
 only text permitted beyond the verdict bodies above, and they apply to both APPROVE
-and REQUEST_CHANGES, including the empty-body cases: when the body is otherwise
-empty, they are the entire body.
+and REQUEST_CHANGES, including the empty-body APPROVE case: when the body is
+otherwise empty, they are the entire body.
 
 **The re-review fingerprint stamp (every submitted review; code-rendered).** Last,
 render this run's stamp with the verdict event you are about to submit:
