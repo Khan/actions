@@ -1251,13 +1251,15 @@ submittable, or to carry a skipped-dimension note (below).
 - **If you left no inline comments**, submit the APPROVE event with the body set to
   exactly `Approved — no blocking issues found.` and nothing else.
 
-**If REQUEST_CHANGES:** a REQUEST_CHANGES verdict carries at least one blocking
-inline comment (the verdict follows from the comments you posted), so submit it with
-an **empty** body. Only if no inline comment was posted (which should not happen),
-keep the body to a single line:
+**If REQUEST_CHANGES:** always submit the event with a non-empty body whose first
+line is exactly:
 ```
 Changes requested — see inline comments.
 ```
+GitHub REJECTS a REQUEST_CHANGES review event with an empty body (the safe-output
+submission posts the event separately from the inline comments, so the comments do
+not make it non-empty); an empty body here loses the blocking verdict entirely
+while the inline comments post as a mere COMMENTED review.
 
 **Re-review accountability (either verdict; code-rendered).** When
 `threads.json` (Step 3 Phase 2) staged at least one unresolved bot thread this run,
