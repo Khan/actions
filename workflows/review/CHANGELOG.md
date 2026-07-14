@@ -1,5 +1,11 @@
 # review
 
+## 1.6.1
+
+### Patch Changes
+
+-   70c7560: Always submit REQUEST_CHANGES with a non-empty body. Step 6 previously instructed the opposite ("a REQUEST_CHANGES verdict carries at least one blocking inline comment, so submit it with an empty body", dating to #197): GitHub rejects a REQUEST_CHANGES review event with an empty body, and under gh-aw v0.81.6 the safe-output flow posts the review event separately from the inline comments, so the comments do not make it non-empty. Observed live on the v1.5.0 behavior test (Khan/webapp#40793): the reviewer computed REQUEST_CHANGES correctly for two blocking findings, the submission failed with "Review body is required for REQUEST_CHANGES", and the PR was left with the inline comments as a COMMENTED review and no blocking verdict. The latent instruction survived this long because models usually filled the body anyway. The body's first line is now always `Changes requested — see inline comments.`, with the accountability section, note lines, and fingerprint stamp appended as before.
+
 ## 1.6.0
 
 ### Minor Changes
