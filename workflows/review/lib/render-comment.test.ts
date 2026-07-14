@@ -234,13 +234,12 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
         expect(body({event: "APPROVE", hasInlineComments: true})).toBe("");
     });
 
-    it("REQUEST_CHANGES with inline comments has an empty body", () => {
-        expect(body({event: "REQUEST_CHANGES", hasInlineComments: true})).toBe(
-            "",
-        );
-    });
-
-    it("REQUEST_CHANGES without inline comments keeps the pointer line (degenerate case)", () => {
+    it("REQUEST_CHANGES always carries the pointer line (GitHub rejects an empty body)", () => {
+        // The inline comments post separately from the review event, so they
+        // never make it non-empty; an empty body loses the blocking verdict.
+        expect(
+            body({event: "REQUEST_CHANGES", hasInlineComments: true}),
+        ).toMatchInlineSnapshot(`"Changes requested — see inline comments."`);
         expect(
             body({event: "REQUEST_CHANGES", hasInlineComments: false}),
         ).toMatchInlineSnapshot(`"Changes requested — see inline comments."`);

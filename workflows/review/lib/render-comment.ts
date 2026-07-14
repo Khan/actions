@@ -222,12 +222,14 @@ const HOLD_UNSTUCK_LINES = [
  * APPROVE/REQUEST_CHANGES, and renders a self-explanatory hold-for-human body
  * for the third event.
  *
- * The body convention (matching `review.md`): when inline comments exist, the
- * comments ARE the review, so the body stays empty; GitHub requires a non-empty
- * body only when a review has no comments. A non-empty body therefore appears
- * only for a comment-less review, for skipped-dimension notes (appended to
- * every verdict, and forming the entire body when the head is empty), and for
- * HOLD_FOR_HUMAN, which must always explain itself and how to proceed.
+ * The body convention (matching `review.md`): on APPROVE with inline comments
+ * the comments ARE the review, so the body stays empty; a REQUEST_CHANGES body
+ * is always non-empty, because GitHub rejects the event with an empty body and
+ * the safe-output flow posts the inline comments separately, so they do not
+ * make the event non-empty. Additional body text appears for a comment-less
+ * approval, for skipped-dimension notes (appended to every verdict, and
+ * forming the entire body when the head is empty), and for HOLD_FOR_HUMAN,
+ * which must always explain itself and how to proceed.
  */
 export const renderReviewBody = (input: ReviewBodyInput): string => {
     let head: string;
@@ -253,13 +255,10 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             break;
         }
         case "REQUEST_CHANGES":
-            // A REQUEST_CHANGES verdict normally carries at least one blocking
-            // inline comment (the verdict follows from the posted labels), so
-            // its body is empty too; the pointer line covers only the
-            // degenerate comment-less case.
-            head = input.hasInlineComments
-                ? ""
-                : "Changes requested — see inline comments.";
+            // GitHub rejects a REQUEST_CHANGES review event with an empty
+            // body, and the inline comments post separately, so they never
+            // make the event non-empty: the pointer line is unconditional.
+            head = "Changes requested — see inline comments.";
             break;
         case "HOLD_FOR_HUMAN":
             head =
