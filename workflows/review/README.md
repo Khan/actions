@@ -197,6 +197,36 @@ and are skipped; routing degrades to fewer lenses, never to a crashed review.
 stays the model-facing prose about file *contents*; team ownership stays in
 `.github/REVIEWERS`, unchanged.
 
+### The `.github/NOTIFIED` file (optional)
+
+If the repo has a Gerald [`.github/NOTIFIED`](https://khanacademy.atlassian.net/wiki/spaces/FRONTEND/pages/598278672/Gerald+Documentation)
+file, the reviewer honours its **notify** rules (distinct from `REVIEWERS`
+*reviewer* ownership): on approval it adds a `### Notified` section to the Review
+Guidance comment that `@`-mentions each matched person/team, telling them the rule
+label and which changed files matched. `lib/notified.ts` parses it and does the
+matching deterministically (review.md Step 7 runs the CLI and pastes its rendered
+block); no file means no section, so it costs nothing where it is absent.
+
+Only the `[ON PULL REQUEST]` section applies (everything above the
+`----Everything above this line…----` marker and the `[ON PUSH WITHOUT PULL
+REQUEST]` section are ignored). Each rule is `[label:] <pattern>  @user @Org/team`,
+where `<pattern>` is either a **path glob** (matched against changed file paths) or
+a **quoted diff regex** `"/body/flags"` (matched against each file's unified diff,
+so a rule can fire on *added content*). The base-branch copy is read (like
+`REVIEWERS`), so a PR cannot add notify rules that take effect before it merges.
+The glob dialect is the documented micromatch subset (`**`, `*`, `?`, `{a,b,c}`,
+`[…]`, `(a|b)`, `?(…) *(…) +(…) @(…)`), anchored at the repo root; an unsupported
+construct simply matches nothing rather than crashing the review. A malformed rule
+adds a `Note:` to the PR review and is skipped.
+
+Because the notified `@mentions` ride in the Review Guidance comment (an
+`add-comment` safe output), gh-aw's mention sanitizer governs whether they
+actually ping: repository collaborators are allow-listed by default
+(`mentions.allow-team-members`), and to let arbitrary teams/users through, widen
+it with a `mentions:` block (`allowed`, `allowed-teams`; `allowed-teams` needs a
+token with `read:org`). Without that, a non-collaborator or team mention is
+rendered but neutralised (shown, not pinged).
+
 ### Re-review modes (the runs-per-PR cost lever)
 
 The workflow reviews every push, so a PR's lifetime cost is runs-per-PR times

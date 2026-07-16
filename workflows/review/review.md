@@ -1332,11 +1332,26 @@ depth (`scoped`, `flip-gated`, `fast`; Step 3): the reduced run computed no tria
 or risk data to compare, so the existing comment stands and `risksPatternsKey`
 carries forward unchanged (Step 9).
 
-When this PR has moderate- or high-risk files **or** common patterns (both from
-Step 3), post a single standalone PR comment — separate from the review and
-from the PR body — summarizing them, using the `add-comment` safe output. This
-replaces the old inline risk annotations and the review-body patterns. **Never
-edit the PR description.**
+When this PR has moderate- or high-risk files, common patterns (both from
+Step 3), **or** people matched by `.github/NOTIFIED` (below), post a single
+standalone PR comment — separate from the review and from the PR body —
+summarizing them, using the `add-comment` safe output. This replaces the old
+inline risk annotations and the review-body patterns. **Never edit the PR
+description.**
+
+**Compute the NOTIFIED matches first (deterministic code).** Before deciding
+whether to post, run the notified CLI from the shared review lib checkout, once:
+```
+cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
+  npx -y tsx workflows/review/lib/notified.ts
+```
+It writes `/tmp/gh-aw/review/notified.json`:
+`{present, matched, warnings, notifications, signature, markdown}`. All the
+matching lives in the script — you never parse `.github/NOTIFIED` yourself. When
+`matched` is true, `markdown` is the ready-to-insert `### Notified` block,
+`notifications[]` names each `@mention` with the rule label and the changed files
+it matched, and `signature` is the canonical notification set for the idempotency
+key below.
 
 ### When to post (and when not to)
 
@@ -1344,22 +1359,26 @@ Because this workflow runs on every push, posting MUST be idempotent — there
 should only ever be one current risks/patterns comment:
 
 - **Only post when there is something to report.** If there are no moderate- or
-  high-risk files AND no common patterns, do NOT post a comment at all, and do not
-  post a "nothing to report" placeholder.
+  high-risk files AND no common patterns AND no NOTIFIED matches (`notified.json`
+  `matched` is `false`), do NOT post a comment at all, and do not post a "nothing
+  to report" placeholder.
 - **Only post when the guidance actually changed — judge by substance, not
   wording.** Build a canonical signature of what you would report: for each
   moderate/high-risk file record its owning team and its path, for each common
-  pattern record the sorted set of files it covers, and record the sorted set of files
-  `pattern-triage` **excluded** from review (see the exclusions section below); then sort
+  pattern record the sorted set of files it covers, record the sorted set of files
+  `pattern-triage` **excluded** from review (see the exclusions section below), and
+  append `notified.json`'s `signature`; then sort
   all of that into one stable string. Compare that signature to `risksPatternsKey` in
   cache memory (Step 9). If it is unchanged, do **not** post a new comment — even if you
   would word the reasons differently or order the entries differently. The existing
   comment is still accurate, and reposting would needlessly notify subscribers and
   collapse the current one. Post only when the signature differs from the cached
   value — a risky file is added or removed, a file's owning team changes, the set of
-  common patterns changes, or the excluded-file set changes — or when no comment has ever
-  been posted yet. (The post *trigger* is unchanged from #194: only post when there is at
-  least one moderate/high-risk file **or** a common pattern to report; an exclusions-only
+  common patterns changes, the excluded-file set changes, or the NOTIFIED match set
+  changes — or when no comment has ever
+  been posted yet. (The post *trigger* is: post when there is at
+  least one moderate/high-risk file **or** a common pattern **or** a NOTIFIED match to
+  report; an exclusions-only
   change never posts a comment on its own — those files stay recorded in the
   `pattern-triage.json` artifact regardless.)
 - When you do post, the `add-comment` safe output is configured with
@@ -1411,6 +1430,13 @@ release this run executed) and `<n>` is the `FINDING_SCHEMA_VERSION` constant in
 + label = formatModern(value, {style: "short"})
 ```
 
+### Notified
+
+These people and teams asked (via `.github/NOTIFIED`) to be notified of the changes below:
+
+- @your-org/platform — **deploy-config**: `deploy/prod.yaml`
+- @octocat — **scorer-change**: `scorer.py`
+
 <details>
 <summary><strong>Excluded from review</strong> (3 files)</summary>
 
@@ -1454,6 +1480,18 @@ fully explained by a common pattern above:
   so the link still lands in the review view.
 - Put the common patterns (when Step 3 found any) below the team sections under a
   smaller `### Common patterns` header.
+- **Notified (`.github/NOTIFIED` matches).** When `notified.json` `matched` is
+  `true`, insert its `markdown` field **verbatim** as the `### Notified` section,
+  placed after "Common patterns" and before "Excluded from review". The script
+  has already rendered the whole section — each notified `@mention` with its rule
+  label and the changed files it matched — so paste it in as-is; do not rebuild,
+  reword, reorder, or drop any entry. The mentions are intentionally raw `@`
+  tokens (not the bare `<summary>` slugs used for teams) precisely so GitHub
+  notifies the matched people; the substance-signature idempotency above is what
+  keeps a repost from re-pinging them when the match set has not changed. Omit the
+  section entirely when `matched` is `false`. If `warnings` is non-empty, also add
+  one `Note:` line per warning to the review body (Step 6) so a malformed rule is
+  visible on the PR, never silent.
 - **Excluded from review (`pattern-triage` exclusions).** Below the patterns, add a
   single collapsed `<details>` block titled `<summary><strong>Excluded from review</strong>
   (N files)</summary>` listing the changed files `pattern-triage` dropped from
@@ -1466,11 +1504,13 @@ fully explained by a common pattern above:
   `pattern-triage` excluded nothing. It rides on the guidance comment only — it never
   triggers a post on its own (see the post trigger above).
 - Include the Review Guidance team sections only when there is at least one
-  moderate- or high-risk file, and include the "Common patterns" section only when
-  Step 3 found patterns. The "Excluded from review" block appears only alongside a comment
-  that is already being posted for risks or patterns. If there is nothing to report (no
-  risky file and no pattern), post nothing at all (see above) — do not write a
-  placeholder, even if files were excluded.
+  moderate- or high-risk file, include the "Common patterns" section only when
+  Step 3 found patterns, and include the "Notified" section only when
+  `notified.json` `matched` is `true`. The "Excluded from review" block appears
+  only alongside a comment that is already being posted for risks, patterns, or
+  notifications. If there is nothing to report (no
+  risky file and no pattern and no NOTIFIED match), post nothing at all (see
+  above) — do not write a placeholder, even if files were excluded.
 
 ## Step 8: On Approval — Request the Owning Teams as Reviewers
 
@@ -1540,8 +1580,9 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
 - The verdict and whether a risks/patterns comment was posted this run
 - `risksPatternsKey`: the canonical signature of the risks/patterns guidance as it
   now stands on the PR — for each moderate/high-risk file its owning team and path,
-  each common pattern's sorted file set, plus the sorted set of files `pattern-triage`
-  excluded from review, all sorted into one stable string (Step 7). Record the signature
+  each common pattern's sorted file set, the sorted set of files `pattern-triage`
+  excluded from review, plus `notified.json`'s `signature` (the NOTIFIED match set),
+  all sorted into one stable string (Step 7). Record the signature
   for the guidance as it now stands: the one you
   posted this run, or — if you skipped posting because the signature was unchanged —
   the value carried over from the previous run. Leave it empty/absent if no comment
