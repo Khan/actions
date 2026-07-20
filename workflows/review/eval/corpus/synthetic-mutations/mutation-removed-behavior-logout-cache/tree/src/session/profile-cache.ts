@@ -1,9 +1,4 @@
-/**
- * Per-device profile cache. Entries are keyed by DEVICE id, not user id: a
- * device that logs a different user in reuses the same key. Whoever ends a
- * session MUST drop the device's entry, or the next login on that device is
- * served the previous user's profile until the entry expires (24h).
- */
+/** Per-device profile cache; entries expire 24h after they are set. */
 export type Profile = {
     userId: string;
     displayName: string;

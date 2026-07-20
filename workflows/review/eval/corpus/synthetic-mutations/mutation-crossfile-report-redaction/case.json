@@ -6,7 +6,7 @@
         "live"
     ],
     "category": "synthetic-mutation",
-    "description": "Model-capability discrimination case (cross-file inference-chain family), minted 2026-07-20 alongside the Opus-vs-Fable A/B. Seeing the defect requires composing three files: share.ts sends the built report to a partner webhook (external destination), the unchanged policy.ts documents that any report leaving the org boundary MUST be built with redact: true, and the unchanged format-report.ts documents that the unset-redact default includes raw userId and email columns. The new buildPartnerReport calls formatReport(relevant) with no options, so partners receive raw identifiers and emails. The test asserts feature filtering only and passes either way. No single file looks wrong in isolation; band placement pending live validation.",
+    "description": "Model-capability discrimination case (cross-file inference-chain family), minted 2026-07-20 and hardened same day after v1 calibrated saturated (4/4 under the Opus roster; policy.ts stated the redaction rule outright). Seeing the defect now requires composing the files without any stated rule: share.ts sends the built rows to a partner webhook (an external destination), and the unchanged format-report.ts documents that the unset-redact default includes raw userId and email columns and 'is only safe for reports that stay inside the org'. The new buildPartnerReport calls formatReport(relevant) with no options, so partners receive raw identifiers and emails. The test asserts feature filtering only and passes either way. No single file looks wrong in isolation; band placement pending v2 calibration.",
     "changedFiles": [
         {
             "path": "src/reports/partner-report.ts",
@@ -43,13 +43,12 @@
                 "confidence": 0.8,
                 "evidence_trace": [
                     "src/reports/share.ts POSTs the built rows to a partner webhook, an external destination",
-                    "src/reports/policy.ts documents that any report leaving the org boundary MUST be built with redact: true",
-                    "src/reports/format-report.ts documents that the unset-redact default includes raw userId and email columns and is only safe inside the org",
+                    "src/reports/format-report.ts documents that the unset-redact default includes raw userId and email columns and is only safe for reports that stay inside the org",
                     "src/reports/partner-report.ts:11 calls formatReport(relevant) with no options"
                 ],
-                "failure_scenario": "The weekly partner job builds rows with buildPartnerReport and posts them via shareWithPartner; because formatReport is called without redact: true, every row carries the raw userId and email of the users who used the partner's features, sending PII across the org boundary in violation of the documented reporting policy.",
+                "failure_scenario": "The weekly partner job builds rows with buildPartnerReport and posts them via shareWithPartner; because formatReport is called without redact: true, every row carries the raw userId and email of the users who used the partner's features, sending PII to a third party even though the formatter documents the unredacted default as only safe inside the org.",
                 "producing_hunt": "correctness:cross-file-trace",
-                "model_authored_prose": "buildPartnerReport calls formatReport(relevant) without options, and the formatter's documented default includes raw userId and email columns. These rows go to a partner webhook (share.ts), and policy.ts requires redact: true for anything leaving the org boundary. Pass {redact: true} here."
+                "model_authored_prose": "buildPartnerReport calls formatReport(relevant) without options, and the formatter's documented default includes raw userId and email columns and is described as only safe for reports that stay inside the org. These rows go to a partner webhook (share.ts). Pass {redact: true} here."
             }
         }
     ],

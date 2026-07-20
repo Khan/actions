@@ -6,7 +6,7 @@
         "live"
     ],
     "category": "synthetic-mutation",
-    "description": "Model-capability discrimination case (removed-behavior family), minted 2026-07-20 alongside the Opus-vs-Fable A/B. A refactor extracts a shared endSession teardown for logout and a new admin force-logout, and silently drops the profileCache.drop(session.deviceId) call the old inline logout carried. The unchanged profile-cache.ts documents that entries are keyed by DEVICE id and that whoever ends a session MUST drop the entry, or the next login on that device is served the previous user's profile. The updated test file also drops the cache assertion, so the suite stays green. The PR description claims 'behavior unchanged'. Targets the correctness reviewer's removed-behavior audit; band placement pending live validation.",
+    "description": "Model-capability discrimination case (removed-behavior family), minted 2026-07-20 and hardened same day after v1 calibrated saturated (4/4 under the Opus roster; the cache module's doc comment stated the invariant outright). A refactor extracts a shared endSession teardown for logout and a new admin force-logout, and silently drops the profileCache.drop(session.deviceId) call the old inline logout carried. The unchanged profile-cache.ts documents only the mechanics (per-device cache, 24h expiry); nothing states that logout must invalidate it, so the reviewer has to infer the invariant from the keying: entries are keyed by deviceId, a device outlives a user session, so a surviving entry serves the previous user's profile to the next login on that device. The updated test file also drops the cache assertion, so the suite stays green, and the PR description claims 'behavior unchanged'. Targets the correctness reviewer's removed-behavior audit; band placement pending v2 calibration.",
     "changedFiles": [
         {
             "path": "src/session/logout.ts",
@@ -38,7 +38,7 @@
                 "severity": "blocking",
                 "confidence": 0.85,
                 "evidence_trace": [
-                    "src/session/profile-cache.ts documents that entries are keyed by device id and that whoever ends a session MUST drop the device's entry",
+                    "src/session/profile-cache.ts keys entries by deviceId with a 24h expiry; a device outlives any one user's session",
                     "the pre-change logout called profileCache.drop(session.deviceId); the new shared endSession teardown only revokes tokens and records an audit event",
                     "src/session/logout.test.ts removed the 'drops the device's cached profile' assertion in the same change"
                 ],
