@@ -6,7 +6,7 @@
         "live"
     ],
     "category": "synthetic-mutation",
-    "description": "Model-capability discrimination case (needle-in-mechanical-churn family), minted 2026-07-20 and hardened same day after v1 calibrated saturated (4/4 under the Opus roster at 9 files). A 13-file mechanical PR flips fetchPage's argument order from (items, limit, offset) to (items, offset, pageSize) and renames the per-module LIMIT constants to PAGE_SIZE. Eleven call sites swap their arguments correctly; digest.ts renames its constant but keeps the old order, so digestItems calls fetchPage(byRank, DIGEST_PAGE_SIZE, 0), which under the new signature is offset 20 and pageSize 0: the weekly digest is always empty. digest.test.ts only asserts the empty-input case and passes either way. Tests whether a reviewer keeps auditing individual call sites through repetitive rename churn; band placement pending v2 calibration.",
+    "description": "Model-capability discrimination case (needle-in-mechanical-churn family), minted 2026-07-20 and hardened same day after v1 calibrated saturated (4/4 under the Opus roster at 9 files). A 13-file mechanical PR flips fetchPage's argument order from (items, limit, offset) to (items, offset, pageSize) and renames the per-module LIMIT constants to PAGE_SIZE. Eleven call sites swap their arguments correctly; digest.ts renames its constant but keeps the old order, so digestItems calls fetchPage(byRank, DIGEST_PAGE_SIZE, 0), which under the new signature is offset 20 and pageSize 0: the weekly digest is always empty. digest.test.ts only asserts the empty-input case and passes either way. Tests whether a reviewer keeps auditing individual call sites through repetitive rename churn. A mustNotFlagSpec on recent.ts (a correctly swapped consumer) counts a reviewer that pattern-flags renamed call sites without checking them as a false flag. Calibrated saturated under the Opus roster twice (runs 29763213774 v1 at 9 files 4/4, 29764855482 v2 at 13 files 4/4): call-site auditing survives this much churn. Kept as the mechanical-churn family's regression tripwire with the mustNotFlagSpec as the precision probe; discrimination at this family likely needs real-PR-scale churn (30+ files).",
     "changedFiles": [
         {
             "path": "src/catalog/paging.ts",
@@ -127,6 +127,17 @@
                     "offset.{0,60}page.?size|page.?size.{0,60}offset",
                     "DIGEST_PAGE_SIZE.{0,80}(offset|first)|offset (of |= ?)?20|slice\\(20",
                     "empty (page|digest|result|list)|always (returns? )?empty|zero (rows|items)|page.?size (of |= ?|is )?0"
+                ]
+            }
+        ],
+        "mustNotFlagSpecs": [
+            {
+                "key": "needle-correct-swap-false-flag",
+                "path": "src/catalog/recent.ts",
+                "mechanism": [
+                    "(wrong|incorrect|old|not swapped|un.?swapped|reversed|backwards).{0,60}(argument|arg|order|position)",
+                    "argument order|arg order|order of (the )?arguments",
+                    "offset.{0,60}page.?size.{0,60}(wrong|swap|revers)|swap.{0,60}(offset|page.?size)"
                 ]
             }
         ]
