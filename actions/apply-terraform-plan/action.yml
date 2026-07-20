@@ -27,7 +27,7 @@ inputs:
     required: false
     default: "tfplan.commit"
   plan_bucket:
-    description: "GCS bucket, optionally with a path prefix, that the generate-terraform-plan action uploaded the binary plan to. Must match that action's plan_bucket input. Required unless auto_approve is 'true'. The service account needs permission to read (and, for cleanup, delete) objects in this bucket."
+    description: "GCS bucket, optionally with a path prefix, that the generate-terraform-plan action uploaded the binary plan to. Must match that action's plan_bucket input. Required unless auto_approve is 'true'. The service account needs permission to read (and, for cleanup, delete) objects in this bucket. A binary plan contains the same sensitive data as the Terraform state, so restrict this bucket exactly like the state bucket: CI service accounts only, no human-facing grants."
     required: false
     default: ""
   gcloud_project:

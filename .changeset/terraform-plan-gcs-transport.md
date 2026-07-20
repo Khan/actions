@@ -11,4 +11,6 @@ Breaking changes: both actions gain a `plan_bucket` input (required for the plan
 
 Consumer workflows must also update their trigger paths: apply workflows typically trigger on `push` with a `paths` filter on `tfplan.binary`, which is never committed anymore. Point that filter (and any `!tfplan.binary` excludes in plan workflows) at the pointer file (default `tfplan.commit`) instead, or apply will never run.
 
+Security model for the bucket: a binary plan contains the same sensitive data as the Terraform state itself, so treat the plan bucket exactly like the state bucket. Create it in the same project, enable uniform bucket-level access and public access prevention, and grant object access only to the CI service accounts (no human-facing grants). Note that project-level IAM (owners/editors, storage admins) inherits access to any bucket in the project; that audience can already read the state bucket, so the plan bucket exposes nothing new to it.
+
 Note: this only stops new leaks. Any `tfplan.binary` still committed at a repo's tip should be deleted, and histories that ever contained committed binary plans still need scrubbing and rotation of any secrets present in the embedded state.

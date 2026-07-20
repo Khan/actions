@@ -31,7 +31,7 @@ inputs:
     required: false
     default: "tfplan.commit"
   plan_bucket:
-    description: "GCS bucket, optionally with a path prefix (e.g. 'my-bucket/terraform-plans'), where the binary plan is uploaded. Required when enable_pr_creation is 'true'. Must match the apply-terraform-plan action's plan_bucket input. The service account needs permission to create objects in this bucket."
+    description: "GCS bucket, optionally with a path prefix (e.g. 'my-bucket/terraform-plans'), where the binary plan is uploaded. Required when enable_pr_creation is 'true'. Must match the apply-terraform-plan action's plan_bucket input. The service account needs permission to create objects in this bucket. A binary plan contains the same sensitive data as the Terraform state, so restrict this bucket exactly like the state bucket: CI service accounts only, no human-facing grants."
     required: false
     default: ""
   workload_identity_provider:
