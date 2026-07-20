@@ -27,7 +27,7 @@ inputs:
     required: false
     default: "tfplan.txt"
   plan_file_pointer:
-    description: "Filename for the committed pointer file that records the commit SHA whose uploaded binary plan should be applied"
+    description: "Filename for the committed pointer file that records the commit SHA whose uploaded binary plan should be applied and that plan's sha256 digest"
     required: false
     default: "tfplan.commit"
   plan_bucket:
@@ -165,19 +165,29 @@ runs:
           echo "The plan_bucket input is required when enable_pr_creation is 'true': the binary plan is uploaded to GCS instead of being committed." >&2
           exit 1
         fi
-        # Slug the terraform path the same way apply-terraform-plan does so
-        # concurrent stacks in one repo can't collide on an object path.
+        # Slug the terraform path the same way apply-terraform-plan does, so
+        # concurrent stacks in one repo can't collide on an object path;
+        # utils/terraform-plan-object-key.test.ts pins the two copies to each
+        # other. The short hash suffix keeps two terraform paths that
+        # normalize to the same slug from colliding.
         slug=$(printf '%s' "${{ inputs.terraform_path }}" | tr -c 'A-Za-z0-9._-' '-' | sed -E 's/-+/-/g; s/^-//; s/-$//')
-        object="gs://${{ inputs.plan_bucket }}/${slug}/${{ github.sha }}/${{ inputs.plan_file_binary }}"
+        slug="${slug}-$(printf '%s' "${{ inputs.terraform_path }}" | sha256sum | cut -c1-8)"
+        # The object's filename segment is a fixed literal on both sides so
+        # the key can't depend on the two actions' independently configurable
+        # local filename inputs.
+        object="gs://${{ inputs.plan_bucket }}/${slug}/${{ github.sha }}/tfplan.binary"
+        plan_hash=$(sha256sum "${{ inputs.plan_file_binary }}" | cut -d' ' -f1)
         gcloud storage cp "${{ inputs.plan_file_binary }}" "$object"
         rm -f "${{ inputs.plan_file_binary }}"
-        # The pointer deliberately holds only the commit SHA, not a full
-        # gs:// URI: apply-terraform-plan reconstructs the object path from
-        # its own workflow-configured inputs, so a tampered pointer can at
-        # worst select another plan previously uploaded for this same stack.
-        printf '%s\n' "${{ github.sha }}" > "${{ inputs.plan_file_pointer }}"
+        # The pointer records the commit SHA the plan was generated from and
+        # the plan's sha256, which apply-terraform-plan verifies after
+        # download so the applied bytes are exactly the reviewed plan. It
+        # deliberately holds no gs:// URI: apply reconstructs the object path
+        # from its own workflow-configured inputs, so a tampered pointer
+        # cannot point apply at an arbitrary object.
+        printf '%s\n%s\n' "${{ github.sha }}" "$plan_hash" > "${{ inputs.plan_file_pointer }}"
         echo "object=$object" >> "$GITHUB_OUTPUT"
-        echo "Uploaded binary plan to $object"
+        echo "Uploaded binary plan to $object (sha256 $plan_hash)"
 
     - name: Get Last Deployed Commit
       if: steps.plan.outputs.has_changes == 'true' && github.ref_name == inputs.pr_creation_branch && inputs.enable_pr_creation == 'true'
