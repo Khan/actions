@@ -297,21 +297,27 @@ sub-agent models — this table is the human-facing summary:
 | orchestrator | `claude-opus-4-8` | high | Owns every GitHub/safe-output decision |
 | `pattern-triage` | `claude-sonnet-4-6` | medium | Cheap first-pass triage |
 | `thread-reconciler` | `claude-opus-4-8` | medium | Reconciliation |
-| `correctness-reviewer` | `claude-opus-4-8` | high | Whole-change reviewer |
+| `correctness-reviewer` | `claude-fable-5` | high | Whole-change reviewer; bug-finding recall is the load-bearing metric |
 | `skill-auditor` | `claude-opus-4-8` | high | Whole-change reviewer |
-| `holistic` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
-| `completeness` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
-| `test-adequacy` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `holistic` | `claude-fable-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `completeness` | `claude-fable-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `test-adequacy` | `claude-fable-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
 | `conventions` | `claude-opus-4-8` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
 | `first-principles` | `claude-fable-5` | high | Opt-in advisory-only; reviews the change's justification |
-| `claim-validator` | `claude-opus-4-8` | xhigh | Adversarial claim validation |
+| `claim-validator` | `claude-fable-5` | xhigh | Adversarial claim validation |
 | specialist lenses | `claude-opus-4-8` | high | Opt-in via `lens=` in `ROUTING`; the security & auth lens is xhigh |
 
 Only the orchestrator and the default roster (`pattern-triage`,
 `correctness-reviewer`, `skill-auditor`, `thread-reconciler`, `claim-validator`)
 run by default; every other row is opt-in via `ROUTING` and earns its line through
-the eval suite. Per-role Fable-5 / Sonnet experiment arms are eval-suite
-measurements to run after the suite exists.
+the eval suite. The deep-reasoning roles (`correctness-reviewer`,
+`claim-validator`, and the opt-in whole-change reviewers) run Fable 5; the
+procedural roles (orchestrator, `thread-reconciler`, `skill-auditor`,
+`conventions`) and the specialist lenses stay on Opus 4.8, the lenses
+deliberately so: Fable's cyber safety classifiers can refuse benign
+security-focused analysis, and a refused security lens would be a silent
+coverage hole. Per-role Sonnet step-down arms remain future eval-suite
+measurements.
 
 ### Feedback signal: thumbs sweep and live counters
 

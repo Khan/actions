@@ -175,7 +175,8 @@ engine:
   model: claude-opus-4-8
 timeout-minutes: 20
 
-# claude-fable-5 (the first-principles reviewer's pinned model) is not in the
+# claude-fable-5 (pinned by first-principles, correctness-reviewer, claim-validator,
+# and the opt-in whole-change reviewers) is not in the
 # AI-credits pricing table of the firewall api-proxy that gh-aw <= v0.81.x pins
 # (gh-aw-firewall v0.27.11), and the proxy rejects any un-priced model with a 400,
 # so the first-principles dispatch fails on every run where it is enabled. Two
@@ -1717,9 +1718,11 @@ return `{"findings": [], "hunts": [...]}` with the hunt states still recorded.
 ---
 name: correctness-reviewer
 description: Classifies each changed file's risk and reviews the diff for correctness defects; returns JSON.
-model: claude-opus-4-8
+model: claude-fable-5
 # effort: high — launch default (whole-change reviewer). gh-aw has no per-agent
 # effort field yet; the per-role model/effort table lives in the README.
+# Fable 5: bug-finding recall is this workflow's load-bearing metric, and
+# stronger real-defect detection is Fable's headline gain over Opus 4.8.
 ---
 You are a correctness-focused code reviewer. You have **no GitHub access** — read the
 diff and file list from disk and return your result as JSON only.
@@ -2113,8 +2116,10 @@ Return ONLY this JSON object (no prose, no code fence):
 ---
 name: claim-validator
 description: Re-checks each candidate review comment against the actual code and the repo's best-practice skills, and drops or corrects the ones that are wrong; returns JSON.
-model: claude-opus-4-8
-# effort: xhigh — launch default (claim-validator).
+model: claude-fable-5
+# effort: xhigh — launch default (claim-validator). Fable 5: adversarial
+# verification is the precision gate before anything reaches the PR, and a
+# wrong drop here is a lost catch (the found-but-dropped miss class).
 ---
 You are a skeptical validator. Other reviewers proposed the comments in
 `/tmp/gh-aw/review/claims.json`; your job is to catch the ones that are **wrong** —
@@ -2287,8 +2292,9 @@ Every input `id` must appear exactly once.
 ---
 name: holistic
 description: Reviews the change as a whole — is the overall approach sound and coherent — and returns findings as JSON.
-model: claude-opus-4-8
-# effort: high — launch default (whole-change reviewer).
+model: claude-fable-5
+# effort: high — launch default (whole-change reviewer). Fable 5: opt-in
+# ambiguity-heavy judgment role; costs nothing until enabled in ROUTING.
 ---
 You are the **holistic** reviewer. Your single mandate is to **judge the
 change as a whole**, not line by line. You have **no GitHub access** — read from disk and
@@ -2363,8 +2369,9 @@ scenario). If the change hangs together, return {"findings": []}.
 ---
 name: completeness
 description: Checks the change against its stated intent (PR description + linked ticket/doc) and returns findings as JSON.
-model: claude-opus-4-8
-# effort: high — launch default (whole-change reviewer).
+model: claude-fable-5
+# effort: high — launch default (whole-change reviewer). Fable 5: opt-in
+# ambiguity-heavy judgment role; costs nothing until enabled in ROUTING.
 ---
 You are the **completeness** reviewer. Your single mandate is to **check
 the change against its stated intent** — does the PR do what it says it does? You have
@@ -2434,8 +2441,9 @@ If the change matches its intent, return {"findings": []}.
 ---
 name: test-adequacy
 description: Evaluates whether the changed behavior is adequately tested and returns findings as JSON.
-model: claude-opus-4-8
-# effort: high — launch default (whole-change reviewer).
+model: claude-fable-5
+# effort: high — launch default (whole-change reviewer). Fable 5: opt-in
+# ambiguity-heavy judgment role; costs nothing until enabled in ROUTING.
 ---
 You are the **test-adequacy** reviewer. Your job is to judge whether the **changed
 behavior is adequately tested**. You have **no GitHub access** — read from disk and return
@@ -2496,16 +2504,16 @@ If the changed behavior is adequately tested, return {"findings": []}.
 name: first-principles
 description: A diverse-perspective, advisory-only sanity check on whether the change should exist as written; returns findings as JSON.
 model: claude-fable-5
-# effort: high — launch default. Runs on Fable 5 (claude-fable-5) day one for a
-# genuinely different perspective. Advisory-only, never blocks.
+# effort: high — launch default. Ran on Fable 5 (claude-fable-5) from day one,
+# ahead of the deep-reasoning roles moving to it. Advisory-only, never blocks.
 ---
 You are the **first-principles** reviewer. Your single mandate is to review the
 **justification for the change, not the change itself**: where `holistic` asks
 whether the diff hangs together, you step outside the change's own framing and ask
 whether it **should exist as written**. Your primary input is the stated rationale —
 the PR title/description and the problem it claims to solve — read against the diff,
-not the diff line by line. You run on a different model (Fable 5) on purpose,
-to bring a perspective the other reviewers do not. You have **no GitHub access** — read
+not the diff line by line. You are prompted for a deliberately different
+perspective than the other reviewers, so bring one. You have **no GitHub access** — read
 from disk and return JSON only.
 
 **You are advisory-only and you never block.** Every finding you return MUST carry a
