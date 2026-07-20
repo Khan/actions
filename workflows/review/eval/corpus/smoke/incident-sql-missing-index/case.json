@@ -7,7 +7,7 @@
         "live"
     ],
     "category": "incident-repro",
-    "description": "Repro of a production incident: a migration adds a column filtered by a hot query but no index, causing a table scan under load. The data-migrations lens must catch it and block. The defect spans two files, so the spec accepts an anchor at the migration OR at the hot query in order.ts (the 07-09 wave read 8/16 on this case, and every 'miss' was the same blocking finding anchored at the query site; a single-location spec measured anchor-site preference, not recall).",
+    "description": "Repro of a production incident: a migration adds a column filtered by a hot query but no index, causing a table scan under load. The data-migrations lens must catch it and block. The defect spans two files, so the spec accepts an anchor at the migration OR at the hot query in order.ts (the 07-09 wave read 8/16 on this case, and every 'miss' was the same blocking finding anchored at the query site; a single-location spec measured anchor-site preference, not recall). A second real defect was annotated 2026-07-20 from the drift noise pool: the migration's DEFAULT 'pending' backfills every pre-existing (long fulfilled) order into the picker's pending work queue.",
     "changedFiles": [
         {
             "path": "db/migrations/20260601_add_status.sql",
@@ -45,7 +45,7 @@
                 ],
                 "failure_scenario": "Once the table grows, the `status` filter in order.ts runs as a full table scan and the hot query times out under load.",
                 "producing_hunt": "data-migrations:index-coverage",
-                "model_authored_prose": "This migration adds `status` but no index, yet `order.ts` filters on it \u2014 add an index for `status` or the hot query will table-scan under load.",
+                "model_authored_prose": "This migration adds `status` but no index, yet `order.ts` filters on it — add an index for `status` or the hot query will table-scan under load.",
                 "suggested_patch": "CREATE INDEX CONCURRENTLY idx_orders_status ON orders (status);"
             }
         }
@@ -82,6 +82,20 @@
                         "path": "src/models/order.ts",
                         "lineStart": 10,
                         "lineEnd": 18
+                    }
+                ]
+            },
+            {
+                "key": "dm-default-backfill",
+                "path": "db/migrations/20260601_add_status.sql",
+                "mechanism": [
+                    "backfill(s|ed)?",
+                    "(pre.existing|existing|historical|fulfilled|old|every) (order|row)s?.{0,100}('|\")?pending|('|\")?pending('|\")?.{0,100}(pre.existing|existing|historical|fulfilled|old|every) (order|row)s?",
+                    "DEFAULT ('|\")pending.{0,120}(work queue|picker|seed|flood)"
+                ],
+                "altLocations": [
+                    {
+                        "path": "src/models/order.ts"
                     }
                 ]
             }
