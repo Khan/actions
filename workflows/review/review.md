@@ -1778,8 +1778,15 @@ Do two things in one pass over the files in the list:
    timing makes this line wrong? Look for logic errors (off-by-one, inverted
    conditions, null/undefined access, races, wrong-but-type-checking code);
    security issues (injection, XSS, unsafe deserialization, missing
-   authz/validation, SSRF, path traversal, committed secrets); and missing tests
-   for added/changed behavior (except pure docs or formatting).
+   authz/validation, SSRF, path traversal, committed secrets); unbounded reads
+   and accumulation (a query, fetch, or scan that materializes an entire result
+   set whose size grows with user data: a `pageSize: "all"` or missing-LIMIT
+   read, loading a whole table to act on part of it, an unpaginated loop
+   buffering everything before writing; ask what happens at 100x the data, and
+   treat "page or batch it" as the expected shape, so a bounded read that
+   deliberately processes one batch per invocation is the fix, not a further
+   defect); and missing tests for added/changed behavior (except pure docs or
+   formatting).
 
    **Removed-behavior audit.** Removed (`-`) lines are in scope, not just added
    ones. For each removed line (or block), name the invariant it enforced: a
@@ -2848,6 +2855,9 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **No unbounded growth.** Caches and in-memory collections have an eviction policy /
   size or TTL bound; a request-scoped accumulator is not promoted to unbounded lifetime.
 - **No N+1 / accidental resource exhaustion** introduced on a hot path.
+- **No unbounded reads.** A query or fetch sized by user data (`pageSize: "all"`,
+  missing LIMIT, whole-table scans to act on a subset) that materializes the entire
+  set in memory on a path where the set grows without bound; page or batch it.
 
 ### Incident-derived hunts (tri-state)
 - **`cache-key-missing-identifier`** — a cached value keyed without a required user/
@@ -2857,6 +2867,9 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   cache it feeds. `found` when invalidation is missing.
 - **`unbounded-cache-or-collection`** — a cache/collection with no eviction, TTL, or size
   bound. `found` when growth is unbounded.
+- **`unbounded-read-materialization`**: a read that loads an unbounded, user-data-sized
+  result set into memory at once (no limit, no pagination, no batching). `found` when the
+  set's growth is unbounded and nothing bounds the read.
 
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
