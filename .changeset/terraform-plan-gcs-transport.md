@@ -9,4 +9,6 @@ generate-terraform-plan now uploads the binary plan to a GCS object keyed by a s
 
 Breaking changes: both actions gain a `plan_bucket` input (required for the plan-PR/apply flow; not needed for PR-comment-only or auto_approve usage) and must be upgraded together. Consumers need a GCS bucket that the plan workflow's service account can write objects to and the apply workflow's service account can read (and ideally delete) objects from, plus a lifecycle rule to expire plans that are never applied (e.g. superseded plan PRs).
 
+Consumer workflows must also update their trigger paths: apply workflows typically trigger on `push` with a `paths` filter on `tfplan.binary`, which is never committed anymore. Point that filter (and any `!tfplan.binary` excludes in plan workflows) at the pointer file (default `tfplan.commit`) instead, or apply will never run.
+
 Note: this only stops new leaks. Any `tfplan.binary` still committed at a repo's tip should be deleted, and histories that ever contained committed binary plans still need scrubbing and rotation of any secrets present in the embedded state.
