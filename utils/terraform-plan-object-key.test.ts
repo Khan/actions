@@ -94,6 +94,9 @@ describe("terraform plan GCS object key", () => {
         ["terraform-foo", "terraform-foo"],
     ])("slugs %s to %s", (input, expected) => {
         const [pipeline] = extractLines(generateYml, SLUG_PIPELINE);
+        if (!pipeline) {
+            throw new Error("No slug pipeline found in generate action");
+        }
         expect(runSlugPipeline(pipeline, input)).toBe(expected);
     });
 });
