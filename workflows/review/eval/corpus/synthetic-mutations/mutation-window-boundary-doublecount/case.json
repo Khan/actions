@@ -6,7 +6,7 @@
         "live"
     ],
     "category": "synthetic-mutation",
-    "description": "Model-capability discrimination case (boundary-composition family), minted 2026-07-20 for the corpus-difficulty work. dailyTotals queries each day as [dayStart, dayStart + DAY_MS] against a query the unchanged db.ts documents as inclusive on BOTH endpoints, so consecutive windows share their boundary instant and an event landing exactly at midnight is summed into two days: revenue double-counts. The fix is dayStart + DAY_MS - 1 (or an exclusive upper bound). The defect requires composing the documented inclusivity with the window arithmetic; neither file is wrong alone, and the tests only use mid-day timestamps. Band placement pending calibration.",
+    "description": "Model-capability discrimination case (boundary-composition family), minted 2026-07-20 for the corpus-difficulty work. dailyTotals queries each day as [dayStart, dayStart + DAY_MS] against a query the unchanged db.ts documents as inclusive on BOTH endpoints, so consecutive windows share their boundary instant and an event landing exactly at midnight is summed into two days: revenue double-counts. The fix is dayStart + DAY_MS - 1 (or an exclusive upper bound). The defect requires composing the documented inclusivity with the window arithmetic; neither file is wrong alone, and the tests only use mid-day timestamps. Calibrated saturated under the Opus roster (run 29765275168, 6/6 identical-arm samples): kept as the family's regression tripwire, not a discriminator.",
     "changedFiles": [
         {
             "path": "src/metrics/rollup.ts",

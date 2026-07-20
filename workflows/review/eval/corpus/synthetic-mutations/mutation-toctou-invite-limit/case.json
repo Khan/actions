@@ -6,7 +6,7 @@
         "live"
     ],
     "category": "synthetic-mutation",
-    "description": "Model-capability discrimination case (check-then-act concurrency family, subtler than the saturated incident-race-condition lost-update case), minted 2026-07-20 for the corpus-difficulty work. inviteMember reads countMembers, checks the seat limit, then awaits insertMember; two concurrent invites for the last seat both pass the check and both insert, exceeding the paid seat count. The unchanged db.ts exports withTeamLock (documented: serializes writers for a team), the mechanism the new code should have used; nothing states that invites must be serialized. The tests are sequential and pass. Band placement pending calibration.",
+    "description": "Model-capability discrimination case (check-then-act concurrency family, subtler than the saturated incident-race-condition lost-update case), minted 2026-07-20 for the corpus-difficulty work. inviteMember reads countMembers, checks the seat limit, then awaits insertMember; two concurrent invites for the last seat both pass the check and both insert, exceeding the paid seat count. The unchanged db.ts exports withTeamLock (documented: serializes writers for a team), the mechanism the new code should have used; nothing states that invites must be serialized. The tests are sequential and pass. Calibrated saturated under the Opus roster (run 29765275168, 6/6 identical-arm samples): kept as the family's regression tripwire, not a discriminator.",
     "changedFiles": [
         {
             "path": "src/teams/invite.ts",
