@@ -1,0 +1,118 @@
+{
+    "id": "mutation-needle-paging-rename",
+    "tags": [
+        "mutation",
+        "mechanical-churn",
+        "live"
+    ],
+    "category": "synthetic-mutation",
+    "description": "Model-capability discrimination case (needle-in-mechanical-churn family), minted 2026-07-20 alongside the Opus-vs-Fable A/B. A 9-file mechanical PR flips fetchPage's argument order from (items, limit, offset) to (items, offset, pageSize) and renames the per-module LIMIT constants to PAGE_SIZE. Seven call sites swap their arguments correctly; digest.ts renames its constant but keeps the old order, so digestItems calls fetchPage(byRank, DIGEST_PAGE_SIZE, 0), which under the new signature is offset 20 and pageSize 0: the weekly digest is always empty. digest.test.ts only asserts the empty-input case and passes either way. Tests whether a reviewer keeps auditing individual call sites through repetitive rename churn; band placement pending live validation.",
+    "changedFiles": [
+        {
+            "path": "src/catalog/paging.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/catalog/featured.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/catalog/recent.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/catalog/search.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/catalog/archive.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/catalog/admin-list.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/catalog/related.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/catalog/digest.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/catalog/paging.test.ts",
+            "status": "modified"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "digest-paging-args-not-swapped",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/catalog/digest.ts",
+                    "line": 9,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.85,
+                "evidence_trace": [
+                    "src/catalog/paging.ts changes fetchPage's signature from (items, limit, offset) to (items, offset, pageSize)",
+                    "featured.ts, recent.ts, search.ts, archive.ts, admin-list.ts, and related.ts all swap their arguments to the new order",
+                    "src/catalog/digest.ts:9 renames DIGEST_LIMIT to DIGEST_PAGE_SIZE but still passes it first: fetchPage(byRank, DIGEST_PAGE_SIZE, 0) is offset 20, pageSize 0",
+                    "digest.test.ts only asserts the empty-input case, so the suite stays green"
+                ],
+                "failure_scenario": "After this PR ships, digestItems calls fetchPage with offset 20 and pageSize 0 under the new signature, so slice(20, 20) returns [] for every input and the weekly email digest renders empty for all users; the only digest test asserts the empty-input case and cannot catch it.",
+                "producing_hunt": "correctness:line-scan",
+                "model_authored_prose": "digest.ts renamed DIGEST_LIMIT to DIGEST_PAGE_SIZE but did not swap the arguments: fetchPage(byRank, DIGEST_PAGE_SIZE, 0) now means offset 20, pageSize 0, so the digest is always empty. Swap to fetchPage(byRank, 0, DIGEST_PAGE_SIZE) like the other call sites."
+            }
+        }
+    ],
+    "validation": [
+        {
+            "id": "digest-paging-args-not-swapped",
+            "verification": "confirmed"
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "digest-paging-args-not-swapped"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/catalog/admin-list.ts b/src/catalog/admin-list.ts\nindex ae5cd99..bf5d40d 100644\n--- a/src/catalog/admin-list.ts\n+++ b/src/catalog/admin-list.ts\n@@ -1,9 +1,9 @@\n import {fetchPage, type Item} from \"./paging\";\n \n-const ADMIN_LIMIT = 100;\n+const ADMIN_PAGE_SIZE = 100;\n \n /** Admin console listing: unfiltered, newest id first. */\n export const adminList = (items: Item[], page: number): Item[] => {\n     const byId = [...items].sort((a, b) => b.id.localeCompare(a.id));\n-    return fetchPage(byId, ADMIN_LIMIT, page * ADMIN_LIMIT);\n+    return fetchPage(byId, page * ADMIN_PAGE_SIZE, ADMIN_PAGE_SIZE);\n };\ndiff --git a/src/catalog/archive.ts b/src/catalog/archive.ts\nindex 32dee70..3ef5448 100644\n--- a/src/catalog/archive.ts\n+++ b/src/catalog/archive.ts\n@@ -1,8 +1,8 @@\n import {fetchPage, type Item} from \"./paging\";\n \n-const ARCHIVE_LIMIT = 50;\n+const ARCHIVE_PAGE_SIZE = 50;\n \n export const archivedItems = (items: Item[], page: number): Item[] => {\n     const archived = items.filter((item) => item.archived);\n-    return fetchPage(archived, ARCHIVE_LIMIT, page * ARCHIVE_LIMIT);\n+    return fetchPage(archived, page * ARCHIVE_PAGE_SIZE, ARCHIVE_PAGE_SIZE);\n };\ndiff --git a/src/catalog/digest.ts b/src/catalog/digest.ts\nindex f639130..434b21a 100644\n--- a/src/catalog/digest.ts\n+++ b/src/catalog/digest.ts\n@@ -1,10 +1,10 @@\n import {fetchPage, type Item} from \"./paging\";\n \n-const DIGEST_LIMIT = 20;\n+const DIGEST_PAGE_SIZE = 20;\n \n /** Items for the weekly email digest: newest first, one page. */\n export const digestItems = (items: Item[]): Item[] => {\n     const active = items.filter((item) => !item.archived);\n     const byRank = [...active].sort((a, b) => b.rank - a.rank);\n-    return fetchPage(byRank, DIGEST_LIMIT, 0);\n+    return fetchPage(byRank, DIGEST_PAGE_SIZE, 0);\n };\ndiff --git a/src/catalog/featured.ts b/src/catalog/featured.ts\nindex 301d6e6..0280d43 100644\n--- a/src/catalog/featured.ts\n+++ b/src/catalog/featured.ts\n@@ -1,8 +1,8 @@\n import {fetchPage, type Item} from \"./paging\";\n \n-const FEATURED_LIMIT = 6;\n+const FEATURED_PAGE_SIZE = 6;\n \n export const featuredItems = (items: Item[]): Item[] => {\n     const byRank = [...items].sort((a, b) => b.rank - a.rank);\n-    return fetchPage(byRank, FEATURED_LIMIT, 0);\n+    return fetchPage(byRank, 0, FEATURED_PAGE_SIZE);\n };\ndiff --git a/src/catalog/paging.test.ts b/src/catalog/paging.test.ts\nindex 161b244..a1cbc75 100644\n--- a/src/catalog/paging.test.ts\n+++ b/src/catalog/paging.test.ts\n@@ -10,14 +10,14 @@ const item = (id: string, rank: number): Item => ({\n const items = [item(\"a\", 3), item(\"b\", 2), item(\"c\", 1)];\n \n describe(\"fetchPage\", () => {\n-    it(\"returns limit rows starting at offset\", () => {\n-        expect(fetchPage(items, 2, 1).map((row) => row.id)).toEqual([\n+    it(\"returns pageSize rows starting at offset\", () => {\n+        expect(fetchPage(items, 1, 2).map((row) => row.id)).toEqual([\n             \"b\",\n             \"c\",\n         ]);\n     });\n \n     it(\"returns a short page at the tail\", () => {\n-        expect(fetchPage(items, 5, 2)).toHaveLength(1);\n+        expect(fetchPage(items, 2, 5)).toHaveLength(1);\n     });\n });\ndiff --git a/src/catalog/paging.ts b/src/catalog/paging.ts\nindex be64e67..51a15a6 100644\n--- a/src/catalog/paging.ts\n+++ b/src/catalog/paging.ts\n@@ -5,9 +5,12 @@ export type Item = {\n     archived: boolean;\n };\n \n-/** Returns one page of items: `limit` rows starting at `offset`. */\n+/**\n+ * Returns one page of items: `pageSize` rows starting at `offset`. Argument\n+ * order matches the Db facade: offset first, then page size.\n+ */\n export const fetchPage = (\n     items: Item[],\n-    limit: number,\n     offset: number,\n-): Item[] => items.slice(offset, offset + limit);\n+    pageSize: number,\n+): Item[] => items.slice(offset, offset + pageSize);\ndiff --git a/src/catalog/recent.ts b/src/catalog/recent.ts\nindex 934e95b..a8f3a8d 100644\n--- a/src/catalog/recent.ts\n+++ b/src/catalog/recent.ts\n@@ -1,8 +1,8 @@\n import {fetchPage, type Item} from \"./paging\";\n \n-const RECENT_LIMIT = 25;\n+const RECENT_PAGE_SIZE = 25;\n \n export const recentItems = (items: Item[], page: number): Item[] => {\n     const active = items.filter((item) => !item.archived);\n-    return fetchPage(active, RECENT_LIMIT, page * RECENT_LIMIT);\n+    return fetchPage(active, page * RECENT_PAGE_SIZE, RECENT_PAGE_SIZE);\n };\ndiff --git a/src/catalog/related.ts b/src/catalog/related.ts\nindex 2373c9e..45764b3 100644\n--- a/src/catalog/related.ts\n+++ b/src/catalog/related.ts\n@@ -1,9 +1,9 @@\n import {fetchPage, type Item} from \"./paging\";\n \n-const RELATED_LIMIT = 4;\n+const RELATED_PAGE_SIZE = 4;\n \n export const relatedItems = (items: Item[], toItem: Item): Item[] => {\n     const others = items.filter((item) => item.id !== toItem.id);\n     const byRank = [...others].sort((a, b) => b.rank - a.rank);\n-    return fetchPage(byRank, RELATED_LIMIT, 0);\n+    return fetchPage(byRank, 0, RELATED_PAGE_SIZE);\n };\ndiff --git a/src/catalog/search.ts b/src/catalog/search.ts\nindex 4e22a69..4e6402e 100644\n--- a/src/catalog/search.ts\n+++ b/src/catalog/search.ts\n@@ -1,6 +1,6 @@\n import {fetchPage, type Item} from \"./paging\";\n \n-const SEARCH_LIMIT = 10;\n+const SEARCH_PAGE_SIZE = 10;\n \n export const searchItems = (\n     items: Item[],\n@@ -10,5 +10,5 @@ export const searchItems = (\n     const hits = items.filter((item) =>\n         item.title.toLowerCase().includes(query.toLowerCase()),\n     );\n-    return fetchPage(hits, SEARCH_LIMIT, page * SEARCH_LIMIT);\n+    return fetchPage(hits, page * SEARCH_PAGE_SIZE, SEARCH_PAGE_SIZE);\n };\n",
+    "live": {
+        "prContext": {
+            "title": "catalog: align fetchPage argument order with the Db facade (offset, pageSize)",
+            "description": "Mechanical: fetchPage(items, limit, offset) becomes fetchPage(items, offset, pageSize) to match the Db facade's (offset, pageSize) convention, and the per-module LIMIT constants are renamed to PAGE_SIZE. All call sites updated; paging tests updated to the new order.",
+            "author": "dev-catalog",
+            "baseBranch": "main"
+        },
+        "tree": "tree",
+        "mustCatchSpecs": [
+            {
+                "key": "digest-paging-args-not-swapped",
+                "path": "src/catalog/digest.ts",
+                "lineStart": 3,
+                "lineEnd": 10,
+                "mechanism": [
+                    "(not|n't|never|forgot|without|fails? to|missing|didn.t).{0,40}swap|swap(ped)?.{0,50}(not|never|missing)|old (argument |arg |parameter )?order|argument order|arg order|order of (the )?arguments|positional",
+                    "offset.{0,60}page.?size|page.?size.{0,60}offset",
+                    "DIGEST_PAGE_SIZE.{0,80}(offset|first)|offset (of |= ?)?20|slice\\(20",
+                    "empty (page|digest|result|list)|always (returns? )?empty|zero (rows|items)|page.?size (of |= ?|is )?0"
+                ]
+            }
+        ]
+    }
+}
