@@ -3,7 +3,10 @@
 # - Checking for plan files
 # - Authenticating with GCP
 # - Generating a Terraform plan
-# - Handling PR creation/comments
+# - Uploading the binary plan to GCS (binary plans embed a full copy of the
+#   Terraform state, including sensitive values, so they are never committed)
+# - Handling PR creation/comments (the PR contains only the redacted plan
+#   text and a pointer file recording which uploaded plan to apply)
 # - Commenting on PRs for success/failure
 # All environment variables starting with TF_VAR_ will be automatically picked up by Terraform
 # Example: TF_VAR_project_id, TF_VAR_region, etc.
@@ -23,6 +26,14 @@ inputs:
     description: "Filename for the text plan file"
     required: false
     default: "tfplan.txt"
+  plan_file_pointer:
+    description: "Filename for the committed pointer file that records the commit SHA whose uploaded binary plan should be applied and that plan's sha256 digest"
+    required: false
+    default: "tfplan.commit"
+  plan_bucket:
+    description: "GCS bucket, optionally with a path prefix (e.g. 'my-bucket/terraform-plans'), where the binary plan is uploaded. Required when enable_pr_creation is 'true'. Must match the apply-terraform-plan action's plan_bucket input. The service account needs permission to create objects in this bucket. A binary plan contains the same sensitive data as the Terraform state, so restrict this bucket exactly like the state bucket: CI service accounts only, no human-facing grants."
+    required: false
+    default: ""
   workload_identity_provider:
     description: "Workload Identity Provider for Google Cloud authentication"
     required: true
@@ -132,6 +143,52 @@ runs:
           echo "has_changes=true" >> "$GITHUB_OUTPUT"
         fi
 
+    # A binary plan file embeds a full copy of the Terraform state, including
+    # sensitive values in cleartext, regardless of what the plan changes.
+    # Committing it would put that state into git history permanently, so we
+    # upload it to an access-controlled GCS bucket instead and commit only a
+    # small pointer file recording the commit SHA the plan was generated from.
+    # The apply-terraform-plan action rebuilds the object path from its own
+    # plan_bucket input plus that SHA and downloads the exact plan that was
+    # reviewed. Plans that are never applied (e.g. superseded plan PRs) leave
+    # objects behind; configure a lifecycle rule on the bucket to expire them.
+    #
+    # The gcloud CLI is preinstalled on GitHub-hosted runners and picks up the
+    # credentials exported by the auth step above.
+    - name: Upload binary plan to GCS
+      if: inputs.enable_pr_creation == 'true' && github.ref_name == inputs.pr_creation_branch && steps.plan.outputs.has_changes == 'true'
+      id: upload
+      shell: bash
+      working-directory: ${{ inputs.terraform_path }}
+      run: |
+        if [ -z "${{ inputs.plan_bucket }}" ]; then
+          echo "The plan_bucket input is required when enable_pr_creation is 'true': the binary plan is uploaded to GCS instead of being committed." >&2
+          exit 1
+        fi
+        # Slug the terraform path the same way apply-terraform-plan does, so
+        # concurrent stacks in one repo can't collide on an object path;
+        # utils/terraform-plan-object-key.test.ts pins the two copies to each
+        # other. The short hash suffix keeps two terraform paths that
+        # normalize to the same slug from colliding.
+        slug=$(printf '%s' "${{ inputs.terraform_path }}" | tr -c 'A-Za-z0-9._-' '-' | sed -E 's/-+/-/g; s/^-//; s/-$//')
+        slug="${slug}-$(printf '%s' "${{ inputs.terraform_path }}" | sha256sum | cut -c1-8)"
+        # The object's filename segment is a fixed literal on both sides so
+        # the key can't depend on the two actions' independently configurable
+        # local filename inputs.
+        object="gs://${{ inputs.plan_bucket }}/${slug}/${{ github.sha }}/tfplan.binary"
+        plan_hash=$(sha256sum "${{ inputs.plan_file_binary }}" | cut -d' ' -f1)
+        gcloud storage cp "${{ inputs.plan_file_binary }}" "$object"
+        rm -f "${{ inputs.plan_file_binary }}"
+        # The pointer records the commit SHA the plan was generated from and
+        # the plan's sha256, which apply-terraform-plan verifies after
+        # download so the applied bytes are exactly the reviewed plan. It
+        # deliberately holds no gs:// URI: apply reconstructs the object path
+        # from its own workflow-configured inputs, so a tampered pointer
+        # cannot point apply at an arbitrary object.
+        printf '%s\n%s\n' "${{ github.sha }}" "$plan_hash" > "${{ inputs.plan_file_pointer }}"
+        echo "object=$object" >> "$GITHUB_OUTPUT"
+        echo "Uploaded binary plan to $object (sha256 $plan_hash)"
+
     - name: Get Last Deployed Commit
       if: steps.plan.outputs.has_changes == 'true' && github.ref_name == inputs.pr_creation_branch && inputs.enable_pr_creation == 'true'
       id: last_deployed
@@ -198,8 +255,10 @@ runs:
 
           Note, this plan reflects the current state of the `${{ inputs.pr_creation_branch }}` branch and may include changes from multiple contributors.
 
-          Plan file: `${{ inputs.terraform_path }}/${{ inputs.plan_file_binary }}`
           Plaintext plan file: `${{ inputs.terraform_path }}/${{ inputs.plan_file_text }}`
+          Binary plan: `${{ steps.upload.outputs.object }}`
+
+          The binary plan is stored in GCS rather than committed because it embeds a full copy of the Terraform state, including sensitive values. The committed pointer file `${{ inputs.terraform_path }}/${{ inputs.plan_file_pointer }}` records which uploaded plan the apply workflow will download.
 
           ## Changes Since Last Deployment
           You can view all changes that have not yet been deployed [here](https://github.com/${{ github.repository }}/compare/${{ steps.last_deployed.outputs.last_deployed }}...${{ github.sha }}).
@@ -217,7 +276,7 @@ runs:
 
           ${{ inputs.pr_extra_text }}
         add-paths: |
-          ${{ inputs.terraform_path }}/${{ inputs.plan_file_binary }}
+          ${{ inputs.terraform_path }}/${{ inputs.plan_file_pointer }}
           ${{ inputs.terraform_path }}/${{ inputs.plan_file_text }}
         base: ${{ inputs.pr_creation_branch }}
         reviewers: ${{ steps.reviewer.outputs.reviewer }}

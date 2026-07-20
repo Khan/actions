@@ -1,7 +1,9 @@
-# This workflow applies checked-in Terraform plans created by the `terraform-plan` workflow
+# This workflow applies Terraform plans created by the `terraform-plan` workflow
 # and can be called from any repository. It handles:
-# - Checking for plan files (unless auto_approve is enabled)
+# - Checking for the committed plan pointer/text files (unless auto_approve is enabled)
 # - Authenticating with GCP
+# - Downloading the binary plan from GCS (binary plans embed a full copy of the
+#   Terraform state, including sensitive values, so they are never committed)
 # - Applying the Terraform plan (or running a blind apply with -auto-approve)
 # - Cleaning up plan files
 # - Commenting on PRs for success/failure
@@ -20,6 +22,14 @@ inputs:
     description: "Path to the plan text file (relative to terraform_path)"
     required: false
     default: "tfplan.txt"
+  plan_pointer_path:
+    description: "Path to the committed pointer file (relative to terraform_path) recording the commit SHA whose uploaded binary plan should be applied and that plan's sha256 digest"
+    required: false
+    default: "tfplan.commit"
+  plan_bucket:
+    description: "GCS bucket, optionally with a path prefix, that the generate-terraform-plan action uploaded the binary plan to. Must match that action's plan_bucket input. Required unless auto_approve is 'true'. The service account needs permission to read (and, for cleanup, delete) objects in this bucket. A binary plan contains the same sensitive data as the Terraform state, so restrict this bucket exactly like the state bucket: CI service accounts only, no human-facing grants."
+    required: false
+    default: ""
   gcloud_project:
     description: "Google Cloud project ID"
     required: true
@@ -68,8 +78,9 @@ runs:
         if [ "${{ inputs.auto_approve }}" == "true" ]; then
           echo "Auto-approve mode enabled, skipping plan file check"
           echo "skip_apply=false" >> "$GITHUB_OUTPUT"
-        elif [ ! -f "${{ inputs.terraform_path }}/${{ inputs.plan_file_path }}" ] || [ ! -f "${{ inputs.terraform_path }}/${{ inputs.plan_text_path }}" ]; then
+        elif [ ! -f "${{ inputs.terraform_path }}/${{ inputs.plan_pointer_path }}" ] || [ ! -f "${{ inputs.terraform_path }}/${{ inputs.plan_text_path }}" ]; then
           echo "Plan files not found, skipping apply steps"
+          echo "::warning::Plan pointer/text files not found under ${{ inputs.terraform_path }}; skipping apply. If a plan PR was just merged, check that this workflow's paths filter watches ${{ inputs.plan_pointer_path }} (not the old tfplan.binary)."
           echo "skip_apply=true" >> "$GITHUB_OUTPUT"
         else
           echo "skip_apply=false" >> "$GITHUB_OUTPUT"
@@ -86,6 +97,55 @@ runs:
       with:
         workload_identity_provider: ${{ inputs.workload_identity_provider }}
         service_account: ${{ inputs.service_account }}
+
+    # generate-terraform-plan uploads the binary plan to GCS (keyed by a slug
+    # of the terraform path plus the commit SHA the plan was generated from)
+    # and commits only a pointer file, because the binary embeds a full copy
+    # of the Terraform state, including sensitive values in cleartext.
+    # Rebuilding the object path here from our own plan_bucket input, rather
+    # than trusting a URI committed to the repo, means a tampered pointer can
+    # at worst select another plan previously uploaded for this same stack.
+    - name: Download binary plan from GCS
+      if: steps.check_files.outputs.skip_apply != 'true' && inputs.auto_approve != 'true'
+      id: download
+      shell: bash
+      working-directory: ${{ inputs.terraform_path }}
+      run: |
+        if [ -z "${{ inputs.plan_bucket }}" ]; then
+          echo "The plan_bucket input is required to download the binary plan uploaded by generate-terraform-plan." >&2
+          exit 1
+        fi
+        plan_sha=$(sed -n '1p' "${{ inputs.plan_pointer_path }}" | tr -d '[:space:]')
+        plan_hash=$(sed -n '2p' "${{ inputs.plan_pointer_path }}" | tr -d '[:space:]')
+        if ! printf '%s' "$plan_sha" | grep -Eq '^[0-9a-f]{40}$'; then
+          echo "Pointer file ${{ inputs.plan_pointer_path }} line 1 does not contain a valid commit SHA: '$plan_sha'" >&2
+          exit 1
+        fi
+        if ! printf '%s' "$plan_hash" | grep -Eq '^[0-9a-f]{64}$'; then
+          echo "Pointer file ${{ inputs.plan_pointer_path }} line 2 does not contain a valid sha256 plan digest: '$plan_hash'" >&2
+          exit 1
+        fi
+        # Slug the terraform path the same way generate-terraform-plan does;
+        # utils/terraform-plan-object-key.test.ts pins the two copies to each
+        # other. The short hash suffix keeps two terraform paths that
+        # normalize to the same slug from colliding on an object key.
+        slug=$(printf '%s' "${{ inputs.terraform_path }}" | tr -c 'A-Za-z0-9._-' '-' | sed -E 's/-+/-/g; s/^-//; s/-$//')
+        slug="${slug}-$(printf '%s' "${{ inputs.terraform_path }}" | sha256sum | cut -c1-8)"
+        # The object's filename segment is a fixed literal on both sides so
+        # the key can't depend on the two actions' independently configurable
+        # local filename inputs.
+        object="gs://${{ inputs.plan_bucket }}/${slug}/${plan_sha}/tfplan.binary"
+        gcloud storage cp "$object" "${{ inputs.plan_file_path }}"
+        # Verify the downloaded bytes are exactly the plan that was reviewed;
+        # the object at this key could in principle have been overwritten
+        # since the plan PR was approved (e.g. by a re-run of the plan
+        # workflow on the same commit after state drift).
+        actual_hash=$(sha256sum "${{ inputs.plan_file_path }}" | cut -d' ' -f1)
+        if [ "$actual_hash" != "$plan_hash" ]; then
+          echo "Downloaded plan digest mismatch: the pointer records $plan_hash but the object has $actual_hash. Refusing to apply an unreviewed plan." >&2
+          exit 1
+        fi
+        echo "object=$object" >> "$GITHUB_OUTPUT"
 
     - name: Terraform Init
       if: steps.check_files.outputs.skip_apply != 'true'
@@ -106,9 +166,12 @@ runs:
         fi
       continue-on-error: true
 
-    # Once the plan is applied, we remove the checked-in plan files to clean up.
-    # This prevents stale plans from being applied and ensures that each
-    # apply job has a fresh plan generated for it.
+    # Once the plan is applied, we remove the committed pointer and plan text
+    # files to clean up. This prevents stale plans from being applied and
+    # ensures that each apply job has a fresh plan generated for it. The
+    # uploaded binary plan is deleted from GCS only after the cleanup PR
+    # merges (see the final cleanup step below), so a cleanup failure never
+    # leaves the base branch pointing at a missing object.
     #
     # The base branch (typically `master`/`main`) is protected and rejects
     # direct pushes, so rather than committing and pushing the cleanup directly
@@ -129,7 +192,9 @@ runs:
       run: |
         # create-pull-request stages these deletions itself via add-paths; a
         # plain rm is more robust than `git rm -f` when a file is already gone.
-        rm -f "${{ inputs.terraform_path }}/${{ inputs.plan_file_path }}" "${{ inputs.terraform_path }}/${{ inputs.plan_text_path }}"
+        # The downloaded binary is untracked but removed too, so nothing later
+        # in the job can pick up an already-applied plan.
+        rm -f "${{ inputs.terraform_path }}/${{ inputs.plan_pointer_path }}" "${{ inputs.terraform_path }}/${{ inputs.plan_text_path }}" "${{ inputs.terraform_path }}/${{ inputs.plan_file_path }}"
 
         # Scope the cleanup branch to this terraform stack. If two apply jobs
         # for different stacks run concurrently in the same repo, a shared
@@ -154,12 +219,12 @@ runs:
         body: |
           This PR was automatically generated by the `${{ github.workflow }}` workflow after the Terraform plan was applied.
 
-          It removes the checked-in plan files so that a stale plan can't be re-applied and the next run generates a fresh plan. It is merged automatically to complete the apply cycle.
+          It removes the committed plan pointer and plan text files so that a stale plan can't be re-applied and the next run generates a fresh plan. It is merged automatically to complete the apply cycle.
 
-          Plan file: `${{ inputs.terraform_path }}/${{ inputs.plan_file_path }}`
+          Plan pointer file: `${{ inputs.terraform_path }}/${{ inputs.plan_pointer_path }}`
           Plaintext plan file: `${{ inputs.terraform_path }}/${{ inputs.plan_text_path }}`
         add-paths: |
-          ${{ inputs.terraform_path }}/${{ inputs.plan_file_path }}
+          ${{ inputs.terraform_path }}/${{ inputs.plan_pointer_path }}
           ${{ inputs.terraform_path }}/${{ inputs.plan_text_path }}
 
     - name: Merge plan-file cleanup PR
@@ -182,6 +247,24 @@ runs:
         done
         echo "Failed to merge cleanup PR #$PR_NUMBER after several attempts" >&2
         exit 1
+
+    # Delete the uploaded binary plan only after the cleanup PR has merged.
+    # If the object were deleted first and the cleanup PR then failed to
+    # create or merge, the base branch would keep a pointer to a missing
+    # object and every re-run of this workflow would hard-fail at download
+    # until a new plan regenerates. (This step is skipped automatically if
+    # any earlier step failed.)
+    - name: Delete uploaded plan from GCS
+      if: steps.apply.outcome == 'success' && inputs.cleanup_plan_files == 'true' && inputs.auto_approve != 'true' && steps.download.outputs.object != ''
+      shell: bash
+      run: |
+        # Best-effort: a failure (e.g. a service account without delete
+        # permission) shouldn't fail the run since the apply already
+        # succeeded and the pointer is gone. A bucket lifecycle rule should
+        # expire anything this misses, including plans that are never applied.
+        if ! gcloud storage rm "${{ steps.download.outputs.object }}"; then
+          echo "Warning: failed to delete ${{ steps.download.outputs.object }}; relying on the bucket lifecycle rule." >&2
+        fi
 
     - name: Find merged PR
       if: steps.apply.outcome == 'success' || steps.apply.outcome == 'failure'
