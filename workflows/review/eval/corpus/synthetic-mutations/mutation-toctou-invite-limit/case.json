@@ -1,0 +1,93 @@
+{
+    "id": "mutation-toctou-invite-limit",
+    "tags": [
+        "mutation",
+        "concurrency",
+        "live"
+    ],
+    "category": "synthetic-mutation",
+    "description": "Model-capability discrimination case (check-then-act concurrency family, subtler than the saturated incident-race-condition lost-update case), minted 2026-07-20 for the corpus-difficulty work. inviteMember reads countMembers, checks the seat limit, then awaits insertMember; two concurrent invites for the last seat both pass the check and both insert, exceeding the paid seat count. The unchanged db.ts exports withTeamLock (documented: serializes writers for a team), the mechanism the new code should have used; nothing states that invites must be serialized. The tests are sequential and pass. Band placement pending calibration.",
+    "changedFiles": [
+        {
+            "path": "src/teams/invite.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/teams/invite.test.ts",
+            "status": "added"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "invite-seat-limit-race",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/teams/invite.ts",
+                    "line": 15,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/teams/invite.ts:15-18 reads countMembers and checks the limit before a separate awaited insertMember call",
+                    "nothing serializes the check with the insert; db.ts exports withTeamLock, documented as serializing writers per team, and invite.ts does not use it",
+                    "invite.test.ts exercises the limit only sequentially"
+                ],
+                "failure_scenario": "A team is one seat under its limit and two admins invite at the same time; both inviteMember calls read the same countMembers value, both pass the seatLimit check, and both insertMember calls run, leaving the team over its paid seat count with no error raised.",
+                "producing_hunt": "correctness:cross-file-trace",
+                "model_authored_prose": "The seat-limit check and the insert are separate awaited steps with no serialization, so concurrent invites for the last seat all pass the check and all insert. Wrap the count-check-insert sequence in withTeamLock (db.ts documents it as serializing writers per team) or enforce the limit atomically in the insert."
+            }
+        }
+    ],
+    "validation": [
+        {
+            "id": "invite-seat-limit-race",
+            "verification": "confirmed"
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "invite-seat-limit-race"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/teams/invite.test.ts b/src/teams/invite.test.ts\nnew file mode 100644\nindex 0000000..02f6732\n--- /dev/null\n+++ b/src/teams/invite.test.ts\n@@ -0,0 +1,14 @@\n+import {inviteMember, SeatLimitError} from \"./invite\";\n+\n+describe(\"inviteMember\", () => {\n+    it(\"adds members below the seat limit\", async () => {\n+        await inviteMember(\"t1\", \"a@example.com\", 2);\n+        await inviteMember(\"t1\", \"b@example.com\", 2);\n+    });\n+\n+    it(\"rejects an invite past the seat limit\", async () => {\n+        await expect(\n+            inviteMember(\"t1\", \"c@example.com\", 2),\n+        ).rejects.toThrow(SeatLimitError);\n+    });\n+});\ndiff --git a/src/teams/invite.ts b/src/teams/invite.ts\nnew file mode 100644\nindex 0000000..cf00903\n--- /dev/null\n+++ b/src/teams/invite.ts\n@@ -0,0 +1,25 @@\n+import {countMembers, insertMember} from \"./db\";\n+\n+export class SeatLimitError extends Error {\n+    constructor(teamId: string) {\n+        super(`team ${teamId} is at its seat limit`);\n+    }\n+}\n+\n+/** Adds a member to the team unless the team is already at its seat limit. */\n+export const inviteMember = async (\n+    teamId: string,\n+    email: string,\n+    seatLimit: number,\n+): Promise<void> => {\n+    const current = await countMembers(teamId);\n+    if (current >= seatLimit) {\n+        throw new SeatLimitError(teamId);\n+    }\n+    await insertMember({\n+        teamId,\n+        email,\n+        role: \"member\",\n+        invitedAt: Date.now(),\n+    });\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "teams: enforce the seat limit when inviting members",
+            "description": "Invites past the team's paid seat count now fail with SeatLimitError instead of silently adding members we never bill for. Covered by limit tests.",
+            "author": "dev-teams",
+            "baseBranch": "main"
+        },
+        "tree": "tree",
+        "mustCatchSpecs": [
+            {
+                "key": "invite-seat-limit-race",
+                "path": "src/teams/invite.ts",
+                "lineStart": 10,
+                "lineEnd": 25,
+                "mechanism": [
+                    "race|concurren|simultaneous|at the same time|same instant|interleav|TOCTOU|check.then.act|time.of.check",
+                    "withTeamLock|serializ|atomic|lock|transaction",
+                    "(two|both|multiple|parallel).{0,80}invit.{0,120}(exceed|over|past|beyond|both (succeed|pass|insert))|(exceed|over|past).{0,40}(seat )?limit"
+                ],
+                "altLocations": [
+                    {
+                        "path": "src/teams/invite.test.ts"
+                    }
+                ]
+            }
+        ]
+    }
+}

@@ -1,0 +1,95 @@
+{
+    "id": "mutation-retry-nonidempotent-capture",
+    "tags": [
+        "mutation",
+        "partial-failure",
+        "live"
+    ],
+    "category": "synthetic-mutation",
+    "description": "Model-capability discrimination case (distributed-semantics / partial-failure family), minted 2026-07-20 for the corpus-difficulty work. captureWithRetry retries capturePayment whenever the gateway times out. The unchanged gateway.ts documents only mechanics: a GatewayTimeoutError means no response arrived within 10s, and CaptureOptions.idempotencyKey exists with at-most-once semantics. The reviewer must supply the distributed-systems reasoning itself: a timeout is not a failure (the capture may have been applied server-side), so blind re-send without the idempotency key can charge the card up to three times. The tests fake the gateway with a timeout that never applies the charge, so they pass. Nothing in the diff states the invariant; band placement pending calibration.",
+    "changedFiles": [
+        {
+            "path": "src/billing/capture.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/billing/capture.test.ts",
+            "status": "added"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "capture-retry-double-charge",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/billing/capture.ts",
+                    "line": 17,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/billing/gateway.ts documents GatewayTimeoutError as 'no response arrived within 10s', which does not imply the capture was not applied server-side",
+                    "src/billing/capture.ts:17 re-sends capturePayment(chargeId, amountCents) after a timeout without passing CaptureOptions.idempotencyKey",
+                    "gateway.ts documents idempotencyKey as applied-at-most-once, the mechanism built for exactly this retry",
+                    "capture.test.ts fakes the gateway so a timeout never applies the charge, which is the one behavior the real gateway does not guarantee"
+                ],
+                "failure_scenario": "During a provider brownout the gateway applies a capture but the response exceeds 10s; captureWithRetry catches the GatewayTimeoutError and re-sends the same capture up to two more times with no idempotency key, so the card is charged twice (or three times) for one order.",
+                "producing_hunt": "correctness:line-scan",
+                "model_authored_prose": "Retrying on GatewayTimeoutError re-sends a capture that may already have been applied; a timeout means no response, not no charge. Without CaptureOptions.idempotencyKey (documented at-most-once), this can double- or triple-charge the card. Generate a key per capture and pass it on every attempt."
+            }
+        }
+    ],
+    "validation": [
+        {
+            "id": "capture-retry-double-charge",
+            "verification": "confirmed"
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "capture-retry-double-charge"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/billing/capture.test.ts b/src/billing/capture.test.ts\nnew file mode 100644\nindex 0000000..91e85b4\n--- /dev/null\n+++ b/src/billing/capture.test.ts\n@@ -0,0 +1,29 @@\n+import {captureWithRetry} from \"./capture\";\n+import * as gateway from \"./gateway\";\n+\n+describe(\"captureWithRetry\", () => {\n+    it(\"retries once after a gateway timeout\", async () => {\n+        const calls: number[] = [];\n+        jest.spyOn(gateway, \"capturePayment\").mockImplementation(\n+            async (chargeId, amountCents) => {\n+                calls.push(amountCents);\n+                if (calls.length === 1) {\n+                    throw new gateway.GatewayTimeoutError();\n+                }\n+                return {chargeId, amountCents, capturedAt: 5};\n+            },\n+        );\n+        const result = await captureWithRetry(\"ch_1\", 1250);\n+        expect(result.amountCents).toBe(1250);\n+        expect(calls).toHaveLength(2);\n+    });\n+\n+    it(\"does not retry a declined charge\", async () => {\n+        jest.spyOn(gateway, \"capturePayment\").mockRejectedValue(\n+            new Error(\"card_declined\"),\n+        );\n+        await expect(captureWithRetry(\"ch_2\", 500)).rejects.toThrow(\n+            \"card_declined\",\n+        );\n+    });\n+});\ndiff --git a/src/billing/capture.ts b/src/billing/capture.ts\nnew file mode 100644\nindex 0000000..4dfdada\n--- /dev/null\n+++ b/src/billing/capture.ts\n@@ -0,0 +1,26 @@\n+import {\n+    capturePayment,\n+    GatewayTimeoutError,\n+    type CaptureResult,\n+} from \"./gateway\";\n+\n+const MAX_ATTEMPTS = 3;\n+\n+/** Captures a charge, retrying when the gateway times out. */\n+export const captureWithRetry = async (\n+    chargeId: string,\n+    amountCents: number,\n+): Promise<CaptureResult> => {\n+    let lastError: unknown;\n+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {\n+        try {\n+            return await capturePayment(chargeId, amountCents);\n+        } catch (error) {\n+            if (!(error instanceof GatewayTimeoutError)) {\n+                throw error;\n+            }\n+            lastError = error;\n+        }\n+    }\n+    throw lastError;\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "billing: retry captures that hit gateway timeouts",
+            "description": "Captures occasionally fail on gateway timeouts during provider incidents; wrap capturePayment in a bounded retry so transient timeouts self-heal. Declines and other errors still fail fast. Covered by retry and fail-fast tests.",
+            "author": "dev-billing",
+            "baseBranch": "main"
+        },
+        "tree": "tree",
+        "mustCatchSpecs": [
+            {
+                "key": "capture-retry-double-charge",
+                "path": "src/billing/capture.ts",
+                "lineStart": 9,
+                "lineEnd": 26,
+                "mechanism": [
+                    "idempoten",
+                    "double.?(charg|captur)|charg(e|ed|ing).{0,30}(twice|again|multiple)|captur(e|ed|ing).{0,30}(twice|again|more than once)|applied (twice|more than once)|duplicate (charge|capture)",
+                    "timeout.{0,140}(succeed|applied|landed|went through|server.side|may have|might have|already)|(may|might|could) have (succeeded|been applied|gone through|landed)",
+                    "not idempotent|non.?idempotent"
+                ],
+                "altLocations": [
+                    {
+                        "path": "src/billing/capture.test.ts"
+                    }
+                ]
+            }
+        ]
+    }
+}
