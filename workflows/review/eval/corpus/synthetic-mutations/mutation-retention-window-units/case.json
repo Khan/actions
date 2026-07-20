@@ -1,0 +1,98 @@
+{
+    "id": "mutation-retention-window-units",
+    "tags": [
+        "mutation",
+        "retention-lifecycle",
+        "live"
+    ],
+    "category": "synthetic-mutation",
+    "description": "Mid-band target in the reviewer's weak class (multi-file retention/lifecycle reasoning), minted 2026-07-20 alongside the floor-case triage. The dedup window constant is in days (config.ts), Note.createdAt is documented as epoch milliseconds (db.ts), and the since arithmetic multiplies days by 24*60*60 without the *1000, so the '30-day' window is actually about 43 minutes and dedup silently never fires for the traffic it names. The tests save notes at the same instant, so they pass either way.",
+    "changedFiles": [
+        {
+            "path": "src/notes/config.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/notes/retention.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/notes/retention.test.ts",
+            "status": "added"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "retention-window-unit-mismatch",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/notes/retention.ts",
+                    "line": 9,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.85,
+                "evidence_trace": [
+                    "src/notes/db.ts documents Note.createdAt as epoch milliseconds",
+                    "src/notes/retention.ts:9 computes since as createdAt minus DEDUP_WINDOW_DAYS * 24 * 60 * 60, which is seconds, not milliseconds",
+                    "30 * 24 * 60 * 60 = 2,592,000 ms, about 43 minutes"
+                ],
+                "failure_scenario": "A user re-saves an identical note an hour after the original; since createdAt is epoch milliseconds and the window arithmetic omits the *1000, the effective window is about 43 minutes instead of 30 days, so the duplicate is stored and the feature silently no-ops for almost all of the traffic it names.",
+                "producing_hunt": "correctness:unit-mismatch",
+                "model_authored_prose": "The window math treats DEDUP_WINDOW_DAYS * 24 * 60 * 60 as milliseconds, but that product is seconds (createdAt is epoch ms per db.ts). Multiply by 1000, or the 30-day window is really about 43 minutes."
+            }
+        }
+    ],
+    "validation": [
+        {
+            "id": "retention-window-unit-mismatch",
+            "verification": "confirmed"
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "retention-window-unit-mismatch"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/notes/config.ts b/src/notes/config.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notes/config.ts\n@@ -0,0 +1,2 @@\n+/** How long a repeated note is treated as a duplicate, in days. */\n+export const DEDUP_WINDOW_DAYS = 30;\ndiff --git a/src/notes/retention.test.ts b/src/notes/retention.test.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notes/retention.test.ts\n@@ -0,0 +1,21 @@\n+import {memDb, note} from \"./testing\";\n+import {saveNote} from \"./retention\";\n+\n+const count = async (db: ReturnType<typeof memDb>): Promise<number> =>\n+    (await db.query(\"Note\", {userId: \"u1\", pageSize: \"all\"})).length;\n+\n+describe(\"saveNote dedup\", () => {\n+    it(\"skips a duplicate note inside the window\", async () => {\n+        const db = memDb();\n+        await saveNote(db, note(\"u1\", \"same content\"));\n+        await saveNote(db, note(\"u1\", \"same content\"));\n+        expect(await count(db)).toBe(1);\n+    });\n+\n+    it(\"keeps notes with distinct content\", async () => {\n+        const db = memDb();\n+        await saveNote(db, note(\"u1\", \"first\"));\n+        await saveNote(db, note(\"u1\", \"second\"));\n+        expect(await count(db)).toBe(2);\n+    });\n+});\ndiff --git a/src/notes/retention.ts b/src/notes/retention.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notes/retention.ts\n@@ -0,0 +1,18 @@\n+import type {Db, Note} from \"./db\";\n+import {DEDUP_WINDOW_DAYS} from \"./config\";\n+\n+export const saveNote = async (db: Db, note: Note): Promise<void> => {\n+    const existing = await db.query(\"Note\", {\n+        userId: note.userId,\n+        pageSize: \"all\",\n+    });\n+    const since = note.createdAt - DEDUP_WINDOW_DAYS * 24 * 60 * 60;\n+    const duplicate = existing.some(\n+        (stored) =>\n+            stored.createdAt >= since && stored.content === note.content,\n+    );\n+    if (duplicate) {\n+        return;\n+    }\n+    await db.put(note);\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "notes: skip duplicate notes saved inside a 30-day window",
+            "description": "A note identical to one saved in the last 30 days is now treated as a duplicate and skipped. Tests cover the duplicate and distinct-content paths.",
+            "author": "dev-notes",
+            "baseBranch": "main"
+        },
+        "tree": "tree",
+        "mustCatchSpecs": [
+            {
+                "key": "retention-window-unit-mismatch",
+                "path": "src/notes/retention.ts",
+                "lineStart": 4,
+                "lineEnd": 12,
+                "mechanism": [
+                    "millisecond|epoch ms|\\* ?1000|times 1000|missing.{0,30}1000",
+                    "seconds?, not|seconds? (instead of|rather than|vs)|(is|are) seconds|unit (mismatch|error|bug)",
+                    "43(\\.2)? ?min|about 43|~ ?43|2,?592,?000",
+                    "(window|since).{0,80}(seconds|minutes|43)"
+                ],
+                "altLocations": [
+                    {
+                        "path": "src/notes/config.ts"
+                    }
+                ]
+            }
+        ]
+    }
+}

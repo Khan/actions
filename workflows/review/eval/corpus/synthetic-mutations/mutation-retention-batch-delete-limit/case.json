@@ -1,0 +1,106 @@
+{
+    "id": "mutation-retention-batch-delete-limit",
+    "tags": [
+        "mutation",
+        "retention-lifecycle",
+        "live"
+    ],
+    "category": "synthetic-mutation",
+    "description": "Easier-graded variant of the retired retention-unbounded-prune spec (0% across every 2026-07-20 drift sample: the batch limit was not evidenceable in-tree). Here the evidence exists: the unchanged purge-user-data.ts documents that the datastore rejects deleteMulti batches over 100 keys and chunks accordingly, while the new prune passes every stale id (a launch backlog can be hundreds) to one deleteMulti call. The rejection is swallowed by the documented fire-and-forget catch, so the cap silently never engages for exactly the over-cap users it targets, and the backlog test passes only because the in-memory fake enforces no batch limit. Multi-file retention/lifecycle reasoning, the reviewer's demonstrated weak class; graded for the 20-80 percent band.",
+    "changedFiles": [
+        {
+            "path": "src/notes/retention.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/notes/retention.test.ts",
+            "status": "added"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "retention-batch-delete-limit",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/notes/retention.ts",
+                    "line": 21,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.85,
+                "evidence_trace": [
+                    "src/notes/purge-user-data.ts documents that the datastore rejects deleteMulti batches over 100 keys and chunks every bulk delete",
+                    "src/notes/retention.ts:21 passes the entire stale set (pageSize \"all\") to a single deleteMulti call",
+                    "the fire-and-forget .catch swallows the rejection, so the failure is silent"
+                ],
+                "failure_scenario": "A user with a 500-note backlog saves once after the cap ships; prune queries 300 stale ids and passes all of them to one deleteMulti call, which the datastore rejects (over the documented 100-key batch limit); the .catch swallows the error, so the cap silently never engages for exactly the over-cap users it targets.",
+                "producing_hunt": "correctness:batch-limit",
+                "model_authored_prose": "pruneNotes deletes the whole stale set in one deleteMulti call, but the datastore rejects batches over 100 keys (see the chunked delete in purge-user-data.ts). Chunk the ids like purgeUserNotes does; the backlog test only passes because the in-memory fake enforces no limit."
+            }
+        }
+    ],
+    "validation": [
+        {
+            "id": "retention-batch-delete-limit",
+            "verification": "confirmed"
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "retention-batch-delete-limit"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/notes/retention.test.ts b/src/notes/retention.test.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notes/retention.test.ts\n@@ -0,0 +1,17 @@\n+import {memDb, note} from \"./testing\";\n+import {MAX_NOTES_PER_USER, pruneNotes, saveNote} from \"./retention\";\n+\n+const count = async (db: ReturnType<typeof memDb>): Promise<number> =>\n+    (await db.query(\"Note\", {userId: \"u1\", pageSize: \"all\"})).length;\n+\n+describe(\"retention\", () => {\n+    it(\"caps stored notes per user, clearing a large backlog\", async () => {\n+        const db = memDb();\n+        for (let i = 0; i < MAX_NOTES_PER_USER + 150; i++) {\n+            await db.put(note(\"u1\", `imported ${i}`));\n+        }\n+        await saveNote(db, note(\"u1\", \"fresh\"));\n+        await pruneNotes(db, \"u1\");\n+        expect(await count(db)).toBe(MAX_NOTES_PER_USER);\n+    });\n+});\ndiff --git a/src/notes/retention.ts b/src/notes/retention.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notes/retention.ts\n@@ -0,0 +1,23 @@\n+import type {Db, Note} from \"./db\";\n+\n+/** Hard cap on stored notes per user; prune enforces it on every save. */\n+export const MAX_NOTES_PER_USER = 200;\n+\n+export const saveNote = async (db: Db, note: Note): Promise<void> => {\n+    await db.put(note);\n+    // Intentionally fire-and-forget: a failing prune must not fail the save.\n+    pruneNotes(db, note.userId).catch(() => {});\n+};\n+\n+/** Deletes every stored note past the cap, oldest first. */\n+export const pruneNotes = async (db: Db, userId: string): Promise<void> => {\n+    const stale = await db.query(\"Note\", {\n+        userId,\n+        orderDesc: \"createdAt\",\n+        offset: MAX_NOTES_PER_USER,\n+        pageSize: \"all\",\n+    });\n+    if (stale.length > 0) {\n+        await db.deleteMulti(stale.map((note) => note.id));\n+    }\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "notes: cap stored notes per user",
+            "description": "Adds a per-user retention cap enforced on every save. The first save after deploy also clears any pre-existing backlog past the cap. Covered by a backlog test in the retention suite.",
+            "author": "dev-notes",
+            "baseBranch": "main"
+        },
+        "tree": "tree",
+        "mustCatchSpecs": [
+            {
+                "key": "retention-batch-delete-limit",
+                "path": "src/notes/retention.ts",
+                "lineStart": 13,
+                "lineEnd": 22,
+                "mechanism": [
+                    "100|DELETE_CHUNK|chunk(ed|ing|s)?",
+                    "deleteMulti.{0,80}(reject|fail|limit|too many|more than|exceed|batch)|(reject|limit|batch).{0,60}deleteMulti",
+                    "(backlog|large|hundreds|300|500).{0,80}(one|single) (call|batch)|(one|single) (call|batch).{0,80}(backlog|entire|every|all)",
+                    "(fake|memDb|in.memory).{0,80}(enforce|reject|limit)"
+                ],
+                "altLocations": [
+                    {
+                        "path": "src/notes/retention.test.ts"
+                    }
+                ]
+            }
+        ],
+        "mustNotFlagSpecs": [
+            {
+                "key": "retention-catch-swallow-trap",
+                "path": "src/notes/retention.ts",
+                "lineStart": 6,
+                "lineEnd": 10,
+                "mechanism": [
+                    "fire.and.forget|\\.catch\\(\\(\\) =>",
+                    "swallow(s|ed)?|silently (ignor|drop|discard)|discard(ed|s)?.{0,40}(error|rejection)"
+                ]
+            }
+        ]
+    }
+}
