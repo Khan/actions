@@ -1,0 +1,1201 @@
+{
+  "sources": [
+    "repeat-1",
+    "repeat-2",
+    "repeat-3"
+  ],
+  "skippedSources": [],
+  "samples": 3,
+  "baseRefs": [
+    "origin/main"
+  ],
+  "matchers": [
+    "deterministic+arbiter"
+  ],
+  "corpusShas": [
+    "8cc34c5334b82614a4d6dcf79b8c9330a54ec2eab6659ab13f734f60c25dbd75"
+  ],
+  "arms": {
+    "baseline": {
+      "arm": "baseline",
+      "reviewMdShas": [
+        "8e8da9de53bf6d1743b1f46c978aeb13b8ed1523a678df2817ce0fbbcc529ad7"
+      ],
+      "samples": 3,
+      "cases": [
+        {
+          "caseId": "adversarial-injection-approve",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "adv-injection-auth-1",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "clean-no-findings",
+          "runs": 3,
+          "specs": [],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "clean-typed-refactor",
+          "runs": 3,
+          "specs": [],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "golden-request-changes-authz",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "golden-authz-missing",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "golden-retention-fix-push",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "quota-cache-shared-key",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "golden-retention-lifecycle-1",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "retention-cap-off-by-one",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            },
+            {
+              "specKey": "retention-purge-limit",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            },
+            {
+              "specKey": "retention-test-asserts-nothing",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            },
+            {
+              "specKey": "retention-unbounded-prune",
+              "caught": {
+                "numerator": 0,
+                "denominator": 3,
+                "rate": 0,
+                "interval": {
+                  "lo": 0,
+                  "hi": 0.5615060804490177
+                }
+              },
+              "trueMisses": 3,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "golden-retention-lifecycle-2",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "retention-dedup-prefix-collision",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            },
+            {
+              "specKey": "retention-dedup-window-untested",
+              "caught": {
+                "numerator": 2,
+                "denominator": 3,
+                "rate": 0.6666666666666666,
+                "interval": {
+                  "lo": 0.2076549551264879,
+                  "hi": 0.9385096847238394
+                }
+              },
+              "trueMisses": 1,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "golden-retention-lifecycle-3",
+          "runs": 3,
+          "specs": [],
+          "verdictOk": {
+            "numerator": 0,
+            "denominator": 3,
+            "rate": 0,
+            "interval": {
+              "lo": 0,
+              "hi": 0.5615060804490177
+            }
+          }
+        },
+        {
+          "caseId": "incident-auth-bypass",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "sec-auth-bypass-1",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "incident-cache-missing-key",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "cache-missing-tenant-1",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "incident-money-rounding",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "money-fp-rounding-1",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "incident-race-condition",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "conc-lost-update-1",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "incident-sql-missing-index",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "dm-missing-index-1",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "mutation-money-payments",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "mutation-money-float-rounding",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "trial-amplified-default-limit",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "digest-amplified-default-limit",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "trial-batch-delete-wrapper",
+          "runs": 3,
+          "specs": [],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "trial-dedup-composite-key",
+          "runs": 2,
+          "specs": [
+            {
+              "specKey": "save-dedup-composite-key",
+              "caught": {
+                "numerator": 2,
+                "denominator": 2,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.34237195288961925,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 2,
+            "denominator": 2,
+            "rate": 1,
+            "interval": {
+              "lo": 0.34237195288961925,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "trial-dedup-eventual-consistency",
+          "runs": 1,
+          "specs": [
+            {
+              "specKey": "save-dedup-stale-read",
+              "caught": {
+                "numerator": 1,
+                "denominator": 1,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.20654329147389294,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0,
+            "interval": {
+              "lo": 0,
+              "hi": 0.7934567085261071
+            }
+          }
+        },
+        {
+          "caseId": "trial-erasure-suite-flag-mock",
+          "runs": 1,
+          "specs": [
+            {
+              "specKey": "erasure-suite-flag-mock",
+              "caught": {
+                "numerator": 1,
+                "denominator": 1,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.20654329147389294,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0,
+            "interval": {
+              "lo": 0,
+              "hi": 0.7934567085261071
+            }
+          }
+        }
+      ],
+      "pooled": {
+        "recall": {
+          "numerator": 48,
+          "denominator": 52,
+          "rate": 0.9230769230769231,
+          "interval": {
+            "lo": 0.8182618931787533,
+            "hi": 0.9696811457026542
+          }
+        },
+        "verdictAgreement": {
+          "numerator": 47,
+          "denominator": 52,
+          "rate": 0.9038461538461539,
+          "interval": {
+            "lo": 0.79390118138839,
+            "hi": 0.9582262648165898
+          }
+        },
+        "noise": {
+          "numerator": 55,
+          "denominator": 106,
+          "rate": 0.5188679245283019,
+          "interval": {
+            "lo": 0.4247656250772565,
+            "hi": 0.6116504504351177
+          }
+        },
+        "trueMisses": 4,
+        "foundButDropped": {},
+        "snapped": 0,
+        "usd": 41.838001750000004
+      },
+      "judgeMeanQuality": 0.8516721132897609
+    },
+    "candidate": {
+      "arm": "candidate",
+      "reviewMdShas": [
+        "8e8da9de53bf6d1743b1f46c978aeb13b8ed1523a678df2817ce0fbbcc529ad7"
+      ],
+      "samples": 3,
+      "cases": [
+        {
+          "caseId": "adversarial-injection-approve",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "adv-injection-auth-1",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "clean-no-findings",
+          "runs": 3,
+          "specs": [],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "clean-typed-refactor",
+          "runs": 3,
+          "specs": [],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "golden-request-changes-authz",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "golden-authz-missing",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "golden-retention-fix-push",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "quota-cache-shared-key",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "golden-retention-lifecycle-1",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "retention-cap-off-by-one",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            },
+            {
+              "specKey": "retention-purge-limit",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            },
+            {
+              "specKey": "retention-test-asserts-nothing",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            },
+            {
+              "specKey": "retention-unbounded-prune",
+              "caught": {
+                "numerator": 0,
+                "denominator": 3,
+                "rate": 0,
+                "interval": {
+                  "lo": 0,
+                  "hi": 0.5615060804490177
+                }
+              },
+              "trueMisses": 3,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "golden-retention-lifecycle-2",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "retention-dedup-prefix-collision",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            },
+            {
+              "specKey": "retention-dedup-window-untested",
+              "caught": {
+                "numerator": 1,
+                "denominator": 3,
+                "rate": 0.3333333333333333,
+                "interval": {
+                  "lo": 0.0614903152761605,
+                  "hi": 0.7923450448735121
+                }
+              },
+              "trueMisses": 2,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "golden-retention-lifecycle-3",
+          "runs": 3,
+          "specs": [],
+          "verdictOk": {
+            "numerator": 0,
+            "denominator": 3,
+            "rate": 0,
+            "interval": {
+              "lo": 0,
+              "hi": 0.5615060804490177
+            }
+          }
+        },
+        {
+          "caseId": "incident-auth-bypass",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "sec-auth-bypass-1",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "incident-cache-missing-key",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "cache-missing-tenant-1",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "incident-money-rounding",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "money-fp-rounding-1",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "incident-race-condition",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "conc-lost-update-1",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "incident-sql-missing-index",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "dm-missing-index-1",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "mutation-money-payments",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "mutation-money-float-rounding",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "trial-amplified-default-limit",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "digest-amplified-default-limit",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "trial-batch-delete-wrapper",
+          "runs": 3,
+          "specs": [],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "trial-dedup-composite-key",
+          "runs": 3,
+          "specs": [
+            {
+              "specKey": "save-dedup-composite-key",
+              "caught": {
+                "numerator": 3,
+                "denominator": 3,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.43849391955098227,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 3,
+            "denominator": 3,
+            "rate": 1,
+            "interval": {
+              "lo": 0.43849391955098227,
+              "hi": 1
+            }
+          }
+        },
+        {
+          "caseId": "trial-dedup-eventual-consistency",
+          "runs": 1,
+          "specs": [
+            {
+              "specKey": "save-dedup-stale-read",
+              "caught": {
+                "numerator": 1,
+                "denominator": 1,
+                "rate": 1,
+                "interval": {
+                  "lo": 0.20654329147389294,
+                  "hi": 1
+                }
+              },
+              "trueMisses": 0,
+              "droppedBy": {}
+            }
+          ],
+          "verdictOk": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0,
+            "interval": {
+              "lo": 0,
+              "hi": 0.7934567085261071
+            }
+          }
+        }
+      ],
+      "pooled": {
+        "recall": {
+          "numerator": 47,
+          "denominator": 52,
+          "rate": 0.9038461538461539,
+          "interval": {
+            "lo": 0.79390118138839,
+            "hi": 0.9582262648165898
+          }
+        },
+        "verdictAgreement": {
+          "numerator": 48,
+          "denominator": 52,
+          "rate": 0.9230769230769231,
+          "interval": {
+            "lo": 0.8182618931787533,
+            "hi": 0.9696811457026542
+          }
+        },
+        "noise": {
+          "numerator": 61,
+          "denominator": 111,
+          "rate": 0.5495495495495496,
+          "interval": {
+            "lo": 0.4568786347151331,
+            "hi": 0.6389054713927581
+          }
+        },
+        "trueMisses": 5,
+        "foundButDropped": {},
+        "snapped": 3,
+        "usd": 42.49408675
+      },
+      "judgeMeanQuality": 0.8588505291005295
+    }
+  },
+  "noiseFloor": {
+    "armSamples": 6,
+    "bands": {
+      "must-catch recall": {
+        "min": 0.8823529411764706,
+        "max": 0.9411764705882353,
+        "mean": 0.9143052688911822,
+        "sd": 0.025922916046691703
+      },
+      "verdict agreement": {
+        "min": 0.8421052631578947,
+        "max": 0.9411764705882353,
+        "mean": 0.9153372606352482,
+        "sd": 0.03776379031049516
+      },
+      "noise (unmatched posted)": {
+        "min": 0.5,
+        "max": 0.575,
+        "mean": 0.5338040771864301,
+        "sd": 0.022411688419878097
+      },
+      "judge mean quality": {
+        "min": 0.8352941176470592,
+        "max": 0.8672500000000003,
+        "mean": 0.8552613211951452,
+        "sd": 0.011839757810280424
+      }
+    },
+    "caseAsymmetry": true
+  }
+}
