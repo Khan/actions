@@ -55,6 +55,33 @@ describe("parseLeadingLabel", () => {
         expect(parseLeadingLabel("Plain reply text.")).toBeNull();
         expect(parseLeadingLabel("prefix **issue (blocking):** x")).toBeNull();
     });
+
+    it("parses the markdown-stripped plain form the staging produces (webapp #40561)", () => {
+        // Every staged opener on Khan/webapp#40561 arrived with the `**`
+        // wrapping stripped; the recap then rendered `**unknown**` on every
+        // line. The plain form must parse to the same label the bold form
+        // would have.
+        expect(
+            parseLeadingLabel(
+                "thought (non-blocking): The trim loop now counts len(...).",
+            ),
+        ).toBe("thought (non-blocking)");
+        expect(
+            parseLeadingLabel("issue (blocking): A gated spec goes silent."),
+        ).toBe("issue (blocking)");
+        expect(
+            parseLeadingLabel(
+                "suggestion (non-blocking, best-practice): Error handling.",
+            ),
+        ).toBe("suggestion (non-blocking, best-practice)");
+    });
+
+    it("keeps the plain form bound to the label vocabulary", () => {
+        // Prose that merely starts with `word:` must not parse as a label.
+        expect(parseLeadingLabel("Note: this only affects tests.")).toBeNull();
+        expect(parseLeadingLabel("warning (non-blocking): x")).toBeNull();
+        expect(parseLeadingLabel("note: no decoration either.")).toBeNull();
+    });
 });
 
 describe("excerptOpeningComment", () => {
@@ -75,6 +102,14 @@ describe("excerptOpeningComment", () => {
 
     it("passes a label-less body through verbatim", () => {
         expect(excerptOpeningComment("No label here.")).toBe("No label here.");
+    });
+
+    it("strips the markdown-stripped plain label form too", () => {
+        expect(
+            excerptOpeningComment(
+                "thought (non-blocking): The trim loop now counts.",
+            ),
+        ).toBe("The trim loop now counts.");
     });
 });
 
@@ -105,7 +140,7 @@ describe("renderRereviewSection", () => {
         expect(result.section).toBe("The 1 prior review thread is resolved.");
     });
 
-    it("enumerates kept threads as links, blocking first", () => {
+    it("lists blocking threads visibly and collapses non-blocking ones", () => {
         const threads = [
             thread({
                 thread_id: "nb",
@@ -135,15 +170,56 @@ describe("renderRereviewSection", () => {
         expect(lines[0]).toBe(
             "1 of 3 prior review threads resolved; 2 still unaddressed as of abcdef1:",
         );
-        // Blocking thread sorts first even though it was listed second.
+        // The blocking thread is the only visible entry line.
         expect(lines[1]).toBe(
             "- **issue (blocking)** [`z/z.go:9`](https://github.com/o/r/pull/1#discussion_r2): The guard was removed.",
         );
-        expect(lines[2]).toBe(
+        // The non-blocking thread renders inside the collapsed block.
+        expect(lines[2]).toBe("");
+        expect(lines[3]).toBe("<details>");
+        expect(lines[4]).toBe(
+            "<summary>1 non-blocking thread still open</summary>",
+        );
+        expect(result.section).toContain(
             "- **suggestion (non-blocking)** [`a/a.go:1`](https://github.com/o/r/pull/1#discussion_r1): Nicer name.",
         );
+        expect(result.section.indexOf("<details>")).toBeLessThan(
+            result.section.indexOf("suggestion (non-blocking)"),
+        );
+        expect(result.section.trimEnd().endsWith("</details>")).toBe(true);
         expect(result.keptCount).toBe(2);
         expect(result.resolvedCount).toBe(1);
+    });
+
+    it("renders no collapsed block when every kept thread blocks", () => {
+        const result = renderRereviewSection({
+            threads: [thread({thread_id: "a"})],
+            reconciler: {resolve: [], keep: ["a"]},
+        });
+        expect(result.section).not.toContain("<details>");
+        expect(result.section).toContain("- **issue (blocking)**");
+    });
+
+    it("pluralizes the collapsed-block summary", () => {
+        const nb = (id: string): StagedThread =>
+            thread({
+                thread_id: id,
+                comments: [
+                    {
+                        author: "github-actions",
+                        body: "**note (non-blocking):** x.",
+                    },
+                ],
+            });
+        const result = renderRereviewSection({
+            threads: [nb("a"), nb("b")],
+            reconciler: {resolve: [], keep: ["a", "b"]},
+        });
+        expect(result.section).toContain(
+            "<summary>2 non-blocking threads still open</summary>",
+        );
+        // No visible entry lines between the header and the block.
+        expect(result.section.split("\n")[1]).toBe("");
     });
 
     it("renders the zero-resolved header without a resolved clause", () => {
@@ -173,6 +249,43 @@ describe("renderRereviewSection", () => {
             reconciler: {resolve: [], keep: ["a"]},
         });
         expect(result.section).toContain("`services/foo/foo.go`:");
+    });
+
+    it("labels a markdown-stripped staged opener correctly (webapp #40561)", () => {
+        // The pathology: every staged body lost its `**` wrapping and every
+        // recap line rendered `**unknown**`. The blocking/non-blocking split
+        // (and the flip gate's keptBlockingCount) must survive that form.
+        const result = renderRereviewSection({
+            threads: [
+                thread({
+                    thread_id: "plain-blk",
+                    comments: [
+                        {
+                            author: "github-actions",
+                            body: "issue (blocking): A gated spec goes silent.",
+                        },
+                    ],
+                }),
+                thread({
+                    thread_id: "plain-nb",
+                    comments: [
+                        {
+                            author: "github-actions",
+                            body: "thought (non-blocking): The trim loop now counts.",
+                        },
+                    ],
+                }),
+            ],
+            reconciler: {resolve: [], keep: ["plain-blk", "plain-nb"]},
+        });
+        expect(result.section).not.toContain("unknown");
+        expect(result.section).toContain(
+            "- **issue (blocking)** [`services/foo/foo.go:12`](https://github.com/o/r/pull/1#discussion_r100): A gated spec goes silent.",
+        );
+        expect(result.section).toContain(
+            "- **thought (non-blocking)** [`services/foo/foo.go:12`](https://github.com/o/r/pull/1#discussion_r100): The trim loop now counts.",
+        );
+        expect(result.keptBlockingCount).toBe(1);
     });
 
     it("still accounts for a keep id missing from the staging", () => {

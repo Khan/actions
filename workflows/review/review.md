@@ -32,7 +32,15 @@ on:
 # (zero AI credits) and posts nothing. The label is evaluated on each trigger event
 # (open/synchronize/reopen/ready), so adding it prevents the *next* run — it does not
 # retroactively dismiss a review already left on an earlier push.
+#
+# Also skip draft PRs: draft-with-frequent-pushes is exactly the traffic that spends
+# review credits on code the author already knows is unfinished. `ready_for_review`
+# fires with `draft` already false, so the PR is reviewed the moment it leaves draft.
+# This gates only the push triggers above; a consumer that swaps in a command trigger
+# (webapp's `/review` override) reviews drafts on demand — that trigger replaces this
+# whole block, and Step 8's in-prompt draft gate still applies to those runs.
 if: >-
+  github.event.pull_request.draft == false &&
   !startsWith(github.event.pull_request.head.ref, 'deploy/') &&
   github.event.pull_request.head.ref != 'changeset-release/main' &&
   !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
@@ -387,12 +395,15 @@ state is ignored here. Do not filter or truncate the bodies.
 This workflow runs on every push. Decide here — using the context gathered in Step 1 —
 whether to stop before reviewing.
 
-**Exception — leaving draft.** If the PR is currently **not** a draft but cache memory
-records `wasDraft: true` from the previous run, this is the draft→ready transition:
-skip the check below and continue to Step 3 so the PR is reviewed and its reviewers
-requested (Step 8), even if a prior run already reviewed the same diff. (The workflow
-fires on the `ready_for_review` event, so this run happens the moment the PR leaves
-draft.)
+**Exception — leaving draft.** If the triggering event action is
+`ready_for_review` (`${{ github.event.action }}`), or the PR is currently **not** a
+draft while cache memory records `wasDraft: true` from a previous run, this is the
+draft→ready transition: skip the check below and continue to Step 3 so the PR is
+reviewed and its reviewers requested (Step 8), even if a prior run already reviewed
+the same diff. (Push-triggered installs never run on drafts — the job-level `if:`
+gates them — so there the event action is the signal; the `wasDraft` comparison
+covers command-triggered installs, where a `/review` may have run while the PR was
+still a draft.)
 
 **Redundant merge commit.** Fetch the head commit
 `${{ github.event.pull_request.head.sha }}` with the `repos` toolset and inspect its
@@ -646,7 +657,11 @@ other threads untouched):
   **first** comment, from the same `get_review_comments` output (omit the field if the
   output carries none) — and its **full reply chain** as
   `comments`: every comment in the thread in order, each `{author, body}` — including
-  the author's replies, not just the bot's opening comment. The reply chain is what
+  the author's replies, not just the bot's opening comment. Stage each `body`
+  **verbatim as the tool returned it**, markdown formatting included — do not
+  reformat, summarize, or strip `**` wrappers; the accountability renderer parses
+  the leading `**label:**` template off these bodies (it tolerates a
+  markdown-stripped form, but verbatim is the contract). The reply chain is what
   lets the `thread-reconciler` weigh the author's response, and `url` is what lets the
   re-review accountability section (Step 6) link each still-open thread to its prior
   comment.
@@ -1276,9 +1291,10 @@ It reads `threads.json`, the reconciler's `out/thread-reconciler.json`, and
 "keptBlockingCount": <n>}` (`keptBlockingCount` also feeds the re-review flip rule,
 Step 4). Append
 `section` **verbatim** to the review body, after any verdict-specific text above —
-it enumerates each still-unaddressed prior thread as a link to its prior comment
-(blocking first) and states the resolved count, and on a run that resolved the last
-open threads it says every prior thread is resolved. When `section` is empty,
+it states the resolved count, enumerates each still-unaddressed *blocking* thread
+as a visible link to its prior comment, folds the still-open non-blocking threads
+into a collapsed `<details>` block with their count, and on a run that resolved the
+last open threads it says every prior thread is resolved. When `section` is empty,
 append nothing. Never rephrase, reorder, or summarize it; if `rereview.json` is
 missing or unparseable, submit the body without the section (do not hand-compose a
 replacement).
@@ -1570,7 +1586,9 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
 - `wasDraft`: whether the PR was a draft at this review (its `draft` field).
   Record it on every review so Step 2 can compare it against the current draft
   status to detect the draft→ready transition and bypass the early-exit check
-  for that one run.
+  for that one run. (Push-triggered installs never review drafts, so this stays
+  `false` there; it matters for command-triggered installs, where a `/review`
+  can run on a draft.)
 
 Finally, if you wrote any sub-agent outputs to `/tmp/gh-aw/review/out/` this run
 (Step 3), upload that directory as a run-scoped artifact with the `upload-artifact`
