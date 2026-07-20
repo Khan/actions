@@ -1,0 +1,5 @@
+---
+"review": patch
+---
+
+Arbiter calibration harness (the tuning memo's item 7), seeded from production evidence instead of synthetic pairs: all 10 fallback accepts recorded in drift run 29724668102, hand-labeled. 4 of the 10 were wrong (three times the cap off-by-one finding accepted for retention-dedup-window-untested; once the unreachable-quotaExceeded finding accepted for quota-cache-shared-key): same file, plausible adjacency, different defect, exactly the false-accept class the arbiter's refuse-bias prompt was supposed to prevent. `eval/arbiter-calibration.ts` replays the labeled pairs through the real arbiter seam and reports per-pair yes-rates plus false-accept/false-reject rates (~$0.02 per run at 3 samples/pair); the deterministic suite pins the set's invariants (10 pairs, 4 mismatches, none deterministically matchable, prompt-builder compatibility). Measurement only: the arbiter prompt is unchanged, since changing it is a ruler change that the calibration numbers should justify first.

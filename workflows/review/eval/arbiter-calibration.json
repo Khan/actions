@@ -1,0 +1,227 @@
+{
+    "description": "Recorded arbiter fallback decision points from drift run 29724668102 (2026-07-20), hand-labeled. Every pair was offered to the Haiku match arbiter in production and ACCEPTED; label says whether the acceptance was correct. All pairs fail deterministic matching by construction (that is why they reached the fallback). 4 of 10 recorded accepts were wrong.",
+    "sourceRun": "29724668102",
+    "pairs": [
+        {
+            "id": "golden-retention-lifecycle-2:retention-dedup-window-untested#1",
+            "arm": "r1-baseline",
+            "label": "mismatch",
+            "note": "The accepted finding is the cap off-by-one at retention.ts:38; the spec labels the dedup window having no test. Different defect, same file.",
+            "spec": {
+                "key": "retention-dedup-window-untested",
+                "path": "src/notes/retention.ts",
+                "mechanism": [
+                    "window.*(untested|no test)|no test.*window",
+                    "DEDUP_WINDOW",
+                    "boundary"
+                ]
+            },
+            "candidate": {
+                "path": "src/notes/retention.ts",
+                "line": 38,
+                "failure_scenario": "A user accumulates 201 notes; pruneNotes queries with offset 201 (MAX_NOTES_PER_USER + 1) against a newest-first result, which returns zero stale rows, so nothing is deleted and 201 notes remain — one over the intended hard cap of 200.",
+                "model_authored_prose": "Off-by-one: offset MAX_NOTES_PER_USER + 1 lets the cap reach 201 Introduced by this change. To keep exactly 200 newest notes (indices 0-199) the query must skip 200 and return index 200+, so offset should be MAX_NOTES_PER_USER, not +1; the current +1 permanently retains one extra note per user."
+            }
+        },
+        {
+            "id": "golden-retention-fix-push:quota-cache-shared-key#1",
+            "arm": "r1-candidate",
+            "label": "mismatch",
+            "note": "The accepted finding is the unreachable quotaExceeded (< 0 after a Math.max clamp); the spec labels a shared/constant cache key leaking quota across users. Different defect, same file.",
+            "spec": {
+                "key": "quota-cache-shared-key",
+                "path": "src/notes/quota.ts",
+                "mechanism": [
+                    "shared (cache )?key|constant key|no user ?id",
+                    "quota-remaining",
+                    "another user|cross.user|leak"
+                ]
+            },
+            "candidate": {
+                "path": "src/notes/quota.ts",
+                "line": 34,
+                "failure_scenario": "A user with 800 or more non-draft notes: remainingQuota returns Math.max(0, 800-800)=0, then quotaExceeded evaluates 0 < 0 = false, so the user is never blocked and can create unlimited notes.",
+                "model_authored_prose": "quotaExceeded is now unreachable — quota is never enforced This defect is introduced by this change: line 25 clamps remainingQuota with Math.max(0, ...) so it can never be negative, while line 34 tests `< 0`, a condition that is now impossible. The two edits interact to make quotaExceeded always return false; previously (`QUOTA_LIMIT - used` unclamped, tested `<= 0`) a user at or over the limit was correctly blocked. The comment's claim that 'equality still allows a save' is the off-by-one in the wrong direction."
+            }
+        },
+        {
+            "id": "trial-dedup-composite-key:save-dedup-composite-key#1",
+            "arm": "r2-baseline",
+            "label": "match",
+            "note": "The finding describes exactly the labeled defect (dedup keyed on Body alone, dropping distinct Kinds); the mechanism regexes miss its word order.",
+            "spec": {
+                "key": "save-dedup-composite-key",
+                "path": "services/notes/save.go",
+                "mechanism": [
+                    "key(s|ed)? (the )?(dedup|seen|duplicate).{0,20} on (note\\.)?Body (alone|only)",
+                    "ignor(es?|ing) (note\\.)?Kind",
+                    "(same|identical|shared?) Body.{0,40}(different|distinct|another) [Kk]ind",
+                    "composite.{0,20}(key|identity)",
+                    "(dedup|duplicate check).{0,40}(drops?|skips?|suppress).{0,40}(summary|kind)"
+                ]
+            },
+            "candidate": {
+                "path": "services/notes/save.go",
+                "line": 32,
+                "failure_scenario": "A user already has a Kind=\"note\" with Body \"chapter three summary\"; when a Kind=\"summary\" note with the same Body is saved, it matches seen[note.Body] and is silently dropped, so the generated summary is never persisted.",
+                "model_authored_prose": "Dedup keys on Body alone, but different Kinds may legitimately share a Body store.go:14-16 documents that notes of different Kind may legitimately share a Body (\"note\" vs \"summary\"), and the dedup Query sets no Kind so `existing` spans all kinds; keying `seen` on `note.Body` alone therefore treats a distinct-Kind note with matching text as a duplicate and drops it. The same collapse happens within one batch (lines 35-40) when two notes differ only by Kind. This defect is introduced by this change. The tests only exercise same-Kind bodies, so CI would not catch it; add a case with matching Body across differing Kind."
+            }
+        },
+        {
+            "id": "golden-retention-lifecycle-2:retention-dedup-window-untested#2",
+            "arm": "r2-candidate",
+            "label": "mismatch",
+            "note": "The accepted finding is the cap off-by-one at retention.ts:38; the spec labels the dedup window having no test. Different defect, same file.",
+            "spec": {
+                "key": "retention-dedup-window-untested",
+                "path": "src/notes/retention.ts",
+                "mechanism": [
+                    "window.*(untested|no test)|no test.*window",
+                    "DEDUP_WINDOW",
+                    "boundary"
+                ]
+            },
+            "candidate": {
+                "path": "src/notes/retention.ts",
+                "line": 38,
+                "failure_scenario": "A user accumulates 201 notes; pruneNotes queries with offset MAX_NOTES_PER_USER + 1 (201) over notes sorted newest-first, so slice(201) returns an empty page, nothing is deleted, and the stored count stabilises at 201 — one over the documented hard cap of 200.",
+                "model_authored_prose": "Off-by-one: offset MAX_NOTES_PER_USER + 1 keeps 201 notes, not 200 Introduced by this change. With 0-based offset (per memDb's slice(offset)), keeping the newest 200 and deleting the rest requires offset === MAX_NOTES_PER_USER; the `+ 1` skips one extra note so the cap is effectively 201."
+            }
+        },
+        {
+            "id": "trial-dedup-composite-key:save-dedup-composite-key#2",
+            "arm": "r2-candidate",
+            "label": "match",
+            "note": "The finding describes exactly the labeled defect (dedup keyed on Body alone, dropping distinct Kinds); the mechanism regexes miss its word order.",
+            "spec": {
+                "key": "save-dedup-composite-key",
+                "path": "services/notes/save.go",
+                "mechanism": [
+                    "key(s|ed)? (the )?(dedup|seen|duplicate).{0,20} on (note\\.)?Body (alone|only)",
+                    "ignor(es?|ing) (note\\.)?Kind",
+                    "(same|identical|shared?) Body.{0,40}(different|distinct|another) [Kk]ind",
+                    "composite.{0,20}(key|identity)",
+                    "(dedup|duplicate check).{0,40}(drops?|skips?|suppress).{0,40}(summary|kind)"
+                ]
+            },
+            "candidate": {
+                "path": "services/notes/save.go",
+                "line": 32,
+                "failure_scenario": "A user already has a note {Kind:\"note\", Body:\"X\"}; SaveNotes is called with a generated {Kind:\"summary\", Body:\"X\"} — because the dedup key is Body alone, seen[\"X\"] is already true, the summary is skipped and never stored, silently losing a legitimately distinct note.",
+                "model_authored_prose": "Dedup key uses Body only, collapsing notes of different Kind store.go documents that Kind distinguishes note types and that \"notes of different kinds may share a Body\" (they are distinct entities readers select on Kind). Keying the dedup on Body alone — plus the Query on lines 23-26 omitting Kind, so `existing` spans all kinds — makes a new note of a different Kind look like a duplicate and be dropped. This defect is introduced by this change. Include Kind in both the read filter and the seen-key."
+            }
+        },
+        {
+            "id": "golden-retention-lifecycle-2:retention-dedup-window-untested#3",
+            "arm": "r3-baseline",
+            "label": "mismatch",
+            "note": "The accepted finding is the cap off-by-one at retention.ts:38; the spec labels the dedup window having no test. Different defect, same file.",
+            "spec": {
+                "key": "retention-dedup-window-untested",
+                "path": "src/notes/retention.ts",
+                "mechanism": [
+                    "window.*(untested|no test)|no test.*window",
+                    "DEDUP_WINDOW",
+                    "boundary"
+                ]
+            },
+            "candidate": {
+                "path": "src/notes/retention.ts",
+                "line": 38,
+                "failure_scenario": "A user accumulates exactly 201 notes; because offset skips MAX_NOTES_PER_USER + 1 = 201 rows before selecting stale ones, prune finds nothing and the user retains 201 notes, one above the documented hard cap of 200.",
+                "model_authored_prose": "Off-by-one: prune keeps MAX_NOTES_PER_USER + 1 notes With orderDesc newest-first, offset N keeps the N newest and deletes the rest; to enforce a cap of 200 the offset should be MAX_NOTES_PER_USER, not +1. Introduced by this change."
+            }
+        },
+        {
+            "id": "trial-amplified-default-limit:digest-amplified-default-limit#1",
+            "arm": "r3-baseline",
+            "label": "match",
+            "note": "The finding describes exactly the labeled defect (dropping Limit truncates the digest to the store default of 1).",
+            "spec": {
+                "key": "digest-amplified-default-limit",
+                "path": "services/notes/digest.go",
+                "mechanism": [
+                    "remov(e[sd]?|al|ing).{0,40}[Ll]imit",
+                    "default.{0,40}(limit.{0,12}(of )?(one|1)|(one|1|single) (row|note|result))",
+                    "(digest|summar(y|ies)).{0,60}(one|1|single) (note|row|result)",
+                    "amplif|pre-?existing|predates|already (there|present|defaulted)",
+                    "not (a )?redundan|behavio(r|ur) change|does not preserve"
+                ]
+            },
+            "candidate": {
+                "path": "services/notes/digest.go",
+                "line": 24,
+                "failure_scenario": "For any user with several summary notes, BuildDigest now returns only the single newest summary (Limit defaults to 1) instead of the intended 5, so the home digest is truncated to one line.",
+                "model_authored_prose": "Dropping Limit: digestSize makes the digest fetch 1 summary, not 5 This defect is introduced by this change. Per store.go's own doc (lines 27-31), a zero/unset Query.Limit means 1 (the store default), NOT unlimited, so Kind and Limit are orthogonal — Kind selects only summaries but does not control the row count. The PR description's premise that the Limit 'duplicated what the query narrows anyway' is incorrect; the sibling RecentPins still passes Limit: digestSize for exactly this reason, confirming the cap is load-bearing."
+            }
+        },
+        {
+            "id": "trial-dedup-composite-key:save-dedup-composite-key#3",
+            "arm": "r3-baseline",
+            "label": "match",
+            "note": "The finding describes exactly the labeled defect (dedup keyed on Body alone, dropping distinct Kinds); the mechanism regexes miss its word order.",
+            "spec": {
+                "key": "save-dedup-composite-key",
+                "path": "services/notes/save.go",
+                "mechanism": [
+                    "key(s|ed)? (the )?(dedup|seen|duplicate).{0,20} on (note\\.)?Body (alone|only)",
+                    "ignor(es?|ing) (note\\.)?Kind",
+                    "(same|identical|shared?) Body.{0,40}(different|distinct|another) [Kk]ind",
+                    "composite.{0,20}(key|identity)",
+                    "(dedup|duplicate check).{0,40}(drops?|skips?|suppress).{0,40}(summary|kind)"
+                ]
+            },
+            "candidate": {
+                "path": "services/notes/save.go",
+                "line": 32,
+                "failure_scenario": "A user already has a note {Kind:\"summary\", Body:\"chapter three\"}; they then save {Kind:\"note\", Body:\"chapter three\"}, and it is silently skipped and never stored even though it is a legitimately distinct note.",
+                "model_authored_prose": "Dedup keys on Body alone, dropping distinct notes that share a Body across Kinds store.go documents that Kind distinguishes notes and that \"notes of different kinds may share a Body\", so the identity of a note is (Kind, Body), not Body alone. The dedup query (lines 23-26) omits Kind and the seen map (lines 32/36/39) keys only on note.Body, so an incoming note whose Body collides with an existing/earlier note of a different Kind is silently discarded — user data loss with no error returned. This is introduced by this change (the file is new)."
+            }
+        },
+        {
+            "id": "incident-money-rounding:money-fp-rounding-1#1",
+            "arm": "r3-candidate",
+            "label": "match",
+            "note": "The finding describes exactly the labeled defect (integer cents converted to float dollars, rounding drift).",
+            "spec": {
+                "key": "money-fp-rounding-1",
+                "path": "src/payments/pricing.ts",
+                "mechanism": [
+                    "float(ing)?[- ]?point",
+                    "rounds? (late|once|at the end)",
+                    "drift",
+                    "unitPriceCents / 100"
+                ]
+            },
+            "candidate": {
+                "path": "src/payments/pricing.ts",
+                "line": 33,
+                "failure_scenario": "A single $1.15 item (unitPriceCents=115) with a 10% discount (rate=0.1) should total 104 cents ($1.15*0.9=$1.035 → round to $1.04), but computeCartTotal returns 103 because (115/100)*0.9*100 evaluates to 103.49999999999999 and rounds down.",
+                "model_authored_prose": "Converting integer cents to float dollars introduces a one-cent money-rounding error under discounts Introduced by this change: the old code summed exact integer cents (item.unitPriceCents * item.quantity); the new line 33 divides by 100 to work in dollars, so values like 1.15 are not exactly representable and the final Math.round on line 37 tips the wrong way at half-cent boundaries. I verified with node: correct integer math yields 104 cents but the new impl yields 103, and a sweep over rates {0.05,0.075,0.1,0.125,...} found 1674 mismatched prices under 20000 cents. Keep the subtotal in integer cents and round only after applying the discount."
+            }
+        },
+        {
+            "id": "trial-dedup-composite-key:save-dedup-composite-key#4",
+            "arm": "r3-candidate",
+            "label": "match",
+            "note": "The finding describes exactly the labeled defect (dedup keyed on Body alone, dropping distinct Kinds); the mechanism regexes miss its word order.",
+            "spec": {
+                "key": "save-dedup-composite-key",
+                "path": "services/notes/save.go",
+                "mechanism": [
+                    "key(s|ed)? (the )?(dedup|seen|duplicate).{0,20} on (note\\.)?Body (alone|only)",
+                    "ignor(es?|ing) (note\\.)?Kind",
+                    "(same|identical|shared?) Body.{0,40}(different|distinct|another) [Kk]ind",
+                    "composite.{0,20}(key|identity)",
+                    "(dedup|duplicate check).{0,40}(drops?|skips?|suppress).{0,40}(summary|kind)"
+                ]
+            },
+            "candidate": {
+                "path": "services/notes/save.go",
+                "line": 32,
+                "failure_scenario": "A user already has a generated summary {Kind:\"summary\", Body:\"Photosynthesis converts light to energy\"}; they then save a user-authored note {Kind:\"note\", Body:\"Photosynthesis converts light to energy\"}; the dedup marks it as already-seen by Body and skips it, so the distinct note is silently never stored.",
+                "model_authored_prose": "Dedup keys on Body alone, conflating notes of different Kind store.go documents that Kind distinguishes note types (\"note\" vs \"summary\") and that \"notes of different kinds may share a Body\" — yet seen[] is keyed on note.Body only, and the dedup Query at line 23 sets no Kind, so it loads existing notes of every kind. A new note whose Body matches an existing note of a different kind is dropped. This defect is introduced by this change. The key should be composite over (Kind, Body)."
+            }
+        }
+    ]
+}
