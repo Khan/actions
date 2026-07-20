@@ -28,7 +28,7 @@ export const saveNote = async (db: Db, note: Note): Promise<void> => {
     }
     await db.put(note);
     // Intentionally fire-and-forget: a failing prune must not fail the save.
-    void pruneNotes(db, note.userId);
+    pruneNotes(db, note.userId).catch(() => {});
 };
 
 export const pruneNotes = async (db: Db, userId: string): Promise<void> => {
