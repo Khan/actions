@@ -100,6 +100,33 @@ describe("parseNotified", () => {
         expect(rules).toHaveLength(1);
         expect(rules[0]?.mentions).toEqual(["@Khan/infra"]);
     });
+
+    it("does not treat a leading character-class glob as a section header", () => {
+        // `[Dd]ockerfile` leads with `[` but is a rule, not a header: it (and
+        // every rule after it) must still parse.
+        const {rules} = parseNotified(
+            [
+                "[ON PULL REQUEST]",
+                "[Dd]ockerfile @Khan/infra",
+                "later: src/** @octocat",
+            ].join("\n"),
+        );
+        expect(rules.map((r) => r.mentions)).toEqual([
+            ["@Khan/infra"],
+            ["@octocat"],
+        ]);
+        expect(rules[0]?.patternSource).toBe("[Dd]ockerfile");
+    });
+
+    it("surfaces a warning for an invalid diff-regex body", () => {
+        const {rules, warnings} = parseNotified(
+            '[ON PULL REQUEST]\nbad: "/(unbalanced/" @who\ngood: deploy/** @ok',
+        );
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("invalid regex");
+        // The bad rule is dropped, but a later valid rule still parses.
+        expect(rules.map((r) => r.label)).toEqual(["good"]);
+    });
 });
 
 describe("parseRuleLine", () => {
@@ -177,7 +204,10 @@ describe("globToRegExpSource / matchGlob", () => {
         expect(matchGlob("main.js", "main?(.test).js")).toBe(true);
         expect(matchGlob("main.test.js", "main?(.test).js")).toBe(true);
         expect(matchGlob("main.spec.js", "main?(.test).js")).toBe(false);
-        // Character classes and POSIX classes.
+        // Character classes and POSIX classes (incl. a leading class).
+        expect(matchGlob("Dockerfile", "[Dd]ockerfile")).toBe(true);
+        expect(matchGlob("dockerfile", "[Dd]ockerfile")).toBe(true);
+        expect(matchGlob("Makefile", "[Dd]ockerfile")).toBe(false);
         expect(matchGlob("file-3", "file-[1-5]")).toBe(true);
         expect(matchGlob("file-9", "file-[1-5]")).toBe(false);
         expect(matchGlob("file-7", "file-[[:digit:]]")).toBe(true);
@@ -394,6 +424,17 @@ describe("computeNotifiedResult", () => {
         expect(result.matched).toBe(true);
         expect(result.notifications[0]?.mention).toBe("@Khan/infra-platform");
         expect(result.markdown).toContain("### Notified");
+    });
+
+    it("carries a malformed-rule warning through to the result", () => {
+        // End-to-end: a bad regex body must reach `warnings[]` so Step 7 can
+        // emit a PR `Note:` — not be dropped silently.
+        const result = computeNotifiedResult(
+            '[ON PULL REQUEST]\nbad: "/(unbalanced/" @who\n',
+            {changedPaths: ["a.ts"], fileDiffs: {}},
+        );
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings[0]).toContain("invalid regex");
     });
 });
 

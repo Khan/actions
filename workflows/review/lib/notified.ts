@@ -35,16 +35,19 @@
  * - The remaining `@`-prefixed tokens are the people/teams to notify, verbatim
  *   (a trailing `!`, the REVIEWERS "required" marker, is dropped defensively).
  *
- * The glob dialect is the documented micromatch subset Gerald advertises:
- * `**` (crosses `/`), `*` and `?` (within a segment), `{a,b,c}` brace
- * alternation, `[…]` character classes (ranges and POSIX classes), `(a|b)`
- * groups, and the `?(…) *(…) +(…) @(…)` extglobs. Patterns are anchored at the
- * repo root (micromatch's default), so a leading globstar-plus-slash is written
- * explicitly to match at any depth — matching Gerald, not the router's
- * basename-anywhere gitattributes
- * convention. A pattern that uses an unsupported construct simply fails to
- * match rather than crashing the review: notification degrades to fewer pings,
- * never to a broken run.
+ * The glob dialect is a practical subset of the micromatch dialect Gerald uses,
+ * not a faithful reimplementation of it: `**` (crosses `/`), `*` and `?`
+ * (within a segment), `{a,b,c}` brace alternation, `[…]` character classes
+ * (ranges and POSIX classes), `(a|b)` groups, and the `?(…) *(…) +(…) @(…)`
+ * extglobs. Patterns are anchored at the repo root, so a leading
+ * globstar-plus-slash is written explicitly to match at any depth (matching
+ * Gerald, not the router's basename-anywhere gitattributes convention). Two
+ * deliberate divergences from real micromatch: wildcards here match dotfiles
+ * (micromatch defaults `dot:false`), and `!(…)` negation is unsupported. A rule
+ * that leans on either — or on any other unsupported construct — may match a
+ * slightly different set than Gerald would, but it degrades toward matching and
+ * never crashes the review. A malformed rule (bad regex body, unterminated
+ * quote) is dropped with a warning that Step 7 surfaces as a `Note:` on the PR.
  *
  * ## Delivery note (why the mentions are raw `@` tokens)
  *
@@ -89,6 +92,17 @@ const IGNORE_MARKER = "Everything above this line will be ignored";
 const PR_SECTION = "[ON PULL REQUEST]";
 
 /**
+ * A genuine `[SECTION]` header line (`[ON PULL REQUEST]`, `[ON PUSH WITHOUT PULL
+ * REQUEST]`, …), matched by its all-caps `[WORDS]` shape. This is deliberately
+ * narrower than "starts with `[`": an unlabeled rule whose glob leads with a
+ * character class (`[Dd]ockerfile`, `[1-5]`, `[[:digit:]]`) is a rule, not a
+ * header, and must not end the section or be skipped.
+ */
+const SECTION_HEADER_RE = /^\[[A-Z][A-Z ]*\]/;
+const isSectionHeader = (line: string): boolean =>
+    SECTION_HEADER_RE.test(line.trim());
+
+/**
  * Extract the lines of the `[ON PULL REQUEST]` section: everything after that
  * header (after the ignore marker, if present) up to the next `[SECTION]`
  * header or end of file. Returns an empty array when the section is absent.
@@ -111,7 +125,7 @@ const prSectionLines = (content: string): string[] => {
     }
     const section: string[] = [];
     for (const line of lines.slice(start + 1)) {
-        if (line.trim().startsWith("[")) {
+        if (isSectionHeader(line)) {
             break; // next section header ends this one
         }
         section.push(line);
@@ -154,6 +168,11 @@ export const parseRuleLine = (
             return {warning: `unterminated quoted pattern: ${raw.trim()}`};
         }
         patternSource = rest.slice(1, close);
+        // Validate the regex here so an invalid body surfaces a warning (and a
+        // `Note:` on the PR) rather than being dropped silently at match time.
+        if (compileDiffRegex(patternSource) === null) {
+            return {warning: `invalid regex in NOTIFIED rule: ${raw.trim()}`};
+        }
         remainder = rest.slice(close + 1);
         kind = "regex";
     } else {
@@ -198,7 +217,7 @@ export const parseNotified = (content: string): ParseResult => {
     const warnings: string[] = [];
     for (const rawLine of prSectionLines(content)) {
         const line = rawLine.trim();
-        if (line === "" || line.startsWith("#") || line.startsWith("[")) {
+        if (line === "" || line.startsWith("#") || isSectionHeader(line)) {
             continue;
         }
         const parsed = parseRuleLine(line);
