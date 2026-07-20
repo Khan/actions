@@ -104,20 +104,24 @@ sql-missing-index case read 8/16 for a week because the spec, not the
 reviewer, was wrong).
 
 Hard-won calibration finding (2026-07-20, runs 29763213774 / 29764855482 /
-29765059892 / 29765275168): hand-authored SMALL synthetic cases do not reach
-the 20-80% band. Eight single-defect cases from three different design
-philosophies (removed-behavior, cross-file chain, 13-file churn needle,
-non-idempotent retry, check-then-act race, boundary double-count, and two
-retention/lifecycle mid-band targets), including a hardening pass that
-removed every stated invariant, all calibrated 100% across ~44 identical-arm
-samples on the Opus roster. When a 2-13 file tree fits in one read, the
-correctness reviewer's named procedures reason to the defect reliably;
-subtlety of planting does not move the rate. Author such cases as deliberate
-family tripwires (they still catch regressions and host mustNotFlagSpecs for
-precision), and get discrimination from tree scale and indirection (the
-in-band and floor rows all live in the larger golden/incident trees), from
-production incidents, and from the noise/precision axis. Calibrate every new
-case with an identical-arm `--force-arms` run before claiming a band.
+29765059892 / 29765275168 / 29767404342): hand-authored synthetic cases do
+not reach the 20-80% band at any feasibly authorable size. Nine
+single-defect cases from three design philosophies (removed-behavior,
+cross-file chain, 13-file churn needle, non-idempotent retry, check-then-act
+race, boundary double-count, two retention/lifecycle mid-band targets, and a
+29-file cross-subsystem case whose invariant sits two unchanged hops from
+the diff), including a hardening pass that removed every stated invariant,
+all calibrated 100% across ~56 identical-arm samples on the Opus roster.
+When the relevant context is discoverable at all, the correctness reviewer's
+named procedures reason to the defect reliably; subtlety of planting and
+tree size up to ~30 files do not move the rate. Author synthetics as
+deliberate family tripwires (they still catch regressions and host
+mustNotFlagSpecs for precision). Every case that has ever calibrated in-band
+or at floor derives from REAL material: golden cases minted from human
+review comments and incident repros from production defects, at real-repo
+scale and messiness. Grow recall discrimination from those sources only, and
+calibrate every new case with an identical-arm `--force-arms` run before
+claiming a band.
 
 ## Reading a report
 
