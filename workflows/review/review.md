@@ -1778,15 +1778,21 @@ Do two things in one pass over the files in the list:
    timing makes this line wrong? Look for logic errors (off-by-one, inverted
    conditions, null/undefined access, races, wrong-but-type-checking code);
    security issues (injection, XSS, unsafe deserialization, missing
-   authz/validation, SSRF, path traversal, committed secrets); unbounded reads
-   and accumulation (a query, fetch, or scan that materializes an entire result
-   set whose size grows with user data: a `pageSize: "all"` or missing-LIMIT
-   read, loading a whole table to act on part of it, an unpaginated loop
-   buffering everything before writing; ask what happens at 100x the data, and
-   treat "page or batch it" as the expected shape, so a bounded read that
-   deliberately processes one batch per invocation is the fix, not a further
-   defect); and missing tests for added/changed behavior (except pure docs or
-   formatting).
+   authz/validation, SSRF, path traversal, committed secrets); and missing
+   tests for added/changed behavior (except pure docs or formatting).
+
+   Additionally, for **every query, fetch, or bulk-read call** the diff
+   touches, ask one more question: what bounds the size of the result it
+   materializes? A read sized by user data with no bound (`pageSize: "all"`,
+   a missing LIMIT, fetching an entire set in order to act on part of it, an
+   unpaginated loop buffering everything before acting) is a finding in its
+   own right; ask what happens at 100x the data. "The code needs all the
+   rows to do its job" is the defect restated, not a justification: the
+   expected shape is to page or batch, so a bounded read that deliberately
+   processes one batch per invocation is the fix, never a further defect.
+   Report an unbounded read **even when the same statement carries another
+   defect**; two defects in one query (say, a wrong offset and an unbounded
+   page size) are two findings, each anchored at its own line.
 
    **Removed-behavior audit.** Removed (`-`) lines are in scope, not just added
    ones. For each removed line (or block), name the invariant it enforced: a
