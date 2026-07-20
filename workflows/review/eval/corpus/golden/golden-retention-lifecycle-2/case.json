@@ -6,7 +6,7 @@
         "live"
     ],
     "category": "golden",
-    "description": "Push 2 of the retention lifecycle: a bad partial fix with added bugs, as an open-PR re-review snapshot. The purge and the unbounded prune are properly fixed; the off-by-one is 'fixed' to a different off-by-one (offset MAX+1) so its thread must be KEPT; the test fix is deferred in a reply so its thread must be KEPT; and the new dedup feature plants a fresh blocking defect (a lowercased 8-char prefix key silently drops distinct notes) plus an untested dedup window.",
+    "description": "Push 2 of the retention lifecycle: a bad partial fix with added bugs, as an open-PR re-review snapshot. The purge and the unbounded prune are properly fixed; the off-by-one is 'fixed' to a different off-by-one (offset MAX+1) so its thread must be KEPT; the test fix is deferred in a reply so its thread must be KEPT; and the new dedup feature plants a fresh blocking defect (a lowercased 8-char prefix key silently drops distinct notes) plus an untested dedup window. The fire-and-forget prune still has no rejection handler (carried from push 1, annotated 2026-07-20 from the drift noise pool). The overcorrected off-by-one and the still-vacuous test are deliberately NOT specs: their prior threads are KEPT, so fresh findings there are re-review duplicates, not recall.",
     "changedFiles": [
         {
             "path": "src/notes/purge-user-data.ts",
@@ -107,9 +107,26 @@
                 "key": "retention-dedup-window-untested",
                 "path": "src/notes/retention.ts",
                 "mechanism": [
-                    "window.*(untested|no test)|no test.*window",
+                    "window.{0,60}(untested|no test|not tested|never tested)|no test.{0,60}window",
                     "DEDUP_WINDOW",
-                    "boundary"
+                    "(boundary|edge).{0,60}(window|dedup)|(window|dedup).{0,60}(boundary|edge)",
+                    "dedup.{0,80}(untested|no test|never (tested|exercised|covered|verifie[sd])|not (covered|tested|exercised|verified))|never verifies.{0,60}dedup"
+                ],
+                "altLocations": [
+                    {
+                        "path": "src/notes/retention.test.ts"
+                    }
+                ]
+            },
+            {
+                "key": "retention-prune-unhandled-rejection",
+                "path": "src/notes/retention.ts",
+                "lineStart": 29,
+                "lineEnd": 33,
+                "mechanism": [
+                    "unhandled (promise )?rejection|unhandledRejection",
+                    "no \\.?catch|without (a )?\\.?catch|no rejection handler|neither awaited nor caught",
+                    "crash(es|ed)?.{0,30}process|terminat(es|e|ing).{0,30}process|process (crash|exit)"
                 ]
             }
         ],

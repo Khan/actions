@@ -73,7 +73,10 @@
                     "ignor(es?|ing) (note\\.)?Kind",
                     "(same|identical|shared?) Body.{0,40}(different|distinct|another) [Kk]ind",
                     "composite.{0,20}(key|identity)",
-                    "(dedup|duplicate check).{0,40}(drops?|skips?|suppress).{0,40}(summary|kind)"
+                    "(dedup|duplicate check).{0,40}(drops?|skips?|suppress).{0,40}(summary|kind)",
+                    "seen\\[note\\.Body\\]|dedup key is (the )?Body|key is (the )?Body( alone| only)?|keyed (only )?(by|on) (note\\.)?Body|Body[- ]only|(dedup|duplicate check) (is |uses )?(on |by )?Body alone",
+                    "(same|identical|matching) Body.{0,100}(different|distinct|another|other) [Kk]ind|[Kk]ind.{0,100}(same|identical|matching) Body",
+                    "(summary|generated summary).{0,100}(silently )?(dropped|skipped|suppressed|never (stored|persisted|saved))|(silently )?(dropped|skipped|suppressed).{0,60}(summary|distinct note)"
                 ],
                 "lens": "correctness",
                 "lineStart": 27,

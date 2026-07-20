@@ -6,7 +6,7 @@
         "live"
     ],
     "category": "golden",
-    "description": "Push 1 of the retention lifecycle (sanitized port of a seeded live trial): a per-user note cap with pruning, and note deletion wired into account deletion. Four planted defects: deletion removes at most one note (facade pageSize defaults to 1), the prune offset keeps one note fewer than the cap, the prune query loads the entire result set, and the prune test asserts nothing the cap needs.",
+    "description": "Push 1 of the retention lifecycle (sanitized port of a seeded live trial): a per-user note cap with pruning, and note deletion wired into account deletion. Four planted defects: deletion removes at most one note (facade pageSize defaults to 1), the prune offset keeps one note fewer than the cap, the fire-and-forget prune discards rejections with no handler (an unhandled rejection can crash the process), and the prune test asserts nothing the cap needs. The former retention-unbounded-prune spec (pageSize \"all\" into one deleteMulti) was retired 2026-07-20: the facade documents no batch limit, so the defect was not evidenceable in-tree and read 0% across every drift sample; mutation-retention-batch-delete-limit covers the mechanism with the limit documented.",
     "changedFiles": [
         {
             "path": "src/notes/purge-user-data.ts",
@@ -71,22 +71,24 @@
             "source": "correctness",
             "finding": {
                 "schema_version": 2,
-                "id": "retention-unbounded-prune",
+                "id": "retention-prune-unhandled-rejection",
                 "lens": "correctness",
                 "anchor": {
                     "type": "line",
                     "path": "src/notes/retention.ts",
-                    "line": 17,
+                    "line": 9,
                     "side": "RIGHT"
                 },
                 "severity": "blocking",
-                "confidence": 0.9,
+                "confidence": 0.85,
                 "evidence_trace": [
-                    "src/notes/retention.ts: pageSize \"all\" on the prune query"
+                    "src/notes/retention.ts:9 fires pruneNotes with `void` and no rejection handler",
+                    "db.query/deleteMulti inside pruneNotes can reject on a transient datastore error",
+                    "an unhandled promise rejection terminates the Node process under default settings"
                 ],
-                "failure_scenario": "A user far over the cap triggers prune; pageSize \"all\" loads every stale row into memory in one call, so a large backlog makes prune (and the save that fired it) balloon instead of deleting in bounded batches.",
-                "producing_hunt": "correctness:unbounded-read",
-                "model_authored_prose": "The prune query loads the entire stale result set at once (`pageSize: \"all\"`). Delete in bounded batches so a large backlog cannot balloon a save."
+                "failure_scenario": "A transient datastore error makes pruneNotes reject after a save; the `void`-discarded promise has no .catch, so the rejection is unhandled and crashes the process under Node's default --unhandled-rejections=throw; the opposite of the comment's 'a failing prune must not fail the save'.",
+                "producing_hunt": "correctness:unhandled-rejection",
+                "model_authored_prose": "`void pruneNotes(...)` discards the promise but not its rejection: a failing prune becomes an unhandledRejection and can crash the process. Attach `.catch(() => {})` (or log the error) so the documented fire-and-forget intent actually holds."
             }
         },
         {
@@ -122,7 +124,7 @@
             "verification": "confirmed"
         },
         {
-            "id": "retention-unbounded-prune",
+            "id": "retention-prune-unhandled-rejection",
             "verification": "confirmed"
         },
         {
@@ -136,7 +138,7 @@
         "mustCatch": [
             "retention-purge-limit",
             "retention-cap-off-by-one",
-            "retention-unbounded-prune",
+            "retention-prune-unhandled-rejection",
             "retention-test-asserts-nothing"
         ]
     },
@@ -168,12 +170,14 @@
                 ]
             },
             {
-                "key": "retention-unbounded-prune",
+                "key": "retention-prune-unhandled-rejection",
                 "path": "src/notes/retention.ts",
+                "lineStart": 6,
+                "lineEnd": 10,
                 "mechanism": [
-                    "pageSize.*all",
-                    "entire result|unbounded|all (stale )?rows",
-                    "batch"
+                    "unhandled (promise )?rejection|unhandledRejection",
+                    "no \\.?catch|without (a )?\\.?catch|no rejection handler|neither awaited nor caught",
+                    "crash(es|ed)?.{0,30}process|terminat(es|e|ing).{0,30}process|process (crash|exit)"
                 ]
             },
             {

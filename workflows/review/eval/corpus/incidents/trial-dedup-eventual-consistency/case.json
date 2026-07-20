@@ -6,7 +6,7 @@
         "live"
     ],
     "category": "incident-repro",
-    "description": "Sanitized structural rewrite of a v1.4.0 re-run miss (dedup push): the save path dedups against a read of the user's recent notes, but the store documents Run as eventually consistent, so a duplicate submitted moments after the original (a retry or double-click, the exact traffic dedup exists for) reads a stale set and is stored again. In the re-run the skill auditor investigated this mechanism and declined to report it for want of a quotable skill rule, and no correctness lens ever surfaced it; ground truth here is that a skill-adjacent correctness issue must surface regardless of which lens owns it.",
+    "description": "Sanitized structural rewrite of a v1.4.0 re-run miss (dedup push): the save path dedups against a read of the user's recent notes, but the store documents Run as eventually consistent, so a duplicate submitted moments after the original (a retry or double-click, the exact traffic dedup exists for) reads a stale set and is stored again. In the re-run the skill auditor investigated this mechanism and declined to report it for want of a quotable skill rule, and no correctness lens ever surfaced it; ground truth here is that a skill-adjacent correctness issue must surface regardless of which lens owns it. Revised 2026-07-20: the expected verdict is REQUEST_CHANGES, not APPROVE. The PR's stated purpose is stopping double-submit duplicates, and the eventually consistent read fails for precisely that traffic, so the change does not deliver what it claims; the reviewer blocked it in every drift sample and that judgment is correct.",
     "changedFiles": [
         {
             "path": "services/notes/save.go",
@@ -31,8 +31,8 @@
                     "line": 23,
                     "side": "RIGHT"
                 },
-                "severity": "advisory",
-                "confidence": 0.65,
+                "severity": "blocking",
+                "confidence": 0.7,
                 "evidence_trace": [
                     "services/notes/save.go:23 reads the user's notes to build the dedup set immediately before writing",
                     "services/notes/store.go documents Run as eventually consistent: a note stored by a recent Put can take a short time to become visible",
@@ -45,7 +45,7 @@
         }
     ],
     "expected": {
-        "verdict": "APPROVE",
+        "verdict": "REQUEST_CHANGES",
         "mustCatch": [
             "save-dedup-stale-read"
         ],
