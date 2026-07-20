@@ -559,6 +559,31 @@ describe("renderAggregateMarkdown", () => {
             "| must-catch recall | 100% | 100% | 100% | 0% | 0% |",
         );
     });
+
+    it("relabels the arms and leads with the noise floor on identical-arm pools", () => {
+        const raw = rawReport({
+            baselineRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+            candidateRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+            baselineSha: "a".repeat(64),
+            candidateSha: "a".repeat(64),
+        });
+        const markdown = renderAggregateMarkdown(
+            aggregateSamples(extractSamples("r1", raw)),
+        );
+        // One prompt in both arms: a wobble control, not an A/B. The
+        // baseline/candidate framing would invite reading noise as a result.
+        expect(markdown).toContain(
+            "## Review wobble control: repeat aggregation (identical arms)",
+        );
+        expect(markdown).toContain("run-to-run wobble, not a prompt effect");
+        expect(markdown).toContain("| Case / spec | Arm A | 95% CI | Arm B |");
+        expect(markdown).toContain("| Metric | Arm A | 95% CI | Arm B |");
+        expect(markdown).not.toContain("Baseline");
+        // The bands are the identical-arm pool's product; they render first.
+        expect(markdown.indexOf("### Noise floor")).toBeLessThan(
+            markdown.indexOf("| Case / spec |"),
+        );
+    });
 });
 
 describe("rateStat", () => {

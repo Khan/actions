@@ -12,7 +12,12 @@
 #
 # Template: the 2026-07-10 manual cumulative dispatches (runs 29065968954 /
 # 29065976210 / 29065977160, $42.83 for 3 repeats of both arms), now one
-# dispatch via --repeats. Report-only: the aggregate lands in the job
+# dispatch via --repeats. The corpus has roughly doubled in cost since: the
+# 2026-07-20 run (29724668102) spent $84.33 of its $85 cap and budget-skipped
+# cases, which contaminates the noise-floor bands with case-mix variance
+# (the report warns when this happens). The $120 default is sized to clear
+# the full corpus x3 on both arms with headroom; a capped run degrades the
+# measurement, not just the cost. Report-only: the aggregate lands in the job
 # summary, the artifact, and a visibility PR (below); the adversarial gate
 # still fails the job on a strict-majority regression, which for a
 # main-vs-main run means production itself regressed and someone should look.
@@ -33,7 +38,7 @@ on:
       max_usd:
         description: "Total hard budget across both arms and all repeats"
         required: false
-        default: "85"
+        default: "120"
 
 permissions:
   # write: the report step commits the aggregate under
@@ -60,7 +65,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           REPEATS: ${{ inputs.repeats || '3' }}
-          MAX_USD: ${{ inputs.max_usd || '85' }}
+          MAX_USD: ${{ inputs.max_usd || '120' }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "ANTHROPIC_API_KEY secret not configured; skipping the drift run." >&2

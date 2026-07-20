@@ -624,23 +624,44 @@ const dropNote = (spec: SpecAggregate): string => {
 };
 
 /**
- * The aggregate as a markdown report: a per-case table (spec catch rates and
- * verdict agreement, both arms, Wilson intervals), the pooled rows, and the
- * noise-floor bands when the pool was an identical-arm control.
+ * The aggregate as a markdown report: the noise-floor bands first when the
+ * pool was an identical-arm control (they are that pool's product), then a
+ * per-case table (spec catch rates and verdict agreement, both arms, Wilson
+ * intervals) and the pooled rows.
  */
 export const renderAggregateMarkdown = (report: AggregateReport): string => {
     const {baseline, candidate} = report.arms;
+    // `noiseFloor` is only computed for identical-arm pools (wobble controls
+    // and the weekly drift run), so its presence IS the identical-arms
+    // signal. Those reports relabel the arms: "baseline vs candidate" over
+    // one prompt invites reading wobble as an A/B result, and the arm split
+    // is arbitrary there.
+    const identicalArms = report.noiseFloor !== undefined;
+    const [armALabel, armBLabel] = identicalArms
+        ? ["Arm A", "Arm B"]
+        : ["Baseline", "Candidate"];
+    const [armANote, armBNote] = identicalArms
+        ? ["arm A", "arm B"]
+        : ["base", "cand"];
     const lines = [
-        "## Review live A/B: repeat aggregation",
+        identicalArms
+            ? "## Review wobble control: repeat aggregation (identical arms)"
+            : "## Review live A/B: repeat aggregation",
         "",
         `Pooled ${report.samples} run(s) per arm from: ${report.sources.join(
             ", ",
         )}.`,
-        `Baseline review.md ${baseline.reviewMdShas
-            .map((sha) => sha.slice(0, 12))
-            .join(", ")}; candidate ${candidate.reviewMdShas
-            .map((sha) => sha.slice(0, 12))
-            .join(", ")}.`,
+        identicalArms
+            ? `Every sample ran the same review.md (${baseline.reviewMdShas
+                  .map((sha) => sha.slice(0, 12))
+                  .join(", ")}): the arm split is arbitrary, and every ` +
+              `between-arm delta below is run-to-run wobble, not a prompt ` +
+              `effect.`
+            : `Baseline review.md ${baseline.reviewMdShas
+                  .map((sha) => sha.slice(0, 12))
+                  .join(", ")}; candidate ${candidate.reviewMdShas
+                  .map((sha) => sha.slice(0, 12))
+                  .join(", ")}.`,
         "",
     ];
     if (baseline.reviewMdShas.length > 1 || candidate.reviewMdShas.length > 1) {
@@ -678,8 +699,41 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
         );
     }
 
+    // The noise-floor bands lead when present: on an identical-arm pool
+    // they are the product, and everything below them is the raw material.
+    if (report.noiseFloor !== undefined) {
+        lines.push(
+            "### Noise floor (identical arms: every sample ran the same prompt)",
+            "",
+            `Bands across ${report.noiseFloor.armSamples} arm-samples of one review.md; ` +
+                "any A/B delta inside a band is indistinguishable from " +
+                "run-to-run wobble. Min/max only widen as samples accumulate; " +
+                "mean +/- sd is the band to track week to week.",
+            "",
+            ...(report.noiseFloor.caseAsymmetry
+                ? [
+                      "**WARNING: the samples did not all score the same " +
+                          "case set (budget skips or mixed corpora), so " +
+                          "these bands fold case-mix variance in on top of " +
+                          "run-to-run wobble. Re-run with a budget that " +
+                          "clears the full corpus before trusting them.**",
+                      "",
+                  ]
+                : []),
+            "| Metric | Min | Mean | Max | SD | Spread |",
+            "| --- | --- | --- | --- | --- | --- |",
+            ...Object.entries(report.noiseFloor.bands).map(
+                ([metric, band]) =>
+                    `| ${metric} | ${pct(band.min)} | ${pct(band.mean)} | ${pct(
+                        band.max,
+                    )} | ${pct(band.sd)} | ${pct(band.max - band.min)} |`,
+            ),
+            "",
+        );
+    }
+
     lines.push(
-        "| Case / spec | Baseline | 95% CI | Candidate | 95% CI | Miss classes |",
+        `| Case / spec | ${armALabel} | 95% CI | ${armBLabel} | 95% CI | Miss classes |`,
         "| --- | --- | --- | --- | --- | --- |",
     );
     const caseIds = [
@@ -701,8 +755,12 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
             const b = base?.specs.find((s) => s.specKey === specKey);
             const c = cand?.specs.find((s) => s.specKey === specKey);
             const notes = [
-                ...(b && dropNote(b) !== "" ? [`base: ${dropNote(b)}`] : []),
-                ...(c && dropNote(c) !== "" ? [`cand: ${dropNote(c)}`] : []),
+                ...(b && dropNote(b) !== ""
+                    ? [`${armANote}: ${dropNote(b)}`]
+                    : []),
+                ...(c && dropNote(c) !== ""
+                    ? [`${armBNote}: ${dropNote(c)}`]
+                    : []),
             ];
             lines.push(
                 `| ${caseId}:${specKey} | ${b ? statCell(b.caught) : "n/a"} | ${
@@ -740,7 +798,7 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
         "",
         "### Pooled",
         "",
-        "| Metric | Baseline | 95% CI | Candidate | 95% CI |",
+        `| Metric | ${armALabel} | 95% CI | ${armBLabel} | 95% CI |`,
         "| --- | --- | --- | --- | --- |",
         pooledRow("Must-catch recall", (a) => a.pooled.recall),
         pooledRow("Verdict agreement", (a) => a.pooled.verdictAgreement),
@@ -763,36 +821,6 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
         "",
     );
 
-    if (report.noiseFloor !== undefined) {
-        lines.push(
-            "### Noise floor (identical arms: every sample ran the same prompt)",
-            "",
-            `Bands across ${report.noiseFloor.armSamples} arm-samples of one review.md; ` +
-                "any A/B delta inside a band is indistinguishable from " +
-                "run-to-run wobble. Min/max only widen as samples accumulate; " +
-                "mean +/- sd is the band to track week to week.",
-            "",
-            ...(report.noiseFloor.caseAsymmetry
-                ? [
-                      "**WARNING: the samples did not all score the same " +
-                          "case set (budget skips or mixed corpora), so " +
-                          "these bands fold case-mix variance in on top of " +
-                          "run-to-run wobble. Re-run with a budget that " +
-                          "clears the full corpus before trusting them.**",
-                      "",
-                  ]
-                : []),
-            "| Metric | Min | Mean | Max | SD | Spread |",
-            "| --- | --- | --- | --- | --- | --- |",
-            ...Object.entries(report.noiseFloor.bands).map(
-                ([metric, band]) =>
-                    `| ${metric} | ${pct(band.min)} | ${pct(band.mean)} | ${pct(
-                        band.max,
-                    )} | ${pct(band.sd)} | ${pct(band.max - band.min)} |`,
-            ),
-            "",
-        );
-    }
     return lines.join("\n");
 };
 
