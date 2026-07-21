@@ -163,6 +163,11 @@ describe("each specialist lens definition", () => {
             expect(section).toContain(
                 "{{#runtime-import .github/aw/review/skills.md}}",
             );
+            // The per-lens consumer payload seam: optional, resolves to
+            // nothing when the host repo carries no payload file.
+            expect(section).toContain(
+                `{{#runtime-import? .github/aw/review/lenses/${lens}.md}}`,
+            );
             expect(section).toContain(`\`lens\` is exactly \`${lens}\``);
             expect(section).toContain(
                 "Domain notes for §Bounded investigation",

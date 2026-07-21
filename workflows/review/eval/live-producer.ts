@@ -18,8 +18,11 @@
  *    router's `lensesToSpawn`.
  *  - `{{#runtime-import <path>}}` directives are compile-time inlines of
  *    consumer-repo files. Here they resolve against the case's checkout tree
- *    when the file exists there, else to a fixed "not configured" note, so a
- *    case can opt into a skills index by carrying the file in its tree.
+ *    when the file exists there, so a case can opt into a skills index or a
+ *    lens payload by carrying the file in its tree. A missing optional
+ *    import (`{{#runtime-import? …}}`) resolves to empty exactly as in
+ *    production; a missing required one resolves to a fixed "not
+ *    configured" note where production would fail the run.
  *  - The investigation-cap CLI the prompts invoke is not staged; sub-agents
  *    run with read-only tools and treat the unavailable cap as a denied
  *    budget (the prompt's own fallback: stop investigating, report what you
@@ -201,26 +204,35 @@ const parseReconciliation = (output: string): LiveReconciliation => {
 /* Prompt resolution                                                          */
 /* -------------------------------------------------------------------------- */
 
-const RUNTIME_IMPORT = /\{\{#runtime-import\??\s+([^}\s]+)\s*\}\}/g;
+const RUNTIME_IMPORT = /\{\{#runtime-import(\?)?\s+([^}\s]+)\s*\}\}/g;
 
 const IMPORT_FALLBACK = "(not configured for this eval case)";
 
 /**
  * Inline `{{#runtime-import <path>}}` directives from the case's checkout
- * tree, falling back to a fixed note when the tree does not carry the file.
- * Exported for the A/B runner's reporting (which imports resolved per case).
+ * tree. A missing OPTIONAL import (`{{#runtime-import? …}}`) resolves to the
+ * empty string, matching production (gh-aw's runtime_import.cjs warns and
+ * inlines nothing), so an absent lens payload is behavior-identical to
+ * production. A missing REQUIRED import falls back to a fixed note; this is
+ * the one deliberate deviation (production fails the run), so cases need not
+ * carry every consumer config file. Exported for the A/B runner's reporting
+ * (which imports resolved per case).
  */
 export const resolveRuntimeImports = (
     prompt: string,
     checkoutDir: string,
     fs: Pick<StageFs, "existsSync" | "readFileSync">,
 ): string =>
-    prompt.replace(RUNTIME_IMPORT, (_match, importPath: string) => {
-        const full = `${checkoutDir}/${importPath}`;
-        return fs.existsSync(full)
-            ? fs.readFileSync(full, "utf8")
-            : IMPORT_FALLBACK;
-    });
+    prompt.replace(
+        RUNTIME_IMPORT,
+        (_match, optional: string | undefined, importPath: string) => {
+            const full = `${checkoutDir}/${importPath}`;
+            if (fs.existsSync(full)) {
+                return fs.readFileSync(full, "utf8");
+            }
+            return optional ? "" : IMPORT_FALLBACK;
+        },
+    );
 
 /* -------------------------------------------------------------------------- */
 /* Output parsing: the three sub-agent contracts -> RecordedFinding           */
