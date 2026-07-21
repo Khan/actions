@@ -148,79 +148,73 @@ describe("parseRuleLine", () => {
         const rule = parseRuleLine('"/a:b/m" @who');
         expect(rule).toMatchObject({kind: "regex", patternSource: "/a:b/m"});
     });
+
+    it("ignores @mentions inside a trailing # comment", () => {
+        const rule = parseRuleLine(
+            "src/** @octocat # also ping @not-a-real-mention later",
+        );
+        expect(rule).toMatchObject({mentions: ["@octocat"]});
+    });
 });
 
-describe("globToRegExpSource / matchGlob", () => {
-    it("matches the real webapp glob rules", () => {
-        expect(matchGlob("deploy/prod.yaml", "deploy/**")).toBe(true);
-        expect(matchGlob("deploy/a/b/c.yaml", "deploy/**")).toBe(true);
-        expect(matchGlob("services/deploy.yaml", "deploy/**")).toBe(false);
-
-        expect(
-            matchGlob("services/assignments/x.graphql", "services/*.graphql"),
-        ).toBe(false); // * does not cross /
-        expect(matchGlob("services/x.graphql", "services/*.graphql")).toBe(
-            true,
-        );
-        expect(matchGlob(".agents/skills/a.md", ".agents/skills/**")).toBe(
-            true,
-        );
-    });
-
-    it("expands {a,b,c} brace alternation", () => {
-        for (const name of ["index", "ka-cron", "pubsub"]) {
-            expect(
-                matchGlob(`${name}.yaml`, "{index,ka-cron,pubsub}.yaml"),
-            ).toBe(true);
-        }
-        expect(matchGlob("other.yaml", "{index,ka-cron,pubsub}.yaml")).toBe(
-            false,
-        );
-        // A brace group is anchored: it does not match at a nested depth.
-        expect(matchGlob("dir/index.yaml", "{index,ka-cron,pubsub}.yaml")).toBe(
-            false,
-        );
-    });
-
-    it("anchors at the repo root (** for any-depth, like Gerald)", () => {
-        expect(matchGlob("a.js", "*.js")).toBe(true);
-        expect(matchGlob("src/a.js", "*.js")).toBe(false); // anchored
-        expect(matchGlob("src/a.js", "**/*.js")).toBe(true);
-        expect(matchGlob("a.js", "**/*.js")).toBe(true); // **/ optional at root
-        expect(matchGlob("src/deep/a.js", "**/*.js")).toBe(true);
-    });
-
-    it("treats . as a literal, not a wildcard", () => {
-        expect(matchGlob("axjs", "*.js")).toBe(false);
-        expect(matchGlob("a.js", "*.js")).toBe(true);
-    });
-
-    it("supports the documented micromatch extras", () => {
-        // Regex-group alternation and brace alternation are equivalent.
-        expect(matchGlob("a.txt", "**/*.(js|txt|yml)")).toBe(true);
-        expect(matchGlob("a.md", "**/*.(js|txt|yml)")).toBe(false);
-        expect(matchGlob("a.yml", "**/*.{js,txt,yml}")).toBe(true);
-        // `?(…)` extglob: optional group.
-        expect(matchGlob("main.js", "main?(.test).js")).toBe(true);
-        expect(matchGlob("main.test.js", "main?(.test).js")).toBe(true);
-        expect(matchGlob("main.spec.js", "main?(.test).js")).toBe(false);
+describe("matchGlob", () => {
+    // A malformed glob never throws: it degrades to a literal (so an unbalanced
+    // `[` matches only the literal text), which the last rows assert. If any row
+    // caused matchGlob to throw, the case would fail rather than return a value.
+    it.each<[string, string, boolean]>([
+        // Real webapp glob rules.
+        ["deploy/**", "deploy/prod.yaml", true],
+        ["deploy/**", "deploy/a/b/c.yaml", true],
+        ["deploy/**", "services/deploy.yaml", false],
+        ["services/*.graphql", "services/assignments/x.graphql", false], // * ⊄ /
+        ["services/*.graphql", "services/x.graphql", true],
+        [".agents/skills/**", ".agents/skills/a.md", true],
+        // {a,b,c} brace alternation (anchored: no match at a nested depth).
+        ["{index,ka-cron,pubsub}.yaml", "index.yaml", true],
+        ["{index,ka-cron,pubsub}.yaml", "ka-cron.yaml", true],
+        ["{index,ka-cron,pubsub}.yaml", "pubsub.yaml", true],
+        ["{index,ka-cron,pubsub}.yaml", "other.yaml", false],
+        ["{index,ka-cron,pubsub}.yaml", "dir/index.yaml", false],
+        // Anchored at the repo root; **/ is written for any depth (like Gerald).
+        ["*.js", "a.js", true],
+        ["*.js", "src/a.js", false],
+        ["**/*.js", "a.js", true], // **/ optional at root
+        ["**/*.js", "src/a.js", true],
+        ["**/*.js", "src/deep/a.js", true],
+        // `.` is a literal, not a wildcard.
+        ["*.js", "axjs", false],
+        // Regex-group and brace alternation are equivalent.
+        ["**/*.(js|txt|yml)", "a.txt", true],
+        ["**/*.(js|txt|yml)", "a.md", false],
+        ["**/*.{js,txt,yml}", "a.yml", true],
+        // Extglobs: ?(…) optional, +(…) one-or-more, *(…) zero-or-more, @(…) one.
+        ["main?(.test).js", "main.js", true],
+        ["main?(.test).js", "main.test.js", true],
+        ["main?(.test).js", "main.spec.js", false],
+        ["+(a).js", "aaa.js", true],
+        ["+(a).js", ".js", false],
+        ["*(a).js", ".js", true],
+        ["@(a|b).js", "a.js", true],
+        ["@(a|b).js", "ab.js", false],
         // Character classes and POSIX classes (incl. a leading class).
-        expect(matchGlob("Dockerfile", "[Dd]ockerfile")).toBe(true);
-        expect(matchGlob("dockerfile", "[Dd]ockerfile")).toBe(true);
-        expect(matchGlob("Makefile", "[Dd]ockerfile")).toBe(false);
-        expect(matchGlob("file-3", "file-[1-5]")).toBe(true);
-        expect(matchGlob("file-9", "file-[1-5]")).toBe(false);
-        expect(matchGlob("file-7", "file-[[:digit:]]")).toBe(true);
-        expect(matchGlob("file-x", "file-[[:digit:]]")).toBe(false);
+        ["[Dd]ockerfile", "Dockerfile", true],
+        ["[Dd]ockerfile", "dockerfile", true],
+        ["[Dd]ockerfile", "Makefile", false],
+        ["file-[1-5]", "file-3", true],
+        ["file-[1-5]", "file-9", false],
+        ["file-[[:digit:]]", "file-7", true],
+        ["file-[[:digit:]]", "file-x", false],
         // Basename-substring style.
-        expect(matchGlob("src/my-gerald-tool.ts", "**/*gerald*")).toBe(true);
+        ["**/*gerald*", "src/my-gerald-tool.ts", true],
+        // Malformed glob: degrades to a literal, never throws.
+        ["[unterminated", "[unterminated", true],
+        ["[unterminated", "a", false],
+    ])("%j matches %j => %s", (pattern, path, expected) => {
+        expect(matchGlob(path, pattern)).toBe(expected);
     });
+});
 
-    it("never throws on a malformed glob (matches nothing)", () => {
-        expect(() => matchGlob("a", "[unterminated")).not.toThrow();
-        expect(matchGlob("[unterminated", "[unterminated")).toBe(true);
-    });
-
+describe("globToRegExpSource", () => {
     it("produces the expected regex source for a globstar", () => {
         expect(globToRegExpSource("deploy/**")).toBe("deploy/.*");
         expect(globToRegExpSource("**/*.js")).toBe("(?:.*/)?[^/]*\\.js");
@@ -349,17 +343,23 @@ describe("computeNotifications", () => {
     });
 });
 
-describe("renderNotifiedMarkdown / notifiedSignature", () => {
+describe("renderNotifiedMarkdown", () => {
     it("returns an empty string when nothing matched", () => {
         expect(renderNotifiedMarkdown([])).toBe("");
     });
 
     it("renders raw @mentions with their labels and files", () => {
-        const md = renderNotifiedMarkdown(computeNotifications(RULES, CHANGES));
-        expect(md).toContain("### Notified");
-        expect(md).toContain("- @infra — **deploy**: `deploy/prod.yaml`");
-        expect(md).toContain("**model**: `services/user.go`");
-        expect(md).toContain("- @data — **model**: `services/user.go`");
+        // Full block as one snapshot, so a reader sees the exact posted shape.
+        expect(renderNotifiedMarkdown(computeNotifications(RULES, CHANGES)))
+            .toMatchInlineSnapshot(`
+          "### Notified
+
+          These people and teams asked (via \`.github/NOTIFIED\`) to be notified of the changes below:
+
+          - @data — **model**: \`services/user.go\`
+          - @infra — **deploy**: \`deploy/prod.yaml\`; **model**: \`services/user.go\`
+          "
+        `);
     });
 
     it("caps a long file list with an overflow tail", () => {
@@ -376,7 +376,9 @@ describe("renderNotifiedMarkdown / notifiedSignature", () => {
         const md = renderNotifiedMarkdown(computeNotifications(rules, changes));
         expect(md).toContain("(+5 more)");
     });
+});
 
+describe("notifiedSignature", () => {
     it("produces a signature that changes with the matched set", () => {
         const full = notifiedSignature(computeNotifications(RULES, CHANGES));
         const fewer = notifiedSignature(
@@ -474,12 +476,42 @@ describe("runCli", () => {
         });
 
         const result = runCli(fs, "/repo");
-        expect(result.present).toBe(true);
-        expect(result.matched).toBe(true);
-        expect(result.notifications[0]?.files).toEqual(["deploy/prod.yaml"]);
+        // Snapshot the whole result so the shape review.md consumes is visible
+        // at a glance (also proves the deploy/** glob matched, src/ did not).
+        expect(result).toMatchInlineSnapshot(`
+          {
+            "markdown": "### Notified
 
-        const onDisk = JSON.parse(written[`${REVIEW_DIR}/notified.json`] ?? "");
-        expect(onDisk.markdown).toContain("@Khan/infra-platform");
+          These people and teams asked (via \`.github/NOTIFIED\`) to be notified of the changes below:
+
+          - @Khan/infra-platform — **deploy**: \`deploy/prod.yaml\`
+          ",
+            "matched": true,
+            "notifications": [
+              {
+                "entries": [
+                  {
+                    "files": [
+                      "deploy/prod.yaml",
+                    ],
+                    "label": "deploy",
+                  },
+                ],
+                "files": [
+                  "deploy/prod.yaml",
+                ],
+                "mention": "@Khan/infra-platform",
+              },
+            ],
+            "present": true,
+            "signature": "@Khan/infra-platform=deploy:deploy/prod.yaml",
+            "warnings": [],
+          }
+        `);
+        // The same object is what gets persisted to notified.json for Step 7.
+        expect(
+            JSON.parse(written[`${REVIEW_DIR}/notified.json`] ?? "null"),
+        ).toEqual(result);
     });
 
     it("handles a missing NOTIFIED file", () => {

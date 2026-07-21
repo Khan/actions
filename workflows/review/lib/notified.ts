@@ -60,7 +60,7 @@
  * {@link NotifiedResult.signature} changes (Step 7 idempotency).
  */
 
-import {splitUnifiedDiff} from "./diff.ts";
+import {splitUnifiedDiff} from "./diff";
 
 /* -------------------------------------------------------------------------- */
 /* Parsing                                                                    */

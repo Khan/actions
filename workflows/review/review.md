@@ -1345,13 +1345,15 @@ whether to post, run the notified CLI from the shared review lib checkout, once:
 cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
   npx -y tsx workflows/review/lib/notified.ts
 ```
-It writes `/tmp/gh-aw/review/notified.json`:
-`{present, matched, warnings, notifications, signature, markdown}`. All the
-matching lives in the script — you never parse `.github/NOTIFIED` yourself. When
-`matched` is true, `markdown` is the ready-to-insert `### Notified` block,
-`notifications[]` names each `@mention` with the rule label and the changed files
-it matched, and `signature` is the canonical notification set for the idempotency
-key below.
+All the matching lives in the script — you never parse `.github/NOTIFIED`
+yourself. It writes `/tmp/gh-aw/review/notified.json` with these fields:
+- `present` — whether the reviewed repo has a `.github/NOTIFIED` file at all.
+- `matched` — whether any rule matched, i.e. whether there is a section to add.
+- `markdown` — the ready-to-insert `### Notified` block (empty when nothing matched).
+- `notifications[]` — each notified `@mention` with its rule label and the changed
+  files it matched.
+- `signature` — the canonical notification set, for the idempotency key below.
+- `warnings[]` — malformed-rule diagnostics to surface as `Note:` lines (Step 6).
 
 ### When to post (and when not to)
 
@@ -1481,17 +1483,18 @@ fully explained by a common pattern above:
 - Put the common patterns (when Step 3 found any) below the team sections under a
   smaller `### Common patterns` header.
 - **Notified (`.github/NOTIFIED` matches).** When `notified.json` `matched` is
-  `true`, insert its `markdown` field **verbatim** as the `### Notified` section,
-  placed after "Common patterns" and before "Excluded from review". The script
-  has already rendered the whole section — each notified `@mention` with its rule
-  label and the changed files it matched — so paste it in as-is; do not rebuild,
-  reword, reorder, or drop any entry. The mentions are intentionally raw `@`
-  tokens (not the bare `<summary>` slugs used for teams) precisely so GitHub
-  notifies the matched people; the substance-signature idempotency above is what
-  keeps a repost from re-pinging them when the match set has not changed. Omit the
-  section entirely when `matched` is `false`. If `warnings` is non-empty, also add
-  one `Note:` line per warning to the review body (Step 6) so a malformed rule is
-  visible on the PR, never silent.
+  `true`, insert its `markdown` field as the `### Notified` section, after "Common
+  patterns" and before "Excluded from review". Specifically:
+  - Paste `markdown` in **verbatim** — the script has already rendered the whole
+    section (each `@mention` with its rule label and matched files). Do not
+    rebuild, reword, reorder, or drop any entry.
+  - The mentions are intentionally raw `@` tokens (not the bare `<summary>` slugs
+    used for teams) so GitHub notifies the matched people; the substance-signature
+    idempotency above is what keeps a repost from re-pinging them when the match
+    set has not changed.
+  - Omit the section entirely when `matched` is `false`.
+  - If `warnings` is non-empty, add one `Note:` line per warning to the review
+    body (Step 6) so a malformed rule is visible on the PR, never silent.
 - **Excluded from review (`pattern-triage` exclusions).** Below the patterns, add a
   single collapsed `<details>` block titled `<summary><strong>Excluded from review</strong>
   (N files)</summary>` listing the changed files `pattern-triage` dropped from
