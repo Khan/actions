@@ -34,9 +34,12 @@ on:
         # Sized from the 2026-07-20 run (29724668102): $84.33 for 103
         # case-arm-runs (~$0.82 each) with the tail of the corpus
         # budget-skipped, which also contaminated the noise-floor bands
-        # (asymmetric case mix). The 21-case corpus needs 21 x 3 repeats x 2
-        # arms = 126 case-arm-runs, ~$103; 120 clears it with headroom while
-        # staying a hard stop against runaways. Repeats stay at 3: they are
+        # (asymmetric case mix). The 23-case corpus (both new mutation cases
+        # are live-tagged) needs 23 x 3 repeats x 2 arms = 138 case-arm-runs,
+        # ~$113; 120 clears it while staying a hard stop against runaways,
+        # though the headroom is thin: the ~$0.82/run mean comes from a run
+        # whose tail was budget-skipped, so it may understate. Repeats stay
+        # at 3: they are
         # the power axis, and per-case repeat tiering would make every
         # noise-floor sample a different case mix.
         description: "Total hard budget across both arms and all repeats"

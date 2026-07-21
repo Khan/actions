@@ -110,7 +110,8 @@
                     "window.{0,60}(untested|no test|not tested|never tested)|no test.{0,60}window",
                     "DEDUP_WINDOW",
                     "(boundary|edge).{0,60}(window|dedup)|(window|dedup).{0,60}(boundary|edge)",
-                    "dedup.{0,80}(untested|no test|never (tested|exercised|covered|verifie[sd])|not (covered|tested|exercised|verified))|never verifies.{0,60}dedup"
+                    "dedup.{0,80}(untested|no test|never (tested|exercised|covered|verifie[sd])|not (covered|tested|exercised|verified))|never verifies.{0,60}dedup",
+                    "(test|coverage).{0,80}dedup"
                 ],
                 "altLocations": [
                     {

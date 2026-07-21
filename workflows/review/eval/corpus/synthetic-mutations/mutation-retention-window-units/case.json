@@ -1,7 +1,7 @@
 {
     "id": "mutation-retention-window-units",
     "tags": [
-        "mutation",
+        "synthetic-mutation",
         "retention-lifecycle",
         "live"
     ],

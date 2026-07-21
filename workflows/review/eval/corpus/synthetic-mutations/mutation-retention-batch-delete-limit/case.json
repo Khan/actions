@@ -1,12 +1,12 @@
 {
     "id": "mutation-retention-batch-delete-limit",
     "tags": [
-        "mutation",
+        "synthetic-mutation",
         "retention-lifecycle",
         "live"
     ],
     "category": "synthetic-mutation",
-    "description": "Easier-graded variant of the retired retention-unbounded-prune spec (0% across every 2026-07-20 drift sample: the batch limit was not evidenceable in-tree). Here the evidence exists: the unchanged purge-user-data.ts documents that the datastore rejects deleteMulti batches over 100 keys and chunks accordingly, while the new prune passes every stale id (a launch backlog can be hundreds) to one deleteMulti call. The rejection is swallowed by the documented fire-and-forget catch, so the cap silently never engages for exactly the over-cap users it targets, and the backlog test passes only because the in-memory fake enforces no batch limit. Multi-file retention/lifecycle reasoning, the reviewer's demonstrated weak class; graded for the 20-80 percent band.",
+    "description": "Easier-graded variant of the retired retention-unbounded-prune spec (0% across every 2026-07-20 drift sample: the batch limit was not evidenceable in-tree). Here the evidence exists: the unchanged purge-user-data.ts documents that the datastore rejects deleteMulti batches over 100 keys and chunks accordingly, while the new prune passes every stale id (a launch backlog can be hundreds) to one deleteMulti call. The rejection is swallowed by the documented fire-and-forget catch, so the cap silently never engages for exactly the over-cap users it targets, and the backlog test passes only because the in-memory fake enforces no batch limit. Multi-file retention/lifecycle reasoning, the reviewer's demonstrated weak class; graded for the 20-80 percent band. The mustCatch window deliberately covers the fire-and-forget .catch line (it is part of the defect's causal chain, and mustCatch claims run before the swallow trap), so a correct diagnosis anchored there scores as a catch, not a false flag; the trap only claims findings that condemn the documented fire-and-forget itself without the batch-limit mechanism.",
     "changedFiles": [
         {
             "path": "src/notes/retention.ts",
@@ -75,7 +75,7 @@
             {
                 "key": "retention-batch-delete-limit",
                 "path": "src/notes/retention.ts",
-                "lineStart": 13,
+                "lineStart": 6,
                 "lineEnd": 22,
                 "mechanism": [
                     "100|DELETE_CHUNK|chunk(ed|ing|s)?",
