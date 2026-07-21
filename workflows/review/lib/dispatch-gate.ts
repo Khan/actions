@@ -1,0 +1,570 @@
+/**
+ * The dispatch-conformance gate: a review verdict cannot leave the agent job
+ * unless the sub-agent outputs it claims to summarize actually exist.
+ *
+ * The production failure this module exists for (the review-v1.7.0 acceptance
+ * trial, Khan/webapp#40992, run 29865480728): the orchestrator ran no router,
+ * dispatched zero sub-agents, did no claim validation, reviewed the diff
+ * itself, labeled its audit record "streamlined direct review", and submitted
+ * a REQUEST_CHANGES whose body disclosed none of it. Nothing on the PR
+ * distinguishes such a run from a conforming one (the previous day's review
+ * of Khan/actions#272 dispatched correctly and disclosed its sheds), the eval
+ * harness dispatches sub-agents from a script so it can never observe
+ * protocol fidelity, and an orchestrator that skips dispatch also skips
+ * prompt-mandated self-checks; code at the submission chokepoint is the only
+ * lever. Same design family as v1.6.1's non-empty-body rule.
+ *
+ * Where it runs: a gh-aw `post-steps:` step in the agent job. gh-aw v0.81.6
+ * compiles post-steps after "Ingest agent output" (which finalizes
+ * `/tmp/gh-aw/agent_output.json`, the validated safe-output queue) and before
+ * "Upload agent artifacts" (which ships that file to the `safe_outputs` job,
+ * the separate job that actually calls the GitHub API). The gate therefore
+ * sees the exact queue the API-calling job will execute, plus the real
+ * `/tmp/gh-aw/review/` staging on the same runner, and a rewrite here BLOCKS
+ * the submission rather than detecting it after the fact.
+ *
+ * What it enforces (per re-review depth; `rereview-plan.json` is the staged
+ * source of truth, missing plan defaults to `full`, the strictest):
+ *
+ *   1. A queued review verdict requires `out/correctness-reviewer.json` to
+ *      exist at every depth that dispatches the correctness pass (`full`,
+ *      `scoped`, `flip-gated`). The one waiver: `pattern-triage` returned an
+ *      empty `reviewFiles` (nothing needed review), proven by its own staged
+ *      output. `fast` dispatches no finding producers, so it carries no
+ *      correctness requirement.
+ *   2. Queued inline review comments require a parseable
+ *      `out/claim-validator.json`, or the disclosed skipped-dimension note
+ *      ("claim validation not assessed this run ...") in the verdict body
+ *      (the #258 shed rules allow shedding the validator near a hard
+ *      ceiling, but never silently).
+ *   3. Planned-but-undispatched reviewers must be disclosed: every name in
+ *      `routing.json`'s `enabledReviewers`/`lensesToSpawn` with no `out/`
+ *      file needs its "not assessed this run" note in the verdict body.
+ *
+ * Violation behavior: strip every posting/mutating item from the queue
+ * (keeping the diagnostics and the `out/` artifact upload so the evidence
+ * still lands), preserve the original queue beside the agent artifact, and
+ * exit non-zero, which fails the agent job and files gh-aw's failure issue.
+ * A violated run is a red run that posts nothing, never a silently-passing
+ * one. Existence is the contract, not authenticity: the gate proves the
+ * orchestrator staged reviewer outputs, not that a model produced them
+ * (script-driven dispatch, the next migration slice, closes that residual).
+ *
+ * Deliberately NOT enforced, to keep the false-positive rate at zero:
+ * `thread-reconciler` and `skill-auditor` existence (production shows a
+ * conforming first review with no prior threads dispatches no reconciler,
+ * e.g. Khan/actions#272), `pattern-triage` itself, and the router having run
+ * (a routerless freelancing run is already caught by rule 1).
+ *
+ * Determinism boundary: pure functions of the queued items and the staged
+ * files; no model call, no clock, no prose about the code under review.
+ */
+
+/* -------------------------------------------------------------------------- */
+/* Types                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/** One queued safe-output item (only the fields the gate reads are typed). */
+export type SafeOutputItem = {
+    type?: unknown;
+    event?: unknown;
+    body?: unknown;
+} & Record<string, unknown>;
+
+/** Mirrors `ReReviewDepth` (rereview-mode.ts); parsed defensively here. */
+export type DispatchGateDepth = "full" | "scoped" | "flip-gated" | "fast";
+
+const GATE_DEPTHS: readonly DispatchGateDepth[] = [
+    "full",
+    "scoped",
+    "flip-gated",
+    "fast",
+];
+
+export type DispatchGateViolationCode =
+    | "correctness-missing"
+    | "correctness-unparseable-undisclosed"
+    | "validator-missing-with-findings"
+    | "shed-undisclosed";
+
+export type DispatchGateViolation = {
+    /** Fixed-format code (never prose). */
+    code: DispatchGateViolationCode;
+    /** The reviewer / lens / dimension the violation is about. */
+    dimension: string;
+    /** One sentence for the step log and the failure issue. */
+    detail: string;
+};
+
+export type DispatchGateEvaluation = {
+    conformant: boolean;
+    violations: DispatchGateViolation[];
+    /** The queued verdict event; null when no review submission is queued. */
+    verdictEvent: string | null;
+    /** Queued inline review comment count. */
+    commentCount: number;
+    /** The depth the rules ran under (defaulted to `full` when unstaged). */
+    depth: DispatchGateDepth;
+    /** Non-blocking observations (unstaged inputs, applied waivers). */
+    notes: string[];
+};
+
+export type DispatchGateInput = {
+    /** The validated safe-output queue (`agent_output.json` `items`). */
+    items: SafeOutputItem[];
+    /** Parsed `rereview-plan.json`; undefined when not staged. */
+    plan: unknown;
+    /** Parsed `routing.json`; undefined when not staged. */
+    routing: unknown;
+    /** `out/` basename → raw file text, e.g. `correctness-reviewer.json`. */
+    outFiles: Record<string, string>;
+};
+
+/* -------------------------------------------------------------------------- */
+/* Evaluation                                                                 */
+/* -------------------------------------------------------------------------- */
+
+const SUBMIT_TYPE = "submit_pull_request_review";
+const COMMENT_TYPE = "create_pull_request_review_comment";
+
+const CORRECTNESS_OUT = "correctness-reviewer.json";
+const VALIDATOR_OUT = "claim-validator.json";
+const TRIAGE_OUT = "pattern-triage.json";
+
+/** The Step 6 skipped-dimension phrasing shared by both note wordings. */
+const NOT_ASSESSED_PHRASE = "not assessed this run";
+
+const parseJson = (text: string): unknown => {
+    try {
+        return JSON.parse(text);
+    } catch {
+        return undefined;
+    }
+};
+
+/**
+ * Lowercase and collapse the separator variants (`-`, `_`, `/`) note authors
+ * use, so `test-adequacy` matches "test adequacy" and `security-auth`
+ * matches "security/auth".
+ */
+const normalize = (text: string): string =>
+    text
+        .toLowerCase()
+        .replace(/[-_/]+/g, " ")
+        .replace(/\s+/g, " ");
+
+/**
+ * Note aliases where the Step 6 dimension wording diverges from the
+ * sub-agent name. Values are normalized substrings; the default alias is the
+ * normalized name itself. `claim valid` covers both the observed production
+ * wording ("claim validation not assessed this run (claim-validator output
+ * unavailable)", Khan/actions#272) and the planned-shed variant.
+ */
+const DIMENSION_ALIASES: Record<string, string[]> = {
+    "correctness-reviewer": ["correctness"],
+    "claim-validator": ["claim valid"],
+};
+
+/**
+ * Does the review body disclose this dimension as skipped? True when the
+ * body carries the Step 6 "not assessed this run" phrasing and names the
+ * dimension (either note wording: planned shed or output unavailable).
+ */
+export const disclosesSkippedDimension = (
+    body: string,
+    dimension: string,
+): boolean => {
+    const normBody = normalize(body);
+    if (!normBody.includes(NOT_ASSESSED_PHRASE)) {
+        return false;
+    }
+    const aliases = DIMENSION_ALIASES[dimension] ?? [normalize(dimension)];
+    return aliases.some((alias) => normBody.includes(alias));
+};
+
+const resolveDepth = (plan: unknown, notes: string[]): DispatchGateDepth => {
+    const depth = (plan as {depth?: unknown} | undefined)?.depth;
+    if (
+        typeof depth === "string" &&
+        (GATE_DEPTHS as readonly string[]).includes(depth)
+    ) {
+        return depth as DispatchGateDepth;
+    }
+    notes.push(
+        plan === undefined
+            ? "rereview plan not staged: rules ran at full depth"
+            : "rereview plan depth unrecognized: rules ran at full depth",
+    );
+    return "full";
+};
+
+/** The names routing planned beyond the defaults (strings only, deduped). */
+const plannedExtras = (routing: unknown): string[] => {
+    const r = routing as
+        | {enabledReviewers?: unknown; lensesToSpawn?: unknown}
+        | undefined;
+    const names = [
+        ...(Array.isArray(r?.enabledReviewers) ? r.enabledReviewers : []),
+        ...(Array.isArray(r?.lensesToSpawn) ? r.lensesToSpawn : []),
+    ].filter((name): name is string => typeof name === "string");
+    return [...new Set(names)];
+};
+
+/**
+ * The one legitimate way a `full`/`scoped` run submits a verdict with no
+ * correctness pass: `pattern-triage` ran and returned an empty `reviewFiles`
+ * (every changed file was generated / formatting-only / pattern-only), proven
+ * by its own staged output.
+ */
+const triageEmptiedReview = (outFiles: Record<string, string>): boolean => {
+    const raw = outFiles[TRIAGE_OUT];
+    if (raw === undefined) {
+        return false;
+    }
+    const parsed = parseJson(raw) as {reviewFiles?: unknown} | undefined;
+    return (
+        parsed !== undefined &&
+        Array.isArray(parsed.reviewFiles) &&
+        parsed.reviewFiles.length === 0
+    );
+};
+
+/** Pure conformance evaluation; the CLI below is its only production caller. */
+export const evaluateDispatchConformance = (
+    input: DispatchGateInput,
+): DispatchGateEvaluation => {
+    const notes: string[] = [];
+    const violations: DispatchGateViolation[] = [];
+
+    const submit = input.items.find((item) => item.type === SUBMIT_TYPE);
+    const verdictEvent =
+        submit === undefined
+            ? null
+            : typeof submit.event === "string"
+            ? submit.event
+            : "";
+    const body =
+        submit !== undefined && typeof submit.body === "string"
+            ? submit.body
+            : "";
+    const commentCount = input.items.filter(
+        (item) => item.type === COMMENT_TYPE,
+    ).length;
+
+    const depth = resolveDepth(input.plan, notes);
+    const emptiedByTriage =
+        (depth === "full" || depth === "scoped") &&
+        triageEmptiedReview(input.outFiles);
+    if (emptiedByTriage) {
+        notes.push(
+            "pattern-triage returned an empty reviewFiles: correctness and planned-roster rules waived",
+        );
+    }
+
+    // Rule 1: a verdict requires the correctness pass at every depth that
+    // dispatches one.
+    if (submit !== undefined && depth !== "fast" && !emptiedByTriage) {
+        const raw = input.outFiles[CORRECTNESS_OUT];
+        if (raw === undefined) {
+            violations.push({
+                code: "correctness-missing",
+                dimension: "correctness-reviewer",
+                detail:
+                    `verdict ${
+                        verdictEvent || "(no event)"
+                    } queued but out/${CORRECTNESS_OUT} does not exist ` +
+                    `(depth ${depth} dispatches the correctness pass; even a failed dispatch stages an error note)`,
+            });
+        } else if (
+            parseJson(raw) === undefined &&
+            !disclosesSkippedDimension(body, "correctness-reviewer")
+        ) {
+            violations.push({
+                code: "correctness-unparseable-undisclosed",
+                dimension: "correctness-reviewer",
+                detail:
+                    `out/${CORRECTNESS_OUT} is not valid JSON and the review body carries no ` +
+                    `"correctness ${NOT_ASSESSED_PHRASE}" note disclosing the gap`,
+            });
+        }
+    }
+
+    // Rule 2: posted findings require the precision gate, or its disclosed
+    // shed (the #258 shed rules permit shedding the validator only near a
+    // hard ceiling, and never silently).
+    if (commentCount > 0) {
+        const raw = input.outFiles[VALIDATOR_OUT];
+        const validated = raw !== undefined && parseJson(raw) !== undefined;
+        if (!validated && !disclosesSkippedDimension(body, "claim-validator")) {
+            violations.push({
+                code: "validator-missing-with-findings",
+                dimension: "claim-validator",
+                detail:
+                    `${commentCount} inline review comment(s) queued but out/${VALIDATOR_OUT} is ` +
+                    `${
+                        raw === undefined ? "missing" : "unparseable"
+                    } and the review body carries no ` +
+                    `"claim validation ${NOT_ASSESSED_PHRASE}" note`,
+            });
+        }
+    }
+
+    // Rule 3: dispatched < planned requires a disclosure note per shed name.
+    // Only full/scoped plan the extras (flip-gated and fast dispatch fixed
+    // rosters, already covered by rule 1).
+    if (
+        submit !== undefined &&
+        (depth === "full" || depth === "scoped") &&
+        !emptiedByTriage
+    ) {
+        if (input.routing === undefined) {
+            notes.push(
+                "routing not staged: planned-roster rule skipped (the missing correctness pass, rule 1, is what catches a routerless run)",
+            );
+        } else {
+            for (const name of plannedExtras(input.routing)) {
+                const dispatched = `${name}.json` in input.outFiles;
+                if (!dispatched && !disclosesSkippedDimension(body, name)) {
+                    violations.push({
+                        code: "shed-undisclosed",
+                        dimension: name,
+                        detail:
+                            `routing planned ${name} but out/${name}.json does not exist and the review body ` +
+                            `carries no "${name} ${NOT_ASSESSED_PHRASE}" note`,
+                    });
+                }
+            }
+        }
+    }
+
+    return {
+        conformant: violations.length === 0,
+        violations,
+        verdictEvent,
+        commentCount,
+        depth,
+        notes,
+    };
+};
+
+/* -------------------------------------------------------------------------- */
+/* CLI: the post-agent gate step                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Fixed gh-aw paths (agent job). `AGENT_OUTPUT_PATH` is written by gh-aw's
+ * "Ingest agent output" step (a placeholder `{"items":[]}` is guaranteed by
+ * "Write agent output placeholder if missing", which precedes post-steps)
+ * and uploaded afterwards as the `agent` artifact the `safe_outputs` job
+ * executes from. `REPORT_DIR` is `/tmp/gh-aw/agent/`, which the "Upload
+ * agent artifacts" step already includes, so the gate report and the
+ * pre-gate queue copy ride the run artifact for free.
+ */
+const AGENT_OUTPUT_PATH = "/tmp/gh-aw/agent_output.json";
+const REVIEW_DIR = "/tmp/gh-aw/review";
+const OUT_DIR = `${REVIEW_DIR}/out`;
+const ROUTING_PATH = `${REVIEW_DIR}/routing.json`;
+const PLAN_PATHS = [
+    `${REVIEW_DIR}/rereview-plan.json`,
+    `${OUT_DIR}/rereview-plan.json`,
+];
+const REPORT_DIR = "/tmp/gh-aw/agent";
+const REPORT_PATH = `${REPORT_DIR}/dispatch-gate.json`;
+const PRE_GATE_QUEUE_PATH = `${REPORT_DIR}/agent_output.pre-gate.json`;
+
+/**
+ * Item types a violated run may still execute: the artifact upload (the
+ * evidence a human needs to diagnose the violation) and the non-posting
+ * diagnostics. Everything else (the review submission, inline comments,
+ * thread resolutions, the risks/patterns comment, reviewer requests, and any
+ * type this list has never seen) is stripped: default-deny.
+ */
+export const KEEP_ITEM_TYPES: ReadonlySet<string> = new Set([
+    "upload_artifact",
+    "missing_tool",
+    "missing_data",
+    "noop",
+]);
+
+export type DispatchGateFs = {
+    readFileSync: (p: string, enc: "utf8") => string;
+    writeFileSync: (p: string, data: string) => void;
+    existsSync: (p: string) => boolean;
+    mkdirSync: (p: string, opts: {recursive: boolean}) => void;
+    readdirSync: (p: string) => string[];
+};
+
+export type DispatchGateReport = DispatchGateEvaluation & {
+    gateVersion: 1;
+    /** True when the queue was rewritten and the job should fail. */
+    blocked: boolean;
+    /** `out/` basenames the gate saw (the dispatch evidence). */
+    outFilesSeen: string[];
+    /** Item types stripped from the queue, with counts (blocked runs). */
+    strippedItemTypes: Record<string, number>;
+};
+
+const readJsonIfPresent = (fs: DispatchGateFs, path: string): unknown => {
+    if (!fs.existsSync(path)) {
+        return undefined;
+    }
+    return parseJson(fs.readFileSync(path, "utf8"));
+};
+
+/**
+ * Run the gate over the staged run. Factored out (fs injected) so it is
+ * testable without touching the real filesystem. Writes the report always;
+ * rewrites the queue only on violation. Returns what it decided.
+ */
+export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
+    const notes: string[] = [];
+
+    const rawQueue = fs.existsSync(AGENT_OUTPUT_PATH)
+        ? fs.readFileSync(AGENT_OUTPUT_PATH, "utf8")
+        : undefined;
+    const queue = rawQueue === undefined ? undefined : parseJson(rawQueue);
+    const items: SafeOutputItem[] = Array.isArray(
+        (queue as {items?: unknown} | undefined)?.items,
+    )
+        ? ((queue as {items: unknown[]}).items.filter(
+              (item): item is SafeOutputItem =>
+                  typeof item === "object" && item !== null,
+          ) as SafeOutputItem[])
+        : [];
+    if (queue === undefined) {
+        notes.push(
+            `agent output queue missing or unparseable (${AGENT_OUTPUT_PATH}): nothing to gate`,
+        );
+    }
+
+    const outFiles: Record<string, string> = {};
+    if (fs.existsSync(OUT_DIR)) {
+        for (const name of fs.readdirSync(OUT_DIR)) {
+            try {
+                outFiles[name] = fs.readFileSync(`${OUT_DIR}/${name}`, "utf8");
+            } catch {
+                // A subdirectory or unreadable entry is not dispatch evidence.
+            }
+        }
+    }
+
+    const plan = PLAN_PATHS.map((path) => readJsonIfPresent(fs, path)).find(
+        (parsed) => parsed !== undefined,
+    );
+    const routing = readJsonIfPresent(fs, ROUTING_PATH);
+
+    const evaluation = evaluateDispatchConformance({
+        items,
+        plan,
+        routing,
+        outFiles,
+    });
+    evaluation.notes.unshift(...notes);
+
+    const strippedItemTypes: Record<string, number> = {};
+    const blocked = !evaluation.conformant;
+    if (blocked && rawQueue !== undefined) {
+        const kept = items.filter(
+            (item) =>
+                typeof item.type === "string" && KEEP_ITEM_TYPES.has(item.type),
+        );
+        for (const item of items) {
+            if (!kept.includes(item)) {
+                const type =
+                    typeof item.type === "string" ? item.type : "(untyped)";
+                strippedItemTypes[type] = (strippedItemTypes[type] ?? 0) + 1;
+            }
+        }
+        fs.mkdirSync(REPORT_DIR, {recursive: true});
+        fs.writeFileSync(PRE_GATE_QUEUE_PATH, rawQueue);
+        fs.writeFileSync(
+            AGENT_OUTPUT_PATH,
+            JSON.stringify(
+                {...(queue as Record<string, unknown>), items: kept},
+                null,
+                2,
+            ),
+        );
+    }
+
+    const report: DispatchGateReport = {
+        gateVersion: 1,
+        blocked,
+        outFilesSeen: Object.keys(outFiles).sort(),
+        strippedItemTypes,
+        ...evaluation,
+    };
+    fs.mkdirSync(REPORT_DIR, {recursive: true});
+    fs.writeFileSync(REPORT_PATH, JSON.stringify(report, null, 2));
+    return report;
+};
+
+/** Markdown for the job step summary; one glance says what happened. */
+export const renderGateSummary = (report: DispatchGateReport): string => {
+    const lines = [
+        "## Dispatch-conformance gate",
+        "",
+        report.blocked
+            ? "**BLOCKED**: the queued review does not conform to the dispatch protocol; every posting safe output was stripped and this job fails."
+            : report.verdictEvent === null && report.commentCount === 0
+            ? "Nothing to gate (no review submission or inline comments queued)."
+            : "Conformant.",
+        "",
+        `- depth: \`${report.depth}\``,
+        `- verdict queued: \`${report.verdictEvent ?? "none"}\``,
+        `- inline comments queued: ${report.commentCount}`,
+        `- out/ files seen: ${
+            report.outFilesSeen.length > 0
+                ? report.outFilesSeen.map((name) => `\`${name}\``).join(", ")
+                : "none"
+        }`,
+    ];
+    for (const violation of report.violations) {
+        lines.push(
+            `- **${violation.code}** (${violation.dimension}): ${violation.detail}`,
+        );
+    }
+    for (const note of report.notes) {
+        lines.push(`- note: ${note}`);
+    }
+    return `${lines.join("\n")}\n`;
+};
+
+// Run only when executed directly (review.md post-steps), never on import
+// (tests). Fail-open on the gate's own errors: a gate bug must not block
+// reviews, but it announces itself in the log and the step summary.
+if (typeof require !== "undefined" && require.main === module) {
+    const nodeFs = require("node:fs") as DispatchGateFs & {
+        appendFileSync: (p: string, data: string) => void;
+    };
+    try {
+        const report = runDispatchGateCli(nodeFs);
+        // eslint-disable-next-line no-console
+        console.log(JSON.stringify(report, null, 2));
+        const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+        if (summaryPath !== undefined && summaryPath !== "") {
+            nodeFs.appendFileSync(summaryPath, renderGateSummary(report));
+        }
+        if (report.blocked) {
+            for (const violation of report.violations) {
+                // eslint-disable-next-line no-console
+                console.error(
+                    `::error title=dispatch-conformance gate::${violation.code} (${violation.dimension}): ${violation.detail}`,
+                );
+            }
+            // eslint-disable-next-line no-console
+            console.error(
+                `::error title=dispatch-conformance gate::review submission blocked; original queue preserved at ${PRE_GATE_QUEUE_PATH} (agent artifact), report at ${REPORT_PATH}`,
+            );
+            process.exit(1);
+        }
+    } catch (error) {
+        // eslint-disable-next-line no-console
+        console.log(
+            `::warning title=dispatch-conformance gate::gate errored (fail-open, review not blocked): ${
+                error instanceof Error ? error.message : String(error)
+            }`,
+        );
+        process.exit(0);
+    }
+}
