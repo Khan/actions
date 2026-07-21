@@ -76,8 +76,17 @@ describe("lensPayloadWarnings", () => {
         expect(warnings[0]).toContain(CORRECTNESS_ALIAS_PATH);
     });
 
-    it("stays silent on the alias alone (supported during migration)", () => {
-        expect(warningsFor([], [], true)).toEqual([]);
+    it("nudges on the alias alone (deprecated, dropped next major)", () => {
+        const warnings = warningsFor([], [], true);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("deprecated alias");
+        expect(warnings[0]).toContain(`${LENS_PAYLOAD_DIR}/correctness.md`);
+    });
+
+    it("does not double-warn when both correctness files exist", () => {
+        const warnings = warningsFor(["correctness.md"], [], true);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("both");
     });
 
     it("accepts every specialist lens name as a payload filename", () => {

@@ -3,11 +3,11 @@ import {describe, it, expect} from "vitest";
 import {
     ALWAYS_ON_LENSES,
     computeRunBudget,
-    LENS_PAYLOAD_DIR,
     DEFAULT_MISROUTED_FLOOR_TIER,
     DEFAULT_TIER_BUDGETS,
     ENABLEABLE_REVIEWERS,
     isGenerated,
+    LENS_PAYLOAD_DIR,
     matchesGlob,
     parseGitattributesGenerated,
     parseReviewers,
@@ -602,6 +602,11 @@ const fakeFs = (inputs: Record<string, string>) => {
             mkdirCalls.push(p);
         },
         readdirSync: (p: string): string[] => {
+            if (p in inputs) {
+                // Mirror node:fs — reading a regular file as a directory
+                // throws ENOTDIR.
+                throw new Error(`ENOTDIR: not a directory, scandir '${p}'`);
+            }
             const prefix = p.endsWith("/") ? p : `${p}/`;
             const names = new Set<string>();
             for (const key of Object.keys(inputs)) {
@@ -944,5 +949,40 @@ describe("runCli: lens payload warnings", () => {
             [ROUTING_CONFIG_PATH]: "src/** lens=security-auth",
         });
         expect(runCli(fs).routingConfig.warnings).toEqual([]);
+    });
+
+    it("wires the alias check: both correctness files warn through runCli", () => {
+        const {fs} = fakeFs({
+            ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
+                {path: "a.ts", status: "modified"},
+            ]),
+            [ROUTING_CONFIG_PATH]: "src/** lens=security-auth",
+            [`${LENS_PAYLOAD_DIR}/correctness.md`]: "- new home",
+            [".github/aw/review/correctness-checks.md"]: "- old home",
+        });
+        const warnings = runCli(fs).routingConfig.warnings;
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("both");
+        expect(warnings[0]).toContain("correctness-checks.md");
+    });
+
+    it("degrades to a warning when the payload dir is a regular file", () => {
+        const {fs, written} = fakeFs({
+            ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
+                {path: "a.ts", status: "modified"},
+            ]),
+            [ROUTING_CONFIG_PATH]: "src/** lens=security-auth",
+            // The payload dir path itself is a file: readdirSync throws
+            // ENOTDIR, which must not crash the CLI before routing.json.
+            [LENS_PAYLOAD_DIR]: "oops, a file",
+        });
+        const json = runCli(fs);
+        expect(json.routingConfig.warnings).toHaveLength(1);
+        expect(json.routingConfig.warnings[0]).toContain(
+            "not a readable directory",
+        );
+        expect(JSON.parse(written["/tmp/gh-aw/review/routing.json"])).toEqual(
+            json,
+        );
     });
 });

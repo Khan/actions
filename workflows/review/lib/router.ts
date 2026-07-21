@@ -930,19 +930,33 @@ export const runCli = (
               ],
           };
 
-    // Lens payloads that would be silently inert are worth a PR note: the
-    // author believes the rules are active, and nothing else would say
-    // otherwise (a missing optional import inlines nothing at runtime).
+    // Lens payloads that would be silently inert are worth a PR note (a
+    // missing optional import inlines nothing at runtime). existsSync is
+    // also true for a regular file at the payload dir path; that must
+    // degrade to a warning, not an ENOTDIR crash before routing.json.
     const lensesDir = repoPath(LENS_PAYLOAD_DIR);
-    const payloadFiles = fs.existsSync(lensesDir)
-        ? fs.readdirSync(lensesDir)
-        : [];
-    const payloadWarnings = lensPayloadWarnings(
-        payloadFiles,
-        routingFileConfig.lensRules,
-        fs.existsSync(repoPath(CORRECTNESS_ALIAS_PATH)),
-        SPECIALIST_LENSES,
-    );
+    let payloadFiles: string[] = [];
+    let payloadDirWarning: string[] = [];
+    if (fs.existsSync(lensesDir)) {
+        try {
+            payloadFiles = fs.readdirSync(lensesDir);
+        } catch {
+            payloadDirWarning = [
+                `${LENS_PAYLOAD_DIR} exists but is not a readable ` +
+                    `directory; lens payloads were not checked and none ` +
+                    `will be imported`,
+            ];
+        }
+    }
+    const payloadWarnings = [
+        ...payloadDirWarning,
+        ...lensPayloadWarnings(
+            payloadFiles,
+            routingFileConfig.lensRules,
+            fs.existsSync(repoPath(CORRECTNESS_ALIAS_PATH)),
+            SPECIALIST_LENSES,
+        ),
+    ];
 
     const input: RouteInput = {files};
     if (fs.existsSync(RESOLVED_TIERS_PATH)) {

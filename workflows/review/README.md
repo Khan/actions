@@ -112,7 +112,7 @@ locally at compile/run time, not from this repo). Create them under
 | `skills.md` | **Required** | The catalog of best-practice skill files (and when each applies). Imported into `skill-auditor` to evaluate the diff against, and into `claim-validator` so it can verify a flagged skill violation against the skill's actual rule. |
 | `ROUTING` | Optional | The machine-readable path map the deterministic router reads (see below). Without it the router spawns no specialist lenses and floors the run budget, and the review notes the missing config on the PR. |
 | `lenses/<lens>.md` | Optional | Per-lens payloads: your repo's surface-specific review rules and extra hunts, imported into the matching reviewer (see [Per-lens payloads](#per-lens-payloads-lenseslensmd)). Absent files import nothing. |
-| `correctness-checks.md` | Deprecated | Alias for `lenses/correctness.md`; still imported for compatibility, and removed in the next major release. Carry one or the other, not both. |
+| `correctness-checks.md` | Deprecated | Alias for `lenses/correctness.md`; still imported for compatibility, and removed in the next major release. Carry only one: when both exist, both are imported (duplicating the checks) and the router warns; an alias carried alone gets a deprecation note on each review. |
 
 The first four are **required**, but validated at different times. `config.md` is a
 frontmatter import, embedded and checked at **compile time** — `gh aw compile` fails if
@@ -152,8 +152,9 @@ major release; carry at most one of the two). A payload only reaches a specialis
 lens on PRs where the router actually spawns that lens, so a payload without
 matching `ROUTING` `lens=` rules is inert. The router warns in the review body's
 note lines when a payload would be silently inert: a filename that matches no
-imported payload, a specialist payload no `ROUTING` rule routes, or the correctness
-alias carried alongside its replacement.
+imported payload, a specialist payload no `ROUTING` rule routes, the correctness
+alias carried alongside its replacement (or, as a deprecation nudge, carried at
+all), or a `lenses` path that is not a readable directory.
 
 Payloads are **additive**: they extend the lens's shared rules and hunts but never
 relax or override them, and the shared rules win on any conflict (the lens prompts

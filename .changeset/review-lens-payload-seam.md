@@ -17,8 +17,10 @@ release. Payloads are additive by contract: the lens prompts state that payload
 rules never relax or override the shared rules, which win on any conflict. The
 router now warns (through `routingConfig.warnings`, surfaced in the review body's
 note lines) when a payload would be silently inert: a filename matching no imported
-payload, a specialist payload no ROUTING rule routes, or the correctness alias
-carried alongside its replacement. The eval's import resolution now matches
+payload, a specialist payload no ROUTING rule routes, the correctness alias carried
+alongside its replacement, the alias carried at all (a deprecation nudge ahead of
+its removal), or a `lenses` path that is not a readable directory (which degrades
+to a warning instead of crashing the router CLI). The eval's import resolution now matches
 production for the optional form (missing resolves to empty, not the "(not
 configured for this eval case)" note), so corpus case trees can carry payloads; the
 required-form fallback note is unchanged. README documents the new surface and the
