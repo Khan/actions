@@ -20,12 +20,18 @@ measurement runs). To run or extend it, start at
 On each run the workflow gathers the PR diff, then delegates the analysis to a set of
 read-only **sub-agents** (it makes every GitHub and comment call itself):
 
-1. **`pattern-triage`** finds common cross-file patterns and narrows the diff to the
+1. Before the agent starts, a deterministic pre-agent step (`lib/stage-pr.ts`)
+   stages the whole review context on disk: the PR metadata and changed files
+   (fetched from the GitHub API), the rebuilt unified diff, the diff facts
+   (fingerprint and hunk signature) and newly-changed-code scope, the prior bot
+   reviews, the router's first pass, the changed-line provenance map, a
+   whole-change diff with `linguist-generated` files stripped (what every
+   whole-change reviewer and specialist lens reads, so a lock-file-heavy PR
+   cannot balloon their context), and the re-review depth plan. The
+   orchestrator wakes with files to read, not staging to perform. Then
+   **`pattern-triage`** finds common cross-file patterns and narrows the diff to the
    files that need a real review — dropping generated, formatting-only, and
-   pattern-only changes. In parallel, deterministic code stages the derived diff
-   artifacts: the changed-line provenance map, and a whole-change diff with
-   `linguist-generated` files stripped, which is what every whole-change reviewer and
-   specialist lens reads (so a lock-file-heavy PR cannot balloon their context).
+   pattern-only changes.
 2. Then, in parallel, **`correctness-reviewer`** (risk level + correctness, worked
    through three named procedures: a line scan, a removed-behavior audit, and a
    cross-file trace) and
