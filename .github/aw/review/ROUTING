@@ -13,13 +13,6 @@
 
 enable holistic,completeness,test-adequacy,first-principles,conventions
 
-# Repeat reviews of the same PR run thread reconciliation plus the correctness
-# pass over the new hunks; a REQUEST_CHANGES -> APPROVE flip is vetoed by any
-# validated blocking finding from that pass. The first full review of a ready
-# PR always runs the whole roster, and the divergence tripwire re-arms full
-# review when a push rewrites enough of the PR (see workflows/review/README.md).
-re-review flip-gated
-
 # Shipped composite actions run inside consuming repos' CI with their credentials.
 actions/**                   tier=high
 # This repo's own CI, the publish pipeline, and the compiled agentic workflows.
