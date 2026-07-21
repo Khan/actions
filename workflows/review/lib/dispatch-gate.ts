@@ -50,6 +50,10 @@
  *      (`out/thread-reconciler.json` `resolve`); the deficit direction is
  *      reported as executed-vs-decided accounting, never blocked (slice 3;
  *      the #244 ledger).
+ *   7. When a submission plan is staged (`submission-plan.json`, scripted
+ *      mode, slice 4), the queued event, body, and inline comments must
+ *      match it under a sanitizer-tolerant normalization; any splice or
+ *      omission blocks (the #244 accountability-splice check, as code).
  *
  * Violation behavior: strip every posting/mutating item from the queue
  * (keeping the diagnostics and the `out/` artifact upload so the evidence
@@ -102,7 +106,8 @@ export type DispatchGateViolationCode =
     | "shed-undisclosed"
     | "approve-with-blocking-comment"
     | "flip-vetoed-kept-blocking"
-    | "resolve-not-decided";
+    | "resolve-not-decided"
+    | "submission-plan-mismatch";
 
 export type DispatchGateViolation = {
     /** Fixed-format code (never prose). */
@@ -139,6 +144,8 @@ export type DispatchGateInput = {
     priorReviews?: unknown;
     /** Parsed `rereview.json` (the accountability result; `keptBlockingCount`). */
     rereviewAccounting?: unknown;
+    /** Parsed `submission-plan.json` (scripted mode; slice 4). */
+    submissionPlan?: unknown;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -486,6 +493,79 @@ export const evaluateDispatchConformance = (
         }
     }
 
+    // Rule 7 (scripted mode, slice 4): when a submission plan is staged, the
+    // queued outputs must match it. gh-aw's ingest sanitizer may neutralize
+    // mentions and rewrite disallowed links, so bodies are compared under a
+    // normalization that survives it (case, whitespace, backticks); anything
+    // beyond that is a splice (#244) and blocks.
+    const planStaged = input.submissionPlan as
+        | {event?: unknown; body?: unknown; comments?: unknown}
+        | undefined;
+    if (planStaged !== undefined && submit !== undefined) {
+        const normalizeBody = (text: string): string =>
+            text.toLowerCase().replace(/`/g, "").replace(/\s+/g, " ").trim();
+        if (
+            typeof planStaged.event === "string" &&
+            verdictEvent !== planStaged.event
+        ) {
+            violations.push({
+                code: "submission-plan-mismatch",
+                dimension: "verdict",
+                detail: `queued event ${
+                    verdictEvent || "(none)"
+                } does not match the staged submission plan's ${
+                    planStaged.event
+                }`,
+            });
+        }
+        if (
+            typeof planStaged.body === "string" &&
+            normalizeBody(body) !== normalizeBody(planStaged.body)
+        ) {
+            violations.push({
+                code: "submission-plan-mismatch",
+                dimension: "review body",
+                detail: "queued review body does not match the staged submission plan (normalized comparison)",
+            });
+        }
+        if (Array.isArray(planStaged.comments)) {
+            const planned = planStaged.comments
+                .filter(
+                    (
+                        comment,
+                    ): comment is {path: string; line: number; body: string} =>
+                        typeof (comment as {path?: unknown}).path ===
+                            "string" &&
+                        typeof (comment as {body?: unknown}).body === "string",
+                )
+                .map(
+                    (comment) =>
+                        `${comment.path}:${comment.line}:${normalizeBody(
+                            comment.body,
+                        )}`,
+                )
+                .sort();
+            const queued = input.items
+                .filter((item) => item.type === COMMENT_TYPE)
+                .map(
+                    (item) =>
+                        `${
+                            typeof item["path"] === "string" ? item["path"] : ""
+                        }:${String(item["line"] ?? "")}:${normalizeBody(
+                            typeof item.body === "string" ? item.body : "",
+                        )}`,
+                )
+                .sort();
+            if (JSON.stringify(planned) !== JSON.stringify(queued)) {
+                violations.push({
+                    code: "submission-plan-mismatch",
+                    dimension: "inline comments",
+                    detail: `queued inline comments (${queued.length}) do not match the staged submission plan (${planned.length})`,
+                });
+            }
+        }
+    }
+
     return {
         conformant: violations.length === 0,
         violations,
@@ -620,6 +700,10 @@ export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
         fs,
         `${REVIEW_DIR}/rereview.json`,
     );
+    const submissionPlan = readJsonIfPresent(
+        fs,
+        `${REVIEW_DIR}/submission-plan.json`,
+    );
 
     const evaluation = evaluateDispatchConformance({
         items,
@@ -628,6 +712,7 @@ export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
         outFiles,
         priorReviews,
         rereviewAccounting,
+        submissionPlan,
     });
     evaluation.notes.unshift(...notes);
 
