@@ -646,7 +646,11 @@ other threads untouched):
   **first** comment, from the same `get_review_comments` output (omit the field if the
   output carries none) — and its **full reply chain** as
   `comments`: every comment in the thread in order, each `{author, body}` — including
-  the author's replies, not just the bot's opening comment. The reply chain is what
+  the author's replies, not just the bot's opening comment. Stage each `body`
+  **verbatim as the tool returned it**, markdown formatting included — do not
+  reformat, summarize, or strip `**` wrappers; the accountability renderer parses
+  the leading `**label:**` template off these bodies (it tolerates a
+  markdown-stripped form, but verbatim is the contract). The reply chain is what
   lets the `thread-reconciler` weigh the author's response, and `url` is what lets the
   re-review accountability section (Step 6) link each still-open thread to its prior
   comment.
@@ -1276,9 +1280,10 @@ It reads `threads.json`, the reconciler's `out/thread-reconciler.json`, and
 "keptBlockingCount": <n>}` (`keptBlockingCount` also feeds the re-review flip rule,
 Step 4). Append
 `section` **verbatim** to the review body, after any verdict-specific text above —
-it enumerates each still-unaddressed prior thread as a link to its prior comment
-(blocking first) and states the resolved count, and on a run that resolved the last
-open threads it says every prior thread is resolved. When `section` is empty,
+it states the resolved count, enumerates each still-unaddressed *blocking* thread
+as a visible link to its prior comment, folds the still-open non-blocking threads
+into a collapsed `<details>` block with their count, and on a run that resolved the
+last open threads it says every prior thread is resolved. When `section` is empty,
 append nothing. Never rephrase, reorder, or summarize it; if `rereview.json` is
 missing or unparseable, submit the body without the section (do not hand-compose a
 replacement).

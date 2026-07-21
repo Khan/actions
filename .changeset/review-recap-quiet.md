@@ -1,0 +1,5 @@
+---
+"review": patch
+---
+
+Quiet the re-review surface, two pieces. (1) Fix the `**unknown**` recap labels: staged `threads.json` bodies do not reliably preserve the posted markdown (on Khan/webapp#40561 every opener arrived with the `**` wrapping stripped), so the accountability renderer's bold-only label parse failed on every line. `parseLeadingLabel`/`excerptOpeningComment` now also accept a plain `label (decoration):` form bound to the closed label vocabulary, and Step 3's staging instruction pins the verbatim-body contract. This also repairs the flip gate's `keptBlockingCount` input for markdown-stripped stagings, which previously undercounted kept blocking threads. (2) Shrink the recap: kept blocking threads stay visible; kept non-blocking threads fold into a collapsed `<details>` block with a count, so a re-review stops re-listing every open nit verbatim on every push (three recap walls in two days on webapp#40561). Accountability is unchanged; only the notification surface shrinks. A third piece (a job-level draft gate) was dropped in review: teams want reviews on draft PRs, and on push-triggered installs the gate would have left no way to request one.

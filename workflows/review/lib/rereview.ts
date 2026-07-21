@@ -55,26 +55,48 @@ export type RereviewSection = {
     keptCount: number;
     resolvedCount: number;
     /**
-     * How many kept threads carry a blocking opening label. The re-review
-     * mode dial's flip gate reads this: a reduced-depth run may flip a prior
-     * REQUEST_CHANGES to APPROVE only when it is zero (and, in `flip-gated`
-     * mode, no validated blocking finding survived), so the check is a number
-     * comparison, not a label judgment re-made at verdict time.
+     * How many kept threads carry a blocking opening label, plus any whose
+     * label could not be parsed (unknown fails closed; see keptEntryFor).
+     * The re-review mode dial's flip gate reads this: a reduced-depth run
+     * may flip a prior REQUEST_CHANGES to APPROVE only when it is zero (and,
+     * in `flip-gated` mode, no validated blocking finding survived), so the
+     * check is a number comparison, not a label judgment re-made at verdict
+     * time.
      */
     keptBlockingCount: number;
 };
 
 /**
+ * The plain-text form of the workflow's own label prefix. The staged
+ * `threads.json` bodies do not reliably preserve the posted markdown: on
+ * Khan/webapp#40561 every staged opener arrived as `thought (non-blocking):
+ * ...` with the `**` wrapping stripped, so the bold-only parse failed and
+ * every recap line rendered `**unknown**`. The plain form is bound to the
+ * closed, code-owned label vocabulary (lowercase, decoration required) so
+ * ordinary prose that happens to start with `word:` can never false-match.
+ */
+const PLAIN_LABEL_RE =
+    /^(praise|issue|todo|suggestion|nitpick|question|thought|note)( \([^)\n]{1,60}\)):\s*/;
+
+const BOLD_LABEL_RE = /^\*\*([^*\n]+?):\*\*\s*/;
+
+/**
  * Extract the Conventional-Comment label from a comment body this workflow
- * posted earlier (`**<label>:** <subject>`, review.md Step 5). Returns null
- * when the body does not start with that template — e.g. a hand-edited or
- * pre-labels-era comment — in which case the caller treats the thread as
- * non-blocking (the safe default `isBlockingLabel` also applies to unknown
- * labels).
+ * posted earlier (`**<label>:** <subject>`, review.md Step 5), tolerating the
+ * markdown-stripped form the staging has been observed to produce (see
+ * {@link PLAIN_LABEL_RE}). Returns null when the body starts with neither
+ * form — e.g. a hand-edited or pre-labels-era comment — in which case the
+ * caller treats the thread as blocking (fail closed: an unparseable label
+ * must not be able to fold a still-open blocking thread into the collapsed
+ * recap or let a reduced-depth run flip the verdict past it).
  */
 export const parseLeadingLabel = (body: string): string | null => {
-    const match = /^\*\*([^*\n]+?):\*\*/.exec(body);
-    return match ? match[1].trim() : null;
+    const bold = BOLD_LABEL_RE.exec(body);
+    if (bold) {
+        return bold[1].trim();
+    }
+    const plain = PLAIN_LABEL_RE.exec(body);
+    return plain ? `${plain[1]}${plain[2]}` : null;
 };
 
 /** Deterministic excerpt cap for a kept thread's opening comment. */
@@ -82,11 +104,14 @@ const EXCERPT_MAX = 120;
 
 /**
  * The first prose line of a previously-posted comment, with the `**label:**`
- * prefix stripped and a hard length cap. Quoted verbatim otherwise: this text
- * was already posted to the PR by an earlier run of this workflow.
+ * prefix (or its markdown-stripped plain form, {@link PLAIN_LABEL_RE})
+ * stripped and a hard length cap. Quoted verbatim otherwise: this text was
+ * already posted to the PR by an earlier run of this workflow.
  */
 export const excerptOpeningComment = (body: string): string => {
-    const withoutLabel = body.replace(/^\*\*[^*\n]+?:\*\*\s*/, "");
+    const withoutBold = body.replace(BOLD_LABEL_RE, "");
+    const withoutLabel =
+        withoutBold !== body ? withoutBold : body.replace(PLAIN_LABEL_RE, "");
     const firstLine = withoutLabel.split("\n", 1)[0].trim();
     if (firstLine.length <= EXCERPT_MAX) {
         return firstLine;
@@ -118,7 +143,7 @@ const keptEntryFor = (
             anchor: `thread ${threadId}`,
             url: undefined,
             label: "unknown",
-            blocking: false,
+            blocking: true,
             excerpt: "(not in the staged threads)",
         };
     }
@@ -132,7 +157,16 @@ const keptEntryFor = (
                 : `${thread.path}:${thread.line}`,
         url: thread.url,
         label,
-        blocking: isBlockingLabel(label),
+        // An unparseable opener fails CLOSED: the thread renders visibly and
+        // counts toward keptBlockingCount (blocking the reduced-depth flip to
+        // APPROVE) rather than folding into the collapsed non-blocking block.
+        // A staging-corruption mode the two label regexes don't cover would
+        // otherwise both hide a still-open blocking thread and let the
+        // verdict flip; fail-open here is exactly the #40561 hole. The cost
+        // of failing closed is a hand-edited or pre-labels-era thread keeping
+        // REQUEST_CHANGES until a full-depth review re-judges it, which is
+        // noise, not a wrongly-permitted approval.
+        blocking: label === "unknown" || isBlockingLabel(label),
         excerpt: excerptOpeningComment(opener),
     };
 };
@@ -172,6 +206,11 @@ export type RenderRereviewInput = {
  * all closed): the section only ever *accounts for prior threads*, so on
  * later pushes with nothing open it renders nothing and the review body is
  * unchanged from today's behavior.
+ *
+ * Shape: the count header, then each kept *blocking* thread as a visible
+ * line, then all kept *non-blocking* threads inside a collapsed `<details>`
+ * block headed by their count. Accountability is unchanged (every kept
+ * thread renders somewhere); only the notification surface shrinks.
  */
 export const renderRereviewSection = (
     input: RenderRereviewInput,
@@ -207,12 +246,37 @@ export const renderRereviewSection = (
     const entries = input.reconciler.keep
         .map((id) => keptEntryFor(id, input.threads))
         .sort(compareKept);
+    const blocking = entries.filter((entry) => entry.blocking);
+    const nonBlocking = entries.filter((entry) => !entry.blocking);
+
+    // Blocking threads render visibly; non-blocking threads fold into a
+    // collapsed block with a count. Every kept thread is still accounted for
+    // (the accountability contract), but a re-review no longer re-lists every
+    // open nit verbatim on every push — the recap walls on Khan/webapp#40561
+    // (three in two days, each re-listing all open non-blocking threads) are
+    // the motivating pathology.
+    const parts: string[] = [header, ...blocking.map(renderKeptLine)];
+    if (nonBlocking.length > 0) {
+        const summary =
+            nonBlocking.length === 1
+                ? "1 non-blocking thread still open"
+                : `${nonBlocking.length} non-blocking threads still open`;
+        parts.push(
+            "",
+            "<details>",
+            `<summary>${summary}</summary>`,
+            "",
+            ...nonBlocking.map(renderKeptLine),
+            "",
+            "</details>",
+        );
+    }
 
     return {
-        section: [header, ...entries.map(renderKeptLine)].join("\n"),
+        section: parts.join("\n"),
         keptCount,
         resolvedCount,
-        keptBlockingCount: entries.filter((entry) => entry.blocking).length,
+        keptBlockingCount: blocking.length,
     };
 };
 
