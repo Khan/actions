@@ -1,6 +1,7 @@
 import {describe, it, expect} from "vitest";
 
 import {
+    BLOCKED_SENTINEL_PATH,
     disclosesSkippedDimension,
     evaluateDispatchConformance,
     renderGateSummary,
@@ -607,5 +608,135 @@ describe("runDispatchGateCli", () => {
             commentCount: 0,
         });
         expect(okSummary).toContain("Nothing to gate");
+    });
+});
+
+describe("fail-open ordering and disclosure precision (review feedback)", () => {
+    it("requires the phrase and the dimension on the same line", () => {
+        // One legitimate note plus a prose mention of another dimension: the
+        // mention must not read as that dimension's disclosure.
+        const body = [
+            "Note: holistic not assessed this run (shed under the High-tier run budget).",
+            "No security/auth concerns in this change.",
+        ].join("\n");
+        expect(disclosesSkippedDimension(body, "holistic")).toBe(true);
+        expect(disclosesSkippedDimension(body, "security-auth")).toBe(false);
+    });
+
+    it("flags a present-but-unparseable validator output with findings queued", () => {
+        const result = evaluate({
+            items: [commentItem(), submitItem("APPROVE", "")],
+            plan: {depth: "fast"},
+            outFiles: {"claim-validator.json": "not json"},
+        });
+        expect(result.violations.map((v) => v.code)).toEqual([
+            "validator-missing-with-findings",
+        ]);
+        expect(result.violations[0].detail).toContain("unparseable");
+    });
+
+    it("strips and counts a typeless item under (untyped)", () => {
+        const fs = makeFakeFs({
+            [AGENT_OUTPUT]: JSON.stringify({
+                items: [
+                    {event: "REQUEST_CHANGES"},
+                    {
+                        type: "submit_pull_request_review",
+                        event: "REQUEST_CHANGES",
+                        body: "x",
+                    },
+                ],
+            }),
+        });
+        const report = runDispatchGateCli(fs);
+        expect(report.blocked).toBe(true);
+        expect(report.strippedItemTypes["(untyped)"]).toBe(1);
+        expect(JSON.parse(fs.files[AGENT_OUTPUT]).items).toEqual([]);
+    });
+
+    it("writes the violation sentinel only on a real block", () => {
+        const blockedFs = makeFakeFs({
+            [AGENT_OUTPUT]: JSON.stringify({
+                items: [
+                    {
+                        type: "submit_pull_request_review",
+                        event: "REQUEST_CHANGES",
+                        body: "x",
+                    },
+                ],
+            }),
+        });
+        runDispatchGateCli(blockedFs);
+        expect(blockedFs.files[BLOCKED_SENTINEL_PATH]).toBeDefined();
+
+        const cleanFs = makeFakeFs({
+            [AGENT_OUTPUT]: JSON.stringify({items: []}),
+        });
+        runDispatchGateCli(cleanFs);
+        expect(cleanFs.files[BLOCKED_SENTINEL_PATH]).toBe(undefined);
+    });
+
+    it("leaves the queue intact when a pre-decision write throws (fail-open path)", () => {
+        const queueText = JSON.stringify({
+            items: [
+                {
+                    type: "submit_pull_request_review",
+                    event: "REQUEST_CHANGES",
+                    body: "x",
+                },
+            ],
+        });
+        const fs = makeFakeFs({[AGENT_OUTPUT]: queueText});
+        const failingFs = {
+            ...fs,
+            writeFileSync: (p: string, data: string) => {
+                if (p.endsWith("dispatch-gate.json")) {
+                    throw new Error("disk full");
+                }
+                fs.writeFileSync(p, data);
+            },
+        };
+        expect(() => runDispatchGateCli(failingFs)).toThrow("disk full");
+        // The report write precedes every queue mutation, so the original
+        // queue is untouched and the CLI entry fails open.
+        expect(fs.files[AGENT_OUTPUT]).toBe(queueText);
+        expect(fs.files[BLOCKED_SENTINEL_PATH]).toBe(undefined);
+    });
+
+    it("degrades block to detect (still red) when only the queue rewrite fails", () => {
+        const queueText = JSON.stringify({
+            items: [
+                {
+                    type: "submit_pull_request_review",
+                    event: "REQUEST_CHANGES",
+                    body: "x",
+                },
+            ],
+        });
+        const fs = makeFakeFs({[AGENT_OUTPUT]: queueText});
+        const failingFs = {
+            ...fs,
+            writeFileSync: (p: string, data: string) => {
+                if (p === AGENT_OUTPUT) {
+                    throw new Error("read-only queue");
+                }
+                fs.writeFileSync(p, data);
+            },
+        };
+        const report = runDispatchGateCli(failingFs);
+        expect(report.blocked).toBe(true);
+        expect(report.notes.join(" ")).toContain("queue rewrite failed");
+        // The sentinel landed, so the step still fails the job.
+        expect(fs.files[BLOCKED_SENTINEL_PATH]).toBeDefined();
+        expect(fs.files[AGENT_OUTPUT]).toBe(queueText);
+    });
+
+    it("notes a present-but-unparseable routing.json distinctly from a missing one", () => {
+        const fs = makeFakeFs({
+            [AGENT_OUTPUT]: JSON.stringify({items: []}),
+            "/tmp/gh-aw/review/routing.json": "corrupt {",
+        });
+        const report = runDispatchGateCli(fs);
+        expect(report.notes.join(" ")).toContain("present but unparseable");
     });
 });

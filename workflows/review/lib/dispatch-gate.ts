@@ -174,12 +174,18 @@ export const disclosesSkippedDimension = (
     body: string,
     dimension: string,
 ): boolean => {
-    const normBody = normalize(body);
-    if (!normBody.includes(NOT_ASSESSED_PHRASE)) {
-        return false;
-    }
     const aliases = DIMENSION_ALIASES[dimension] ?? [normalize(dimension)];
-    return aliases.some((alias) => normBody.includes(alias));
+    // The phrase and the dimension must co-occur on one line (the Step 6
+    // notes are one line each): matched independently across the whole body,
+    // one legitimate note would satisfy the phrase globally and any prose
+    // mention of another dimension would then read as its disclosure.
+    return body.split("\n").some((line) => {
+        const norm = normalize(line);
+        return (
+            norm.includes(NOT_ASSESSED_PHRASE) &&
+            aliases.some((alias) => norm.includes(alias))
+        );
+    });
 };
 
 const resolveDepth = (plan: unknown, notes: string[]): DispatchGateDepth => {
@@ -371,6 +377,12 @@ const PLAN_PATHS = [
 const REPORT_DIR = "/tmp/gh-aw/agent";
 const REPORT_PATH = `${REPORT_DIR}/dispatch-gate.json`;
 const PRE_GATE_QUEUE_PATH = `${REPORT_DIR}/agent_output.pre-gate.json`;
+/**
+ * Written only when a violation was decided. The workflow step fails the job
+ * only when this file exists, so an infra failure (npx bootstrap, a crash
+ * before the decision) fails open instead of reading as a block.
+ */
+export const BLOCKED_SENTINEL_PATH = "/tmp/gh-aw/dispatch-gate.blocked";
 
 /**
  * Item types a violated run may still execute: the artifact upload (the
@@ -452,6 +464,11 @@ export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
         (parsed) => parsed !== undefined,
     );
     const routing = readJsonIfPresent(fs, ROUTING_PATH);
+    if (routing === undefined && fs.existsSync(ROUTING_PATH)) {
+        notes.push(
+            `routing.json is present but unparseable (${ROUTING_PATH}): treated as not staged`,
+        );
+    }
 
     const evaluation = evaluateDispatchConformance({
         items,
@@ -463,6 +480,23 @@ export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
 
     const strippedItemTypes: Record<string, number> = {};
     const blocked = !evaluation.conformant;
+
+    // Ordering is the fail-open invariant (module doc): every fallible write
+    // before the queue rewrite may throw and leave the original queue intact
+    // (the CLI entry then fails open); the queue rewrite comes LAST among the
+    // mutating writes, and once `blocked` is decided the CLI's exit code no
+    // longer depends on any write succeeding, so a post-rewrite error can
+    // never turn a blocked run green.
+    const report: DispatchGateReport = {
+        gateVersion: 1,
+        blocked,
+        outFilesSeen: Object.keys(outFiles).sort(),
+        strippedItemTypes,
+        ...evaluation,
+    };
+    fs.mkdirSync(REPORT_DIR, {recursive: true});
+    fs.writeFileSync(REPORT_PATH, JSON.stringify(report, null, 2));
+
     if (blocked && rawQueue !== undefined) {
         const kept = items.filter(
             (item) =>
@@ -475,27 +509,40 @@ export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
                 strippedItemTypes[type] = (strippedItemTypes[type] ?? 0) + 1;
             }
         }
-        fs.mkdirSync(REPORT_DIR, {recursive: true});
+        // The violation sentinel: the workflow step fails the job only when
+        // this file exists, so a crash of the gate BEFORE this point (or of
+        // the `npx tsx` bootstrap before the script runs at all) reads as an
+        // infra failure and fails open instead of red-flagging the run.
+        fs.writeFileSync(BLOCKED_SENTINEL_PATH, "blocked\n");
         fs.writeFileSync(PRE_GATE_QUEUE_PATH, rawQueue);
-        fs.writeFileSync(
-            AGENT_OUTPUT_PATH,
-            JSON.stringify(
-                {...(queue as Record<string, unknown>), items: kept},
-                null,
-                2,
-            ),
-        );
+        try {
+            fs.writeFileSync(
+                AGENT_OUTPUT_PATH,
+                JSON.stringify(
+                    {...(queue as Record<string, unknown>), items: kept},
+                    null,
+                    2,
+                ),
+            );
+        } catch (error) {
+            // A failed rewrite degrades block to detect: the run still goes
+            // red (blocked is already decided), but the untouched queue may
+            // post. Recorded so the forensics say which mode this run got.
+            report.notes.push(
+                `queue rewrite failed (${
+                    error instanceof Error ? error.message : String(error)
+                }): violation detected but the original queue may still post`,
+            );
+        }
+        // Refresh the report with the strip counts and any rewrite note;
+        // best-effort (the pre-rewrite report above already persisted).
+        try {
+            fs.writeFileSync(REPORT_PATH, JSON.stringify(report, null, 2));
+        } catch {
+            // The earlier report write already landed.
+        }
     }
 
-    const report: DispatchGateReport = {
-        gateVersion: 1,
-        blocked,
-        outFilesSeen: Object.keys(outFiles).sort(),
-        strippedItemTypes,
-        ...evaluation,
-    };
-    fs.mkdirSync(REPORT_DIR, {recursive: true});
-    fs.writeFileSync(REPORT_PATH, JSON.stringify(report, null, 2));
     return report;
 };
 
@@ -531,40 +578,51 @@ export const renderGateSummary = (report: DispatchGateReport): string => {
 };
 
 // Run only when executed directly (review.md post-steps), never on import
-// (tests). Fail-open on the gate's own errors: a gate bug must not block
-// reviews, but it announces itself in the log and the step summary.
+// (tests). Fail-open ONLY on errors thrown before the gate decided (the
+// queue is then untouched, by the write ordering in runDispatchGateCli);
+// once `blocked` is decided, the exit code depends on nothing else — a
+// failed report write or step-summary append can never turn a blocked run
+// green.
 if (typeof require !== "undefined" && require.main === module) {
     const nodeFs = require("node:fs") as DispatchGateFs & {
         appendFileSync: (p: string, data: string) => void;
     };
+    let report: DispatchGateReport;
     try {
-        const report = runDispatchGateCli(nodeFs);
+        report = runDispatchGateCli(nodeFs);
+    } catch (error) {
+        // eslint-disable-next-line no-console
+        console.log(
+            `::warning title=dispatch-conformance gate::gate errored before deciding (fail-open, review not blocked): ${
+                error instanceof Error ? error.message : String(error)
+            }`,
+        );
+        process.exit(0);
+    }
+    // Reporting is best-effort and must not affect the exit code in either
+    // direction.
+    try {
         // eslint-disable-next-line no-console
         console.log(JSON.stringify(report, null, 2));
         const summaryPath = process.env.GITHUB_STEP_SUMMARY;
         if (summaryPath !== undefined && summaryPath !== "") {
             nodeFs.appendFileSync(summaryPath, renderGateSummary(report));
         }
-        if (report.blocked) {
-            for (const violation of report.violations) {
-                // eslint-disable-next-line no-console
-                console.error(
-                    `::error title=dispatch-conformance gate::${violation.code} (${violation.dimension}): ${violation.detail}`,
-                );
-            }
+    } catch {
+        // The report file and stdout above are redundant surfaces; losing
+        // one changes nothing about the verdict on this run.
+    }
+    if (report.blocked) {
+        for (const violation of report.violations) {
             // eslint-disable-next-line no-console
             console.error(
-                `::error title=dispatch-conformance gate::review submission blocked; original queue preserved at ${PRE_GATE_QUEUE_PATH} (agent artifact), report at ${REPORT_PATH}`,
+                `::error title=dispatch-conformance gate::${violation.code} (${violation.dimension}): ${violation.detail}`,
             );
-            process.exit(1);
         }
-    } catch (error) {
         // eslint-disable-next-line no-console
-        console.log(
-            `::warning title=dispatch-conformance gate::gate errored (fail-open, review not blocked): ${
-                error instanceof Error ? error.message : String(error)
-            }`,
+        console.error(
+            `::error title=dispatch-conformance gate::review submission blocked; original queue preserved at ${PRE_GATE_QUEUE_PATH} (agent artifact), report at ${REPORT_PATH}`,
         );
-        process.exit(0);
+        process.exit(1);
     }
 }

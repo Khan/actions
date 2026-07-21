@@ -249,10 +249,27 @@ pre-agent-steps:
 # zero sub-agent dispatches and no disclosure; a prompt rule cannot gate an
 # orchestrator that is already ignoring the prompt. `if: always()` because the
 # safe_outputs job executes the queue even when the agent job fails partway.
+# The step fails the job ONLY on the gate's violation sentinel, never on an
+# infra failure: `npx` resolving `tsx` from the registry (or any crash before
+# the gate decides) exits non-zero without the sentinel, and since the
+# safe_outputs job runs regardless of this job's result, red-flagging such a
+# run would file a spurious failure issue while the untouched queue posts
+# anyway. The gate writes the sentinel only after deciding a real violation
+# (and it strips the queue in the same code path).
 post-steps:
   - name: Dispatch-conformance gate
     if: always()
-    run: cd gh-aw-review-lib && npx -y tsx workflows/review/lib/dispatch-gate.ts
+    run: |
+      rm -f /tmp/gh-aw/dispatch-gate.blocked
+      if (cd gh-aw-review-lib && npx -y tsx workflows/review/lib/dispatch-gate.ts); then
+        exit 0
+      fi
+      if [ -f /tmp/gh-aw/dispatch-gate.blocked ]; then
+        echo "::error title=dispatch-conformance gate::submission blocked; failing the job"
+        exit 1
+      fi
+      echo "::warning title=dispatch-conformance gate::gate could not run (infra failure; review not blocked)"
+      exit 0
 
 # Cost guardrails (AI credits; 1 credit = $0.01). gh-aw >= v0.79 bakes in
 # defaults of 1000/run ($10) and 5000/day ($50). Disable the daily ceiling
