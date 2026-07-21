@@ -180,6 +180,28 @@ export type CalibrationSummary = {
     };
 };
 
+/**
+ * Distinct decision points per label. Several recorded pairs are the same
+ * arbiter decision re-sampled (same spec, same defect at the same anchor,
+ * near-identical prose from different runs): the composite-key match appears
+ * 4x and the dedup-window mismatch 3x, so the pooled rates' effective N is 5
+ * decision points, not 10 pairs, and the false-accept side moves almost
+ * entirely with one point. Reported next to the pooled rates so the
+ * percentage is weighed correctly; duplicates are extra samples of one
+ * point, not independent evidence.
+ */
+export const distinctDecisionPoints = (
+    pairs: readonly CalibrationPair[],
+): {match: number; mismatch: number} => {
+    const seen = {match: new Set<string>(), mismatch: new Set<string>()};
+    for (const pair of pairs) {
+        seen[pair.label].add(
+            `${pair.spec.key} ${pair.candidate.path} ${pair.candidate.line}`,
+        );
+    }
+    return {match: seen.match.size, mismatch: seen.mismatch.size};
+};
+
 export const summarize = (scores: PairScore[]): CalibrationSummary => {
     const votes = {matchYes: 0, matchNo: 0, mismatchYes: 0, mismatchNo: 0};
     for (const score of scores) {
@@ -207,10 +229,13 @@ export const summarize = (scores: PairScore[]): CalibrationSummary => {
 
 if (process.argv[1]?.endsWith("arbiter-calibration.ts")) {
     const samplesArg = process.argv.indexOf("--samples");
+    // `|| 3`: a trailing `--samples` with no value would otherwise produce
+    // NaN, run zero samples per pair, and print a misleading 0% false-accept
+    // rate with no model spend.
     const samples =
         samplesArg === -1
             ? 3
-            : Math.max(1, Number(process.argv[samplesArg + 1]));
+            : Math.max(1, Number(process.argv[samplesArg + 1]) || 3);
     if (!process.env["ANTHROPIC_API_KEY"]) {
         console.error(
             "ANTHROPIC_API_KEY is required for a live calibration run.",
@@ -242,15 +267,21 @@ if (process.argv[1]?.endsWith("arbiter-calibration.ts")) {
             );
         }
         const summary = summarize(scores);
+        const distinct = distinctDecisionPoints(set.pairs);
         console.log(
             `\nfalse-accept rate (mismatch pairs answered yes): ${(
                 summary.falseAcceptRate * 100
-            ).toFixed(0)}%`,
+            ).toFixed(0)}% across ${distinct.mismatch} distinct decision points`,
         );
         console.log(
             `false-reject rate (match pairs answered no): ${(
                 summary.falseRejectRate * 100
-            ).toFixed(0)}%`,
+            ).toFixed(0)}% across ${distinct.match} distinct decision points`,
+        );
+        console.log(
+            "Duplicate pairs are re-samples of one decision point (same spec, " +
+                "same defect), not independent evidence; weigh the pooled " +
+                "rates by the distinct counts.",
         );
         console.log(
             "Production behavior on this set was 100% yes (every pair is a recorded accept).",

@@ -1,6 +1,7 @@
 import {describe, expect, it} from "vitest";
 
 import {
+    distinctDecisionPoints,
     loadCalibrationSet,
     parseCalibrationSet,
     summarize,
@@ -58,6 +59,26 @@ describe("arbiter calibration set", () => {
         expect(() => parseCalibrationSet({pairs: [{label: "maybe"}]})).toThrow(
             'must be "match" or "mismatch"',
         );
+        // The guards protecting the paid live run from malformed recorded
+        // data: a spec without mechanism alternates and a candidate without
+        // its finding text.
+        expect(() =>
+            parseCalibrationSet({pairs: [{label: "match", spec: {}}]}),
+        ).toThrow("missing mechanism alternates");
+        expect(() =>
+            parseCalibrationSet({
+                pairs: [{label: "match", spec: {mechanism: []}, candidate: {}}],
+            }),
+        ).toThrow("missing finding text");
+    });
+
+    it("pools to 5 distinct decision points, not 10 independent pairs", () => {
+        // The composite-key match repeats 4x and the dedup-window mismatch
+        // 3x (same spec, same defect, re-sampled prose), so the effective N
+        // behind the pooled rates is 2 mismatch and 3 match points; the CLI
+        // prints these next to the rates so a reader weighs them correctly.
+        const distinct = distinctDecisionPoints(loadCalibrationSet().pairs);
+        expect(distinct).toEqual({match: 3, mismatch: 2});
     });
 });
 
