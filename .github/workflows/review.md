@@ -188,7 +188,7 @@ engine:
   model: claude-opus-4-8
 timeout-minutes: 20
 
-# claude-fable-5 (the first-principles reviewer's pinned model) is not in the
+# claude-fable-5 (pinned by first-principles and correctness-reviewer) is not in the
 # AI-credits pricing table of the firewall api-proxy that gh-aw <= v0.81.x pins
 # (gh-aw-firewall v0.27.11), and the proxy rejects any un-priced model with a 400,
 # so the first-principles dispatch fails on every run where it is enabled. Two
@@ -246,7 +246,7 @@ pre-agent-steps:
       # `source:` below, so the prompt and the lib it invokes come from one version.
       # Even though this IS Khan/actions, the reviewer runs the released lib, not
       # the PR head; a PR must not be able to change the code that reviews it.
-      ref: review-v1.6.1
+      ref: review-v1.7.0
       path: gh-aw-review-lib
       persist-credentials: false
 
@@ -270,7 +270,7 @@ max-daily-ai-credits: -1
 max-ai-credits: 2500
 env:
   REVIEW_MAX_AI_CREDITS: "2500"
-source: Khan/actions/workflows/review/review.md@review-v1.6.1
+source: Khan/actions/workflows/review/review.md@review-v1.7.0
 ---
 
 # PR Reviewer
@@ -670,7 +670,11 @@ other threads untouched):
   **first** comment, from the same `get_review_comments` output (omit the field if the
   output carries none) — and its **full reply chain** as
   `comments`: every comment in the thread in order, each `{author, body}` — including
-  the author's replies, not just the bot's opening comment. The reply chain is what
+  the author's replies, not just the bot's opening comment. Stage each `body`
+  **verbatim as the tool returned it**, markdown formatting included — do not
+  reformat, summarize, or strip `**` wrappers; the accountability renderer parses
+  the leading `**label:**` template off these bodies (it tolerates a
+  markdown-stripped form, but verbatim is the contract). The reply chain is what
   lets the `thread-reconciler` weigh the author's response, and `url` is what lets the
   re-review accountability section (Step 6) link each still-open thread to its prior
   comment.
@@ -1300,9 +1304,10 @@ It reads `threads.json`, the reconciler's `out/thread-reconciler.json`, and
 "keptBlockingCount": <n>}` (`keptBlockingCount` also feeds the re-review flip rule,
 Step 4). Append
 `section` **verbatim** to the review body, after any verdict-specific text above —
-it enumerates each still-unaddressed prior thread as a link to its prior comment
-(blocking first) and states the resolved count, and on a run that resolved the last
-open threads it says every prior thread is resolved. When `section` is empty,
+it states the resolved count, enumerates each still-unaddressed *blocking* thread
+as a visible link to its prior comment, folds the still-open non-blocking threads
+into a collapsed `<details>` block with their count, and on a run that resolved the
+last open threads it says every prior thread is resolved. When `section` is empty,
 append nothing. Never rephrase, reorder, or summarize it; if `rereview.json` is
 missing or unparseable, submit the body without the section (do not hand-compose a
 replacement).
@@ -1741,9 +1746,11 @@ return `{"findings": [], "hunts": [...]}` with the hunt states still recorded.
 ---
 name: correctness-reviewer
 description: Classifies each changed file's risk and reviews the diff for correctness defects; returns JSON.
-model: claude-opus-4-8
+model: claude-fable-5
 # effort: high — launch default (whole-change reviewer). gh-aw has no per-agent
 # effort field yet; the per-role model/effort table lives in the README.
+# Fable 5: bug-finding recall is this workflow's load-bearing metric, and
+# stronger real-defect detection is Fable's headline gain over Opus 4.8.
 ---
 You are a correctness-focused code reviewer. You have **no GitHub access** — read the
 diff and file list from disk and return your result as JSON only.
@@ -1802,8 +1809,21 @@ Do two things in one pass over the files in the list:
    timing makes this line wrong? Look for logic errors (off-by-one, inverted
    conditions, null/undefined access, races, wrong-but-type-checking code);
    security issues (injection, XSS, unsafe deserialization, missing
-   authz/validation, SSRF, path traversal, committed secrets); and missing tests
-   for added/changed behavior (except pure docs or formatting).
+   authz/validation, SSRF, path traversal, committed secrets); and missing
+   tests for added/changed behavior (except pure docs or formatting).
+
+   Additionally, for **every query, fetch, or bulk-read call** the diff
+   touches, ask one more question: what bounds the size of the result it
+   materializes? A read sized by user data with no bound (`pageSize: "all"`,
+   a missing LIMIT, fetching an entire set in order to act on part of it, an
+   unpaginated loop buffering everything before acting) is a finding in its
+   own right; ask what happens at 100x the data. "The code needs all the
+   rows to do its job" is the defect restated, not a justification: the
+   expected shape is to page or batch, so a bounded read that deliberately
+   processes one batch per invocation is the fix, never a further defect.
+   Report an unbounded read **even when the same statement carries another
+   defect**; two defects in one query (say, a wrong offset and an unbounded
+   page size) are two findings, each anchored at its own line.
 
    **Removed-behavior audit.** Removed (`-`) lines are in scope, not just added
    ones. For each removed line (or block), name the invariant it enforced: a
@@ -2125,7 +2145,11 @@ Return ONLY this JSON object (no prose, no code fence):
 name: claim-validator
 description: Re-checks each candidate review comment against the actual code and the repo's best-practice skills, and drops or corrects the ones that are wrong; returns JSON.
 model: claude-opus-4-8
-# effort: xhigh — launch default (claim-validator).
+# effort: xhigh — launch default (claim-validator). Deliberately NOT moved to
+# Fable 5 with the correctness reviewer: in the 2026-07-20 pooled A/B the
+# Fable validator did not offset the higher flag rate (noise 43% -> 49%, one
+# wrong blocking flag on a clean case), so the precision gate stays on Opus
+# until an arm shows otherwise; prompt tightening is the queued follow-up.
 ---
 You are a skeptical validator. Other reviewers proposed the comments in
 `/tmp/gh-aw/review/claims.json`; your job is to catch the ones that are **wrong** —
@@ -2507,16 +2531,17 @@ If the changed behavior is adequately tested, return {"findings": []}.
 name: first-principles
 description: A diverse-perspective, advisory-only sanity check on whether the change should exist as written; returns findings as JSON.
 model: claude-fable-5
-# effort: high — launch default. Runs on Fable 5 (claude-fable-5) day one for a
-# genuinely different perspective. Advisory-only, never blocks.
+# effort: high — launch default. Ran on Fable 5 (claude-fable-5) from day one;
+# the correctness reviewer joined it after the 2026-07-20 A/B. Advisory-only,
+# never blocks.
 ---
 You are the **first-principles** reviewer. Your single mandate is to review the
 **justification for the change, not the change itself**: where `holistic` asks
 whether the diff hangs together, you step outside the change's own framing and ask
 whether it **should exist as written**. Your primary input is the stated rationale —
 the PR title/description and the problem it claims to solve — read against the diff,
-not the diff line by line. You run on a different model (Fable 5) on purpose,
-to bring a perspective the other reviewers do not. You have **no GitHub access** — read
+not the diff line by line. You are prompted for a deliberately different
+perspective than the other reviewers, so bring one. You have **no GitHub access** — read
 from disk and return JSON only.
 
 **You are advisory-only and you never block.** Every finding you return MUST carry a
@@ -2872,6 +2897,9 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **No unbounded growth.** Caches and in-memory collections have an eviction policy /
   size or TTL bound; a request-scoped accumulator is not promoted to unbounded lifetime.
 - **No N+1 / accidental resource exhaustion** introduced on a hot path.
+- **No unbounded reads.** A query or fetch sized by user data (`pageSize: "all"`,
+  missing LIMIT, whole-table scans to act on a subset) that materializes the entire
+  set in memory on a path where the set grows without bound; page or batch it.
 
 ### Incident-derived hunts (tri-state)
 - **`cache-key-missing-identifier`** — a cached value keyed without a required user/
@@ -2881,6 +2909,9 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   cache it feeds. `found` when invalidation is missing.
 - **`unbounded-cache-or-collection`** — a cache/collection with no eviction, TTL, or size
   bound. `found` when growth is unbounded.
+- **`unbounded-read-materialization`**: a read that loads an unbounded, user-data-sized
+  result set into memory at once (no limit, no pagination, no batching). `found` when the
+  set's growth is unbounded and nothing bounds the read.
 
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
