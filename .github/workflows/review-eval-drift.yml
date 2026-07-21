@@ -12,12 +12,7 @@
 #
 # Template: the 2026-07-10 manual cumulative dispatches (runs 29065968954 /
 # 29065976210 / 29065977160, $42.83 for 3 repeats of both arms), now one
-# dispatch via --repeats. The corpus has roughly doubled in cost since: the
-# 2026-07-20 run (29724668102) spent $84.33 of its $85 cap and budget-skipped
-# cases, which contaminates the noise-floor bands with case-mix variance
-# (the report warns when this happens). The $120 default is sized to clear
-# the full corpus x3 on both arms with headroom; a capped run degrades the
-# measurement, not just the cost. Report-only: the aggregate lands in the job
+# dispatch via --repeats. Report-only: the aggregate lands in the job
 # summary, the artifact, and a visibility PR (below); the adversarial gate
 # still fails the job on a strict-majority regression, which for a
 # main-vs-main run means production itself regressed and someone should look.
@@ -38,7 +33,7 @@ on:
       max_usd:
         description: "Total hard budget across both arms and all repeats"
         required: false
-        default: "120"
+        default: "85"
 
 permissions:
   # write: the report step commits the aggregate under
@@ -65,7 +60,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           REPEATS: ${{ inputs.repeats || '3' }}
-          MAX_USD: ${{ inputs.max_usd || '120' }}
+          MAX_USD: ${{ inputs.max_usd || '85' }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "ANTHROPIC_API_KEY secret not configured; skipping the drift run." >&2
@@ -126,3 +121,17 @@ jobs:
             --head "$BRANCH" \
             --title "review: eval drift report $STAMP" \
             --body-file out/live-ab-report.md
+      - name: Fail on a contaminated noise floor
+        # `caseAsymmetry` means the pooled samples scored different case
+        # sets (a budget-skipped tail), so the noise-floor bands carry
+        # case-mix variance and the drift run's product is degraded. The
+        # report body already warns, but a warning inside a footnote lets
+        # the degradation persist silently until someone reads it; a corpus
+        # outgrowing the budget should be a red run. Runs after the report
+        # is uploaded and the visibility PR exists, so nothing is lost.
+        run: |
+          if [ -f out/live-ab-report.json ] && \
+             [ "$(jq '.aggregate.noiseFloor.caseAsymmetry // false' out/live-ab-report.json)" = "true" ]; then
+            echo "::error::Noise-floor bands are contaminated: pooled samples scored different case sets (budget-skipped tail?). Raise max_usd and re-dispatch." >&2
+            exit 1
+          fi
