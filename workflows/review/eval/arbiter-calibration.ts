@@ -271,7 +271,9 @@ if (process.argv[1]?.endsWith("arbiter-calibration.ts")) {
         console.log(
             `\nfalse-accept rate (mismatch pairs answered yes): ${(
                 summary.falseAcceptRate * 100
-            ).toFixed(0)}% across ${distinct.mismatch} distinct decision points`,
+            ).toFixed(0)}% across ${
+                distinct.mismatch
+            } distinct decision points`,
         );
         console.log(
             `false-reject rate (match pairs answered no): ${(
