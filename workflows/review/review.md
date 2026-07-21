@@ -175,8 +175,7 @@ engine:
   model: claude-opus-4-8
 timeout-minutes: 20
 
-# claude-fable-5 (pinned by first-principles, correctness-reviewer, claim-validator,
-# and the opt-in whole-change reviewers) is not in the
+# claude-fable-5 (pinned by first-principles and correctness-reviewer) is not in the
 # AI-credits pricing table of the firewall api-proxy that gh-aw <= v0.81.x pins
 # (gh-aw-firewall v0.27.11), and the proxy rejects any un-priced model with a 400,
 # so the first-principles dispatch fails on every run where it is enabled. Two
@@ -2116,10 +2115,12 @@ Return ONLY this JSON object (no prose, no code fence):
 ---
 name: claim-validator
 description: Re-checks each candidate review comment against the actual code and the repo's best-practice skills, and drops or corrects the ones that are wrong; returns JSON.
-model: claude-fable-5
-# effort: xhigh — launch default (claim-validator). Fable 5: adversarial
-# verification is the precision gate before anything reaches the PR, and a
-# wrong drop here is a lost catch (the found-but-dropped miss class).
+model: claude-opus-4-8
+# effort: xhigh — launch default (claim-validator). Deliberately NOT moved to
+# Fable 5 with the correctness reviewer: in the 2026-07-20 pooled A/B the
+# Fable validator did not offset the higher flag rate (noise 43% -> 49%, one
+# wrong blocking flag on a clean case), so the precision gate stays on Opus
+# until an arm shows otherwise; prompt tightening is the queued follow-up.
 ---
 You are a skeptical validator. Other reviewers proposed the comments in
 `/tmp/gh-aw/review/claims.json`; your job is to catch the ones that are **wrong** —
@@ -2292,9 +2293,8 @@ Every input `id` must appear exactly once.
 ---
 name: holistic
 description: Reviews the change as a whole — is the overall approach sound and coherent — and returns findings as JSON.
-model: claude-fable-5
-# effort: high — launch default (whole-change reviewer). Fable 5: opt-in
-# ambiguity-heavy judgment role; costs nothing until enabled in ROUTING.
+model: claude-opus-4-8
+# effort: high — launch default (whole-change reviewer).
 ---
 You are the **holistic** reviewer. Your single mandate is to **judge the
 change as a whole**, not line by line. You have **no GitHub access** — read from disk and
@@ -2369,9 +2369,8 @@ scenario). If the change hangs together, return {"findings": []}.
 ---
 name: completeness
 description: Checks the change against its stated intent (PR description + linked ticket/doc) and returns findings as JSON.
-model: claude-fable-5
-# effort: high — launch default (whole-change reviewer). Fable 5: opt-in
-# ambiguity-heavy judgment role; costs nothing until enabled in ROUTING.
+model: claude-opus-4-8
+# effort: high — launch default (whole-change reviewer).
 ---
 You are the **completeness** reviewer. Your single mandate is to **check
 the change against its stated intent** — does the PR do what it says it does? You have
@@ -2441,9 +2440,8 @@ If the change matches its intent, return {"findings": []}.
 ---
 name: test-adequacy
 description: Evaluates whether the changed behavior is adequately tested and returns findings as JSON.
-model: claude-fable-5
-# effort: high — launch default (whole-change reviewer). Fable 5: opt-in
-# ambiguity-heavy judgment role; costs nothing until enabled in ROUTING.
+model: claude-opus-4-8
+# effort: high — launch default (whole-change reviewer).
 ---
 You are the **test-adequacy** reviewer. Your job is to judge whether the **changed
 behavior is adequately tested**. You have **no GitHub access** — read from disk and return
@@ -2504,8 +2502,9 @@ If the changed behavior is adequately tested, return {"findings": []}.
 name: first-principles
 description: A diverse-perspective, advisory-only sanity check on whether the change should exist as written; returns findings as JSON.
 model: claude-fable-5
-# effort: high — launch default. Ran on Fable 5 (claude-fable-5) from day one,
-# ahead of the deep-reasoning roles moving to it. Advisory-only, never blocks.
+# effort: high — launch default. Ran on Fable 5 (claude-fable-5) from day one;
+# the correctness reviewer joined it after the 2026-07-20 A/B. Advisory-only,
+# never blocks.
 ---
 You are the **first-principles** reviewer. Your single mandate is to review the
 **justification for the change, not the change itself**: where `holistic` asks

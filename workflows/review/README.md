@@ -299,25 +299,30 @@ sub-agent models — this table is the human-facing summary:
 | `thread-reconciler` | `claude-opus-4-8` | medium | Reconciliation |
 | `correctness-reviewer` | `claude-fable-5` | high | Whole-change reviewer; bug-finding recall is the load-bearing metric |
 | `skill-auditor` | `claude-opus-4-8` | high | Whole-change reviewer |
-| `holistic` | `claude-fable-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
-| `completeness` | `claude-fable-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
-| `test-adequacy` | `claude-fable-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `holistic` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `completeness` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `test-adequacy` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
 | `conventions` | `claude-opus-4-8` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
 | `first-principles` | `claude-fable-5` | high | Opt-in advisory-only; reviews the change's justification |
-| `claim-validator` | `claude-fable-5` | xhigh | Adversarial claim validation |
+| `claim-validator` | `claude-opus-4-8` | xhigh | Adversarial claim validation; stays Opus (the Fable arm did not improve precision) |
 | specialist lenses | `claude-opus-4-8` | high | Opt-in via `lens=` in `ROUTING`; the security & auth lens is xhigh |
 
 Only the orchestrator and the default roster (`pattern-triage`,
 `correctness-reviewer`, `skill-auditor`, `thread-reconciler`, `claim-validator`)
 run by default; every other row is opt-in via `ROUTING` and earns its line through
-the eval suite. The deep-reasoning roles (`correctness-reviewer`,
-`claim-validator`, and the opt-in whole-change reviewers) run Fable 5; the
-procedural roles (orchestrator, `thread-reconciler`, `skill-auditor`,
-`conventions`) and the specialist lenses stay on Opus 4.8, the lenses
-deliberately so: Fable's cyber safety classifiers can refuse benign
-security-focused analysis, and a refused security lens would be a silent
-coverage hole. Per-role Sonnet step-down arms remain future eval-suite
-measurements.
+the eval suite. Exactly two roles run Fable 5: `first-principles` (from day
+one, for perspective diversity) and `correctness-reviewer` (the 2026-07-20
+A/B's recall gain concentrated in correctness-adjacent rows, and bug-finding
+recall is the load-bearing metric). Everything else stays on Opus 4.8
+deliberately: the A/B measured the full-Fable bundle, so the other roles'
+contribution is unattributed while their cost is not (both known consumers
+enable the whole-change reviewers in `ROUTING`, so they are not free in
+practice); the Fable `claim-validator` measurably did not improve the
+precision gate (noise 43% -> 49%); and the specialist lenses stay Opus
+because Fable's cyber safety classifiers can refuse benign security-focused
+analysis, and a refused security lens would be a silent coverage hole. Any
+further per-role promotion (or Sonnet step-down) earns its line through its
+own eval-suite arm.
 
 ### Feedback signal: thumbs sweep and live counters
 
