@@ -2,6 +2,7 @@
     "name": "review",
     "version": "1.7.0",
     "dependencies": {
-        "octokit": "5.0.5"
+        "octokit": "5.0.5",
+        "@anthropic-ai/claude-agent-sdk": "0.3.205"
     }
 }

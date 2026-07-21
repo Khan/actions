@@ -170,9 +170,19 @@ observability:
 # Pin the orchestrator to a specific model version rather than a floating tier alias, so
 # the review doesn't silently change behavior when a new Opus ships. If we use Opus, we
 # use Opus 4.8. Sub-agents pin their own versions in their frontmatter below.
+#
+# The `env:` overrides gh-aw's 60s Bash tool timeout defaults (compile-verified:
+# these replace the generated values on the engine execution step). Needed by the
+# scripted dispatch mode (ROUTING `dispatch scripted`): the orchestrator invokes
+# the deterministic dispatcher (lib/dispatch.ts) as ONE blocking Bash call that
+# waits for the whole sub-agent fan-out, which takes minutes, not seconds. The
+# job-level timeout-minutes still bounds the run.
 engine:
   id: claude
   model: claude-opus-4-8
+  env:
+    BASH_DEFAULT_TIMEOUT_MS: "60000"
+    BASH_MAX_TIMEOUT_MS: "1200000"
 timeout-minutes: 20
 
 # claude-fable-5 (pinned by first-principles and correctness-reviewer) is not in the
@@ -250,6 +260,20 @@ pre-agent-steps:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       REVIEW_PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
     run: cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" npx -y tsx workflows/review/lib/stage-pr.ts
+
+  # Scripted-dispatch dependencies (deterministic-orchestrator slice 2). Only a
+  # repo whose ROUTING carries `dispatch scripted` pays this install: the
+  # dispatcher (lib/dispatch.ts) imports the Claude Agent SDK, which must be in
+  # node_modules before the sandboxed agent step starts (no network installs are
+  # guaranteed inside the firewall; this step runs on the host). npm ci against
+  # the released lockfile keeps the install reproducible and pinned.
+  - name: Install scripted-dispatch dependencies (scripted mode only)
+    run: |
+      if grep -qE '^dispatch[[:space:]]+scripted([[:space:]]|$)' "$GITHUB_WORKSPACE/.github/aw/review/ROUTING" 2>/dev/null; then
+        cd gh-aw-review-lib/workflows/review && npm ci --ignore-scripts --no-audit --no-fund
+      else
+        echo "dispatch mode is task (default): skipping the SDK install"
+      fi
 
 # The dispatch-conformance gate (workflows/review/lib/dispatch-gate.ts): a code
 # chokepoint between the agent and the review submission. gh-aw compiles
@@ -632,6 +656,45 @@ review body (Step 6), exactly:
 When the plan's `tripwireRearmed` is true, queue instead, exactly:
 `Note: divergence tripwire re-armed a full review (unreviewed share <share rounded
 to 2 decimals>).`
+
+**Scripted dispatch (when `routing.json` says so).** When the staged
+`routing.json` carries `"dispatchMode": "scripted"`, the three phases below run
+as ONE deterministic program instead of your turn-by-turn dispatch, and your
+Step 3 is exactly this:
+
+1. Stage the review threads first, exactly as Phase 2 below describes
+   (`threads.json` and `human-threads.json`) — the dispatcher's reconciler
+   dispatch reads them from disk.
+2. If any staged bot thread's reply chain shows the author factually
+   disputing a claim on the merits, write
+   `/tmp/gh-aw/review/author-disputes.json`: a list of `{path, line, quote}`
+   (the author's grounds, short and verbatim). Skip the file when there are
+   none.
+3. Invoke the dispatcher, once, as a single Bash call with `timeout` set to
+   `1200000` (it waits for the whole sub-agent fan-out; the engine's Bash
+   ceiling is raised for exactly this call):
+```
+cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
+  npx -y tsx workflows/review/lib/dispatch.ts
+```
+   It runs triage, the reviewer fan-out (roster, budget cap, and planned
+   sheds computed from `routing.json`, every dispatch staged to
+   `out/<agent>.json`), the provenance gate, the scope filter, and claim
+   validation, and writes `/tmp/gh-aw/review/dispatch-result.json`.
+4. Read `dispatch-result.json` and act on it: `claims` is the validated
+   candidate set Steps 4-6 act on (already gated, scoped, and validated;
+   never re-derive or second-guess it); `reconciliation.resolve` is the list
+   to resolve with `resolve-pull-request-review-thread` safe outputs (batch
+   them in one turn) and `reconciliation.skipLines` the lines Step 5 must not
+   comment on; `noteLines` are Step 6 note lines to append verbatim;
+   `riskFiles`, `patterns`, and `excludedFiles` feed Steps 7 and 8. Then go
+   straight to Step 4. Do not dispatch any sub-agent yourself in this mode,
+   and do not re-run the dispatcher; if its call failed, treat the run as
+   over budget and land the review from whatever `out/` evidence exists (the
+   dispatch-conformance gate decides whether a verdict may post).
+
+Everything from "Phase 1" below to the end of Phase 3 applies only to the
+default `task` dispatch mode.
 
 **Phase 1 — triage (first, alone).** Dispatch **`pattern-triage`**. It returns
 `patterns[]` (common cross-file change patterns; on approval they go in the
