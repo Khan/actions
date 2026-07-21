@@ -13,6 +13,17 @@
 
 enable holistic,completeness,test-adequacy,first-principles,conventions
 
+# Repeat reviews of the same PR run thread reconciliation plus the full
+# enabled roster over the new hunks (scoped staging); the first full review
+# of a ready PR runs everything, and the divergence tripwire re-arms full
+# review when a push rewrites enough of the PR. Scoped rather than
+# flip-gated: composite actions here run in consuming repos' CI with their
+# credentials, so a small post-review push should still be seen by the
+# whole-change reviewers, not only the correctness pass. Graduate to
+# flip-gated once re-reviews here show scoped is overpaying (see
+# workflows/review/README.md for the dial).
+re-review scoped
+
 # Shipped composite actions run inside consuming repos' CI with their credentials.
 actions/**                   tier=high
 # This repo's own CI, the publish pipeline, and the compiled agentic workflows.
