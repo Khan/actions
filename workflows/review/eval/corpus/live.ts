@@ -82,6 +82,18 @@ export type LiveDefectSpec = {
      * mechanism alternates still have to agree wherever the finding anchors.
      */
     altLocations?: LiveSpecLocation[];
+    /**
+     * When true, only a candidate with a blocking label can satisfy the
+     * spec. Meant for must-not-flag traps guarding a documented deliberate
+     * pattern: the trap should claim a finding that condemns the pattern as
+     * a defect, not a non-blocking advisory that merely names it while
+     * diagnosing something else (observed in the 2026-07-20 A/B: companion
+     * "log instead of an empty catch" suggestions on the batch-limit defect
+     * matched the swallow trap's mechanism and scored as false flags). A
+     * non-blocking mention stays noise, which the noise metric already
+     * counts.
+     */
+    blockingOnly?: boolean;
 };
 
 /**
@@ -246,6 +258,11 @@ const parseDefectSpecs = (
             errors.push(`${at}.lens: must be a non-empty string when present`);
             return;
         }
+        const blockingOnly = entry["blockingOnly"];
+        if (blockingOnly !== undefined && typeof blockingOnly !== "boolean") {
+            errors.push(`${at}.blockingOnly: must be a boolean when present`);
+            return;
+        }
         const rawAlt = entry["altLocations"];
         let altLocations: LiveSpecLocation[] | undefined;
         if (rawAlt !== undefined) {
@@ -328,6 +345,9 @@ const parseDefectSpecs = (
         }
         if (altLocations !== undefined) {
             spec.altLocations = altLocations;
+        }
+        if (blockingOnly !== undefined) {
+            spec.blockingOnly = blockingOnly;
         }
         specs.push(spec);
     });

@@ -6,7 +6,7 @@
         "live"
     ],
     "category": "synthetic-mutation",
-    "description": "Mid-band target in the reviewer's weak class (multi-file retention/lifecycle reasoning), minted 2026-07-20 alongside the floor-case triage. The dedup window constant is in days (config.ts), Note.createdAt is documented as epoch milliseconds (db.ts), and the since arithmetic multiplies days by 24*60*60 without the *1000, so the '30-day' window is actually about 43 minutes and dedup silently never fires for the traffic it names. The tests save notes at the same instant, so they pass either way.",
+    "description": "Mid-band target in the reviewer's weak class (multi-file retention/lifecycle reasoning), minted 2026-07-20 alongside the floor-case triage; calibrated saturated (identical-arm run 29765059892 2/2, then 5/5 across both arms of the 2026-07-20 pooled A/B, runs 29783522498-29783549087), consistent with the eval README's synthetic-saturation finding, and kept as a family tripwire. The dedup window constant is in days (config.ts), Note.createdAt is documented as epoch milliseconds (db.ts), and the since arithmetic multiplies days by 24*60*60 without the *1000, so the '30-day' window is actually about 43 minutes and dedup silently never fires for the traffic it names. The tests save notes at the same instant, so they pass either way.",
     "changedFiles": [
         {
             "path": "src/notes/config.ts",

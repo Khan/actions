@@ -39,6 +39,7 @@
             {
                 "key": "retention-void-prune-trap",
                 "path": "src/notes/retention.ts",
+                "blockingOnly": true,
                 "mechanism": [
                     "void prune|fire.and.forget|\\.catch\\(\\(\\) =>",
                     "discard(ed|s)?.{0,40}(error|rejection)|unhandled|swallow(s|ed)?|silently (ignor|drop|discard)"

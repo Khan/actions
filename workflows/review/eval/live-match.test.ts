@@ -76,6 +76,23 @@ describe("matchesSpec", () => {
         ).toBe(false);
     });
 
+    it("blockingOnly specs reject non-blocking candidates", () => {
+        // A must-not-flag trap guarding a documented deliberate pattern
+        // should claim a finding that condemns the pattern as a defect, not
+        // a non-blocking advisory that merely names it (the 2026-07-20 A/B
+        // saw "log instead of an empty catch" suggestions score as false
+        // flags on the batch-limit case).
+        const trap = spec({blockingOnly: true});
+        expect(matchesSpec(candidate(), trap)).toBe(true);
+        const advisory = candidate({
+            label: "suggestion (non-blocking)",
+            blocking: false,
+        });
+        expect(matchesSpec(advisory, trap)).toBe(false);
+        // Without the pin, severity is not consulted.
+        expect(matchesSpec(advisory, spec())).toBe(true);
+    });
+
     it("matches file anchors on path alone and pr anchors on mechanism alone", () => {
         const fileAnchored = candidate({
             anchor: {type: "file", path: "src/a.ts"},
