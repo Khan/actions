@@ -3,6 +3,8 @@ import {join} from "node:path";
 
 import {describe, it, expect} from "vitest";
 
+import {renderRereviewStamp, STAMP_SCHEMA_VERSION} from "./rereview-mode";
+
 import {
     BLOCKED_SENTINEL_PATH,
     disclosesSkippedDimension,
@@ -40,11 +42,14 @@ const submitItem = (event: string, body = ""): SafeOutputItem => ({
     body,
 });
 
-const commentItem = (line = 1): SafeOutputItem => ({
+const commentItem = (
+    line = 1,
+    body = "**suggestion (non-blocking):** x",
+): SafeOutputItem => ({
     type: "create_pull_request_review_comment",
     path: "a.ts",
     line,
-    body: "**issue (blocking):** x",
+    body,
 });
 
 const uploadItem: SafeOutputItem = {type: "upload_artifact", path: "out"};
@@ -479,6 +484,7 @@ describe("runDispatchGateCli", () => {
         expect(report.violations.map((v) => v.code)).toEqual([
             "correctness-missing",
             "validator-missing-with-findings",
+            "resolve-not-decided",
         ]);
         // The rewritten queue keeps only the KEEP_ITEM_TYPES survivors.
         const rewritten = JSON.parse(fs.files[AGENT_OUTPUT]) as {
@@ -852,5 +858,127 @@ describe("third-round nits: keep-list survivors, template coupling, summary", ()
         const report = runDispatchGateCli(fs);
         expect(report.blocked).toBe(false);
         expect(renderGateSummary(report)).toContain("Conformant.");
+    });
+});
+
+describe("verdict and resolution chokepoints (slice 3)", () => {
+    const conforming = () => ({
+        plan: {depth: "full"},
+        routing: {enabledReviewers: [], lensesToSpawn: []},
+        outFiles: conformingOutFiles(),
+    });
+
+    it("rejects an APPROVE queued alongside a blocking inline comment", () => {
+        const result = evaluate({
+            ...conforming(),
+            items: [
+                commentItem(2, "**issue (blocking):** guard removed"),
+                submitItem("APPROVE", ""),
+            ],
+        });
+        expect(result.violations.map((v) => v.code)).toEqual([
+            "approve-with-blocking-comment",
+        ]);
+        // The same comment under REQUEST_CHANGES is the conforming shape.
+        const rc = evaluate({
+            ...conforming(),
+            items: [
+                commentItem(2, "**issue (blocking):** guard removed"),
+                submitItem(
+                    "REQUEST_CHANGES",
+                    "Changes requested — see inline comments.",
+                ),
+            ],
+        });
+        expect(rc.conformant).toBe(true);
+    });
+
+    it("vetoes a reduced-depth flip over kept blocking threads", () => {
+        const stampedPrior = [
+            {
+                body: renderRereviewStamp({
+                    schemaVersion: STAMP_SCHEMA_VERSION,
+                    depth: "full",
+                    verdict: "REQUEST_CHANGES",
+                    anchorDraft: false,
+                    anchorHunks: {},
+                }),
+            },
+        ];
+        const base = {
+            items: [submitItem("APPROVE", "")],
+            plan: {depth: "fast"},
+            outFiles: {"thread-reconciler.json": "{}"},
+            priorReviews: stampedPrior,
+        };
+        const vetoed = evaluate({
+            ...base,
+            rereviewAccounting: {keptBlockingCount: 2},
+        });
+        expect(vetoed.violations.map((v) => v.code)).toEqual([
+            "flip-vetoed-kept-blocking",
+        ]);
+        // Zero kept blocking threads: the flip is legitimate.
+        const clean = evaluate({
+            ...base,
+            rereviewAccounting: {keptBlockingCount: 0},
+        });
+        expect(clean.conformant).toBe(true);
+        // Missing accounting fails open, with a note.
+        const open = evaluate(base);
+        expect(open.conformant).toBe(true);
+        expect(open.notes.join(" ")).toContain("fail-open");
+        // The rule never applies at full depth.
+        const full = evaluate({
+            ...conforming(),
+            items: [submitItem("APPROVE", "")],
+            priorReviews: stampedPrior,
+            rereviewAccounting: {keptBlockingCount: 2},
+        });
+        expect(full.conformant).toBe(true);
+    });
+
+    it("rejects a queued resolution the reconciler did not decide", () => {
+        const resolveItem = (id: string): SafeOutputItem => ({
+            type: "resolve_pull_request_review_thread",
+            thread_id: id,
+        });
+        const outFiles = {
+            ...conformingOutFiles(),
+            "thread-reconciler.json": JSON.stringify({
+                resolve: ["t1", "t2"],
+                keep: ["t3"],
+            }),
+        };
+        const rogue = evaluate({
+            plan: {depth: "full"},
+            routing: {enabledReviewers: [], lensesToSpawn: []},
+            outFiles,
+            items: [submitItem("APPROVE", ""), resolveItem("t3")],
+        });
+        expect(rogue.violations.map((v) => v.code)).toEqual([
+            "resolve-not-decided",
+        ]);
+        // Decided resolutions pass; the deficit is reported, not blocked.
+        const partial = evaluate({
+            plan: {depth: "full"},
+            routing: {enabledReviewers: [], lensesToSpawn: []},
+            outFiles,
+            items: [submitItem("APPROVE", ""), resolveItem("t1")],
+        });
+        expect(partial.conformant).toBe(true);
+        expect(partial.notes.join(" ")).toContain(
+            "1 reconciler-decided resolution(s) not queued (t2)",
+        );
+        // Resolutions with no reconciler output at all are the freelance move.
+        const noReconciler = evaluate({
+            plan: {depth: "full"},
+            routing: {enabledReviewers: [], lensesToSpawn: []},
+            outFiles: conformingOutFiles(),
+            items: [submitItem("APPROVE", ""), resolveItem("t1")],
+        });
+        expect(noReconciler.violations.map((v) => v.code)).toEqual([
+            "resolve-not-decided",
+        ]);
     });
 });
