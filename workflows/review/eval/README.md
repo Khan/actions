@@ -10,7 +10,7 @@ comment is the reference for its internals.
 | --- | --- | --- | --- |
 | Deterministic suite (vitest) | The pipeline code: router, gates, verdict, rendering, matching, aggregation. Replays recorded findings; no model calls. | $0 | Every push (`pnpm test --run`) |
 | Live A/B, smoke subset | One PR's marginal `review.md` delta: real model sub-agents run from BOTH the base branch's and the PR's review.md over live-tagged smoke cases. A tripwire, not a measurement. | ~$10/PR | Every PR touching `workflows/review/**` |
-| Powered / scheduled runs | Recall effects, priced with repeats and binomial intervals; run-to-run wobble; cumulative drift vs main. | ~$29-85 | `workflow_dispatch`, weekly cron |
+| Powered / scheduled runs | Recall effects, priced with repeats and binomial intervals; run-to-run wobble; cumulative drift vs main. | ~$29-220 | `workflow_dispatch`, weekly cron |
 
 Single-run percentage deltas below the measured noise floor mean nothing
 (see "Reading a report" below). Any recall claim needs a powered run.
@@ -66,13 +66,16 @@ gh workflow run review-eval-ab.yml --ref <branch> \
   -f cases=adversarial-injection-approve,golden-request-changes-authz \
   -f repeats=10 -f max_usd=45
 
-# Cumulative measurement vs production (~$60): full corpus x3 against main
+# Cumulative measurement vs production (~$170 at post-Fable-swap measured
+# rates: ~$0.80/case-arm-run on the all-Opus baseline arm, ~$1.08 on the
+# Fable-correctness candidate arm, 30 live cases x3): full corpus x3
 gh workflow run review-eval-ab.yml --ref <branch> \
-  -f base_ref=origin/main -f full=true -f repeats=3 -f max_usd=85
+  -f base_ref=origin/main -f full=true -f repeats=3 -f max_usd=200
 
-# Noise floor / wobble control: identical arms, full corpus x3
+# Noise floor / wobble control (~$194 measured with both arms on the
+# Fable-correctness roster): identical arms, full corpus x3
 gh workflow run review-eval-ab.yml --ref <branch> \
-  -f base_ref=origin/<branch> -f force_arms=true -f full=true -f repeats=3 -f max_usd=85
+  -f base_ref=origin/<branch> -f force_arms=true -f full=true -f repeats=3 -f max_usd=220
 
 # Pool reports across dispatches (run ids or local paths)
 pnpm dlx tsx workflows/review/eval/aggregate.ts <run-id> <run-id> ... [--out <path>]

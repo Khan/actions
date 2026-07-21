@@ -175,7 +175,7 @@ engine:
   model: claude-opus-4-8
 timeout-minutes: 20
 
-# claude-fable-5 (the first-principles reviewer's pinned model) is not in the
+# claude-fable-5 (pinned by first-principles and correctness-reviewer) is not in the
 # AI-credits pricing table of the firewall api-proxy that gh-aw <= v0.81.x pins
 # (gh-aw-firewall v0.27.11), and the proxy rejects any un-priced model with a 400,
 # so the first-principles dispatch fails on every run where it is enabled. Two
@@ -1722,9 +1722,11 @@ return `{"findings": [], "hunts": [...]}` with the hunt states still recorded.
 ---
 name: correctness-reviewer
 description: Classifies each changed file's risk and reviews the diff for correctness defects; returns JSON.
-model: claude-opus-4-8
+model: claude-fable-5
 # effort: high — launch default (whole-change reviewer). gh-aw has no per-agent
 # effort field yet; the per-role model/effort table lives in the README.
+# Fable 5: bug-finding recall is this workflow's load-bearing metric, and
+# stronger real-defect detection is Fable's headline gain over Opus 4.8.
 ---
 You are a correctness-focused code reviewer. You have **no GitHub access** — read the
 diff and file list from disk and return your result as JSON only.
@@ -2119,7 +2121,11 @@ Return ONLY this JSON object (no prose, no code fence):
 name: claim-validator
 description: Re-checks each candidate review comment against the actual code and the repo's best-practice skills, and drops or corrects the ones that are wrong; returns JSON.
 model: claude-opus-4-8
-# effort: xhigh — launch default (claim-validator).
+# effort: xhigh — launch default (claim-validator). Deliberately NOT moved to
+# Fable 5 with the correctness reviewer: in the 2026-07-20 pooled A/B the
+# Fable validator did not offset the higher flag rate (noise 43% -> 49%, one
+# wrong blocking flag on a clean case), so the precision gate stays on Opus
+# until an arm shows otherwise; prompt tightening is the queued follow-up.
 ---
 You are a skeptical validator. Other reviewers proposed the comments in
 `/tmp/gh-aw/review/claims.json`; your job is to catch the ones that are **wrong** —
@@ -2501,16 +2507,17 @@ If the changed behavior is adequately tested, return {"findings": []}.
 name: first-principles
 description: A diverse-perspective, advisory-only sanity check on whether the change should exist as written; returns findings as JSON.
 model: claude-fable-5
-# effort: high — launch default. Runs on Fable 5 (claude-fable-5) day one for a
-# genuinely different perspective. Advisory-only, never blocks.
+# effort: high — launch default. Ran on Fable 5 (claude-fable-5) from day one;
+# the correctness reviewer joined it after the 2026-07-20 A/B. Advisory-only,
+# never blocks.
 ---
 You are the **first-principles** reviewer. Your single mandate is to review the
 **justification for the change, not the change itself**: where `holistic` asks
 whether the diff hangs together, you step outside the change's own framing and ask
 whether it **should exist as written**. Your primary input is the stated rationale —
 the PR title/description and the problem it claims to solve — read against the diff,
-not the diff line by line. You run on a different model (Fable 5) on purpose,
-to bring a perspective the other reviewers do not. You have **no GitHub access** — read
+not the diff line by line. You are prompted for a deliberately different
+perspective than the other reviewers, so bring one. You have **no GitHub access** — read
 from disk and return JSON only.
 
 **You are advisory-only and you never block.** Every finding you return MUST carry a

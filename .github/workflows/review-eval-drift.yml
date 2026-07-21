@@ -35,16 +35,23 @@ on:
         # case-arm-runs (~$0.82 each) with the tail of the corpus
         # budget-skipped, which also contaminated the noise-floor bands
         # (asymmetric case mix). The 23-case corpus (both new mutation cases
-        # are live-tagged) needs 23 x 3 repeats x 2 arms = 138 case-arm-runs,
-        # ~$113; 120 clears it while staying a hard stop against runaways,
-        # though the headroom is thin: the ~$0.82/run mean comes from a run
-        # whose tail was budget-skipped, so it may understate. Repeats stay
-        # at 3: they are
-        # the power axis, and per-case repeat tiering would make every
-        # noise-floor sample a different case mix.
+        # are live-tagged) needed 23 x 3 repeats x 2 arms = 138 case-arm-runs,
+        # ~$113; 120 cleared it while staying a hard stop against runaways.
+        # Repeats stay at 3: they are the power axis, and per-case repeat
+        # tiering would make every noise-floor sample a different case mix.
+        #
+        # Re-sized 2026-07-21 for the Fable-5 correctness-reviewer plus the
+        # discrimination cases added alongside it: 30 live cases (2 clean +
+        # 5 golden + 6 incidents + 7 smoke + 10 synthetic-mutations) x 3
+        # repeats x 2 arms = 180 case-arm-runs. The de-scoped roster measured
+        # ~$1.08 per case-arm-run in the pooled A/B (runs
+        # 29855626692-29855643020: $97.19 / 90), so a drift week with both
+        # arms on this roster is ~$194; 220 clears it with real headroom,
+        # which matters now that a budget-skipped tail is a red run (the
+        # caseAsymmetry gate). If the swap is reverted, dial back toward 160.
         description: "Total hard budget across both arms and all repeats"
         required: false
-        default: "120"
+        default: "220"
 
 permissions:
   # write: the report step commits the aggregate under
@@ -71,7 +78,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           REPEATS: ${{ inputs.repeats || '3' }}
-          MAX_USD: ${{ inputs.max_usd || '120' }}
+          MAX_USD: ${{ inputs.max_usd || '220' }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "ANTHROPIC_API_KEY secret not configured; skipping the drift run." >&2
