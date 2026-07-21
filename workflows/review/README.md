@@ -89,8 +89,10 @@ every safe output during the agent run and executes the queue from a separate
 verdict and findings against the staged `out/` sub-agent outputs (per re-review
 depth: the correctness pass wherever the depth dispatches one, the
 claim-validator whenever findings post, a disclosure note for every planned
-shed) and, on violation, strips the posting items from the queue and fails the
-job. A run that skipped its own dispatch protocol (observed in production:
+shed, no blocking inline comment under an APPROVE, the reduced-depth flip veto
+over kept blocking threads, and every queued thread resolution backed by the
+reconciler's decision) and, on violation, strips the posting items from the
+queue and fails the job. A run that skipped its own dispatch protocol (observed in production:
 zero sub-agents dispatched, verdict submitted, nothing disclosed) becomes a
 red run that posts nothing instead of a normal-looking review; the run
 artifact keeps the original queue and the gate report for diagnosis. The gate
