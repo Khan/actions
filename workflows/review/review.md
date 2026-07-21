@@ -233,6 +233,27 @@ pre-agent-steps:
       path: gh-aw-review-lib
       persist-credentials: false
 
+# The dispatch-conformance gate (workflows/review/lib/dispatch-gate.ts): a code
+# chokepoint between the agent and the review submission. gh-aw compiles
+# `post-steps` into the agent job after "Ingest agent output" (which finalizes
+# /tmp/gh-aw/agent_output.json, the validated safe-output queue) and before
+# "Upload agent artifacts" (which ships that queue to the separate safe_outputs
+# job that actually calls the GitHub API). The gate reads the queue plus the
+# /tmp/gh-aw/review/ staging on the same runner and, when a queued verdict or
+# queued findings lack the sub-agent outputs the protocol requires (Step 3;
+# per re-review depth, sheds must be disclosed), strips every posting item
+# from the queue and exits non-zero: the submission is BLOCKED (not detected
+# after the fact), the run goes red, and the evidence (the out/ artifact, the
+# original queue beside the agent artifact, the gate report) still lands.
+# Exists because run 29865480728 (Khan/webapp#40992) submitted a verdict with
+# zero sub-agent dispatches and no disclosure; a prompt rule cannot gate an
+# orchestrator that is already ignoring the prompt. `if: always()` because the
+# safe_outputs job executes the queue even when the agent job fails partway.
+post-steps:
+  - name: Dispatch-conformance gate
+    if: always()
+    run: cd gh-aw-review-lib && npx -y tsx workflows/review/lib/dispatch-gate.ts
+
 # Cost guardrails (AI credits; 1 credit = $0.01). gh-aw >= v0.79 bakes in
 # defaults of 1000/run ($10) and 5000/day ($50). Disable the daily ceiling
 # (-1) so reviews are never skipped on a busy PR day; the per-run cap below
