@@ -497,6 +497,15 @@ export const runStagePrCli = async (
     // at flip-gated depth pattern-triage never runs, so the review diff and
     // file list are staged directly from scoped.diff.
     const scopedPath = SCOPED_DIFF_PATH;
+    if (plan.staging === "new-hunks" && !fs.existsSync(scopedPath)) {
+        // Unreachable today (a new-hunks plan implies a usable anchor, so
+        // the plan CLI wrote scoped.diff), but if that invariant ever
+        // breaks, the run silently reviewing the WHOLE diff at a reduced
+        // depth deserves a visible warning, not a shrug.
+        warnings.push(
+            `re-review plan staged new-hunks but ${scopedPath} is missing: whole-change surfaces left unscoped`,
+        );
+    }
     if (plan.staging === "new-hunks" && fs.existsSync(scopedPath)) {
         const scoped = fs.readFileSync(scopedPath, "utf8");
         write(STRIPPED_DIFF_OUT, scoped);
@@ -544,10 +553,12 @@ if (typeof require !== "undefined" && require.main === module) {
     const apiUrl = process.env.GITHUB_API_URL ?? "https://api.github.com";
     const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? "";
     const ghGet: GhGet = async (path) => {
+        const ATTEMPTS = 3;
         let lastError: unknown;
-        for (let attempt = 0; attempt < 3; attempt++) {
+        for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+            let response: Awaited<ReturnType<typeof fetch>> | null = null;
             try {
-                const response = await fetch(`${apiUrl}${path}`, {
+                response = await fetch(`${apiUrl}${path}`, {
                     headers: {
                         accept: "application/vnd.github+json",
                         ...(token !== ""
@@ -555,14 +566,25 @@ if (typeof require !== "undefined" && require.main === module) {
                             : {}),
                     },
                 });
-                if (!response.ok) {
-                    throw new Error(
-                        `GET ${path} -> ${response.status} ${response.statusText}`,
-                    );
-                }
-                return await response.json();
             } catch (error) {
+                // Network-level failure: retryable.
                 lastError = error;
+            }
+            if (response !== null) {
+                if (response.ok) {
+                    return await response.json();
+                }
+                const error = new Error(
+                    `GET ${path} -> ${response.status} ${response.statusText}`,
+                );
+                if (response.status < 500 && response.status !== 429) {
+                    // A 4xx (bad token, missing PR) will not heal on retry;
+                    // fail the staging immediately.
+                    throw error;
+                }
+                lastError = error;
+            }
+            if (attempt < ATTEMPTS - 1) {
                 await new Promise((resolve) =>
                     setTimeout(resolve, 1000 * (attempt + 1)),
                 );
