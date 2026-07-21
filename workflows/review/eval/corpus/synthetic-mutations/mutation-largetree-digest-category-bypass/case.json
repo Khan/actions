@@ -1,0 +1,113 @@
+{
+    "id": "mutation-largetree-digest-category-bypass",
+    "tags": [
+        "mutation",
+        "large-tree",
+        "cross-file",
+        "live"
+    ],
+    "category": "synthetic-mutation",
+    "description": "Scale-hypothesis discrimination case, minted 2026-07-20 after five hand-authored small synthetics (2-13 files) all calibrated saturated under the Opus roster: this one tests whether difficulty comes from tree size and cross-subsystem indirection. A 29-file notifications platform where the PR ships the second half of a digest launch: assembly (digest/assemble.ts), scheduling, and a bulk sender that goes straight to the transport. The defect is invisible in the diff alone: the unchanged delivery/send.ts queues weekly-frequency users' items BEFORE its per-category isSubscribed check (deliberately, per its comment, because preferences can change before digest time), so the queue is unfiltered, and the new assembly drains and sends it without ever re-checking isSubscribed(userId, item.category). The unchanged preferences/defaults.ts makes the consequence concrete: marketing is opt-in (default false), so every weekly-frequency user receives marketing items in their digest that immediate-frequency users never receive. The tests exercise subscribed categories only. Catching it requires composing three unchanged files (send.ts queue ordering, store.ts semantics, defaults.ts opt-in table) with the new path. Calibrated saturated under the Opus roster (run 29767404342, 6/6 identical-arm samples): even at 29 files with the invariant two unchanged hops from the diff, the cross-file trace reasons to the defect. Consistent with the scale-at-authorable-size hypothesis being false, with one attribution caveat: the retained send.ts comment (preferences can change between queueing and digest time) all but states the missing re-check, so saturation here cannot distinguish scale adds no difficulty from the hint gave it away. Kept as the large-tree family tripwire; live samples also post companion advisories (2-3 comments observed), so postedCommentCount is deliberately unset while mustCatch and the verdict still gate.",
+    "changedFiles": [
+        {
+            "path": "src/notify/digest/assemble.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/notify/digest/schedule.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/notify/digest/assemble.test.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/notify/delivery/bulk.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/notify/templates/digest.ts",
+            "status": "added"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "digest-skips-category-check",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/notify/digest/assemble.ts",
+                    "line": 20,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/notify/delivery/send.ts queues weekly users' items before its isSubscribed(item.category) check, and its comment says queued items are stored as-is because preferences can change before digest time",
+                    "src/notify/digest/assemble.ts:20 drains the pending queue and renders every item; nothing between drainPending and sendBatch checks isSubscribed(userId, item.category)",
+                    "src/notify/delivery/bulk.ts sends the assembled digest straight to the transport, bypassing the per-item send pipeline where the category check lives",
+                    "src/notify/preferences/defaults.ts marks marketing (and tips) opt-in by default, so the unchecked path delivers content most users never opted into"
+                ],
+                "failure_scenario": "A weekly-frequency user with the default marketing opt-out has a marketing item produced for them; send.ts queues it unfiltered (by design), buildDigest drains and renders it without re-checking isSubscribed, and sendBatch delivers it, so every weekly user receives marketing (and any other unsubscribed category) that immediate users are correctly protected from; at digest scale this is a mass unsolicited-email incident.",
+                "producing_hunt": "correctness:cross-file-trace",
+                "model_authored_prose": "The digest path never re-applies the per-category subscription check: send.ts deliberately queues weekly users' items unfiltered (its comment says preferences can change before digest time), and buildDigest drains and sends everything via the transport-direct bulk sender. Filter the drained items with isSubscribed(userId, item.category) in buildDigest, or the digest delivers marketing and other opt-in categories to users who never subscribed."
+            }
+        }
+    ],
+    "validation": [
+        {
+            "id": "digest-skips-category-check",
+            "verification": "confirmed"
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "digest-skips-category-check"
+        ]
+    },
+    "diff": "diff --git a/src/notify/delivery/bulk.ts b/src/notify/delivery/bulk.ts\nnew file mode 100644\nindex 0000000..ec4463a\n--- /dev/null\n+++ b/src/notify/delivery/bulk.ts\n@@ -0,0 +1,15 @@\n+import type {Digest} from \"../digest/assemble\";\n+import {emailFor} from \"../users/directory\";\n+import {sendEmail} from \"./transport\";\n+\n+/**\n+ * Digest delivery goes straight to the transport: the digest is one email,\n+ * already assembled, so the per-item send pipeline does not apply.\n+ */\n+export const sendBatch = async (digest: Digest): Promise<void> => {\n+    await sendEmail({\n+        to: emailFor(digest.userId),\n+        subject: digest.subject,\n+        html: digest.html,\n+    });\n+};\ndiff --git a/src/notify/digest/assemble.test.ts b/src/notify/digest/assemble.test.ts\nnew file mode 100644\nindex 0000000..307adf5\n--- /dev/null\n+++ b/src/notify/digest/assemble.test.ts\n@@ -0,0 +1,33 @@\n+import {setFrequency} from \"../preferences/store\";\n+import {buildDigest} from \"./assemble\";\n+import {queuePending} from \"./pending\";\n+\n+const item = (userId: string, id: string, category: string) => ({\n+    id,\n+    userId,\n+    category,\n+    subject: `s-${id}`,\n+    body: `b-${id}`,\n+    at: Number(id.slice(1)),\n+});\n+\n+describe(\"buildDigest\", () => {\n+    it(\"returns null for immediate-frequency users\", () => {\n+        queuePending(item(\"u1\", \"i1\", \"product_updates\"));\n+        expect(buildDigest(\"u1\")).toBeNull();\n+    });\n+\n+    it(\"bundles queued items for weekly users\", () => {\n+        setFrequency(\"u2\", \"weekly\");\n+        queuePending(item(\"u2\", \"i1\", \"product_updates\"));\n+        queuePending(item(\"u2\", \"i2\", \"billing\"));\n+        const digest = buildDigest(\"u2\");\n+        expect(digest?.itemCount).toBe(2);\n+        expect(digest?.subject).toContain(\"2 updates\");\n+    });\n+\n+    it(\"returns null when nothing is queued\", () => {\n+        setFrequency(\"u3\", \"weekly\");\n+        expect(buildDigest(\"u3\")).toBeNull();\n+    });\n+});\ndiff --git a/src/notify/digest/assemble.ts b/src/notify/digest/assemble.ts\nnew file mode 100644\nindex 0000000..563a6fb\n--- /dev/null\n+++ b/src/notify/digest/assemble.ts\n@@ -0,0 +1,30 @@\n+import {wantsDigest} from \"../preferences/store\";\n+import {renderDigest} from \"../templates/digest\";\n+import {drainPending} from \"./pending\";\n+\n+export type Digest = {\n+    userId: string;\n+    subject: string;\n+    html: string;\n+    itemCount: number;\n+};\n+\n+/**\n+ * Builds the weekly digest for one user, or null when there is nothing to\n+ * send this week.\n+ */\n+export const buildDigest = (userId: string): Digest | null => {\n+    if (!wantsDigest(userId)) {\n+        return null;\n+    }\n+    const items = drainPending(userId);\n+    if (items.length === 0) {\n+        return null;\n+    }\n+    return {\n+        userId,\n+        subject: `Your weekly digest (${items.length} updates)`,\n+        html: renderDigest(items),\n+        itemCount: items.length,\n+    };\n+};\ndiff --git a/src/notify/digest/schedule.ts b/src/notify/digest/schedule.ts\nnew file mode 100644\nindex 0000000..7710b6c\n--- /dev/null\n+++ b/src/notify/digest/schedule.ts\n@@ -0,0 +1,19 @@\n+import {sendBatch} from \"../delivery/bulk\";\n+import {recordDigest} from \"../audit/log\";\n+import {buildDigest} from \"./assemble\";\n+import {usersWithPending} from \"./pending\";\n+\n+/** Runs Monday 09:00 platform time; invoked by the platform cron. */\n+export const runWeeklyDigests = async (): Promise<number> => {\n+    let sent = 0;\n+    for (const userId of usersWithPending()) {\n+        const digest = buildDigest(userId);\n+        if (digest === null) {\n+            continue;\n+        }\n+        await sendBatch(digest);\n+        recordDigest(digest.userId, digest.itemCount);\n+        sent += 1;\n+    }\n+    return sent;\n+};\ndiff --git a/src/notify/templates/digest.ts b/src/notify/templates/digest.ts\nnew file mode 100644\nindex 0000000..7c25933\n--- /dev/null\n+++ b/src/notify/templates/digest.ts\n@@ -0,0 +1,12 @@\n+import type {NotificationItem} from \"../types\";\n+import {wrapHtml} from \"./layout\";\n+import {renderItem} from \"./render\";\n+\n+/** One section per queued item, oldest first, inside the standard shell. */\n+export const renderDigest = (items: NotificationItem[]): string =>\n+    wrapHtml(\n+        [\n+            `<h1>Your week in review</h1>`,\n+            ...items.map((item) => `<section>${renderItem(item)}</section>`),\n+        ].join(\"\\n\"),\n+    );\n",
+    "live": {
+        "prContext": {
+            "title": "notifications: ship the weekly digest sender",
+            "description": "Second half of the digest launch: items for weekly-frequency users have been queueing since the frequency preference shipped, and this adds the assembly and bulk delivery that sends them every Monday. Digest delivery respects the weekly opt-in. Covered by assembly tests.",
+            "author": "dev-notify",
+            "baseBranch": "main"
+        },
+        "tree": "tree",
+        "mustCatchSpecs": [
+            {
+                "key": "digest-skips-category-check",
+                "path": "src/notify/digest/assemble.ts",
+                "lineStart": 12,
+                "lineEnd": 30,
+                "mechanism": [
+                    "isSubscribed",
+                    "categor(y|ies).{0,80}(check|filter|subscri|re.?check|preference)|(check|filter|re.?check).{0,60}categor",
+                    "unsubscribed.{0,100}(item|marketing|categor|content)|(marketing|opt.in|opted.out|never (opted|subscribed)).{0,120}(digest|deliver|receiv|sent)",
+                    "bypass.{0,60}(check|pipeline|subscription)|skips? the (per.item|subscription|category)|without (re.?)?(checking|filtering)"
+                ],
+                "altLocations": [
+                    {
+                        "path": "src/notify/delivery/bulk.ts"
+                    },
+                    {
+                        "path": "src/notify/digest/schedule.ts"
+                    },
+                    {
+                        "path": "src/notify/digest/assemble.test.ts"
+                    }
+                ]
+            }
+        ]
+    }
+}

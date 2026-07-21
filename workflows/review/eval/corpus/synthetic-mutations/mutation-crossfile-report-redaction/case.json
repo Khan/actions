@@ -1,0 +1,96 @@
+{
+    "id": "mutation-crossfile-report-redaction",
+    "tags": [
+        "mutation",
+        "cross-file",
+        "live"
+    ],
+    "category": "synthetic-mutation",
+    "description": "Model-capability discrimination case (cross-file inference-chain family), minted 2026-07-20 and hardened same day after v1 calibrated saturated (4/4 under the Opus roster; policy.ts stated the redaction rule outright). Seeing the defect now requires composing the files without any stated rule: share.ts sends the built rows to a partner webhook (an external destination), and the unchanged format-report.ts documents that the unset-redact default includes raw userId and email columns and 'is only safe for reports that stay inside the org'. The new buildPartnerReport calls formatReport(relevant) with no options, so partners receive raw identifiers and emails. The test asserts feature filtering only and passes either way. No single file looks wrong in isolation. Calibrated saturated under the Opus roster twice (runs 29763213774 v1 4/4, 29764855482 v2-hardened 4/4): the cross-file trace composes three small files reliably. Kept as the cross-file family's regression tripwire, not a discriminator; samples also post a companion missing-redaction-test finding (reviewer-side dedup gap), deliberately not annotated; postedCommentCount is deliberately unset because that companion makes the live posted count vary (0-3 observed), while mustCatch and the verdict still gate.",
+    "changedFiles": [
+        {
+            "path": "src/reports/partner-report.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/reports/share.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/reports/partner-report.test.ts",
+            "status": "added"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "partner-report-unredacted",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/reports/partner-report.ts",
+                    "line": 11,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/reports/share.ts POSTs the built rows to a partner webhook, an external destination",
+                    "src/reports/format-report.ts documents that the unset-redact default includes raw userId and email columns and is only safe for reports that stay inside the org",
+                    "src/reports/partner-report.ts:11 calls formatReport(relevant) with no options"
+                ],
+                "failure_scenario": "The weekly partner job builds rows with buildPartnerReport and posts them via shareWithPartner; because formatReport is called without redact: true, every row carries the raw userId and email of the users who used the partner's features, sending PII to a third party even though the formatter documents the unredacted default as only safe inside the org.",
+                "producing_hunt": "correctness:cross-file-trace",
+                "model_authored_prose": "buildPartnerReport calls formatReport(relevant) without options, and the formatter's documented default includes raw userId and email columns and is described as only safe for reports that stay inside the org. These rows go to a partner webhook (share.ts). Pass {redact: true} here."
+            }
+        }
+    ],
+    "validation": [
+        {
+            "id": "partner-report-unredacted",
+            "verification": "confirmed"
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "partner-report-unredacted"
+        ]
+    },
+    "diff": "diff --git a/src/reports/partner-report.test.ts b/src/reports/partner-report.test.ts\nnew file mode 100644\nindex 0000000..8a8b80b\n--- /dev/null\n+++ b/src/reports/partner-report.test.ts\n@@ -0,0 +1,25 @@\n+import {buildPartnerReport} from \"./partner-report\";\n+import type {UsageEvent} from \"./format-report\";\n+\n+const event = (feature: string): UsageEvent => ({\n+    userId: \"u1\",\n+    email: \"u1@example.com\",\n+    feature,\n+    at: 1,\n+});\n+\n+describe(\"buildPartnerReport\", () => {\n+    it(\"keeps only the partner's own features\", () => {\n+        const rows = buildPartnerReport(\n+            [event(\"search\"), event(\"editor\"), event(\"search\")],\n+            [\"search\"],\n+        );\n+        expect(rows).toHaveLength(2);\n+        expect(rows.every((row) => row[\"feature\"] === \"search\")).toBe(true);\n+    });\n+\n+    it(\"returns no rows when nothing matches\", () => {\n+        const rows = buildPartnerReport([event(\"editor\")], [\"search\"]);\n+        expect(rows).toHaveLength(0);\n+    });\n+});\ndiff --git a/src/reports/partner-report.ts b/src/reports/partner-report.ts\nnew file mode 100644\nindex 0000000..693484f\n--- /dev/null\n+++ b/src/reports/partner-report.ts\n@@ -0,0 +1,12 @@\n+import {formatReport, type ReportRow, type UsageEvent} from \"./format-report\";\n+\n+/** Weekly usage summary a partner integration receives for its own features. */\n+export const buildPartnerReport = (\n+    events: UsageEvent[],\n+    partnerFeatures: string[],\n+): ReportRow[] => {\n+    const relevant = events.filter((event) =>\n+        partnerFeatures.includes(event.feature),\n+    );\n+    return formatReport(relevant);\n+};\ndiff --git a/src/reports/share.ts b/src/reports/share.ts\nnew file mode 100644\nindex 0000000..fc73ae0\n--- /dev/null\n+++ b/src/reports/share.ts\n@@ -0,0 +1,24 @@\n+import type {ReportRow} from \"./format-report\";\n+import {PARTNER_WEBHOOK_TIMEOUT_MS} from \"./policy\";\n+\n+/** POSTs a built report to the partner's registered webhook. */\n+export const shareWithPartner = async (\n+    webhookUrl: string,\n+    rows: ReportRow[],\n+): Promise<void> => {\n+    const controller = new AbortController();\n+    const timer = setTimeout(\n+        () => controller.abort(),\n+        PARTNER_WEBHOOK_TIMEOUT_MS,\n+    );\n+    try {\n+        await fetch(webhookUrl, {\n+            method: \"POST\",\n+            headers: {\"content-type\": \"application/json\"},\n+            body: JSON.stringify({rows}),\n+            signal: controller.signal,\n+        });\n+    } finally {\n+        clearTimeout(timer);\n+    }\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "reports: send partners a weekly usage summary for their features",
+            "description": "Adds a weekly partner usage report and a webhook sender. The report reuses the shared formatter; rows are scoped to the partner's own features. Covered by filtering tests.",
+            "author": "dev-reports",
+            "baseBranch": "main"
+        },
+        "tree": "tree",
+        "mustCatchSpecs": [
+            {
+                "key": "partner-report-unredacted",
+                "path": "src/reports/partner-report.ts",
+                "lineStart": 4,
+                "lineEnd": 12,
+                "mechanism": [
+                    "redact",
+                    "email|PII|personal(ly identifiable)? (data|information)|raw (user ?id|identifier)",
+                    "(leave|leaves|leaving|outside|beyond|across|crosses).{0,50}(org|boundary)|third.part|(partner|webhook|external).{0,80}(email|raw|unredacted|identifier|PII)"
+                ],
+                "altLocations": [
+                    {
+                        "path": "src/reports/share.ts"
+                    }
+                ]
+            }
+        ]
+    }
+}

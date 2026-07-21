@@ -1,0 +1,95 @@
+{
+    "id": "mutation-window-boundary-doublecount",
+    "tags": [
+        "mutation",
+        "boundary",
+        "live"
+    ],
+    "category": "synthetic-mutation",
+    "description": "Model-capability discrimination case (boundary-composition family), minted 2026-07-20 for the corpus-difficulty work. dailyTotals queries each day as [dayStart, dayStart + DAY_MS] against a query the unchanged db.ts documents as inclusive on BOTH endpoints, so consecutive windows share their boundary instant and an event landing exactly at midnight is summed into two days: revenue double-counts. The fix is dayStart + DAY_MS - 1 (or an exclusive upper bound). The defect requires composing the documented inclusivity with the window arithmetic; neither file is wrong alone, and the tests only use mid-day timestamps. Calibrated saturated under the Opus roster (run 29765275168, 6/6 identical-arm samples): kept as the family's regression tripwire, not a discriminator.",
+    "changedFiles": [
+        {
+            "path": "src/metrics/rollup.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/metrics/rollup.test.ts",
+            "status": "added"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "rollup-inclusive-boundary-doublecount",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/metrics/rollup.ts",
+                    "line": 17,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/metrics/db.ts documents queryEvents as inclusive on both endpoints (fromMs <= at AND at <= toMs)",
+                    "src/metrics/rollup.ts:17 queries each day as queryEvents(dayStart, dayStart + DAY_MS), and the next iteration starts at that same dayStart + DAY_MS",
+                    "an event with at exactly on a day boundary satisfies both windows and is summed twice",
+                    "rollup.test.ts only records events at mid-day offsets, so the suite passes"
+                ],
+                "failure_scenario": "A sale recorded at exactly midnight (at = dayStart + DAY_MS, common for batch-imported or clock-aligned events) matches both the day ending and the day starting at that instant because queryEvents is inclusive on both ends; dailyTotals sums it into both rows and the finance dashboard over-reports revenue.",
+                "producing_hunt": "correctness:cross-file-trace",
+                "model_authored_prose": "queryEvents is documented inclusive on both endpoints, and each window here ends exactly where the next begins (dayStart + DAY_MS), so a midnight-aligned event is counted in two days. Query to dayStart + DAY_MS - 1, or make the upper bound exclusive."
+            }
+        }
+    ],
+    "validation": [
+        {
+            "id": "rollup-inclusive-boundary-doublecount",
+            "verification": "confirmed"
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "rollup-inclusive-boundary-doublecount"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/metrics/rollup.test.ts b/src/metrics/rollup.test.ts\nnew file mode 100644\nindex 0000000..a9175e4\n--- /dev/null\n+++ b/src/metrics/rollup.test.ts\n@@ -0,0 +1,19 @@\n+import {recordEvent} from \"./db\";\n+import {dailyTotals} from \"./rollup\";\n+\n+const DAY_MS = 24 * 60 * 60 * 1000;\n+\n+describe(\"dailyTotals\", () => {\n+    it(\"sums each day's events\", async () => {\n+        await recordEvent({name: \"sale\", valueCents: 100, at: DAY_MS + 5});\n+        await recordEvent({name: \"sale\", valueCents: 250, at: DAY_MS + 90});\n+        const totals = await dailyTotals(DAY_MS, 2 * DAY_MS);\n+        expect(totals).toHaveLength(1);\n+        expect(totals[0]?.totalCents).toBe(350);\n+    });\n+\n+    it(\"returns one row per day\", async () => {\n+        const totals = await dailyTotals(0, 3 * DAY_MS);\n+        expect(totals).toHaveLength(3);\n+    });\n+});\ndiff --git a/src/metrics/rollup.ts b/src/metrics/rollup.ts\nnew file mode 100644\nindex 0000000..81ff8e2\n--- /dev/null\n+++ b/src/metrics/rollup.ts\n@@ -0,0 +1,27 @@\n+import {queryEvents} from \"./db\";\n+\n+const DAY_MS = 24 * 60 * 60 * 1000;\n+\n+export type DailyTotal = {\n+    dayStartMs: number;\n+    totalCents: number;\n+};\n+\n+/** Sums revenue events into one row per day across [fromMs, toMs). */\n+export const dailyTotals = async (\n+    fromMs: number,\n+    toMs: number,\n+): Promise<DailyTotal[]> => {\n+    const totals: DailyTotal[] = [];\n+    for (let dayStart = fromMs; dayStart < toMs; dayStart += DAY_MS) {\n+        const dayEvents = await queryEvents(dayStart, dayStart + DAY_MS);\n+        totals.push({\n+            dayStartMs: dayStart,\n+            totalCents: dayEvents.reduce(\n+                (sum, event) => sum + event.valueCents,\n+                0,\n+            ),\n+        });\n+    }\n+    return totals;\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "metrics: add a daily revenue rollup",
+            "description": "Adds dailyTotals, one row per day over the requested range, for the finance dashboard. Covered by per-day summing and row-count tests.",
+            "author": "dev-metrics",
+            "baseBranch": "main"
+        },
+        "tree": "tree",
+        "mustCatchSpecs": [
+            {
+                "key": "rollup-inclusive-boundary-doublecount",
+                "path": "src/metrics/rollup.ts",
+                "lineStart": 11,
+                "lineEnd": 27,
+                "mechanism": [
+                    "double.?count|counted (twice|in (two|both))|summed (twice|into (two|both))|(two|both) (days|rows|windows)",
+                    "inclusive|both end|overlap",
+                    "midnight|boundary|exactly (at|on)|day.{0,20}(start|end)",
+                    "DAY_MS.{0,20}- ?1|minus (one|1)|off.by.one|exclusive"
+                ],
+                "altLocations": [
+                    {
+                        "path": "src/metrics/rollup.test.ts"
+                    }
+                ]
+            }
+        ]
+    }
+}

@@ -1,0 +1,94 @@
+{
+    "id": "mutation-removed-behavior-logout-cache",
+    "tags": [
+        "mutation",
+        "removed-behavior",
+        "live"
+    ],
+    "category": "synthetic-mutation",
+    "description": "Model-capability discrimination case (removed-behavior family), minted 2026-07-20 and hardened same day after v1 calibrated saturated (4/4 under the Opus roster; the cache module's doc comment stated the invariant outright). A refactor extracts a shared endSession teardown for logout and a new admin force-logout, and silently drops the profileCache.drop(session.deviceId) call the old inline logout carried. The unchanged profile-cache.ts documents only the mechanics (per-device cache, 24h expiry); nothing states that logout must invalidate it, so the reviewer has to infer the invariant from the keying: entries are keyed by deviceId, a device outlives a user session, so a surviving entry serves the previous user's profile to the next login on that device. The updated test file also drops the cache assertion, so the suite stays green, and the PR description claims 'behavior unchanged'. Targets the correctness reviewer's removed-behavior audit. Calibrated saturated under the Opus roster twice (runs 29763213774 v1 4/4, 29764855482 v2-hardened 4/4): the correctness reviewer's removed-behavior audit reasons to the defect reliably at this tree size. Kept as the removed-behavior family's regression tripwire, not a discriminator; every sample also posted a companion deleted-test-coverage finding (the known reviewer-side dedup gap), deliberately not annotated as a spec.",
+    "changedFiles": [
+        {
+            "path": "src/session/logout.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/session/logout.test.ts",
+            "status": "modified"
+        }
+    ],
+    "dimensions": {
+        "correctness": "assessed",
+        "skillSeverity": "assessed",
+        "patternTriage": "assessed"
+    },
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "logout-cache-drop-removed",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/session/logout.ts",
+                    "line": 11,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.85,
+                "evidence_trace": [
+                    "src/session/profile-cache.ts keys entries by deviceId with a 24h expiry; a device outlives any one user's session",
+                    "the pre-change logout called profileCache.drop(session.deviceId); the new shared endSession teardown only revokes tokens and records an audit event",
+                    "src/session/logout.test.ts removed the 'drops the device's cached profile' assertion in the same change"
+                ],
+                "failure_scenario": "User A logs out on a shared device and user B logs in on the same device within the cache's 24h expiry; endSession no longer calls profileCache.drop, so the stale entry keyed by that deviceId survives and B is served A's cached profile (display name and email), a cross-user data leak the old logout prevented.",
+                "producing_hunt": "correctness:removed-behavior-audit",
+                "model_authored_prose": "The refactor drops profileCache.drop(session.deviceId) from the logout path. profile-cache.ts documents that entries are keyed by device id and must be dropped when a session ends; without the drop, the next login on the same device reads the previous user's cached profile until the 24h expiry. Restore the drop inside endSession (both logout and forceLogout need it)."
+            }
+        }
+    ],
+    "validation": [
+        {
+            "id": "logout-cache-drop-removed",
+            "verification": "confirmed"
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "logout-cache-drop-removed"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/session/logout.test.ts b/src/session/logout.test.ts\nindex 3421c45..2256d0f 100644\n--- a/src/session/logout.test.ts\n+++ b/src/session/logout.test.ts\n@@ -1,22 +1,22 @@\n-import {logout, type Session} from \"./logout\";\n+import {forceLogout, logout, type Session} from \"./logout\";\n import {isRevoked} from \"./tokens\";\n-import {profileCache} from \"./profile-cache\";\n+import {auditLog} from \"./audit\";\n \n const session: Session = {id: \"s1\", userId: \"u1\", deviceId: \"d1\"};\n \n-describe(\"logout\", () => {\n-    it(\"revokes the session's tokens\", async () => {\n+describe(\"session teardown\", () => {\n+    it(\"logout revokes the session's tokens\", async () => {\n         await logout(session);\n         expect(isRevoked(\"s1\")).toBe(true);\n     });\n \n-    it(\"drops the device's cached profile\", async () => {\n-        profileCache.set(\"d1\", {\n-            userId: \"u1\",\n-            displayName: \"User One\",\n-            email: \"u1@example.com\",\n-        });\n-        await logout(session);\n-        expect(profileCache.get(\"d1\")).toBeUndefined();\n+    it(\"forceLogout records its own audit reason\", async () => {\n+        await forceLogout({...session, id: \"s2\"});\n+        expect(\n+            auditLog().some(\n+                (event) =>\n+                    event.type === \"force-logout\" && event.sessionId === \"s2\",\n+            ),\n+        ).toBe(true);\n     });\n });\ndiff --git a/src/session/logout.ts b/src/session/logout.ts\nindex 54c2798..57631fb 100644\n--- a/src/session/logout.ts\n+++ b/src/session/logout.ts\n@@ -1,4 +1,3 @@\n-import {profileCache} from \"./profile-cache\";\n import {revokeSessionTokens} from \"./tokens\";\n import {recordAudit} from \"./audit\";\n \n@@ -8,8 +7,16 @@ export type Session = {\n     deviceId: string;\n };\n \n-export const logout = async (session: Session): Promise<void> => {\n+/** Shared teardown for user logout and admin force-logout. */\n+const endSession = async (session: Session, reason: string): Promise<void> => {\n     await revokeSessionTokens(session.id);\n-    profileCache.drop(session.deviceId);\n-    recordAudit({type: \"logout\", sessionId: session.id, at: Date.now()});\n+    recordAudit({type: reason, sessionId: session.id, at: Date.now()});\n+};\n+\n+export const logout = async (session: Session): Promise<void> => {\n+    await endSession(session, \"logout\");\n+};\n+\n+export const forceLogout = async (session: Session): Promise<void> => {\n+    await endSession(session, \"force-logout\");\n };\n",
+    "live": {
+        "prContext": {
+            "title": "session: extract shared teardown for logout and admin force-logout",
+            "description": "Refactors logout so the new admin force-logout path reuses the same teardown. Behavior unchanged; tests updated to cover both paths.",
+            "author": "dev-session",
+            "baseBranch": "main"
+        },
+        "tree": "tree",
+        "mustCatchSpecs": [
+            {
+                "key": "logout-cache-drop-removed",
+                "path": "src/session/logout.ts",
+                "lineStart": 10,
+                "lineEnd": 21,
+                "mechanism": [
+                    "profile.?cache.{0,80}(drop|clear|delete|remove|invalid|no longer|missing|gone)",
+                    "(drop|clear|delete|remove|invalid|restore).{0,60}profile.?cache",
+                    "(previous|prior|another|wrong|first) user('s)? (cached )?(profile|data)|stale profile|cross.user",
+                    "(next|new) (login|user).{0,60}(same )?device|deviceId|device id"
+                ],
+                "altLocations": [
+                    {
+                        "path": "src/session/logout.test.ts"
+                    }
+                ]
+            }
+        ]
+    }
+}
