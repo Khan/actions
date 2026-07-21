@@ -466,4 +466,37 @@ describe("keptBlockingCount (the mode dial's flip-gate input)", () => {
         });
         expect(result.keptBlockingCount).toBe(0);
     });
+
+    it("fails closed on an unparseable opener: visible and counted", () => {
+        // A staging-corruption mode neither label regex covers must degrade
+        // to noise (a visible unknown entry that blocks the flip), never to
+        // a hidden thread plus a permitted APPROVE.
+        const result = renderRereviewSection({
+            threads: [
+                {
+                    thread_id: "t1",
+                    path: "src/handler.ts",
+                    line: 10,
+                    comments: [
+                        {
+                            author: "github-actions[bot]",
+                            body: "ISSUE (BLOCKING) - A gated spec goes silent.",
+                        },
+                    ],
+                },
+            ],
+            reconciler: {resolve: [], keep: ["t1"]},
+        });
+        expect(result.keptBlockingCount).toBe(1);
+        expect(result.section).toContain("- **unknown**");
+        expect(result.section).not.toContain("<details>");
+    });
+
+    it("fails closed on a keep id missing from the staging", () => {
+        const result = renderRereviewSection({
+            threads: [],
+            reconciler: {resolve: [], keep: ["ghost"]},
+        });
+        expect(result.keptBlockingCount).toBe(1);
+    });
 });

@@ -55,11 +55,13 @@ export type RereviewSection = {
     keptCount: number;
     resolvedCount: number;
     /**
-     * How many kept threads carry a blocking opening label. The re-review
-     * mode dial's flip gate reads this: a reduced-depth run may flip a prior
-     * REQUEST_CHANGES to APPROVE only when it is zero (and, in `flip-gated`
-     * mode, no validated blocking finding survived), so the check is a number
-     * comparison, not a label judgment re-made at verdict time.
+     * How many kept threads carry a blocking opening label, plus any whose
+     * label could not be parsed (unknown fails closed; see keptEntryFor).
+     * The re-review mode dial's flip gate reads this: a reduced-depth run
+     * may flip a prior REQUEST_CHANGES to APPROVE only when it is zero (and,
+     * in `flip-gated` mode, no validated blocking finding survived), so the
+     * check is a number comparison, not a label judgment re-made at verdict
+     * time.
      */
     keptBlockingCount: number;
 };
@@ -84,8 +86,9 @@ const BOLD_LABEL_RE = /^\*\*([^*\n]+?):\*\*\s*/;
  * markdown-stripped form the staging has been observed to produce (see
  * {@link PLAIN_LABEL_RE}). Returns null when the body starts with neither
  * form — e.g. a hand-edited or pre-labels-era comment — in which case the
- * caller treats the thread as non-blocking (the safe default
- * `isBlockingLabel` also applies to unknown labels).
+ * caller treats the thread as blocking (fail closed: an unparseable label
+ * must not be able to fold a still-open blocking thread into the collapsed
+ * recap or let a reduced-depth run flip the verdict past it).
  */
 export const parseLeadingLabel = (body: string): string | null => {
     const bold = BOLD_LABEL_RE.exec(body);
@@ -140,7 +143,7 @@ const keptEntryFor = (
             anchor: `thread ${threadId}`,
             url: undefined,
             label: "unknown",
-            blocking: false,
+            blocking: true,
             excerpt: "(not in the staged threads)",
         };
     }
@@ -154,7 +157,16 @@ const keptEntryFor = (
                 : `${thread.path}:${thread.line}`,
         url: thread.url,
         label,
-        blocking: isBlockingLabel(label),
+        // An unparseable opener fails CLOSED: the thread renders visibly and
+        // counts toward keptBlockingCount (blocking the reduced-depth flip to
+        // APPROVE) rather than folding into the collapsed non-blocking block.
+        // A staging-corruption mode the two label regexes don't cover would
+        // otherwise both hide a still-open blocking thread and let the
+        // verdict flip; fail-open here is exactly the #40561 hole. The cost
+        // of failing closed is a hand-edited or pre-labels-era thread keeping
+        // REQUEST_CHANGES until a full-depth review re-judges it, which is
+        // noise, not a wrongly-permitted approval.
+        blocking: label === "unknown" || isBlockingLabel(label),
         excerpt: excerptOpeningComment(opener),
     };
 };
