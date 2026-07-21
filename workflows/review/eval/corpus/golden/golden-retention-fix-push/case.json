@@ -6,7 +6,7 @@
         "live"
     ],
     "category": "golden",
-    "description": "The under-tripwire re-review pricing case: an open PR touched five regions of quota.ts and the prior full review blocked one (an off-by-one in the remaining-quota math). The fix push rewrites only that region (unreviewed share 0.2, below the tripwire threshold), so scoped/flip-gated/fast actually execute their reduced paths. The fix resolves the thread but plants a fresh defect in the same hunk: the remaining count is cached under a shared key with no user id, leaking quota across users. scoped and flip-gated stage exactly that hunk and must catch it; fast dispatches no finder and cannot, which is the recall cost the mode sweep prices.",
+    "description": "The under-tripwire re-review pricing case: an open PR touched five regions of quota.ts and the prior full review blocked one (an off-by-one in the remaining-quota math). The fix push rewrites only that region (unreviewed share 0.2, below the tripwire threshold), so scoped/flip-gated/fast actually execute their reduced paths. The fix resolves the thread but plants a fresh defect in the same hunk: the remaining count is cached under a shared key with no user id, leaking quota across users. scoped and flip-gated stage exactly that hunk and must catch it; fast dispatches no finder and cannot, which is the recall cost the mode sweep prices. The rewritten hunk also leaves quotaExceeded unsatisfiable (remaining is clamped to zero, then compared < 0, so the quota is never enforced); a second real defect annotated 2026-07-20 from the drift noise pool.",
     "changedFiles": [
         {
             "path": "src/notes/quota.ts",
@@ -67,6 +67,17 @@
                     "shared (cache )?key|constant key|no user ?id",
                     "quota-remaining",
                     "another user|cross.user|leak"
+                ]
+            },
+            {
+                "key": "quota-exceeded-never-true",
+                "path": "src/notes/quota.ts",
+                "lineStart": 30,
+                "lineEnd": 36,
+                "mechanism": [
+                    "never (returns? )?true|always (returns? )?false|can never (be true|be negative|exceed)|unsatisfiable",
+                    "Math\\.max\\(0.{0,80}< 0|clamp(ed|s)?.{0,80}< 0|< 0 is (always )?false|0 < 0",
+                    "unlimited (notes|saves)|quota (is )?never enforced|save is (always )?allowed|never blocked"
                 ]
             }
         ],

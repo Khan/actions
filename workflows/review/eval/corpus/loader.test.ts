@@ -120,6 +120,7 @@ describe("parseCase: the live block", () => {
                             key: "trap-1",
                             path: "src/a.ts",
                             mechanism: ["wrapper chunks internally"],
+                            blockingOnly: true,
                         },
                     ],
                 },
@@ -129,6 +130,8 @@ describe("parseCase: the live block", () => {
         expect(parsed.live?.mustCatchSpecs?.[0]?.key).toBe("bug-1");
         expect(parsed.live?.mustCatchSpecs?.[0]?.lineEnd).toBe(2);
         expect(parsed.live?.mustNotFlagSpecs?.[0]?.lineStart).toBeUndefined();
+        expect(parsed.live?.mustNotFlagSpecs?.[0]?.blockingOnly).toBe(true);
+        expect(parsed.live?.mustCatchSpecs?.[0]?.blockingOnly).toBeUndefined();
     });
 
     it("parses and validates altLocations like the primary location", () => {

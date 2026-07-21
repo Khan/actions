@@ -155,11 +155,14 @@ const mechanismAgrees = (
     });
 };
 
-/** The deterministic rule: location AND mechanism. */
+/** The deterministic rule: location AND mechanism (AND severity, if pinned). */
 export const matchesSpec = (
     candidate: RunCandidate,
     spec: LiveDefectSpec,
-): boolean => anchorAgrees(candidate, spec) && mechanismAgrees(candidate, spec);
+): boolean =>
+    (spec.blockingOnly !== true || candidate.blocking) &&
+    anchorAgrees(candidate, spec) &&
+    mechanismAgrees(candidate, spec);
 
 /**
  * Match one case's POSTED candidates against its live specs. Each posted

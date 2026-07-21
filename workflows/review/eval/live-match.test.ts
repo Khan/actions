@@ -1,6 +1,6 @@
 import {describe, it, expect} from "vitest";
 
-import {parseCase, type LiveDefectSpec} from "./corpus/loader";
+import {loadLiveCorpus, parseCase, type LiveDefectSpec} from "./corpus/loader";
 import {
     computeLiveMetrics,
     matchCase,
@@ -74,6 +74,23 @@ describe("matchesSpec", () => {
         expect(
             matchesSpec(candidate(), spec({mechanism: ["sql injection"]})),
         ).toBe(false);
+    });
+
+    it("blockingOnly specs reject non-blocking candidates", () => {
+        // A must-not-flag trap guarding a documented deliberate pattern
+        // should claim a finding that condemns the pattern as a defect, not
+        // a non-blocking advisory that merely names it (the 2026-07-20 A/B
+        // saw "log instead of an empty catch" suggestions score as false
+        // flags on the batch-limit case).
+        const trap = spec({blockingOnly: true});
+        expect(matchesSpec(candidate(), trap)).toBe(true);
+        const advisory = candidate({
+            label: "suggestion (non-blocking)",
+            blocking: false,
+        });
+        expect(matchesSpec(advisory, trap)).toBe(false);
+        // Without the pin, severity is not consulted.
+        expect(matchesSpec(advisory, spec())).toBe(true);
     });
 
     it("matches file anchors on path alone and pr anchors on mechanism alone", () => {
@@ -195,6 +212,101 @@ const finding = (id: string, prose: string, severity = "blocking") => ({
     failure_scenario: prose,
     producing_hunt: "h",
     model_authored_prose: prose,
+});
+
+describe("retention-dedup-window-untested spec (drift run 29724668102 regressions)", () => {
+    // That run exposed two matching failures on this spec. The reviewer's
+    // real dedup-coverage finding anchors on the TEST file, and the spec's
+    // only location was retention.ts, so it could never match and was
+    // recorded as a true miss. Meanwhile the Haiku arbiter accepted the
+    // unrelated cap off-by-one finding for this spec three times (recorded
+    // via: "fallback"), inflating the catch rate with a non-match. Both
+    // recorded findings are pinned here (quoted from the run artifact,
+    // punctuation lightly normalized) against the spec as loaded from the
+    // corpus, so the fixed spec keeps matching the real finding
+    // deterministically and never matches the arbiter's false accept.
+    const dedupSpec = loadLiveCorpus()
+        .find((c) => c.id === "golden-retention-lifecycle-2")
+        ?.live?.mustCatchSpecs?.find(
+            (s) => s.key === "retention-dedup-window-untested",
+        );
+    if (dedupSpec === undefined) {
+        throw new Error(
+            "retention-dedup-window-untested spec missing from the corpus",
+        );
+    }
+
+    const coverageFinding = candidate({
+        anchor: {
+            type: "line",
+            path: "src/notes/retention.test.ts",
+            line: 5,
+            side: "RIGHT",
+        },
+        path: "src/notes/retention.test.ts",
+        line: 5,
+        finding: {
+            ...candidate().finding,
+            anchor: {
+                type: "line",
+                path: "src/notes/retention.test.ts",
+                line: 5,
+                side: "RIGHT",
+            },
+            failure_scenario:
+                "The off-by-one at retention.ts:38 or a broken prune would " +
+                "ship undetected because this test, despite its name, saves " +
+                "only 2 notes (cap is 200) and asserts only that pruneNotes " +
+                "resolves; it never exceeds the cap nor checks the " +
+                "surviving count.",
+            model_authored_prose:
+                "Test does not exercise the cap or dedup it claims to " +
+                "cover. Add a test that saves more than MAX_NOTES_PER_USER " +
+                "notes and asserts the retained count equals the cap, plus " +
+                "a dedup test asserting a duplicate is not stored; " +
+                "otherwise the core new behavior is untested.",
+        },
+    });
+
+    const arbiterFalseAccept = candidate({
+        anchor: {
+            type: "line",
+            path: "src/notes/retention.ts",
+            line: 38,
+            side: "RIGHT",
+        },
+        path: "src/notes/retention.ts",
+        line: 38,
+        finding: {
+            ...candidate().finding,
+            anchor: {
+                type: "line",
+                path: "src/notes/retention.ts",
+                line: 38,
+                side: "RIGHT",
+            },
+            failure_scenario:
+                "A user accumulates 201 notes; pruneNotes queries with " +
+                "offset 201 (MAX_NOTES_PER_USER + 1) against a newest-first " +
+                "result, which returns zero stale rows, so nothing is " +
+                "deleted and 201 notes remain, one over the intended hard " +
+                "cap of 200.",
+            model_authored_prose:
+                "Off-by-one: offset MAX_NOTES_PER_USER + 1 lets the cap " +
+                "reach 201. To keep exactly 200 newest notes (indices " +
+                "0-199) the query must skip 200 and return index 200+, so " +
+                "offset should be MAX_NOTES_PER_USER, not +1; the current " +
+                "+1 permanently retains one extra note per user.",
+        },
+    });
+
+    it("matches the recorded test-file coverage finding deterministically", () => {
+        expect(matchesSpec(coverageFinding, dedupSpec)).toBe(true);
+    });
+
+    it("never matches the off-by-one finding the arbiter wrongly accepted", () => {
+        expect(matchesSpec(arbiterFalseAccept, dedupSpec)).toBe(false);
+    });
 });
 
 describe("matchCase", () => {
