@@ -63,7 +63,11 @@
 
 import {createHash} from "node:crypto";
 
-import {annotateDiffLineNumbers, splitUnifiedDiff} from "./diff";
+import {
+    annotateDiffLineNumbers,
+    splitPatchHunks,
+    splitUnifiedDiff,
+} from "./diff";
 import {runProvenanceCli} from "./provenance";
 import {runRereviewPlanCli} from "./rereview-mode";
 import {runCli as runRouterCli} from "./router";
@@ -75,6 +79,28 @@ import {runCli as runRouterCli} from "./router";
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const OUT_DIR = `${REVIEW_DIR}/out`;
 const CACHE_MEMORY_DIR = "/tmp/gh-aw/cache-memory";
+
+/**
+ * One named constant per staged path (the sibling CLIs' convention), so a
+ * typo cannot silently desync a filename from the CLI or sub-agent that
+ * reads it.
+ */
+const PR_CONTEXT_OUT = `${REVIEW_DIR}/pr-context.json`;
+const FILES_OUT = `${REVIEW_DIR}/files.json`;
+const FULL_DIFF_OUT = `${REVIEW_DIR}/full.diff`;
+const DIFF_FACTS_OUT = `${REVIEW_DIR}/diff-facts.json`;
+const NEW_SCOPE_OUT = `${REVIEW_DIR}/new-scope.json`;
+const PRIOR_REVIEWS_OUT = `${REVIEW_DIR}/prior-reviews.json`;
+const ROUTING_OUT = `${REVIEW_DIR}/routing.json`;
+const PROVENANCE_OUT = `${REVIEW_DIR}/provenance.json`;
+const STRIPPED_DIFF_OUT = `${REVIEW_DIR}/full-stripped.diff`;
+const ANNOTATED_DIFF_OUT = `${REVIEW_DIR}/full-stripped-annotated.diff`;
+const PLAN_OUT = `${REVIEW_DIR}/rereview-plan.json`;
+const PLAN_ARTIFACT_OUT = `${OUT_DIR}/rereview-plan.json`;
+const SCOPED_DIFF_PATH = `${REVIEW_DIR}/scoped.diff`;
+const PR_DIFF_OUT = `${REVIEW_DIR}/pr.diff`;
+const PR_ANNOTATED_OUT = `${REVIEW_DIR}/pr-annotated.diff`;
+const REVIEW_FILES_OUT = `${REVIEW_DIR}/review-files.json`;
 
 export type StagePrFs = {
     readFileSync: (p: string, enc: "utf8") => string;
@@ -161,26 +187,6 @@ export const buildUnifiedDiff = (files: PullFile[]): string => {
 
 const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
-/** Split one patch into hunks (header line included). */
-const splitPatchHunks = (patch: string): string[] => {
-    const hunks: string[] = [];
-    let current: string[] | null = null;
-    for (const line of patch.split("\n")) {
-        if (HUNK_HEADER_RE.test(line)) {
-            if (current !== null) {
-                hunks.push(current.join("\n"));
-            }
-            current = [line];
-        } else if (current !== null) {
-            current.push(line);
-        }
-    }
-    if (current !== null) {
-        hunks.push(current.join("\n"));
-    }
-    return hunks;
-};
-
 /**
  * The Step 1 added-lines hunk hash: SHA-256 of the hunk's `+` lines, leading
  * `+` stripped, trailing whitespace trimmed, newline-joined in order. This is
@@ -191,7 +197,12 @@ export const hashHunkAddedLines = (hunkText: string): string =>
     sha256(
         hunkText
             .split("\n")
-            .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+            // Every `+`-prefixed hunk-body line is an added line: per-file
+            // patches carry no `+++` file headers inside hunks, and an added
+            // source line whose content starts with `++` serializes as
+            // `+++...`, so a header-shaped exclusion would silently drop it
+            // from the hash (and desync it from hunkAddedLineNumbers below).
+            .filter((line) => line.startsWith("+"))
             .map((line) => line.slice(1).replace(/\s+$/, ""))
             .join("\n"),
     );
@@ -337,8 +348,20 @@ export const runStagePrCli = async (
         head?: {sha?: string};
         draft?: boolean;
     };
+    if (
+        typeof pr.head?.sha !== "string" ||
+        pr.head.sha === "" ||
+        typeof pr.base?.ref !== "string" ||
+        pr.base.ref === ""
+    ) {
+        // Metadata is a hard prerequisite: an empty headSha or base ref would
+        // flow into Step 2's merge-parent check and every sub-agent context.
+        throw new Error(
+            `PR metadata missing load-bearing fields (head.sha/base.ref) for ${repo}#${prNumber}`,
+        );
+    }
     write(
-        `${REVIEW_DIR}/pr-context.json`,
+        PR_CONTEXT_OUT,
         JSON.stringify(
             {
                 number: pr.number ?? prNumber,
@@ -349,8 +372,8 @@ export const runStagePrCli = async (
                 headSha: pr.head?.sha ?? "",
                 isDraft: pr.draft === true,
                 repo,
-                diffPath: `${REVIEW_DIR}/full.diff`,
-                filesPath: `${REVIEW_DIR}/files.json`,
+                diffPath: FULL_DIFF_OUT,
+                filesPath: FILES_OUT,
             },
             null,
             2,
@@ -360,7 +383,7 @@ export const runStagePrCli = async (
     // 2. Changed files → files.json + full.diff (hard prerequisite).
     const files = await fetchAllFiles(ghGet, repo, prNumber);
     write(
-        `${REVIEW_DIR}/files.json`,
+        FILES_OUT,
         JSON.stringify(
             files.map((file) => ({
                 path: file.filename,
@@ -371,12 +394,12 @@ export const runStagePrCli = async (
             2,
         ),
     );
-    write(`${REVIEW_DIR}/full.diff`, buildUnifiedDiff(files));
+    write(FULL_DIFF_OUT, buildUnifiedDiff(files));
 
     // 3. Code-computed diff facts: the fingerprint Step 2 compares and the
     // hunk signature Step 9 saves as reviewedHunks.
     write(
-        `${REVIEW_DIR}/diff-facts.json`,
+        DIFF_FACTS_OUT,
         JSON.stringify(
             {
                 diffFingerprint: computeDiffFingerprint(files),
@@ -416,21 +439,32 @@ export const runStagePrCli = async (
         }
     }
     write(
-        `${REVIEW_DIR}/new-scope.json`,
+        NEW_SCOPE_OUT,
         JSON.stringify(computeNewScope(files, reviewedHunks), null, 2),
     );
 
     // 5. Prior bot reviews (fetch failure degrades to []: full review).
     let priorReviews: {body: string; submittedAt?: string}[] = [];
     try {
-        const reviews = (await ghGet(
-            `/repos/${repo}/pulls/${prNumber}/reviews?per_page=100`,
-        )) as {
+        type RawReview = {
             user?: {login?: string};
             body?: string | null;
             submitted_at?: string;
-        }[];
-        priorReviews = (Array.isArray(reviews) ? reviews : [])
+        };
+        const reviews: RawReview[] = [];
+        for (let page = 1; ; page++) {
+            const batch = (await ghGet(
+                `/repos/${repo}/pulls/${prNumber}/reviews?per_page=100&page=${page}`,
+            )) as RawReview[];
+            if (!Array.isArray(batch)) {
+                throw new Error("GET /pulls/{n}/reviews returned a non-array");
+            }
+            reviews.push(...batch);
+            if (batch.length < 100) {
+                break;
+            }
+        }
+        priorReviews = reviews
             .filter((review) => review.user?.login === "github-actions[bot]")
             .map((review) => ({
                 body: review.body ?? "",
@@ -445,49 +479,36 @@ export const runStagePrCli = async (
             }): staged []; re-review degrades to full`,
         );
     }
-    write(
-        `${REVIEW_DIR}/prior-reviews.json`,
-        JSON.stringify(priorReviews, null, 2),
-    );
+    write(PRIOR_REVIEWS_OUT, JSON.stringify(priorReviews, null, 2));
 
     // 6-8. The deterministic CLI chain, in the order review.md Step 3 ran it:
     // router pass 1 → provenance → re-review plan.
     runRouterCli(fs, repoRoot, env);
-    staged.push(`${REVIEW_DIR}/routing.json`);
+    staged.push(ROUTING_OUT);
     runProvenanceCli(fs, repoRoot);
-    staged.push(
-        `${REVIEW_DIR}/provenance.json`,
-        `${REVIEW_DIR}/full-stripped.diff`,
-        `${REVIEW_DIR}/full-stripped-annotated.diff`,
-    );
+    staged.push(PROVENANCE_OUT, STRIPPED_DIFF_OUT, ANNOTATED_DIFF_OUT);
     const {plan, warnings: planWarnings} = runRereviewPlanCli(fs);
     warnings.push(...planWarnings);
-    staged.push(`${REVIEW_DIR}/rereview-plan.json`);
-    write(`${OUT_DIR}/rereview-plan.json`, JSON.stringify(plan, null, 2));
+    staged.push(PLAN_OUT);
+    write(PLAN_ARTIFACT_OUT, JSON.stringify(plan, null, 2));
 
     // 9. The scoped swap (review.md Step 3's depth semantics). When the plan
     // stages new-hunks, the whole-change surfaces shrink to the unseen hunks;
     // at flip-gated depth pattern-triage never runs, so the review diff and
     // file list are staged directly from scoped.diff.
-    const scopedPath = `${REVIEW_DIR}/scoped.diff`;
+    const scopedPath = SCOPED_DIFF_PATH;
     if (plan.staging === "new-hunks" && fs.existsSync(scopedPath)) {
         const scoped = fs.readFileSync(scopedPath, "utf8");
-        write(`${REVIEW_DIR}/full-stripped.diff`, scoped);
-        write(
-            `${REVIEW_DIR}/full-stripped-annotated.diff`,
-            annotateDiffLineNumbers(scoped),
-        );
+        write(STRIPPED_DIFF_OUT, scoped);
+        write(ANNOTATED_DIFF_OUT, annotateDiffLineNumbers(scoped));
         if (plan.depth === "flip-gated") {
             const scopedPaths = new Set(
                 splitUnifiedDiff(scoped).map((section) => section.path),
             );
-            write(`${REVIEW_DIR}/pr.diff`, scoped);
+            write(PR_DIFF_OUT, scoped);
+            write(PR_ANNOTATED_OUT, annotateDiffLineNumbers(scoped));
             write(
-                `${REVIEW_DIR}/pr-annotated.diff`,
-                annotateDiffLineNumbers(scoped),
-            );
-            write(
-                `${REVIEW_DIR}/review-files.json`,
+                REVIEW_FILES_OUT,
                 JSON.stringify(
                     files
                         .filter((file) => scopedPaths.has(file.filename))
