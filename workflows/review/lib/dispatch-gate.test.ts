@@ -1,3 +1,6 @@
+import {readFileSync} from "node:fs";
+import {join} from "node:path";
+
 import {describe, it, expect} from "vitest";
 
 import {
@@ -788,5 +791,66 @@ describe("re-review hardening (second feedback round)", () => {
         );
         // The queue rewrite still ran: the violating queue can never post.
         expect(JSON.parse(fs.files[AGENT_OUTPUT]).items).toEqual([]);
+    });
+});
+
+describe("third-round nits: keep-list survivors, template coupling, summary", () => {
+    it("keeps noop and missing_data through a strip", () => {
+        const fs = makeFakeFs({
+            [AGENT_OUTPUT]: JSON.stringify({
+                items: [
+                    {
+                        type: "submit_pull_request_review",
+                        event: "REQUEST_CHANGES",
+                        body: "x",
+                    },
+                    {type: "noop", message: "m"},
+                    {type: "missing_data", data: "d"},
+                ],
+            }),
+        });
+        const report = runDispatchGateCli(fs);
+        expect(report.blocked).toBe(true);
+        expect(
+            JSON.parse(fs.files[AGENT_OUTPUT]).items.map(
+                (i: {type: string}) => i.type,
+            ),
+        ).toEqual(["noop", "missing_data"]);
+    });
+
+    it("review.md's Step 6 note templates still carry the phrase the gate matches", () => {
+        // Couples the disclosure matcher to the prompt templates: a Step 6
+        // reword that drops the phrase must fail here, not silently break
+        // rules 2/3 in production.
+        const reviewMd = readFileSync(
+            join(__dirname, "..", "review.md"),
+            "utf8",
+        );
+        expect(reviewMd).toContain(
+            "not assessed this run (shed under the <tier>-tier run budget)",
+        );
+        expect(reviewMd).toContain(
+            "not assessed this run (<sub-agent> output unavailable)",
+        );
+    });
+
+    it("renders the Conformant summary branch", () => {
+        const fs = makeFakeFs({
+            [AGENT_OUTPUT]: JSON.stringify({
+                items: [
+                    {
+                        type: "submit_pull_request_review",
+                        event: "APPROVE",
+                        body: "Approved — no blocking issues found.",
+                    },
+                ],
+            }),
+            "/tmp/gh-aw/review/rereview-plan.json": JSON.stringify({
+                depth: "fast",
+            }),
+        });
+        const report = runDispatchGateCli(fs);
+        expect(report.blocked).toBe(false);
+        expect(renderGateSummary(report)).toContain("Conformant.");
     });
 });
