@@ -35,6 +35,11 @@ import {clampBudgetToCreditCap, resolveCreditCap} from "./credit-cap";
 import {KNOWN_LENSES} from "./finding-schema";
 import type {Lens} from "./finding-schema";
 import {
+    CORRECTNESS_ALIAS_PATH,
+    LENS_PAYLOAD_DIR,
+    lensPayloadWarnings,
+} from "./lens-payloads";
+import {
     DEFAULT_RE_REVIEW_MODE,
     ENABLEABLE_REVIEWERS,
     parseRoutingConfig,
@@ -62,6 +67,7 @@ export {
     RISK_TIERS,
     ROUTING_CONFIG_PATH,
 };
+export {CORRECTNESS_ALIAS_PATH, LENS_PAYLOAD_DIR, lensPayloadWarnings};
 export type {
     EnableableReviewer,
     LensRule,
@@ -862,6 +868,7 @@ type FsLike = {
     writeFileSync: (p: string, data: string) => void;
     existsSync: (p: string) => boolean;
     mkdirSync: (p: string, opts: {recursive: boolean}) => void;
+    readdirSync: (p: string) => string[];
 };
 
 /**
@@ -923,6 +930,20 @@ export const runCli = (
               ],
           };
 
+    // Lens payloads that would be silently inert are worth a PR note: the
+    // author believes the rules are active, and nothing else would say
+    // otherwise (a missing optional import inlines nothing at runtime).
+    const lensesDir = repoPath(LENS_PAYLOAD_DIR);
+    const payloadFiles = fs.existsSync(lensesDir)
+        ? fs.readdirSync(lensesDir)
+        : [];
+    const payloadWarnings = lensPayloadWarnings(
+        payloadFiles,
+        routingFileConfig.lensRules,
+        fs.existsSync(repoPath(CORRECTNESS_ALIAS_PATH)),
+        SPECIALIST_LENSES,
+    );
+
     const input: RouteInput = {files};
     if (fs.existsSync(RESOLVED_TIERS_PATH)) {
         const raw: Record<string, unknown> = JSON.parse(
@@ -946,7 +967,7 @@ export const runCli = (
         result,
         {
             present: routingConfigPresent,
-            warnings: routingFileConfig.warnings,
+            warnings: [...routingFileConfig.warnings, ...payloadWarnings],
         },
         routingFileConfig.enabledReviewers,
         routingFileConfig.reReviewMode,

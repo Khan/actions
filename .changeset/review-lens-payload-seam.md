@@ -12,7 +12,13 @@ repo. Behavior-neutral for every current consumer: no consumer carries a payload
 file yet, and a missing optional import inlines nothing at runtime.
 `correctness-checks.md` remains imported as a deprecated alias for
 `lenses/correctness.md` (frontend carries one today); repos should migrate the file
-and carry at most one of the two. The eval's import resolution now matches
+and carry at most one of the two, and the alias is removed in the next major
+release. Payloads are additive by contract: the lens prompts state that payload
+rules never relax or override the shared rules, which win on any conflict. The
+router now warns (through `routingConfig.warnings`, surfaced in the review body's
+note lines) when a payload would be silently inert: a filename matching no imported
+payload, a specialist payload no ROUTING rule routes, or the correctness alias
+carried alongside its replacement. The eval's import resolution now matches
 production for the optional form (missing resolves to empty, not the "(not
 configured for this eval case)" note), so corpus case trees can carry payloads; the
 required-form fallback note is unchanged. README documents the new surface and the

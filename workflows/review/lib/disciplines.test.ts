@@ -176,6 +176,20 @@ describe("each specialist lens definition", () => {
     }
 });
 
+describe("the correctness payload seam", () => {
+    it("correctness-reviewer imports lenses/correctness.md and its alias", () => {
+        const section = lensSection("correctness-reviewer");
+        expect(section).toContain(
+            "{{#runtime-import? .github/aw/review/lenses/correctness.md}}",
+        );
+        // The deprecated alias stays imported until consumers migrate
+        // (frontend carries one); dropping either import is a regression.
+        expect(section).toContain(
+            "{{#runtime-import? .github/aw/review/correctness-checks.md}}",
+        );
+    });
+});
+
 describe("the label-shape reviewers still carry their own disciplines", () => {
     // Their variants differ materially (CLI cap invocation with per-agent id
     // semantics, `discussion` instead of `evidence_trace`), so they were
