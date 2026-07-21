@@ -112,6 +112,9 @@ importers:
 
   workflows/review:
     dependencies:
+      '@anthropic-ai/claude-agent-sdk':
+        specifier: 0.3.205
+        version: 0.3.205(@anthropic-ai/sdk@0.110.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(zod@4.4.3)
       octokit:
         specifier: 5.0.5
         version: 5.0.5
