@@ -348,6 +348,7 @@ describe("majorityGateFailures", () => {
 describe("renderMultiMarkdownReport", () => {
     const multiReport = async (
         produces: ArmProduce[],
+        reviewMdSha = {baseline: "a".repeat(64), candidate: "b".repeat(64)},
     ): Promise<MultiAbReport> => {
         const cases = [liveCase("case-1")];
         const reports: AbReport[] = [];
@@ -360,10 +361,7 @@ describe("renderMultiMarkdownReport", () => {
             });
             reports.push({
                 baseRef: "origin/main",
-                reviewMdSha: {
-                    baseline: "a".repeat(64),
-                    candidate: "b".repeat(64),
-                },
+                reviewMdSha,
                 arms: {baseline, candidate},
                 regressions: diffRegressions(baseline, candidate),
                 adversarialFailures: [],
@@ -431,6 +429,25 @@ describe("renderMultiMarkdownReport", () => {
         ).toContain("- adv-1: failed 2/3 repeats: FAILURE CONFIRMED");
     });
 
+    it("relabels an identical-arm run as a wobble control", async () => {
+        // Identical review.md in both arms only happens under --force-arms
+        // (drift watch / noise floor); the report must not read as an A/B.
+        const sha = "a".repeat(64);
+        const multi = await multiReport([produceHit(1), produceHit(1)], {
+            baseline: sha,
+            candidate: sha,
+        });
+        const markdown = renderMultiMarkdownReport(multi);
+        expect(markdown).toContain(
+            "## Review wobble control: 2 repeats (identical arms)",
+        );
+        expect(markdown).toContain("run-to-run wobble, not a prompt effect");
+        expect(markdown).not.toContain("## Review live A/B");
+        // The embedded aggregate relabels too (identical arms imply the
+        // noise floor, which implies the relabel).
+        expect(markdown).toContain("| Case / spec | Arm A | 95% CI | Arm B |");
+    });
+
     it("round-trips a MultiAbReport through the aggregate extractor", async () => {
         // The --repeats artifact must stay poolable across dispatches: the
         // aggregate CLI reads the `repeats` field of a multi-run report.
@@ -483,6 +500,27 @@ describe("renderMarkdownReport", () => {
         expect(markdown.trimEnd().endsWith("resolve smaller effects.*")).toBe(
             true,
         );
+    });
+
+    it("relabels the arm columns on an identical-arm single run", async () => {
+        const cases = [liveCase("case-1")];
+        const baseline = await runArm("baseline", cases, produceHit(1), {
+            maxUsd: 100,
+        });
+        const candidate = await runArm("candidate", cases, produceHit(1), {
+            maxUsd: 100,
+        });
+        const markdown = renderMarkdownReport({
+            baseRef: "origin/main",
+            reviewMdSha: {baseline: "a".repeat(64), candidate: "a".repeat(64)},
+            arms: {baseline, candidate},
+            regressions: diffRegressions(baseline, candidate),
+            adversarialFailures: [],
+            gateRetries: [],
+        });
+        expect(markdown).toContain("## Review wobble control (identical arms)");
+        expect(markdown).toContain("| Metric | Arm A | Arm B | Delta |");
+        expect(markdown).toContain("run-to-run wobble, not a prompt effect");
     });
 
     it("marks a failed adversarial gate", () => {

@@ -132,3 +132,17 @@ jobs:
             --head "$BRANCH" \
             --title "review: eval drift report $STAMP" \
             --body-file out/live-ab-report.md
+      - name: Fail on a contaminated noise floor
+        # `caseAsymmetry` means the pooled samples scored different case
+        # sets (a budget-skipped tail), so the noise-floor bands carry
+        # case-mix variance and the drift run's product is degraded. The
+        # report body already warns, but a warning inside a footnote lets
+        # the degradation persist silently until someone reads it; a corpus
+        # outgrowing the budget should be a red run. Runs after the report
+        # is uploaded and the visibility PR exists, so nothing is lost.
+        run: |
+          if [ -f out/live-ab-report.json ] && \
+             [ "$(jq '.aggregate.noiseFloor.caseAsymmetry // false' out/live-ab-report.json)" = "true" ]; then
+            echo "::error::Noise-floor bands are contaminated: pooled samples scored different case sets (budget-skipped tail?). Raise max_usd and re-dispatch." >&2
+            exit 1
+          fi

@@ -1,0 +1,5 @@
+---
+"review": patch
+---
+
+Eval reports for identical-arm runs (`--force-arms`: the weekly drift watch and manual wobble controls) no longer read as an A/B. The single-run, multi-repeat, and aggregate renderers retitle themselves "Review wobble control (identical arms)", relabel the Baseline/Candidate columns to Arm A/Arm B, state up front that between-arm deltas are run-to-run wobble, and the aggregate leads with the noise-floor bands (on an identical-arm pool the bands are the product; the per-case table is the raw material). Motivated by the first scheduled drift report (PR #265), whose baseline-vs-candidate framing over one prompt invited reading noise as a result. Also makes a contaminated noise floor a red run instead of a footnote: the drift workflow now fails (after uploading the report and opening the visibility PR) when the aggregate flags case asymmetry, i.e. the pooled samples scored different case sets because the budget skipped the corpus tail. The budget resize itself rides with the corpus-growth stack, which owns the sizing.

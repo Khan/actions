@@ -132,20 +132,36 @@ export type MultiAbReport = {
 
 export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
     const first = report.repeats[0];
+    // Identical review.md in both arms only happens under `--force-arms`
+    // (the runner short-circuits otherwise): a wobble control or the weekly
+    // drift run, not an A/B. Say so up front; a report headed
+    // "baseline vs candidate" over one prompt invites reading noise as a
+    // result.
+    const identicalArms =
+        first !== undefined &&
+        first.reviewMdSha.baseline === first.reviewMdSha.candidate;
     const lines = [
-        `## Review live A/B: ${report.repeatCount} repeats`,
+        identicalArms
+            ? `## Review wobble control: ${report.repeatCount} repeats (identical arms)`
+            : `## Review live A/B: ${report.repeatCount} repeats`,
         "",
         ...(first !== undefined
             ? [
-                  `Baseline: \`${
-                      first.baseRef
-                  }\` (review.md ${first.reviewMdSha.baseline.slice(
-                      0,
-                      12,
-                  )}); candidate: working tree (review.md ${first.reviewMdSha.candidate.slice(
-                      0,
-                      12,
-                  )}).`,
+                  identicalArms
+                      ? `Both arms ran the same review.md (${first.reviewMdSha.baseline.slice(
+                            0,
+                            12,
+                        )}, base \`${first.baseRef}\`): every between-arm ` +
+                        `delta below is run-to-run wobble, not a prompt effect.`
+                      : `Baseline: \`${
+                            first.baseRef
+                        }\` (review.md ${first.reviewMdSha.baseline.slice(
+                            0,
+                            12,
+                        )}); candidate: working tree (review.md ${first.reviewMdSha.candidate.slice(
+                            0,
+                            12,
+                        )}).`,
                   "",
               ]
             : []),
@@ -248,6 +264,12 @@ const NOISE_FLOOR_FOOTER =
 
 export const renderMarkdownReport = (report: AbReport): string => {
     const {baseline, candidate} = report.arms;
+    // See renderMultiMarkdownReport: identical shas imply `--force-arms`.
+    const identicalArms =
+        report.reviewMdSha.baseline === report.reviewMdSha.candidate;
+    const [armALabel, armBLabel] = identicalArms
+        ? ["Arm A", "Arm B"]
+        : ["Baseline", "Candidate"];
     const row = (
         label: string,
         base: string,
@@ -268,15 +290,23 @@ export const renderMarkdownReport = (report: AbReport): string => {
         );
 
     const lines = [
-        "## Review live A/B",
+        identicalArms
+            ? "## Review wobble control (identical arms)"
+            : "## Review live A/B",
         "",
-        `Baseline: \`${
-            report.baseRef
-        }\` (review.md ${report.reviewMdSha.baseline.slice(0, 12)}); ` +
-            `candidate: working tree (review.md ${report.reviewMdSha.candidate.slice(
-                0,
-                12,
-            )}).`,
+        identicalArms
+            ? `Both arms ran the same review.md (${report.reviewMdSha.baseline.slice(
+                  0,
+                  12,
+              )}, base \`${report.baseRef}\`): every between-arm delta ` +
+              `below is run-to-run wobble, not a prompt effect.`
+            : `Baseline: \`${
+                  report.baseRef
+              }\` (review.md ${report.reviewMdSha.baseline.slice(0, 12)}); ` +
+              `candidate: working tree (review.md ${report.reviewMdSha.candidate.slice(
+                  0,
+                  12,
+              )}).`,
         "",
         ...(report.provenance !== undefined
             ? [
@@ -286,7 +316,7 @@ export const renderMarkdownReport = (report: AbReport): string => {
                   "",
               ]
             : []),
-        "| Metric | Baseline | Candidate | Delta |",
+        `| Metric | ${armALabel} | ${armBLabel} | Delta |`,
         "| --- | --- | --- | --- |",
         metric("Must-catch recall", (a) => a.metrics.mustCatchRecall.rate),
         metric("Verdict agreement", (a) => a.metrics.verdictAgreement.rate),
