@@ -1,0 +1,278 @@
+/**
+ * The submission plan (deterministic-orchestrator slice 4, the probe): Steps
+ * 4-6 as code. Given the dispatcher's validated claims (slice 2), this CLI
+ * computes the verdict, renders every inline comment and the full review
+ * body (accountability section, note lines, fingerprint stamp), and stages
+ * `submission-plan.json`; the orchestrator's remaining job is to emit safe
+ * outputs that match the plan verbatim, and the dispatch-conformance gate
+ * blocks a submission that does not (the #244 accountability-splice check,
+ * as code).
+ *
+ * This is the end-state shape the migration plan names (the no-post runner's
+ * pipeline in production): staging (slice 1) → dispatch/validation (slice 2)
+ * → verdict/render/plan (here) → emit → gate. What remains model work is the
+ * sub-agents themselves plus the safe-output EMISSION: under gh-aw, safe
+ * outputs are queued through the engine's MCP tools, whose credentials never
+ * enter the sandbox, so code cannot queue them directly. That emission seam
+ * is the one piece only an upstream gh-aw change could delete (the plan
+ * doc's Q1 scope note); until then the orchestrator is a typist for MCP
+ * calls, and the gate makes mis-typing a red run.
+ *
+ * Verdict rules encoded (review.md Step 4, mechanically):
+ *   - REQUEST_CHANGES iff at least one posted claim carries a blocking label
+ *     (via computeVerdict, threshold 1).
+ *   - The reduced-depth flip rule: at flip-gated/fast depth over a prior
+ *     REQUEST_CHANGES stamp, `rereview.json`'s keptBlockingCount floors the
+ *     verdict at REQUEST_CHANGES.
+ *
+ * Body rules encoded (review.md Step 6): the verdict head (empty-body
+ * APPROVE with comments; the fixed REQUEST_CHANGES line), the code-rendered
+ * accountability section spliced verbatim, one note line per shed / skipped
+ * dimension / depth reduction (the dispatcher already rendered those), any
+ * PR-level claims folded into the body (the inline-comment safe output needs
+ * a path and line), and the hidden fingerprint stamp as the final line.
+ *
+ * Determinism boundary: pure composition of staged files through the same
+ * lib functions the eval runner uses; no model call, no prose about the code
+ * under review.
+ */
+
+import type {Claim} from "./dispatch-contracts";
+import {renderReviewBody} from "./render-comment";
+import {runRereviewCli, type RereviewCliFs} from "./rereview";
+import {
+    findLatestStamp,
+    runRereviewStampCli,
+    type PriorReview,
+} from "./rereview-mode";
+import {computeVerdict} from "./verdict";
+
+/* -------------------------------------------------------------------------- */
+/* Types and paths                                                            */
+/* -------------------------------------------------------------------------- */
+
+const REVIEW_DIR = "/tmp/gh-aw/review";
+
+export type PlannedComment = {path: string; line: number; body: string};
+
+export type SubmissionPlan = {
+    /** The event to submit (Step 4's two-state rule; never HOLD here). */
+    event: "APPROVE" | "REQUEST_CHANGES";
+    /** The full review body, stamp included; submit verbatim. */
+    body: string;
+    /** The inline comments to post, one safe output each, verbatim. */
+    comments: PlannedComment[];
+    /** Thread ids to resolve (the reconciler's decision, passed through). */
+    resolve: string[];
+    /** Why the event is what it is (fixed-format, for the artifact). */
+    reasons: string[];
+    /** Non-blocking composition observations. */
+    notes: string[];
+};
+
+export type SubmissionFs = RereviewCliFs;
+
+const readJson = (fs: SubmissionFs, path: string): unknown => {
+    if (!fs.existsSync(path)) {
+        return undefined;
+    }
+    try {
+        return JSON.parse(fs.readFileSync(path, "utf8"));
+    } catch {
+        return undefined;
+    }
+};
+
+/* -------------------------------------------------------------------------- */
+/* Rendering                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Render one claim as its Conventional Comment (the renderComment layout,
+ * driven by the claim's post-validation label rather than a recomputed one).
+ */
+export const renderClaimComment = (claim: Claim): string => {
+    const lines: string[] = [`**${claim.label}:** ${claim.discussion}`];
+    if (claim.rule_quote !== undefined) {
+        const [first, ...rest] = claim.rule_quote.split("\n");
+        lines.push(
+            "",
+            `> **Rule:** ${first}`,
+            ...rest.map((line) => (line === "" ? ">" : `> ${line}`)),
+        );
+    }
+    if (claim.suggestion !== undefined) {
+        lines.push("", "```suggestion", claim.suggestion, "```");
+    }
+    return lines.join("\n");
+};
+
+/* -------------------------------------------------------------------------- */
+/* The plan                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Compose the submission plan from the staged dispatch result. Factored out
+ * (fs injected) so it is testable without touching the real filesystem.
+ * Writes `submission-plan.json` (and, via the rereview CLI it invokes,
+ * `rereview.json`). Returns what was written.
+ */
+export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
+    const notes: string[] = [];
+    const dispatch = readJson(fs, `${REVIEW_DIR}/dispatch-result.json`) as
+        | {
+              claims?: unknown;
+              noteLines?: unknown;
+              reconciliation?: {resolve?: unknown};
+              depth?: unknown;
+          }
+        | undefined;
+    if (dispatch === undefined) {
+        throw new Error(
+            `dispatch-result.json not staged under ${REVIEW_DIR}: run the dispatcher first`,
+        );
+    }
+    const claims = (
+        Array.isArray(dispatch.claims) ? dispatch.claims : []
+    ) as Claim[];
+    const noteLines = Array.isArray(dispatch.noteLines)
+        ? dispatch.noteLines.filter(
+              (line): line is string => typeof line === "string",
+          )
+        : [];
+    const depth = typeof dispatch.depth === "string" ? dispatch.depth : "full";
+
+    // The accountability section (renders and stages rereview.json too).
+    const rereview = runRereviewCli(fs);
+
+    // The reduced-depth flip floor (Step 4): only over a prior
+    // REQUEST_CHANGES stamp at flip-gated/fast depth.
+    let keptBlockingFloor = 0;
+    if (depth === "flip-gated" || depth === "fast") {
+        const priorRaw = readJson(fs, `${REVIEW_DIR}/prior-reviews.json`);
+        const priors: PriorReview[] = Array.isArray(priorRaw)
+            ? priorRaw.filter(
+                  (entry): entry is PriorReview =>
+                      typeof (entry as {body?: unknown}).body === "string",
+              )
+            : [];
+        const stamp = findLatestStamp(priors);
+        if (stamp !== null && stamp.verdict === "REQUEST_CHANGES") {
+            keptBlockingFloor = rereview.keptBlockingCount;
+        }
+    }
+
+    // Inline comments need a path and a line; a PR-level claim folds into
+    // the body instead (rare: a pr-anchored finding).
+    const inline: PlannedComment[] = [];
+    const prLevelLines: string[] = [];
+    for (const claim of claims) {
+        if (claim.path !== undefined && claim.line !== undefined) {
+            inline.push({
+                path: claim.path,
+                line: claim.line,
+                body: renderClaimComment(claim),
+            });
+        } else {
+            prLevelLines.push(`**${claim.label}:** ${claim.discussion}`);
+            notes.push(
+                `pr-level claim ${claim.id} folded into the review body`,
+            );
+        }
+    }
+
+    const verdict = computeVerdict({
+        postedLabels: claims.map((claim) => claim.label),
+        dimensions: {
+            correctness: "assessed",
+            skillSeverity: "assessed",
+            patternTriage: "assessed",
+        },
+        keptBlockingCount: keptBlockingFloor,
+    });
+    // With every dimension reported assessed (the dispatcher's unavailable
+    // dimensions surface as note lines instead), the two-state Step 4 rule
+    // is what remains: HOLD_FOR_HUMAN is unreachable here.
+    const event =
+        verdict.event === "REQUEST_CHANGES" ? "REQUEST_CHANGES" : "APPROVE";
+
+    // The depth note (Step 3), when the run reduced.
+    const plan = readJson(fs, `${REVIEW_DIR}/rereview-plan.json`) as
+        | {mode?: unknown; tripwireRearmed?: unknown; divergence?: unknown}
+        | undefined;
+    const depthNotes: string[] = [];
+    if (plan !== undefined && depth !== "full") {
+        const mode = typeof plan.mode === "string" ? plan.mode : "full";
+        depthNotes.push(
+            `Note: re-review ran at ${depth} depth (re-review mode ${mode}).`,
+        );
+    }
+    if (plan?.tripwireRearmed === true) {
+        const share = (plan.divergence as {share?: unknown} | undefined)?.share;
+        depthNotes.push(
+            `Note: divergence tripwire re-armed a full review (unreviewed share ${
+                typeof share === "number" ? share.toFixed(2) : "unknown"
+            }).`,
+        );
+    }
+
+    const head = renderReviewBody({
+        event,
+        hasInlineComments: inline.length > 0,
+        rereviewSection: rereview.section,
+    });
+    const stamp = runRereviewStampCli(fs, event);
+    const body = [head, ...prLevelLines, ...noteLines, ...depthNotes]
+        .filter((line) => line !== "")
+        .join("\n")
+        .concat(stamp === null ? "" : `\n${stamp}`)
+        .replace(/^\n+/, "");
+
+    const submission: SubmissionPlan = {
+        event,
+        body,
+        comments: inline,
+        resolve: Array.isArray(dispatch.reconciliation?.resolve)
+            ? dispatch.reconciliation.resolve.filter(
+                  (id): id is string => typeof id === "string",
+              )
+            : [],
+        reasons: verdict.reasons,
+        notes,
+    };
+    fs.writeFileSync(
+        `${REVIEW_DIR}/submission-plan.json`,
+        JSON.stringify(submission, null, 2),
+    );
+    return submission;
+};
+
+// Run only when executed directly (review.md Steps 4-6, scripted dispatch
+// mode), never on import (tests).
+if (typeof require !== "undefined" && require.main === module) {
+    const fs = require("node:fs") as SubmissionFs;
+    try {
+        const plan = runSubmissionCli(fs);
+        // eslint-disable-next-line no-console
+        console.log(
+            JSON.stringify(
+                {
+                    event: plan.event,
+                    comments: plan.comments.length,
+                    resolve: plan.resolve.length,
+                    reasons: plan.reasons,
+                },
+                null,
+                2,
+            ),
+        );
+    } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error(
+            `::error title=review submission plan::${
+                error instanceof Error ? error.message : String(error)
+            }`,
+        );
+        process.exit(1);
+    }
+}
