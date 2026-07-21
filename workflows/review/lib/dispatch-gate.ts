@@ -513,8 +513,21 @@ export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
         // this file exists, so a crash of the gate BEFORE this point (or of
         // the `npx tsx` bootstrap before the script runs at all) reads as an
         // infra failure and fails open instead of red-flagging the run.
-        fs.writeFileSync(BLOCKED_SENTINEL_PATH, "blocked\n");
-        fs.writeFileSync(PRE_GATE_QUEUE_PATH, rawQueue);
+        // Wrapped so a failed write here cannot escape to the entry's
+        // fail-open catch with the queue still unstripped: the rewrite below
+        // must run whenever `blocked` was decided (worst case is a blocked
+        // run whose job stays green — quiet, but the violating queue never
+        // posts).
+        try {
+            fs.writeFileSync(BLOCKED_SENTINEL_PATH, "blocked\n");
+            fs.writeFileSync(PRE_GATE_QUEUE_PATH, rawQueue);
+        } catch (error) {
+            report.notes.push(
+                `sentinel/pre-gate write failed (${
+                    error instanceof Error ? error.message : String(error)
+                }): block still enforced via the queue rewrite`,
+            );
+        }
         try {
             fs.writeFileSync(
                 AGENT_OUTPUT_PATH,

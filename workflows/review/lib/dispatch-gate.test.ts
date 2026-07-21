@@ -740,3 +740,53 @@ describe("fail-open ordering and disclosure precision (review feedback)", () => 
         expect(report.notes.join(" ")).toContain("present but unparseable");
     });
 });
+
+describe("re-review hardening (second feedback round)", () => {
+    it("a disclosure note does not waive a fully-missing correctness output", () => {
+        const result = evaluate({
+            items: [
+                submitItem(
+                    "APPROVE",
+                    "Note: correctness not assessed this run (correctness-reviewer output unavailable).",
+                ),
+            ],
+            plan: {depth: "full"},
+            outFiles: {},
+        });
+        expect(result.violations.map((v) => v.code)).toEqual([
+            "correctness-missing",
+        ]);
+    });
+
+    it("still strips the queue when the sentinel/pre-gate writes fail", () => {
+        const queueText = JSON.stringify({
+            items: [
+                {
+                    type: "submit_pull_request_review",
+                    event: "REQUEST_CHANGES",
+                    body: "x",
+                },
+            ],
+        });
+        const fs = makeFakeFs({[AGENT_OUTPUT]: queueText});
+        const failingFs = {
+            ...fs,
+            writeFileSync: (p: string, data: string) => {
+                if (
+                    p === BLOCKED_SENTINEL_PATH ||
+                    p.endsWith("agent_output.pre-gate.json")
+                ) {
+                    throw new Error("disk full");
+                }
+                fs.writeFileSync(p, data);
+            },
+        };
+        const report = runDispatchGateCli(failingFs);
+        expect(report.blocked).toBe(true);
+        expect(report.notes.join(" ")).toContain(
+            "sentinel/pre-gate write failed",
+        );
+        // The queue rewrite still ran: the violating queue can never post.
+        expect(JSON.parse(fs.files[AGENT_OUTPUT]).items).toEqual([]);
+    });
+});
