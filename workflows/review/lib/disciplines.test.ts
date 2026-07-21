@@ -148,7 +148,12 @@ describe("the shared disciplines section", () => {
                     path.endsWith("/files?per_page=100&page=1") ||
                         path.endsWith("/reviews?per_page=100")
                         ? []
-                        : {number: 1, title: "t"},
+                        : {
+                              number: 1,
+                              title: "t",
+                              head: {sha: "abc123"},
+                              base: {ref: "main"},
+                          },
                 ),
             {repo: "o/r", prNumber: 1, repoRoot: "/work"},
         );
