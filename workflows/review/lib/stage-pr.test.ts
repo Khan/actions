@@ -7,6 +7,7 @@ import {
     renderRereviewStamp,
     STAMP_SCHEMA_VERSION,
 } from "./rereview-mode";
+import {runCli as runRouterCli} from "./router";
 import {
     buildUnifiedDiff,
     computeDiffFingerprint,
@@ -74,7 +75,7 @@ const PATCH_ONE = "@@ -1,2 +1,3 @@\n ctx\n+added line\n ctx";
 const baseRoutes = (files: unknown[]): Record<string, unknown> => ({
     "/repos/o/r/pulls/7": PR_META,
     "/repos/o/r/pulls/7/files?per_page=100&page=1": files,
-    "/repos/o/r/pulls/7/reviews?per_page=100": [],
+    "/repos/o/r/pulls/7/reviews?per_page=100&page=1": [],
 });
 
 describe("buildUnifiedDiff", () => {
@@ -155,6 +156,27 @@ describe("computeNewScope", () => {
         const a = hashHunkAddedLines("@@ -1 +1,2 @@\n ctx\n+x  ");
         const b = hashHunkAddedLines("@@ -9 +9,2 @@\n other ctx\n+x");
         expect(a).toBe(b);
+    });
+
+    it("includes added lines whose content itself starts with `+` (e.g. `++counter`)", () => {
+        // `++counter` serializes as `+++counter` in the patch; a
+        // header-shaped exclusion would drop it from the hash while the line
+        // numbering still counts it, so a push changing only that line would
+        // be scoped out as already-reviewed.
+        const before = "@@ -1 +1,2 @@\n ctx\n+++counter";
+        const after = "@@ -1 +1,2 @@\n ctx\n+++counter2";
+        expect(hashHunkAddedLines(before)).not.toBe(hashHunkAddedLines(after));
+        const scope = computeNewScope(
+            [
+                {
+                    filename: "a.ts",
+                    status: "modified",
+                    patch: after,
+                },
+            ],
+            {"a.ts": [hashHunkAddedLines(before)]},
+        );
+        expect(scope.inScope).toEqual({"a.ts": [2]});
     });
 });
 
@@ -279,7 +301,7 @@ describe("runStagePrCli", () => {
         const routes = baseRoutes([
             {filename: "a.ts", status: "modified", patch: PATCH_ONE},
         ]);
-        delete routes["/repos/o/r/pulls/7/reviews?per_page=100"];
+        delete routes["/repos/o/r/pulls/7/reviews?per_page=100&page=1"];
         const fs = makeFakeFs();
         const result = await runStagePrCli(fs, ghGetFromMap(routes), options);
         expect(JSON.parse(fs.files[`${REVIEW}/prior-reviews.json`])).toEqual(
@@ -297,7 +319,7 @@ describe("runStagePrCli", () => {
         const routes = baseRoutes([
             {filename: "a.ts", status: "modified", patch: PATCH_ONE},
         ]);
-        routes["/repos/o/r/pulls/7/reviews?per_page=100"] = [
+        routes["/repos/o/r/pulls/7/reviews?per_page=100&page=1"] = [
             {
                 user: {login: "github-actions[bot]"},
                 body: "dismissed body",
@@ -339,7 +361,7 @@ describe("runStagePrCli", () => {
             {filename: "a.ts", status: "modified", patch: hunkA},
             {filename: "b.ts", status: "modified", patch: hunkB},
         ]);
-        routes["/repos/o/r/pulls/7/reviews?per_page=100"] = [
+        routes["/repos/o/r/pulls/7/reviews?per_page=100&page=1"] = [
             {
                 user: {login: "github-actions[bot]"},
                 body: stamp,
@@ -370,5 +392,150 @@ describe("runStagePrCli", () => {
             runStagePrCli(fs, ghGetFromMap({}), options),
         ).rejects.toThrow("unexpected GET /repos/o/r/pulls/7");
         expect(fs.files[`${REVIEW}/pr-context.json`]).toBe(undefined);
+    });
+});
+
+describe("review-feedback coverage (slice 1 hardening)", () => {
+    const options = {repo: "o/r", prNumber: 7, repoRoot: "/work"};
+    const oneFile = () =>
+        baseRoutes([{filename: "a.ts", status: "modified", patch: PATCH_ONE}]);
+
+    it("degrades an unparseable cache file to whole-diff scope with a warning", async () => {
+        const fs = makeFakeFs({
+            "/tmp/gh-aw/cache-memory/pr-7.json": "corrupt {",
+        });
+        const result = await runStagePrCli(
+            fs,
+            ghGetFromMap(oneFile()),
+            options,
+        );
+        expect(JSON.parse(fs.files[`${REVIEW}/new-scope.json`])).toEqual({
+            priorReview: false,
+            inScope: {},
+        });
+        expect(result.warnings.join(" ")).toContain("cache memory unparseable");
+    });
+
+    it("paginates the reviews fetch past 100 entries and keeps the newest stamp", async () => {
+        const routes = oneFile();
+        routes["/repos/o/r/pulls/7/reviews?per_page=100&page=1"] = Array.from(
+            {length: 100},
+            (_, i) => ({
+                user: {login: "github-actions[bot]"},
+                body: `old ${i}`,
+                submitted_at: "2026-07-01T00:00:00Z",
+            }),
+        );
+        routes["/repos/o/r/pulls/7/reviews?per_page=100&page=2"] = [
+            {
+                user: {login: "github-actions[bot]"},
+                body: "newest",
+                submitted_at: "2026-07-20T00:00:00Z",
+            },
+        ];
+        const fs = makeFakeFs();
+        await runStagePrCli(fs, ghGetFromMap(routes), options);
+        const staged = JSON.parse(fs.files[`${REVIEW}/prior-reviews.json`]);
+        expect(staged).toHaveLength(101);
+        expect(staged.at(-1).body).toBe("newest");
+    });
+
+    it("fails hard on metadata missing load-bearing fields (no partial staging)", async () => {
+        const routes = oneFile();
+        routes["/repos/o/r/pulls/7"] = {number: 7, title: "t"};
+        const fs = makeFakeFs();
+        await expect(
+            runStagePrCli(fs, ghGetFromMap(routes), options),
+        ).rejects.toThrow(/load-bearing fields/);
+        expect(fs.files[`${REVIEW}/pr-context.json`]).toBe(undefined);
+    });
+
+    it("fails hard when the files endpoint returns a non-array", async () => {
+        const routes = oneFile();
+        routes["/repos/o/r/pulls/7/files?per_page=100&page=1"] = {oops: true};
+        await expect(
+            runStagePrCli(makeFakeFs(), ghGetFromMap(routes), options),
+        ).rejects.toThrow(/non-array/);
+    });
+
+    it("performs the scoped-depth swap: stripped and annotated shrink, pr.diff stays triage's", async () => {
+        const hunkA = [
+            "@@ -1,2 +1,3 @@\n ctx\n+alpha\n ctx",
+            "@@ -10,2 +11,3 @@\n ctx\n+alpha2\n ctx",
+            "@@ -20,2 +22,3 @@\n ctx\n+alpha3\n ctx",
+        ].join("\n");
+        const hunkB = "@@ -5,2 +5,3 @@\n ctx\n+beta\n ctx";
+        const priorDiff = buildUnifiedDiff([
+            {filename: "a.ts", status: "modified", patch: hunkA},
+        ]);
+        const stamp = renderRereviewStamp({
+            schemaVersion: STAMP_SCHEMA_VERSION,
+            depth: "full",
+            verdict: "APPROVE",
+            anchorDraft: false,
+            anchorHunks: computeHunkSignature(priorDiff),
+        });
+        const routes = baseRoutes([
+            {filename: "a.ts", status: "modified", patch: hunkA},
+            {filename: "b.ts", status: "modified", patch: hunkB},
+        ]);
+        routes["/repos/o/r/pulls/7/reviews?per_page=100&page=1"] = [
+            {
+                user: {login: "github-actions[bot]"},
+                body: stamp,
+                submitted_at: "2026-07-01T00:00:00Z",
+                state: "APPROVED",
+            },
+        ];
+        const fs = makeFakeFs({
+            "/work/.github/aw/review/ROUTING": "re-review scoped\n",
+        });
+        const result = await runStagePrCli(fs, ghGetFromMap(routes), options);
+        expect(result.depth).toBe("scoped");
+        const scoped = fs.files[`${REVIEW}/scoped.diff`];
+        expect(scoped).toContain("beta");
+        expect(scoped).not.toContain("alpha");
+        expect(fs.files[`${REVIEW}/full-stripped.diff`]).toBe(scoped);
+        expect(fs.files[`${REVIEW}/full-stripped-annotated.diff`]).toContain(
+            "beta",
+        );
+        expect(
+            fs.files[`${REVIEW}/full-stripped-annotated.diff`],
+        ).not.toContain("alpha");
+        // At scoped depth, pattern-triage still owns pr.diff mid-run.
+        expect(fs.files[`${REVIEW}/pr.diff`]).toBe(undefined);
+        expect(fs.files[`${REVIEW}/review-files.json`]).toBe(undefined);
+    });
+
+    it("router second pass changes only tiers/budget: generatedFiles and reReviewMode are pass-stable", async () => {
+        // The invariant the pre-staged provenance and re-review artifacts
+        // rely on (stated in the staging step's rationale): resolving the
+        // direction-dependent tier questions must not move anything those
+        // CLIs read.
+        const fs = makeFakeFs({
+            "/work/.github/aw/review/ROUTING": [
+                "re-review scoped",
+                "pkg/auth/** tier=high direction-dependent lens=security-auth",
+            ].join("\n"),
+            "/work/.gitattributes": "*.lock linguist-generated\n",
+        });
+        const routes = baseRoutes([
+            {filename: "pkg/auth/x.ts", status: "modified", patch: PATCH_ONE},
+            {filename: "yarn.lock", status: "modified", patch: PATCH_ONE},
+        ]);
+        await runStagePrCli(fs, ghGetFromMap(routes), options);
+        const first = JSON.parse(fs.files[`${REVIEW}/routing.json`]);
+        // Second pass: answers staged, router re-run (as the orchestrator
+        // does mid-run).
+        fs.files["/tmp/gh-aw/review/resolved-tiers.json"] = JSON.stringify({
+            "pkg/auth/x.ts": "Low",
+        });
+        runRouterCli(fs, "/work", {});
+        const second = JSON.parse(fs.files[`${REVIEW}/routing.json`]);
+        expect(second.generatedFiles).toEqual(first.generatedFiles);
+        expect(second.reReviewMode).toBe(first.reReviewMode);
+        expect(second.perFileTier["pkg/auth/x.ts"]).not.toBe(
+            first.perFileTier["pkg/auth/x.ts"],
+        );
     });
 });

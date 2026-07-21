@@ -57,7 +57,7 @@
 
 import {createHash} from "node:crypto";
 
-import {splitUnifiedDiff} from "./diff";
+import {splitPatchHunks, splitUnifiedDiff} from "./diff";
 import {DEFAULT_RE_REVIEW_MODE, RE_REVIEW_MODES} from "./routing-config";
 import type {ReReviewMode} from "./routing-config";
 
@@ -75,28 +75,6 @@ export type HunkSignature = Record<string, string[]>;
 
 /** Truncation keeps the stamp compact; 16 hex chars ≈ 64 bits per hunk. */
 const HUNK_HASH_CHARS = 16;
-
-const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/;
-
-/** Split one file section's text into its hunk bodies (headers included). */
-const splitHunks = (sectionText: string): string[] => {
-    const hunks: string[] = [];
-    let current: string[] | null = null;
-    for (const line of sectionText.split("\n")) {
-        if (HUNK_HEADER_RE.test(line)) {
-            if (current !== null) {
-                hunks.push(current.join("\n"));
-            }
-            current = [line];
-        } else if (current !== null) {
-            current.push(line);
-        }
-    }
-    if (current !== null) {
-        hunks.push(current.join("\n"));
-    }
-    return hunks;
-};
 
 const hashHunk = (hunkText: string): string => {
     const content = hunkText
@@ -118,7 +96,7 @@ const hashHunk = (hunkText: string): string => {
 export const computeHunkSignature = (diffText: string): HunkSignature => {
     const signature: HunkSignature = {};
     for (const section of splitUnifiedDiff(diffText)) {
-        signature[section.path] = splitHunks(section.text).map(hashHunk);
+        signature[section.path] = splitPatchHunks(section.text).map(hashHunk);
     }
     return signature;
 };
@@ -494,7 +472,7 @@ export const buildScopedDiff = (
     const kept: string[] = [];
     for (const section of splitUnifiedDiff(diffText)) {
         const seen = new Set(reviewed[section.path] ?? []);
-        const hunks = splitHunks(section.text);
+        const hunks = splitPatchHunks(section.text);
         const inScope = hunks.filter((hunk) => !seen.has(hashHunk(hunk)));
         if (inScope.length === 0) {
             continue;
