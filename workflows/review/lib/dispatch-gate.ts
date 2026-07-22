@@ -60,6 +60,8 @@
  * files; no model call, no clock, no prose about the code under review.
  */
 
+import {extractJsonValue} from "./agent-json";
+
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -141,6 +143,16 @@ const parseJson = (text: string): unknown => {
         return undefined;
     }
 };
+
+/**
+ * Sub-agent OUT-FILE parses use the shared lenient extraction
+ * (`agent-json.ts`), the same rule the dispatcher applies: a prose-prefixed
+ * or fence-wrapped payload is an output that exists, and the gate must not
+ * call unparseable what the dispatcher parsed (run 29893634730 blocked a
+ * conforming submission exactly that way). Code-written inputs (the agent
+ * output queue, staged routing) stay on strict {@link parseJson}.
+ */
+const parseAgentOutFile = (text: string): unknown => extractJsonValue(text);
 
 /**
  * Lowercase and collapse the separator variants (`-`, `_`, `/`) note authors
@@ -227,7 +239,9 @@ const triageEmptiedReview = (outFiles: Record<string, string>): boolean => {
     if (raw === undefined) {
         return false;
     }
-    const parsed = parseJson(raw) as {reviewFiles?: unknown} | undefined;
+    const parsed = parseAgentOutFile(raw) as
+        | {reviewFiles?: unknown}
+        | undefined;
     return (
         parsed !== undefined &&
         Array.isArray(parsed.reviewFiles) &&
@@ -282,7 +296,7 @@ export const evaluateDispatchConformance = (
                     `(depth ${depth} dispatches the correctness pass; even a failed dispatch stages an error note)`,
             });
         } else if (
-            parseJson(raw) === undefined &&
+            parseAgentOutFile(raw) === undefined &&
             !disclosesSkippedDimension(body, "correctness-reviewer")
         ) {
             violations.push({
@@ -300,7 +314,8 @@ export const evaluateDispatchConformance = (
     // hard ceiling, and never silently).
     if (commentCount > 0) {
         const raw = input.outFiles[VALIDATOR_OUT];
-        const validated = raw !== undefined && parseJson(raw) !== undefined;
+        const validated =
+            raw !== undefined && parseAgentOutFile(raw) !== undefined;
         if (!validated && !disclosesSkippedDimension(body, "claim-validator")) {
             violations.push({
                 code: "validator-missing-with-findings",
