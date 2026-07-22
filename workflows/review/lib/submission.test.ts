@@ -194,6 +194,49 @@ describe("runSubmissionCli", () => {
         );
     });
 
+    it("applies the flip floor from the cache-memory stamp when posted bodies carry none (the production shape)", () => {
+        const fs = makeFakeFs(
+            staged(
+                {depth: "fast", claims: []},
+                {
+                    // What production priors actually look like: the ingest
+                    // sanitizer stripped the stamp.
+                    [`${REVIEW}/prior-reviews.json`]: JSON.stringify([
+                        {body: "Changes requested — see inline comments."},
+                    ]),
+                    [`${REVIEW}/threads.json`]: JSON.stringify([
+                        {
+                            thread_id: "t1",
+                            path: "a.ts",
+                            line: 2,
+                            comments: [
+                                {
+                                    author: "github-actions[bot]",
+                                    body: "**issue (blocking):** still broken",
+                                },
+                            ],
+                        },
+                    ]),
+                    [`${REVIEW}/out/thread-reconciler.json`]: JSON.stringify({
+                        resolve: [],
+                        keep: ["t1"],
+                    }),
+                    [`${REVIEW}/pr-context.json`]: JSON.stringify({
+                        number: 41007,
+                        repo: "o/r",
+                    }),
+                    "/tmp/gh-aw/cache-memory/pr-41007.json": JSON.stringify({
+                        verdict: "REQUEST_CHANGES",
+                        stampHunks: {"a.ts": ["deadbeef00000000"]},
+                        wasDraft: false,
+                    }),
+                },
+            ),
+        );
+        const plan = runSubmissionCli(fs);
+        expect(plan.event).toBe("REQUEST_CHANGES");
+    });
+
     it("folds a pr-level claim into the body instead of an inline comment", () => {
         const fs = makeFakeFs(
             staged({
@@ -258,6 +301,22 @@ describe("the gate's plan-match rule (slice 4)", () => {
         const plan = runSubmissionCli(plannedFs());
         const result = evaluateDispatchConformance({
             items: queuedFromPlan(plan),
+            plan: {depth: "full"},
+            routing: {enabledReviewers: [], lensesToSpawn: []},
+            outFiles,
+            submissionPlan: plan,
+        });
+        expect(result.violations).toEqual([]);
+    });
+
+    it("passes when the ingest sanitizer stripped the plan's stamp comment from the queued body (run 29893634730)", () => {
+        const plan = runSubmissionCli(plannedFs());
+        // The plan's body carries the hidden fingerprint stamp; what the
+        // gate sees queued is the POST-sanitizer body, comments deleted.
+        expect(plan.body).toContain("<!--");
+        const sanitizedBody = plan.body.replace(/<!--[\s\S]*?-->/g, "");
+        const result = evaluateDispatchConformance({
+            items: queuedFromPlan({...plan, body: sanitizedBody}),
             plan: {depth: "full"},
             routing: {enabledReviewers: [], lensesToSpawn: []},
             outFiles,

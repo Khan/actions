@@ -530,6 +530,12 @@ export const evaluateDispatchConformance = (
         | undefined;
     const normalizeBody = (text: string): string =>
         text
+            // The ingest sanitizer deletes ALL XML/HTML comments
+            // (removeXmlComments), so the queued body can never carry the
+            // plan's fingerprint stamp; comparing modulo comments is what
+            // "sanitizer-tolerant" requires (trial run 29893634730 blocked
+            // a byte-faithful transcription on exactly this).
+            .replace(/<!--[\s\S]*?-->/g, "")
             .toLowerCase()
             .replace(/`/g, "")
             .replace(/https?:\/\/\S+/g, "<url>")
