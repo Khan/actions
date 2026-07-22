@@ -304,6 +304,49 @@ export const parseFinderOutput = (
 };
 
 /* -------------------------------------------------------------------------- */
+/* Structured-final contract checks                                           */
+/* -------------------------------------------------------------------------- */
+
+export type ContractKind = "finder" | "lens" | "validator" | "json";
+
+/**
+ * Build the structured-final contract check for one sub-agent: the exact
+ * parse the collection phase will run, applied at the `submit_result` tool
+ * boundary so a drifted shape is rejected back to the model in-session
+ * instead of voiding the dimension after the run. Free-text finals stay the
+ * fallback, so this never *loses* an output the old path would have kept.
+ *
+ * Why: three distinct correctness-reviewer shape drifts in five trial runs
+ * (the defect-13 ledger line), each costing a corrective re-dispatch or the
+ * whole dimension; free-text JSON contracts were the weakest link in the
+ * scripted pipeline. `json` accepts any object (pattern-triage and the
+ * reconciler already tolerate missing fields downstream, failing toward
+ * more review / fewer resolutions).
+ *
+ * Side-effect-free: the finder parse runs against a throwaway id set, so
+ * validation here never perturbs the collection phase's cross-agent id
+ * collision handling.
+ */
+export const contractValidator = (
+    name: string,
+    kind: ContractKind,
+): ((payload: Record<string, unknown>) => string | null) => {
+    return (payload) => {
+        try {
+            const text = JSON.stringify(payload);
+            if (kind === "validator") {
+                parseValidatorOutput(text);
+            } else if (kind === "finder" || kind === "lens") {
+                parseFinderOutput(name, text, new Set(), kind === "lens");
+            }
+            return null;
+        } catch (error) {
+            return error instanceof Error ? error.message : String(error);
+        }
+    };
+};
+
+/* -------------------------------------------------------------------------- */
 /* Scope filter and label computation                                         */
 /* -------------------------------------------------------------------------- */
 

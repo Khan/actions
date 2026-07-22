@@ -677,7 +677,11 @@ cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
 ```
    It runs triage, the reviewer fan-out (roster, budget cap, and planned
    sheds computed from `routing.json`, every dispatch staged to
-   `out/<agent>.json`), the provenance gate, the scope filter, and claim
+   `out/<agent>.json`), the provenance gate, the scope filter, cross-source
+   dedup, open-thread suppression (a candidate that describes a defect an
+   open bot thread already tracks is not re-validated or re-posted; a
+   suppressed blocking candidate still floors the verdict when the matched
+   thread's opener is itself blocking), and claim
    validation, and writes `/tmp/gh-aw/review/dispatch-result.json`.
 4. Compose the submission deterministically, once:
 ```
@@ -687,7 +691,10 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    (`rereview.json`), computes the verdict (Step 4's mechanical rule plus the
    reduced-depth flip floor), renders every inline comment and the full
    review body (note lines and fingerprint stamp included), and writes
-   `/tmp/gh-aw/review/submission-plan.json`.
+   `/tmp/gh-aw/review/submission-plan.json`. At full depth it also
+   stages `/tmp/gh-aw/review/risks-patterns-key.txt`, the code-computed
+   canonical signature Step 7 compares (never compose your own signature in
+   this mode).
 5. Emit the safe outputs **exactly** as the plan says, nothing more and
    nothing less: one `create-pull-request-review-comment` per `comments`
    entry (its `path`, `line`, and `body` verbatim), one
@@ -708,7 +715,9 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    Do not dispatch any sub-agent yourself in this mode, and do not re-run
    the dispatcher; if its call failed, treat the run as over budget and land
    the review from whatever `out/` evidence exists (the gate decides whether
-   a verdict may post).
+   a verdict may post). In this mode Step 9's cache-memory record is also
+   code-owned (`lib/cache-record.ts`, invoked there); never write or edit
+   `/tmp/gh-aw/cache-memory/pr-*.json` yourself.
 
 Everything from "Phase 1" below to the end of Phase 3 applies only to the
 default `task` dispatch mode.
@@ -1453,7 +1462,12 @@ should only ever be one current risks/patterns comment:
   pattern record the sorted set of files it covers, and record the sorted set of files
   `pattern-triage` **excluded** from review (see the exclusions section below); then sort
   all of that into one stable string. Compare that signature to `risksPatternsKey` in
-  cache memory (Step 9). If it is unchanged, do **not** post a new comment — even if you
+  cache memory (Step 9). **Scripted dispatch mode:** never compose the
+  signature yourself; the plan CLI staged it at
+  `/tmp/gh-aw/review/risks-patterns-key.txt` (Step 3); compare that string
+  verbatim against `risksPatternsKey` in cache memory, and the deterministic
+  cache writer records the same string when your comment queues, so the
+  compare and the record share one code-owned format. If it is unchanged, do **not** post a new comment — even if you
   would word the reasons differently or order the entries differently. The existing
   comment is still accurate, and reposting would needlessly notify subscribers and
   collapse the current one. Post only when the signature differs from the cached
@@ -1632,6 +1646,20 @@ Only request teams that appear in the `allowed-team-reviewers` allowlist in this
 workflow's frontmatter; skip any relevant team that is not on that list.
 
 ## Step 9: Update Cache Memory
+
+**Scripted dispatch mode: never hand-write the cache record.** When
+`routing.json` carries `"dispatchMode": "scripted"`, run the deterministic
+writer once, AFTER you have emitted every safe output:
+```
+cd gh-aw-review-lib && npx -y tsx workflows/review/lib/cache-record.ts
+```
+It writes the record below by copying the fingerprints verbatim from the
+staged files and reading the verdict, `risksPatternsKey`, and
+`requestedTeams` from the submission plan and the safe-output queue; hand
+composition risks exactly the transcription slip it exists to remove (a
+mis-copied `stampHunks` silently degrades every later run to a full review).
+Then continue at the artifact upload at the end of this step; everything in
+between applies only to the default task mode.
 
 Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || github.event.issue.number }}.json`:
 - Timestamp of this review

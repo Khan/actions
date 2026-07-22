@@ -1,13 +1,20 @@
 import {describe, it, expect} from "vitest";
 
-import {runDispatch, type AgentRunner, type DispatchFs} from "./dispatch";
+import {
+    contractValidator,
+    runDispatch,
+    type AgentRunner,
+    type DispatchFs,
+} from "./dispatch";
 import {computeDiffProvenance} from "./provenance";
 
 /**
- * Trial-driven dispatcher regression tests, split from dispatch.test.ts
- * (which sits against the max-lines budget); the harness and fixtures
- * mirror that file's.
+ * Post-trial follow-up tests for the scripted dispatcher: the
+ * structured-final `submit_result` channel (trial suggestion h) and
+ * open-thread suppression (trial suggestion g). Split from dispatch.test.ts
+ * for its max-lines budget; the fixtures mirror that file's.
  */
+
 const REVIEW = "/tmp/gh-aw/review";
 const AGENTS = "/work/.claude/agents";
 
@@ -122,6 +129,199 @@ const VALIDATOR_CONFIRM = JSON.stringify({
             confidence: 0.9,
         },
     ],
+});
+
+describe("structured finals (trial suggestion h)", () => {
+    it("builds contract checks that reject drifted shapes and accept the contract", async () => {
+        const fs = makeFakeFs({
+            ...baseStaging(),
+            ...agentFiles(
+                "pattern-triage",
+                "correctness-reviewer",
+                "skill-auditor",
+                "claim-validator",
+            ),
+        });
+        const validators: Record<
+            string,
+            (payload: Record<string, unknown>) => string | null
+        > = {};
+        const runner: AgentRunner = async (request) => {
+            if (request.validate !== undefined) {
+                validators[request.name] = request.validate;
+            }
+            return {
+                output: {
+                    "pattern-triage": TRIAGE_OK,
+                    "correctness-reviewer": CORRECTNESS_OUT,
+                    "skill-auditor": EMPTY_FINDINGS,
+                    "claim-validator": VALIDATOR_CONFIRM,
+                }[request.name] as string,
+                usd: 0.5,
+                turns: 3,
+                wallMs: 100,
+            };
+        };
+        await runDispatch({fs, runner, repoRoot: "/work"});
+
+        // Every dispatch carried a contract check.
+        expect(Object.keys(validators).sort()).toEqual([
+            "claim-validator",
+            "correctness-reviewer",
+            "pattern-triage",
+            "skill-auditor",
+        ]);
+        const finder = validators["correctness-reviewer"];
+        // The defect-13 drift class: a ReportFindings-style object with no
+        // Conventional Comments label is rejected with the exact contract
+        // message, in-session, instead of voiding the dimension.
+        expect(
+            finder({
+                findings: [
+                    {
+                        file: "a.ts",
+                        line: 2,
+                        summary: "Broken guard.",
+                        severity: "blocking",
+                        verdict: "CONFIRMED",
+                    },
+                ],
+            }),
+        ).toMatch(/label/);
+        expect(finder(JSON.parse(CORRECTNESS_OUT))).toBeNull();
+        // The validator's contract: a claims array is required.
+        expect(validators["claim-validator"]({})).toMatch(/claims array/);
+        expect(
+            validators["claim-validator"](JSON.parse(VALIDATOR_CONFIRM)),
+        ).toBeNull();
+        // Triage tolerates any object (downstream fails toward more review).
+        expect(validators["pattern-triage"]({})).toBeNull();
+    });
+
+    it("records a structured final in the per-agent report and acts on its payload", async () => {
+        const fs = makeFakeFs({
+            ...baseStaging(),
+            ...agentFiles(
+                "pattern-triage",
+                "correctness-reviewer",
+                "skill-auditor",
+                "claim-validator",
+            ),
+        });
+        const runner: AgentRunner = async (request) => ({
+            output: {
+                "pattern-triage": TRIAGE_OK,
+                "correctness-reviewer": CORRECTNESS_OUT,
+                "skill-auditor": EMPTY_FINDINGS,
+                "claim-validator": VALIDATOR_CONFIRM,
+            }[request.name] as string,
+            usd: 0.5,
+            turns: 3,
+            wallMs: 100,
+            ...(request.name === "correctness-reviewer"
+                ? {structured: true}
+                : {}),
+        });
+        const result = await runDispatch({fs, runner, repoRoot: "/work"});
+
+        const correctness = result.perAgent.find(
+            (agent) => agent.name === "correctness-reviewer",
+        );
+        expect(correctness?.structuredFinal).toBe(true);
+        expect(
+            result.perAgent.find((agent) => agent.name === "skill-auditor")
+                ?.structuredFinal,
+        ).toBeUndefined();
+        // The structured payload flowed through the normal collection path.
+        expect(result.claims).toHaveLength(1);
+        expect(result.claims[0].source).toBe("correctness-reviewer");
+    });
+
+    it("does not perturb id-collision handling (validation uses a throwaway id set)", () => {
+        const check = contractValidator("correctness-reviewer", "finder");
+        const payload = JSON.parse(CORRECTNESS_OUT) as Record<string, unknown>;
+        // Two validations of the same payload both pass: no shared id state.
+        expect(check(payload)).toBeNull();
+        expect(check(payload)).toBeNull();
+    });
+});
+
+describe("open-thread suppression (trial suggestion g)", () => {
+    const THREADS = JSON.stringify([
+        {
+            thread_id: "T1",
+            path: "a.ts",
+            line: 60,
+            url: "https://github.com/x/y/pull/1#discussion_r1",
+            comments: [
+                {
+                    author: "github-actions[bot]",
+                    body: "**issue (blocking):** Broken guard. The guard was removed. nil deref on empty input",
+                },
+            ],
+        },
+    ]);
+    const outputs = (reconciler: Record<string, unknown>) => ({
+        "pattern-triage": TRIAGE_OK,
+        "correctness-reviewer": CORRECTNESS_OUT,
+        "skill-auditor": EMPTY_FINDINGS,
+        "thread-reconciler": JSON.stringify(reconciler),
+    });
+    const staging = () => ({
+        ...baseStaging(),
+        [`${REVIEW}/threads.json`]: THREADS,
+        ...agentFiles(
+            "pattern-triage",
+            "correctness-reviewer",
+            "skill-auditor",
+            "claim-validator",
+            "thread-reconciler",
+        ),
+    });
+
+    it("suppresses a re-flag of an open thread's defect, skipping validation, noting it, and recording it", async () => {
+        const runner = stubRunner(
+            outputs({resolve: [], keep: ["T1"], skipLines: []}),
+        );
+        const result = await runDispatch({
+            fs: makeFakeFs(staging()),
+            runner,
+            repoRoot: "/work",
+        });
+        // The one candidate duplicated the open thread: nothing to post,
+        // nothing to validate (the validator dispatch is saved).
+        expect(result.claims).toEqual([]);
+        expect(runner.calls).not.toContain("claim-validator");
+        expect(result.threadSuppressions).toEqual([
+            {
+                id: "correctness-reviewer-1",
+                source: "correctness-reviewer",
+                label: "issue (blocking)",
+                path: "a.ts",
+                line: 2,
+                thread_id: "T1",
+                threadBlocking: true,
+            },
+        ]);
+        expect(result.noteLines).toEqual([
+            "Note: 1 finding(s) not re-posted (already tracked in open review threads).",
+        ]);
+    });
+
+    it("does not suppress against a thread the reconciler resolves this run", async () => {
+        const runner = stubRunner(
+            outputs({resolve: ["T1"], keep: [], skipLines: []}),
+        );
+        const fs = makeFakeFs({
+            ...staging(),
+        });
+        const result = await runDispatch({fs, runner, repoRoot: "/work"});
+        // The thread is being resolved, so the re-flag is a fresh finding:
+        // it survives to validation (which retains it unvalidated here:
+        // the stub has no validator output, so the unavailable note posts).
+        expect(result.threadSuppressions).toEqual([]);
+        expect(result.claims).toHaveLength(1);
+    });
 });
 
 describe("dispatch-result artifact staging (run 29943085279)", () => {
