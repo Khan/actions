@@ -173,7 +173,7 @@ observability:
 engine:
   id: claude
   model: claude-opus-4-8
-timeout-minutes: 20
+timeout-minutes: 40
 
 # claude-fable-5 (pinned by first-principles and correctness-reviewer) is not in the
 # AI-credits pricing table of the firewall api-proxy that gh-aw <= v0.81.x pins
