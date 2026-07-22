@@ -39,6 +39,7 @@
  * note lines) is pure code. No prose about the code under review.
  */
 
+import {dedupeClaims, type ClaimMerge} from "./dedup";
 import {annotateDiffLineNumbers, splitUnifiedDiff} from "./diff";
 import {
     applyScopeFilter,
@@ -70,6 +71,7 @@ export {
     type Claim,
     type Verification,
 } from "./dispatch-contracts";
+export {dedupeClaims, type ClaimMerge} from "./dedup";
 
 /* -------------------------------------------------------------------------- */
 /* Seams                                                                      */
@@ -294,6 +296,8 @@ export type DispatchResult = {
     noteLines: string[];
     /** The validated claims Steps 4-6 act on. */
     claims: Claim[];
+    /** Cross-source duplicates merged before validation (#245). */
+    merges: ClaimMerge[];
     /** The reconciler's decision, when it ran and parsed. */
     reconciliation?: {resolve: string[]; keep: string[]; skipLines: unknown};
     /** correctness-reviewer `files[]` risk levels (Steps 7-8). */
@@ -754,8 +758,13 @@ export const runDispatch = async (
         }
     }
 
+    // Cross-source duplicate merge (#245), BEFORE validation so duplicate
+    // claims are neither separately validated (the largest sub-agent cost
+    // line) nor separately posted.
+    const deduped = dedupeClaims(buildClaims(scoped.kept));
+    let claims = deduped.claims;
+
     // Phase 3: claim validation.
-    let claims = buildClaims(scoped.kept);
     let validatorRan = false;
     if (claims.length > 0) {
         fs.writeFileSync(
@@ -824,6 +833,7 @@ export const runDispatch = async (
         skippedDimensions,
         noteLines,
         claims,
+        merges: deduped.merges,
         ...(reconciliation !== undefined ? {reconciliation} : {}),
         ...(riskFiles !== undefined ? {riskFiles} : {}),
         ...(patterns !== undefined ? {patterns} : {}),
