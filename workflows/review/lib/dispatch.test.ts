@@ -15,6 +15,7 @@ import {
     type DispatchFs,
 } from "./dispatch";
 import {computeDiffProvenance} from "./provenance";
+import {runCli as runRouterCli} from "./router";
 import {parseRoutingConfig} from "./routing-config";
 
 /**
@@ -132,7 +133,13 @@ const CORRECTNESS_OUT = JSON.stringify({
 const EMPTY_FINDINGS = JSON.stringify({findings: []});
 
 const VALIDATOR_CONFIRM = JSON.stringify({
-    "correctness-reviewer-1": {verification: "confirmed", confidence: 0.9},
+    claims: [
+        {
+            id: "correctness-reviewer-1",
+            verification: "confirmed",
+            confidence: 0.9,
+        },
+    ],
 });
 
 describe("parseAgentFile", () => {
@@ -317,15 +324,23 @@ describe("verification mechanics", () => {
         ...overrides,
     });
 
-    it("parses the validator's id-keyed map, skipping malformed entries", () => {
+    it("parses the validator's claims-array contract, skipping malformed entries", () => {
+        // The contract (review.md and the eval producer alike) is
+        // {"claims": [{id, verification, ...}]}.
         const parsed = parseValidatorOutput(
             JSON.stringify({
-                c1: {verification: "confirmed", confidence: 0.95},
-                c2: {verification: "nonsense"},
-                c3: "not an object",
+                claims: [
+                    {id: "c1", verification: "confirmed", confidence: 0.95},
+                    {id: "c2", verification: "nonsense"},
+                    "not an object",
+                    {verification: "refuted"},
+                ],
             }),
         );
         expect(Object.keys(parsed)).toEqual(["c1"]);
+        expect(() => parseValidatorOutput(JSON.stringify({c1: {}}))).toThrow(
+            /no claims array/,
+        );
     });
 
     it("drops refuted, downgrades plausible to non-blocking, applies corrections", () => {
@@ -630,5 +645,124 @@ describe("runDispatch", () => {
         expect(
             JSON.parse(fs.files[`${REVIEW}/out/pre-existing.json`]),
         ).toHaveLength(1);
+    });
+});
+
+describe("re-review hardening (slice 2 feedback)", () => {
+    it("caps an author-disputed claim without any verification (validator failed or omitted)", () => {
+        const disputed: Claim = {
+            id: "c1",
+            source: "correctness-reviewer",
+            path: "a.ts",
+            line: 2,
+            label: "issue (blocking)",
+            subject: "s",
+            discussion: "d",
+            failure_scenario: "f",
+            confidence: 0.7,
+            author_dispute: "author says no",
+        };
+        expect(applyVerifications([disputed], {})[0].label).toBe(
+            "question (non-blocking)",
+        );
+    });
+
+    it("renames the second lens finding when ids collide across producers", () => {
+        const lensFinding = (id: string) =>
+            JSON.stringify({
+                findings: [
+                    {
+                        schema_version: 2,
+                        id,
+                        lens: "security-auth",
+                        anchor: {
+                            type: "line",
+                            path: "a.ts",
+                            line: 2,
+                            side: "RIGHT",
+                        },
+                        severity: "advisory",
+                        confidence: 0.8,
+                        evidence_trace: ["a.ts:2"],
+                        failure_scenario: "f",
+                        producing_hunt: "h",
+                        model_authored_prose: "p",
+                    },
+                ],
+            });
+        const used = new Set<string>();
+        parseFinderOutput(
+            "security-auth",
+            lensFinding("shared-id"),
+            used,
+            true,
+        );
+        const second = parseFinderOutput(
+            "caching-resource",
+            lensFinding("shared-id"),
+            used,
+            true,
+        );
+        expect(second.candidates[0].finding.id).toBe(
+            "caching-resource:shared-id",
+        );
+    });
+
+    it("warns on dispatch directive arity and duplicates (last one wins)", () => {
+        const arity = parseRoutingConfig("dispatch task scripted\n");
+        expect(arity.dispatchMode).toBe("task");
+        expect(arity.warnings.join(" ")).toContain("exactly one");
+        const dupe = parseRoutingConfig("dispatch task\ndispatch scripted\n");
+        expect(dupe.dispatchMode).toBe("scripted");
+        expect(dupe.warnings.join(" ")).toContain("duplicate dispatch");
+    });
+
+    it("emits dispatchMode through the router CLI's routing.json", () => {
+        const files: Record<string, string> = {
+            "/tmp/gh-aw/review/files.json": JSON.stringify([
+                {path: "a.ts", status: "modified"},
+            ]),
+            "/work/.github/aw/review/ROUTING": "dispatch scripted\n",
+        };
+        const fs = {
+            readFileSync: (p: string) => {
+                if (!(p in files)) {
+                    throw new Error(`ENOENT: ${p}`);
+                }
+                return files[p];
+            },
+            writeFileSync: (p: string, data: string) => {
+                files[p] = data;
+            },
+            existsSync: (p: string) => p in files,
+            mkdirSync: () => {},
+        };
+        const routing = runRouterCli(fs, "/work", {});
+        expect(routing.dispatchMode).toBe("scripted");
+        expect(
+            JSON.parse(files["/tmp/gh-aw/review/routing.json"]).dispatchMode,
+        ).toBe("scripted");
+    });
+
+    it("stages review-files.json for the finders when triage is unavailable", async () => {
+        const fs = makeFakeFs({
+            ...baseStaging(),
+            ...agentFiles(
+                "pattern-triage",
+                "correctness-reviewer",
+                "skill-auditor",
+            ),
+        });
+        const runner = stubRunner(
+            {
+                "correctness-reviewer": EMPTY_FINDINGS,
+                "skill-auditor": EMPTY_FINDINGS,
+            },
+            ["pattern-triage"],
+        );
+        await runDispatch({fs, runner, repoRoot: "/work"});
+        expect(JSON.parse(fs.files[`${REVIEW}/review-files.json`])).toEqual([
+            {path: "a.ts", status: "modified", hasPatch: true},
+        ]);
     });
 });

@@ -269,7 +269,7 @@ pre-agent-steps:
   # the released lockfile keeps the install reproducible and pinned.
   - name: Install scripted-dispatch dependencies (scripted mode only)
     run: |
-      if grep -qE '^dispatch[[:space:]]+scripted([[:space:]]|$)' "$GITHUB_WORKSPACE/.github/aw/review/ROUTING" 2>/dev/null; then
+      if grep -qE '^[[:space:]]*dispatch[[:space:]]+scripted([[:space:]]|$)' "$GITHUB_WORKSPACE/.github/aw/review/ROUTING" 2>/dev/null; then
         cd gh-aw-review-lib/workflows/review && npm ci --ignore-scripts --no-audit --no-fund
       else
         echo "dispatch mode is task (default): skipping the SDK install"
