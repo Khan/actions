@@ -400,8 +400,14 @@ export const evaluateDispatchConformance = (
     ) {
         const priorStamp = Array.isArray(input.priorReviews)
             ? findLatestStamp(
+                  // Defensive over agent-writable staged input, like every
+                  // sibling parse in this file: a null or non-object element
+                  // must not throw (a throw here escapes before the gate
+                  // decides and fail-opens ALL rules).
                   input.priorReviews.filter(
                       (review): review is {body: string} =>
+                          typeof review === "object" &&
+                          review !== null &&
                           typeof (review as {body?: unknown}).body === "string",
                   ),
               )

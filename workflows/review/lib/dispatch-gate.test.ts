@@ -982,3 +982,27 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
         ]);
     });
 });
+
+describe("staged-input robustness (slice 3 re-review)", () => {
+    it("tolerates null and non-object entries in prior-reviews.json", () => {
+        const stamp = renderRereviewStamp({
+            schemaVersion: STAMP_SCHEMA_VERSION,
+            depth: "full",
+            verdict: "REQUEST_CHANGES",
+            anchorDraft: false,
+            anchorHunks: {},
+        });
+        const result = evaluate({
+            items: [submitItem("APPROVE", "")],
+            plan: {depth: "fast"},
+            outFiles: {},
+            priorReviews: [null, 42, "junk", {nobody: true}, {body: stamp}],
+            rereviewAccounting: {keptBlockingCount: 1},
+        });
+        // The valid stamp is still found and the flip veto still fires; the
+        // garbage entries neither throw nor disable the gate.
+        expect(result.violations.map((v) => v.code)).toEqual([
+            "flip-vetoed-kept-blocking",
+        ]);
+    });
+});
