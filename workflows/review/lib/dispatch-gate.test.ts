@@ -854,3 +854,75 @@ describe("third-round nits: keep-list survivors, template coupling, summary", ()
         expect(renderGateSummary(report)).toContain("Conformant.");
     });
 });
+
+/* -------------------------------------------------------------------------- */
+/* Lenient out-file parsing (run 29893634730)                                 */
+/* -------------------------------------------------------------------------- */
+
+describe("prose-tolerant out-file parsing", () => {
+    // The production shape that falsely blocked a conforming scripted run:
+    // sub-agents prefix prose (and fence the payload) despite the "JSON
+    // only" contract, and the dispatcher stages their final text verbatim.
+    const prosePrefixedValidator = [
+        "All four claims are factually accurate and non-blocking:",
+        "- **test-adequacy-1**: Confirmed.",
+        "",
+        JSON.stringify({claims: [{id: "x", verification: "confirmed"}]}),
+    ].join("\n");
+
+    const fencedCorrectness = [
+        "Investigation complete. The commit-limit concern is refuted.",
+        "",
+        "```json",
+        JSON.stringify({files: [], findings: []}),
+        "```",
+    ].join("\n");
+
+    it("accepts a prose-prefixed validator output (rule 2)", () => {
+        const outFiles = conformingOutFiles();
+        outFiles["claim-validator.json"] = prosePrefixedValidator;
+        const result = evaluate({
+            items: [commentItem(), submitItem("APPROVE", "ok")],
+            outFiles,
+        });
+        expect(result.violations.map((v) => v.code)).toEqual([]);
+    });
+
+    it("accepts a fence-wrapped correctness output (rule 1)", () => {
+        const outFiles = conformingOutFiles();
+        outFiles["correctness-reviewer.json"] = fencedCorrectness;
+        const result = evaluate({
+            items: [submitItem("APPROVE", "ok")],
+            outFiles,
+        });
+        expect(result.violations.map((v) => v.code)).toEqual([]);
+    });
+
+    it("still flags a validator file with no JSON payload at all", () => {
+        const outFiles = conformingOutFiles();
+        outFiles["claim-validator.json"] = "I could not finish the audit.";
+        const result = evaluate({
+            items: [commentItem(), submitItem("APPROVE", "ok")],
+            outFiles,
+        });
+        expect(result.violations.map((v) => v.code)).toEqual([
+            "validator-missing-with-findings",
+        ]);
+    });
+
+    it("reads a prose-wrapped triage empty-reviewFiles waiver", () => {
+        const result = evaluate({
+            items: [submitItem("APPROVE", "ok")],
+            outFiles: {
+                "pattern-triage.json": [
+                    "Everything in this diff is generated.",
+                    "```json",
+                    JSON.stringify({patterns: [], reviewFiles: []}),
+                    "```",
+                ].join("\n"),
+            },
+        });
+        expect(result.conformant).toBe(true);
+        expect(result.notes.join(" ")).toContain("empty reviewFiles");
+    });
+});
