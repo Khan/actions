@@ -1999,6 +1999,19 @@ produce. The claim-validator attacks exactly this scenario, so make it specific
 enough to check; a finding whose scenario you cannot state concretely is not ready
 to report.
 
+One complete example finding, in exactly this shape. These key names are the
+contract: do not substitute the ReportFindings-style keys (`summary`, `severity`,
+`category`, `anchor`, `suggested_patch`), a drift that has cost committable fixes
+before (run 29943085279 carried its one-line fix under `suggested_patch`):
+{
+  "path": "services/example/retention.go", "line": 41,
+  "label": "issue (blocking)",
+  "failure_scenario": "A user with records older than the window saves; the cutoff computes 15 years back instead of 180 days, matches nothing, and no record is ever deleted.",
+  "subject": "AddDate(0, -TTLDays, 0) subtracts months, not days, so the retention pass never removes anything.",
+  "discussion": "Go's AddDate signature is (years, months, days), so the day count lands in the months slot. Introduced by this change.",
+  "suggestion": "cutoff := now.AddDate(0, 0, -TTLDays)"
+}
+
 ## agent: `skill-auditor`
 ---
 name: skill-auditor

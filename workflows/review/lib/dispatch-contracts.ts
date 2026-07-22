@@ -157,8 +157,17 @@ const fromLabelShape = (
             raw["failure_scenario"] ?? (subject !== "" ? subject : discussion),
         producing_hunt: `dispatch:${agentName}`,
         model_authored_prose: joinProse(subject, discussion),
+        // Suggestion salvage, like the anchor/subject salvage above: run
+        // 29943085279's correctness pass drifted into the ReportFindings
+        // shape with the AddDate one-line fix under `suggested_patch`, and
+        // reading only `suggestion` posted the comment with no committable
+        // fix. `suggestion` wins when both are present (it is the contract
+        // key).
         ...(typeof raw["suggestion"] === "string" && raw["suggestion"] !== ""
             ? {suggested_patch: raw["suggestion"]}
+            : typeof raw["suggested_patch"] === "string" &&
+              raw["suggested_patch"] !== ""
+            ? {suggested_patch: raw["suggested_patch"]}
             : {}),
     };
     const result = validateFinding(candidate);
