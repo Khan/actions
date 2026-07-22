@@ -536,16 +536,18 @@ export const evaluateDispatchConformance = (
             // "sanitizer-tolerant" requires (trial run 29893634730 blocked
             // a byte-faithful transcription on exactly this).
             .replace(/<!--[\s\S]*?-->/g, "")
-            // The sanitizer also folds typographic unicode to ASCII: trial
-            // run 29903306596 blocked a jq-verbatim emission because one
-            // reviewer-authored ellipsis came back as three dots. Fold the
-            // same family on both sides (ellipsis, curly quotes, dashes,
-            // no-break space).
-            .replace(/\u2026/g, "...")
+            // The sanitizer's hardenUnicodeText applies NFKC and strips
+            // zero-width characters (gh-aw sanitize_content_core.cjs), which
+            // rewrites compatibility characters: trial run 29903306596
+            // blocked a jq-verbatim emission because one reviewer-authored
+            // ellipsis came back as three dots (NFKC). Apply the same
+            // normalization on both sides, plus the typographic quote/dash
+            // folds NFKC does not cover.
+            .normalize("NFKC")
+            .replace(/[\u00ad\u034f\u200b-\u200f\u2060-\u2064\ufeff]/g, "")
             .replace(/[\u2018\u2019\u201a\u201b]/g, "'")
             .replace(/[\u201c\u201d\u201e\u201f]/g, '"')
             .replace(/[\u2012\u2013\u2014\u2015]/g, "-")
-            .replace(/\u00a0/g, " ")
             .toLowerCase()
             .replace(/`/g, "")
             .replace(/https?:\/\/\S+/g, "<url>")
