@@ -766,3 +766,171 @@ describe("re-review hardening (slice 2 feedback)", () => {
         ]);
     });
 });
+
+/* -------------------------------------------------------------------------- */
+/* Malformed-output leniency and retry (trial run 29893634730)                */
+/* -------------------------------------------------------------------------- */
+
+describe("prose-wrapped outputs and the malformed-output retry", () => {
+    const options = (fs: DispatchFs, runner: AgentRunner) => ({
+        fs,
+        runner,
+        repoRoot: "/work",
+    });
+
+    /** A runner whose canned outputs are consumed per call, in order. */
+    const sequencedRunner = (
+        sequences: Record<string, string[]>,
+    ): AgentRunner & {calls: string[]} => {
+        const remaining = Object.fromEntries(
+            Object.entries(sequences).map(([k, v]) => [k, [...v]]),
+        );
+        const calls: string[] = [];
+        const runner = (async (request) => {
+            calls.push(request.name);
+            const output = remaining[request.name]?.shift();
+            if (output === undefined) {
+                throw new Error(`no canned output for ${request.name}`);
+            }
+            return {output, usd: 0.5, turns: 3, wallMs: 100};
+        }) as AgentRunner & {calls: string[]};
+        runner.calls = calls;
+        return runner;
+    };
+
+    const staging = () => ({
+        ...baseStaging(),
+        ...agentFiles(
+            "pattern-triage",
+            "correctness-reviewer",
+            "skill-auditor",
+            "claim-validator",
+        ),
+    });
+
+    it("parses the run-29893634730 correctness shape without a retry: prose, a json fence, and no findings key", async () => {
+        const proseFenced = [
+            "Investigation complete. The commit-limit concern is refuted.",
+            "```json",
+            JSON.stringify({files: [{path: "a.ts", risk: "High"}]}),
+            "```",
+        ].join("\n");
+        const runner = stubRunner({
+            "pattern-triage": JSON.stringify({
+                patterns: [],
+                reviewFiles: ["a.ts"],
+            }),
+            "correctness-reviewer": proseFenced,
+            "skill-auditor": EMPTY_FINDINGS,
+        });
+        const result = await runDispatch(
+            options(makeFakeFs(staging()), runner),
+        );
+        // One call each: the lenient parse needed no retry, the dimension
+        // was not shed, and the risk block came through.
+        expect(
+            runner.calls.filter((c) => c === "correctness-reviewer"),
+        ).toHaveLength(1);
+        expect(result.skippedDimensions).toEqual([]);
+        expect(result.riskFiles).toEqual([{path: "a.ts", risk: "High"}]);
+        expect(result.noteLines).toEqual([]);
+    });
+
+    it("retries a malformed finder once with a corrective note and acts on the second reply", async () => {
+        const runner = sequencedRunner({
+            "pattern-triage": [
+                JSON.stringify({patterns: [], reviewFiles: ["a.ts"]}),
+            ],
+            "correctness-reviewer": [
+                "I reviewed the change and found one blocking problem.",
+                CORRECTNESS_OUT,
+            ],
+            "skill-auditor": [EMPTY_FINDINGS],
+            "claim-validator": [VALIDATOR_CONFIRM],
+        });
+        const fs = makeFakeFs(staging());
+        const result = await runDispatch(options(fs, runner));
+
+        expect(
+            runner.calls.filter((c) => c === "correctness-reviewer"),
+        ).toHaveLength(2);
+        // The claim survived: the second output was parsed and validated.
+        expect(result.claims).toHaveLength(1);
+        expect(result.skippedDimensions).toEqual([]);
+        // The retry entry is marked, its cost is real, and the roster
+        // arithmetic does not double-count the agent.
+        const entries = result.perAgent.filter(
+            (agent) => agent.name === "correctness-reviewer",
+        );
+        expect(entries).toHaveLength(2);
+        expect(entries[1].retried).toBe(true);
+        expect(
+            result.dispatched.filter((n) => n === "correctness-reviewer"),
+        ).toHaveLength(1);
+        // The staged out-file is the output the run acted on.
+        expect(fs.files[`${REVIEW}/out/correctness-reviewer.json`]).toBe(
+            CORRECTNESS_OUT,
+        );
+    });
+
+    it("sheds the dimension with its note when the retry is malformed too", async () => {
+        const runner = sequencedRunner({
+            "pattern-triage": [
+                JSON.stringify({patterns: [], reviewFiles: ["a.ts"]}),
+            ],
+            "correctness-reviewer": ["prose only", "still prose only"],
+            "skill-auditor": [EMPTY_FINDINGS],
+        });
+        const result = await runDispatch(
+            options(makeFakeFs(staging()), runner),
+        );
+        expect(result.skippedDimensions).toEqual([
+            {dimension: "correctness-reviewer", cause: "unavailable"},
+        ]);
+        expect(result.noteLines.join(" ")).toContain(
+            "correctness-reviewer not assessed this run",
+        );
+    });
+
+    it("retries a prose-only validator and applies the second reply", async () => {
+        const runner = sequencedRunner({
+            "pattern-triage": [
+                JSON.stringify({patterns: [], reviewFiles: ["a.ts"]}),
+            ],
+            "correctness-reviewer": [CORRECTNESS_OUT],
+            "skill-auditor": [EMPTY_FINDINGS],
+            "claim-validator": [
+                "All claims check out, nothing to change.",
+                VALIDATOR_CONFIRM,
+            ],
+        });
+        const result = await runDispatch(
+            options(makeFakeFs(staging()), runner),
+        );
+        expect(
+            runner.calls.filter((c) => c === "claim-validator"),
+        ).toHaveLength(2);
+        // Validated, not degraded: no unavailable note for claim validation.
+        expect(result.skippedDimensions).toEqual([]);
+        expect(result.claims[0].label).toBe("issue (blocking)");
+    });
+
+    it("accepts a prose-prefixed validator payload without a retry (the production claim-validator shape)", async () => {
+        const runner = stubRunner({
+            "pattern-triage": JSON.stringify({
+                patterns: [],
+                reviewFiles: ["a.ts"],
+            }),
+            "correctness-reviewer": CORRECTNESS_OUT,
+            "skill-auditor": EMPTY_FINDINGS,
+            "claim-validator": `All four claims are accurate.\n\n${VALIDATOR_CONFIRM}`,
+        });
+        const result = await runDispatch(
+            options(makeFakeFs(staging()), runner),
+        );
+        expect(
+            runner.calls.filter((c) => c === "claim-validator"),
+        ).toHaveLength(1);
+        expect(result.skippedDimensions).toEqual([]);
+    });
+});
