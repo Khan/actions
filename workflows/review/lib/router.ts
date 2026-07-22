@@ -35,6 +35,7 @@ import {clampBudgetToCreditCap, resolveCreditCap} from "./credit-cap";
 import {KNOWN_LENSES} from "./finding-schema";
 import type {Lens} from "./finding-schema";
 import {
+    DEFAULT_DISPATCH_MODE,
     DEFAULT_RE_REVIEW_MODE,
     ENABLEABLE_REVIEWERS,
     parseRoutingConfig,
@@ -43,6 +44,7 @@ import {
     ROUTING_CONFIG_PATH,
 } from "./routing-config";
 import type {
+    DispatchMode,
     EnableableReviewer,
     LensRule,
     ReReviewMode,
@@ -785,6 +787,12 @@ export type RoutingJson = {
      */
     reReviewMode: ReReviewMode;
     /**
+     * The repo's dispatch mode (`dispatch` line in `ROUTING`; `task` when
+     * absent). `scripted` opts the repo into the deterministic dispatcher
+     * (`dispatch.ts`, orchestrator slice 2).
+     */
+    dispatchMode: DispatchMode;
+    /**
      * Whether the consumer `ROUTING` file was found, plus any parse warnings
      * (or the missing-file warning). The orchestrator surfaces these in the
      * review body's note lines so a silently-unconfigured repo is visible.
@@ -806,6 +814,7 @@ export const toRoutingJson = (
     routingConfig: RoutingJson["routingConfig"] = {present: true, warnings: []},
     enabledReviewers: EnableableReviewer[] = [],
     reReviewMode: ReReviewMode = DEFAULT_RE_REVIEW_MODE,
+    dispatchMode: DispatchMode = DEFAULT_DISPATCH_MODE,
 ): RoutingJson => {
     const owners: Record<string, string[]> = {};
     const generatedFiles: string[] = [];
@@ -831,6 +840,7 @@ export const toRoutingJson = (
         pendingRiskQuestions: result.pendingRiskQuestions,
         enabledReviewers,
         reReviewMode,
+        dispatchMode,
         routingConfig,
     };
 };
@@ -916,6 +926,7 @@ export const runCli = (
               riskRules: [],
               enabledReviewers: [],
               reReviewMode: DEFAULT_RE_REVIEW_MODE,
+              dispatchMode: DEFAULT_DISPATCH_MODE,
               warnings: [
                   `routing config missing (${ROUTING_CONFIG_PATH}): no ` +
                       `specialist lenses will run; always-on reviewers only ` +
@@ -950,6 +961,7 @@ export const runCli = (
         },
         routingFileConfig.enabledReviewers,
         routingFileConfig.reReviewMode,
+        routingFileConfig.dispatchMode,
     );
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});

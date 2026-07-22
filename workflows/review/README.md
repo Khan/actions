@@ -180,6 +180,7 @@ rule per line:
 # <pattern> [lens=<lens>,…] [tier=trivial|low|medium|high] [direction-dependent]
 # enable <reviewer>[,<reviewer>…]
 # re-review full|scoped|flip-gated|fast
+# dispatch task|scripted
 services/**/migrations/**  tier=high lens=data-migrations
 **/*.graphql               lens=api-federation-compat
 pkg/auth/**                tier=high direction-dependent lens=security-auth
@@ -207,6 +208,16 @@ re-review scoped
 - `re-review` sets the repo's re-review mode (see the next section). Default
   `full`; when several lines set it, the last one wins with a warning. An
   unknown mode degrades to `full`: toward more review, never less.
+- `dispatch` sets how Step 3 runs (default `task`): `task` is the
+  orchestrator's own Task-tool dispatch; `scripted` opts the repo into the
+  deterministic dispatcher (`lib/dispatch.ts`): the orchestrator invokes one
+  CLI that runs triage, the reviewer fan-out (roster, budget cap, and planned
+  sheds computed from `routing.json`), the provenance gate, the scope filter,
+  and claim validation as code, inside the same firewall sandbox (the
+  api-proxy meters and caps script-spawned sub-agents exactly like
+  Task-spawned ones). Scripted mode is the production probe of the
+  deterministic-orchestrator migration and is live-trial-gated; an unknown
+  mode degrades to `task` with a warning.
 
 Glob semantics are a practical subset of gitignore/CODEOWNERS: `**` crosses
 directories, `*` and `?` stay within a segment, a trailing `/` matches everything
