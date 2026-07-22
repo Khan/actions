@@ -614,12 +614,28 @@ if (typeof require !== "undefined" && require.main === module) {
                 const error = new Error(
                     `GET ${path} -> ${response.status} ${response.statusText}`,
                 );
-                if (response.status < 500 && response.status !== 429) {
-                    // A 4xx (bad token, missing PR) will not heal on retry;
-                    // fail the staging immediately.
+                // GitHub's secondary rate limit surfaces as a 403 with a
+                // Retry-After header, not 429; that one 4xx heals on retry.
+                const retryAfterSeconds = Number(
+                    response.headers.get("retry-after") ?? "",
+                );
+                const rateLimited =
+                    response.status === 429 ||
+                    (response.status === 403 && retryAfterSeconds > 0);
+                if (response.status < 500 && !rateLimited) {
+                    // Any other 4xx (bad token, missing PR) will not heal on
+                    // retry; fail the staging immediately.
                     throw error;
                 }
                 lastError = error;
+                if (rateLimited && retryAfterSeconds > 0) {
+                    await new Promise((resolve) =>
+                        setTimeout(
+                            resolve,
+                            Math.min(retryAfterSeconds, 60) * 1000,
+                        ),
+                    );
+                }
             }
             if (attempt < ATTEMPTS - 1) {
                 await new Promise((resolve) =>
