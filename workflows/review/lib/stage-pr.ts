@@ -101,6 +101,7 @@ const SCOPED_DIFF_PATH = `${REVIEW_DIR}/scoped.diff`;
 const PR_DIFF_OUT = `${REVIEW_DIR}/pr.diff`;
 const PR_ANNOTATED_OUT = `${REVIEW_DIR}/pr-annotated.diff`;
 const REVIEW_FILES_OUT = `${REVIEW_DIR}/review-files.json`;
+const DISCIPLINES_OUT = `${REVIEW_DIR}/disciplines.md`;
 
 export type StagePrFs = {
     readFileSync: (p: string, enc: "utf8") => string;
@@ -502,7 +503,7 @@ export const runStagePrCli = async (
             section !== null &&
             section.includes("## Structured finding schema and hunts")
         ) {
-            write(`${REVIEW_DIR}/disciplines.md`, section);
+            write(DISCIPLINES_OUT, section);
         } else {
             warnings.push(
                 section === null
@@ -614,12 +615,28 @@ if (typeof require !== "undefined" && require.main === module) {
                 const error = new Error(
                     `GET ${path} -> ${response.status} ${response.statusText}`,
                 );
-                if (response.status < 500 && response.status !== 429) {
-                    // A 4xx (bad token, missing PR) will not heal on retry;
-                    // fail the staging immediately.
+                // GitHub's secondary rate limit surfaces as a 403 with a
+                // Retry-After header, not 429; that one 4xx heals on retry.
+                const retryAfterSeconds = Number(
+                    response.headers.get("retry-after") ?? "",
+                );
+                const rateLimited =
+                    response.status === 429 ||
+                    (response.status === 403 && retryAfterSeconds > 0);
+                if (response.status < 500 && !rateLimited) {
+                    // Any other 4xx (bad token, missing PR) will not heal on
+                    // retry; fail the staging immediately.
                     throw error;
                 }
                 lastError = error;
+                if (rateLimited && retryAfterSeconds > 0) {
+                    await new Promise((resolve) =>
+                        setTimeout(
+                            resolve,
+                            Math.min(retryAfterSeconds, 60) * 1000,
+                        ),
+                    );
+                }
             }
             if (attempt < ATTEMPTS - 1) {
                 await new Promise((resolve) =>

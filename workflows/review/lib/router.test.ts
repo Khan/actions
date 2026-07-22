@@ -900,3 +900,24 @@ describe("runCli: re-review mode", () => {
         expect(runCli(fs).reReviewMode).toBe("full");
     });
 });
+
+describe("runCli: dispatch mode", () => {
+    it("surfaces a configured dispatch scripted line in routing.json", () => {
+        const {fs} = fakeFs({
+            ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
+                {path: "a.ts", status: "modified"},
+            ]),
+            [ROUTING_CONFIG_PATH]: "dispatch scripted",
+        });
+        expect(runCli(fs).dispatchMode).toBe("scripted");
+    });
+
+    it("defaults to task without a dispatch line", () => {
+        const {fs} = fakeFs({
+            ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
+                {path: "a.ts", status: "modified"},
+            ]),
+        });
+        expect(runCli(fs).dispatchMode).toBe("task");
+    });
+});

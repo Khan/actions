@@ -685,3 +685,45 @@ describe("prose-tolerant out-file parsing", () => {
         expect(result.notes.join(" ")).toContain("empty reviewFiles");
     });
 });
+
+describe("runDispatchGateCli: rule 5 disk wiring", () => {
+    const REVIEW_STAGE = "/tmp/gh-aw/review";
+
+    it("reads prior-reviews, rereview accounting, and the cache-memory stamp from disk for the flip veto", () => {
+        const fs = makeFakeFs({
+            [AGENT_OUTPUT]: JSON.stringify({
+                items: [
+                    {
+                        type: "submit_pull_request_review",
+                        event: "APPROVE",
+                        body: "ok",
+                    },
+                ],
+            }),
+            [`${REVIEW_STAGE}/rereview-plan.json`]: JSON.stringify({
+                depth: "fast",
+            }),
+            // The production shape: prior bodies exist, stamps sanitized
+            // away; the anchor comes from the cache-memory record.
+            [`${REVIEW_STAGE}/prior-reviews.json`]: JSON.stringify([
+                {body: "Changes requested — see inline comments."},
+            ]),
+            [`${REVIEW_STAGE}/rereview.json`]: JSON.stringify({
+                keptBlockingCount: 2,
+            }),
+            [`${REVIEW_STAGE}/pr-context.json`]: JSON.stringify({
+                number: 41007,
+            }),
+            ["/tmp/gh-aw/cache-memory/pr-41007.json"]: JSON.stringify({
+                verdict: "REQUEST_CHANGES",
+                stampHunks: {"a.ts": ["deadbeef00000000"]},
+                wasDraft: false,
+            }),
+        });
+        const report = runDispatchGateCli(fs);
+        expect(report.blocked).toBe(true);
+        expect(report.violations.map((v) => v.code)).toEqual([
+            "flip-vetoed-kept-blocking",
+        ]);
+    });
+});
