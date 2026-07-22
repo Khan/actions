@@ -41,6 +41,33 @@ describe("label-contract enforcement (run 29897276810)", () => {
         );
     });
 
+    it("salvages a label-valid finding with only {id, anchor, discussion} (run 29906543140)", () => {
+        // Round-2 correctness drift: valid label, anchor object, rich
+        // discussion, but no subject/summary and no failure_scenario.
+        const {candidates} = parseFinderOutput(
+            "correctness-reviewer",
+            JSON.stringify({
+                findings: [
+                    {
+                        id: "ttl-months-vs-days",
+                        label: "issue (blocking)",
+                        anchor: {path: "a.go", line: 38},
+                        discussion:
+                            "AddDate(0, -MemoryTTLDays, 0) passes 180 into the months parameter, so the cutoff is 15 years in the past.",
+                    },
+                ],
+            }),
+            new Set(),
+        );
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0].finding.severity).toBe("blocking");
+        expect(candidates[0].finding.anchor).toMatchObject({
+            path: "a.go",
+            line: 38,
+        });
+        expect(candidates[0].finding.failure_scenario).toContain("AddDate");
+    });
+
     it("rejects a finding whose label is missing or unknown (the run's ReportFindings shape)", () => {
         const reportFindingsShape = JSON.stringify({
             findings: [
