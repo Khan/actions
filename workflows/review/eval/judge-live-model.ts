@@ -14,6 +14,7 @@ import {
     type JudgeRequest,
     type JudgeScore,
 } from "./judge";
+import {extractJsonObject} from "./extract-json";
 
 const API_URL = "https://api.anthropic.com/v1/messages";
 const CONCURRENCY = 4;
@@ -94,13 +95,14 @@ const scoreOne = async (request: JudgeRequest): Promise<JudgeScore> => {
     };
     const text =
         data.content.find((block) => block.type === "text")?.text ?? "";
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) {
+    let parsed: Omit<JudgeScore, "findingId">;
+    try {
+        parsed = extractJsonObject(text) as Omit<JudgeScore, "findingId">;
+    } catch {
         throw new Error(
-            `judge returned no JSON for finding ${request.findingId}: ${text}`,
+            `judge returned no parseable JSON for finding ${request.findingId}: ${text}`,
         );
     }
-    const parsed = JSON.parse(match[0]) as Omit<JudgeScore, "findingId">;
     return {findingId: request.findingId, ...parsed};
 };
 

@@ -259,6 +259,29 @@ describe("produceLive", () => {
         expect(retryPrompt).toMatch(/previous output was rejected/);
     });
 
+    it("parses a payload preceded by quoted template-literal braces, no retry", async () => {
+        const {runner} = scriptedRunner({
+            "correctness-reviewer": [
+                "The key `user-profile:${tenantId}:${userId}` drops the" +
+                    ` tenant. ${JSON.stringify({findings: [LABEL_FINDING]})}`,
+            ],
+            "skill-auditor": [JSON.stringify({findings: []})],
+            "money-payments": [JSON.stringify({findings: []})],
+            "claim-validator": [validatorOutput([])],
+        });
+        const result = await produceLive(CASE, AGENTS, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        const report = result.perAgent.find(
+            (a) => a.name === "correctness-reviewer",
+        );
+        expect(report?.retried).toBe(false);
+        expect(report?.failed).toBeUndefined();
+        expect(result.findings.length).toBe(1);
+    });
+
     it("marks a twice-failed agent failed and keeps everyone else", async () => {
         const {runner} = scriptedRunner({
             "correctness-reviewer": ["not json", "still not json"],

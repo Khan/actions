@@ -20,6 +20,7 @@
 import type {LiveDefectSpec} from "./corpus/loader";
 import type {MatchFallback} from "./live-match";
 import type {RunCandidate} from "./runner";
+import {extractJsonObject} from "./extract-json";
 
 /**
  * Pinned snapshot, deliberately at the Haiku tier: the question is a narrow
@@ -70,13 +71,8 @@ export const buildArbiterPrompt = (
 
 /** Parse the arbiter's reply; anything but an explicit true is a no. */
 export const parseArbiterAnswer = (text: string): boolean => {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) {
-        return false;
-    }
     try {
-        const parsed = JSON.parse(match[0]) as {match?: unknown};
-        return parsed.match === true;
+        return extractJsonObject(text)["match"] === true;
     } catch {
         return false;
     }
