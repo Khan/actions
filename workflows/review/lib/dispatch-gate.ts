@@ -50,6 +50,10 @@
  *      (`out/thread-reconciler.json` `resolve`); the deficit direction is
  *      reported as executed-vs-decided accounting, never blocked (slice 3;
  *      the #244 ledger).
+ *   7. When a submission plan is staged (`submission-plan.json`, scripted
+ *      mode, slice 4), the queued event, body, and inline comments must
+ *      match it under a sanitizer-tolerant normalization; any splice or
+ *      omission blocks (the #244 accountability-splice check, as code).
  *
  * Violation behavior: strip every posting/mutating item from the queue
  * (keeping the diagnostics and the `out/` artifact upload so the evidence
@@ -103,7 +107,8 @@ export type DispatchGateViolationCode =
     | "shed-undisclosed"
     | "approve-with-blocking-comment"
     | "flip-vetoed-kept-blocking"
-    | "resolve-not-decided";
+    | "resolve-not-decided"
+    | "submission-plan-mismatch";
 
 export type DispatchGateViolation = {
     /** Fixed-format code (never prose). */
@@ -147,6 +152,8 @@ export type DispatchGateInput = {
     cacheMemory?: unknown;
     /** Parsed `rereview.json` (the accountability result; `keptBlockingCount`). */
     rereviewAccounting?: unknown;
+    /** Parsed `submission-plan.json` (scripted mode; slice 4). */
+    submissionPlan?: unknown;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -508,6 +515,153 @@ export const evaluateDispatchConformance = (
         }
     }
 
+    // Rule 7 (scripted mode, slice 4): when a submission plan is staged, the
+    // queued outputs must match it. gh-aw's ingest sanitizer may neutralize
+    // mentions and rewrite disallowed links, so bodies are compared under a
+    // normalization that survives it (case, whitespace, backticks, and URL
+    // bodies, which the sanitizer may rewrite); anything beyond that is a
+    // splice (#244) and blocks. The rule also owns the NO-submission shapes:
+    // queued comments with no submit would land as a COMMENT review, and a
+    // silently-dropped plan would withhold a REQUEST_CHANGES verdict, so only
+    // an APPROVE plan with no comments may legitimately queue nothing (the
+    // Step 6 redundant-approval skip).
+    const planStaged = input.submissionPlan as
+        | {event?: unknown; body?: unknown; comments?: unknown}
+        | undefined;
+    const normalizeBody = (text: string): string =>
+        text
+            // The ingest sanitizer deletes ALL XML/HTML comments
+            // (removeXmlComments), so the queued body can never carry the
+            // plan's fingerprint stamp; comparing modulo comments is what
+            // "sanitizer-tolerant" requires (trial run 29893634730 blocked
+            // a byte-faithful transcription on exactly this).
+            .replace(/<!--[\s\S]*?-->/g, "")
+            // The sanitizer's hardenUnicodeText applies NFKC and strips
+            // zero-width characters (gh-aw sanitize_content_core.cjs), which
+            // rewrites compatibility characters: trial run 29903306596
+            // blocked a jq-verbatim emission because one reviewer-authored
+            // ellipsis came back as three dots (NFKC). Apply the same
+            // normalization on both sides, plus the typographic quote/dash
+            // folds NFKC does not cover.
+            .normalize("NFKC")
+            .replace(/\u034f/g, "")
+            // Zero-width, bidi-control (sanitizer step 4), C0/DEL (its
+            // control-strip): all deleted on the queued side only, so
+            // delete them on both.
+            .replace(/[\u00ad\u200b-\u200f\u2060-\u2064\ufeff]/g, "")
+            .replace(/[\u202a-\u202e\u2066-\u2069]/g, "")
+            // eslint-disable-next-line no-control-regex
+            .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+            .replace(/[\u2018\u2019\u201a\u201b]/g, "'")
+            .replace(/[\u201c\u201d\u201e\u201f]/g, '"')
+            .replace(/[\u2012\u2013\u2014\u2015]/g, "-")
+            .toLowerCase()
+            .replace(/`/g, "")
+            // neutralizeTemplateDelimiters escapes {{ ${ {% {# <%= outside
+            // code regions; drop the escaping backslashes on both sides.
+            .replace(/\\(?=[{$%#<])/g, "")
+            // URL sanitization applies even inside code regions under the
+            // deployed allowed-only policy: a non-allowlisted domain or a
+            // non-https scheme is rewritten to "(host/redacted)" or
+            // "(redacted)" (sanitizeUrlDomains / sanitizeUrlProtocols,
+            // gh-aw v0.81.6). Fold every URL form and every redaction
+            // token to one placeholder so a cited MDN link cannot false-
+            // block the submission.
+            .replace(/[a-z][a-z0-9+.-]*:\/\/\S+/g, "<url>")
+            .replace(
+                /(?:mailto|javascript|vbscript|data|about|tel|magnet):\S+/g,
+                "<url>",
+            )
+            .replace(/\((?:[a-z0-9.-]+\/)?redacted\)/g, "<url>")
+            .replace(/\s+/g, " ")
+            .trim();
+    if (planStaged !== undefined && submit === undefined) {
+        const planComments = Array.isArray(planStaged.comments)
+            ? planStaged.comments
+            : [];
+        if (commentCount > 0) {
+            violations.push({
+                code: "submission-plan-mismatch",
+                dimension: "verdict",
+                detail: `${commentCount} inline comment(s) queued with no review submission (they would land as an ungated COMMENT review); the staged plan requires a ${String(
+                    planStaged.event,
+                )} submission`,
+            });
+        } else if (planStaged.event !== "APPROVE" || planComments.length > 0) {
+            violations.push({
+                code: "submission-plan-mismatch",
+                dimension: "verdict",
+                detail: `nothing queued but the staged plan is ${String(
+                    planStaged.event,
+                )} with ${
+                    planComments.length
+                } comment(s); only an APPROVE plan with no comments may skip the submission`,
+            });
+        }
+    }
+    if (planStaged !== undefined && submit !== undefined) {
+        if (
+            typeof planStaged.event === "string" &&
+            verdictEvent !== planStaged.event
+        ) {
+            violations.push({
+                code: "submission-plan-mismatch",
+                dimension: "verdict",
+                detail: `queued event ${
+                    verdictEvent || "(none)"
+                } does not match the staged submission plan's ${
+                    planStaged.event
+                }`,
+            });
+        }
+        if (
+            typeof planStaged.body === "string" &&
+            normalizeBody(body) !== normalizeBody(planStaged.body)
+        ) {
+            violations.push({
+                code: "submission-plan-mismatch",
+                dimension: "review body",
+                detail: "queued review body does not match the staged submission plan (normalized comparison)",
+            });
+        }
+        if (Array.isArray(planStaged.comments)) {
+            const planned = planStaged.comments
+                .filter(
+                    (
+                        comment,
+                    ): comment is {path: string; line: number; body: string} =>
+                        typeof (comment as {path?: unknown}).path ===
+                            "string" &&
+                        typeof (comment as {body?: unknown}).body === "string",
+                )
+                .map(
+                    (comment) =>
+                        `${comment.path}:${comment.line}:${normalizeBody(
+                            comment.body,
+                        )}`,
+                )
+                .sort();
+            const queued = input.items
+                .filter((item) => item.type === COMMENT_TYPE)
+                .map(
+                    (item) =>
+                        `${
+                            typeof item["path"] === "string" ? item["path"] : ""
+                        }:${String(item["line"] ?? "")}:${normalizeBody(
+                            typeof item.body === "string" ? item.body : "",
+                        )}`,
+                )
+                .sort();
+            if (JSON.stringify(planned) !== JSON.stringify(queued)) {
+                violations.push({
+                    code: "submission-plan-mismatch",
+                    dimension: "inline comments",
+                    detail: `queued inline comments (${queued.length}) do not match the staged submission plan (${planned.length})`,
+                });
+            }
+        }
+    }
+
     return {
         conformant: violations.length === 0,
         violations,
@@ -642,6 +796,10 @@ export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
         fs,
         `${REVIEW_DIR}/rereview.json`,
     );
+    const submissionPlan = readJsonIfPresent(
+        fs,
+        `${REVIEW_DIR}/submission-plan.json`,
+    );
     const prContext = readJsonIfPresent(fs, `${REVIEW_DIR}/pr-context.json`) as
         | {number?: unknown}
         | undefined;
@@ -660,6 +818,7 @@ export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
         outFiles,
         priorReviews,
         rereviewAccounting,
+        submissionPlan,
         cacheMemory,
     });
     evaluation.notes.unshift(...notes);

@@ -679,17 +679,36 @@ cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
    sheds computed from `routing.json`, every dispatch staged to
    `out/<agent>.json`), the provenance gate, the scope filter, and claim
    validation, and writes `/tmp/gh-aw/review/dispatch-result.json`.
-4. Read `dispatch-result.json` and act on it: `claims` is the validated
-   candidate set Steps 4-6 act on (already gated, scoped, and validated;
-   never re-derive or second-guess it); `reconciliation.resolve` is the list
-   to resolve with `resolve-pull-request-review-thread` safe outputs (batch
-   them in one turn) and `reconciliation.skipLines` the lines Step 5 must not
-   comment on; `noteLines` are Step 6 note lines to append verbatim;
-   `riskFiles`, `patterns`, and `excludedFiles` feed Steps 7 and 8. Then go
-   straight to Step 4. Do not dispatch any sub-agent yourself in this mode,
-   and do not re-run the dispatcher; if its call failed, treat the run as
-   over budget and land the review from whatever `out/` evidence exists (the
-   dispatch-conformance gate decides whether a verdict may post).
+4. Compose the submission deterministically, once:
+```
+cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
+```
+   It reads `dispatch-result.json`, renders the accountability section
+   (`rereview.json`), computes the verdict (Step 4's mechanical rule plus the
+   reduced-depth flip floor), renders every inline comment and the full
+   review body (note lines and fingerprint stamp included), and writes
+   `/tmp/gh-aw/review/submission-plan.json`.
+5. Emit the safe outputs **exactly** as the plan says, nothing more and
+   nothing less: one `create-pull-request-review-comment` per `comments`
+   entry (its `path`, `line`, and `body` verbatim), one
+   `resolve-pull-request-review-thread` per `resolve` id (batched in one
+   turn), and one `submit-pull-request-review` with the plan's `event` and
+   `body` verbatim. The redundant-approval skip still applies, restated here
+   since you skip Step 6's text in this mode: only when the plan's `event` is
+   APPROVE with zero `comments`, the plan's `body` carries no `Note:` lines
+   and no accountability section, and the PR's most recent
+   `github-actions[bot]` review is already APPROVED, emit no submission at
+   all (the gate permits queueing nothing exactly for that shape). The dispatch-conformance gate
+   compares what you queued against the staged plan and blocks the
+   submission on any deviation, so a mis-typed or "improved" body is a red
+   run, never a posted one. `dispatch-result.json`'s `riskFiles`,
+   `patterns`, and `excludedFiles` feed Steps 7 and 8 as usual;
+   `reconciliation.skipLines` is already reflected in the plan. Then skip
+   Steps 4-6 below entirely (the plan IS Steps 4-6) and continue at Step 7.
+   Do not dispatch any sub-agent yourself in this mode, and do not re-run
+   the dispatcher; if its call failed, treat the run as over budget and land
+   the review from whatever `out/` evidence exists (the gate decides whether
+   a verdict may post).
 
 Everything from "Phase 1" below to the end of Phase 3 applies only to the
 default `task` dispatch mode.

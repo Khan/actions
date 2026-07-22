@@ -217,7 +217,14 @@ re-review scoped
   sheds computed from `routing.json`), the provenance gate, the scope filter,
   and claim validation as code, inside the same firewall sandbox (the
   api-proxy meters and caps script-spawned sub-agents exactly like
-  Task-spawned ones). Scripted mode is the production probe of the
+  Task-spawned ones). In scripted mode Steps 4-6 are code too: the submission
+  CLI (`lib/submission.ts`) computes the verdict, renders the comments and
+  the full review body, and stages `submission-plan.json`; the orchestrator
+  emits safe outputs that must match the plan (the gate blocks any
+  deviation), which reduces its model role to typing MCP calls the plan
+  dictates. The safe-output emission itself is the one seam only an upstream
+  gh-aw change could remove (the queue's credentials never enter the
+  sandbox). Scripted mode is the production probe of the
   deterministic-orchestrator migration and is live-trial-gated; an unknown
   mode degrades to `task` with a warning.
 
