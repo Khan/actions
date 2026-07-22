@@ -374,7 +374,7 @@ downstream CLI and sub-agent reads):
 
 Then:
 
-1. Read `pr-context.json`2. Read `pr-context.json` and `files.json` for the PR details and the changed
+1. Read `pr-context.json` and `files.json` for the PR details and the changed
    files.
 2. If cache memory exists from a prior review of this PR, recall what you
    previously flagged. Focus on changes since then and any unresolved issues.
@@ -666,9 +666,15 @@ definitions and the shared lib.)
 
 The comments are rendered by the plan CLI (Step 3): one Conventional Comment
 per validated claim, rule quotes and suggestion fences included, human-thread
-skip lines and open-thread suppression already applied. Emit the plan's
-`comments` verbatim — one `create-pull-request-review-comment` per entry, all
-in one batched turn; never add, drop, reword, or re-anchor one.
+skip lines and open-thread suppression already applied. The posting bar is
+code too: the plan ranks claims (blocking first, then confidence descending),
+posts at most 20 inline (matching this workflow's
+`create-pull-request-review-comment` `max:`), and folds the remainder plus
+any sub-medium-confidence claims into a single collapsed section riding the
+top-ranked comment (or the review body), so the plan never exceeds what the
+engine will emit. Emit the plan's `comments` verbatim — one
+`create-pull-request-review-comment` per entry, all in one batched turn;
+never add, drop, reword, or re-anchor one.
 
 ## Step 6: Submit the Review
 
@@ -891,7 +897,8 @@ workflow's frontmatter; skip any relevant team that is not on that list.
 ## Step 9: Update Cache Memory
 
 **Never hand-write the cache record.** Run the deterministic writer once,
-AFTER you have emitted every safe output:```
+AFTER you have emitted every safe output:
+```
 cd gh-aw-review-lib && npx -y tsx workflows/review/lib/cache-record.ts
 ```
 It writes `/tmp/gh-aw/cache-memory/pr-<number>.json` — the next run's scoping
