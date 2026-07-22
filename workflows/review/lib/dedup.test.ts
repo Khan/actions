@@ -1,6 +1,10 @@
 import {describe, it, expect} from "vitest";
 
-import {dedupeClaims, suppressOpenThreadDuplicates} from "./dedup";
+import {
+    dedupeClaims,
+    openThreadsFromStaged,
+    suppressOpenThreadDuplicates,
+} from "./dedup";
 import type {Claim} from "./dispatch-contracts";
 
 /**
@@ -467,5 +471,52 @@ describe("suppressOpenThreadDuplicates (trial suggestion g)", () => {
             ).suppressed,
         ).toEqual([]);
         expect(suppressOpenThreadDuplicates([reflag], []).kept).toHaveLength(1);
+    });
+});
+
+describe("openThreadsFromStaged", () => {
+    const staged = (over: Record<string, unknown> = {}) => ({
+        thread_id: "T1",
+        path: "a.ts",
+        comments: [
+            {
+                author: "github-actions[bot]",
+                body: "**issue (blocking):** opener",
+            },
+        ],
+        ...over,
+    });
+
+    it("keeps only bot-opened, unresolved threads (staging is prompt-executed and unenforced upstream)", () => {
+        const threads = [
+            staged(),
+            staged({
+                thread_id: "T2",
+                comments: [{author: "some-human", body: "please also check X"}],
+            }),
+            staged({thread_id: "T3"}),
+            staged({thread_id: "T4", comments: []}),
+            staged({thread_id: "T5", comments: undefined}),
+            {no_thread_id: true},
+            "not a record",
+        ];
+        const result = openThreadsFromStaged(threads, new Set(["T3"]));
+        expect(result).toEqual([
+            {
+                thread_id: "T1",
+                path: "a.ts",
+                body: "**issue (blocking):** opener",
+            },
+        ]);
+    });
+
+    it("is empty for non-array staging and tolerates a missing opener body", () => {
+        expect(openThreadsFromStaged(undefined, new Set())).toEqual([]);
+        expect(openThreadsFromStaged({not: "an array"}, new Set())).toEqual([]);
+        const noBody = openThreadsFromStaged(
+            [staged({comments: [{author: "github-actions[bot]"}]})],
+            new Set(),
+        );
+        expect(noBody).toEqual([{thread_id: "T1", path: "a.ts", body: ""}]);
     });
 });

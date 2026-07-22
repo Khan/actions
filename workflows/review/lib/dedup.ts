@@ -20,7 +20,7 @@
  * Determinism boundary: pure text arithmetic; no model call, no filesystem.
  */
 
-import type {Claim} from "./dispatch-contracts";
+import {isRecord, type Claim} from "./dispatch-contracts";
 import {isBlockingLabel} from "./render-comment";
 
 export type ClaimMerge = {
@@ -145,6 +145,51 @@ const threadProse = (body: string): string =>
         .filter((line) => !line.trimStart().startsWith(">"))
         .join(" ")
         .replace(/^\s*\*{0,2}[a-z]+ \([^)]*\)\*{0,2}:?\*{0,2}\s*/i, "");
+
+/**
+ * Build the suppression inputs from staged threads.json. The staging is
+ * prompt-executed (review.md asks the orchestrator for the unresolved
+ * github-actions[bot] threads; stage-pr.ts deliberately does not stage
+ * threads yet), so the bot-only property is enforced HERE in code: only a
+ * thread whose OPENING comment the bot authored may suppress. A mis-staged
+ * human thread must never silently kill a candidate, and its free-text
+ * opener would also read as non-blocking and skip the verdict floor.
+ * Threads in resolvedIds (reconciler-resolved this run) are exempt: a fixed
+ * defect posting again is a fresh finding. Fails closed: a thread without a
+ * bot-authored opener never suppresses (worst case is a duplicate comment).
+ */
+export const openThreadsFromStaged = (
+    threads: unknown,
+    resolvedIds: ReadonlySet<string>,
+): OpenThread[] =>
+    (Array.isArray(threads) ? threads : [])
+        .filter(isRecord)
+        .flatMap((thread) => {
+            const comments = thread["comments"];
+            const opener =
+                Array.isArray(comments) && isRecord(comments[0])
+                    ? comments[0]
+                    : undefined;
+            if (
+                typeof thread["thread_id"] !== "string" ||
+                resolvedIds.has(thread["thread_id"]) ||
+                opener?.["author"] !== "github-actions[bot]"
+            ) {
+                return [];
+            }
+            return [
+                {
+                    thread_id: thread["thread_id"],
+                    ...(typeof thread["path"] === "string"
+                        ? {path: thread["path"]}
+                        : {}),
+                    body:
+                        typeof opener["body"] === "string"
+                            ? opener["body"]
+                            : "",
+                },
+            ];
+        });
 
 /** Whether a claim clearly describes the defect an open thread tracks. */
 export const describesOpenThreadDefect = (
