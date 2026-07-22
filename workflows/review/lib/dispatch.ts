@@ -276,7 +276,7 @@ export type PerAgentReport = {
     failed?: string;
 };
 
-export type SkippedDimension = {
+export type DispatchSkippedDimension = {
     dimension: string;
     cause: "budget" | "unavailable";
 };
@@ -287,7 +287,7 @@ export type DispatchResult = {
     planned: string[];
     dispatched: string[];
     shed: RosterShed[];
-    skippedDimensions: SkippedDimension[];
+    skippedDimensions: DispatchSkippedDimension[];
     /** Step 6 note lines, code-rendered, ready to append verbatim. */
     noteLines: string[];
     /** The validated claims Steps 4-6 act on. */
@@ -392,10 +392,12 @@ export const runDispatch = async (
 
     const roster = computeRoster(depth, routing, hasThreads);
     const perAgent: PerAgentReport[] = [];
-    const skippedDimensions: SkippedDimension[] = roster.shed.map((shed) => ({
-        dimension: shed.name,
-        cause: "budget",
-    }));
+    const skippedDimensions: DispatchSkippedDimension[] = roster.shed.map(
+        (shed) => ({
+            dimension: shed.name,
+            cause: "budget",
+        }),
+    );
     const writeOut = (name: string, content: string): void => {
         fs.writeFileSync(`${OUT_DIR}/${name}.json`, content);
     };
@@ -492,6 +494,17 @@ export const runDispatch = async (
             fs.writeFileSync(
                 `${REVIEW_DIR}/pr-annotated.diff`,
                 annotateDiffLineNumbers(diffText),
+            );
+            // The finder prompts read review-files.json for their file
+            // list; with triage unavailable, everything is a review file.
+            const allFiles = readJson(fs, `${REVIEW_DIR}/files.json`);
+            fs.writeFileSync(
+                `${REVIEW_DIR}/review-files.json`,
+                JSON.stringify(
+                    Array.isArray(allFiles) ? allFiles : [],
+                    null,
+                    2,
+                ),
             );
         } else {
             const sections = splitUnifiedDiff(diffText);
@@ -711,6 +724,10 @@ export const runDispatch = async (
             }
         }
         if (!validatorRan) {
+            // The dispute cap still applies without a validator (the
+            // mechanical floor applyVerifications enforces for unmentioned
+            // claims).
+            claims = applyVerifications(claims, {});
             skippedDimensions.push({
                 dimension: "claim validation",
                 cause: "unavailable",

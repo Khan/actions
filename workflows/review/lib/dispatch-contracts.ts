@@ -326,14 +326,24 @@ export type Verification = {
     corrected?: Record<string, unknown>;
 };
 
-/** Parse the validator's id-keyed verification map. */
+/**
+ * Parse the validator's output, per its contract (review.md): a
+ * `{"claims": [{id, verification, confidence?, corrected?}]}` array,
+ * returned here as an id-keyed map for mechanical application. Entries with
+ * an unknown verification state or no id are skipped (they neither drop nor
+ * downgrade anything: fail toward retaining).
+ */
 export const parseValidatorOutput = (
     output: string,
 ): Record<string, Verification> => {
     const parsed = parseJsonObject(output);
+    const rawClaims = parsed["claims"];
+    if (!Array.isArray(rawClaims)) {
+        throw new Error("validator output has no claims array");
+    }
     const verifications: Record<string, Verification> = {};
-    for (const [id, raw] of Object.entries(parsed)) {
-        if (!isRecord(raw)) {
+    for (const raw of rawClaims) {
+        if (!isRecord(raw) || typeof raw["id"] !== "string") {
             continue;
         }
         const state = raw["verification"];
@@ -344,7 +354,7 @@ export const parseValidatorOutput = (
         ) {
             continue;
         }
-        verifications[id] = {
+        verifications[raw["id"]] = {
             verification: state,
             ...(typeof raw["confidence"] === "number"
                 ? {confidence: raw["confidence"]}
@@ -373,7 +383,18 @@ export const applyVerifications = (
     for (const claim of claims) {
         const verdict = verifications[claim.id];
         if (verdict === undefined) {
-            surviving.push(claim);
+            // Retained unvalidated (missing-output rule), EXCEPT the dispute
+            // cap, which is a mechanical floor: an author-disputed claim can
+            // never re-block on the same evidence without a confirmed
+            // verification, validator or no validator.
+            if (claim.author_dispute !== undefined) {
+                surviving.push({
+                    ...claim,
+                    label: "question (non-blocking)",
+                });
+            } else {
+                surviving.push(claim);
+            }
             continue;
         }
         if (verdict.verification === "refuted") {
