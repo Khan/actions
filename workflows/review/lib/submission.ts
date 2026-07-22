@@ -101,8 +101,53 @@ const readCacheMemoryRecord = (fs: SubmissionFs): unknown => {
 /* -------------------------------------------------------------------------- */
 
 /**
+ * How many lines a committable suggestion may replace the anchored line
+ * with; anything longer is a sketch, not a drop-in.
+ */
+const MAX_SUGGESTION_LINES = 8;
+
+const lineHasCodeSignal = (line: string): boolean =>
+    /\w\(/.test(line) || // a call
+    /[{};]/.test(line) || // block/statement punctuation
+    /:=|=>|->/.test(line) || // assignment/arrow operators
+    /^\s*(\/\/|#|\/\*|\*)/.test(line) || // a comment marker
+    /^\t/.test(line); // code-convention indentation
+
+const looksLikeProse = (line: string): boolean => {
+    if (lineHasCodeSignal(line)) {
+        return false;
+    }
+    const words = line.trim().split(/\s+/);
+    if (words.length < 6) {
+        return false;
+    }
+    const plain = words.filter((word) =>
+        /^\(?[A-Za-z][A-Za-z']*[.,;:!?)]?$/.test(word),
+    );
+    return plain.length / words.length >= 0.75;
+};
+
+/**
+ * Whether a claim's suggestion is plausibly a committable replacement of
+ * the anchored line: small and code-shaped. Trial run 29897276810 posted an
+ * English sentence and a 30-line test function inside `suggestion` fences
+ * (Khan/webapp#41009 comments r3628128268 / r3628128224), both of which a
+ * single click would have committed verbatim into the file.
+ */
+export const isDropInSuggestion = (suggestion: string): boolean => {
+    const lines = suggestion.replace(/\n$/, "").split("\n");
+    const content = lines.filter((line) => line.trim() !== "");
+    if (content.length === 0 || lines.length > MAX_SUGGESTION_LINES) {
+        return false;
+    }
+    return content.some(lineHasCodeSignal) && !content.some(looksLikeProse);
+};
+
+/**
  * Render one claim as its Conventional Comment (the renderComment layout,
  * driven by the claim's post-validation label rather than a recomputed one).
+ * A suggestion only becomes a committable `suggestion` fence when it is
+ * plausibly drop-in; otherwise it renders as a plain fenced sketch.
  */
 export const renderClaimComment = (claim: Claim): string => {
     const lines: string[] = [`**${claim.label}:** ${claim.discussion}`];
@@ -115,7 +160,18 @@ export const renderClaimComment = (claim: Claim): string => {
         );
     }
     if (claim.suggestion !== undefined) {
-        lines.push("", "```suggestion", claim.suggestion, "```");
+        if (isDropInSuggestion(claim.suggestion)) {
+            lines.push("", "```suggestion", claim.suggestion, "```");
+        } else {
+            lines.push(
+                "",
+                "A sketch, not a committable replacement:",
+                "",
+                "````",
+                claim.suggestion,
+                "````",
+            );
+        }
     }
     return lines.join("\n");
 };

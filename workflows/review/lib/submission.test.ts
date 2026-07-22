@@ -4,6 +4,7 @@ import {evaluateDispatchConformance} from "./dispatch-gate";
 import {labelForFinding, renderComment} from "./render-comment";
 import {renderRereviewStamp, STAMP_SCHEMA_VERSION} from "./rereview-mode";
 import {
+    isDropInSuggestion,
     renderClaimComment,
     runSubmissionCli,
     type SubmissionFs,
@@ -90,6 +91,60 @@ describe("renderClaimComment", () => {
         expect(body).toContain("> **Rule:** Always guard.\n> Even here.");
     });
 
+    it("keeps the suggestion fence for small code-shaped payloads", () => {
+        // Run 29897276810's legitimate drop-ins: a one-line cutoff fix and a
+        // five-line query chain.
+        expect(
+            isDropInSuggestion(
+                "\tcutoff := ctx.Time().Now().AddDate(0, 0, -MemoryTTLDays)",
+            ),
+        ).toBe(true);
+        expect(
+            isDropInSuggestion(
+                [
+                    "\tq := datastore.NewQuery(models.AIGuideMemoryKind).",
+                    '\t\tFilterField("kaid", "=", kaid).',
+                    '\t\tFilterField("created_at", "<", cutoff).',
+                    "\t\tKeysOnly().",
+                    "\t\tLimit(500)",
+                ].join("\n"),
+            ),
+        ).toBe(true);
+    });
+
+    it("renders an English-prose suggestion as a sketch, not a suggestion fence (r3628128268)", () => {
+        const prose =
+            "Add a created_at >= cutoff filter in Query so stale memories can never surface regardless of write activity, and consider a native Datastore TTL policy on created_at in place of (or alongside) the write-path ExpireStale pass.";
+        expect(isDropInSuggestion(prose)).toBe(false);
+        const body = renderClaimComment(
+            claim({
+                label: "suggestion (non-blocking)",
+                suggestion: prose,
+            }) as never,
+        );
+        expect(body).not.toContain("```suggestion");
+        expect(body).toContain("A sketch, not a committable replacement:");
+        expect(body).toContain(`\`\`\`\`\n${prose}\n\`\`\`\``);
+    });
+
+    it("renders an oversized code payload as a sketch (r3628128224's 30-line test fn)", () => {
+        const testFn = [
+            "func (suite *expirationSuite) TestExpirationRemovesStaleMemories() {",
+            "\tctx := suite.KAContext()",
+            ...Array.from(
+                {length: 26},
+                (_, i) => `\tsuite.Require().NoError(step${i}(ctx))`,
+            ),
+            "\tsuite.Require().Len(keys, 1)",
+            "}",
+        ].join("\n");
+        expect(isDropInSuggestion(testFn)).toBe(false);
+        const body = renderClaimComment(
+            claim({label: "todo (blocking)", suggestion: testFn}) as never,
+        );
+        expect(body).not.toContain("```suggestion");
+        expect(body).toContain("A sketch, not a committable replacement:");
+    });
 });
 
 describe("runSubmissionCli", () => {
