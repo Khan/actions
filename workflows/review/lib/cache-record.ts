@@ -94,11 +94,21 @@ const readQueue = (
             : raw;
     if (queuePath !== undefined && fs.existsSync(queuePath)) {
         try {
+            // Parse per line: one malformed entry (a truncated tail from a
+            // crash mid-append) must not discard the whole queue. A skipped
+            // line can only remove corroborating evidence, so the failure
+            // direction stays a refusal to write, never a false write.
             const items = fs
                 .readFileSync(queuePath, "utf8")
                 .split("\n")
                 .filter((line) => line.trim() !== "")
-                .map((line) => JSON.parse(line) as unknown)
+                .flatMap((line) => {
+                    try {
+                        return [JSON.parse(line) as unknown];
+                    } catch {
+                        return [];
+                    }
+                })
                 .filter(isRecord)
                 .map(normalize);
             return {items, readable: true};
@@ -124,7 +134,7 @@ const readQueue = (
 
 /**
  * Step 7's canonical signature of the risks/patterns guidance, as code: for
- * each moderate/high-risk file its path and owning teams, for each common
+ * each medium/high-risk file its path and owning teams, for each common
  * pattern its identity and the sorted file set it covers, plus the sorted
  * excluded-file set, all sorted into one stable string. Both sides of the
  * repost decision, the compare (Step 7 reads the staged copy) and the
@@ -150,7 +160,11 @@ export const computeRisksPatternsKey = (input: {
         }
         const risk =
             typeof file["risk"] === "string" ? file["risk"].toLowerCase() : "";
-        if (risk !== "moderate" && risk !== "high") {
+        // The triage contract's tier vocabulary is Trivial/Low/Medium/High
+        // (review.md `files[]`, RISK_TIERS); "moderate" is tolerated because
+        // the surrounding prose uses it and a drifted emitter must fail
+        // toward a fuller signature, not a silently narrower one.
+        if (risk !== "medium" && risk !== "moderate" && risk !== "high") {
             continue;
         }
         const teams = Array.isArray(owners[file["path"]])
@@ -200,10 +214,24 @@ export const computeRisksPatternsKey = (input: {
 export type CacheRecordResult = {
     written: boolean;
     reason: string;
+    /**
+     * Set on refusals that indicate something WRONG (a corroboration
+     * mismatch, missing staged facts), as opposed to the benign no-ops
+     * (task mode, gate-blocked run). The CLI surfaces these as `::warning`:
+     * a systematic refusal permanently stales the fingerprint and forces
+     * full-depth reviews indefinitely, which must not stay invisible.
+     */
+    warn?: boolean;
     record?: Record<string, unknown>;
 };
 
 const skip = (reason: string): CacheRecordResult => ({written: false, reason});
+
+const refuse = (reason: string): CacheRecordResult => ({
+    written: false,
+    reason,
+    warn: true,
+});
 
 /**
  * Write the Step 9 cache record from staged truth. `nowIso` is injected so
@@ -229,7 +257,7 @@ export const runCacheRecordCli = (
         );
     }
     if (plan.event !== "APPROVE" && plan.event !== "REQUEST_CHANGES") {
-        return skip("the staged plan carries no submittable event");
+        return refuse("the staged plan carries no submittable event");
     }
 
     // When the queue is readable, the queued submission must corroborate
@@ -248,12 +276,12 @@ export const runCacheRecordCli = (
                 ? plan.comments
                 : [];
             if (plan.event !== "APPROVE" || planComments.length > 0) {
-                return skip(
+                return refuse(
                     "no review submission queued and the plan is not the redundant-approval shape: the prior record stands",
                 );
             }
         } else if (submit["event"] !== plan.event) {
-            return skip(
+            return refuse(
                 "the queued submission does not match the staged plan: the prior record stands",
             );
         }
@@ -263,7 +291,7 @@ export const runCacheRecordCli = (
         | {number?: unknown; headSha?: unknown; isDraft?: unknown}
         | undefined;
     if (typeof prContext?.number !== "number") {
-        return skip("pr-context.json is not staged: no record path to write");
+        return refuse("pr-context.json is not staged: no record path to write");
     }
     const diffFacts = readJson(fs, `${REVIEW_DIR}/diff-facts.json`) as
         | {diffFingerprint?: unknown; hunkSignature?: unknown}
@@ -272,7 +300,7 @@ export const runCacheRecordCli = (
         !isRecord(diffFacts?.diffFingerprint) ||
         !isRecord(diffFacts?.hunkSignature)
     ) {
-        return skip(
+        return refuse(
             "diff-facts.json is missing or unparseable: a record without trustworthy fingerprints would poison the next run's scoping",
         );
     }
@@ -393,6 +421,16 @@ if (typeof require !== "undefined" && require.main === module) {
                 2,
             ),
         );
+        if (result.warn === true) {
+            // A refusal that is not one of the benign no-ops must reach the
+            // workflow UI: a systematic corroboration mismatch would stale
+            // the fingerprint on every run (permanent full-depth reviews)
+            // with nothing visible in the logs summary otherwise.
+            // eslint-disable-next-line no-console
+            console.error(
+                `::warning title=review cache record::refused to write: ${result.reason}`,
+            );
+        }
     } catch (error) {
         // eslint-disable-next-line no-console
         console.error(

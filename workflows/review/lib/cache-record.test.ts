@@ -87,9 +87,12 @@ describe("computeRisksPatternsKey", () => {
     it("builds one stable sorted string from risks, patterns, and exclusions", () => {
         const key = computeRisksPatternsKey({
             riskFiles: [
-                {path: "b.ts", risk: "moderate"},
+                // The contract vocabulary (review.md `files[]`: Medium/High,
+                // case-insensitive), plus the tolerated "moderate" synonym.
+                {path: "b.ts", risk: "Medium"},
                 {path: "a.ts", risk: "high"},
                 {path: "c.ts", risk: "low"},
+                {path: "d.ts", risk: "moderate"},
             ],
             patterns: [
                 {pattern: "rename", files: ["z.ts", "a.ts"]},
@@ -105,6 +108,7 @@ describe("computeRisksPatternsKey", () => {
                 "pattern:rename=a.ts,z.ts",
                 "risk:a.ts=team-a+team-b",
                 "risk:b.ts=",
+                "risk:d.ts=",
             ].join("|"),
         );
         // Low-risk files never contribute.
@@ -115,7 +119,7 @@ describe("computeRisksPatternsKey", () => {
         const a = computeRisksPatternsKey({
             riskFiles: [
                 {path: "a.ts", risk: "high"},
-                {path: "b.ts", risk: "moderate"},
+                {path: "b.ts", risk: "medium"},
             ],
             patterns: ["p1", "p2"],
             excludedFiles: ["x.ts", "y.ts"],
@@ -123,7 +127,7 @@ describe("computeRisksPatternsKey", () => {
         });
         const b = computeRisksPatternsKey({
             riskFiles: [
-                {path: "b.ts", risk: "moderate"},
+                {path: "b.ts", risk: "medium"},
                 {path: "a.ts", risk: "high"},
             ],
             patterns: ["p2", "p1"],
@@ -169,43 +173,51 @@ describe("runCacheRecordCli", () => {
         const result = runCacheRecordCli(fs, NOW);
         expect(result.written).toBe(false);
         expect(result.reason).toMatch(/task mode/);
+        // Benign no-op: never surfaced as a workflow warning.
+        expect(result.warn).toBeUndefined();
     });
 
     it("refuses when the gate blocked, when the queue contradicts the plan, and when diff facts are missing", () => {
-        // Gate blocked: nothing posted.
-        expect(
-            runCacheRecordCli(makeFakeFs(staged({[SENTINEL]: ""})), NOW)
-                .written,
-        ).toBe(false);
-        // No submission queued for a plan with comments.
-        expect(
-            runCacheRecordCli(
-                makeFakeFs(staged({[QUEUE]: JSON.stringify({items: []})})),
-                NOW,
-            ).written,
-        ).toBe(false);
+        // Gate blocked: nothing posted. Benign (the gate is already loud).
+        const blocked = runCacheRecordCli(
+            makeFakeFs(staged({[SENTINEL]: ""})),
+            NOW,
+        );
+        expect(blocked.written).toBe(false);
+        expect(blocked.warn).toBeUndefined();
+        // No submission queued for a plan with comments: a corroboration
+        // mismatch, so it warns (a systematic one would permanently stale
+        // the fingerprint with no UI signal otherwise).
+        const notQueued = runCacheRecordCli(
+            makeFakeFs(staged({[QUEUE]: JSON.stringify({items: []})})),
+            NOW,
+        );
+        expect(notQueued.written).toBe(false);
+        expect(notQueued.warn).toBe(true);
         // Queued event contradicts the plan.
-        expect(
-            runCacheRecordCli(
-                makeFakeFs(
-                    staged({
-                        [QUEUE]: JSON.stringify({
-                            items: [
-                                {
-                                    type: "submit_pull_request_review",
-                                    event: "APPROVE",
-                                },
-                            ],
-                        }),
+        const contradicted = runCacheRecordCli(
+            makeFakeFs(
+                staged({
+                    [QUEUE]: JSON.stringify({
+                        items: [
+                            {
+                                type: "submit_pull_request_review",
+                                event: "APPROVE",
+                            },
+                        ],
                     }),
-                ),
-                NOW,
-            ).written,
-        ).toBe(false);
+                }),
+            ),
+            NOW,
+        );
+        expect(contradicted.written).toBe(false);
+        expect(contradicted.warn).toBe(true);
         // Missing diff facts: a record without fingerprints poisons scoping.
         const noFacts = staged();
         delete noFacts[`${REVIEW}/diff-facts.json`];
-        expect(runCacheRecordCli(makeFakeFs(noFacts), NOW).written).toBe(false);
+        const missingFacts = runCacheRecordCli(makeFakeFs(noFacts), NOW);
+        expect(missingFacts.written).toBe(false);
+        expect(missingFacts.warn).toBe(true);
     });
 
     it("accepts the redundant-approval skip (APPROVE plan, zero comments, empty queue)", () => {
@@ -298,6 +310,26 @@ describe("the in-run safe-output queue (GH_AW_SAFE_OUTPUTS)", () => {
             }),
         });
         expect(runCacheRecordCli(mismatched, NOW, JSONL).written).toBe(false);
+    });
+
+    it("tolerates one malformed JSONL line without discarding the queue", () => {
+        const base = staged();
+        delete base[QUEUE];
+        const fs = makeFakeFs({
+            ...base,
+            [JSONL]: [
+                JSON.stringify({
+                    type: "submit_pull_request_review",
+                    event: "REQUEST_CHANGES",
+                }),
+                '{"type": "add_comm', // truncated tail from a crash mid-append
+            ].join("\n"),
+        });
+        const result = runCacheRecordCli(fs, NOW, JSONL);
+        // The intact submit line still corroborates: the queue is read as
+        // readable (not fallen through to plan-only carry-forward).
+        expect(result.written).toBe(true);
+        expect(result.reason).not.toMatch(/queue unreadable/);
     });
 
     it("trusts the plan when no queue is readable, carrying the supplements forward", () => {
