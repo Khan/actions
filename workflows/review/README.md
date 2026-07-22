@@ -59,6 +59,13 @@ The workflow then posts the per-line Conventional Comments that survived validat
 submits an approve / request-changes review, and on approval posts the risk/patterns
 summary and requests the owning teams. The config files below feed these sub-agents.
 
+A review is only ever posted while its PR is still open. Merging or closing the PR
+cancels an in-flight run within seconds (the `closed` trigger enters the same per-PR
+concurrency group), and a deterministic pre-check in the safe-outputs job skips all
+posting if the PR is somehow no longer open at submit time (e.g. a manual rerun of a
+stale run), recording why in the run's job summary. A run whose PR is still open posts
+normally even when a newer push exists; the newer push's run supersedes it.
+
 A mechanical gate and a budget guardrail sit between the reviewers and the PR. The
 **change-provenance gate** (enforced in code against the diff's parsed changed-line
 map, not by prompt)
