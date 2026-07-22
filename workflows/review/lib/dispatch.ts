@@ -39,11 +39,18 @@
  * note lines) is pure code. No prose about the code under review.
  */
 
-import {dedupeClaims, type ClaimMerge} from "./dedup";
+import {
+    dedupeClaims,
+    suppressOpenThreadDuplicates,
+    type ClaimMerge,
+    type OpenThread,
+    type ThreadSuppression,
+} from "./dedup";
 import {annotateDiffLineNumbers, splitUnifiedDiff} from "./diff";
 import {
     applyScopeFilter,
     buildClaims,
+    contractValidator,
     parseFinderOutput,
     parseJsonObject,
     parseValidatorOutput,
@@ -65,13 +72,20 @@ export {
     applyScopeFilter,
     applyVerifications,
     buildClaims,
+    contractValidator,
     parseFinderOutput,
     parseValidatorOutput,
     type Candidate,
     type Claim,
+    type ContractKind,
     type Verification,
 } from "./dispatch-contracts";
-export {dedupeClaims, type ClaimMerge} from "./dedup";
+export {
+    dedupeClaims,
+    suppressOpenThreadDuplicates,
+    type ClaimMerge,
+    type ThreadSuppression,
+} from "./dedup";
 
 /* -------------------------------------------------------------------------- */
 /* Seams                                                                      */
@@ -93,6 +107,16 @@ export type AgentRequest = {
     cwd: string;
     maxTurns: number;
     timeoutMs: number;
+    /**
+     * The structured-final contract check (trial suggestion h). When set,
+     * the runner exposes a `submit_result` tool whose input is validated by
+     * this function BEFORE it is accepted: null accepts the payload as the
+     * agent's result; a string rejects it back to the model, which corrects
+     * and re-calls in the same session (a few turns, not the $2-3 full
+     * re-dispatch the malformed-output retry costs). Free-text finals stay as
+     * the fallback for a model that never calls the tool.
+     */
+    validate?: (payload: Record<string, unknown>) => string | null;
 };
 
 export type AgentResult = {
@@ -101,6 +125,8 @@ export type AgentResult = {
     usd: number;
     turns: number;
     wallMs: number;
+    /** The output came through the structured-final tool, pre-validated. */
+    structured?: boolean;
 };
 
 /** The model seam; the SDK-backed production runner lives in the CLI entry. */
@@ -286,6 +312,8 @@ export type PerAgentReport = {
     wallMs: number;
     /** This entry is the one malformed-output retry of the same agent. */
     retried?: boolean;
+    /** The result arrived via the structured-final tool (pre-validated). */
+    structuredFinal?: boolean;
     failed?: string;
 };
 
@@ -307,6 +335,12 @@ export type DispatchResult = {
     claims: Claim[];
     /** Cross-source duplicates merged before validation (#245). */
     merges: ClaimMerge[];
+    /**
+     * Candidates dropped because an open bot thread already tracks the
+     * defect (trial suggestion g). Blocking entries still floor the verdict
+     * (submission.ts): the open thread is the actionable feedback.
+     */
+    threadSuppressions: ThreadSuppression[];
     /** The reconciler's decision, when it ran and parsed. */
     reconciliation?: {resolve: string[]; keep: string[]; skipLines: unknown};
     /** correctness-reviewer `files[]` risk levels (Steps 7-8). */
@@ -406,6 +440,23 @@ export const runDispatch = async (
     const hasThreads = Array.isArray(threads) && threads.length > 0;
 
     const roster = computeRoster(depth, routing, hasThreads);
+    const lensNames = Array.isArray(routing.lensesToSpawn)
+        ? routing.lensesToSpawn
+        : [];
+    /** The structured-final contract check for each dispatchable agent. */
+    const validatorFor = (
+        name: string,
+    ): ((payload: Record<string, unknown>) => string | null) =>
+        contractValidator(
+            name,
+            name === VALIDATOR
+                ? "validator"
+                : name === TRIAGE || name === RECONCILER
+                ? "json"
+                : lensNames.includes(name)
+                ? "lens"
+                : "finder",
+        );
     const perAgent: PerAgentReport[] = [];
     const skippedDimensions: DispatchSkippedDimension[] = roster.shed.map(
         (shed) => ({
@@ -443,14 +494,15 @@ export const runDispatch = async (
             const corrective =
                 malformedNote === undefined
                     ? ""
-                    : `\n\nYour previous reply could not be used (${malformedNote}). Reply again now, and this time your ENTIRE message must be the JSON object your output contract specifies: no prose before or after it, no code fence.`;
+                    : `\n\nYour previous reply could not be used (${malformedNote}). Submit again now, and this time deliver the complete corrected JSON object through the submit_result tool (or, if that tool is unavailable, as your ENTIRE message: no prose before or after it, no code fence).`;
             const result = await runner({
                 name,
                 model: definition.model,
-                prompt: `${definition.prompt}\n\nProceed now per your definition. Your final message must be exactly the JSON object your definition's output contract specifies, nothing else.${corrective}`,
+                prompt: `${definition.prompt}\n\nProceed now per your definition. Deliver your result by calling the submit_result tool ONCE, passing the ENTIRE JSON object your definition's output contract specifies as its \`result\` argument; if the tool rejects it, correct the object and call the tool again. After it is accepted, end the turn without repeating the JSON. If the submit_result tool is unavailable, your final message must be exactly that JSON object, nothing else.${corrective}`,
                 cwd: repoRoot,
                 maxTurns,
                 timeoutMs,
+                validate: validatorFor(name),
             });
             writeOut(name, result.output);
             perAgent.push({
@@ -460,6 +512,7 @@ export const runDispatch = async (
                 turns: result.turns,
                 wallMs: result.wallMs,
                 ...(malformedNote === undefined ? {} : {retried: true}),
+                ...(result.structured === true ? {structuredFinal: true} : {}),
             });
             return result.output;
         } catch (error) {
@@ -618,9 +671,6 @@ export const runDispatch = async (
         entry,
         output: await dispatchAgent(entry.name),
     }));
-    const lensNames = Array.isArray(routing.lensesToSpawn)
-        ? routing.lensesToSpawn
-        : [];
     for (const {entry, output} of outputs) {
         const shedDimension = (): void => {
             skippedDimensions.push({
@@ -773,6 +823,38 @@ export const runDispatch = async (
     const deduped = dedupeClaims(buildClaims(scoped.kept));
     let claims = deduped.claims;
 
+    // Open-thread suppression (trial suggestion g), also before validation:
+    // a defect an open bot thread already tracks is not re-validated or
+    // re-posted at a new anchor. Threads the reconciler resolves this run
+    // are exempt: a resolved thread's defect posting again is a fresh
+    // finding, not a duplicate. When the reconciler was unavailable, nothing
+    // resolves, so every staged thread suppresses (fail toward fewer
+    // duplicate threads; the open thread remains the feedback).
+    const resolvedIds = new Set(reconciliation?.resolve ?? []);
+    const openThreads: OpenThread[] = (Array.isArray(threads) ? threads : [])
+        .filter(isRecord)
+        .filter(
+            (thread) =>
+                typeof thread["thread_id"] === "string" &&
+                !resolvedIds.has(thread["thread_id"]),
+        )
+        .map((thread) => {
+            const comments = thread["comments"];
+            const opener =
+                Array.isArray(comments) && isRecord(comments[0])
+                    ? comments[0]["body"]
+                    : undefined;
+            return {
+                thread_id: thread["thread_id"] as string,
+                ...(typeof thread["path"] === "string"
+                    ? {path: thread["path"]}
+                    : {}),
+                body: typeof opener === "string" ? opener : "",
+            };
+        });
+    const suppression = suppressOpenThreadDuplicates(claims, openThreads);
+    claims = suppression.kept;
+
     // Phase 3: claim validation.
     let validatorRan = false;
     if (claims.length > 0) {
@@ -832,6 +914,11 @@ export const runDispatch = async (
                   "Note: change-provenance gate skipped this run (diff staging unparseable).",
               ]
             : []),
+        ...(suppression.suppressed.length > 0
+            ? [
+                  `Note: ${suppression.suppressed.length} finding(s) not re-posted (already tracked in open review threads).`,
+              ]
+            : []),
     ];
 
     const result: DispatchResult = {
@@ -843,6 +930,7 @@ export const runDispatch = async (
         noteLines,
         claims,
         merges: deduped.merges,
+        threadSuppressions: suppression.suppressed,
         ...(reconciliation !== undefined ? {reconciliation} : {}),
         ...(riskFiles !== undefined ? {riskFiles} : {}),
         ...(patterns !== undefined ? {patterns} : {}),
@@ -862,78 +950,15 @@ export const runDispatch = async (
 /* -------------------------------------------------------------------------- */
 
 // Run only when executed directly (review.md Step 3, scripted dispatch mode),
-// never on import (tests). The SDK is loaded lazily so unit tests and the
-// task-mode path never require it; the staging pre-step installs it
-// (workflows/review/package.json) before the agent starts.
+// never on import (tests). The SDK-backed runner (dispatch-runner.ts) is
+// loaded lazily so unit tests and the task-mode path never require the SDK;
+// the staging pre-step installs it (workflows/review/package.json) before
+// the agent starts.
 if (typeof require !== "undefined" && require.main === module) {
     const nodeFs = require("node:fs") as DispatchFs;
     void (async () => {
-        const sdk = (await import("@anthropic-ai/claude-agent-sdk")) as {
-            query: (input: {
-                prompt: string;
-                options: Record<string, unknown>;
-            }) => AsyncIterable<Record<string, unknown>>;
-        };
-        const runner: AgentRunner = async (request) => {
-            const started = Date.now();
-            const abort = new AbortController();
-            let timedOut = false;
-            const timer = setTimeout(() => {
-                timedOut = true;
-                abort.abort(
-                    new Error(`timed out after ${request.timeoutMs}ms`),
-                );
-            }, request.timeoutMs);
-            try {
-                const run = sdk.query({
-                    prompt: request.prompt,
-                    options: {
-                        cwd: request.cwd,
-                        model: request.model,
-                        maxTurns: request.maxTurns,
-                        // Bash is allowed for production parity: the
-                        // investigation-cap CLI the sub-agent prompts invoke
-                        // runs through it, inside the same sandbox.
-                        allowedTools: ["Read", "Grep", "Glob", "LS", "Bash"],
-                        permissionMode: "bypassPermissions",
-                        abortController: abort,
-                    },
-                });
-                let output = "";
-                let usd = 0;
-                let turns = 0;
-                for await (const message of run) {
-                    if (message["type"] !== "result") {
-                        continue;
-                    }
-                    if (message["subtype"] !== "success") {
-                        throw new Error(
-                            `sub-agent ended without success: ${String(
-                                message["subtype"],
-                            )}`,
-                        );
-                    }
-                    output = String(message["result"] ?? "");
-                    usd = Number(message["total_cost_usd"] ?? 0);
-                    turns = Number(message["num_turns"] ?? 0);
-                }
-                return {output, usd, turns, wallMs: Date.now() - started};
-            } catch (error) {
-                // The SDK reports an abort as a generic "aborted by user";
-                // surface the actual cause so the staged error record and
-                // the run report say what happened (run 29901690493's two
-                // shed finders were 5-minute timeouts, unreadably recorded).
-                if (timedOut) {
-                    throw new Error(
-                        `sub-agent timed out after ${request.timeoutMs}ms`,
-                    );
-                }
-                throw error;
-            } finally {
-                clearTimeout(timer);
-            }
-        };
-
+        const {createSdkRunner} = await import("./dispatch-runner");
+        const runner = await createSdkRunner();
         const repoRoot =
             process.env.REVIEW_REPO_ROOT ?? process.env.GITHUB_WORKSPACE ?? ".";
         const result = await runDispatch({fs: nodeFs, runner, repoRoot});

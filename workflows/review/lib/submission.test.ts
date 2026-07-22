@@ -646,3 +646,57 @@ describe("re-review hardening (slice 4 feedback)", () => {
         expect(viaClaim).toBe(canonical);
     });
 });
+
+describe("open-thread suppression verdict floor (trial suggestion g)", () => {
+    it("floors the verdict at REQUEST_CHANGES when a blocking claim was suppressed as an open-thread duplicate", () => {
+        const fs = makeFakeFs(
+            staged({
+                depth: "full",
+                claims: [],
+                noteLines: [
+                    "Note: 1 finding(s) not re-posted (already tracked in open review threads).",
+                ],
+                threadSuppressions: [
+                    {
+                        id: "correctness-reviewer-1",
+                        source: "correctness-reviewer",
+                        label: "todo (blocking)",
+                        path: "a.ts",
+                        line: 42,
+                        thread_id: "T1",
+                    },
+                ],
+            }),
+        );
+        const plan = runSubmissionCli(fs);
+        // The reviewer re-confirmed a defect an open blocking thread tracks:
+        // no duplicate comment posts, but the run must not flip to APPROVE.
+        expect(plan.event).toBe("REQUEST_CHANGES");
+        expect(plan.reasons).toContainEqual({
+            code: "kept-blocking-thread",
+            count: 1,
+        });
+        expect(plan.comments).toEqual([]);
+        expect(plan.body).toContain("not re-posted");
+    });
+
+    it("does not floor on a suppressed non-blocking duplicate", () => {
+        const fs = makeFakeFs(
+            staged({
+                depth: "full",
+                claims: [],
+                noteLines: [],
+                threadSuppressions: [
+                    {
+                        id: "c1",
+                        source: "holistic",
+                        label: "suggestion (non-blocking)",
+                        path: "a.ts",
+                        thread_id: "T2",
+                    },
+                ],
+            }),
+        );
+        expect(runSubmissionCli(fs).event).toBe("APPROVE");
+    });
+});

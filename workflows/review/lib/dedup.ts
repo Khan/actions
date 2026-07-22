@@ -94,6 +94,116 @@ export const describesSameDefect = (a: Claim, b: Claim): boolean => {
     );
 };
 
+/* -------------------------------------------------------------------------- */
+/* Open-thread suppression (trial suggestion g)                               */
+/* -------------------------------------------------------------------------- */
+
+/** One still-open bot thread a candidate claim may duplicate. */
+export type OpenThread = {
+    thread_id: string;
+    path?: string;
+    /** The thread's opening comment body (the bot's original finding). */
+    body: string;
+};
+
+export type ThreadSuppression = {
+    id: string;
+    source: string;
+    label: string;
+    path: string;
+    line?: number;
+    thread_id: string;
+};
+
+/**
+ * The prose of a previously-posted bot comment, for similarity comparison:
+ * the leading `**label:**` template (tolerating the markdown-stripped form
+ * the staged bodies sometimes carry) and everything from the first code
+ * fence on (a suggestion block) are dropped, as are rule-quote lines:
+ * boilerplate shared by ALL bot comments would inflate similarity between
+ * unrelated findings.
+ */
+const threadProse = (body: string): string =>
+    body
+        .split("```")[0]
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith(">"))
+        .join(" ")
+        .replace(/^\s*\*{0,2}[a-z]+ \([^)]*\)\*{0,2}:?\*{0,2}\s*/i, "");
+
+/** Whether a claim clearly describes the defect an open thread tracks. */
+export const describesOpenThreadDefect = (
+    claim: Claim,
+    thread: OpenThread,
+): boolean => {
+    const tokensA = contentTokens(
+        `${claim.subject} ${claim.discussion} ${claim.failure_scenario}`,
+    );
+    const tokensB = contentTokens(threadProse(thread.body));
+    const setA = new Set(tokensA);
+    const setB = new Set(tokensB);
+    if (setA.size === 0 || setB.size === 0) {
+        return false;
+    }
+    const shared = intersectionSize(setA, setB);
+    const jaccard = shared / (setA.size + setB.size - shared);
+    const overlap = shared / Math.min(setA.size, setB.size);
+    const sharedBigrams = intersectionSize(bigrams(tokensA), bigrams(tokensB));
+    return (
+        jaccard >= MIN_JACCARD &&
+        overlap >= MIN_OVERLAP &&
+        sharedBigrams >= MIN_SHARED_BIGRAMS
+    );
+};
+
+/**
+ * Drop candidate claims that describe a defect an open bot thread already
+ * tracks (trial run S4 r2: the missing-test defect re-flagged at
+ * expiration.go:42 while its round-1 thread at :62 was still open, so the
+ * same defect briefly had two open threads). The match is same-path plus the
+ * calibrated #245 text-similarity floor, deliberately with NO line window:
+ * a persisting defect's re-flag routinely lands on a different line
+ * of the same file (the observed pair sat 20 lines apart); the similarity
+ * floor carries the precision. The caller excludes threads the reconciler
+ * resolves this run, so a fixed defect's fresh regression still posts, and
+ * records suppressed blocking labels so the verdict cannot flip to APPROVE
+ * over a still-open blocking objection (submission.ts feeds them into the
+ * kept-blocking floor).
+ */
+export const suppressOpenThreadDuplicates = (
+    claims: Claim[],
+    threads: OpenThread[],
+): {kept: Claim[]; suppressed: ThreadSuppression[]} => {
+    if (threads.length === 0) {
+        return {kept: claims, suppressed: []};
+    }
+    const kept: Claim[] = [];
+    const suppressed: ThreadSuppression[] = [];
+    for (const claim of claims) {
+        const match =
+            claim.path === undefined
+                ? undefined
+                : threads.find(
+                      (thread) =>
+                          thread.path === claim.path &&
+                          describesOpenThreadDefect(claim, thread),
+                  );
+        if (match === undefined) {
+            kept.push(claim);
+            continue;
+        }
+        suppressed.push({
+            id: claim.id,
+            source: claim.source,
+            label: claim.label,
+            path: claim.path as string,
+            ...(claim.line !== undefined ? {line: claim.line} : {}),
+            thread_id: match.thread_id,
+        });
+    }
+    return {kept, suppressed};
+};
+
 const mergeable = (a: Claim, b: Claim): boolean =>
     a.source !== b.source &&
     a.path !== undefined &&

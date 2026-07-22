@@ -1,6 +1,6 @@
 import {describe, it, expect} from "vitest";
 
-import {dedupeClaims} from "./dedup";
+import {dedupeClaims, suppressOpenThreadDuplicates} from "./dedup";
 import type {Claim} from "./dispatch-contracts";
 
 /**
@@ -176,5 +176,96 @@ describe("dedupeClaims", () => {
         const {claims, merges} = dedupeClaims([anchored, prLevel]);
         expect(claims).toHaveLength(2);
         expect(merges).toEqual([]);
+    });
+});
+
+describe("suppressOpenThreadDuplicates (trial suggestion g)", () => {
+    const openThread = (over: Record<string, unknown> = {}) => ({
+        thread_id: "T1",
+        path: "services/ai-guide/memory/expiration.go",
+        body: [
+            "**issue (blocking):** No test exercises the deletion path: TestExpiration only asserts that expired keys are identified, so a regression that identifies but never deletes expired memories stays green.",
+            "",
+            "> **Rule:** New behavior ships with a test that fails when the behavior breaks.",
+            "",
+            "```suggestion",
+            "func TestExpirationDeletes(t *testing.T) {",
+            "```",
+        ].join("\n"),
+        ...over,
+    });
+
+    it("suppresses a same-defect re-flag on the same path at a distant line", () => {
+        const reflag = claim({
+            id: "correctness-reviewer-2",
+            source: "correctness-reviewer",
+            line: 42,
+            label: "todo (blocking)",
+            subject:
+                "Missing deletion test: the expiration path has no test covering the delete.",
+            discussion:
+                "No test exercises the deletion path; TestExpiration asserts expired keys are identified but a regression that never deletes expired memories stays green.",
+            failure_scenario:
+                "A regression that identifies expired memories but skips the deletion is not caught by TestExpiration and ships green.",
+        });
+        const {kept, suppressed} = suppressOpenThreadDuplicates(
+            [reflag],
+            [openThread()],
+        );
+        expect(kept).toEqual([]);
+        expect(suppressed).toEqual([
+            {
+                id: "correctness-reviewer-2",
+                source: "correctness-reviewer",
+                label: "todo (blocking)",
+                path: "services/ai-guide/memory/expiration.go",
+                line: 42,
+                thread_id: "T1",
+            },
+        ]);
+    });
+
+    it("keeps a distinct defect on the same path", () => {
+        const distinct = claim({
+            id: "correctness-reviewer-3",
+            source: "correctness-reviewer",
+            subject:
+                "AddDate(0, -MemoryTTLDays, 0) subtracts 180 months, not 180 days.",
+            discussion:
+                "Go's time.Time.AddDate signature is (years, months, days), so the cutoff computes to now minus 15 years and nothing ever expires.",
+            failure_scenario:
+                "created_at < cutoff matches nothing and expiredKeys is always empty.",
+        });
+        const {kept, suppressed} = suppressOpenThreadDuplicates(
+            [distinct],
+            [openThread()],
+        );
+        expect(kept).toHaveLength(1);
+        expect(suppressed).toEqual([]);
+    });
+
+    it("never matches across paths or without an anchor, and is identity without threads", () => {
+        const reflag = claim({
+            id: "c",
+            source: "correctness-reviewer",
+            subject: "No test exercises the deletion path.",
+            discussion:
+                "No test exercises the deletion path; TestExpiration asserts expired keys are identified but a regression that never deletes expired memories stays green.",
+            failure_scenario:
+                "A regression that identifies expired memories but skips the deletion stays green.",
+        });
+        expect(
+            suppressOpenThreadDuplicates(
+                [claim({...reflag, path: undefined, line: undefined})],
+                [openThread()],
+            ).suppressed,
+        ).toEqual([]);
+        expect(
+            suppressOpenThreadDuplicates(
+                [reflag],
+                [openThread({path: "other/file.go"})],
+            ).suppressed,
+        ).toEqual([]);
+        expect(suppressOpenThreadDuplicates([reflag], []).kept).toHaveLength(1);
     });
 });

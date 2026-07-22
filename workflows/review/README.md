@@ -215,18 +215,28 @@ re-review scoped
   deterministic dispatcher (`lib/dispatch.ts`): the orchestrator invokes one
   CLI that runs triage, the reviewer fan-out (roster, budget cap, and planned
   sheds computed from `routing.json`), the provenance gate, the scope filter,
-  and claim validation as code, inside the same firewall sandbox (the
-  api-proxy meters and caps script-spawned sub-agents exactly like
-  Task-spawned ones). In scripted mode Steps 4-6 are code too: the submission
-  CLI (`lib/submission.ts`) computes the verdict, renders the comments and
+  cross-source dedup, open-thread suppression (a candidate describing a
+  defect an open bot thread already tracks posts no duplicate; a suppressed
+  blocking candidate still floors the verdict), and claim validation as
+  code, inside the same firewall sandbox (the api-proxy meters and caps
+  script-spawned sub-agents exactly like Task-spawned ones). Each sub-agent
+  delivers its result through an in-process `submit_result` MCP tool whose
+  input is validated against the agent's exact output contract at the tool
+  boundary (`lib/dispatch-runner.ts`), so a drifted shape is corrected
+  in-session instead of voiding the dimension; free-text finals remain the
+  fallback. In scripted mode Steps 4-6 are code too: the submission CLI
+  (`lib/submission.ts`) computes the verdict, renders the comments and
   the full review body, and stages `submission-plan.json`; the orchestrator
   emits safe outputs that must match the plan (the gate blocks any
   deviation), which reduces its model role to typing MCP calls the plan
-  dictates. The safe-output emission itself is the one seam only an upstream
-  gh-aw change could remove (the queue's credentials never enter the
-  sandbox). Scripted mode is the production probe of the
-  deterministic-orchestrator migration and is live-trial-gated; an unknown
-  mode degrades to `task` with a warning.
+  dictates. Step 9's cache record is code as well (`lib/cache-record.ts`,
+  invoked once after the emission): the fingerprint-carrier fields are
+  copied verbatim from staged files and corroborated against the safe-output
+  queue, never serialized from the model's memory. The safe-output emission
+  itself is the one seam only an upstream gh-aw change could remove (the
+  queue's credentials never enter the sandbox). Scripted mode is the
+  production probe of the deterministic-orchestrator migration and is
+  live-trial-gated; an unknown mode degrades to `task` with a warning.
 
 Glob semantics are a practical subset of gitignore/CODEOWNERS: `**` crosses
 directories, `*` and `?` stay within a segment, a trailing `/` matches everything

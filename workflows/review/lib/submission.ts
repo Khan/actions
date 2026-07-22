@@ -37,8 +37,9 @@
  * under review.
  */
 
+import {computeRisksPatternsKey, RISKS_PATTERNS_KEY_PATH} from "./cache-record";
 import type {Claim} from "./dispatch-contracts";
-import {renderReviewBody} from "./render-comment";
+import {isBlockingLabel, renderReviewBody} from "./render-comment";
 import {runRereviewCli, type RereviewCliFs} from "./rereview";
 import {
     findLatestStamp,
@@ -195,6 +196,10 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
               noteLines?: unknown;
               reconciliation?: {resolve?: unknown};
               depth?: unknown;
+              threadSuppressions?: unknown;
+              riskFiles?: unknown;
+              patterns?: unknown;
+              excludedFiles?: unknown;
           }
         | undefined;
     if (dispatch === undefined) {
@@ -211,6 +216,29 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
           )
         : [];
     const depth = typeof dispatch.depth === "string" ? dispatch.depth : "full";
+
+    // Stage the code-computed risks/patterns signature (trial suggestion b):
+    // Step 7 compares THIS string against cache memory's `risksPatternsKey`
+    // instead of composing its own, and the deterministic cache writer
+    // (cache-record.ts) records the same string when the guidance comment
+    // queues, so one code-owned format sits on both sides of the repost
+    // decision.
+    // Reduced depths compute no triage or risk data, so nothing is staged
+    // there (the existing comment stands and the key carries forward).
+    if (depth === "full" || depth === "scoped") {
+        const routing = readJson(fs, `${REVIEW_DIR}/routing.json`) as
+            | {teams?: {owners?: unknown}}
+            | undefined;
+        fs.writeFileSync(
+            RISKS_PATTERNS_KEY_PATH,
+            computeRisksPatternsKey({
+                riskFiles: dispatch.riskFiles,
+                patterns: dispatch.patterns,
+                excludedFiles: dispatch.excludedFiles,
+                owners: routing?.teams?.owners,
+            }),
+        );
+    }
 
     // The accountability section (renders and stages rereview.json too).
     const rereview = runRereviewCli(fs);
@@ -256,6 +284,23 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
         }
     }
 
+    // A blocking candidate the dispatcher suppressed as a duplicate of a
+    // still-open bot thread (trial suggestion g) blocks like a fresh one:
+    // the reviewer re-confirmed the defect, and the open thread is the
+    // actionable feedback. Without this floor, suppression could flip the
+    // verdict to APPROVE over an unfixed blocking objection. (A thread the
+    // reduced-depth floor above already counted may add one more here; the
+    // verdict is the same either way, only the reason count differs.)
+    const suppressedBlocking = (
+        Array.isArray(dispatch.threadSuppressions)
+            ? dispatch.threadSuppressions
+            : []
+    ).filter(
+        (entry) =>
+            typeof (entry as {label?: unknown}).label === "string" &&
+            isBlockingLabel((entry as {label: string}).label),
+    ).length;
+
     const verdict = computeVerdict({
         postedLabels: claims.map((claim) => claim.label),
         dimensions: {
@@ -263,7 +308,7 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
             skillSeverity: "assessed",
             patternTriage: "assessed",
         },
-        keptBlockingCount: keptBlockingFloor,
+        keptBlockingCount: keptBlockingFloor + suppressedBlocking,
     });
     // With every dimension reported assessed (the dispatcher's unavailable
     // dimensions surface as note lines instead), the two-state Step 4 rule
