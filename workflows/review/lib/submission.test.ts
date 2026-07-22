@@ -428,6 +428,48 @@ describe("the gate's plan-match rule (slice 4)", () => {
         expect(result.violations).toEqual([]);
     });
 
+    it("tolerates URL/scheme redaction and template-delimiter escaping (v0.81.6 sanitizer audit)", () => {
+        // The deployed URL policy is allowed-only and runs inside code
+        // regions too: a cited non-allowlisted domain (MDN, StackOverflow)
+        // comes back "(host/redacted)", a blocked scheme "(redacted)", and
+        // unbackticked template delimiters gain escaping backslashes; none
+        // of these may false-block a byte-faithful transcription.
+        const cited = claim({
+            discussion:
+                "See https://developer.mozilla.org/en-US/docs/Web/API/AbortController for the contract; never emit javascript:alert(1) links, and ${{ github.token }} must stay out of run logs.",
+        });
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged({
+                    depth: "full",
+                    claims: [cited],
+                    reconciliation: {resolve: [], keep: []},
+                }),
+            ),
+        );
+        const sanitized = plan.comments.map((comment) => ({
+            ...comment,
+            body: comment.body
+                .replace(
+                    /https:\/\/developer\.mozilla\.org\S+/g,
+                    "(developer.mozilla.org/redacted)",
+                )
+                .replace(/javascript:\S+/g, "(redacted)")
+                .replace(/\$\{\{/g, "\\$\\{\\{"),
+        }));
+        expect(JSON.stringify(sanitized)).not.toBe(
+            JSON.stringify(plan.comments),
+        );
+        const result = evaluateDispatchConformance({
+            items: queuedFromPlan({...plan, comments: sanitized}),
+            plan: {depth: "full"},
+            routing: {enabledReviewers: [], lensesToSpawn: []},
+            outFiles,
+            submissionPlan: plan,
+        });
+        expect(result.violations).toEqual([]);
+    });
+
     it("blocks a spliced body, a flipped event, and a dropped comment", () => {
         const plan = runSubmissionCli(plannedFs());
         const splicedBody = evaluateDispatchConformance({

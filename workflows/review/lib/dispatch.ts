@@ -581,9 +581,18 @@ export const runDispatch = async (
             patterns = parsed["patterns"];
             const raw = parsed["reviewFiles"];
             if (Array.isArray(raw)) {
-                reviewFiles = raw.filter(
+                const strings = raw.filter(
                     (v): v is string => typeof v === "string",
                 );
+                // A non-empty array of non-strings is malformed triage
+                // output, not an empty review: the gate's empty-reviewFiles
+                // waiver reads the RAW staged array, so treating it as
+                // empty here would dispatch no finders and render no
+                // disclosure while rule 1 still demands the correctness
+                // pass (a guaranteed false block). Fall through to the
+                // triage-unavailable path instead (review everything).
+                reviewFiles =
+                    strings.length === 0 && raw.length > 0 ? null : strings;
             }
         }
         const diffPath =
@@ -938,10 +947,16 @@ export const runDispatch = async (
         perAgent,
         totalUsd: perAgent.reduce((sum, agent) => sum + agent.usd, 0),
     };
-    fs.writeFileSync(
-        `${REVIEW_DIR}/dispatch-result.json`,
-        JSON.stringify(result, null, 2),
-    );
+    const serialized = JSON.stringify(result, null, 2);
+    fs.writeFileSync(`${REVIEW_DIR}/dispatch-result.json`, serialized);
+    // Also staged under out/ so the Step 9 artifact upload carries it: run
+    // 29943085279's post-hoc could not tell whether the correctness output
+    // arrived structured or via the text fallback because perAgent
+    // (structuredFinal, retried, per-agent usd), merges, and
+    // threadSuppressions lived only in the review dir, which the artifact
+    // does not include. The dispatch gate tolerates non-agent out/ files
+    // (rereview-plan.json already stages there).
+    writeOut("dispatch-result", serialized);
     return result;
 };
 

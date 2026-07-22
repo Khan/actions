@@ -8,6 +8,9 @@ import type {Claim} from "./dispatch-contracts";
  * fixtures are abridged from trial run 29897276810's real outputs, where the
  * AddDate months-vs-days defect posted four times; the non-duplicate
  * fixtures are that run's distinct defects on the same or adjacent lines.
+ * The distant-line fixtures are trial run 29943085279's real claims, where
+ * the missing-deletion-test defect posted four times because the old
+ * two-line window blocked every same-path merge.
  */
 
 const claim = (over: Partial<Claim> & {id: string; source: string}): Claim => ({
@@ -135,15 +138,76 @@ describe("dedupeClaims", () => {
         expect(merges).toEqual([]);
     });
 
-    it("never merges across the two-line window or across paths", () => {
+    it("merges same-defect copies at distant lines on the same path, never across paths", () => {
+        // The two-line window this test used to pin is gone: run
+        // 29943085279's missing-deletion-test copies sat 43 lines apart in
+        // one file and the window kept all four separate.
         const [a, b] = addDateClaims();
-        const {claims: farApart} = dedupeClaims([a, {...b, line: 43}]);
-        expect(farApart).toHaveLength(2);
+        const {claims: distantLines} = dedupeClaims([a, {...b, line: 43}]);
+        expect(distantLines).toHaveLength(1);
         const {claims: otherPath} = dedupeClaims([
             a,
             {...b, path: "services/ai-guide/memory/memory.go"},
         ]);
         expect(otherPath).toHaveLength(2);
+    });
+
+    it("never drops a chain-only member: a bridging claim merges, the distinct defect it links stays", () => {
+        // A bundles-two-defects finding (missing test AND unbounded read)
+        // clears the floor against each half separately while the halves do
+        // not clear it against each other; union-find alone would collapse
+        // all three and silently drop the unbounded-read finding.
+        const missingTest = claim({
+            id: "correctness-reviewer-1",
+            source: "correctness-reviewer",
+            line: 15,
+            subject:
+                "No test creates a memory older than the retention window and asserts it gets deleted, so the deletion path is never exercised.",
+            failure_scenario:
+                "A regression that turns expiration into a no-op ships with green tests because no test creates a stale memory and asserts it is deleted from the datastore.",
+        });
+        const bridge = claim({
+            id: "test-adequacy-1",
+            source: "test-adequacy",
+            line: 40,
+            label: "todo (blocking)",
+            subject:
+                "No test creates a stale memory and asserts it is deleted, and no test bounds the query: the deletion path and the unbounded read both ship untested.",
+            failure_scenario:
+                "A stale memory is never deleted in any test, and the unbounded query loads every stale memory into one slice with no Limit, so both regressions ship green while the read is sized by user data.",
+        });
+        const unboundedRead = claim({
+            id: "correctness-reviewer-2",
+            source: "correctness-reviewer",
+            line: 62,
+            subject:
+                "The expiration query has no Limit and loads every stale memory into one slice, so the read is sized by unbounded user data.",
+            failure_scenario:
+                "A user with a large stale backlog makes the query load every stale memory into memory at once with no Limit, so the unbounded read grows with user data until the instance OOMs.",
+        });
+        const {claims, merges} = dedupeClaims([
+            missingTest,
+            bridge,
+            unboundedRead,
+        ]);
+        expect(claims.map((c) => c.id)).toEqual([
+            "correctness-reviewer-1",
+            "correctness-reviewer-2",
+        ]);
+        expect(merges).toEqual([
+            {
+                survivor: "correctness-reviewer-1",
+                merged: [
+                    {
+                        id: "test-adequacy-1",
+                        source: "test-adequacy",
+                        label: "todo (blocking)",
+                    },
+                ],
+                path: "services/ai-guide/memory/expiration.go",
+                line: 15,
+            },
+        ]);
     });
 
     it("adopts a merged duplicate's suggestion and author dispute when the survivor lacks them", () => {
@@ -163,6 +227,112 @@ describe("dedupeClaims", () => {
         expect(claims[0].id).toBe(survivorToBe.id);
         expect(claims[0].suggestion).toBe(donor.suggestion);
         expect(claims[0].author_dispute).toBe(donor.author_dispute);
+    });
+
+    it("merges the run-29943085279 missing-deletion-test todo and question 43 lines apart; survivor is the blocking copy", () => {
+        // Real claim texts from that run's claims.json: the correctness todo
+        // at expiration_test.go:15 and the skill-auditor out-of-lane question
+        // at :58 describe one defect and posted as two comments.
+        const todo = claim({
+            id: "correctness-reviewer-3",
+            source: "correctness-reviewer",
+            path: "services/ai-guide/memory/expiration_test.go",
+            line: 15,
+            label: "todo (blocking)",
+            subject:
+                "No test creates a memory older than the retention window and asserts it gets deleted; the core added behavior (expiration actually expiring something) is untested, and both existing tests pass even when ExpireStale is a total no-op.",
+            failure_scenario:
+                "The TTL arithmetic bug (or any future regression that quietly turns expiration into a no-op, e.g. a filter-field typo) ships with green tests, and memories never expire in production with nothing to flag it.",
+        });
+        const question = claim({
+            id: "skill-auditor-ool-2",
+            source: "skill-auditor (out-of-lane)",
+            path: "services/ai-guide/memory/expiration_test.go",
+            line: 58,
+            label: "question (non-blocking)",
+            subject:
+                "Both tests only exercise current memories (TestExpirationKeepsCurrentMemories) or an empty user (TestExpirationEmptyUser); neither creates a memory older than the retention window and asserts it is deleted.",
+            failure_scenario:
+                "Because no test stores a stale memory and checks it is removed, an incorrect cutoff computation (e.g. the AddDate months-vs-days error) passes CI green, so a retention feature that deletes nothing ships undetected.",
+        });
+        const {claims, merges} = dedupeClaims([todo, question]);
+        expect(claims).toHaveLength(1);
+        expect(claims[0].id).toBe("correctness-reviewer-3");
+        expect(claims[0].label).toBe("todo (blocking)");
+        expect(claims[0].discussion).toContain(
+            "Also flagged by skill-auditor (out-of-lane).",
+        );
+        expect(merges).toEqual([
+            {
+                survivor: "correctness-reviewer-3",
+                merged: [
+                    {
+                        id: "skill-auditor-ool-2",
+                        source: "skill-auditor (out-of-lane)",
+                        label: "question (non-blocking)",
+                    },
+                ],
+                path: "services/ai-guide/memory/expiration_test.go",
+                line: 15,
+            },
+        ]);
+    });
+
+    it("keeps the run's test-adequacy todo and first-principles thought apart (same underlying defect, but below the similarity floor)", () => {
+        // Real texts from expiration.go:62 and :38: replayed against the
+        // calibrated floor they score below it, so this pair stays two
+        // comments rather than forcing a looser floor (a false merge
+        // silently drops a distinct finding; a missed merge only costs a
+        // duplicate).
+        const todo = claim({
+            id: "test-adequacy-1",
+            source: "test-adequacy",
+            line: 62,
+            label: "todo (blocking)",
+            subject:
+                "Positive expiration path (stale memory actually deleted) is untested.",
+            failure_scenario:
+                "No test creates a memory older than the retention window, so the DeleteMulti expiration path never runs; if the cutoff sign, filter field, or comparison were wrong (or expiration silently deleted nothing), stale memories would linger forever and every existing test would still pass since they only assert current memories survive.",
+        });
+        const thought = claim({
+            id: "first-principles-1",
+            source: "first-principles",
+            line: 38,
+            label: "thought (non-blocking)",
+            subject:
+                "The change's one central behavior (old memories get deleted) is never exercised, and the cutoff bug proves it.",
+            failure_scenario:
+                "The retention window is effectively 15 years, not 180 days; AddDate(0, -MemoryTTLDays, 0) puts the day count in the months slot, so the feature ships doing nothing, and the tests cannot notice because no test ever creates a stale memory and asserts it is deleted.",
+        });
+        const {claims, merges} = dedupeClaims([todo, thought]);
+        expect(claims).toHaveLength(2);
+        expect(merges).toEqual([]);
+    });
+
+    it("never merges the AddDate issue with the untested-behavior thought on the very same line", () => {
+        // The false-merge guard for dropping the window: run 29943085279's
+        // correctness AddDate issue and first-principles thought both anchor
+        // at expiration.go:38 but are distinct findings, and both posted.
+        const issue = claim({
+            id: "correctness-reviewer-1",
+            source: "correctness-reviewer",
+            subject:
+                "AddDate(0, -MemoryTTLDays, 0) subtracts 180 months (15 years), not 180 days; the retention cutoff is ~2011, so no memory is ever expired and the entire feature is a silent no-op.",
+            failure_scenario:
+                "A user has memories written 181+ days ago. They save a new memory; ExpireStale runs, computes cutoff = now minus 180 months, finds no memory older than that, deletes nothing. Stale context keeps surfacing into Khanmigo conversations forever: exactly the problem the PR set out to fix.",
+        });
+        const thought = claim({
+            id: "first-principles-1",
+            source: "first-principles",
+            label: "thought (non-blocking)",
+            subject:
+                "The change's one central behavior (old memories get deleted) is never exercised, and the cutoff bug proves it.",
+            failure_scenario:
+                "The retention window is effectively 15 years, not 180 days; AddDate(0, -MemoryTTLDays, 0) puts the day count in the months slot, so the feature ships doing nothing, and the tests cannot notice because no test ever creates a stale memory and asserts it is deleted.",
+        });
+        const {claims, merges} = dedupeClaims([issue, thought]);
+        expect(claims).toHaveLength(2);
+        expect(merges).toEqual([]);
     });
 
     it("passes PR-level (non-anchored) claims through untouched", () => {

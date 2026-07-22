@@ -95,6 +95,66 @@ describe("label-contract enforcement (run 29897276810)", () => {
         expect(candidates[0].finding.failure_scenario).toContain("AddDate");
     });
 
+    it("salvages suggested_patch as the one-click fix (run 29943085279's drift shape)", () => {
+        // That run's correctness pass emitted the ReportFindings-style keys
+        // (id, label, severity, category, anchor, summary, discussion,
+        // failure_scenario, suggested_patch); the label was valid so the
+        // finding salvaged, but the AddDate fix under suggested_patch was
+        // dropped and the posted comment carried no suggestion fence.
+        const {candidates} = parseFinderOutput(
+            "correctness-reviewer",
+            JSON.stringify({
+                findings: [
+                    {
+                        id: "ttl-months-not-days",
+                        label: "issue (blocking)",
+                        severity: "blocking",
+                        category: "correctness",
+                        anchor: {
+                            path: "services/ai-guide/memory/expiration.go",
+                            line: 38,
+                        },
+                        summary:
+                            "AddDate(0, -MemoryTTLDays, 0) subtracts 180 months (15 years), not 180 days; the retention cutoff is ~2011, so no memory is ever expired and the entire feature is a silent no-op.",
+                        discussion:
+                            "Go's time.Time.AddDate signature is AddDate(years, months, days), so the day count lands in the months slot.",
+                        failure_scenario:
+                            "A user has memories written 181+ days ago; ExpireStale computes cutoff = now minus 180 months, finds no memory older than that, deletes nothing.",
+                        suggested_patch:
+                            "cutoff := ctx.Time().Now().AddDate(0, 0, -MemoryTTLDays)",
+                    },
+                ],
+            }),
+            new Set(),
+        );
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0].finding.suggested_patch).toBe(
+            "cutoff := ctx.Time().Now().AddDate(0, 0, -MemoryTTLDays)",
+        );
+    });
+
+    it("prefers suggestion over suggested_patch when a finding carries both", () => {
+        const {candidates} = parseFinderOutput(
+            "correctness-reviewer",
+            JSON.stringify({
+                findings: [
+                    {
+                        path: "a.go",
+                        line: 38,
+                        label: "issue (blocking)",
+                        subject: "s",
+                        discussion: "d",
+                        failure_scenario: "f",
+                        suggestion: "the contract key",
+                        suggested_patch: "the drift key",
+                    },
+                ],
+            }),
+            new Set(),
+        );
+        expect(candidates[0].finding.suggested_patch).toBe("the contract key");
+    });
+
     it("rejects a finding whose label is missing or unknown (the run's ReportFindings shape)", () => {
         const reportFindingsShape = JSON.stringify({
             findings: [
