@@ -74,9 +74,10 @@
  * files; no model call, no clock, no prose about the code under review.
  */
 
+import {extractJsonValue} from "./agent-json";
 import {isBlockingLabel} from "./render-comment";
 import {parseLeadingLabel} from "./rereview";
-import {findLatestStamp} from "./rereview-mode";
+import {findLatestStamp, stampFromCacheMemory} from "./rereview-mode";
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -142,6 +143,13 @@ export type DispatchGateInput = {
     outFiles: Record<string, string>;
     /** Parsed `prior-reviews.json` (the flip rule's stamp source). */
     priorReviews?: unknown;
+    /**
+     * Parsed cache-memory record (`pr-<n>.json`), the fallback stamp
+     * carrier: posted bodies never keep their stamp (the ingest sanitizer
+     * strips HTML comments), so the flip rule reads the same carrier the
+     * plan CLI anchored on.
+     */
+    cacheMemory?: unknown;
     /** Parsed `rereview.json` (the accountability result; `keptBlockingCount`). */
     rereviewAccounting?: unknown;
     /** Parsed `submission-plan.json` (scripted mode; slice 4). */
@@ -171,6 +179,16 @@ const parseJson = (text: string): unknown => {
         return undefined;
     }
 };
+
+/**
+ * Sub-agent OUT-FILE parses use the shared lenient extraction
+ * (`agent-json.ts`), the same rule the dispatcher applies: a prose-prefixed
+ * or fence-wrapped payload is an output that exists, and the gate must not
+ * call unparseable what the dispatcher parsed (run 29893634730 blocked a
+ * conforming submission exactly that way). Code-written inputs (the agent
+ * output queue, staged routing) stay on strict {@link parseJson}.
+ */
+const parseAgentOutFile = (text: string): unknown => extractJsonValue(text);
 
 /**
  * Lowercase and collapse the separator variants (`-`, `_`, `/`) note authors
@@ -257,7 +275,9 @@ const triageEmptiedReview = (outFiles: Record<string, string>): boolean => {
     if (raw === undefined) {
         return false;
     }
-    const parsed = parseJson(raw) as {reviewFiles?: unknown} | undefined;
+    const parsed = parseAgentOutFile(raw) as
+        | {reviewFiles?: unknown}
+        | undefined;
     return (
         parsed !== undefined &&
         Array.isArray(parsed.reviewFiles) &&
@@ -312,7 +332,7 @@ export const evaluateDispatchConformance = (
                     `(depth ${depth} dispatches the correctness pass; even a failed dispatch stages an error note)`,
             });
         } else if (
-            parseJson(raw) === undefined &&
+            parseAgentOutFile(raw) === undefined &&
             !disclosesSkippedDimension(body, "correctness-reviewer")
         ) {
             violations.push({
@@ -330,7 +350,8 @@ export const evaluateDispatchConformance = (
     // hard ceiling, and never silently).
     if (commentCount > 0) {
         const raw = input.outFiles[VALIDATOR_OUT];
-        const validated = raw !== undefined && parseJson(raw) !== undefined;
+        const validated =
+            raw !== undefined && parseAgentOutFile(raw) !== undefined;
         if (!validated && !disclosesSkippedDimension(body, "claim-validator")) {
             violations.push({
                 code: "validator-missing-with-findings",
@@ -405,7 +426,7 @@ export const evaluateDispatchConformance = (
         verdictEvent === "APPROVE" &&
         (depth === "flip-gated" || depth === "fast")
     ) {
-        const priorStamp = Array.isArray(input.priorReviews)
+        const bodyStamp = Array.isArray(input.priorReviews)
             ? findLatestStamp(
                   // Defensive over agent-writable staged input, like every
                   // sibling parse in this file: a null or non-object element
@@ -419,6 +440,7 @@ export const evaluateDispatchConformance = (
                   ),
               )
             : null;
+        const priorStamp = bodyStamp ?? stampFromCacheMemory(input.cacheMemory);
         if (priorStamp !== null && priorStamp.verdict === "REQUEST_CHANGES") {
             const kept = (
                 input.rereviewAccounting as
@@ -452,9 +474,9 @@ export const evaluateDispatchConformance = (
             typeof item["thread_id"] === "string" ? item["thread_id"] : "",
         );
     if (queuedResolves.length > 0) {
-        const reconciler = parseJson(input.outFiles[RECONCILER_OUT] ?? "") as
-            | {resolve?: unknown}
-            | undefined;
+        const reconciler = parseAgentOutFile(
+            input.outFiles[RECONCILER_OUT] ?? "",
+        ) as {resolve?: unknown} | undefined;
         const decided = new Set(
             Array.isArray(reconciler?.resolve)
                 ? reconciler.resolve.filter(
@@ -738,6 +760,16 @@ export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
         fs,
         `${REVIEW_DIR}/submission-plan.json`,
     );
+    const prContext = readJsonIfPresent(fs, `${REVIEW_DIR}/pr-context.json`) as
+        | {number?: unknown}
+        | undefined;
+    const cacheMemory =
+        typeof prContext?.number === "number"
+            ? readJsonIfPresent(
+                  fs,
+                  `/tmp/gh-aw/cache-memory/pr-${prContext.number}.json`,
+              )
+            : undefined;
 
     const evaluation = evaluateDispatchConformance({
         items,
@@ -747,6 +779,7 @@ export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
         priorReviews,
         rereviewAccounting,
         submissionPlan,
+        cacheMemory,
     });
     evaluation.notes.unshift(...notes);
 

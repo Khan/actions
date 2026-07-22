@@ -12,6 +12,7 @@
  */
 
 import {validateFinding, type Anchor, type Finding} from "./finding-schema";
+import {extractJsonObject} from "./agent-json";
 import {isBlockingLabel, labelForFinding} from "./render-comment";
 
 /** Production's confidence default for label-shape reviewers (review.md). */
@@ -24,15 +25,17 @@ const LABEL_SHAPE_CONFIDENCE = 0.7;
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Extract the JSON object from an agent's final text (the eval's rule). */
+/**
+ * Extract the JSON object from an agent's final text, via the shared
+ * lenient extraction (`agent-json.ts`) the conformance gate also applies:
+ * strict parse, then fenced blocks, then balanced spans. The old
+ * first-brace-to-last-brace regex broke on any prose brace before or after
+ * the payload.
+ */
 export const parseJsonObject = (output: string): Record<string, unknown> => {
-    const match = output.match(/\{[\s\S]*\}/);
-    if (!match) {
-        throw new Error("output carries no JSON object");
-    }
-    const parsed: unknown = JSON.parse(match[0]);
-    if (!isRecord(parsed)) {
-        throw new Error("output JSON is not an object");
+    const parsed = extractJsonObject(output);
+    if (parsed === undefined) {
+        throw new Error("output carries no parseable JSON object");
     }
     return parsed;
 };
@@ -167,10 +170,24 @@ export const parseFinderOutput = (
 ): {candidates: Candidate[]; riskFiles?: unknown; hunts?: unknown} => {
     const parsed = parseJsonObject(output);
     const rawFindings = parsed["findings"];
-    if (!Array.isArray(rawFindings)) {
+    // A finder with nothing to report routinely omits the empty findings
+    // array (production run 29893634730's correctness-reviewer returned
+    // only its `files` risk block, and the whole dimension was voided).
+    // Absence is accepted as empty when another contract key proves the
+    // object is the contract payload; anything else is malformed.
+    const looksLikeContract =
+        "files" in parsed ||
+        "hunts" in parsed ||
+        "out_of_lane_observations" in parsed;
+    const findings = Array.isArray(rawFindings)
+        ? rawFindings
+        : rawFindings === undefined && looksLikeContract
+        ? []
+        : null;
+    if (findings === null) {
         throw new Error("output JSON has no findings array");
     }
-    const candidates = rawFindings.map((raw, index): Candidate => {
+    const candidates = findings.map((raw, index): Candidate => {
         if (!isLens) {
             return fromLabelShape(
                 agentName,
