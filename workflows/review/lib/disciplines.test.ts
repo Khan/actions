@@ -1,4 +1,3 @@
-import {execFileSync} from "node:child_process";
 import {readFileSync} from "node:fs";
 import {join} from "node:path";
 
@@ -15,14 +14,18 @@ import {SPECIALIST_LENSES} from "./router.ts";
  * skills, the schema-rules trailer, ...) were stamped verbatim into every one
  * of the eleven specialist-lens definitions and paid on every dispatch. The
  * shared text now lives once, in the marker-delimited REVIEW DISCIPLINES
- * section of review.md's main body, which Step 1 stages to
- * `/tmp/gh-aw/review/disciplines.md` with a mechanical `sed` range extraction.
+ * section of review.md's main body. Since slice 3 (#247) the extraction is
+ * code, not prompt: the pre-agent staging step (`stage-pr.ts`) extracts the
+ * marker-delimited section from the rendered prompt and verifies the schema
+ * heading before writing `/tmp/gh-aw/review/disciplines.md`; the prompt keeps
+ * only the byte-for-byte heredoc fallback for a failed staging.
  *
- * These tests pin the contract: the section exists and extracts cleanly (the
- * same line-range semantics the sed command uses), it carries every section
- * the lens pointer names, each lens definition points at the staged file and
- * no longer carries its own copy, and the label-shape reviewers (whose
- * variants differ materially) still carry theirs.
+ * These tests pin the contract: the section exists and extracts cleanly
+ * under the same whole-line marker semantics the staging code uses (verified
+ * against stage-pr's real extraction over the real review.md), it carries
+ * every section the lens pointer names, each lens definition points at the
+ * staged file and no longer carries its own copy, and the label-shape
+ * reviewers (whose variants differ materially) still carry theirs.
  */
 
 const reviewMdPath = join(__dirname, "..", "review.md");
@@ -32,17 +35,11 @@ const BEGIN = "<!-- BEGIN REVIEW DISCIPLINES -->";
 const END = "<!-- END REVIEW DISCIPLINES -->";
 
 /**
- * The exact sed range expression review.md Step 1 runs (whole-line anchored).
- * The anchors are load-bearing: without `^...$`, the range would open at the
- * first backticked *mention* of the marker in the prose, ~1075 lines early.
- */
-const SED_RANGE = `/^${BEGIN}$/,/^${END}$/p`;
-
-/**
- * The sed range extraction from review.md Step 1, replicated line-for-line.
- * The Step 1 command anchors both patterns to whole lines (`^...$`), so only
- * the marker lines themselves open/close the range — never prose that mentions
- * a marker, and never the sed command's own text.
+ * The old Step 1 sed range semantics, replicated line-for-line: only whole
+ * marker LINES open/close the range — never prose that mentions a marker.
+ * The staging code (stage-pr.ts) uses `indexOf` over split lines, which is
+ * the same whole-line rule; the parity test below proves it against the
+ * real file.
  */
 const sedRangeExtract = (text: string): string => {
     const lines = text.split("\n");
@@ -114,26 +111,53 @@ describe("the shared disciplines section", () => {
         }
     });
 
-    it("is staged by Step 1 with the sed extraction and a fallback guard", () => {
-        expect(mainBody).toContain("$GH_AW_PROMPT");
+    it("is code-staged (pre-agent step) with the heredoc fallback retained", () => {
+        // The extraction instruction left the prompt with slice 3 (#247);
+        // what remains is the staged-path pointer and the byte-for-byte
+        // fallback for a failed staging.
         expect(mainBody).toContain("/tmp/gh-aw/review/disciplines.md");
-        expect(mainBody).toContain(
-            "grep -q '## Structured finding schema and hunts'",
-        );
+        expect(mainBody).toContain("byte-for-byte");
+        expect(mainBody).not.toContain("sed -n");
     });
 
-    it("extracts identically under real sed (not only the modeled replica)", () => {
-        // The replica above models the sed semantics; this runs the real
-        // thing, so a drift in the Step 1 command (say, dropped `^...$`
-        // anchors) fails here even if the model still passes. Pin the range
-        // expression to the one review.md actually documents, then run it
-        // against the real file.
-        expect(mainBody).toContain(`sed -n '${SED_RANGE}'`);
-        const staged = execFileSync("sed", ["-n", SED_RANGE, reviewMdPath], {
-            encoding: "utf8",
-        });
-        // sed prints each selected line with its newline; the replica joins
-        // without a trailing one.
+    it("extracts identically under stage-pr's real extraction (parity with the old sed)", async () => {
+        // Run the actual staging CLI over the real review.md as the rendered
+        // prompt: its output must equal the old sed range semantics, so the
+        // code extraction is a drop-in for what production ran before.
+        const {runStagePrCli} = await import("./stage-pr");
+        const files: Record<string, string> = {
+            "/tmp/gh-aw/aw-prompts/prompt.txt": reviewMd,
+        };
+        const fakeFs = {
+            readFileSync: (p: string) => {
+                if (!(p in files)) {
+                    throw new Error(`ENOENT: ${p}`);
+                }
+                return files[p];
+            },
+            writeFileSync: (p: string, data: string) => {
+                files[p] = data;
+            },
+            existsSync: (p: string) => p in files,
+            mkdirSync: () => {},
+        };
+        await runStagePrCli(
+            fakeFs,
+            (path: string) =>
+                Promise.resolve(
+                    path.endsWith("/files?per_page=100&page=1") ||
+                        path.endsWith("/reviews?per_page=100&page=1")
+                        ? []
+                        : {
+                              number: 1,
+                              title: "t",
+                              head: {sha: "abc123"},
+                              base: {ref: "main"},
+                          },
+                ),
+            {repo: "o/r", prNumber: 1, repoRoot: "/work"},
+        );
+        const staged = files["/tmp/gh-aw/review/disciplines.md"];
         expect(staged).toBe(`${sedRangeExtract(reviewMd)}\n`);
         expect(staged.startsWith(BEGIN)).toBe(true);
         for (const heading of DISCIPLINE_HEADINGS) {

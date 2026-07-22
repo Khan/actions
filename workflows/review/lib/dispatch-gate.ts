@@ -40,6 +40,16 @@
  *   3. Planned-but-undispatched reviewers must be disclosed: every name in
  *      `routing.json`'s `enabledReviewers`/`lensesToSpawn` with no `out/`
  *      file needs its "not assessed this run" note in the verdict body.
+ *   4. An APPROVE cannot carry a blocking inline comment (Step 4's verdict
+ *      is a mechanical function of the labels; slice 3).
+ *   5. The reduced-depth flip veto (Step 4): at flip-gated/fast depth over a
+ *      prior REQUEST_CHANGES stamp, APPROVE requires `rereview.json`'s
+ *      `keptBlockingCount` to be zero (slice 3; the #246 flip-gate
+ *      chokepoint).
+ *   6. Every queued thread resolution must be one the reconciler decided
+ *      (`out/thread-reconciler.json` `resolve`); the deficit direction is
+ *      reported as executed-vs-decided accounting, never blocked (slice 3;
+ *      the #244 ledger).
  *
  * Violation behavior: strip every posting/mutating item from the queue
  * (keeping the diagnostics and the `out/` artifact upload so the evidence
@@ -61,6 +71,9 @@
  */
 
 import {extractJsonValue} from "./agent-json";
+import {isBlockingLabel} from "./render-comment";
+import {parseLeadingLabel} from "./rereview";
+import {findLatestStamp, stampFromCacheMemory} from "./rereview-mode";
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -87,7 +100,10 @@ export type DispatchGateViolationCode =
     | "correctness-missing"
     | "correctness-unparseable-undisclosed"
     | "validator-missing-with-findings"
-    | "shed-undisclosed";
+    | "shed-undisclosed"
+    | "approve-with-blocking-comment"
+    | "flip-vetoed-kept-blocking"
+    | "resolve-not-decided";
 
 export type DispatchGateViolation = {
     /** Fixed-format code (never prose). */
@@ -120,6 +136,17 @@ export type DispatchGateInput = {
     routing: unknown;
     /** `out/` basename → raw file text, e.g. `correctness-reviewer.json`. */
     outFiles: Record<string, string>;
+    /** Parsed `prior-reviews.json` (the flip rule's stamp source). */
+    priorReviews?: unknown;
+    /**
+     * Parsed cache-memory record (`pr-<n>.json`), the fallback stamp
+     * carrier: posted bodies never keep their stamp (the ingest sanitizer
+     * strips HTML comments), so the flip rule reads the same carrier the
+     * plan CLI anchored on.
+     */
+    cacheMemory?: unknown;
+    /** Parsed `rereview.json` (the accountability result; `keptBlockingCount`). */
+    rereviewAccounting?: unknown;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -128,6 +155,8 @@ export type DispatchGateInput = {
 
 const SUBMIT_TYPE = "submit_pull_request_review";
 const COMMENT_TYPE = "create_pull_request_review_comment";
+const RESOLVE_TYPE = "resolve_pull_request_review_thread";
+const RECONCILER_OUT = "thread-reconciler.json";
 
 const CORRECTNESS_OUT = "correctness-reviewer.json";
 const VALIDATOR_OUT = "claim-validator.json";
@@ -358,6 +387,127 @@ export const evaluateDispatchConformance = (
         }
     }
 
+    // Rule 4: an APPROVE cannot carry a blocking inline comment (Step 4 is a
+    // mechanical function of the labels: a surviving validated blocking
+    // finding means REQUEST_CHANGES at every depth). The inverse direction is
+    // legitimate (a REQUEST_CHANGES may ride entirely on kept prior threads),
+    // so only the APPROVE direction is enforced.
+    if (verdictEvent === "APPROVE") {
+        for (const item of input.items) {
+            if (item.type !== COMMENT_TYPE || typeof item.body !== "string") {
+                continue;
+            }
+            const label = parseLeadingLabel(item.body);
+            if (label !== null && isBlockingLabel(label)) {
+                violations.push({
+                    code: "approve-with-blocking-comment",
+                    dimension: "verdict",
+                    detail:
+                        `APPROVE queued alongside an inline comment labeled "${label}" ` +
+                        `(a surviving blocking finding mechanically requires REQUEST_CHANGES)`,
+                });
+                break;
+            }
+        }
+    }
+
+    // Rule 5: the re-review flip veto (Step 4, reduced depths only): at
+    // flip-gated/fast depth, a prior REQUEST_CHANGES (read from the stamp,
+    // not the review state) may flip to APPROVE only when the code-rendered
+    // accountability result says every blocking thread was resolved.
+    if (
+        verdictEvent === "APPROVE" &&
+        (depth === "flip-gated" || depth === "fast")
+    ) {
+        const bodyStamp = Array.isArray(input.priorReviews)
+            ? findLatestStamp(
+                  // Defensive over agent-writable staged input, like every
+                  // sibling parse in this file: a null or non-object element
+                  // must not throw (a throw here escapes before the gate
+                  // decides and fail-opens ALL rules).
+                  input.priorReviews.filter(
+                      (review): review is {body: string} =>
+                          typeof review === "object" &&
+                          review !== null &&
+                          typeof (review as {body?: unknown}).body === "string",
+                  ),
+              )
+            : null;
+        const priorStamp = bodyStamp ?? stampFromCacheMemory(input.cacheMemory);
+        if (priorStamp !== null && priorStamp.verdict === "REQUEST_CHANGES") {
+            const kept = (
+                input.rereviewAccounting as
+                    | {keptBlockingCount?: unknown}
+                    | undefined
+            )?.keptBlockingCount;
+            if (typeof kept === "number" && kept > 0) {
+                violations.push({
+                    code: "flip-vetoed-kept-blocking",
+                    dimension: "verdict",
+                    detail:
+                        `APPROVE queued at ${depth} depth over a prior REQUEST_CHANGES stamp with ` +
+                        `${kept} kept blocking thread(s) (rereview.json keptBlockingCount); the flip rule requires zero`,
+                });
+            } else if (typeof kept !== "number") {
+                notes.push(
+                    "flip rule: rereview.json accounting not staged or unparseable (veto not evaluable; fail-open)",
+                );
+            }
+        }
+    }
+
+    // Rule 6: every queued thread resolution must be one the reconciler
+    // decided. Resolving a thread the reconciler said to keep (or resolving
+    // with no reconciler run at all) is the freelancing move this gate
+    // exists for. The deficit direction (decided but not queued) is
+    // accounting, not a violation: it is reported as a note.
+    const queuedResolves = input.items
+        .filter((item) => item.type === RESOLVE_TYPE)
+        .map((item) =>
+            typeof item["thread_id"] === "string" ? item["thread_id"] : "",
+        );
+    if (queuedResolves.length > 0) {
+        const reconciler = parseAgentOutFile(
+            input.outFiles[RECONCILER_OUT] ?? "",
+        ) as {resolve?: unknown} | undefined;
+        const decided = new Set(
+            Array.isArray(reconciler?.resolve)
+                ? reconciler.resolve.filter(
+                      (id): id is string => typeof id === "string",
+                  )
+                : [],
+        );
+        for (const threadId of queuedResolves) {
+            if (!decided.has(threadId)) {
+                violations.push({
+                    code: "resolve-not-decided",
+                    dimension: "thread-reconciler",
+                    detail:
+                        `thread resolution queued for "${
+                            threadId || "(missing thread_id)"
+                        }" but ` +
+                        `out/${RECONCILER_OUT} ${
+                            reconciler === undefined
+                                ? "is missing or unparseable"
+                                : "does not list it in resolve"
+                        }`,
+                });
+            }
+        }
+        const deficit = [...decided].filter(
+            (id) => !queuedResolves.includes(id),
+        );
+        if (deficit.length > 0) {
+            notes.push(
+                `executed-vs-decided: ${
+                    deficit.length
+                } reconciler-decided resolution(s) not queued (${deficit.join(
+                    ", ",
+                )})`,
+            );
+        }
+    }
+
     return {
         conformant: violations.length === 0,
         violations,
@@ -484,12 +634,33 @@ export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
             `routing.json is present but unparseable (${ROUTING_PATH}): treated as not staged`,
         );
     }
+    const priorReviews = readJsonIfPresent(
+        fs,
+        `${REVIEW_DIR}/prior-reviews.json`,
+    );
+    const rereviewAccounting = readJsonIfPresent(
+        fs,
+        `${REVIEW_DIR}/rereview.json`,
+    );
+    const prContext = readJsonIfPresent(fs, `${REVIEW_DIR}/pr-context.json`) as
+        | {number?: unknown}
+        | undefined;
+    const cacheMemory =
+        typeof prContext?.number === "number"
+            ? readJsonIfPresent(
+                  fs,
+                  `/tmp/gh-aw/cache-memory/pr-${prContext.number}.json`,
+              )
+            : undefined;
 
     const evaluation = evaluateDispatchConformance({
         items,
         plan,
         routing,
         outFiles,
+        priorReviews,
+        rereviewAccounting,
+        cacheMemory,
     });
     evaluation.notes.unshift(...notes);
 

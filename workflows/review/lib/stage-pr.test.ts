@@ -197,7 +197,13 @@ describe("runStagePrCli", () => {
     const options = {repo: "o/r", prNumber: 7, repoRoot: "/work"};
 
     it("stages the full Step 1 + Step 3 contract for a first review", async () => {
-        const fs = makeFakeFs();
+        const fs = makeFakeFs({
+            "/tmp/gh-aw/aw-prompts/prompt.txt": [
+                "<!-- BEGIN REVIEW DISCIPLINES -->",
+                "## Structured finding schema and hunts",
+                "<!-- END REVIEW DISCIPLINES -->",
+            ].join("\n"),
+        });
         const result = await runStagePrCli(
             fs,
             ghGetFromMap(
@@ -537,5 +543,62 @@ describe("review-feedback coverage (slice 1 hardening)", () => {
         expect(second.perFileTier["pkg/auth/x.ts"]).not.toBe(
             first.perFileTier["pkg/auth/x.ts"],
         );
+    });
+});
+
+describe("disciplines extraction (slice 3, #247)", () => {
+    const PROMPT = "/tmp/gh-aw/aw-prompts/prompt.txt";
+    const options = {
+        repo: "o/r",
+        prNumber: 7,
+        repoRoot: "/work",
+    };
+    const routes = () =>
+        baseRoutes([{filename: "a.ts", status: "modified", patch: PATCH_ONE}]);
+    const disciplines = [
+        "<!-- BEGIN REVIEW DISCIPLINES -->",
+        "# Review disciplines (specialist lenses)",
+        "## Structured finding schema and hunts",
+        "rules...",
+        "<!-- END REVIEW DISCIPLINES -->",
+    ].join("\n");
+
+    it("extracts the marker-delimited section and verifies the schema heading", async () => {
+        const fs = makeFakeFs({
+            [PROMPT]: `preamble\n${disciplines}\ntrailer\n`,
+        });
+        const result = await runStagePrCli(fs, ghGetFromMap(routes()), options);
+        expect(fs.files[`${REVIEW}/disciplines.md`]).toBe(`${disciplines}\n`);
+        expect(
+            result.warnings.filter((w) => w.includes("disciplines")),
+        ).toEqual([]);
+    });
+
+    it("warns (fallback applies) when the schema heading is missing", async () => {
+        const broken = disciplines.replace(
+            "## Structured finding schema and hunts",
+            "## Something else",
+        );
+        const fs = makeFakeFs({[PROMPT]: broken});
+        const result = await runStagePrCli(fs, ghGetFromMap(routes()), options);
+        expect(fs.files[`${REVIEW}/disciplines.md`]).toBe(undefined);
+        expect(result.warnings.join(" ")).toContain("schema-heading verify");
+    });
+
+    it("warns when the prompt or its markers are absent", async () => {
+        const noPrompt = makeFakeFs();
+        const r1 = await runStagePrCli(
+            noPrompt,
+            ghGetFromMap(routes()),
+            options,
+        );
+        expect(r1.warnings.join(" ")).toContain("rendered prompt not found");
+        const noMarkers = makeFakeFs({[PROMPT]: "just a prompt"});
+        const r2 = await runStagePrCli(
+            noMarkers,
+            ghGetFromMap(routes()),
+            options,
+        );
+        expect(r2.warnings.join(" ")).toContain("markers not found");
     });
 });
