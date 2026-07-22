@@ -154,3 +154,41 @@ describe("dispatch-result artifact staging (run 29943085279)", () => {
         );
     });
 });
+
+describe("malformed reviewFiles entries (gate-waiver divergence)", () => {
+    it("treats a non-empty array of non-strings as triage unavailable, not an empty review", async () => {
+        // The gate's empty-reviewFiles waiver reads the RAW staged array;
+        // filtering [1, 2] to [] here and dispatching no finders would
+        // render no disclosure while gate rule 1 still demands the
+        // correctness pass: a guaranteed false block on a conforming
+        // dispatcher. Fail toward more review instead.
+        const fs = makeFakeFs({
+            ...baseStaging(),
+            ...agentFiles(
+                "pattern-triage",
+                "correctness-reviewer",
+                "skill-auditor",
+                "claim-validator",
+            ),
+        });
+        const runner = stubRunner({
+            "pattern-triage": JSON.stringify({
+                patterns: [],
+                reviewFiles: [1, 2],
+            }),
+            "correctness-reviewer": CORRECTNESS_OUT,
+            "skill-auditor": EMPTY_FINDINGS,
+            "claim-validator": VALIDATOR_CONFIRM,
+        });
+        const result = await runDispatch({fs, runner, repoRoot: "/work"});
+        expect(runner.calls).toContain("correctness-reviewer");
+        expect(result.claims).toHaveLength(1);
+        expect(result.skippedDimensions).toContainEqual({
+            dimension: "pattern triage",
+            cause: "unavailable",
+        });
+        expect(result.noteLines.join("\n")).toContain(
+            "pattern triage not assessed this run",
+        );
+    });
+});

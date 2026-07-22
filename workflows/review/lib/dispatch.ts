@@ -528,9 +528,18 @@ export const runDispatch = async (
             patterns = parsed["patterns"];
             const raw = parsed["reviewFiles"];
             if (Array.isArray(raw)) {
-                reviewFiles = raw.filter(
+                const strings = raw.filter(
                     (v): v is string => typeof v === "string",
                 );
+                // A non-empty array of non-strings is malformed triage
+                // output, not an empty review: the gate's empty-reviewFiles
+                // waiver reads the RAW staged array, so treating it as
+                // empty here would dispatch no finders and render no
+                // disclosure while rule 1 still demands the correctness
+                // pass (a guaranteed false block). Fall through to the
+                // triage-unavailable path instead (review everything).
+                reviewFiles =
+                    strings.length === 0 && raw.length > 0 ? null : strings;
             }
         }
         const diffPath =
