@@ -132,6 +132,8 @@ const CORRECTNESS_OUT = JSON.stringify({
 
 const EMPTY_FINDINGS = JSON.stringify({findings: []});
 
+const TRIAGE_OK = JSON.stringify({patterns: [], reviewFiles: ["a.ts"]});
+
 const VALIDATOR_CONFIRM = JSON.stringify({
     claims: [
         {
@@ -659,6 +661,52 @@ describe("runDispatch", () => {
         expect(
             JSON.parse(fs.files[`${REVIEW}/out/pre-existing.json`]),
         ).toHaveLength(1);
+    });
+
+    it("merges cross-source duplicates before the validator sees them (#245)", async () => {
+        const duplicate = (label: string) =>
+            JSON.stringify({
+                findings: [
+                    {
+                        path: "a.ts",
+                        line: 2,
+                        label,
+                        subject: "AddDate subtracts months, not days.",
+                        failure_scenario:
+                            "Memories older than 180 days are never expired; the retention pass is a silent no-op.",
+                    },
+                ],
+            });
+        const fs = makeFakeFs({
+            ...baseStaging(),
+            ...agentFiles(
+                "pattern-triage",
+                "correctness-reviewer",
+                "skill-auditor",
+                "claim-validator",
+            ),
+        });
+        const runner = stubRunner({
+            "pattern-triage": TRIAGE_OK,
+            "correctness-reviewer": duplicate("issue (blocking)"),
+            "skill-auditor": duplicate("nitpick (non-blocking)"),
+            "claim-validator": VALIDATOR_CONFIRM,
+        });
+        const result = await runDispatch(options(fs, runner));
+        expect(result.claims).toMatchObject([{id: "correctness-reviewer-1"}]);
+        expect(result.claims[0].discussion).toContain("Also flagged by");
+        // The validator was dispatched on the merged set, and the merge is
+        // recorded in dispatch-result.json for the run report.
+        expect(JSON.parse(fs.files[`${REVIEW}/claims.json`])).toHaveLength(1);
+        expect(
+            JSON.parse(fs.files[`${REVIEW}/dispatch-result.json`]).merges,
+        ).toEqual(result.merges);
+        expect(result.merges).toMatchObject([
+            {survivor: "correctness-reviewer-1", path: "a.ts", line: 2},
+        ]);
+        expect(result.merges[0].merged.map((m) => m.id)).toEqual([
+            "skill-auditor-1",
+        ]);
     });
 });
 
