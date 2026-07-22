@@ -41,6 +41,33 @@ describe("label-contract enforcement (run 29897276810)", () => {
         );
     });
 
+    it("salvages a title-keyed subject (run 29908199997's drift shape)", () => {
+        const {candidates} = parseFinderOutput(
+            "correctness-reviewer",
+            JSON.stringify({
+                findings: [
+                    {
+                        id: "unbounded-expiration-read",
+                        file: "a.go",
+                        anchor: {path: "a.go", line: 44},
+                        label: "issue (blocking)",
+                        category: "resource-exhaustion",
+                        title: "Expiration query is unbounded.",
+                        discussion: "The query has no Limit and no KeysOnly.",
+                    },
+                ],
+            }),
+            new Set(),
+        );
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0].finding.model_authored_prose).toBe(
+            "Expiration query is unbounded. The query has no Limit and no KeysOnly.",
+        );
+        expect(candidates[0].finding.failure_scenario).toBe(
+            "Expiration query is unbounded.",
+        );
+    });
+
     it("salvages a label-valid finding with only {id, anchor, discussion} (run 29906543140)", () => {
         // Round-2 correctness drift: valid label, anchor object, rich
         // discussion, but no subject/summary and no failure_scenario.
