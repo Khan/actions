@@ -902,22 +902,24 @@ describe("runCli: re-review mode", () => {
 });
 
 describe("runCli: dispatch mode", () => {
-    it("surfaces a configured dispatch scripted line in routing.json", () => {
+    it("always emits scripted (the dial is retired), warning on a leftover line", () => {
         const {fs} = fakeFs({
             ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
                 {path: "a.ts", status: "modified"},
             ]),
             [ROUTING_CONFIG_PATH]: "dispatch scripted",
         });
-        expect(runCli(fs).dispatchMode).toBe("scripted");
+        const routing = runCli(fs);
+        expect(routing.dispatchMode).toBe("scripted");
+        expect(routing.routingConfig.warnings.join(" ")).toContain("obsolete");
     });
 
-    it("defaults to task without a dispatch line", () => {
+    it("emits scripted without a dispatch line", () => {
         const {fs} = fakeFs({
             ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
                 {path: "a.ts", status: "modified"},
             ]),
         });
-        expect(runCli(fs).dispatchMode).toBe("task");
+        expect(runCli(fs).dispatchMode).toBe("scripted");
     });
 });

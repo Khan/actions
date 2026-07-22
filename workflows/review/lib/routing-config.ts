@@ -98,15 +98,15 @@ export const DEFAULT_RE_REVIEW_MODE: ReReviewMode = "full";
  * The dispatch-mode dial (deterministic-orchestrator slice 2): `task` keeps
  * the orchestrator's Task-tool dispatch (today's behavior); `scripted` has
  * the orchestrator invoke the deterministic dispatcher (`lib/dispatch.ts`)
- * once, which runs Step 3's phases as code. Opt-in per repo while the
- * scripted path is live-trial-gated; the default flips with a release once
- * the trial holds.
+ * once, which runs Step 3's phases as code. Scripted is the ONLY mode since
+ * the lifecycle trial held (task mode was removed); the constant survives as
+ * the type routing.json's `dispatchMode` field carries.
  */
-export const DISPATCH_MODES = ["task", "scripted"] as const;
+export const DISPATCH_MODES = ["scripted"] as const;
 
 export type DispatchMode = typeof DISPATCH_MODES[number];
 
-export const DEFAULT_DISPATCH_MODE: DispatchMode = "task";
+export const DEFAULT_DISPATCH_MODE: DispatchMode = "scripted";
 
 /** Parsed `.github/aw/review/ROUTING` config. */
 export type RoutingFileConfig = {
@@ -116,7 +116,7 @@ export type RoutingFileConfig = {
     enabledReviewers: EnableableReviewer[];
     /** The repo's re-review mode (`re-review` line; default `full`). */
     reReviewMode: ReReviewMode;
-    /** The repo's dispatch mode (`dispatch` line; default `task`). */
+    /** The dispatch mode: always `scripted` (task mode was removed). */
     dispatchMode: DispatchMode;
     /** Fixed-format parse warnings (unknown lens/tier, no-op rule). */
     warnings: string[];
@@ -131,7 +131,6 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  *     <pattern> [lens=<lens>[,<lens>…]] [tier=trivial|low|medium|high] [direction-dependent]
  *     enable <reviewer>[,<reviewer>…]
  *     re-review full|scoped|flip-gated|fast
- *     dispatch task|scripted
  *
  * `lens=` names specialist lenses to spawn when the pattern is touched (multiple
  * matching rules union their lenses). `tier=` assigns a risk tier; when several
@@ -145,9 +144,8 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  * ({@link ENABLEABLE_REVIEWERS}) for every review in this repo.
  * `re-review` sets the repo's re-review mode ({@link RE_REVIEW_MODES}); when
  * several lines set it the LAST one wins (with a warning), matching the
- * file's last-rule-wins convention. `dispatch` sets the dispatch mode
- * ({@link DISPATCH_MODES}) with the same last-one-wins rule; an unknown mode
- * degrades to `task` (today's behavior).
+ * file's last-rule-wins convention. A leftover `dispatch` line from the
+ * retired dial warns and is ignored (scripted is the only mode).
  *
  * Malformed fields and unknown lens/reviewer names produce a warning and skip
  * the lens or line rather than aborting the run: routing degrades to fewer
@@ -160,7 +158,6 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
     const enabled = new Set<EnableableReviewer>();
     let reReviewMode: ReReviewMode = DEFAULT_RE_REVIEW_MODE;
     let reReviewLineSeen = false;
-    let dispatchMode: DispatchMode = DEFAULT_DISPATCH_MODE;
     let dispatchLineSeen = false;
     const warnings: string[] = [];
 
@@ -226,28 +223,22 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
         }
 
         if (pattern === "dispatch") {
-            if (fields.length !== 1) {
+            // The dial is retired: task mode was removed and scripted always
+            // runs. A leftover line is tolerated (never a crashed run); any
+            // value other than `scripted` earns a visible warning so the
+            // consumer deletes the line.
+            if (fields.length !== 1 || fields[0] !== "scripted") {
                 warnings.push(
-                    `ROUTING line ${lineNo}: dispatch takes exactly one ` +
-                        `mode (line skipped)`,
+                    `ROUTING line ${lineNo}: the dispatch dial is retired ` +
+                        `(task mode was removed; scripted dispatch always ` +
+                        `runs) — delete this line`,
                 );
-                continue;
-            }
-            const mode = fields[0];
-            if (!(DISPATCH_MODES as readonly string[]).includes(mode)) {
+            } else if (!dispatchLineSeen) {
                 warnings.push(
-                    `ROUTING line ${lineNo}: unknown dispatch mode ` +
-                        `"${mode}" (kept ${dispatchMode})`,
-                );
-                continue;
-            }
-            if (dispatchLineSeen) {
-                warnings.push(
-                    `ROUTING line ${lineNo}: duplicate dispatch line ` +
-                        `(last one wins)`,
+                    `ROUTING line ${lineNo}: the dispatch line is obsolete ` +
+                        `(scripted dispatch is the only mode) — delete it`,
                 );
             }
-            dispatchMode = mode as DispatchMode;
             dispatchLineSeen = true;
             continue;
         }
@@ -326,7 +317,7 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
             enabled.has(reviewer),
         ),
         reReviewMode,
-        dispatchMode,
+        dispatchMode: DEFAULT_DISPATCH_MODE,
         warnings,
     };
 };
