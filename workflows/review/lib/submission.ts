@@ -43,6 +43,7 @@ import {runRereviewCli, type RereviewCliFs} from "./rereview";
 import {
     findLatestStamp,
     runRereviewStampCli,
+    stampFromCacheMemory,
     type PriorReview,
 } from "./rereview-mode";
 import {computeVerdict} from "./verdict";
@@ -52,6 +53,7 @@ import {computeVerdict} from "./verdict";
 /* -------------------------------------------------------------------------- */
 
 const REVIEW_DIR = "/tmp/gh-aw/review";
+const CACHE_MEMORY_DIR = "/tmp/gh-aw/cache-memory";
 
 export type PlannedComment = {path: string; line: number; body: string};
 
@@ -81,6 +83,17 @@ const readJson = (fs: SubmissionFs, path: string): unknown => {
     } catch {
         return undefined;
     }
+};
+
+/** The Step 9 cache record for this PR (pr number from pr-context.json). */
+const readCacheMemoryRecord = (fs: SubmissionFs): unknown => {
+    const prContext = readJson(fs, `${REVIEW_DIR}/pr-context.json`) as
+        | {number?: unknown}
+        | undefined;
+    if (typeof prContext?.number !== "number") {
+        return undefined;
+    }
+    return readJson(fs, `${CACHE_MEMORY_DIR}/pr-${prContext.number}.json`);
 };
 
 /* -------------------------------------------------------------------------- */
@@ -156,7 +169,12 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
                       typeof (entry as {body?: unknown}).body === "string",
               )
             : [];
-        const stamp = findLatestStamp(priors);
+        // Posted bodies never keep their stamp (the ingest sanitizer strips
+        // HTML comments), so the floor anchors on the same cache-memory
+        // carrier the plan CLI and gate rule 5 read.
+        const stamp =
+            findLatestStamp(priors) ??
+            stampFromCacheMemory(readCacheMemoryRecord(fs));
         if (stamp !== null && stamp.verdict === "REQUEST_CHANGES") {
             keptBlockingFloor = rereview.keptBlockingCount;
         }
