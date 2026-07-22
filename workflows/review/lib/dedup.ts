@@ -7,13 +7,15 @@
  * sub-agent cost line, so duplicates are merged before it, not after.
  *
  * The merge is deliberately conservative: only claims from DIFFERENT sources,
- * anchored on the same path within a two-line window, whose subject and
- * failure scenario clearly describe the same defect (token-set similarity
- * plus a shared-phrase floor, thresholds calibrated on that run's real
- * outputs, where same-defect pairs scored >= 0.20 Jaccard and
- * different-defect pairs on the same lines scored <= 0.05). The survivor is
- * the highest-severity copy, its discussion gains an "also flagged by" note,
- * and every merge is recorded for dispatch-result.json.
+ * anchored on the same path, whose subject and failure scenario clearly
+ * describe the same defect (token-set similarity plus a shared-phrase floor,
+ * thresholds calibrated on that run's real outputs, where same-defect pairs
+ * scored >= 0.20 Jaccard and different-defect pairs on the same lines scored
+ * <= 0.05). No line window: run 29943085279's missing-deletion-test defect
+ * posted four times with anchors 43 lines apart in expiration_test.go (:15
+ * and :58), so the similarity floor carries the precision alone. The
+ * survivor is the highest-severity copy, its discussion gains an "also
+ * flagged by" note, and every merge is recorded for dispatch-result.json.
  *
  * Determinism boundary: pure text arithmetic; no model call, no filesystem.
  */
@@ -27,9 +29,6 @@ export type ClaimMerge = {
     path: string;
     line: number;
 };
-
-/** How far apart two anchors may sit and still describe one defect. */
-const LINE_WINDOW = 2;
 
 /**
  * Similarity floor, calibrated on run 29897276810's thirteen findings:
@@ -94,13 +93,21 @@ export const describesSameDefect = (a: Claim, b: Claim): boolean => {
     );
 };
 
+/**
+ * Same path, any line distance: run 29943085279 posted the
+ * missing-deletion-test defect at expiration_test.go:15 and :58 (43 lines
+ * apart), and the old two-line window kept all four copies separate; the
+ * similarity floor carries the precision alone. Cross-FILE merging stays
+ * out: that same run flagged the defect in expiration.go too (:62, :38) and
+ * a floor loose enough to catch a cross-file pair needs its own strictly
+ * higher calibration; a missed merge only costs a duplicate comment.
+ */
 const mergeable = (a: Claim, b: Claim): boolean =>
     a.source !== b.source &&
     a.path !== undefined &&
     a.path === b.path &&
     a.line !== undefined &&
     b.line !== undefined &&
-    Math.abs(a.line - b.line) <= LINE_WINDOW &&
     describesSameDefect(a, b);
 
 /**
@@ -170,7 +177,24 @@ export const dedupeClaims = (
             survivorFirst(best, index, claims),
         );
         const survivor = claims[survivorIndex];
-        const others = group.filter((index) => index !== survivorIndex);
+        // Star guard: only a member that clears the floor against the
+        // survivor DIRECTLY merges. Union-find alone chains A~B~C through a
+        // bridging claim that bundles two defects (a test-adequacy finding
+        // naming both a missing test and an unbounded read links the two
+        // distinct correctness findings), and collapsing the chain would
+        // silently drop a distinct finding; with no line window bounding
+        // groups, a bridge can span a whole file. Chain-only members stay
+        // their own claims. Both recorded trial merges are unaffected: run
+        // 29897276810's four-way group is pairwise-complete and run
+        // 29943085279's is a direct pair.
+        const others = group.filter(
+            (index) =>
+                index !== survivorIndex &&
+                describesSameDefect(survivor, claims[index]),
+        );
+        if (others.length === 0) {
+            continue;
+        }
         for (const index of others) {
             drop.add(index);
         }
