@@ -367,7 +367,11 @@ downstream CLI and sub-agent reads):
   uses this to filter candidate comments.
 - `prior-reviews.json` — every prior `github-actions[bot]` review body,
   whatever its state (a dismissed or comment-only review still carries its
-  fingerprint stamp, which is why states are not filtered).
+  fingerprint stamp, which is why states are not filtered). In practice
+  gh-aw's safe-output sanitizer strips the stamp comment before a review
+  posts, so these bodies usually carry none; the plan CLI then anchors on
+  the Step 9 cache-memory record instead (its `rereview-plan.json` records
+  which carrier won as `stampSource`).
 - `routing.json`, `provenance.json`, `full-stripped.diff`,
   `full-stripped-annotated.diff`, `rereview-plan.json` (also copied to
   `out/rereview-plan.json` for the run artifact), and, on a reduced-depth
@@ -1648,9 +1652,17 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
   comments to hunks whose content is new since this review (Step 1 → Step 3). Record
   the full staged signature, not just the hunks you commented on — "already reviewed"
   means every hunk you looked at this run. (This cache entry serves comment scoping
-  only; the divergence tripwire's authoritative fingerprint is the hidden stamp in
-  the review body, Step 6, which is exactly why the stamp exists: cache memory can
-  be evicted, the review body cannot.)
+  only; both sides of that comparison are Step 1's own added-lines hash.)
+- `stampHunks`: copy **verbatim** from `rereview-plan.json`'s `stampHunks` field (the
+  plan CLI wrote it in Step 3). This, with `verdict` and `wasDraft`, is the divergence
+  tripwire's working fingerprint carrier: gh-aw's safe-output sanitizer strips the
+  hidden body stamp before the review posts, so the Step 6 stamp (still emitted, and
+  still read first if ever present) never survives to the PR today, and the next
+  run's plan CLI anchors on this cache record instead. Never hand-compute it: the
+  CLI compares it hash-for-hash against its own computation, which hashes added AND
+  removed lines (Step 1's added-lines hash is a different regime and must not be
+  mixed in). Cache eviction degrades the next run to a full review, never a cheaper
+  one.
 - `wasDraft`: whether the PR was a draft at this review (its `draft` field).
   Record it on every review so Step 2 can compare it against the current draft
   status to detect the draft→ready transition and bypass the early-exit check
