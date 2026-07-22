@@ -233,6 +233,44 @@ pre-agent-steps:
       path: gh-aw-review-lib
       persist-credentials: false
 
+# The dispatch-conformance gate (workflows/review/lib/dispatch-gate.ts): a code
+# chokepoint between the agent and the review submission. gh-aw compiles
+# `post-steps` into the agent job after "Ingest agent output" (which finalizes
+# /tmp/gh-aw/agent_output.json, the validated safe-output queue) and before
+# "Upload agent artifacts" (which ships that queue to the separate safe_outputs
+# job that actually calls the GitHub API). The gate reads the queue plus the
+# /tmp/gh-aw/review/ staging on the same runner and, when a queued verdict or
+# queued findings lack the sub-agent outputs the protocol requires (Step 3;
+# per re-review depth, sheds must be disclosed), strips every posting item
+# from the queue and exits non-zero: the submission is BLOCKED (not detected
+# after the fact), the run goes red, and the evidence (the out/ artifact, the
+# original queue beside the agent artifact, the gate report) still lands.
+# Exists because run 29865480728 (Khan/webapp#40992) submitted a verdict with
+# zero sub-agent dispatches and no disclosure; a prompt rule cannot gate an
+# orchestrator that is already ignoring the prompt. `if: always()` because the
+# safe_outputs job executes the queue even when the agent job fails partway.
+# The step fails the job ONLY on the gate's violation sentinel, never on an
+# infra failure: `npx` resolving `tsx` from the registry (or any crash before
+# the gate decides) exits non-zero without the sentinel, and since the
+# safe_outputs job runs regardless of this job's result, red-flagging such a
+# run would file a spurious failure issue while the untouched queue posts
+# anyway. The gate writes the sentinel only after deciding a real violation
+# (and it strips the queue in the same code path).
+post-steps:
+  - name: Dispatch-conformance gate
+    if: always()
+    run: |
+      rm -f /tmp/gh-aw/dispatch-gate.blocked
+      if (cd gh-aw-review-lib && npx -y tsx workflows/review/lib/dispatch-gate.ts); then
+        exit 0
+      fi
+      if [ -f /tmp/gh-aw/dispatch-gate.blocked ]; then
+        echo "::error title=dispatch-conformance gate::submission blocked; failing the job"
+        exit 1
+      fi
+      echo "::warning title=dispatch-conformance gate::gate could not run (infra failure; review not blocked)"
+      exit 0
+
 # Cost guardrails (AI credits; 1 credit = $0.01). gh-aw >= v0.79 bakes in
 # defaults of 1000/run ($10) and 5000/day ($50). Disable the daily ceiling
 # (-1) so reviews are never skipped on a busy PR day; the per-run cap below
@@ -380,7 +418,10 @@ CHANGES_REQUESTED, COMMENTED, DISMISSED), each `{"body": "...",
 "submittedAt": "<ISO timestamp>"}`. The re-review plan CLI (Step 3) reads the hidden
 fingerprint stamp from these bodies; a review that branch protection dismissed, or
 that was submitted comment-only, still carries its stamp, which is exactly why the
-state is ignored here. Do not filter or truncate the bodies.
+state is ignored here. Do not filter or truncate the bodies. (In practice gh-aw's
+safe-output sanitizer strips the stamp comment before the review posts, so these
+bodies usually carry none; the CLI then falls back to the Step 9 cache-memory
+record. Stage them anyway: the body stamp is read first whenever it exists.)
 
 ## Step 2: Early-Exit Check
 
@@ -1569,9 +1610,17 @@ Save to `/tmp/gh-aw/cache-memory/pr-${{ github.event.pull_request.number || gith
   comments to hunks whose content is new since this review (Step 1 → Step 3). Record
   the full current signature, not just the hunks you commented on — "already reviewed"
   means every hunk you looked at this run. (This cache entry serves comment scoping
-  only; the divergence tripwire's authoritative fingerprint is the hidden stamp in
-  the review body, Step 6, which is exactly why the stamp exists: cache memory can
-  be evicted, the review body cannot.)
+  only; both sides of that comparison are Step 1's own added-lines hash.)
+- `stampHunks`: copy **verbatim** from `rereview-plan.json`'s `stampHunks` field (the
+  plan CLI wrote it in Step 3). This, with `verdict` and `wasDraft`, is the divergence
+  tripwire's working fingerprint carrier: gh-aw's safe-output sanitizer strips the
+  hidden body stamp before the review posts, so the Step 6 stamp (still emitted, and
+  still read first if ever present) never survives to the PR today, and the next
+  run's plan CLI anchors on this cache record instead. Never hand-compute it: the
+  CLI compares it hash-for-hash against its own computation, which hashes added AND
+  removed lines (Step 1's added-lines hash is a different regime and must not be
+  mixed in). Cache eviction degrades the next run to a full review, never a cheaper
+  one.
 - `wasDraft`: whether the PR was a draft at this review (its `draft` field).
   Record it on every review so Step 2 can compare it against the current draft
   status to detect the draft→ready transition and bypass the early-exit check

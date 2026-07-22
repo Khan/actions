@@ -13,6 +13,7 @@ import {
     runRereviewPlanCli,
     runRereviewStampCli,
     STAMP_SCHEMA_VERSION,
+    stampFromCacheMemory,
 } from "./rereview-mode";
 import type {HunkSignature, ReReviewStamp} from "./rereview-mode";
 
@@ -572,6 +573,158 @@ describe("runRereviewPlanCli", () => {
         );
         const {plan} = runRereviewPlanCli(fs);
         expect(plan.mode).toBe("full");
+    });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The cache-memory fingerprint carrier                                       */
+/* -------------------------------------------------------------------------- */
+
+/** A Step 9 cache record whose fields reconstruct a usable stamp. */
+const cacheRecord = (over: Record<string, unknown> = {}): string =>
+    JSON.stringify({
+        verdict: "APPROVE",
+        reviewedHunks: CURRENT,
+        wasDraft: false,
+        ...over,
+    });
+
+describe("stampFromCacheMemory", () => {
+    it("reconstructs a stamp from a valid Step 9 record", () => {
+        const stamp = stampFromCacheMemory(JSON.parse(cacheRecord()));
+        expect(stamp).toEqual({
+            schemaVersion: STAMP_SCHEMA_VERSION,
+            depth: "full",
+            verdict: "APPROVE",
+            anchorDraft: false,
+            anchorHunks: CURRENT,
+        });
+    });
+
+    it.each([
+        ["missing verdict", {verdict: undefined}],
+        ["unknown verdict", {verdict: "COMMENTED"}],
+        ["missing wasDraft", {wasDraft: undefined}],
+        ["non-boolean wasDraft", {wasDraft: "false"}],
+        ["missing hunks", {reviewedHunks: undefined}],
+        ["array hunks", {reviewedHunks: ["abc"]}],
+        ["non-string hash", {reviewedHunks: {"a.ts": [42]}}],
+        ["empty hash", {reviewedHunks: {"a.ts": [""]}}],
+        ["empty hunk map", {reviewedHunks: {}}],
+    ])("returns null on %s (fail toward full)", (_label, over) => {
+        expect(stampFromCacheMemory(JSON.parse(cacheRecord(over)))).toBeNull();
+    });
+
+    it("returns null on a non-object record", () => {
+        expect(stampFromCacheMemory(null)).toBeNull();
+        expect(stampFromCacheMemory("{}")).toBeNull();
+        expect(stampFromCacheMemory([])).toBeNull();
+    });
+
+    it("prefers stampHunks (the plan CLI's own hash regime) over reviewedHunks", () => {
+        const other: HunkSignature = {"other.ts": ["deadbeef"]};
+        const stamp = stampFromCacheMemory(
+            JSON.parse(cacheRecord({stampHunks: other})),
+        );
+        expect(stamp?.anchorHunks).toEqual(other);
+    });
+
+    it("falls back to reviewedHunks when stampHunks is invalid", () => {
+        const stamp = stampFromCacheMemory(
+            JSON.parse(cacheRecord({stampHunks: {"a.ts": [42]}})),
+        );
+        expect(stamp?.anchorHunks).toEqual(CURRENT);
+    });
+});
+
+describe("runRereviewPlanCli cache-memory fallback", () => {
+    const CACHE_PATH = "/tmp/gh-aw/cache-memory/pr-41007.json";
+    const contextWithNumber = JSON.stringify({isDraft: false, number: 41007});
+
+    it("anchors on the cache record when no prior-review body carries a stamp (the production shape: the ingest sanitizer strips the body stamp)", () => {
+        const fs = fakeFs(
+            stagedInputs({
+                [`${REVIEW_DIR}/pr-context.json`]: contextWithNumber,
+                // What production prior reviews actually look like: bodies
+                // present, stamps sanitized away.
+                [`${REVIEW_DIR}/prior-reviews.json`]: JSON.stringify([
+                    {body: "Changes requested — see inline comments."},
+                ]),
+                [CACHE_PATH]: cacheRecord(),
+            }),
+        );
+        const {plan, stampSource} = runRereviewPlanCli(fs);
+        expect(plan.depth).toBe("fast");
+        expect(plan.reasons).toEqual(["mode-fast"]);
+        expect(stampSource).toBe("cache-memory");
+        const written = JSON.parse(
+            fs.files.get(`${REVIEW_DIR}/rereview-plan.json`) ?? "{}",
+        );
+        expect(written.stampSource).toBe("cache-memory");
+    });
+
+    it("prefers a review-body stamp over the cache record", () => {
+        const fs = fakeFs(
+            stagedInputs({
+                [`${REVIEW_DIR}/pr-context.json`]: contextWithNumber,
+                [CACHE_PATH]: cacheRecord({verdict: "REQUEST_CHANGES"}),
+            }),
+        );
+        const {stampSource} = runRereviewPlanCli(fs);
+        expect(stampSource).toBe("review-body");
+    });
+
+    it("plans full with no stamp in either carrier", () => {
+        const fs = fakeFs(
+            stagedInputs({
+                [`${REVIEW_DIR}/pr-context.json`]: contextWithNumber,
+                [`${REVIEW_DIR}/prior-reviews.json`]: JSON.stringify([
+                    {body: "no stamp here"},
+                ]),
+            }),
+        );
+        const {plan, stampSource} = runRereviewPlanCli(fs);
+        expect(plan.depth).toBe("full");
+        expect(plan.reasons).toEqual(["no-prior-fingerprint"]);
+        expect(stampSource).toBeNull();
+    });
+
+    it("applies the ready-for-review guard to a cache anchor taken on a draft", () => {
+        const fs = fakeFs(
+            stagedInputs({
+                [`${REVIEW_DIR}/pr-context.json`]: contextWithNumber,
+                [`${REVIEW_DIR}/prior-reviews.json`]: "[]",
+                [CACHE_PATH]: cacheRecord({wasDraft: true}),
+            }),
+        );
+        const {plan} = runRereviewPlanCli(fs);
+        expect(plan.depth).toBe("full");
+        expect(plan.reasons).toEqual(["ready-for-review-anchor"]);
+    });
+
+    it("ignores the cache when pr-context carries no number", () => {
+        const fs = fakeFs(
+            stagedInputs({
+                [`${REVIEW_DIR}/prior-reviews.json`]: "[]",
+                [CACHE_PATH]: cacheRecord(),
+            }),
+        );
+        const {plan, stampSource} = runRereviewPlanCli(fs);
+        expect(plan.depth).toBe("full");
+        expect(stampSource).toBeNull();
+    });
+
+    it("treats an unparseable cache record as no anchor", () => {
+        const fs = fakeFs(
+            stagedInputs({
+                [`${REVIEW_DIR}/pr-context.json`]: contextWithNumber,
+                [`${REVIEW_DIR}/prior-reviews.json`]: "[]",
+                [CACHE_PATH]: "{not json",
+            }),
+        );
+        const {plan, stampSource} = runRereviewPlanCli(fs);
+        expect(plan.depth).toBe("full");
+        expect(stampSource).toBeNull();
     });
 });
 
