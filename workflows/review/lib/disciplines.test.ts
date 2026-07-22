@@ -146,7 +146,7 @@ describe("the shared disciplines section", () => {
             (path: string) =>
                 Promise.resolve(
                     path.endsWith("/files?per_page=100&page=1") ||
-                        path.endsWith("/reviews?per_page=100")
+                        path.endsWith("/reviews?per_page=100&page=1")
                         ? []
                         : {
                               number: 1,
