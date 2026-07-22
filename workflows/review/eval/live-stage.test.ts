@@ -166,3 +166,87 @@ describe("rewriteAgentPrompt", () => {
         expect(rewritten).toContain("/stage/context/out/");
     });
 });
+
+describe("stageCase re-review roster parity", () => {
+    it("shrinks review-files.json to the scoped paths on a new-hunks plan", () => {
+        // Prior review covered three hunks of src/a.ts; this push adds one
+        // new hunk in src/b.ts (unreviewed share 0.25, under the divergence
+        // tripwire). Under flip-gated mode the plan stages new-hunks, so the
+        // review diff AND the reviewed-file roster must both shrink to the
+        // unseen file, matching production's stage-pr.ts staging.
+        const priorDiff = [
+            "diff --git a/src/a.ts b/src/a.ts",
+            "--- a/src/a.ts",
+            "+++ b/src/a.ts",
+            "@@ -1,2 +1,3 @@",
+            " ctx",
+            "+alpha",
+            " ctx",
+            "@@ -10,2 +11,3 @@",
+            " ctx",
+            "+alpha2",
+            " ctx",
+            "@@ -20,2 +22,3 @@",
+            " ctx",
+            "+alpha3",
+            " ctx",
+            "",
+        ].join("\n");
+        const currentDiff = [
+            priorDiff.trimEnd(),
+            "diff --git a/src/b.ts b/src/b.ts",
+            "--- a/src/b.ts",
+            "+++ b/src/b.ts",
+            "@@ -5,2 +5,3 @@",
+            " ctx",
+            "+beta",
+            " ctx",
+            "",
+        ].join("\n");
+        const vol = Volume.fromJSON({
+            "/corpus/clean/stage-case/tree/src/a.ts": "x\n",
+            "/corpus/clean/stage-case/tree/src/b.ts": "y\n",
+        });
+        const staged = stageCase(
+            liveCase({
+                changedFiles: [
+                    {path: "src/a.ts", status: "modified"},
+                    {path: "src/b.ts", status: "modified"},
+                ],
+                diff: currentDiff,
+                live: {
+                    prContext: {
+                        title: "t",
+                        description: "d",
+                        author: "octocat",
+                        baseBranch: "main",
+                    },
+                    rereview: {
+                        priorDiff,
+                        priorVerdict: "APPROVE",
+                        priorDepth: "full",
+                        priorThreads: [
+                            {
+                                key: "k1",
+                                path: "src/a.ts",
+                                line: 2,
+                                body: "**suggestion (non-blocking):** x",
+                                expect: "keep",
+                            },
+                        ],
+                    },
+                },
+            }),
+            "/stage",
+            volFs(vol),
+            {reReviewMode: "flip-gated"},
+        );
+        expect(staged.rereviewPlan?.staging).toBe("new-hunks");
+        const read = (p: string) => vol.readFileSync(p, "utf8") as string;
+        expect(read("/stage/context/pr.diff")).toContain("beta");
+        expect(read("/stage/context/pr.diff")).not.toContain("alpha");
+        expect(JSON.parse(read("/stage/context/review-files.json"))).toEqual([
+            {path: "src/b.ts", status: "modified", hasPatch: true},
+        ]);
+    });
+});
