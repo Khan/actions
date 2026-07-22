@@ -114,9 +114,10 @@ const lineHasCodeSignal = (line: string): boolean =>
     /^\t/.test(line); // code-convention indentation
 
 const looksLikeProse = (line: string): boolean => {
-    if (lineHasCodeSignal(line)) {
-        return false;
-    }
+    // Deliberately NOT vetoed by lineHasCodeSignal: run 29901690493 posted
+    // "Use ctx.Time().Now().AddDate(0, 0, -MemoryTTLDays), and add a test
+    // that ..." as a committable fence because the embedded call defeated
+    // the prose check. A sentence that names code is still a sentence.
     const words = line.trim().split(/\s+/);
     if (words.length < 6) {
         return false;

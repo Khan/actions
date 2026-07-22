@@ -112,6 +112,19 @@ describe("renderClaimComment", () => {
         ).toBe(true);
     });
 
+    it("treats prose that names code as prose (run 29901690493's fence misses)", () => {
+        expect(
+            isDropInSuggestion(
+                "Use ctx.Time().Now().AddDate(0, 0, -MemoryTTLDays), and add a test that writes a memory with created_at beyond the window and asserts it is deleted by the pass.",
+            ),
+        ).toBe(false);
+        expect(
+            isDropInSuggestion(
+                "Filter by the retention cutoff at read time in Query; keep (or drop) the write-path delete as a storage-cost optimization only.",
+            ),
+        ).toBe(false);
+    });
+
     it("renders an English-prose suggestion as a sketch, not a suggestion fence (r3628128268)", () => {
         const prose =
             "Add a created_at >= cutoff filter in Query so stale memories can never surface regardless of write activity, and consider a native Datastore TTL policy on created_at in place of (or alongside) the write-path ExpireStale pass.";
