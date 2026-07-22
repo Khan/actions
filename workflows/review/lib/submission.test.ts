@@ -733,6 +733,109 @@ describe("risks/patterns key staging (trial suggestion b)", () => {
     });
 });
 
+describe("the inline posting bar (task-mode Step 5 cap, as code)", () => {
+    const manyClaims = (count: number, over: Record<string, unknown> = {}) =>
+        Array.from({length: count}, (_, index) =>
+            claim({
+                id: `c${index + 1}`,
+                line: index + 1,
+                subject: `finding ${index + 1}`,
+                ...over,
+            }),
+        );
+
+    it("caps inline comments at 20, collapsing the overflow into the top comment", () => {
+        // 22 blocking claims, confidence descending so the ranking is
+        // deterministic: the two weakest collapse.
+        const claims = manyClaims(22).map((entry, index) => ({
+            ...entry,
+            confidence: 0.99 - index * 0.01,
+        }));
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        expect(plan.comments).toHaveLength(20);
+        expect(plan.comments[0].body).toContain(
+            "Lower-confidence observations (2)",
+        );
+        expect(plan.comments[0].body).toContain("`a.ts:21`");
+        expect(plan.comments[0].body).toContain("`a.ts:22`");
+        // A collapsed blocking claim still drives the verdict.
+        expect(plan.event).toBe("REQUEST_CHANGES");
+        expect(plan.notes).toContainEqual(
+            "2 claim(s) collapsed below the inline bar (cap 20, medium-confidence floor)",
+        );
+    });
+
+    it("ranks blocking claims into the cap ahead of higher-confidence non-blocking ones", () => {
+        const claims = [
+            ...manyClaims(20, {
+                label: "suggestion (non-blocking)",
+                confidence: 0.9,
+            }),
+            claim({
+                id: "blocker",
+                line: 99,
+                confidence: 0.6,
+                subject: "the blocker",
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        expect(plan.comments).toHaveLength(20);
+        // The blocking claim posts inline first; the weakest non-blocking
+        // claim is the one collapsed.
+        expect(plan.comments[0].line).toBe(99);
+        expect(plan.comments[0].body).toContain(
+            "Lower-confidence observations (1)",
+        );
+    });
+
+    it("collapses sub-medium-confidence non-blocking claims even under the cap", () => {
+        const claims = [
+            claim({
+                id: "strong",
+                line: 1,
+                label: "suggestion (non-blocking)",
+                confidence: 0.8,
+            }),
+            claim({
+                id: "weak",
+                line: 2,
+                label: "thought (non-blocking)",
+                confidence: 0.3,
+                subject: "a hunch",
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        expect(plan.comments).toHaveLength(1);
+        expect(plan.comments[0].line).toBe(1);
+        expect(plan.comments[0].body).toContain("a hunch");
+        expect(plan.event).toBe("APPROVE");
+    });
+
+    it("rides the review body when nothing posts inline", () => {
+        const claims = [
+            claim({
+                id: "weak",
+                line: 2,
+                label: "thought (non-blocking)",
+                confidence: 0.3,
+                subject: "a hunch",
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        expect(plan.comments).toEqual([]);
+        expect(plan.body).toContain("Lower-confidence observations (1)");
+        expect(plan.body).toContain("a hunch");
+    });
+});
+
 describe("open-thread suppression verdict floor (trial suggestion g)", () => {
     it("floors the verdict at REQUEST_CHANGES when a blocking claim was suppressed as a duplicate of an open BLOCKING thread", () => {
         const fs = makeFakeFs(

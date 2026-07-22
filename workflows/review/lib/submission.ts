@@ -107,6 +107,18 @@ const readCacheMemoryRecord = (fs: SubmissionFs): unknown => {
  */
 const MAX_SUGGESTION_LINES = 8;
 
+/**
+ * At most this many inline comments post; the rest collapse (task mode's
+ * Step 5 cap, as code). MUST match the frontmatter's
+ * `create-pull-request-review-comment: max:` in review.md: the engine
+ * rejects safe outputs past that number, and a plan the engine cannot fully
+ * emit is a conformance-gate red after full spend.
+ */
+export const MAX_INLINE_COMMENTS = 20;
+
+/** The medium-confidence inline floor (task mode's Step 5 posting bar). */
+const MIN_INLINE_CONFIDENCE = 0.5;
+
 const lineHasCodeSignal = (line: string): boolean =>
     /\w\(/.test(line) || // a call
     /[{};]/.test(line) || // block/statement punctuation
@@ -270,21 +282,70 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
 
     // Inline comments need a path and a line; a PR-level claim folds into
     // the body instead (rare: a pr-anchored finding).
-    const inline: PlannedComment[] = [];
+    const anchored: Claim[] = [];
     const prLevelLines: string[] = [];
     for (const claim of claims) {
         if (claim.path !== undefined && claim.line !== undefined) {
-            inline.push({
-                path: claim.path,
-                line: claim.line,
-                body: renderClaimComment(claim),
-            });
+            anchored.push(claim);
         } else {
             prLevelLines.push(`**${claim.label}:** ${claim.discussion}`);
             notes.push(
                 `pr-level claim ${claim.id} folded into the review body`,
             );
         }
+    }
+
+    // The posting bar (task mode's Step 5 ranked bar, as code): rank
+    // blocking before non-blocking, then confidence descending (the sort is
+    // stable, so dispatch order breaks ties). A claim below medium
+    // confidence (< 0.5) never posts inline (a blocking claim always
+    // qualifies: it is validator-confirmed by construction), and at most
+    // MAX_INLINE_COMMENTS post inline: the frontmatter caps the
+    // create-pull-request-review-comment safe output at the same number, so
+    // a longer plan would have the engine reject the overflow and the
+    // conformance gate red the run after full spend. Everything else
+    // collapses to one terse line each in a single <details> block riding
+    // the highest-ranked inline comment (or the review body when nothing
+    // posts inline), so it is surfaced without scattering noise. The
+    // verdict is computed from ALL claims, so a collapsed blocking claim
+    // (a 21st blocking finding) still blocks.
+    const ranked = [...anchored].sort((a, b) => {
+        const blocking =
+            Number(isBlockingLabel(b.label)) - Number(isBlockingLabel(a.label));
+        return blocking !== 0 ? blocking : b.confidence - a.confidence;
+    });
+    const inlineWorthy = ranked.filter(
+        (claim) =>
+            isBlockingLabel(claim.label) ||
+            claim.confidence >= MIN_INLINE_CONFIDENCE,
+    );
+    const inlineClaims = new Set(inlineWorthy.slice(0, MAX_INLINE_COMMENTS));
+    const collapsed = ranked.filter((claim) => !inlineClaims.has(claim));
+    const inline: PlannedComment[] = [...inlineClaims].map((claim) => ({
+        path: claim.path as string,
+        line: claim.line as number,
+        body: renderClaimComment(claim),
+    }));
+    if (collapsed.length > 0) {
+        const section = [
+            "<details>",
+            `<summary>Lower-confidence observations (${collapsed.length})</summary>`,
+            "",
+            ...collapsed.map(
+                (claim) =>
+                    `- \`${claim.path}:${claim.line}\` ${claim.label}: ${claim.subject}`,
+            ),
+            "",
+            "</details>",
+        ].join("\n");
+        if (inline.length > 0) {
+            inline[0] = {...inline[0], body: `${inline[0].body}\n\n${section}`};
+        } else {
+            prLevelLines.push(section);
+        }
+        notes.push(
+            `${collapsed.length} claim(s) collapsed below the inline bar (cap ${MAX_INLINE_COMMENTS}, medium-confidence floor)`,
+        );
     }
 
     // A blocking candidate the dispatcher suppressed as a duplicate of a
