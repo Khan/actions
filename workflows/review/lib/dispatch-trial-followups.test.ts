@@ -7,6 +7,7 @@ import {
     type DispatchFs,
 } from "./dispatch";
 import {computeDiffProvenance} from "./provenance";
+import {subAgentEnv} from "./dispatch-runner";
 
 /**
  * Post-trial follow-up tests for the scripted dispatcher: the
@@ -320,5 +321,17 @@ describe("open-thread suppression (trial suggestion g)", () => {
         // the stub has no validator output, so the unavailable note posts).
         expect(result.threadSuppressions).toEqual([]);
         expect(result.claims).toHaveLength(1);
+    });
+});
+
+describe("subAgentEnv (the orchestrator effort dial never reaches sub-agents)", () => {
+    it("strips CLAUDE_CODE_EFFORT_LEVEL and undefined values, keeps the rest", () => {
+        expect(
+            subAgentEnv({
+                CLAUDE_CODE_EFFORT_LEVEL: "low",
+                REVIEW_REPO_ROOT: "/work",
+                EMPTY: undefined,
+            }),
+        ).toEqual({REVIEW_REPO_ROOT: "/work"});
     });
 });

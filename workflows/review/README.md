@@ -342,7 +342,7 @@ sub-agent models — this table is the human-facing summary:
 
 | Role | Model | Effort | Why |
 | --- | --- | --- | --- |
-| orchestrator | `claude-opus-4-8` | high | Owns every GitHub/safe-output decision |
+| orchestrator | `claude-sonnet-5` | low | Transcribes the plan and stages threads; the gate reds any transcription drift, and the reasoning lives in the sub-agents (the runner strips the orchestrator's effort env from theirs) |
 | `pattern-triage` | `claude-sonnet-4-6` | medium | Cheap first-pass triage |
 | `thread-reconciler` | `claude-opus-4-8` | medium | Reconciliation |
 | `correctness-reviewer` | `claude-fable-5` | high | Whole-change reviewer; bug-finding recall is the load-bearing metric |

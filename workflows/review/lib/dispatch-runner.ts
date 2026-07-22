@@ -12,6 +12,27 @@
 import type {AgentRequest, AgentResult, AgentRunner} from "./dispatch";
 
 /**
+ * The environment the sub-agents run under: the sandbox env minus the
+ * orchestrator's effort dial. The engine sets CLAUDE_CODE_EFFORT_LEVEL for
+ * the ORCHESTRATOR (Sonnet at low effort), and env vars reach every process
+ * in the sandbox — without this filter the SDK-spawned reviewers would
+ * silently inherit low effort too, degrading the reasoning roles the
+ * orchestrator dial was never meant to touch. Sub-agents keep the harness
+ * default (their definitions' effort annotations remain the human-facing
+ * table in the README until gh-aw grows a per-agent effort field).
+ */
+export const subAgentEnv = (
+    env: Record<string, string | undefined>,
+): Record<string, string> =>
+    Object.fromEntries(
+        Object.entries(env).filter(
+            (entry): entry is [string, string] =>
+                entry[1] !== undefined &&
+                entry[0] !== "CLAUDE_CODE_EFFORT_LEVEL",
+        ),
+    );
+
+/**
  * Build the production runner. The SDK and zod are imported lazily here
  * (both installed by the scripted-mode `npm ci` pre-agent step); zod is the
  * SDK's own schema language for in-process MCP tools (a peer dependency).
@@ -57,6 +78,7 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
             allowedTools,
             permissionMode: "bypassPermissions",
             abortController: abort,
+            env: subAgentEnv(process.env),
         };
         // The structured-final channel (trial suggestion h): an in-process
         // MCP tool whose handler runs the same contract parse the collection

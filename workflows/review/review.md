@@ -167,20 +167,34 @@ observability:
         headers:
           x-sentry-auth: ${{ secrets.GH_AW_OTEL_SENTRY_AUTHORIZATION }}
 
-# Pin the orchestrator to a specific model version rather than a floating tier alias, so
-# the review doesn't silently change behavior when a new Opus ships. If we use Opus, we
-# use Opus 4.8. Sub-agents pin their own versions in their frontmatter below.
+# Pin the orchestrator to a specific model version rather than a floating tier
+# alias, so the review doesn't silently change behavior when a new model ships.
+# Sub-agents pin their own versions in their frontmatter below; the reasoning
+# stays on their models (Fable/Opus). The orchestrator itself is Sonnet at LOW
+# effort: with task mode removed its job is transcription plus a handful of
+# small judgments (thread staging, the tier questions, Steps 7-8), the
+# dispatch-conformance gate turns any transcription drift into a red run
+# rather than a wrong review, and the trial measured the orchestrator line at
+# $2-3/run on Opus — the single largest non-reviewer cost. claude-sonnet-5 is
+# its own pin (Sonnet 5 has no dated alias).
 #
-# The `env:` overrides gh-aw's 60s Bash tool timeout defaults (compile-verified:
-# these replace the generated values on the engine execution step). Needed by the
-# scripted dispatch mode (ROUTING `dispatch scripted`): the orchestrator invokes
-# the deterministic dispatcher (lib/dispatch.ts) as ONE blocking Bash call that
-# waits for the whole sub-agent fan-out, which takes minutes, not seconds. The
-# job-level timeout-minutes still bounds the run.
+# CLAUDE_CODE_EFFORT_LEVEL sets the orchestrator's reasoning effort (it
+# outranks the CLI flag and settings.json). It reaches the whole sandbox env,
+# so the dispatcher's runner (lib/dispatch-runner.ts) strips it from the
+# sub-agent environment — reviewer effort must never silently follow the
+# orchestrator dial.
+#
+# The BASH_* env overrides replace gh-aw's 60s Bash tool timeout defaults
+# (compile-verified: these replace the generated values on the engine
+# execution step). Needed because the orchestrator invokes the deterministic
+# dispatcher (lib/dispatch.ts) as ONE blocking Bash call that waits for the
+# whole sub-agent fan-out, which takes minutes, not seconds. The job-level
+# timeout-minutes still bounds the run.
 engine:
   id: claude
-  model: claude-opus-4-8
+  model: claude-sonnet-5
   env:
+    CLAUDE_CODE_EFFORT_LEVEL: "low"
     BASH_DEFAULT_TIMEOUT_MS: "60000"
     BASH_MAX_TIMEOUT_MS: "1200000"
 timeout-minutes: 20
@@ -217,6 +231,15 @@ models:
             output: 5.0e-05
             cache_read: 1.0e-06
             cache_write: 1.25e-05
+        # The orchestrator's model (same caveat: keeps gh-aw's cost display
+        # correct; the firewall api-proxy's own table, v0.27.27, already
+        # prices it).
+        claude-sonnet-5:
+          cost:
+            input: 3.0e-06
+            output: 1.5e-05
+            cache_read: 3.0e-07
+            cache_write: 3.75e-06
 
 # The shared review workflow is more than this markdown file: its deterministic
 # pieces (the finding schema and validator today; the router, computed verdict, and
