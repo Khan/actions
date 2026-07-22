@@ -89,6 +89,13 @@ describe("renderClaimComment", () => {
         );
         expect(body).toContain("> **Rule:** Always guard.\n> Even here.");
     });
+
+    it("renders an embedded blank quote line as a bare '>' so the blockquote does not split", () => {
+        const body = renderClaimComment(
+            claim({rule_quote: "Always guard.\n\nEven here."}) as never,
+        );
+        expect(body).toContain("> **Rule:** Always guard.\n>\n> Even here.");
+    });
 });
 
 describe("runSubmissionCli", () => {
@@ -235,6 +242,31 @@ describe("runSubmissionCli", () => {
         );
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("REQUEST_CHANGES");
+    });
+
+    it("appends the tripwire depth note with the plan's unreviewed share", () => {
+        const fs = makeFakeFs({
+            [`${REVIEW}/dispatch-result.json`]: JSON.stringify({
+                depth: "full",
+                claims: [],
+            }),
+            [`${REVIEW}/rereview-plan.json`]: JSON.stringify({
+                depth: "full",
+                mode: "scoped",
+                tripwireRearmed: true,
+                divergence: {
+                    totalHunks: 10,
+                    unreviewedHunks: 5,
+                    unreviewedShare: 0.5,
+                },
+                stampAnchorDraft: false,
+                stampHunks: {},
+            }),
+        });
+        const plan = runSubmissionCli(fs);
+        expect(plan.body).toContain(
+            "Note: divergence tripwire re-armed a full review (unreviewed share 0.50).",
+        );
     });
 
     it("folds a pr-level claim into the body instead of an inline comment", () => {

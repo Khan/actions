@@ -233,7 +233,9 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
         );
     }
     if (plan?.tripwireRearmed === true) {
-        const share = (plan.divergence as {share?: unknown} | undefined)?.share;
+        const share = (
+            plan.divergence as {unreviewedShare?: unknown} | undefined
+        )?.unreviewedShare;
         depthNotes.push(
             `Note: divergence tripwire re-armed a full review (unreviewed share ${
                 typeof share === "number" ? share.toFixed(2) : "unknown"
