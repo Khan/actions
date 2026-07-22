@@ -545,13 +545,34 @@ export const evaluateDispatchConformance = (
             // folds NFKC does not cover.
             .normalize("NFKC")
             .replace(/\u034f/g, "")
+            // Zero-width, bidi-control (sanitizer step 4), C0/DEL (its
+            // control-strip): all deleted on the queued side only, so
+            // delete them on both.
             .replace(/[\u00ad\u200b-\u200f\u2060-\u2064\ufeff]/g, "")
+            .replace(/[\u202a-\u202e\u2066-\u2069]/g, "")
+            // eslint-disable-next-line no-control-regex
+            .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
             .replace(/[\u2018\u2019\u201a\u201b]/g, "'")
             .replace(/[\u201c\u201d\u201e\u201f]/g, '"')
             .replace(/[\u2012\u2013\u2014\u2015]/g, "-")
             .toLowerCase()
             .replace(/`/g, "")
-            .replace(/https?:\/\/\S+/g, "<url>")
+            // neutralizeTemplateDelimiters escapes {{ ${ {% {# <%= outside
+            // code regions; drop the escaping backslashes on both sides.
+            .replace(/\\(?=[{$%#<])/g, "")
+            // URL sanitization applies even inside code regions under the
+            // deployed allowed-only policy: a non-allowlisted domain or a
+            // non-https scheme is rewritten to "(host/redacted)" or
+            // "(redacted)" (sanitizeUrlDomains / sanitizeUrlProtocols,
+            // gh-aw v0.81.6). Fold every URL form and every redaction
+            // token to one placeholder so a cited MDN link cannot false-
+            // block the submission.
+            .replace(/[a-z][a-z0-9+.-]*:\/\/\S+/g, "<url>")
+            .replace(
+                /(?:mailto|javascript|vbscript|data|about|tel|magnet):\S+/g,
+                "<url>",
+            )
+            .replace(/\((?:[a-z0-9.-]+\/)?redacted\)/g, "<url>")
             .replace(/\s+/g, " ")
             .trim();
     if (planStaged !== undefined && submit === undefined) {
