@@ -114,6 +114,8 @@ const fromLabelShape = (
             ? raw["subject"]
             : typeof raw["summary"] === "string"
             ? raw["summary"]
+            : typeof raw["title"] === "string"
+            ? raw["title"]
             : "";
     const discussion =
         typeof raw["discussion"] === "string" ? raw["discussion"] : "";
