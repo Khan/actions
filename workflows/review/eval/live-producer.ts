@@ -46,6 +46,7 @@ import {
 } from "./corpus/loader";
 import type {ExtractedAgent} from "./agent-extract";
 import type {ReReviewMode} from "../lib/routing-config";
+import {extractJsonObject} from "./extract-json";
 import {
     rewriteAgentPrompt,
     stageCase,
@@ -181,7 +182,7 @@ const RECONCILER = "thread-reconciler";
 
 /** Parse the reconciler's `{resolve, keep}` output (thread-id arrays). */
 const parseReconciliation = (output: string): LiveReconciliation => {
-    const parsed = parseJsonObject(output);
+    const parsed = extractJsonObject(output);
     const ids = (value: unknown, key: string): string[] => {
         if (
             !Array.isArray(value) ||
@@ -231,19 +232,6 @@ type LiveFinding = RecordedFinding & {skill?: string};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** Extract the JSON object from an agent's final text (live-judge's rule). */
-const parseJsonObject = (output: string): Record<string, unknown> => {
-    const match = output.match(/\{[\s\S]*\}/);
-    if (!match) {
-        throw new Error("output carries no JSON object");
-    }
-    const parsed: unknown = JSON.parse(match[0]);
-    if (!isRecord(parsed)) {
-        throw new Error("output JSON is not an object");
-    }
-    return parsed;
-};
 
 /**
  * Map one label-shape finding (correctness-reviewer / skill-auditor contract)
@@ -316,7 +304,7 @@ const parseAgentFindings = (
     usedIds: Set<string>,
     caseId: string,
 ): LiveFinding[] => {
-    const parsed = parseJsonObject(output);
+    const parsed = extractJsonObject(output);
     const rawFindings = parsed["findings"];
     if (!Array.isArray(rawFindings)) {
         throw new Error("output JSON has no findings array");
@@ -396,7 +384,7 @@ const parseVerifications = (
     output: string,
     knownIds: Set<string>,
 ): CaseVerification[] => {
-    const parsed = parseJsonObject(output);
+    const parsed = extractJsonObject(output);
     const rawClaims = parsed["claims"];
     if (!Array.isArray(rawClaims)) {
         throw new Error("validator output has no claims array");
