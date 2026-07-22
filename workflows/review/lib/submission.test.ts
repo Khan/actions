@@ -394,6 +394,40 @@ describe("the gate's plan-match rule (slice 4)", () => {
         expect(result.violations).toEqual([]);
     });
 
+    it("tolerates the sanitizer's typographic ASCII fold (run 29903306596's ellipsis)", () => {
+        const fancy = claim({
+            discussion:
+                "composite indexes that are missing from index.yaml \u2026 the order of the \u201cproperties\u201d matters \u2014 it\u2019s direction-sensitive.",
+        });
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged({
+                    depth: "full",
+                    claims: [fancy],
+                    reconciliation: {resolve: [], keep: []},
+                }),
+            ),
+        );
+        // What the gate sees queued is the POST-sanitizer body: unicode
+        // typography folded to ASCII.
+        const folded = plan.comments.map((comment) => ({
+            ...comment,
+            body: comment.body
+                .replace(/\u2026/g, "...")
+                .replace(/[\u201c\u201d]/g, '"')
+                .replace(/\u2014/g, "-")
+                .replace(/\u2019/g, "'"),
+        }));
+        const result = evaluateDispatchConformance({
+            items: queuedFromPlan({...plan, comments: folded}),
+            plan: {depth: "full"},
+            routing: {enabledReviewers: [], lensesToSpawn: []},
+            outFiles,
+            submissionPlan: plan,
+        });
+        expect(result.violations).toEqual([]);
+    });
+
     it("blocks a spliced body, a flipped event, and a dropped comment", () => {
         const plan = runSubmissionCli(plannedFs());
         const splicedBody = evaluateDispatchConformance({
