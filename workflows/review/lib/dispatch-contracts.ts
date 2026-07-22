@@ -13,10 +13,29 @@
 
 import {validateFinding, type Anchor, type Finding} from "./finding-schema";
 import {extractJsonObject} from "./agent-json";
-import {isBlockingLabel, labelForFinding} from "./render-comment";
+import {
+    BLOCKING_LABELS,
+    NON_BLOCKING_LABELS,
+    isBlockingLabel,
+    labelForFinding,
+} from "./render-comment";
 
 /** Production's confidence default for label-shape reviewers (review.md). */
 const LABEL_SHAPE_CONFIDENCE = 0.7;
+
+/**
+ * The full Conventional-Comments vocabulary a label-shape reviewer may emit
+ * (review.md's label contract). A finding whose label is not in this set is
+ * rejected so the malformed-output retry re-dispatches the reviewer: trial
+ * run 29897276810's correctness-reviewer emitted its ReportFindings tool
+ * shape instead (no `label` at all), the old default of `""` was accepted,
+ * and four blocking correctness findings posted label-less and demoted to
+ * advisory.
+ */
+const KNOWN_LABELS: ReadonlySet<string> = new Set([
+    ...BLOCKING_LABELS,
+    ...NON_BLOCKING_LABELS,
+]);
 
 /* -------------------------------------------------------------------------- */
 /* Output parsing                                                             */
@@ -53,6 +72,27 @@ export type Candidate = {
     authorDispute?: string;
 };
 
+/**
+ * Join the label contract's `subject` and `discussion` into one prose block.
+ * A subject with no terminal punctuation gets a sentence break, not a bare
+ * space (run 29897276810 posted "...memory Both TestExpiration..."); the
+ * break also keeps `buildClaims`' first-sentence split recovering the
+ * subject.
+ */
+export const joinProse = (subject: string, discussion: string): string => {
+    if (discussion === "") {
+        return subject.trim();
+    }
+    if (subject === "") {
+        return discussion.trim();
+    }
+    const trimmed = subject.trimEnd();
+    // Terminal punctuation may sit inside closing quotes/brackets/emphasis.
+    const core = trimmed.replace(/["'`)\]*_]+$/, "");
+    const glue = /[.!?:;]$/.test(core) ? " " : ". ";
+    return `${trimmed}${glue}${discussion.trim()}`;
+};
+
 /** Map one label-shape finding into a schema finding (the eval's rule). */
 const fromLabelShape = (
     agentName: string,
@@ -63,21 +103,40 @@ const fromLabelShape = (
     if (!isRecord(raw)) {
         throw new Error(`findings[${index}] is not an object`);
     }
-    const label = typeof raw["label"] === "string" ? raw["label"] : "";
-    const subject = typeof raw["subject"] === "string" ? raw["subject"] : "";
+    // Near-miss salvage before the label check: a reviewer drifting into a
+    // ReportFindings-style shape still carries the anchor in `anchor`/`file`
+    // and the subject in `summary`.
+    const rawAnchor = isRecord(raw["anchor"]) ? raw["anchor"] : undefined;
+    const path = raw["path"] ?? rawAnchor?.["path"] ?? raw["file"];
+    const line = raw["line"] ?? rawAnchor?.["line"];
+    const subject =
+        typeof raw["subject"] === "string"
+            ? raw["subject"]
+            : typeof raw["summary"] === "string"
+            ? raw["summary"]
+            : "";
     const discussion =
         typeof raw["discussion"] === "string" ? raw["discussion"] : "";
+    const label = typeof raw["label"] === "string" ? raw["label"] : "";
+    if (!KNOWN_LABELS.has(label)) {
+        throw new Error(
+            `findings[${index}] label ${JSON.stringify(
+                label,
+            )} is not a Conventional Comments label; every finding needs a ` +
+                `"label" field set to one of: ${[...KNOWN_LABELS].join(", ")}`,
+        );
+    }
     const candidate: Record<string, unknown> = {
         schema_version: 2,
         id: `${agentName}-${index + 1}`,
         lens,
         anchor:
-            raw["path"] === undefined || raw["line"] === undefined
+            path === undefined || line === undefined
                 ? {type: "pr"}
                 : {
                       type: "line",
-                      path: raw["path"],
-                      line: raw["line"],
+                      path,
+                      line,
                       side: "RIGHT",
                   },
         severity: isBlockingLabel(label) ? "blocking" : "advisory",
@@ -88,8 +147,7 @@ const fromLabelShape = (
         ],
         failure_scenario: raw["failure_scenario"] ?? subject,
         producing_hunt: `dispatch:${agentName}`,
-        model_authored_prose:
-            discussion === "" ? subject : `${subject} ${discussion}`.trim(),
+        model_authored_prose: joinProse(subject, discussion),
         ...(typeof raw["suggestion"] === "string" && raw["suggestion"] !== ""
             ? {suggested_patch: raw["suggestion"]}
             : {}),

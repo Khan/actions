@@ -428,9 +428,7 @@ describe("ROUTING dispatch directive", () => {
     });
 
     it("lets the last of duplicate dispatch lines win, with a warning", () => {
-        const config = parseRoutingConfig(
-            "dispatch task\ndispatch scripted\n",
-        );
+        const config = parseRoutingConfig("dispatch task\ndispatch scripted\n");
         expect(config.dispatchMode).toBe("scripted");
         expect(config.warnings.join("\n")).toContain("duplicate dispatch");
     });
