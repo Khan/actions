@@ -273,6 +273,8 @@ export type PerAgentReport = {
     usd: number;
     turns: number;
     wallMs: number;
+    /** This entry is the one malformed-output retry of the same agent. */
+    retried?: boolean;
     failed?: string;
 };
 
@@ -402,8 +404,15 @@ export const runDispatch = async (
         fs.writeFileSync(`${OUT_DIR}/${name}.json`, content);
     };
 
-    /** Dispatch one agent; stage its raw output; report cost and failure. */
-    const dispatchAgent = async (name: string): Promise<string | null> => {
+    /**
+     * Dispatch one agent; stage its raw output; report cost and failure.
+     * `malformedNote` marks the one contract-parse retry: it appends the
+     * corrective instruction to the prompt and flags the report entry.
+     */
+    const dispatchAgent = async (
+        name: string,
+        malformedNote?: string,
+    ): Promise<string | null> => {
         const definition = agents.get(name);
         if (definition === undefined) {
             writeOut(name, JSON.stringify({error: "agent definition missing"}));
@@ -418,10 +427,14 @@ export const runDispatch = async (
             return null;
         }
         try {
+            const corrective =
+                malformedNote === undefined
+                    ? ""
+                    : `\n\nYour previous reply could not be used (${malformedNote}). Reply again now, and this time your ENTIRE message must be the JSON object your output contract specifies: no prose before or after it, no code fence.`;
             const result = await runner({
                 name,
                 model: definition.model,
-                prompt: `${definition.prompt}\n\nProceed now per your definition. Your final message must be exactly the JSON object your definition's output contract specifies, nothing else.`,
+                prompt: `${definition.prompt}\n\nProceed now per your definition. Your final message must be exactly the JSON object your definition's output contract specifies, nothing else.${corrective}`,
                 cwd: repoRoot,
                 maxTurns,
                 timeoutMs,
@@ -433,6 +446,7 @@ export const runDispatch = async (
                 usd: result.usd,
                 turns: result.turns,
                 wallMs: result.wallMs,
+                ...(malformedNote === undefined ? {} : {retried: true}),
             });
             return result.output;
         } catch (error) {
@@ -455,6 +469,37 @@ export const runDispatch = async (
         }
     };
 
+    /**
+     * Parse an agent's output per its contract, re-dispatching ONCE with a
+     * corrective note when the parse fails (the eval producer's
+     * malformed-output rule). The retry's output overwrites the staged
+     * out-file, so the gate reads whatever the run actually acted on. A
+     * second failure returns null and the caller sheds the dimension with
+     * its disclosure note; without the retry, one prose-wrapped reply
+     * silently voids a dispatched (and paid-for) reviewer, which is how the
+     * mandatory correctness pass went missing in trial run 29893634730.
+     */
+    const parseWithRetry = async <T>(
+        name: string,
+        output: string,
+        parse: (output: string) => T,
+    ): Promise<T | null> => {
+        try {
+            return parse(output);
+        } catch (error) {
+            const note = error instanceof Error ? error.message : String(error);
+            const second = await dispatchAgent(name, note);
+            if (second === null) {
+                return null;
+            }
+            try {
+                return parse(second);
+            } catch {
+                return null;
+            }
+        }
+    };
+
     // Phase 1: triage (full/scoped), staging pr.diff and review-files.json.
     let excludedFiles: string[] | undefined;
     let patterns: unknown;
@@ -462,18 +507,17 @@ export const runDispatch = async (
     if (roster.triage) {
         const output = await dispatchAgent(TRIAGE);
         let reviewFiles: string[] | null = null;
-        if (output !== null) {
-            try {
-                const parsed = parseJsonObject(output);
-                patterns = parsed["patterns"];
-                const raw = parsed["reviewFiles"];
-                if (Array.isArray(raw)) {
-                    reviewFiles = raw.filter(
-                        (v): v is string => typeof v === "string",
-                    );
-                }
-            } catch {
-                reviewFiles = null;
+        const parsed =
+            output === null
+                ? null
+                : await parseWithRetry(TRIAGE, output, parseJsonObject);
+        if (parsed !== null) {
+            patterns = parsed["patterns"];
+            const raw = parsed["reviewFiles"];
+            if (Array.isArray(raw)) {
+                reviewFiles = raw.filter(
+                    (v): v is string => typeof v === "string",
+                );
             }
         }
         const diffPath =
@@ -561,8 +605,11 @@ export const runDispatch = async (
         entry,
         output: await dispatchAgent(entry.name),
     }));
+    const lensNames = Array.isArray(routing.lensesToSpawn)
+        ? routing.lensesToSpawn
+        : [];
     for (const {entry, output} of outputs) {
-        if (output === null) {
+        const shedDimension = (): void => {
             skippedDimensions.push({
                 dimension:
                     entry.kind === "reconciler"
@@ -570,47 +617,51 @@ export const runDispatch = async (
                         : entry.name,
                 cause: "unavailable",
             });
+        };
+        if (output === null) {
+            shedDimension();
             continue;
         }
-        try {
-            if (entry.kind === "reconciler") {
-                const parsed = parseJsonObject(output);
-                reconciliation = {
-                    resolve: Array.isArray(parsed["resolve"])
-                        ? parsed["resolve"].filter(
-                              (v): v is string => typeof v === "string",
-                          )
-                        : [],
-                    keep: Array.isArray(parsed["keep"])
-                        ? parsed["keep"].filter(
-                              (v): v is string => typeof v === "string",
-                          )
-                        : [],
-                    skipLines: parsed["skipLines"] ?? [],
-                };
-            } else {
-                const lensNames = Array.isArray(routing.lensesToSpawn)
-                    ? routing.lensesToSpawn
-                    : [];
-                const parsed = parseFinderOutput(
+        if (entry.kind === "reconciler") {
+            const parsed = await parseWithRetry(
+                entry.name,
+                output,
+                parseJsonObject,
+            );
+            if (parsed === null) {
+                shedDimension();
+                continue;
+            }
+            reconciliation = {
+                resolve: Array.isArray(parsed["resolve"])
+                    ? parsed["resolve"].filter(
+                          (v): v is string => typeof v === "string",
+                      )
+                    : [],
+                keep: Array.isArray(parsed["keep"])
+                    ? parsed["keep"].filter(
+                          (v): v is string => typeof v === "string",
+                      )
+                    : [],
+                skipLines: parsed["skipLines"] ?? [],
+            };
+        } else {
+            const parsed = await parseWithRetry(entry.name, output, (raw) =>
+                parseFinderOutput(
                     entry.name,
-                    output,
+                    raw,
                     usedIds,
                     lensNames.includes(entry.name),
-                );
-                candidates.push(...parsed.candidates);
-                if (entry.name === "correctness-reviewer") {
-                    riskFiles = parsed.riskFiles;
-                }
+                ),
+            );
+            if (parsed === null) {
+                shedDimension();
+                continue;
             }
-        } catch {
-            skippedDimensions.push({
-                dimension:
-                    entry.kind === "reconciler"
-                        ? "thread reconciliation"
-                        : entry.name,
-                cause: "unavailable",
-            });
+            candidates.push(...parsed.candidates);
+            if (entry.name === "correctness-reviewer") {
+                riskFiles = parsed.riskFiles;
+            }
         }
     }
 
@@ -713,14 +764,14 @@ export const runDispatch = async (
         );
         const output = await dispatchAgent(VALIDATOR);
         if (output !== null) {
-            try {
-                claims = applyVerifications(
-                    claims,
-                    parseValidatorOutput(output),
-                );
+            const verifications = await parseWithRetry(
+                VALIDATOR,
+                output,
+                parseValidatorOutput,
+            );
+            if (verifications !== null) {
+                claims = applyVerifications(claims, verifications);
                 validatorRan = true;
-            } catch {
-                validatorRan = false;
             }
         }
         if (!validatorRan) {
@@ -735,9 +786,13 @@ export const runDispatch = async (
         }
     }
 
-    const dispatched = perAgent
-        .filter((agent) => agent.failed === undefined)
-        .map((agent) => agent.name);
+    const dispatched = [
+        ...new Set(
+            perAgent
+                .filter((agent) => agent.failed === undefined)
+                .map((agent) => agent.name),
+        ),
+    ];
     const noteLines = [
         ...roster.shed.map((shed) => noteLine.shed(shed.name, tier)),
         ...skippedDimensions
