@@ -113,7 +113,23 @@ export type ThreadSuppression = {
     path: string;
     line?: number;
     thread_id: string;
+    /**
+     * Whether the matched thread's OPENING comment carries a blocking label.
+     * The verdict floor keys on this, not on the candidate's own label: the
+     * thread's severity survived last run's validation, while a suppressed
+     * candidate is dropped before validation ever sees it.
+     */
+    threadBlocking: boolean;
 };
+
+/**
+ * Whether an open thread's opener is a blocking finding, read from the
+ * leading `**label:**` template (tolerating the markdown-stripped form the
+ * staged bodies sometimes carry). A body with no recognizable label reads
+ * as non-blocking: an unvalidated floor is the failure mode this guards.
+ */
+const threadOpenerIsBlocking = (body: string): boolean =>
+    /^\s*\*{0,2}[a-z]+ \(blocking\)/i.test(body);
 
 /**
  * The prose of a previously-posted bot comment, for similarity comparison:
@@ -166,9 +182,12 @@ export const describesOpenThreadDefect = (
  * of the same file (the observed pair sat 20 lines apart); the similarity
  * floor carries the precision. The caller excludes threads the reconciler
  * resolves this run, so a fixed defect's fresh regression still posts, and
- * records suppressed blocking labels so the verdict cannot flip to APPROVE
- * over a still-open blocking objection (submission.ts feeds them into the
- * kept-blocking floor).
+ * each suppression records both the candidate's label and the matched
+ * thread's blocking-ness so the verdict cannot flip to APPROVE over a
+ * still-open, re-confirmed blocking objection (submission.ts floors only
+ * when BOTH are blocking: the thread's severity is the validated one, and
+ * the candidate's re-confirmation at blocking severity is what makes the
+ * floor more than a stale thread).
  */
 export const suppressOpenThreadDuplicates = (
     claims: Claim[],
@@ -199,6 +218,7 @@ export const suppressOpenThreadDuplicates = (
             path: claim.path as string,
             ...(claim.line !== undefined ? {line: claim.line} : {}),
             thread_id: match.thread_id,
+            threadBlocking: threadOpenerIsBlocking(match.body),
         });
     }
     return {kept, suppressed};

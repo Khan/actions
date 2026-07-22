@@ -221,8 +221,38 @@ describe("suppressOpenThreadDuplicates (trial suggestion g)", () => {
                 path: "services/ai-guide/memory/expiration.go",
                 line: 42,
                 thread_id: "T1",
+                threadBlocking: true,
             },
         ]);
+    });
+
+    it("records the matched thread's opener as non-blocking when it is", () => {
+        const reflag = claim({
+            id: "correctness-reviewer-2",
+            source: "correctness-reviewer",
+            line: 42,
+            label: "issue (blocking)",
+            subject:
+                "Missing deletion test: the expiration path has no test covering the delete.",
+            discussion:
+                "No test exercises the deletion path; TestExpiration asserts expired keys are identified but a regression that never deletes expired memories stays green.",
+            failure_scenario:
+                "A regression that identifies expired memories but skips the deletion is not caught by TestExpiration and ships green.",
+        });
+        const nonBlockingThread = openThread({
+            body: openThread().body.replace(
+                "**issue (blocking):**",
+                "suggestion (non-blocking):",
+            ),
+        });
+        const {suppressed} = suppressOpenThreadDuplicates(
+            [reflag],
+            [nonBlockingThread],
+        );
+        // Still suppressed (same defect), but flagged so submission.ts never
+        // floors the verdict on an unvalidated blocking candidate alone.
+        expect(suppressed).toHaveLength(1);
+        expect(suppressed[0].threadBlocking).toBe(false);
     });
 
     it("keeps a distinct defect on the same path", () => {

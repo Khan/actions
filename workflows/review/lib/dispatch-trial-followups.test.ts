@@ -300,6 +300,7 @@ describe("open-thread suppression (trial suggestion g)", () => {
                 path: "a.ts",
                 line: 2,
                 thread_id: "T1",
+                threadBlocking: true,
             },
         ]);
         expect(result.noteLines).toEqual([

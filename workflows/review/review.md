@@ -680,7 +680,8 @@ cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
    `out/<agent>.json`), the provenance gate, the scope filter, cross-source
    dedup, open-thread suppression (a candidate that describes a defect an
    open bot thread already tracks is not re-validated or re-posted; a
-   suppressed blocking candidate still floors the verdict), and claim
+   suppressed blocking candidate still floors the verdict when the matched
+   thread's opener is itself blocking), and claim
    validation, and writes `/tmp/gh-aw/review/dispatch-result.json`.
 4. Compose the submission deterministically, once:
 ```
@@ -690,7 +691,7 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    (`rereview.json`), computes the verdict (Step 4's mechanical rule plus the
    reduced-depth flip floor), renders every inline comment and the full
    review body (note lines and fingerprint stamp included), and writes
-   `/tmp/gh-aw/review/submission-plan.json`. At full/scoped depth it also
+   `/tmp/gh-aw/review/submission-plan.json`. At full depth it also
    stages `/tmp/gh-aw/review/risks-patterns-key.txt`, the code-computed
    canonical signature Step 7 compares (never compose your own signature in
    this mode).

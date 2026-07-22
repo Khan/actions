@@ -647,8 +647,52 @@ describe("re-review hardening (slice 4 feedback)", () => {
     });
 });
 
+describe("risks/patterns key staging (trial suggestion b)", () => {
+    const KEY_PATH = `${REVIEW}/risks-patterns-key.txt`;
+    const triaged = {
+        claims: [],
+        riskFiles: [
+            {path: "a.ts", risk: "High"},
+            {path: "b.ts", risk: "Medium"},
+            {path: "c.ts", risk: "Low"},
+        ],
+        patterns: ["bump-deps"],
+        excludedFiles: ["gen.ts"],
+    };
+
+    it("stages the canonical signature at full depth, owners from routing.json", () => {
+        const fs = makeFakeFs(
+            staged(
+                {depth: "full", ...triaged},
+                {
+                    [`${REVIEW}/routing.json`]: JSON.stringify({
+                        teams: {owners: {"a.ts": ["team-b", "team-a"]}},
+                    }),
+                },
+            ),
+        );
+        runSubmissionCli(fs);
+        expect(fs.files[KEY_PATH]).toBe(
+            [
+                "excluded:gen.ts",
+                "pattern:bump-deps=",
+                "risk:a.ts=team-a+team-b",
+                "risk:b.ts=",
+            ].join("|"),
+        );
+    });
+
+    it("stages nothing at any reduced depth (Step 7 skips them; a scoped subset must not overwrite the full signature)", () => {
+        for (const depth of ["scoped", "flip-gated", "fast"]) {
+            const fs = makeFakeFs(staged({depth, ...triaged}));
+            runSubmissionCli(fs);
+            expect(fs.files[KEY_PATH]).toBeUndefined();
+        }
+    });
+});
+
 describe("open-thread suppression verdict floor (trial suggestion g)", () => {
-    it("floors the verdict at REQUEST_CHANGES when a blocking claim was suppressed as an open-thread duplicate", () => {
+    it("floors the verdict at REQUEST_CHANGES when a blocking claim was suppressed as a duplicate of an open BLOCKING thread", () => {
         const fs = makeFakeFs(
             staged({
                 depth: "full",
@@ -664,6 +708,7 @@ describe("open-thread suppression verdict floor (trial suggestion g)", () => {
                         path: "a.ts",
                         line: 42,
                         thread_id: "T1",
+                        threadBlocking: true,
                     },
                 ],
             }),
@@ -693,6 +738,35 @@ describe("open-thread suppression verdict floor (trial suggestion g)", () => {
                         label: "suggestion (non-blocking)",
                         path: "a.ts",
                         thread_id: "T2",
+                        threadBlocking: true,
+                    },
+                ],
+            }),
+        );
+        expect(runSubmissionCli(fs).event).toBe("APPROVE");
+    });
+
+    it("does not floor a blocking candidate matched to a NON-blocking open thread", () => {
+        // Suppression runs before validation, so the candidate's blocking
+        // label is unvalidated; the matched thread's opener is the severity
+        // that survived a prior run's validation. A false-positive blocking
+        // candidate that text-matches an open suggestion thread must not
+        // force REQUEST_CHANGES with no validation and no visible blocking
+        // comment.
+        const fs = makeFakeFs(
+            staged({
+                depth: "full",
+                claims: [],
+                noteLines: [],
+                threadSuppressions: [
+                    {
+                        id: "correctness-reviewer-1",
+                        source: "correctness-reviewer",
+                        label: "issue (blocking)",
+                        path: "a.ts",
+                        line: 42,
+                        thread_id: "T3",
+                        threadBlocking: false,
                     },
                 ],
             }),

@@ -223,9 +223,12 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
     // (cache-record.ts) records the same string when the guidance comment
     // queues, so one code-owned format sits on both sides of the repost
     // decision.
-    // Reduced depths compute no triage or risk data, so nothing is staged
-    // there (the existing comment stands and the key carries forward).
-    if (depth === "full" || depth === "scoped") {
+    // Full depth only: Step 7 skips every reduced depth (`scoped` included),
+    // so the existing comment stands and the key carries forward. A scoped
+    // run DOES compute triage, but against the scoped subset; staging that
+    // narrower signature could collapse the standing full-run guidance the
+    // next time any comment queues.
+    if (depth === "full") {
         const routing = readJson(fs, `${REVIEW_DIR}/routing.json`) as
             | {teams?: {owners?: unknown}}
             | undefined;
@@ -285,12 +288,18 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
     }
 
     // A blocking candidate the dispatcher suppressed as a duplicate of a
-    // still-open bot thread (trial suggestion g) blocks like a fresh one:
-    // the reviewer re-confirmed the defect, and the open thread is the
-    // actionable feedback. Without this floor, suppression could flip the
-    // verdict to APPROVE over an unfixed blocking objection. (A thread the
-    // reduced-depth floor above already counted may add one more here; the
-    // verdict is the same either way, only the reason count differs.)
+    // still-open BLOCKING bot thread (trial suggestion g) blocks like a
+    // fresh one: the reviewer re-confirmed the defect, and the open thread
+    // is the actionable feedback. Without this floor, suppression could
+    // flip the verdict to APPROVE over an unfixed blocking objection. Both
+    // sides must be blocking: suppression happens before validation, so the
+    // candidate's own label is unvalidated; the matched thread's opener
+    // label is the severity that DID survive a prior run's validation. A
+    // blocking candidate matching a non-blocking open thread therefore
+    // never floors (it would force REQUEST_CHANGES with no validation and
+    // no visible blocking comment). (A thread the reduced-depth floor above
+    // already counted may add one more here; the verdict is the same either
+    // way, only the reason count differs.)
     const suppressedBlocking = (
         Array.isArray(dispatch.threadSuppressions)
             ? dispatch.threadSuppressions
@@ -298,7 +307,8 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
     ).filter(
         (entry) =>
             typeof (entry as {label?: unknown}).label === "string" &&
-            isBlockingLabel((entry as {label: string}).label),
+            isBlockingLabel((entry as {label: string}).label) &&
+            (entry as {threadBlocking?: unknown}).threadBlocking === true,
     ).length;
 
     const verdict = computeVerdict({
