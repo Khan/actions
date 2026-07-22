@@ -262,12 +262,14 @@ describe("parseFinderOutput", () => {
         ).toThrow(/findings\[0\]/);
     });
 
-    it("dedupes colliding finding ids across producers", () => {
+    it("keeps label-shape ids distinct without renaming (agent-prefixed ids cannot collide)", () => {
+        // The real collision case (two lenses declaring the same schema id)
+        // is covered in "renames the second lens finding when ids collide
+        // across producers"; this pins the non-collision path: label-shape
+        // ids are <agent>-<index>, so distinct agents never rename.
         const used = new Set<string>();
         parseFinderOutput("correctness-reviewer", CORRECTNESS_OUT, used);
         const second = parseFinderOutput("holistic", CORRECTNESS_OUT, used);
-        // holistic's first finding id collides (both are <agent>-1 shapes
-        // only when equal); here ids differ by agent name so no collision.
         expect(second.candidates[0].finding.id).toBe("holistic-1");
         expect(used.has("holistic-1")).toBe(true);
     });
@@ -417,6 +419,20 @@ describe("ROUTING dispatch directive", () => {
         const config = parseRoutingConfig("dispatch warp\n");
         expect(config.dispatchMode).toBe("task");
         expect(config.warnings.join(" ")).toContain("unknown dispatch mode");
+    });
+
+    it("skips a dispatch line with the wrong arity", () => {
+        const config = parseRoutingConfig("dispatch task scripted\n");
+        expect(config.dispatchMode).toBe("task");
+        expect(config.warnings.join("\n")).toContain("exactly one");
+    });
+
+    it("lets the last of duplicate dispatch lines win, with a warning", () => {
+        const config = parseRoutingConfig(
+            "dispatch task\ndispatch scripted\n",
+        );
+        expect(config.dispatchMode).toBe("scripted");
+        expect(config.warnings.join("\n")).toContain("duplicate dispatch");
     });
 });
 
