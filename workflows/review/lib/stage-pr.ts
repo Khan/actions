@@ -101,6 +101,7 @@ const SCOPED_DIFF_PATH = `${REVIEW_DIR}/scoped.diff`;
 const PR_DIFF_OUT = `${REVIEW_DIR}/pr.diff`;
 const PR_ANNOTATED_OUT = `${REVIEW_DIR}/pr-annotated.diff`;
 const REVIEW_FILES_OUT = `${REVIEW_DIR}/review-files.json`;
+const DISCIPLINES_OUT = `${REVIEW_DIR}/disciplines.md`;
 
 export type StagePrFs = {
     readFileSync: (p: string, enc: "utf8") => string;
@@ -502,7 +503,7 @@ export const runStagePrCli = async (
             section !== null &&
             section.includes("## Structured finding schema and hunts")
         ) {
-            write(`${REVIEW_DIR}/disciplines.md`, section);
+            write(DISCIPLINES_OUT, section);
         } else {
             warnings.push(
                 section === null
