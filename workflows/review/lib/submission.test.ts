@@ -1,6 +1,7 @@
 import {describe, it, expect} from "vitest";
 
 import {evaluateDispatchConformance} from "./dispatch-gate";
+import {labelForFinding, renderComment} from "./render-comment";
 import {renderRereviewStamp, STAMP_SCHEMA_VERSION} from "./rereview-mode";
 import {
     renderClaimComment,
@@ -304,15 +305,182 @@ describe("the gate's plan-match rule (slice 4)", () => {
         );
     });
 
-    it("does not fire when no submission is queued (the redundant-approval skip)", () => {
-        const plan = runSubmissionCli(plannedFs());
+    it("the redundant-approval skip queues nothing only for an APPROVE plan with no comments", () => {
+        const approvePlan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims: []})),
+        );
         const result = evaluateDispatchConformance({
             items: [],
             plan: {depth: "full"},
             routing: {enabledReviewers: [], lensesToSpawn: []},
             outFiles,
-            submissionPlan: plan,
+            submissionPlan: approvePlan,
         });
         expect(result.conformant).toBe(true);
+        // Dropping a REQUEST_CHANGES plan is the withheld-verdict shape and
+        // blocks (pinned in detail in the hardening suite below).
+        const rcPlan = runSubmissionCli(plannedFs());
+        const dropped = evaluateDispatchConformance({
+            items: [],
+            plan: {depth: "full"},
+            routing: {enabledReviewers: [], lensesToSpawn: []},
+            outFiles,
+            submissionPlan: rcPlan,
+        });
+        expect(dropped.conformant).toBe(false);
+    });
+});
+
+describe("re-review hardening (slice 4 feedback)", () => {
+    const gateInput = (plan: ReturnType<typeof runSubmissionCli>) => ({
+        plan: {depth: "full"},
+        routing: {enabledReviewers: [], lensesToSpawn: []},
+        outFiles: {
+            "pattern-triage.json": JSON.stringify({reviewFiles: ["a.ts"]}),
+            "correctness-reviewer.json": "{}",
+            "claim-validator.json": "{}",
+        },
+        submissionPlan: plan,
+    });
+    const rcPlan = () =>
+        runSubmissionCli(
+            makeFakeFs(
+                staged({
+                    depth: "full",
+                    claims: [claim()],
+                    reconciliation: {resolve: [], keep: []},
+                }),
+            ),
+        );
+
+    it("blocks queued comments with no submission (the ungated COMMENT review shape)", () => {
+        const plan = rcPlan();
+        const result = evaluateDispatchConformance({
+            ...gateInput(plan),
+            items: plan.comments.map((comment) => ({
+                type: "create_pull_request_review_comment",
+                ...comment,
+            })),
+        });
+        expect(result.violations.map((v) => v.code)).toContain(
+            "submission-plan-mismatch",
+        );
+    });
+
+    it("blocks a silently-dropped REQUEST_CHANGES plan (nothing queued)", () => {
+        const plan = rcPlan();
+        const result = evaluateDispatchConformance({
+            ...gateInput(plan),
+            items: [],
+        });
+        expect(result.violations.map((v) => v.code)).toEqual([
+            "submission-plan-mismatch",
+        ]);
+    });
+
+    it("permits queueing nothing only for an APPROVE plan with no comments", () => {
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims: []})),
+        );
+        const result = evaluateDispatchConformance({
+            ...gateInput(plan),
+            items: [],
+        });
+        expect(result.conformant).toBe(true);
+    });
+
+    it("tolerates sanitizer-shaped drift: case, backticks, whitespace, URL rewrites", () => {
+        const plan = rcPlan();
+        const mangle = (text: string): string =>
+            `${text
+                .toUpperCase()
+                .replace(/ /g, "  ")
+                .replace(
+                    "GUARD",
+                    "`GUARD` https://evil.example/redirect?x=1",
+                )}`;
+        const planWithUrl = {
+            ...plan,
+            body: `${plan.body}\nSee https://github.com/Khan/actions/pull/1 for context.`,
+        };
+        const result = evaluateDispatchConformance({
+            ...gateInput(planWithUrl),
+            items: [
+                ...plan.comments.map((comment) => ({
+                    type: "create_pull_request_review_comment",
+                    path: comment.path,
+                    line: comment.line,
+                    body: comment.body.toUpperCase().replace(/ /g, "  "),
+                })),
+                {
+                    type: "submit_pull_request_review",
+                    event: plan.event,
+                    body: `${plan.body}\nSee https://redirect.github.example/rewritten for context.`,
+                },
+            ],
+        });
+        expect(
+            result.violations.filter(
+                (v) => v.code === "submission-plan-mismatch",
+            ),
+        ).toEqual([]);
+        // mangle() is used above only for the URL clause; keep the linter
+        // honest about it.
+        expect(mangle("guard")).toContain("GUARD");
+    });
+
+    it("appends the tripwire note with the 2-decimal share", () => {
+        const fs = makeFakeFs({
+            [`${REVIEW}/dispatch-result.json`]: JSON.stringify({
+                depth: "full",
+                claims: [],
+            }),
+            [`${REVIEW}/rereview-plan.json`]: JSON.stringify({
+                depth: "full",
+                mode: "scoped",
+                tripwireRearmed: true,
+                divergence: {share: 0.4567},
+                stampAnchorDraft: false,
+                stampHunks: {},
+            }),
+        });
+        const plan = runSubmissionCli(fs);
+        expect(plan.body).toContain(
+            "Note: divergence tripwire re-armed a full review (unreviewed share 0.46).",
+        );
+    });
+
+    it("keeps a blank line inside a rule-quote blockquote", () => {
+        const body = renderClaimComment(
+            claim({rule_quote: "First.\n\nSecond."}) as never,
+        );
+        expect(body).toContain("> **Rule:** First.\n>\n> Second.");
+    });
+
+    it("renderClaimComment matches renderComment byte-for-byte on the same finding", () => {
+        const finding = {
+            schema_version: 2,
+            id: "f1",
+            lens: "correctness",
+            anchor: {type: "line", path: "a.ts", line: 2, side: "RIGHT"},
+            severity: "blocking",
+            confidence: 0.9,
+            evidence_trace: ["a.ts:2"],
+            failure_scenario: "fails",
+            producing_hunt: "h",
+            model_authored_prose: "The guard was removed.",
+            rule_quote: "Always guard.\n\nEven here.",
+            suggested_patch: "guard()",
+        } as never;
+        const canonical = renderComment(finding);
+        const viaClaim = renderClaimComment(
+            claim({
+                label: labelForFinding(finding),
+                discussion: "The guard was removed.",
+                rule_quote: "Always guard.\n\nEven here.",
+                suggestion: "guard()",
+            }) as never,
+        );
+        expect(viaClaim).toBe(canonical);
     });
 });

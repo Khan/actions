@@ -496,14 +496,48 @@ export const evaluateDispatchConformance = (
     // Rule 7 (scripted mode, slice 4): when a submission plan is staged, the
     // queued outputs must match it. gh-aw's ingest sanitizer may neutralize
     // mentions and rewrite disallowed links, so bodies are compared under a
-    // normalization that survives it (case, whitespace, backticks); anything
-    // beyond that is a splice (#244) and blocks.
+    // normalization that survives it (case, whitespace, backticks, and URL
+    // bodies, which the sanitizer may rewrite); anything beyond that is a
+    // splice (#244) and blocks. The rule also owns the NO-submission shapes:
+    // queued comments with no submit would land as a COMMENT review, and a
+    // silently-dropped plan would withhold a REQUEST_CHANGES verdict, so only
+    // an APPROVE plan with no comments may legitimately queue nothing (the
+    // Step 6 redundant-approval skip).
     const planStaged = input.submissionPlan as
         | {event?: unknown; body?: unknown; comments?: unknown}
         | undefined;
+    const normalizeBody = (text: string): string =>
+        text
+            .toLowerCase()
+            .replace(/`/g, "")
+            .replace(/https?:\/\/\S+/g, "<url>")
+            .replace(/\s+/g, " ")
+            .trim();
+    if (planStaged !== undefined && submit === undefined) {
+        const planComments = Array.isArray(planStaged.comments)
+            ? planStaged.comments
+            : [];
+        if (commentCount > 0) {
+            violations.push({
+                code: "submission-plan-mismatch",
+                dimension: "verdict",
+                detail: `${commentCount} inline comment(s) queued with no review submission (they would land as an ungated COMMENT review); the staged plan requires a ${String(
+                    planStaged.event,
+                )} submission`,
+            });
+        } else if (planStaged.event !== "APPROVE" || planComments.length > 0) {
+            violations.push({
+                code: "submission-plan-mismatch",
+                dimension: "verdict",
+                detail: `nothing queued but the staged plan is ${String(
+                    planStaged.event,
+                )} with ${
+                    planComments.length
+                } comment(s); only an APPROVE plan with no comments may skip the submission`,
+            });
+        }
+    }
     if (planStaged !== undefined && submit !== undefined) {
-        const normalizeBody = (text: string): string =>
-            text.toLowerCase().replace(/`/g, "").replace(/\s+/g, " ").trim();
         if (
             typeof planStaged.event === "string" &&
             verdictEvent !== planStaged.event

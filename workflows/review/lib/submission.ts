@@ -192,7 +192,14 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
     });
     // With every dimension reported assessed (the dispatcher's unavailable
     // dimensions surface as note lines instead), the two-state Step 4 rule
-    // is what remains: HOLD_FOR_HUMAN is unreachable here.
+    // is what remains: HOLD_FOR_HUMAN is unreachable here, and the guard
+    // makes a future edit that feeds real dimension availability into
+    // computeVerdict fail loudly instead of auto-approving a crashed run.
+    if (verdict.event === "HOLD_FOR_HUMAN") {
+        throw new Error(
+            "HOLD_FOR_HUMAN reached the submission plan: dimension availability must not feed this CLI without a hold path",
+        );
+    }
     const event =
         verdict.event === "REQUEST_CHANGES" ? "REQUEST_CHANGES" : "APPROVE";
 

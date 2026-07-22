@@ -689,8 +689,12 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    entry (its `path`, `line`, and `body` verbatim), one
    `resolve-pull-request-review-thread` per `resolve` id (batched in one
    turn), and one `submit-pull-request-review` with the plan's `event` and
-   `body` verbatim. The redundant-approval skip (Step 6) still applies: when
-   it says skip, emit no submission at all. The dispatch-conformance gate
+   `body` verbatim. The redundant-approval skip still applies, restated here
+   since you skip Step 6's text in this mode: only when the plan's `event` is
+   APPROVE with zero `comments`, the plan's `body` carries no `Note:` lines
+   and no accountability section, and the PR's most recent
+   `github-actions[bot]` review is already APPROVED, emit no submission at
+   all (the gate permits queueing nothing exactly for that shape). The dispatch-conformance gate
    compares what you queued against the staged plan and blocks the
    submission on any deviation, so a mis-typed or "improved" body is a red
    run, never a posted one. `dispatch-result.json`'s `riskFiles`,
