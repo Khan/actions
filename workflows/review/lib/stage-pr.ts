@@ -487,10 +487,12 @@ export const runStagePrCli = async (
     staged.push(ROUTING_OUT);
     runProvenanceCli(fs, repoRoot);
     staged.push(PROVENANCE_OUT, STRIPPED_DIFF_OUT, ANNOTATED_DIFF_OUT);
-    const {plan, warnings: planWarnings} = runRereviewPlanCli(fs);
+    const {plan, warnings: planWarnings, stampSource} = runRereviewPlanCli(fs);
     warnings.push(...planWarnings);
     staged.push(PLAN_OUT);
-    write(PLAN_ARTIFACT_OUT, JSON.stringify(plan, null, 2));
+    // Mirror the staged plan verbatim, stampSource included, so the run
+    // artifact records which fingerprint carrier anchored the depth.
+    write(PLAN_ARTIFACT_OUT, JSON.stringify({...plan, stampSource}, null, 2));
 
     // 9. The scoped swap (review.md Step 3's depth semantics). When the plan
     // stages new-hunks, the whole-change surfaces shrink to the unseen hunks;
