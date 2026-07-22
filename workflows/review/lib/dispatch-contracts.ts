@@ -145,7 +145,14 @@ const fromLabelShape = (
             `${agentName} label: ${label}`,
             ...(discussion === "" ? [] : [discussion]),
         ],
-        failure_scenario: raw["failure_scenario"] ?? subject,
+        // Salvage order: the contract field, then the subject, then the
+        // discussion. Trial run 29906543140's correctness pass emitted
+        // valid labels with only {id, anchor, discussion}; rejecting it for
+        // the missing failure_scenario voided the whole correctness
+        // dimension twice, which is strictly worse than validating against
+        // the discussion prose.
+        failure_scenario:
+            raw["failure_scenario"] ?? (subject !== "" ? subject : discussion),
         producing_hunt: `dispatch:${agentName}`,
         model_authored_prose: joinProse(subject, discussion),
         ...(typeof raw["suggestion"] === "string" && raw["suggestion"] !== ""
