@@ -177,7 +177,24 @@ export const dedupeClaims = (
             survivorFirst(best, index, claims),
         );
         const survivor = claims[survivorIndex];
-        const others = group.filter((index) => index !== survivorIndex);
+        // Star guard: only a member that clears the floor against the
+        // survivor DIRECTLY merges. Union-find alone chains A~B~C through a
+        // bridging claim that bundles two defects (a test-adequacy finding
+        // naming both a missing test and an unbounded read links the two
+        // distinct correctness findings), and collapsing the chain would
+        // silently drop a distinct finding; with no line window bounding
+        // groups, a bridge can span a whole file. Chain-only members stay
+        // their own claims. Both recorded trial merges are unaffected: run
+        // 29897276810's four-way group is pairwise-complete and run
+        // 29943085279's is a direct pair.
+        const others = group.filter(
+            (index) =>
+                index !== survivorIndex &&
+                describesSameDefect(survivor, claims[index]),
+        );
+        if (others.length === 0) {
+            continue;
+        }
         for (const index of others) {
             drop.add(index);
         }

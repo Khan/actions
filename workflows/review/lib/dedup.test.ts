@@ -152,6 +152,64 @@ describe("dedupeClaims", () => {
         expect(otherPath).toHaveLength(2);
     });
 
+    it("never drops a chain-only member: a bridging claim merges, the distinct defect it links stays", () => {
+        // A bundles-two-defects finding (missing test AND unbounded read)
+        // clears the floor against each half separately while the halves do
+        // not clear it against each other; union-find alone would collapse
+        // all three and silently drop the unbounded-read finding.
+        const missingTest = claim({
+            id: "correctness-reviewer-1",
+            source: "correctness-reviewer",
+            line: 15,
+            subject:
+                "No test creates a memory older than the retention window and asserts it gets deleted, so the deletion path is never exercised.",
+            failure_scenario:
+                "A regression that turns expiration into a no-op ships with green tests because no test creates a stale memory and asserts it is deleted from the datastore.",
+        });
+        const bridge = claim({
+            id: "test-adequacy-1",
+            source: "test-adequacy",
+            line: 40,
+            label: "todo (blocking)",
+            subject:
+                "No test creates a stale memory and asserts it is deleted, and no test bounds the query: the deletion path and the unbounded read both ship untested.",
+            failure_scenario:
+                "A stale memory is never deleted in any test, and the unbounded query loads every stale memory into one slice with no Limit, so both regressions ship green while the read is sized by user data.",
+        });
+        const unboundedRead = claim({
+            id: "correctness-reviewer-2",
+            source: "correctness-reviewer",
+            line: 62,
+            subject:
+                "The expiration query has no Limit and loads every stale memory into one slice, so the read is sized by unbounded user data.",
+            failure_scenario:
+                "A user with a large stale backlog makes the query load every stale memory into memory at once with no Limit, so the unbounded read grows with user data until the instance OOMs.",
+        });
+        const {claims, merges} = dedupeClaims([
+            missingTest,
+            bridge,
+            unboundedRead,
+        ]);
+        expect(claims.map((c) => c.id)).toEqual([
+            "correctness-reviewer-1",
+            "correctness-reviewer-2",
+        ]);
+        expect(merges).toEqual([
+            {
+                survivor: "correctness-reviewer-1",
+                merged: [
+                    {
+                        id: "test-adequacy-1",
+                        source: "test-adequacy",
+                        label: "todo (blocking)",
+                    },
+                ],
+                path: "services/ai-guide/memory/expiration.go",
+                line: 15,
+            },
+        ]);
+    });
+
     it("adopts a merged duplicate's suggestion and author dispute when the survivor lacks them", () => {
         const [withSuggestion, plain] = addDateClaims();
         const survivorToBe: Claim = {
