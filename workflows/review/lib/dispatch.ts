@@ -41,9 +41,9 @@
 
 import {
     dedupeClaims,
+    openThreadsFromStaged,
     suppressOpenThreadDuplicates,
     type ClaimMerge,
-    type OpenThread,
     type ThreadSuppression,
 } from "./dedup";
 import {annotateDiffLineNumbers, splitUnifiedDiff} from "./diff";
@@ -835,33 +835,15 @@ export const runDispatch = async (
     // Open-thread suppression (trial suggestion g), also before validation:
     // a defect an open bot thread already tracks is not re-validated or
     // re-posted at a new anchor. Threads the reconciler resolves this run
-    // are exempt: a resolved thread's defect posting again is a fresh
-    // finding, not a duplicate. When the reconciler was unavailable, nothing
-    // resolves, so every staged thread suppresses (fail toward fewer
-    // duplicate threads; the open thread remains the feedback).
-    const resolvedIds = new Set(reconciliation?.resolve ?? []);
-    const openThreads: OpenThread[] = (Array.isArray(threads) ? threads : [])
-        .filter(isRecord)
-        .filter(
-            (thread) =>
-                typeof thread["thread_id"] === "string" &&
-                !resolvedIds.has(thread["thread_id"]),
-        )
-        .map((thread) => {
-            const comments = thread["comments"];
-            const opener =
-                Array.isArray(comments) && isRecord(comments[0])
-                    ? comments[0]["body"]
-                    : undefined;
-            return {
-                thread_id: thread["thread_id"] as string,
-                ...(typeof thread["path"] === "string"
-                    ? {path: thread["path"]}
-                    : {}),
-                body: typeof opener === "string" ? opener : "",
-            };
-        });
-    const suppression = suppressOpenThreadDuplicates(claims, openThreads);
+    // are exempt; when the reconciler was unavailable, nothing resolves, so
+    // every staged bot thread suppresses (fail toward fewer duplicate
+    // threads). Only bot-authored openers may suppress: the filter lives in
+    // openThreadsFromStaged (dedup.ts), since threads.json staging is
+    // prompt-executed and unenforced upstream.
+    const suppression = suppressOpenThreadDuplicates(
+        claims,
+        openThreadsFromStaged(threads, new Set(reconciliation?.resolve ?? [])),
+    );
     claims = suppression.kept;
 
     // Phase 3: claim validation.
