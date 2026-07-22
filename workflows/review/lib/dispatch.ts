@@ -114,7 +114,16 @@ const REVIEW_DIR = "/tmp/gh-aw/review";
 const OUT_DIR = `${REVIEW_DIR}/out`;
 
 const DEFAULT_MAX_TURNS = 30;
-const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+/**
+ * Per-sub-agent wall-clock cap. 15 minutes, not 5: trial run 29901690493
+ * killed both default finders (correctness-reviewer, skill-auditor) at
+ * exactly the old 5-minute mark while every lighter reviewer finished in
+ * 60-115s; the heavy investigators routinely need 5-10 minutes (the prior
+ * pin's correctness pass ran ~8 minutes to completion). The cap is a hang
+ * backstop, not a budget: credit spend is metered separately by the
+ * sandbox's api-proxy.
+ */
+const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_CONCURRENCY = 4;
 
 const TRIAGE = "pattern-triage";
@@ -868,7 +877,9 @@ if (typeof require !== "undefined" && require.main === module) {
         const runner: AgentRunner = async (request) => {
             const started = Date.now();
             const abort = new AbortController();
+            let timedOut = false;
             const timer = setTimeout(() => {
+                timedOut = true;
                 abort.abort(
                     new Error(`timed out after ${request.timeoutMs}ms`),
                 );
@@ -907,6 +918,17 @@ if (typeof require !== "undefined" && require.main === module) {
                     turns = Number(message["num_turns"] ?? 0);
                 }
                 return {output, usd, turns, wallMs: Date.now() - started};
+            } catch (error) {
+                // The SDK reports an abort as a generic "aborted by user";
+                // surface the actual cause so the staged error record and
+                // the run report say what happened (run 29901690493's two
+                // shed finders were 5-minute timeouts, unreadably recorded).
+                if (timedOut) {
+                    throw new Error(
+                        `sub-agent timed out after ${request.timeoutMs}ms`,
+                    );
+                }
+                throw error;
             } finally {
                 clearTimeout(timer);
             }
