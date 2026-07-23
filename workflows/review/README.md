@@ -197,6 +197,48 @@ and are skipped; routing degrades to fewer lenses, never to a crashed review.
 stays the model-facing prose about file *contents*; team ownership stays in
 `.github/REVIEWERS`, unchanged.
 
+### The `.github/NOTIFIED` file (optional)
+
+If the repo has a Gerald [`.github/NOTIFIED`](https://khanacademy.atlassian.net/wiki/spaces/FRONTEND/pages/598278672/Gerald+Documentation)
+file, the reviewer honours its **notify** rules (distinct from `REVIEWERS`
+*reviewer* ownership): **on approval** it adds a `### Notified` section to the Review
+Guidance comment that `@`-mentions each matched person/team, telling them the rule
+label and which changed files matched. `lib/notified.ts` parses it and does the
+matching deterministically (review.md Step 7 runs the CLI and pastes its rendered
+block); no file means no section, so it costs nothing where it is absent.
+
+**Delivery is approval-time, not on-touch.** The pings ride in the (approval-only)
+Review Guidance comment, so — unlike Gerald, which notifies on every push — a
+watcher is pinged when the reviewer approves, and a PR held at REQUEST_CHANGES or
+merged before the AI verdict lands never pings them. This is intentional: the
+notification piggybacks on the one comment the reviewer already posts, and firing
+only on a clean approval keeps the ping meaningful and idempotent (below). Where a
+repo still runs Gerald itself, Gerald's own on-touch NOTIFIED pings continue
+independently — expect both until Gerald's NOTIFIED is retired for that repo.
+
+Only the `[ON PULL REQUEST]` section applies (everything above the
+`----Everything above this line…----` marker and the `[ON PUSH WITHOUT PULL
+REQUEST]` section are ignored). Each rule is `[label:] <pattern>  @user @Org/team`,
+where `<pattern>` is either a **path glob** (matched against changed file paths) or
+a **quoted diff regex** `"/body/flags"` (matched against each file's unified diff,
+so a rule can fire on *added content*). The base-branch copy is read (like
+`REVIEWERS`), so a PR cannot add notify rules that take effect before it merges.
+The glob dialect is a **practical subset** of Gerald's micromatch, not a faithful
+reimplementation (`**`, `*`, `?`, `{a,b,c}`, `[…]`, `(a|b)`, `?(…) *(…) +(…) @(…)`),
+anchored at the repo root. Two known divergences: wildcards here match dotfiles
+(micromatch defaults `dot:false`) and `!(…)` negation is unsupported — a rule that
+relies on those may match a slightly different set than Gerald. An unsupported glob
+construct matches nothing rather than crashing the review; a malformed rule (bad
+regex body, unterminated quote) is dropped and adds a `Note:` to the PR review.
+
+Because the notified `@mentions` ride in the Review Guidance comment (an
+`add-comment` safe output), gh-aw's mention sanitizer governs whether they
+actually ping: repository collaborators are allow-listed by default
+(`mentions.allow-team-members`), and to let arbitrary teams/users through, widen
+it with a `mentions:` block (`allowed`, `allowed-teams`; `allowed-teams` needs a
+token with `read:org`). Without that, a non-collaborator or team mention is
+rendered but neutralised (shown, not pinged).
+
 ### Re-review modes (the runs-per-PR cost lever)
 
 The workflow reviews every push, so a PR's lifetime cost is runs-per-PR times
