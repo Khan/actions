@@ -56,8 +56,11 @@
  * not allow-listed (`@user` → `` `@user` ``); repository collaborators are
  * allow-listed by default (`mentions.allow-team-members`), and the workflow can
  * widen that with `mentions.allowed` / `mentions.allowed-teams`. Re-posting the
- * guidance comment re-pings, so review.md only re-posts when the notification
- * {@link NotifiedResult.signature} changes (Step 7 idempotency).
+ * guidance comment re-pings, and review.md gates re-posts on a substance
+ * signature (Step 7) — but that gate is the *combined* Review Guidance key
+ * (risk files, patterns, exclusions, and this notification set, via
+ * {@link NotifiedResult.signature}), so a change to any one component re-posts
+ * and re-pings the watchers, not the notification set alone.
  */
 
 import {splitUnifiedDiff} from "./diff";

@@ -204,6 +204,15 @@ describe("matchGlob", () => {
         ["file-[1-5]", "file-9", false],
         ["file-[[:digit:]]", "file-7", true],
         ["file-[[:digit:]]", "file-x", false],
+        // Negated character classes ([!…] and [^…]).
+        ["[!a-z]", "5", true],
+        ["[!a-z]", "a", false],
+        ["[^abc]", "d", true],
+        ["[^abc]", "a", false],
+        // Trailing-slash directory glob: the dir and everything beneath it.
+        ["deploy/", "deploy/prod.yaml", true],
+        ["deploy/", "deploy/a/b.yaml", true],
+        ["deploy/", "deployments/x", false],
         // Basename-substring style.
         ["**/*gerald*", "src/my-gerald-tool.ts", true],
         // Malformed glob: degrades to a literal, never throws.
