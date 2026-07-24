@@ -1,0 +1,105 @@
+{
+    "id": "incident-docstring-contract-parity",
+    "tags": [
+        "incident",
+        "live"
+    ],
+    "category": "incident-repro",
+    "description": "Incident repro from webapp PR #36024 (SEC-620 benchmark Row 2, reviewed at commit d861af720f8b, before the follow-up fix #36040 was merged into the PR): the gap-detector resolver switched student-facing display from itemDataAnswerless to full itemData, so GetNextAssessmentItem now assigns the assessment item JSON 'complete with answers' (fetchAssessmentItemJson's own docstring) to SimpleAssessmentItem.Content, whose GraphQL schema docstring promises 'The Perseus content of the item without answers.' Every getNextAssessmentItem response delivers the answers to the student's browser; the PR description defers stripping to a future frontend change, which would not stop answers leaving the server. The human reviewer and the SEC-620 baseline reviewer both missed the docstring/runtime contradiction; it was fixed after merge review via PR #36040. The unchanged schema file (services/progress/assessment_item.graphql) and the full-data fetcher (cross_service/assessment_item.go) are staged in the tree as the discoverability chain for the promise and the runtime.",
+    "changedFiles": [
+        {
+            "path": "services/progress/cross_service/assessment_items.go",
+            "status": "removed"
+        },
+        {
+            "path": "services/progress/cross_service/assessment_items_mocks.go",
+            "status": "removed"
+        },
+        {
+            "path": "services/progress/resolvers/gap_detector.go",
+            "status": "modified"
+        },
+        {
+            "path": "services/progress/resolvers/gap_detector_test.go",
+            "status": "modified"
+        }
+    ],
+    "findings": [
+        {
+            "source": "security-auth",
+            "finding": {
+                "schema_version": 2,
+                "id": "answers-in-display-content",
+                "lens": "security-auth",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/progress/resolvers/gap_detector.go",
+                    "line": 534,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.85,
+                "evidence_trace": [
+                    "services/progress/assessment_item.graphql:48 documents SimpleAssessmentItem.content as \"The Perseus content of the item without answers.\"",
+                    "services/progress/resolvers/gap_detector.go:526 now fetches the item via fetchAssessmentItemJson, whose docstring (line 409) says it returns the item JSON \"complete with answers\"",
+                    "services/progress/resolvers/gap_detector.go:534 assigns that JSON to SimpleAssessmentItem.Content unmodified",
+                    "the deleted cross_service/assessment_items.go removed the only answerless fetch path, and the PR description defers answer-stripping to a future frontend change"
+                ],
+                "failure_scenario": "A student taking a gap-detector assessment issues the getNextAssessmentItem query and receives the full Perseus itemData JSON -- including the correct answers, rubric, and hints -- in SimpleAssessmentItem.content; opening the browser network tab reveals the answer to every item before the student responds.",
+                "producing_hunt": "security-auth:docstring-contract-parity",
+                "model_authored_prose": "The GraphQL schema documents `SimpleAssessmentItem.content` as \"The Perseus content of the item without answers,\" but this now assigns the output of `fetchAssessmentItemJson` -- the item JSON \"complete with answers\" per its own docstring -- to that field. Every assessment item reaches the student's browser with its answers embedded; stripping in the frontend later (the stated upcoming work) does not fix this, because the answers still leave the server. Strip answers server-side before populating `content`, or change the field's documented contract."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": [
+            "answers-in-display-content"
+        ]
+    },
+    "diff": "diff --git a/services/progress/cross_service/assessment_items.go b/services/progress/cross_service/assessment_items.go\ndeleted file mode 100644\nindex eac68ef35d86..000000000000\n--- a/services/progress/cross_service/assessment_items.go\n+++ /dev/null\n@@ -1,58 +0,0 @@\n-// Package cross_service provides functionality for making cross-service\n-// calls to other Khan Academy services for retrieving assessment items and\n-// related data.\n-package cross_service\n-\n-import (\n-\t\"github.com/Khan/webapp/pkg/web/gqlclient\"\n-\t\"github.com/Khan/webapp/services/progress/generated/genqlient\"\n-)\n-\n-// Type alias for the very long generated type name\n-type assessmentItemType = genqlient.Progress_GetAssessmentItemByIdAnswerlessAssessmentItemByIdAssessmentItemOrErrorItemAssessmentItem\n-\n-func GetAssessmentItemByIdAnswerless(\n-\tctx gqlclient.KAContext,\n-\texerciseID string,\n-\titemID string,\n-) (\n-\tassessmentItemType,\n-\terror,\n-) {\n-\t_ = `# @genqlient\n-\t\tquery Progress_GetAssessmentItemByIdAnswerless($exerciseId: ID!, $itemId: ID!) {\n-\t\t\tassessmentItemById(exerciseId: $exerciseId, itemId: $itemId) {\n-\t\t\t\titem {\n-\t\t\t\t\tid\n-\t\t\t\t\titemDataAnswerless\n-\t\t\t\t\titemData\n-\t\t\t\t}\n-\t\t\t\terror {\n-\t\t\t\t\tcode\n-\t\t\t\t\tdebugMessage\n-\t\t\t\t}\n-\t\t\t}\n-\t\t}\n-\t`\n-\n-\tresp, err := genqlient.Progress_GetAssessmentItemByIdAnswerless(\n-\t\tctx,\n-\t\tctx.GraphQL().WithService(\"content\").AsUser(),\n-\t\texerciseID,\n-\t\titemID,\n-\t)\n-\tif err != nil {\n-\t\treturn assessmentItemType{}, err\n-\t}\n-\n-\terr = gqlclient.ErrorInResponse(resp)\n-\tif err != nil {\n-\t\treturn assessmentItemType{}, err\n-\t}\n-\n-\tif resp.AssessmentItemById.Error.Code != \"\" {\n-\t\treturn assessmentItemType{}, err\n-\t}\n-\n-\treturn resp.AssessmentItemById.Item, nil\n-}\ndiff --git a/services/progress/cross_service/assessment_items_mocks.go b/services/progress/cross_service/assessment_items_mocks.go\ndeleted file mode 100644\nindex 85e5a076d78c..000000000000\n--- a/services/progress/cross_service/assessment_items_mocks.go\n+++ /dev/null\n@@ -1,35 +0,0 @@\n-// Package cross_service provides mock implementations for testing cross-service\n-// assessment item retrieval functionality.\n-package cross_service\n-\n-import (\n-\t\"github.com/Khan/webapp/pkg/web/gqlclient\"\n-\t\"github.com/Khan/webapp/pkg/web/gqlclient/js\"\n-)\n-\n-func MockGetAssessmentItemByIdAnswerless(\n-\tmux *gqlclient.Mux,\n-\texerciseID string,\n-\titemID string,\n-\titemDataAnswerless string,\n-) *gqlclient.SimpleHandler {\n-\treturn mux.HandleOperationWithVars(\n-\t\t\"Progress_GetAssessmentItemByIdAnswerless\",\n-\t\tmap[string]interface{}{\n-\t\t\t\"exerciseId\": exerciseID,\n-\t\t\t\"itemId\":     itemID,\n-\t\t},\n-\t\tjs.Obj{\n-\t\t\t\"assessmentItemById\": js.Obj{\n-\t\t\t\t\"item\": js.Obj{\n-\t\t\t\t\t\"id\":                 itemID,\n-\t\t\t\t\t\"itemDataAnswerless\": itemDataAnswerless,\n-\t\t\t\t},\n-\t\t\t\t\"error\": js.Obj{\n-\t\t\t\t\t\"code\":         \"\",\n-\t\t\t\t\t\"debugMessage\": \"\",\n-\t\t\t\t},\n-\t\t\t},\n-\t\t},\n-\t)\n-}\ndiff --git a/services/progress/resolvers/gap_detector.go b/services/progress/resolvers/gap_detector.go\nindex da401a997983..9fc7d4c6df6b 100644\n--- a/services/progress/resolvers/gap_detector.go\n+++ b/services/progress/resolvers/gap_detector.go\n@@ -37,14 +37,10 @@ import (\n \t\"github.com/Khan/webapp/services/progress/generated/analytics_events\"\n \t\"github.com/Khan/webapp/services/progress/generated/automap\"\n \t\"github.com/Khan/webapp/services/progress/generated/capabilities\"\n-\t\"github.com/Khan/webapp/services/progress/generated/genqlient\"\n \t\"github.com/Khan/webapp/services/progress/generated/graphql\"\n \t\"github.com/Khan/webapp/services/progress/models\"\n )\n \n-// Type alias for the long genqlient-generated assessment item type\n-type assessmentItemAnswerless = genqlient.Progress_GetAssessmentItemByIdAnswerlessAssessmentItemByIdAssessmentItemOrErrorItemAssessmentItem\n-\n // SelectFromTopN controls item selection randomization in production.\n // Items are selected randomly from the top N highest Fisher Information items\n // to reduce item exposure while maintaining adaptive efficiency.\n@@ -409,39 +405,8 @@ func loadAssessmentContext(\n \treturn userKAID, assessment, manager, nil\n }\n \n-// fetchAssessmentItemAnswerless looks up exercise mapping and fetches the\n-// assessment item without answers (for display to students)\n-func fetchAssessmentItemAnswerless(\n-\tctx interface {\n-\t\tgqlclient.KAContext\n-\t\tlog.KAContext\n-\t},\n-\tmanager *adaptive_test.BlueprintManager,\n-\titemID string,\n-) (assessmentItemAnswerless, error) {\n-\t// Get exercise ID for item\n-\texerciseID, exists := adaptive_test.GetExerciseIDForItem(manager, itemID)\n-\tif !exists {\n-\t\treturn assessmentItemAnswerless{}, errors.Internal(\n-\t\t\t\"no exercise mapping found for item \" + itemID,\n-\t\t)\n-\t}\n-\n-\t// Fetch the assessment item from content service\n-\tassessmentItem, err := cross_service.GetAssessmentItemByIdAnswerless(\n-\t\tctx,\n-\t\texerciseID,\n-\t\titemID,\n-\t)\n-\tif err != nil {\n-\t\treturn assessmentItemAnswerless{}, err\n-\t}\n-\n-\treturn assessmentItem, nil\n-}\n-\n // fetchAssessmentItemJson looks up exercise mapping and fetches the assessment\n-// item JSON complete with answers (for scoring)\n+// item JSON complete with answers\n func fetchAssessmentItemJson(\n \tctx interface {\n \t\tgqlclient.KAContext\n@@ -521,6 +486,8 @@ func (r *queryResolver) GetNextAssessmentItem(\n \t\tlog.KAContext\n \t\ttimectx.KAContext\n \t\tweb.AuthedUserContext\n+\t\tweb.KALocaleContext\n+\t\tweb.PublishedContentVersionContext\n \t} = kacontext.Upgrade(ctx)\n \n \t// Authorization: Access is controlled in two ways: 1. Only admins can\n@@ -555,16 +522,16 @@ func (r *queryResolver) GetNextAssessmentItem(\n \n \tcurrentItemID := *assessment.CurrentItemID\n \n-\t// Fetch the assessment item (without answers for display)\n-\tassessmentItem, err := fetchAssessmentItemAnswerless(ktx, manager, currentItemID)\n+\t// Fetch the assessment item\n+\tassessmentItemJson, err := fetchAssessmentItemJson(ktx, manager, currentItemID)\n \tif err != nil {\n \t\treturn automap.NextAssessmentItemResponseErr(ktx, err)\n \t}\n \n \t// Convert to SimpleAssessmentItem format\n \tsimpleItem := &graphql.SimpleAssessmentItem{\n-\t\tID:      assessmentItem.Id,\n-\t\tContent: assessmentItem.ItemDataAnswerless,\n+\t\tID:      currentItemID,\n+\t\tContent: assessmentItemJson,\n \t}\n \n \t// Publish CEDAR event for item viewed\ndiff --git a/services/progress/resolvers/gap_detector_test.go b/services/progress/resolvers/gap_detector_test.go\nindex fd9fd05f8415..07e445b40eff 100644\n--- a/services/progress/resolvers/gap_detector_test.go\n+++ b/services/progress/resolvers/gap_detector_test.go\n@@ -509,28 +509,7 @@ func (suite *gapDetectorSuite) TestGetNextAssessmentItem_HappyPath() {\n \tctx := suite.KAContext().Clone()\n \tmux := gqlclient.NewMux()\n \n-\t// Mock assessment items for answerless responses (used by both query\n-\t// and mutation)\n-\tcross_service.MockGetAssessmentItemByIdAnswerless(\n-\t\tmux,\n-\t\t\"xf24bd181\",\n-\t\t\"xe969f1c2bda72ec0\",\n-\t\t`{\"question\":{\"content\":\"What is 2 + 3?\"}}`,\n-\t)\n-\tcross_service.MockGetAssessmentItemByIdAnswerless(\n-\t\tmux,\n-\t\t\"xf24bd181\",\n-\t\t\"x147aad123a743f14\",\n-\t\t`{\"question\":{\"content\":\"Solve for x: 2x + 5 = 11\"}}`,\n-\t)\n-\tcross_service.MockGetAssessmentItemByIdAnswerless(\n-\t\tmux,\n-\t\t\"xf24bd181\",\n-\t\t\"xf81acc1058c5dbcc\",\n-\t\t`{\"question\":{\"content\":\"What is 7 * 6?\"}}`,\n-\t)\n-\n-\t// Mock the assessment items for scoring (mutation needs the full data)\n+\t// Mock assessment items (used by both query and mutation)\n \tcross_service.MockGetAssessmentItemById(\n \t\tmux,\n \t\t\"xf24bd181\",\n@@ -698,7 +677,7 @@ func (suite *gapDetectorSuite) TestGetNextAssessmentItem_LogCedar() {\n \tmux := gqlclient.NewMux()\n \n \t// Mock assessment item for answerless response\n-\tcross_service.MockGetAssessmentItemByIdAnswerless(\n+\tcross_service.MockGetAssessmentItemById(\n \t\tmux,\n \t\t\"xf24bd181\",\n \t\t\"xe969f1c2bda72ec0\",\n@@ -940,7 +919,7 @@ func (suite *gapDetectorSuite) TestGetNextAssessmentItem_WithMultipleAssessments\n \tsuite.Require().NoError(err, \"Should create second assessment\")\n \n \t// Mock the assessment item that should be returned (from SECOND assessment)\n-\tcross_service.MockGetAssessmentItemByIdAnswerless(\n+\tcross_service.MockGetAssessmentItemById(\n \t\tmux,\n \t\t\"xf24bd181\",\n \t\tsecondCurrentItemID,\n",
+    "live": {
+        "prContext": {
+            "title": "Remove itemDataAnswerless",
+            "description": "## Summary:\nSwitch gap detector to use itemData instead of itemDataAnswerless\n\nThe itemDataAnswerless field is not being populated during the SSS\nmigration, causing blank pages when displaying assessment items.\nSwitch to using itemData for both display and scoring.\n\nRemove duplicate assessment_items.go and consolidate to single\nGetAssessmentItem function.\n\nUpcoming work: Frontend should separately strip answers using splitPerseusItem().\n\nIssue: TUT-3215 \n\n## Test plan:\nTesting:\n-Modified existing unit tests.\n-Loaded gap detector in the frontend and verified that can still answer questions.",
+            "author": "sxkosone",
+            "baseBranch": "deploy/sxkosone"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "answers-in-display-content",
+                "path": "services/progress/resolvers/gap_detector.go",
+                "lineStart": 520,
+                "lineEnd": 540,
+                "mechanism": [
+                    "(docstring|doc comment|schema|contract|promis\\w+|documented|documentation)\\W.{0,80}(mismatch|contradict|violat|no longer (hold|true|match|accurate)|not (hold|true|match)|stale|broken|incorrect|false|out of (date|sync))",
+                    "without answers",
+                    "(answer|solution|rubric)s?\\b.{0,80}(expos|leak|reveal|sent to|returned to|delivered|shipped|visible|available).{0,80}(student|client|learner|user|frontend|browser|network)",
+                    "(student|client|learner|user)s?\\b.{0,100}(see|sees|receive|view|read|inspect|extract)\\w*.{0,60}(answer|solution|correct response)",
+                    "cheat"
+                ],
+                "altLocations": [
+                    {
+                        "path": "services/progress/resolvers/gap_detector.go",
+                        "lineStart": 405,
+                        "lineEnd": 442
+                    },
+                    {
+                        "path": "services/progress/cross_service/assessment_items.go"
+                    }
+                ]
+            }
+        ]
+    },
+    "routerConfig": {
+        "lensRules": [
+            {
+                "pattern": "services/progress/resolvers/gap_detector.go",
+                "lenses": [
+                    "security-auth"
+                ]
+            }
+        ]
+    }
+}

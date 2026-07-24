@@ -1,0 +1,84 @@
+"""
+Response for getting the next assessment item in a managed sequence.
+"""
+type NextAssessmentItemResponse {
+  """The assessment item to render. Null when assessment is complete."""
+  item: SimpleAssessmentItem
+
+  """Current position in the sequence (1-based)."""
+  currentIndex: Int!
+
+  """Total number of items in the sequence."""
+  totalItems: Int!
+
+  """Whether the sequence is complete."""
+  isComplete: Boolean!
+
+  """An error that occurred during assessment processing."""
+  error: AssessmentItemProcessingError
+}
+
+"""
+Response for submitting an assessment answer.
+"""
+type SubmitAssessmentItemResponse {
+  """Total number of items in the sequence."""
+  totalItems: Int!
+
+  """Whether the sequence is complete."""
+  isComplete: Boolean!
+
+  """Score for the submitted answer: 0 (incorrect) or 1 (correct)."""
+  score: Int
+
+  """Number of questions answered correctly. Only populated when assessment is complete."""
+  numCorrect: Int
+
+  """An error that occurred during assessment processing."""
+  error: AssessmentItemProcessingError
+}
+
+"""
+Simple assessment item for prototype - just the essentials.
+"""
+type SimpleAssessmentItem {
+  """The unique identifier for the item."""
+  id: ID!
+
+  """The Perseus content of the item without answers."""
+  content: String!
+}
+
+extend type Query {
+  """Get the next assessment item in a managed sequence. Backend handles session tracking."""
+  getNextAssessmentItem: NextAssessmentItemResponse!
+}
+
+extend type Mutation {
+  """Submit an assessment answer and get the score/completion status."""
+  submitAssessmentAnswer(userAnswer: String!): SubmitAssessmentItemResponse!
+}
+
+"""
+Error information for assessment item processing.
+"""
+type AssessmentItemProcessingError {
+  code: AssessmentItemProcessingErrorCode!
+  debugMessage: String
+
+  """A Base64-encoded UUID included in the logged error."""
+  uuid: String
+}
+
+enum AssessmentItemProcessingErrorCode {
+  INTERNAL
+  UNAUTHORIZED
+  INVALID_INPUT
+  NOT_FOUND
+  
+  """User adaptive assessment not found."""
+  ASSESSMENT_NOT_FOUND @automap(go: "github.com/Khan/webapp/services/progress/adaptive_test.AssessmentNotFoundError", log: "warn")
+  
+  """Assessment is already complete - cannot submit more answers."""
+  ASSESSMENT_ALREADY_COMPLETE @automap(go: "github.com/Khan/webapp/services/progress/adaptive_test.AssessmentAlreadyCompleteError", log: "warn")
+}
