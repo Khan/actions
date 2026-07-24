@@ -2706,6 +2706,19 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`injection-sink`** — trace user-controlled input to a SQL/HTML/path/URL/shell/
   deserialization sink without validation or parameterization. `found` on an unguarded
   sink.
+- **`pwn-request`** — when `.github/workflows/*.yml` changes: a workflow
+  combining a `pull_request`-family trigger, write permissions
+  (`contents:write` / `pull-requests:write`), checkout of the PR head, and any
+  step executing untrusted code (install/build/lint that runs or mutates files).
+  `found` on the full combination — treat as blocking.
+- **`push-ref-race`** — a workflow `git push` targeting a ref name rather than
+  the head commit SHA observed at checkout. `found` when the pushed ref can move
+  between checkout and push.
+- **`over-scoped-secret`** — a workflow granting `secrets.GITHUB_TOKEN` or a
+  custom org token broader permissions than its steps need. `found` on a
+  concrete unneeded scope.
+- **`unpinned-action`** — a non-GitHub-owned action referenced by tag or branch
+  (`@v3`, `@main`) rather than a commit SHA. `found` per unpinned reference.
 
 ### Repo-specific rules and hunts (optional)
 Additional review rules and hunts the host repo defines for this lens, imported when
