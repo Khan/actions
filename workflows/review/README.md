@@ -339,32 +339,38 @@ sub-agent models — this table is the human-facing summary:
 | orchestrator | `claude-opus-4-8` | high | Owns every GitHub/safe-output decision |
 | `pattern-triage` | `claude-sonnet-4-6` | medium | Cheap first-pass triage |
 | `thread-reconciler` | `claude-opus-4-8` | medium | Reconciliation |
-| `correctness-reviewer` | `claude-fable-5` | high | Whole-change reviewer; bug-finding recall is the load-bearing metric |
+| `correctness-reviewer` | `claude-opus-5` | high | Whole-change reviewer; bug-finding recall is the load-bearing metric |
 | `skill-auditor` | `claude-opus-4-8` | high | Whole-change reviewer |
 | `holistic` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
 | `completeness` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
 | `test-adequacy` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
 | `conventions` | `claude-opus-4-8` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
-| `first-principles` | `claude-fable-5` | high | Opt-in advisory-only; reviews the change's justification |
-| `claim-validator` | `claude-opus-4-8` | xhigh | Adversarial claim validation; stays Opus (the Fable arm did not improve precision) |
+| `first-principles` | `claude-opus-5` | high | Opt-in advisory-only; reviews the change's justification |
+| `claim-validator` | `claude-opus-4-8` | xhigh | Adversarial claim validation; held at 4.8 so the correctness swap is the only variable |
 | specialist lenses | `claude-opus-4-8` | high | Opt-in via `lens=` in `ROUTING`; the security & auth lens is xhigh |
 
 Only the orchestrator and the default roster (`pattern-triage`,
 `correctness-reviewer`, `skill-auditor`, `thread-reconciler`, `claim-validator`)
 run by default; every other row is opt-in via `ROUTING` and earns its line through
-the eval suite. Exactly two roles run Fable 5: `first-principles` (from day
-one, for perspective diversity) and `correctness-reviewer` (the 2026-07-20
-A/B's recall gain concentrated in correctness-adjacent rows, and bug-finding
-recall is the load-bearing metric). Everything else stays on Opus 4.8
-deliberately: the A/B measured the full-Fable bundle, so the other roles'
-contribution is unattributed while their cost is not (both known consumers
-enable the whole-change reviewers in `ROUTING`, so they are not free in
-practice); the Fable `claim-validator` measurably did not improve the
-precision gate (noise 43% -> 49%); and the specialist lenses stay Opus
-because Fable's cyber safety classifiers can refuse benign security-focused
-analysis, and a refused security lens would be a silent coverage hole. Any
-further per-role promotion (or Sonnet step-down) earns its line through its
-own eval-suite arm.
+the eval suite. Exactly two roles run Opus 5, the two deep-reasoning reviewers:
+`correctness-reviewer` (bug-finding recall is the load-bearing metric) and
+`first-principles` (advisory-only). Both ran Fable 5 until Opus 5 shipped with
+high precision and high recall at half Fable's per-token price; no role runs
+Fable now, which retires the reason the cyber-classifier carve-out below
+existed. Everything else stays on Opus 4.8 deliberately, and for one reason
+in this change: the correctness reviewer's swap is the single variable the
+powered A/B measures, and moving the `claim-validator` or the whole-change
+reviewers alongside it would confound the precision columns the swap is read
+against. Each of those is its own queued arm. Any further per-role promotion
+(or Sonnet step-down) earns its line through its own eval-suite arm.
+
+**Compiler floor: gh-aw >= v0.83.0.** `claude-opus-5` is absent from every
+gh-aw-firewall release's AI-credits pricing table (checked through v0.27.41),
+and the api-proxy rejects un-priced models with a 400, so `review.md`
+frontmatter carries `models.default-ai-credits-pricing` as the proxy's fallback
+rate — a field that does not exist below gh-aw v0.83.0. An older `gh aw compile`
+fails on this file rather than producing a lock that 400s at runtime. Consumers
+must be on v0.83.0 or newer before importing this release.
 
 ### Feedback signal: thumbs sweep and live counters
 

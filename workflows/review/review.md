@@ -167,46 +167,79 @@ observability:
         headers:
           x-sentry-auth: ${{ secrets.GH_AW_OTEL_SENTRY_AUTHORIZATION }}
 
-# Pin the orchestrator to a specific model version rather than a floating tier alias, so
-# the review doesn't silently change behavior when a new Opus ships. If we use Opus, we
-# use Opus 4.8. Sub-agents pin their own versions in their frontmatter below.
+# Pin every model to a specific version rather than a floating tier alias, so the
+# review doesn't silently change behavior when a new model ships. The orchestrator
+# stays on Opus 4.8: it is the token-heaviest agent under a 20-minute timeout, and
+# nothing in the roster change touches its instruction-following-over-staged-context
+# job. Sub-agents pin their own versions in their frontmatter below; the two
+# deep-reasoning reviewers run claude-opus-5.
 engine:
   id: claude
   model: claude-opus-4-8
 timeout-minutes: 20
 
-# claude-fable-5 (pinned by first-principles and correctness-reviewer) is not in the
-# AI-credits pricing table of the firewall api-proxy that gh-aw <= v0.81.x pins
-# (gh-aw-firewall v0.27.11), and the proxy rejects any un-priced model with a 400,
-# so the first-principles dispatch fails on every run where it is enabled. Two
-# pieces fix that, and BOTH pin to the same upstream source of truth
-# (gh-aw-firewall v0.27.27, the release that added curated Claude 5 pricing:
-# $10/M input, $1/M cache read, $12.50/M cache write, $50/M output):
+# MINIMUM COMPILER: gh-aw >= v0.83.0, for `models.default-ai-credits-pricing` below.
+# The field does not exist in the v0.82.x frontmatter schema, so an older `gh aw
+# compile` rejects this file outright — a loud compile-time failure, not a runtime
+# one. Consumers on an older gh-aw must upgrade before importing this release.
 #
-# 1. `sandbox.agent.version` below runs that firewall version, whose api-proxy
-#    guard knows the model. This is the piece that actually unblocks the dispatch;
-#    the `models:` frontmatter only feeds gh-aw's cost-summary display and does
-#    NOT reach the proxy guard (verified empirically on gh-aw v0.81.6).
-# 2. The `models:` block keeps the run's cost accounting/display correct for the
-#    same model.
+# claude-opus-5 (pinned by correctness-reviewer and first-principles) is in NO
+# gh-aw-firewall release's curated AI-credits pricing table, nor in its bundled
+# models.dev catalog fallback (checked through v0.27.41 and firewall main as of
+# 2026-07-24). The api-proxy's AI-credits guard is active by default and rejects
+# any un-priced model with a 400 before the request reaches the model — the same
+# failure that took out the first-principles dispatch on every run of the release
+# that introduced it (see the CHANGELOG entries for 299defb and 283d4b6). Pinning
+# a newer `sandbox.agent.version` cannot fix this one: no release prices the model.
 #
-# Remove both once the workflow runs on a gh-aw release whose default firewall
-# is >= v0.27.27.
+# Two pieces, with distinct jobs — only the first is load-bearing:
+#
+# 1. `models.default-ai-credits-pricing` sets the proxy's fallback rate for
+#    un-priced models, which both suppresses the rejection (the guard skips it
+#    whenever a default is configured) and prices the usage. The rate below is
+#    claude-opus-5's ACTUAL list price, identical to Opus 4.8's ($5/M input,
+#    $25/M output), so this is exact accounting rather than an approximation:
+#    the proxy derives cache reads as input x 0.1 = $0.50/M, also exact. It does
+#    not bill cache writes ($6.25/M real), so credit accounting under-counts the
+#    cache-write component; the `models:` cost block below carries the full rate
+#    for the run's cost summary. Caveat: the fallback applies to ANY un-priced
+#    model, so a future typo'd model id bills at Opus rates instead of failing
+#    loudly. Drop this field once a firewall release prices claude-opus-5 and
+#    `sandbox.agent.version` names it.
+# 2. The `models:` block keeps the run's cost accounting/display correct. It only
+#    feeds gh-aw's cost-summary display and does NOT reach the proxy guard
+#    (verified empirically on gh-aw v0.81.6), so it cannot substitute for (1).
+#
+# `sandbox.agent.version` no longer has a model-pricing reason to exist — v0.27.27
+# was pinned for Fable 5's curated entry, and no role runs Fable now. It stays only
+# to freeze sandbox behavior so this change moves exactly one variable (dropping it
+# would inherit the compiler's default, v0.27.37+, which flipped the no-sudo default
+# at v0.27.32). v0.27.27 is verified to accept and map `apiProxy.defaultAiCreditsPricing`,
+# so (1) works under this pin. Removing the pin is a separate PR.
 sandbox:
   agent:
     id: awf
     version: v0.27.27
 
+# Both blocks below carry claude-opus-5's list price (identical to Opus 4.8's:
+# $5/M input, $0.50/M cache read, $6.25/M cache write, $25/M output) — but in
+# DIFFERENT UNITS, and they are not interchangeable. See (1) and (2) above.
 models:
+  # $/1M tokens. `input` and `output` are the only rates the schema accepts, so
+  # the cache rates are the proxy's derivations, not ours.
+  default-ai-credits-pricing:
+    input: 5.0
+    output: 25.0
+  # $/token.
   providers:
     anthropic:
       models:
-        claude-fable-5:
+        claude-opus-5:
           cost:
-            input: 1.0e-05
-            output: 5.0e-05
-            cache_read: 1.0e-06
-            cache_write: 1.25e-05
+            input: 5.0e-06
+            output: 2.5e-05
+            cache_read: 5.0e-07
+            cache_write: 6.25e-06
 
 # The shared review workflow is more than this markdown file: its deterministic
 # pieces (the finding schema and validator today; the router, computed verdict, and
@@ -1766,11 +1799,14 @@ return `{"findings": [], "hunts": [...]}` with the hunt states still recorded.
 ---
 name: correctness-reviewer
 description: Classifies each changed file's risk and reviews the diff for correctness defects; returns JSON.
-model: claude-fable-5
+model: claude-opus-5
 # effort: high — launch default (whole-change reviewer). gh-aw has no per-agent
 # effort field yet; the per-role model/effort table lives in the README.
-# Fable 5: bug-finding recall is this workflow's load-bearing metric, and
-# stronger real-defect detection is Fable's headline gain over Opus 4.8.
+# Opus 5: bug-finding recall is this workflow's load-bearing metric. This role
+# ran Fable 5 from the 2026-07-20 A/B (which bought +7 points of recall for
+# +35% cost) until Opus 5 shipped with high precision AND high recall at half
+# Fable's per-token price. The swap back is priced by its own powered A/B —
+# see the CHANGELOG entry for the measurement that justified it.
 ---
 You are a correctness-focused code reviewer. You have **no GitHub access** — read the
 diff and file list from disk and return your result as JSON only.
@@ -2165,11 +2201,13 @@ Return ONLY this JSON object (no prose, no code fence):
 name: claim-validator
 description: Re-checks each candidate review comment against the actual code and the repo's best-practice skills, and drops or corrects the ones that are wrong; returns JSON.
 model: claude-opus-4-8
-# effort: xhigh — launch default (claim-validator). Deliberately NOT moved to
-# Fable 5 with the correctness reviewer: in the 2026-07-20 pooled A/B the
-# Fable validator did not offset the higher flag rate (noise 43% -> 49%, one
-# wrong blocking flag on a clean case), so the precision gate stays on Opus
-# until an arm shows otherwise; prompt tightening is the queued follow-up.
+# effort: xhigh — launch default (claim-validator). Stayed on Opus 4.8 through
+# the Fable era: in the 2026-07-20 pooled A/B the Fable validator did not offset
+# the higher flag rate (noise 43% -> 49%, one wrong blocking flag on a clean
+# case), so the precision gate never left Opus. It is NOT moved to Opus 5 here
+# either — the correctness reviewer's swap is the one variable this change
+# measures, and a validator move would confound the precision columns it is
+# read against. Its own arm is the queued follow-up, alongside prompt tightening.
 ---
 You are a skeptical validator. Other reviewers proposed the comments in
 `/tmp/gh-aw/review/claims.json`; your job is to catch the ones that are **wrong** —
@@ -2550,10 +2588,12 @@ If the changed behavior is adequately tested, return {"findings": []}.
 ---
 name: first-principles
 description: A diverse-perspective, advisory-only sanity check on whether the change should exist as written; returns findings as JSON.
-model: claude-fable-5
-# effort: high — launch default. Ran on Fable 5 (claude-fable-5) from day one;
-# the correctness reviewer joined it after the 2026-07-20 A/B. Advisory-only,
-# never blocks.
+model: claude-opus-5
+# effort: high — launch default. Ran on Fable 5 from day one (for perspective
+# diversity against an all-Opus roster) until Opus 5 shipped; it moves with the
+# correctness reviewer so the roster keeps one model family, and the perspective
+# diversity this role exists for comes from its prompt, not its model.
+# Advisory-only, never blocks.
 ---
 You are the **first-principles** reviewer. Your single mandate is to review the
 **justification for the change, not the change itself**: where `holistic` asks
