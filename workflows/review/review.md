@@ -2652,14 +2652,17 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   (`contents:write` / `pull-requests:write`), checkout of the PR head, and any
   step executing untrusted code (install/build/lint that runs or mutates files).
   `found` on the full combination — treat as blocking.
-- **`push-ref-race`** — a workflow `git push` targeting a ref name rather than
-  the head commit SHA observed at checkout. `found` when the pushed ref can move
-  between checkout and push.
-- **`over-scoped-secret`** — a workflow granting `secrets.GITHUB_TOKEN` or a
-  custom org token broader permissions than its steps need. `found` on a
-  concrete unneeded scope.
-- **`unpinned-action`** — a non-GitHub-owned action referenced by tag or branch
-  (`@v3`, `@main`) rather than a commit SHA. `found` per unpinned reference.
+- **`push-ref-race`** — when `.github/workflows/*.yml` changes: a workflow
+  `git push` targeting a ref name rather than the head commit SHA observed at
+  checkout. `found` when the pushed ref can move between checkout and push.
+- **`over-scoped-secret`** — when `.github/workflows/*.yml` changes: a workflow
+  granting `secrets.GITHUB_TOKEN` or a custom org token a permission no step
+  uses (e.g., `contents: write` when every step only reads, or a broad PAT
+  where the default `GITHUB_TOKEN` suffices). `found` names the unneeded
+  permission and the step-by-step reason no step needs it.
+- **`unpinned-action`** — when `.github/workflows/*.yml` changes: a
+  non-GitHub-owned action referenced by tag or branch (`@v3`, `@main`) rather
+  than a commit SHA. `found` per unpinned reference.
 
 ### Repo-specific rules and hunts (optional)
 Additional review rules and hunts the host repo defines for this lens, imported when
