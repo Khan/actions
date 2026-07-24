@@ -163,12 +163,31 @@ describe("each specialist lens definition", () => {
             expect(section).toContain(
                 "{{#runtime-import .github/aw/review/skills.md}}",
             );
+            // The per-lens consumer payload seam: optional, resolves to
+            // nothing when the host repo carries no payload file.
+            expect(section).toContain(
+                `{{#runtime-import? .github/aw/review/lenses/${lens}.md}}`,
+            );
             expect(section).toContain(`\`lens\` is exactly \`${lens}\``);
             expect(section).toContain(
                 "Domain notes for §Bounded investigation",
             );
         });
     }
+});
+
+describe("the correctness payload seam", () => {
+    it("correctness-reviewer imports lenses/correctness.md and its alias", () => {
+        const section = lensSection("correctness-reviewer");
+        expect(section).toContain(
+            "{{#runtime-import? .github/aw/review/lenses/correctness.md}}",
+        );
+        // The deprecated alias stays imported until consumers migrate
+        // (frontend carries one); dropping either import is a regression.
+        expect(section).toContain(
+            "{{#runtime-import? .github/aw/review/correctness-checks.md}}",
+        );
+    });
 });
 
 describe("the label-shape reviewers still carry their own disciplines", () => {

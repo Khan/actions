@@ -1903,8 +1903,13 @@ Risk tiers for this repo:
 What this repo's CI and tooling already catch — do NOT flag these:
 {{#runtime-import .github/aw/review/ci-tooling.md}}
 
-Additional correctness checks for this repo (optional — present only when the host repo
-provides them; ignore this section if it is empty):
+Additional correctness checks for this repo (optional; present only when the host repo
+provides them; ignore this section if it is empty). These checks are additive: they
+never relax or override the rules above, and the rules above win on any conflict.
+Two paths are imported for
+compatibility: `lenses/correctness.md` is the current home and `correctness-checks.md`
+its deprecated alias; a repo carries at most one:
+{{#runtime-import? .github/aw/review/lenses/correctness.md}}
 {{#runtime-import? .github/aw/review/correctness-checks.md}}
 
 **Per-directory review contracts (optional).** Some repos document sub-tree-specific
@@ -2740,6 +2745,14 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   deserialization sink without validation or parameterization. `found` on an unguarded
   sink.
 
+### Repo-specific rules and hunts (optional)
+Additional review rules and hunts the host repo defines for this lens, imported when
+present; ignore this section if it is empty. Treat its rules exactly like the review
+rules above, and report any hunts it defines in `hunts` with the same tri-state.
+Payload rules are additive: they never relax or override the rules above, and the
+rules above win on any conflict:
+{{#runtime-import? .github/aw/review/lenses/security-auth.md}}
+
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
 §Structured finding schema and hunts; `lens` is exactly `security-auth`, and no
@@ -2806,6 +2819,14 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`pii-to-model-or-logs`** — PII/sensitive fields sent to a model or written to a
   generation log unredacted. `found` on real exposure.
 
+### Repo-specific rules and hunts (optional)
+Additional review rules and hunts the host repo defines for this lens, imported when
+present; ignore this section if it is empty. Treat its rules exactly like the review
+rules above, and report any hunts it defines in `hunts` with the same tri-state.
+Payload rules are additive: they never relax or override the rules above, and the
+rules above win on any conflict:
+{{#runtime-import? .github/aw/review/lenses/ai-safety-moderation.md}}
+
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
 §Structured finding schema and hunts; `lens` is exactly `ai-safety-moderation`, and no
@@ -2865,6 +2886,14 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   under-13 exclusion. `found` when the gate is absent.
 - **`unsubscribe-not-honored`** — a send that ignores opt-out / notification preferences.
   `found` when opt-out is bypassed.
+
+### Repo-specific rules and hunts (optional)
+Additional review rules and hunts the host repo defines for this lens, imported when
+present; ignore this section if it is empty. Treat its rules exactly like the review
+rules above, and report any hunts it defines in `hunts` with the same tri-state.
+Payload rules are additive: they never relax or override the rules above, and the
+rules above win on any conflict:
+{{#runtime-import? .github/aw/review/lenses/mass-comms-coppa.md}}
 
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
@@ -2933,6 +2962,14 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   result set into memory at once (no limit, no pagination, no batching). `found` when the
   set's growth is unbounded and nothing bounds the read.
 
+### Repo-specific rules and hunts (optional)
+Additional review rules and hunts the host repo defines for this lens, imported when
+present; ignore this section if it is empty. Treat its rules exactly like the review
+rules above, and report any hunts it defines in `hunts` with the same tri-state.
+Payload rules are additive: they never relax or override the rules above, and the
+rules above win on any conflict:
+{{#runtime-import? .github/aw/review/lenses/caching-resource.md}}
+
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
 §Structured finding schema and hunts; `lens` is exactly `caching-resource`, and no
@@ -2995,6 +3032,14 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`unbatched-backfill`** — a full-table `UPDATE`/backfill with no batching/chunking.
   `found` when the write is unbounded.
 
+### Repo-specific rules and hunts (optional)
+Additional review rules and hunts the host repo defines for this lens, imported when
+present; ignore this section if it is empty. Treat its rules exactly like the review
+rules above, and report any hunts it defines in `hunts` with the same tri-state.
+Payload rules are additive: they never relax or override the rules above, and the
+rules above win on any conflict:
+{{#runtime-import? .github/aw/review/lenses/data-migrations.md}}
+
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
 §Structured finding schema and hunts; `lens` is exactly `data-migrations`, and no
@@ -3056,6 +3101,14 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`missing-idempotency-on-retryable-handler`** — a redeliverable handler doing a
   side-effecting op with no idempotency guard. `found` when redelivery double-applies.
 
+### Repo-specific rules and hunts (optional)
+Additional review rules and hunts the host repo defines for this lens, imported when
+present; ignore this section if it is empty. Treat its rules exactly like the review
+rules above, and report any hunts it defines in `hunts` with the same tri-state.
+Payload rules are additive: they never relax or override the rules above, and the
+rules above win on any conflict:
+{{#runtime-import? .github/aw/review/lenses/concurrency-async.md}}
+
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
 §Structured finding schema and hunts; `lens` is exactly `concurrency-async`, and no
@@ -3116,6 +3169,14 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   `found` when it is non-optional and undefaulted.
 - **`federation-key-changed`** — a change to a federated key/reference/entity resolver
   that breaks composition. `found` when composition/resolution breaks.
+
+### Repo-specific rules and hunts (optional)
+Additional review rules and hunts the host repo defines for this lens, imported when
+present; ignore this section if it is empty. Treat its rules exactly like the review
+rules above, and report any hunts it defines in `hunts` with the same tri-state.
+Payload rules are additive: they never relax or override the rules above, and the
+rules above win on any conflict:
+{{#runtime-import? .github/aw/review/lenses/api-federation-compat.md}}
 
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
@@ -3182,6 +3243,14 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`format-switch-single-deploy`** — a writer switched to a new format/encoding/key set
   while old readers are still deployed. `found` on a single-phase switch.
 
+### Repo-specific rules and hunts (optional)
+Additional review rules and hunts the host repo defines for this lens, imported when
+present; ignore this section if it is empty. Treat its rules exactly like the review
+rules above, and report any hunts it defines in `hunts` with the same tri-state.
+Payload rules are additive: they never relax or override the rules above, and the
+rules above win on any conflict:
+{{#runtime-import? .github/aw/review/lenses/cross-deploy-serialization.md}}
+
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
 §Structured finding schema and hunts; `lens` is exactly `cross-deploy-serialization`, and no
@@ -3245,6 +3314,14 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`destructive-infra-change`** — an IaC change that destroys/replaces a stateful
   resource. `found` on an unguarded destructive change.
 
+### Repo-specific rules and hunts (optional)
+Additional review rules and hunts the host repo defines for this lens, imported when
+present; ignore this section if it is empty. Treat its rules exactly like the review
+rules above, and report any hunts it defines in `hunts` with the same tri-state.
+Payload rules are additive: they never relax or override the rules above, and the
+rules above win on any conflict:
+{{#runtime-import? .github/aw/review/lenses/deploy-infra-config.md}}
+
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
 §Structured finding schema and hunts; `lens` is exactly `deploy-infra-config`, and no
@@ -3305,6 +3382,14 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   key. `found` when the guard is missing.
 - **`currency-mismatch-or-missing`** — an amount handled without a currency, or arithmetic
   mixing currencies. `found` on a real mismatch.
+
+### Repo-specific rules and hunts (optional)
+Additional review rules and hunts the host repo defines for this lens, imported when
+present; ignore this section if it is empty. Treat its rules exactly like the review
+rules above, and report any hunts it defines in `hunts` with the same tri-state.
+Payload rules are additive: they never relax or override the rules above, and the
+rules above win on any conflict:
+{{#runtime-import? .github/aw/review/lenses/money-payments.md}}
 
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
@@ -3369,6 +3454,14 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   interpolation that breaks across locales. `found` on a real concatenation.
 - **`locale-unaware-formatting`** — a date/number/currency formatted without locale.
   `found` on locale-unaware formatting.
+
+### Repo-specific rules and hunts (optional)
+Additional review rules and hunts the host repo defines for this lens, imported when
+present; ignore this section if it is empty. Treat its rules exactly like the review
+rules above, and report any hunts it defines in `hunts` with the same tri-state.
+Payload rules are additive: they never relax or override the rules above, and the
+rules above win on any conflict:
+{{#runtime-import? .github/aw/review/lenses/content-i18n.md}}
 
 ### Output
 Return ONLY the finding-schema JSON object below, under disciplines
