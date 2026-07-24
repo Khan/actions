@@ -48,7 +48,16 @@ on:
         # 29855626692-29855643020: $97.19 / 90), so a drift week with both
         # arms on this roster is ~$194; 220 clears it with real headroom,
         # which matters now that a budget-skipped tail is a red run (the
-        # caseAsymmetry gate). If the swap is reverted, dial back toward 160.
+        # caseAsymmetry gate).
+        #
+        # HELD at 220 for the 2026-07-24 Fable -> Opus 5 swap, not dialled back
+        # toward the pre-Fable ~$148 (180 x ~$0.82). Opus 5 lists at Opus 4.8's
+        # per-token price, but per-token parity is not per-run parity: it thinks
+        # by default and writes longer, so its case-arm-run rate is unmeasured
+        # until the first drift week on the new roster. Under-sizing here costs
+        # a red run (caseAsymmetry) and a contaminated noise-floor band, which is
+        # strictly worse than an unused ceiling. Re-size from that run's measured
+        # rate, not from the list price.
         description: "Total hard budget across both arms and all repeats"
         required: false
         default: "220"

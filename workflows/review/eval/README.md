@@ -66,14 +66,18 @@ gh workflow run review-eval-ab.yml --ref <branch> \
   -f cases=adversarial-injection-approve,golden-request-changes-authz \
   -f repeats=10 -f max_usd=45
 
-# Cumulative measurement vs production (~$170 at post-Fable-swap measured
-# rates: ~$0.80/case-arm-run on the all-Opus baseline arm, ~$1.08 on the
-# Fable-correctness candidate arm, 30 live cases x3): full corpus x3
+# Cumulative measurement vs production (30 live cases x3): full corpus x3.
+# Budget from the last measured rates: ~$0.80/case-arm-run on an all-Opus-4.8
+# arm, ~$1.08 on the Fable-correctness arm (~$170 for that pair). Opus 5 lists
+# at Opus 4.8's per-token price, but it is a chattier model, so its per-run rate
+# is NOT assumed equal to 4.8's until a powered run measures it — keep the cap
+# at the Fable-era number until then rather than budget-skipping a tail.
 gh workflow run review-eval-ab.yml --ref <branch> \
   -f base_ref=origin/main -f full=true -f repeats=3 -f max_usd=200
 
 # Noise floor / wobble control (~$194 measured with both arms on the
-# Fable-correctness roster): identical arms, full corpus x3
+# Fable-correctness roster; re-measure on the Opus 5 roster): identical arms,
+# full corpus x3
 gh workflow run review-eval-ab.yml --ref <branch> \
   -f base_ref=origin/<branch> -f force_arms=true -f full=true -f repeats=3 -f max_usd=220
 
@@ -209,9 +213,29 @@ claiming a band.
 
 ## Costs and models
 
-Measured ~$0.72-0.75 per case per arm. Smoke run ~$10/PR; full 14-case
-corpus x3 repeats x both arms ~$60 (cap it at $85 to avoid budget skips).
+Measured ~$0.72-0.75 per case per arm on the all-Opus-4.8 roster, ~$1.08 on
+the Fable-correctness roster. The 2026-07-24 Opus 5 roster is unmeasured:
+Opus 5 lists at Opus 4.8's per-token price ($5/M in, $25/M out), but it
+thinks by default and writes longer, so budget from a measured run rather
+than from the list price. Smoke run ~$10/PR; full 14-case corpus x3 repeats
+x both arms ~$60 (cap it at $85 to avoid budget skips).
 The judge and the match arbiter are pinned to `claude-haiku-4-5-20251001`.
+
+The harness calls the Anthropic API directly through the Agent SDK and reads
+`total_cost_usd` off each result message, so it has no local pricing table to
+maintain and no firewall api-proxy in the path. That is why it can measure a
+model the gh-aw firewall does not yet price (`claude-opus-5`) — the pricing
+workaround in `review.md` frontmatter is a production-dispatch concern only.
+
+**The SDK floor is load-bearing for budget enforcement.** `--max-usd` is only
+as good as the `total_cost_usd` the SDK reports, and an SDK that does not know
+a pinned model reports nothing useful for it — a cap that silently stops
+capping on the arm that spends the most. `@anthropic-ai/claude-agent-sdk` is
+therefore pinned at `^0.3.219`, the first release that knows `claude-opus-5`
+(0.3.205 did not). When a role moves to a model newer than the SDK, bump the
+SDK in the same PR and re-check `grep -oE "claude-[a-z0-9.-]*"` over
+`node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs` before dispatching a
+powered run.
 Every model-spending path degrades to a partial report rather than dying
 at a cap, and judge/arbiter failures degrade to notes/non-matches.
 
