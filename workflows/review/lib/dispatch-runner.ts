@@ -12,6 +12,13 @@
 import type {AgentRequest, AgentResult, AgentRunner} from "./dispatch";
 
 /**
+ * Anthropic SDK internal retries for a sub-agent subprocess (the SDK's own
+ * default). Set explicitly because the engine step's environment now disables
+ * them; see the `env` note in the options below.
+ */
+const SUBAGENT_MAX_RETRIES = "2";
+
+/**
  * Build the production runner. The SDK and zod are imported lazily here
  * (both installed by the scripted-mode `npm ci` pre-agent step); zod is the
  * SDK's own schema language for in-process MCP tools (a peer dependency).
@@ -57,6 +64,17 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
             allowedTools,
             permissionMode: "bypassPermissions",
             abortController: abort,
+            // gh-aw >= v0.83 sets ANTHROPIC_MAX_RETRIES=0 on the engine step so
+            // that a terminal error (403 ai_credits_limit_exceeded) reaches its
+            // harness immediately, because that harness owns the retry/backoff
+            // loop for 429/529 — for the ORCHESTRATOR process only. These
+            // sub-agents are spawned by the dispatcher inside that process and
+            // have no such wrapper, so inheriting 0 turns any transient
+            // overload into a shed lens. Restore the SDK default for the
+            // sub-agent subprocesses alone. `env` REPLACES the subprocess
+            // environment rather than merging, so process.env is spread first:
+            // the CLI still needs PATH, HOME, and the proxy's steering vars.
+            env: {...process.env, ANTHROPIC_MAX_RETRIES: SUBAGENT_MAX_RETRIES},
         };
         // The structured-final channel (trial suggestion h): an in-process
         // MCP tool whose handler runs the same contract parse the collection

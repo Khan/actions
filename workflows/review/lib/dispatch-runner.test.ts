@@ -27,6 +27,9 @@ let session: (
     tools: RegisteredTool[],
 ) => AsyncGenerator<Record<string, unknown>>;
 
+/** The options the runner handed the SDK on the last query. */
+let lastOptions: Record<string, unknown>;
+
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
     tool: (
         name: string,
@@ -37,6 +40,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
     createSdkMcpServer: (options: {name: string; tools: RegisteredTool[]}) =>
         options,
     query: ({options}: {prompt: string; options: Record<string, unknown>}) => {
+        lastOptions = options;
         const servers = options["mcpServers"] as
             | Record<string, {tools: RegisteredTool[]}>
             | undefined;
@@ -145,5 +149,46 @@ describe("createSdkRunner submit_result (trial suggestion h)", () => {
         )(request({validate: undefined}));
         expect(result.structured).toBeUndefined();
         expect(result.output).toBe("free text");
+    });
+});
+
+/**
+ * The sub-agent subprocess environment. gh-aw >= v0.83 puts
+ * ANTHROPIC_MAX_RETRIES=0 on the engine step for the orchestrator's benefit
+ * (its harness owns retry/backoff); a sub-agent has no such wrapper, so the
+ * runner must not let it inherit that value.
+ */
+describe("createSdkRunner sub-agent environment", () => {
+    beforeEach(() => {
+        session = async function* () {
+            yield success("free text");
+        };
+    });
+
+    it("restores SDK retries instead of inheriting the engine step's 0", async () => {
+        process.env["ANTHROPIC_MAX_RETRIES"] = "0";
+        try {
+            await (
+                await createSdkRunner()
+            )(request());
+        } finally {
+            delete process.env["ANTHROPIC_MAX_RETRIES"];
+        }
+        const env = lastOptions["env"] as Record<string, string | undefined>;
+        expect(env["ANTHROPIC_MAX_RETRIES"]).toBe("2");
+    });
+
+    it("spreads the inherited environment, since `env` replaces rather than merges", async () => {
+        process.env["GH_AW_DISPATCH_RUNNER_PROBE"] = "inherited";
+        try {
+            await (
+                await createSdkRunner()
+            )(request());
+        } finally {
+            delete process.env["GH_AW_DISPATCH_RUNNER_PROBE"];
+        }
+        const env = lastOptions["env"] as Record<string, string | undefined>;
+        expect(env["GH_AW_DISPATCH_RUNNER_PROBE"]).toBe("inherited");
+        expect(env["PATH"]).toBe(process.env["PATH"]);
     });
 });
