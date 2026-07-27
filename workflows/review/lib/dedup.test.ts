@@ -11,6 +11,14 @@ import type {Claim} from "./dispatch-contracts";
  * The distant-line fixtures are trial run 29943085279's real claims, where
  * the missing-deletion-test defect posted four times because the old
  * two-line window blocked every same-path merge.
+ *
+ * The `run30301235749` fixtures are that run's real pre-validation claims
+ * (its `out/claims.json` plus the skill-auditor handoff the run merged
+ * away). Five sources flagged one TTL-unit defect on one line there and the
+ * first calibration merged none of them, because the default correctness
+ * pass supplies no `failure_scenario` and so compared its own one-line
+ * subject against itself; it merged the handoff into an unrelated
+ * missing-test todo 24 lines away instead.
  */
 
 const claim = (over: Partial<Claim> & {id: string; source: string}): Claim => ({
@@ -64,6 +72,62 @@ const addDateClaims = (): Claim[] => [
             "The cutoff uses AddDate(0, -MemoryTTLDays, 0), placing the 180 days value in AddDate's months parameter (signature is AddDate(years, months, days)), so the retention window is ~180 months (~15 years) instead of 180 days.",
         failure_scenario:
             "A memory created 200 days ago is not older than a 15-years-ago cutoff, so it is never expired; the retention feature effectively never removes stale memories within its intended 180-day window.",
+    }),
+];
+
+/**
+ * Run 30301235749's five copies of the TTL-unit defect, all anchored at
+ * expiration.go:38, in dispatch order. `correctness-reviewer-1` is the
+ * shape that broke the first calibration: the reviewer returned a title and
+ * a discussion but no `failure_scenario`, so `buildClaims` handed the claim
+ * its own subject back as one.
+ */
+const ttlUnitClaims = (): Claim[] => [
+    claim({
+        id: "correctness-reviewer-1",
+        source: "correctness-reviewer",
+        subject:
+            "AddDate passes the TTL as months, not days — cutoff is 15 years ago, so nothing ever expires.",
+        failure_scenario:
+            "AddDate passes the TTL as months, not days — cutoff is 15 years ago, so nothing ever expires",
+        discussion:
+            "AddDate passes the TTL as months, not days — cutoff is 15 years ago, so nothing ever expires. Introduced by this change. Go's signature is Time.AddDate(years, months, days), so AddDate(0, -MemoryTTLDays, 0) with MemoryTTLDays = 180 subtracts 180 months — the cutoff lands ~15 years in the past, and the created_at < cutoff filter matches essentially no entity. The retention window the PR exists to add is a silent no-op: the query succeeds, returns zero rows, ExpireStale returns nil, and nothing is logged.",
+        suggestion:
+            "\tcutoff := ctx.Time().Now().AddDate(0, 0, -MemoryTTLDays)",
+    }),
+    claim({
+        id: "skill-auditor-ool-1",
+        source: "skill-auditor (out-of-lane)",
+        label: "question (non-blocking)",
+        subject:
+            "cutoff := ctx.Time().Now().AddDate(0, -MemoryTTLDays, 0) passes the day count (180) into AddDate's months parameter (signature is AddDate(years, months, days)), computing a cutoff ~180 months (~15 years) in the past instead of 180 days.",
+        failure_scenario:
+            "With MemoryTTLDays=180 the cutoff is ~15 years ago, so no stored memory is ever older than it; the created_at < cutoff filter matches nothing and ExpireStale deletes nothing, meaning the retention window silently never fires and stale memories accumulate indefinitely — exactly the problem the PR claims to fix.",
+    }),
+    claim({
+        id: "completeness-1",
+        source: "completeness",
+        subject:
+            "Retention window is 180 months, not 180 days — AddDate args swapped.",
+        failure_scenario:
+            "A memory created 200 days ago is never expired: AddDate(0, -180, 0) subtracts 180 months (~15 years), so the cutoff sits ~15 years in the past and only memories older than that are removed — the promised 180-day retention window never takes effect for any realistic data.",
+    }),
+    claim({
+        id: "holistic-1",
+        source: "holistic",
+        subject:
+            "Whole change is incoherent: 180-day retention is implemented as ~180 months, defeating the change's entire purpose.",
+        failure_scenario:
+            "A memory created 200 days ago (well past the intended 180-day window) is never expired, because AddDate(0, -MemoryTTLDays, 0) subtracts 180 MONTHS (~15 years), so the retention window silently becomes ~15 years and the change's stated purpose does not happen.",
+    }),
+    claim({
+        id: "first-principles-3",
+        source: "first-principles",
+        label: "note (non-blocking)",
+        subject:
+            "AddDate(0, -MemoryTTLDays, 0) subtracts 180 months, not 180 days — the implementation contradicts its own description and comment.",
+        failure_scenario:
+            "The shipped retention window is ~15 years rather than the 180 days the description promises, so effectively nothing ever expires and the PR's stated goal is silently unmet.",
     }),
 ];
 
@@ -331,6 +395,78 @@ describe("dedupeClaims", () => {
                 "The retention window is effectively 15 years, not 180 days; AddDate(0, -MemoryTTLDays, 0) puts the day count in the months slot, so the feature ships doing nothing, and the tests cannot notice because no test ever creates a stale memory and asserts it is deleted.",
         });
         const {claims, merges} = dedupeClaims([issue, thought]);
+        expect(claims).toHaveLength(2);
+        expect(merges).toEqual([]);
+    });
+
+    it("merges run 30301235749's five same-line TTL-unit copies into the correctness issue", () => {
+        const {claims, merges} = dedupeClaims(ttlUnitClaims());
+        expect(claims).toHaveLength(1);
+        expect(claims[0].id).toBe("correctness-reviewer-1");
+        expect(claims[0].discussion).toContain(
+            "Also flagged by skill-auditor (out-of-lane), completeness, " +
+                "holistic, first-principles.",
+        );
+        expect(merges).toEqual([
+            {
+                survivor: "correctness-reviewer-1",
+                merged: [
+                    {
+                        id: "skill-auditor-ool-1",
+                        source: "skill-auditor (out-of-lane)",
+                        label: "question (non-blocking)",
+                    },
+                    {
+                        id: "completeness-1",
+                        source: "completeness",
+                        label: "issue (blocking)",
+                    },
+                    {
+                        id: "holistic-1",
+                        source: "holistic",
+                        label: "issue (blocking)",
+                    },
+                    {
+                        id: "first-principles-3",
+                        source: "first-principles",
+                        label: "note (non-blocking)",
+                    },
+                ],
+                path: "services/ai-guide/memory/expiration.go",
+                line: 38,
+            },
+        ]);
+    });
+
+    it("compares a reviewer's discussion when its failure scenario only restates its subject", () => {
+        // The mechanism behind the fixture above, isolated. A correctness
+        // finding with no `failure_scenario` of its own carries eleven
+        // content tokens twice; its evidence is all in the discussion, and
+        // without reading it no floor loose enough to match the discursive
+        // copies stays tight enough to reject run 29943085279's distinct
+        // same-line pair below.
+        const [terse, handoff] = ttlUnitClaims();
+        const evidenceless: Claim = {...terse, discussion: terse.subject};
+        expect(dedupeClaims([evidenceless, handoff]).claims).toHaveLength(2);
+        expect(dedupeClaims([terse, handoff]).claims).toHaveLength(1);
+    });
+
+    it("keeps run 30301235749's TTL handoff and missing-test todo apart across lines", () => {
+        // The false merge the first calibration made: the skill-auditor's
+        // AddDate handoff at :38 landed in the test-adequacy todo at :62 on
+        // five shared bigrams. Both real different-line duplicates share six
+        // or more, so the other-line tier now asks for six.
+        const handoff = ttlUnitClaims()[1];
+        const todo = claim({
+            id: "test-adequacy-1",
+            source: "test-adequacy",
+            line: 62,
+            label: "todo (blocking)",
+            subject: "Core stale-memory deletion path is completely untested.",
+            failure_scenario:
+                "No test ever stores a memory older than the retention window, so the deletion path (created_at < cutoff match → expiredKeys → DeleteMulti) is never exercised; a broken cutoff (e.g. AddDate month/day slot, or an inverted/wrong filter) that deletes nothing would pass CI while stale memories silently persist forever — exactly the behavior this change exists to fix.",
+        });
+        const {claims, merges} = dedupeClaims([handoff, todo]);
         expect(claims).toHaveLength(2);
         expect(merges).toEqual([]);
     });
