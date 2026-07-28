@@ -157,11 +157,21 @@ network:
     - github
 
 # Pinned to a specific model version rather than a floating tier alias, so the
-# autofixer does not silently change behaviour when a new Opus ships. Matches
-# the reviewer's orchestrator pin.
+# autofixer does not silently change behaviour when a new Opus ships.
+#
+# Deliberately AHEAD of the reviewer's orchestrator pin (claude-opus-4-8): the
+# reviewer's version is bound to its eval-suite calibration, whereas autofix has
+# no such tie, and writing the fix is the harder half of this pair.
+#
+# Claude 5 pricing has to be known to the firewall api-proxy or it rejects the
+# model with a 400; that is the trap review.md documents for claude-fable-5 on
+# gh-aw <= v0.81.x. This workflow compiles on gh-aw v0.83.4, whose default
+# firewall is 0.27.42, past the 0.27.27 release that added curated Claude 5
+# pricing, so no `sandbox.agent.version` or `models:` override is needed here.
+# Re-check that if this workflow is ever compiled on an older gh-aw.
 engine:
   id: claude
-model: claude-opus-4-8
+model: claude-opus-5
 timeout-minutes: 20
 
 # Autofix reads the reviewer's staged artifacts and the reviewer's own label
@@ -395,7 +405,7 @@ The commit message is:
 ```
 autofix: address reviewer feedback
 
-<one line per fixed finding: `<path>:<line> — <what changed>`>
+<one line per fixed finding: `<path>:<line>: <what changed>`>
 
 <the plan's `trailer` field, verbatim>
 ```
