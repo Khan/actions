@@ -70,14 +70,32 @@ describe("buildPlan", () => {
         expect(plan.trailer).toBe("");
     });
 
-    it("refuses when the PR has never been reviewed", () => {
+    it("refuses only when the PR has never been reviewed", () => {
         const plan = buildPlan(input({priorReviews: []}));
         expect(plan.status).toBe("refused");
         expect(plan.reason).toContain("nothing to autofix");
         expect(plan.items).toEqual([]);
     });
 
-    it("refuses when the review fingerprint is unreadable", () => {
+    it("still arms against an unstamped review, with a degraded note", () => {
+        // The Khan/webapp#41130 shape: real blocking feedback, no fingerprint.
+        const plan = buildPlan(
+            input({
+                priorReviews: [
+                    {
+                        body: "Changes requested — see inline comments.",
+                        submittedAt: "2026-07-01T00:00:00Z",
+                    },
+                ],
+            }),
+        );
+        expect(plan.status).toBe("armed");
+        expect(plan.items.map((i) => i.threadId)).toEqual(["T1"]);
+        expect(plan.degradedNote).toContain("thread anchors only");
+        expect(plan.stalePaths).toEqual([]);
+    });
+
+    it("still arms when the fingerprint overflowed", () => {
         const plan = buildPlan(
             input({
                 priorReviews: [
@@ -94,8 +112,32 @@ describe("buildPlan", () => {
                 ],
             }),
         );
-        expect(plan.status).toBe("refused");
-        expect(plan.reason).toContain("fingerprint is unavailable");
+        expect(plan.status).toBe("armed");
+        expect(plan.degradedNote).toContain("overflowed");
+    });
+
+    it("leaves the degraded note empty when the fingerprint check ran", () => {
+        expect(buildPlan(input()).degradedNote).toBe("");
+    });
+
+    it("still drops an outdated thread when running degraded", () => {
+        // The anchor check is what the degraded path leans on, so it has to
+        // keep working when the fingerprint is gone.
+        const plan = buildPlan(
+            input({
+                priorReviews: [
+                    {
+                        body: "Changes requested — see inline comments.",
+                        submittedAt: "2026-07-01T00:00:00Z",
+                    },
+                ],
+                threads: [
+                    thread({body: "**issue (blocking):** x", line: null}),
+                ],
+            }),
+        );
+        expect(plan.status).toBe("no-op");
+        expect(plan.skipped[0].reason).toBe("outdated-anchor");
     });
 
     it("drops a finding whose file changed after the review", () => {

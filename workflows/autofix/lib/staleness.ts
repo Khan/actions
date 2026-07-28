@@ -23,10 +23,24 @@
  * items and fix the rest, so the guard degrades to partial work instead of
  * refusal.
  *
- * Every unreadable state fails closed (refuse, do not fix). The reviewer's
- * equivalent states fail the other way — an unreadable fingerprint there means
- * "review more deeply", extra work on a safe side. Here the safe side is doing
- * nothing.
+ * **Degrading, and why it is not a weakened guard.** An earlier version refused
+ * outright whenever no fingerprint could be read. That made autofix unusable
+ * against the reviewer as actually deployed: on Khan/webapp#41130 the reviewer
+ * posted a correct blocking finding under a body of exactly "Changes requested
+ * — see inline comments." and no stamp, and autofix refused every time.
+ *
+ * The fingerprint is not the only currency signal, and it is not even the
+ * primary one. GitHub marks a review comment outdated when the diff hunk it
+ * anchors to changes, which `worklist.ts` already reads (a null anchor is
+ * dropped as `outdated-anchor`). That per-thread signal covers the case that
+ * actually matters: the author edited the flagged code. The fingerprint adds
+ * coarser file-level detection — "something else in this file moved" — whose
+ * failure mode is a redundant fix that the following re-review catches.
+ *
+ * So the policy is: use the fingerprint when it is there, fall back to anchors
+ * when it is not, and **say so in the summary** so a weaker check is never
+ * silent. Refuse only when there is no review at all, which is the one state
+ * where there is genuinely nothing to act on.
  */
 
 import {
@@ -38,16 +52,17 @@ import type {Divergence, PriorReview} from "../../review/lib/rereview-mode.ts";
 
 export type CurrencyAssessment =
     | {
-          /** No review has ever stamped this PR; there are no findings to act on. */
+          /** The reviewer has never reviewed this PR; there is nothing to act on. */
           status: "no-review";
       }
     | {
           /**
-           * A review exists but its fingerprint is unreadable — `hunks=overflow`
-           * on a diff too large to stamp, or a stamp this schema version does
-           * not understand. Currency cannot be established, so the run stops.
+           * Reviews exist but carry no usable fingerprint, so the file-level
+           * check cannot run. This is NOT a refusal — see the note on degrading
+           * below.
            */
-          status: "no-fingerprint";
+          status: "unverifiable";
+          why: "unstamped" | "overflow";
       }
     | {
           status: "current";
@@ -66,12 +81,21 @@ export const assessReviewCurrency = (
     reviews: readonly PriorReview[],
     diffText: string,
 ): CurrencyAssessment => {
-    const stamp = findLatestStamp(reviews);
-    if (stamp === null) {
+    // "No review at all" and "reviews exist but none carry a fingerprint" are
+    // different facts and must not be collapsed. Collapsing them told the author
+    // of Khan/webapp#41130 that "no reviewer feedback has been posted on this
+    // PR", on a PR carrying a blocking finding that the reviewer had just
+    // posted. The message was wrong because the state was wrong.
+    if (reviews.length === 0) {
         return {status: "no-review"};
     }
+
+    const stamp = findLatestStamp(reviews);
+    if (stamp === null) {
+        return {status: "unverifiable", why: "unstamped"};
+    }
     if (stamp.anchorHunks === "overflow") {
-        return {status: "no-fingerprint"};
+        return {status: "unverifiable", why: "overflow"};
     }
 
     const current = computeHunkSignature(diffText);
@@ -89,15 +113,26 @@ export const assessReviewCurrency = (
 };
 
 /** Human-readable reason a refusal is a refusal; rendered into the PR comment. */
-export const REFUSAL_REASONS: Readonly<
-    Record<"no-review" | "no-fingerprint", string>
-> = {
+export const REFUSAL_REASONS: Readonly<Record<"no-review", string>> = {
     "no-review":
-        "no reviewer feedback has been posted on this PR yet, so there is " +
-        "nothing to autofix. Push a commit (or re-run the reviewer) and label " +
-        "again once a review exists.",
-    "no-fingerprint":
-        "the most recent review could not be matched to the current diff " +
-        "(its fingerprint is unavailable, which happens on very large diffs). " +
-        "Autofix will not edit code it cannot confirm was reviewed.",
+        "the reviewer has not reviewed this PR yet, so there is nothing to " +
+        "autofix. Re-run the reviewer and arm autofix again once a review " +
+        "exists.",
+};
+
+/**
+ * What to tell the author when the file-level check could not run. Rendered into
+ * the summary so a weaker check is never silent.
+ */
+export const DEGRADED_NOTES: Readonly<
+    Record<"unstamped" | "overflow", string>
+> = {
+    unstamped:
+        "The reviewer's review carries no diff fingerprint, so the file-level " +
+        "currency check could not run; findings were checked against their " +
+        "thread anchors only.",
+    overflow:
+        "The reviewer's diff fingerprint overflowed (very large diff), so the " +
+        "file-level currency check could not run; findings were checked " +
+        "against their thread anchors only.",
 };

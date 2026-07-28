@@ -67,14 +67,25 @@ tools:
     min-integrity: none
     toolsets: [pull_requests, repos]
   edit:
+  # NOTE THE `:*` SUFFIX. gh-aw's schema documents `"npx *"` (space-star) as
+  # "command with any args", but it compiles that form to the Claude Code
+  # permission `Bash(npx)`, which matches ONLY a bare `npx` with no arguments —
+  # so `npx -y tsx …` is denied and the plan CLI never runs. `"npx:*"` compiles
+  # to `Bash(npx:*)`, which is the form gh-aw's own defaults use
+  # (`Bash(git add:*)`). Observed on gh-aw v0.83.4; verify the compiled
+  # `--allowed-tools` list still carries the `:*` suffix after any gh-aw bump.
+  #
+  # Declaring this list at all NARROWS the agent: a workflow with no `bash:` key
+  # (the reviewer, for one) compiles to unrestricted `Bash`. That is the
+  # trade being made here deliberately, which is why the list must be right.
   bash:
-    - "git *"
-    - "npx *"
-    - "node *"
-    - "cat *"
-    - "ls *"
-    - "date *"
-    - "mkdir *"
+    - "git:*"
+    - "npx:*"
+    - "node:*"
+    - "cat:*"
+    - "ls:*"
+    - "date:*"
+    - "mkdir:*"
 
 safe-outputs:
   allowed-domains:
@@ -256,6 +267,14 @@ re-classify a skipped thread, or act on a finding it did not hand you. If you
 disagree with the plan, say so in the Step 7 comment; do not act on the
 disagreement.
 
+**If the CLI does not run, the run is over.** If `npx` is unavailable, the
+command errors, or the tool call is denied, do **not** reconstruct the plan by
+reading the library source and reasoning about it. A hand-simulated plan is
+exactly the thing this workflow's determinism boundary exists to prevent, and
+it produces a confident-looking result nobody can audit. Instead: change
+nothing, post a Step 7 comment saying the plan CLI could not be executed and
+quoting the error, remove the labels (Step 8), and stop.
+
 The plan resolves the arming itself, from whichever surface triggered the run:
 `command.txt` when it exists, the PR's labels otherwise. **The trigger decides,
 and the two never union** — a stale `autofix: nits` label must not silently
@@ -360,7 +379,11 @@ Then, in this order:
    `stale-path`), so the author can see what autofix did not consider.
 5. If `plan.stalePaths` is non-empty, one line: `Files changed since the last
    review, so findings in them were not acted on: <paths>.`
-6. Last line, exactly: `The reviewer will re-review this push; autofix does not
+6. If `plan.degradedNote` is non-empty, that note **verbatim** on its own line.
+   This says the file-level currency check could not run and only thread
+   anchors were used. Never omit it and never soften it: a weaker check that
+   goes unmentioned is indistinguishable from the full one.
+7. Last line, exactly: `The reviewer will re-review this push; autofix does not
    resolve its own threads.` Omit this line when nothing was pushed.
 
 Write nothing else. No preamble, no summary of the PR, no opinion on the code.

@@ -1,6 +1,10 @@
 import {describe, expect, it} from "vitest";
 
-import {assessReviewCurrency, REFUSAL_REASONS} from "./staleness.ts";
+import {
+    assessReviewCurrency,
+    DEGRADED_NOTES,
+    REFUSAL_REASONS,
+} from "./staleness.ts";
 import {
     computeHunkSignature,
     renderRereviewStamp,
@@ -41,23 +45,41 @@ describe("assessReviewCurrency", () => {
         });
     });
 
-    it("refuses when a review exists but carries no readable stamp", () => {
+    it("degrades, not refuses, when a review carries no readable stamp", () => {
+        // Khan/webapp#41130: the reviewer posted a correct blocking finding
+        // under a body of exactly "Changes requested — see inline comments."
+        // and no stamp. Reporting that as "no review" was wrong twice over:
+        // wrong message, and a refusal on a PR that had real feedback.
         const result = assessReviewCurrency(
-            [{body: "Looks good to me", submittedAt: "2026-07-01T00:00:00Z"}],
+            [
+                {
+                    body: "Changes requested — see inline comments.",
+                    submittedAt: "2026-07-01T00:00:00Z",
+                },
+            ],
             diffFor({"a.ts": ["x"]}),
         );
-        expect(result.status).toBe("no-review");
+        expect(result).toEqual({status: "unverifiable", why: "unstamped"});
     });
 
-    it("refuses when the fingerprint overflowed", () => {
-        // Fail closed: currency cannot be established on a diff too large to
-        // stamp, and the reviewer's own "do more work" answer has no analogue
-        // here, so the run stops.
+    it("degrades when the fingerprint overflowed", () => {
         const result = assessReviewCurrency(
             [stampedReview("overflow")],
             diffFor({"a.ts": ["x"]}),
         );
-        expect(result.status).toBe("no-fingerprint");
+        expect(result).toEqual({status: "unverifiable", why: "overflow"});
+    });
+
+    it("distinguishes no reviews at all from unstamped reviews", () => {
+        expect(assessReviewCurrency([], diffFor({"a.ts": ["x"]})).status).toBe(
+            "no-review",
+        );
+        expect(
+            assessReviewCurrency(
+                [{body: "anything", submittedAt: "2026-07-01T00:00:00Z"}],
+                diffFor({"a.ts": ["x"]}),
+            ).status,
+        ).toBe("unverifiable");
     });
 
     it("reports current with no stale paths when the head matches the review", () => {
@@ -161,6 +183,21 @@ describe("REFUSAL_REASONS", () => {
     it("gives the author an action for each refusal", () => {
         for (const reason of Object.values(REFUSAL_REASONS)) {
             expect(reason.length).toBeGreaterThan(40);
+        }
+    });
+
+    it("no longer claims there is no feedback when there is", () => {
+        // The exact wording that misreported Khan/webapp#41130.
+        expect(REFUSAL_REASONS["no-review"]).not.toContain(
+            "no reviewer feedback has been posted",
+        );
+    });
+});
+
+describe("DEGRADED_NOTES", () => {
+    it("names the weaker check for each degraded cause", () => {
+        for (const note of Object.values(DEGRADED_NOTES)) {
+            expect(note).toContain("thread anchors only");
         }
     });
 });

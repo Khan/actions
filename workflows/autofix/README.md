@@ -107,7 +107,8 @@ is the scope a cadence axis would be built on.
 Every refusal fails closed: when the run cannot establish that acting is safe,
 it does nothing, clears any label that armed it, and says why.
 
-- **No reviewer feedback yet.** Nothing to fix.
+- **No reviewer feedback at all.** Nothing to fix. This is the *only* currency
+  state that refuses.
 - **The review does not match this head.** Currency is checked against the
   reviewer's own hidden fingerprint stamp (`review.md` Step 6), which survives
   force-pushes and rebases because it hashes added-line content rather than
@@ -115,8 +116,6 @@ it does nothing, clears any label that armed it, and says why.
   the review, findings in the files that did not change are still fixed, and
   only the affected ones are dropped. An all-or-nothing gate would refuse
   routine PRs constantly.
-- **The fingerprint is unreadable** (`hunks=overflow`, on a diff too large to
-  stamp). Autofix will not edit code it cannot confirm was reviewed.
 - **The thread's label will not parse.** Note this fails *closed in the opposite
   direction* from `rereview.ts`, where an unparseable label is treated as
   blocking so the thread is kept. Here an unclassifiable finding is excluded,
@@ -126,6 +125,26 @@ it does nothing, clears any label that armed it, and says why.
   finding was written about is gone.
 - **The head moved while the run was working.** The edits are against a base
   that no longer exists, so the push is abandoned.
+
+### Degrading when there is no fingerprint
+
+If the reviewer's review carries no diff fingerprint (no stamp at all, or
+`hunks=overflow` on a very large diff), the file-level check cannot run. Autofix
+**degrades rather than refusing**, and says so in the summary.
+
+An earlier version refused outright, which made autofix unusable against the
+reviewer as actually deployed: on Khan/webapp#41130 the reviewer posted a correct
+blocking finding under a body of exactly `Changes requested — see inline
+comments.` with no stamp, and autofix refused every time while reporting "no
+reviewer feedback has been posted on this PR".
+
+The fingerprint is not the only currency signal and not even the primary one.
+GitHub marks a review comment outdated when the diff hunk it anchors to changes,
+which is the per-thread check above, and it covers the case that actually
+matters: the author edited the flagged code. The fingerprint adds coarser
+file-level detection whose failure mode is a redundant fix the next re-review
+catches. So: use the fingerprint when it is there, fall back to anchors when it
+is not, and never let the weaker check be silent.
 
 ## What it will not do to your code
 

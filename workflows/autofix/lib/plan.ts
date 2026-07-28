@@ -28,7 +28,11 @@ import {AUTOFIX_LABEL_PREFIX, resolveCommand, resolveScope} from "./scope.ts";
 import type {RequestSurface, ScopeResolution} from "./scope.ts";
 import {buildWorkList} from "./worklist.ts";
 import type {SkippedThread, WorkItem} from "./worklist.ts";
-import {assessReviewCurrency, REFUSAL_REASONS} from "./staleness.ts";
+import {
+    assessReviewCurrency,
+    DEGRADED_NOTES,
+    REFUSAL_REASONS,
+} from "./staleness.ts";
 import {
     renderTrailer,
     summariseLedger,
@@ -58,6 +62,12 @@ export type AutofixPlan = {
     stalePaths: string[];
     /** Which surface armed the run; empty when nothing did. */
     surface: RequestSurface | "";
+    /**
+     * Set when the file-level currency check could not run and the plan fell
+     * back to per-thread anchors. Rendered into the summary verbatim; empty
+     * when the fingerprint check ran normally.
+     */
+    degradedNote: string;
 };
 
 export type PlanInput = {
@@ -109,6 +119,7 @@ export const buildPlan = (input: PlanInput): AutofixPlan => {
         trailer: "",
         stalePaths: [] as string[],
         surface: "" as RequestSurface | "",
+        degradedNote: "",
     };
 
     const resolution = resolveRequest(input);
@@ -135,16 +146,25 @@ export const buildPlan = (input: PlanInput): AutofixPlan => {
     }
 
     const currency = assessReviewCurrency(input.priorReviews, input.diffText);
-    if (currency.status !== "current") {
+    if (currency.status === "no-review") {
         return {
             ...base,
             status: "refused",
             scopes: resolution.request.scopes,
-            reason: REFUSAL_REASONS[currency.status],
+            reason: REFUSAL_REASONS["no-review"],
         };
     }
 
-    const stale = new Set(currency.stalePaths);
+    // No fingerprint means the file-level check cannot run, not that the run
+    // must stop: the per-thread anchor check in `buildWorkList` still applies,
+    // and it is the signal that covers "the author edited the flagged code".
+    // The note is carried into the summary so the weaker check is never silent.
+    const degradedNote =
+        currency.status === "unverifiable" ? DEGRADED_NOTES[currency.why] : "";
+    base.degradedNote = degradedNote;
+
+    const stalePaths = currency.status === "current" ? currency.stalePaths : [];
+    const stale = new Set(stalePaths);
     const {items, skipped} = buildWorkList(
         input.threads,
         resolution.request.findingLabels,
@@ -172,7 +192,7 @@ export const buildPlan = (input: PlanInput): AutofixPlan => {
         ...base,
         scopes: resolution.request.scopes,
         skipped: allSkipped,
-        stalePaths: currency.stalePaths,
+        stalePaths,
     };
 
     if (actionable.length === 0) {
@@ -285,6 +305,7 @@ if (typeof require !== "undefined" && require.main === module) {
             surface: plan.surface,
             scopes: plan.scopes,
             cycle: plan.cycle,
+            degraded: plan.degradedNote !== "",
             itemCount: plan.items.length,
             skippedCount: plan.skipped.length,
         }),
