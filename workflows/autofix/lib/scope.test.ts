@@ -4,9 +4,13 @@ import {
     AUTOFIX_SCOPES,
     findingLabelsForScope,
     isLoopEligible,
+    labelForToken,
+    resolveCommand,
     resolveScope,
     SCOPE_LABELS,
+    SCOPE_TOKENS,
     UNIMPLEMENTED_LABELS,
+    UNIMPLEMENTED_TOKENS,
 } from "./scope.ts";
 import {
     BLOCKING_LABELS,
@@ -130,5 +134,148 @@ describe("findingLabelsForScope", () => {
         for (const label of findingLabelsForScope("nits")) {
             expect(blocking.has(label)).toBe(false);
         }
+    });
+});
+
+describe("resolveCommand", () => {
+    it("reports none for a comment that is not an autofix command", () => {
+        expect(resolveCommand("looks good to me").status).toBe("none");
+        expect(resolveCommand("/review").status).toBe("none");
+    });
+
+    it("does not match a command that is only a prefix of another word", () => {
+        expect(resolveCommand("/autofixer please").status).toBe("none");
+    });
+
+    it("arms blocking scope for a bare command", () => {
+        const result = resolveCommand("/autofix");
+        expect(result.status).toBe("armed");
+        if (result.status !== "armed") {
+            return;
+        }
+        expect(result.request.scopes).toEqual(["blocking"]);
+        expect(result.request.surface).toBe("command");
+    });
+
+    it("arms the scopes named as arguments", () => {
+        const result = resolveCommand("/autofix nits");
+        if (result.status !== "armed") {
+            throw new Error("expected armed");
+        }
+        expect(result.request.scopes).toEqual(["nits"]);
+    });
+
+    it("unions multiple arguments and orders them canonically", () => {
+        const result = resolveCommand("/autofix nits blocking");
+        if (result.status !== "armed") {
+            throw new Error("expected armed");
+        }
+        expect(result.request.scopes).toEqual(["blocking", "nits"]);
+    });
+
+    it("tolerates a trailing CRLF", () => {
+        // The exact shape that silently killed /review in Khan/webapp#40943:
+        // the GitHub web UI appends \r\n when you press Enter after a command.
+        const result = resolveCommand("/autofix blocking\r\n");
+        if (result.status !== "armed") {
+            throw new Error("expected armed");
+        }
+        expect(result.request.scopes).toEqual(["blocking"]);
+    });
+
+    it("tolerates a bare command with a trailing CRLF", () => {
+        expect(resolveCommand("/autofix\r\n").status).toBe("armed");
+    });
+
+    it("tolerates leading whitespace and tabs between arguments", () => {
+        const result = resolveCommand("  /autofix\tblocking   nits  ");
+        if (result.status !== "armed") {
+            throw new Error("expected armed");
+        }
+        expect(result.request.scopes).toEqual(["blocking", "nits"]);
+    });
+
+    it("reads arguments from the command line only, ignoring later prose", () => {
+        const result = resolveCommand(
+            "/autofix blocking\n\nbut please keep the existing naming",
+        );
+        if (result.status !== "armed") {
+            throw new Error("expected armed");
+        }
+        expect(result.request.scopes).toEqual(["blocking"]);
+    });
+
+    it("rejects an unimplemented axis and quotes the command form", () => {
+        const result = resolveCommand("/autofix loop");
+        expect(result.status).toBe("rejected");
+        if (result.status !== "rejected") {
+            return;
+        }
+        expect(result.surface).toBe("command");
+        expect(result.reason).toContain("cadence");
+        expect(result.labels).toEqual(["/autofix loop"]);
+    });
+
+    it("rejects an unrecognised argument", () => {
+        const result = resolveCommand("/autofix everything");
+        expect(result.status).toBe("rejected");
+        if (result.status !== "rejected") {
+            return;
+        }
+        expect(result.reason).toContain("unrecognised");
+        expect(result.reason).toContain("/autofix blocking");
+    });
+
+    it("never asks a command-armed run to remove labels", () => {
+        const result = resolveCommand("/autofix blocking");
+        if (result.status !== "armed") {
+            throw new Error("expected armed");
+        }
+        expect(result.request.labels).toEqual([]);
+    });
+});
+
+describe("the two surfaces agree", () => {
+    // The whole reason both funnel through one resolver: a token must not mean
+    // one thing as a label and another as a command.
+    it("resolves the same scopes from either surface", () => {
+        for (const [labels, command] of [
+            [["autofix: blocking"], "/autofix blocking"],
+            [["autofix: nits"], "/autofix nits"],
+            [["autofix: blocking", "autofix: nits"], "/autofix blocking nits"],
+        ] as const) {
+            const fromLabel = resolveScope(labels);
+            const fromCommand = resolveCommand(command);
+            if (
+                fromLabel.status !== "armed" ||
+                fromCommand.status !== "armed"
+            ) {
+                throw new Error(`expected both armed for ${command}`);
+            }
+            expect(fromCommand.request.scopes).toEqual(
+                fromLabel.request.scopes,
+            );
+            expect(fromCommand.request.findingLabels).toEqual(
+                fromLabel.request.findingLabels,
+            );
+        }
+    });
+
+    it("rejects the same tokens on either surface", () => {
+        for (const token of Object.keys(UNIMPLEMENTED_TOKENS)) {
+            expect(resolveScope([labelForToken(token)]).status).toBe(
+                "rejected",
+            );
+            expect(resolveCommand(`/autofix ${token}`).status).toBe("rejected");
+        }
+    });
+
+    it("derives the label tables from the token tables", () => {
+        expect(Object.keys(SCOPE_LABELS)).toEqual(
+            Object.keys(SCOPE_TOKENS).map(labelForToken),
+        );
+        expect(Object.keys(UNIMPLEMENTED_LABELS)).toEqual(
+            Object.keys(UNIMPLEMENTED_TOKENS).map(labelForToken),
+        );
     });
 });

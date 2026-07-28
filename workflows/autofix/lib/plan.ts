@@ -12,14 +12,20 @@
  * The plan has three outcomes and the distinction matters to the PR comment the
  * run posts:
  *   - `armed` — there is work; the agent runs.
- *   - `no-op` — the labels were understood and nothing needed fixing. Not a
- *     failure; the run says so and removes the label.
- *   - `refused` — the run cannot safely proceed (unimplemented label, no
- *     review, unreadable fingerprint). The label is still removed, because a
- *     label left on after a refusal reads as "still queued" when nothing is.
+ *   - `no-op` — the request was understood and nothing needed fixing. Not a
+ *     failure; the run says so and clears any label that armed it.
+ *   - `refused` — the run cannot safely proceed (unimplemented token, no
+ *     review, unreadable fingerprint). A label that armed it is still removed,
+ *     because a label left on after a refusal reads as "still queued" when
+ *     nothing is.
+ *
+ * Autofix is armed from either of two peer surfaces, a label or an `/autofix`
+ * comment. {@link resolveRequest} owns the rule that reconciles them, and the
+ * rule is that the trigger decides: they never union with each other.
  */
 
-import {resolveScope} from "./scope.ts";
+import {AUTOFIX_LABEL_PREFIX, resolveCommand, resolveScope} from "./scope.ts";
+import type {RequestSurface, ScopeResolution} from "./scope.ts";
 import {buildWorkList} from "./worklist.ts";
 import type {SkippedThread, WorkItem} from "./worklist.ts";
 import {assessReviewCurrency, REFUSAL_REASONS} from "./staleness.ts";
@@ -35,7 +41,11 @@ export type AutofixPlan = {
     status: "armed" | "no-op" | "refused";
     /** One sentence, rendered verbatim into the run's PR comment. */
     reason: string;
-    /** Autofix labels to remove; always removed, whatever the status. */
+    /**
+     * Autofix labels to remove. Every autofix label on the PR, whatever the
+     * status, on a label-armed run; empty on a command-armed one, which has no
+     * label state of its own to tidy.
+     */
     labelsToRemove: string[];
     scopes: string[];
     items: WorkItem[];
@@ -46,6 +56,8 @@ export type AutofixPlan = {
     trailer: string;
     /** Paths carrying hunks no stamped review has seen. */
     stalePaths: string[];
+    /** Which surface armed the run; empty when nothing did. */
+    surface: RequestSurface | "";
 };
 
 export type PlanInput = {
@@ -56,33 +68,68 @@ export type PlanInput = {
     diffText: string;
     /** Commit messages on the PR head, for the cycle ledger. */
     commitMessages: readonly string[];
+    /**
+     * The body of the `/autofix` comment that triggered this run, when one did.
+     * Absent on a label-triggered run.
+     */
+    command?: string;
 };
 
-/** Every autofix label present, so a refusal still clears the PR. */
+/** Every autofix label present, so a label-armed refusal still clears the PR. */
 const autofixLabelsOn = (labels: readonly string[]): string[] =>
-    labels.filter((label) => label.startsWith("autofix: "));
+    labels.filter((label) => label.startsWith(AUTOFIX_LABEL_PREFIX));
+
+/**
+ * Resolve the request from whichever surface armed the run.
+ *
+ * **The trigger decides, and the two surfaces never union.** A run triggered by
+ * a comment resolves the comment; a run triggered by a label resolves the
+ * labels. Unioning them would mean a stale `autofix: nits` label silently
+ * widening someone's `/autofix blocking`, and would make the request depend on
+ * PR state the author was not looking at when they typed the command.
+ */
+const resolveRequest = (input: PlanInput): ScopeResolution => {
+    if (input.command !== undefined && input.command.trim() !== "") {
+        const fromCommand = resolveCommand(input.command);
+        if (fromCommand.status !== "none") {
+            return fromCommand;
+        }
+    }
+    return resolveScope(input.labels);
+};
 
 export const buildPlan = (input: PlanInput): AutofixPlan => {
-    const labelsToRemove = autofixLabelsOn(input.labels);
     const ledger = summariseLedger(input.commitMessages);
     const base = {
-        labelsToRemove,
+        labelsToRemove: [] as string[],
         scopes: [] as string[],
         items: [] as WorkItem[],
         skipped: [] as SkippedThread[],
         cycle: ledger.nextCycle,
         trailer: "",
         stalePaths: [] as string[],
+        surface: "" as RequestSurface | "",
     };
 
-    const resolution = resolveScope(input.labels);
+    const resolution = resolveRequest(input);
     if (resolution.status === "none") {
         return {
             ...base,
             status: "no-op",
-            reason: "no autofix label is present on this PR.",
+            reason: "no autofix label or `/autofix` command armed this run.",
         };
     }
+
+    // A command is self-clearing, so only a label-armed run has label state to
+    // tidy. On that path every autofix label present comes off, not just the
+    // ones that resolved, so a refusal never leaves one reading as "queued".
+    const surface =
+        resolution.status === "armed"
+            ? resolution.request.surface
+            : resolution.surface;
+    base.surface = surface;
+    base.labelsToRemove =
+        surface === "command" ? [] : autofixLabelsOn(input.labels);
     if (resolution.status === "rejected") {
         return {...base, status: "refused", reason: resolution.reason};
     }
@@ -202,6 +249,12 @@ export const runPlanCli = (fs: PlanCliFs, dir = AUTOFIX_DIR): AutofixPlan => {
             ? fs.readFileSync(`${dir}/pr.diff`)
             : "",
         commitMessages: readJson<string[]>(fs, `${dir}/commits.json`, []),
+        // Staged only on the comment-triggered path. Absent on a label run,
+        // and absent for any consumer still on an install that predates the
+        // command surface, which falls back to labels unchanged.
+        command: fs.existsSync(`${dir}/command.txt`)
+            ? fs.readFileSync(`${dir}/command.txt`)
+            : undefined,
     });
     fs.writeFileSync(`${dir}/plan.json`, `${JSON.stringify(plan, null, 2)}\n`);
     return plan;
@@ -229,6 +282,7 @@ if (typeof require !== "undefined" && require.main === module) {
         JSON.stringify({
             status: plan.status,
             reason: plan.reason,
+            surface: plan.surface,
             scopes: plan.scopes,
             cycle: plan.cycle,
             itemCount: plan.items.length,

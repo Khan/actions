@@ -1,7 +1,7 @@
 # `autofix` — opt-in reviewer-feedback autofixer
 
 Addresses the [`review`](../review) workflow's own feedback on a PR, on demand,
-one run per arming. Add a label, get a commit.
+one run per arming. Add a label or comment `/autofix`, get a commit.
 
 It is deliberately narrow. It fixes findings the reviewer already raised; it
 does not review, does not look for problems nobody flagged, and does not resolve
@@ -9,50 +9,90 @@ its own threads.
 
 ## Using it
 
-Add one of these labels to a PR:
+Two ways to arm it, and they are peers. Neither is a shorthand for the other.
+
+**Label the PR:**
 
 | Label              | Fixes                                                      |
 | ------------------ | ---------------------------------------------------------- |
 | `autofix: blocking` | The reviewer's open blocking threads (`issue (blocking)`, `issue (blocking, best-practice)`, `todo (blocking)`) |
 | `autofix: nits`     | The reviewer's open non-blocking threads (suggestions, nitpicks, questions, thoughts, notes) |
 
-Both may be on at once; the scopes union. The run then:
+**Or comment on the PR:**
+
+```
+/autofix                 # same as /autofix blocking
+/autofix nits
+/autofix blocking nits
+```
+
+Prose after the command line is ignored by the parser, so you can leave context
+for whoever reads the thread later:
+
+```
+/autofix blocking
+
+but keep the existing naming, it matches the RFC
+```
+
+Both labels may be on at once and both arguments may be given at once; the
+scopes union. **The trigger decides, and the two surfaces never union with each
+other**: a stale `autofix: nits` label will not widen an explicit
+`/autofix blocking`. Whichever one fired the run is the one that is read.
+
+The run then:
 
 1. checks that the reviewer's feedback is current for this head,
 2. fixes what it can, in one commit pushed to the PR branch,
 3. replies in each thread saying what it did (or why it did not),
 4. posts one summary comment,
-5. **removes the label.**
+5. **removes the label** (label-armed runs only).
 
 The label is a button, not a mode. It comes off on every outcome, including
 refusals, so its presence always means "queued" and never "already done".
 Re-arming is one click.
+
+A command-armed run removes nothing, and that is deliberate: a comment is
+already self-clearing, and any autofix label sitting on the PR was not what
+armed the run. Clearing it would discard an intent nobody acted on.
 
 The push is made with `KHAN_ACTIONS_BOT_TOKEN`, so it triggers a re-review.
 **That re-review is the verification step**: autofix never resolves a thread,
 and whether a fix actually settled a finding is decided by the next review, not
 by the run that wrote it.
 
-## The label axis model
+## The axis model
 
-The labels are namespaced `autofix: <value>`, and that namespace is flat while
-the semantics are not. Three axes exist; a label names a value on exactly one of
-them:
+Both surfaces share one currency: the **token**, the value after the namespace.
+`autofix: blocking` and `/autofix blocking` carry the same token, resolve
+through the same function (`scope.ts` `resolveTokens`), and cannot drift.
 
-| Axis        | Values                        | Combination rule       | Implemented |
+The token space is flat while the semantics are not. Three axes exist; a token
+names a value on exactly one of them:
+
+| Axis        | Tokens                        | Combination rule       | Implemented |
 | ----------- | ----------------------------- | ---------------------- | ----------- |
 | **scope**   | `blocking`, `nits`            | union                  | yes         |
 | **cadence** | `loop` (absent = once)        | flag                   | no          |
 | **source**  | `human`, `author` (absent = the reviewer bot) | union  | no          |
 
-Read this before adding a label to the vocabulary. `autofix: nits` and
-`autofix: loop` look like peers and are not, and the day both are on a PR the
-rule that resolves them has to already exist.
+Read this before adding a token to the vocabulary. `nits` and `loop` look like
+peers and are not, and the day both are requested the rule that resolves them
+has to already exist.
 
-A label on an unimplemented axis is **rejected, not ignored** (`scope.ts`
-`UNIMPLEMENTED_LABELS`). Honouring the blocking half of `blocking + loop` would
+Because unioning happens *within* an axis, the vocabulary stays bounded by the
+axes (five tokens across all three) rather than growing as their product. There
+is no `blocking-loop` token and there must never be one.
+
+A token on an unimplemented axis is **rejected, not ignored** (`scope.ts`
+`UNIMPLEMENTED_TOKENS`). Honouring the blocking half of `blocking + loop` would
 present as a loop that mysteriously stopped after one cycle, which is worse than
 a clear refusal.
+
+A bare `/autofix` means `blocking`, the scope that terminates at the merge gate;
+a bare command must not silently do the open-ended thing. There is deliberately
+no bare `autofix` label equivalent, since a label carries no arguments and the
+two forms would be indistinguishable at a glance.
 
 ### One constraint that outlives v1: nits never loop
 
@@ -65,7 +105,7 @@ is the scope a cadence axis would be built on.
 ## What it refuses to do
 
 Every refusal fails closed: when the run cannot establish that acting is safe,
-it does nothing, removes the label, and says why.
+it does nothing, clears any label that armed it, and says why.
 
 - **No reviewer feedback yet.** Nothing to fix.
 - **The review does not match this head.** Currency is checked against the
@@ -146,10 +186,34 @@ autofix reads its threads, its label taxonomy, and its fingerprint stamp.
 
 ### Repository setup
 
-Create the two labels (`autofix: blocking`, `autofix: nits`). Nothing else is
-configured per repo in v1; scope is chosen per PR by which label you add.
+Create the two labels (`autofix: blocking`, `autofix: nits`) if you want the
+label surface; the `/autofix` command needs no setup. Nothing else is
+configured per repo: scope is chosen per PR by label or argument.
 
 ## Design notes
+
+### Why the command is written out longhand
+
+The `/autofix` gate is spelled out in the workflow's `if:` rather than using
+gh-aw's `slash_command` trigger. gh-aw's compiled gate only matches the command
+followed by a space, a bare `\n`, or end-of-body, so a comment saved with a
+trailing CRLF — which the GitHub web UI produces when you press Enter after the
+command — never activates the workflow. That silently killed `/review` in
+Khan/webapp#40943. The parser in `scope.ts` tolerates the same shapes; the two
+must stay in step, and there is a test pinning the CRLF case specifically.
+
+### The command path's gates are weaker
+
+Worth knowing before relying on it. `issue_comment` carries no
+`github.event.pull_request`, so the fork guard and the `skip-ai-review` check
+cannot be evaluated in the `if:` at all — they move into the plan, after the
+agent job has started. An `/autofix` on a PR the label path would have rejected
+for free still costs a job.
+
+The gate that actually matters is unaffected: gh-aw's `roles` check still runs,
+compiling to an `author_association` test against `OWNER`/`MEMBER`/
+`COLLABORATOR`, so a comment from someone without write access never reaches the
+agent. That is the gate standing between a drive-by comment and a code push.
 
 ### Why the label, and not a 🚀 on a comment
 
@@ -157,14 +221,18 @@ Per-comment triggering was considered and dropped for v1. GitHub emits **no
 webhook for reactions** — the feature request has been open since 2022 — which
 is why the review workflow's own thumbs sweep is a two-hourly cron. A
 reaction-triggered autofix would inherit that latency, or need a second poll to
-shave a delay it still could not bound. `pull_request: labeled` fires
-immediately.
+shave a delay it still could not bound. `pull_request: labeled` and
+`issue_comment: created` both fire immediately.
 
 Note also that 🚀 is already live signal: `thumbs-sweep.ts` counts it as a
 positive reaction feeding the reviewer's tuning loop, so overloading it would
-corrupt that channel. If per-comment triggering lands later, a thread **reply**
-is the better mechanism anyway: `pull_request_review_comment: created` fires
-instantly, carries `in_reply_to_id`, and lets the human add context.
+corrupt that channel.
+
+The command surface makes per-comment autofix nearly free when it lands: an
+`/autofix` posted as a **reply inside a review thread** fires
+`pull_request_review_comment: created` and carries `in_reply_to_id`, naming the
+exact finding with no matching heuristics. The parser already handles the
+command; only the trigger and the thread-scoping would be new.
 
 ### Why not suggestion blocks
 

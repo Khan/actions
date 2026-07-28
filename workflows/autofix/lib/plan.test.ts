@@ -250,3 +250,143 @@ describe("runPlanCli", () => {
         expect(runPlanCli(fs).status).toBe("no-op");
     });
 });
+
+describe("buildPlan across both surfaces", () => {
+    it("arms from an /autofix command with no label present", () => {
+        const plan = buildPlan(
+            input({labels: [], command: "/autofix blocking"}),
+        );
+        expect(plan.status).toBe("armed");
+        expect(plan.surface).toBe("command");
+        expect(plan.scopes).toEqual(["blocking"]);
+        expect(plan.items.map((i) => i.threadId)).toEqual(["T1"]);
+    });
+
+    it("never removes labels on a command-armed run", () => {
+        // A stale label the author never acted on must survive an /autofix.
+        const plan = buildPlan(
+            input({
+                labels: ["autofix: nits"],
+                command: "/autofix blocking",
+            }),
+        );
+        expect(plan.status).toBe("armed");
+        expect(plan.labelsToRemove).toEqual([]);
+    });
+
+    it("never removes labels on a command-armed refusal either", () => {
+        const plan = buildPlan(
+            input({labels: ["autofix: nits"], command: "/autofix loop"}),
+        );
+        expect(plan.status).toBe("refused");
+        expect(plan.surface).toBe("command");
+        expect(plan.labelsToRemove).toEqual([]);
+    });
+
+    it("lets the command decide, never unioning it with stale labels", () => {
+        // `autofix: nits` on the PR must not widen an explicit /autofix
+        // blocking into both scopes.
+        const plan = buildPlan(
+            input({
+                labels: ["autofix: nits"],
+                command: "/autofix blocking",
+                threads: [
+                    thread({thread_id: "T1", body: "**issue (blocking):** a"}),
+                    thread({
+                        thread_id: "T2",
+                        body: "**nitpick (non-blocking):** b",
+                    }),
+                ],
+            }),
+        );
+        expect(plan.scopes).toEqual(["blocking"]);
+        expect(plan.items.map((i) => i.threadId)).toEqual(["T1"]);
+    });
+
+    it("falls back to labels when the comment is not an autofix command", () => {
+        const plan = buildPlan(
+            input({labels: ["autofix: blocking"], command: "/review"}),
+        );
+        expect(plan.status).toBe("armed");
+        expect(plan.surface).toBe("label");
+        expect(plan.labelsToRemove).toEqual(["autofix: blocking"]);
+    });
+
+    it("falls back to labels for an empty or whitespace command", () => {
+        for (const command of ["", "   "]) {
+            const plan = buildPlan(
+                input({labels: ["autofix: blocking"], command}),
+            );
+            expect(plan.surface).toBe("label");
+        }
+    });
+
+    it("still removes every autofix label on a label-armed refusal", () => {
+        const plan = buildPlan(
+            input({labels: ["autofix: blocking", "autofix: loop"]}),
+        );
+        expect(plan.status).toBe("refused");
+        expect(plan.labelsToRemove.sort()).toEqual([
+            "autofix: blocking",
+            "autofix: loop",
+        ]);
+    });
+
+    it("produces an identical plan from equivalent label and command armings", () => {
+        const viaLabel = buildPlan(input({labels: ["autofix: blocking"]}));
+        const viaCommand = buildPlan(
+            input({labels: [], command: "/autofix blocking"}),
+        );
+        expect(viaCommand.items).toEqual(viaLabel.items);
+        expect(viaCommand.scopes).toEqual(viaLabel.scopes);
+        expect(viaCommand.trailer).toEqual(viaLabel.trailer);
+        expect(viaCommand.status).toEqual(viaLabel.status);
+    });
+});
+
+describe("runPlanCli command staging", () => {
+    it("reads command.txt when the comment path staged it", () => {
+        const files: Record<string, string> = {
+            "/tmp/gh-aw/autofix/labels.json": JSON.stringify([]),
+            "/tmp/gh-aw/autofix/threads.json": JSON.stringify([
+                thread({body: "**issue (blocking):** x"}),
+            ]),
+            "/tmp/gh-aw/autofix/prior-reviews.json": JSON.stringify([
+                reviewStamped(DIFF),
+            ]),
+            "/tmp/gh-aw/autofix/pr.diff": DIFF,
+            "/tmp/gh-aw/autofix/commits.json": JSON.stringify([]),
+            "/tmp/gh-aw/autofix/command.txt": "/autofix blocking\r\n",
+        };
+        const plan = runPlanCli({
+            existsSync: (path) => files[path] !== undefined,
+            readFileSync: (path) => files[path],
+            writeFileSync: () => {},
+        });
+        expect(plan.status).toBe("armed");
+        expect(plan.surface).toBe("command");
+    });
+
+    it("falls back to labels when command.txt is absent", () => {
+        const files: Record<string, string> = {
+            "/tmp/gh-aw/autofix/labels.json": JSON.stringify([
+                "autofix: blocking",
+            ]),
+            "/tmp/gh-aw/autofix/threads.json": JSON.stringify([
+                thread({body: "**issue (blocking):** x"}),
+            ]),
+            "/tmp/gh-aw/autofix/prior-reviews.json": JSON.stringify([
+                reviewStamped(DIFF),
+            ]),
+            "/tmp/gh-aw/autofix/pr.diff": DIFF,
+            "/tmp/gh-aw/autofix/commits.json": JSON.stringify([]),
+        };
+        const plan = runPlanCli({
+            existsSync: (path) => files[path] !== undefined,
+            readFileSync: (path) => files[path],
+            writeFileSync: () => {},
+        });
+        expect(plan.status).toBe("armed");
+        expect(plan.surface).toBe("label");
+    });
+});

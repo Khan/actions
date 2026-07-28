@@ -6,8 +6,18 @@ description: >
   removes the label. One run per arming.
 
 on:
+  # Two arming surfaces, and they are PEERS — neither is a shorthand for the
+  # other. A label is state you click; a command is an event you type and can
+  # pass arguments to. Both resolve through one shared resolver (`scope.ts`), so
+  # a value can never mean one thing as a label and another as a command.
   pull_request:
     types: [labeled]
+  issue_comment:
+    types: [created]
+  # Acknowledge an `/autofix` comment immediately, the same way the reviewer
+  # acknowledges `/review`. Without this the author has no signal between typing
+  # the command and the summary comment several minutes later.
+  reaction: eyes
   # No status comment: the run posts exactly one summary comment of its own
   # (Step 7), and a gh-aw "started/completed" comment on top of that would
   # double the noise on a PR that is already carrying a full review.
@@ -15,20 +25,37 @@ on:
   # Autofix writes code to someone's branch, so the actor who armed it must be
   # able to write to the repo themselves. This is deliberately NOT the
   # reviewer's `roles: all` override: the reviewer only reads and comments, and
-  # its gate is relaxed so a collaborator's push still triggers a review.
+  # its gate is relaxed so a collaborator's push still triggers a review. On the
+  # comment path this role check is the PRIMARY gate — see below.
   roles: [admin, maintainer, write]
 
-# Three gates, all cheap and all before the agent starts:
+# One gate per surface. Double-quoted YAML so the `\n`/`\r`/`\t` escapes below
+# become real characters in the expression rather than literal backslashes.
+#
+# LABEL PATH — three cheap gates before the agent starts:
 #   1. Same-repo branches only. A fork PR gets no secrets, so the push would
-#      fail anyway, and this repo is public.
+#      fail anyway.
 #   2. The label that fired this event is an autofix label. Every other label
-#      addition on the PR is a no-op run we never pay for.
+#      addition on the PR is a run we never pay for.
 #   3. Never on a PR the reviewer was told to skip: with no review there is
 #      nothing to fix, and the plan would refuse in Step 2 regardless.
-if: >-
-  github.event.pull_request.head.repo.full_name == github.repository &&
-  startsWith(github.event.label.name, 'autofix: ') &&
-  !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
+#
+# COMMAND PATH — deliberately weaker, and worth understanding before you touch
+# it. `issue_comment` carries no `github.event.pull_request`, so the fork guard
+# and the `skip-ai-review` check CANNOT be evaluated here at all; they move into
+# the plan, after the agent job has already started. That means an `/autofix` on
+# a PR the label path would have rejected for free still costs a job. The gate
+# that actually matters is unaffected: gh-aw's `roles` check above still runs,
+# so a comment from someone without write access never reaches the agent.
+#
+# The command match is written out longhand rather than using gh-aw's
+# `slash_command` trigger. gh-aw's compiled gate only matches the command
+# followed by a space, a bare `\n`, or end-of-body, so a comment saved with a
+# trailing CRLF — which the GitHub web UI produces when you press Enter after
+# the command — never activates the workflow. That silently killed `/review` in
+# Khan/webapp#40943. `scope.ts`'s parser tolerates the same shapes; keep the two
+# in step.
+if: "(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.label.name, 'autofix: ') && !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')) || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && (github.event.comment.body == '/autofix' || startsWith(github.event.comment.body, '/autofix ') || startsWith(github.event.comment.body, '/autofix\n') || startsWith(github.event.comment.body, '/autofix\r') || startsWith(github.event.comment.body, '/autofix\t')))"
 
 permissions:
   contents: read
@@ -162,12 +189,13 @@ hands you in Step 2.
 ## Current Context
 
 - **Repository**: ${{ github.repository }}
-- **Pull Request**: #${{ github.event.pull_request.number }}
+- **Pull Request**: #${{ github.event.pull_request.number || github.event.issue.number }}
 
-The label that armed this run is not interpolated here on purpose: gh-aw's
+This workflow fires on two events, so the PR number is read from whichever one
+carries it. What armed the run is not interpolated here on purpose: gh-aw's
 expression allowlist excludes `github.event.label.name` from prompt bodies, and
-the plan reads the PR's live labels in Step 2 anyway, which is the authoritative
-answer regardless of which single label fired the event.
+the plan resolves the arming itself in Step 2, which is the authoritative answer
+either way.
 
 ## Step 1: Stage the inputs
 
@@ -197,6 +225,16 @@ parses them, and every decision this run makes is derived from them.
    it is read from the branch rather than from cache memory because the branch
    cannot be evicted.
 
+Then, **only when this run was triggered by an `/autofix` comment** (the event
+is `issue_comment`), stage one more file:
+
+6. `command.txt` — the triggering comment's body, **verbatim**, including any
+   trailing whitespace. Do not trim it, normalise its line endings, or rewrite
+   it: the parser is deliberately tolerant of the trailing-CRLF shape the GitHub
+   web UI produces, and "helpfully" cleaning the body up here would hide whether
+   that tolerance actually works. On a label-triggered run, do not create this
+   file at all — its absence is what tells the plan to resolve labels instead.
+
 Also record the current head SHA (`pull_requests` `get`, `head.sha`). Step 5
 compares against it.
 
@@ -217,6 +255,11 @@ skipped and why, and what the commit trailer says. Do not widen it, narrow it,
 re-classify a skipped thread, or act on a finding it did not hand you. If you
 disagree with the plan, say so in the Step 7 comment; do not act on the
 disagreement.
+
+The plan resolves the arming itself, from whichever surface triggered the run:
+`command.txt` when it exists, the PR's labels otherwise. **The trigger decides,
+and the two never union** — a stale `autofix: nits` label must not silently
+widen someone's `/autofix blocking`. `plan.surface` records which one won.
 
 `plan.json` has a `status`:
 
@@ -328,6 +371,11 @@ Emit `remove-labels` for every label in the plan's `labelsToRemove`. Do this on
 every path through this workflow, including refusals and no-ops. The label is a
 button: once the run is over it must be off, so that its presence always means
 "queued" and never "already done".
+
+On a command-armed run `labelsToRemove` is empty, and that is correct, not an
+oversight: a comment is self-clearing, and any autofix label sitting on the PR
+was not what armed this run. Removing it would clear an intent nobody acted on.
+Emit nothing in that case.
 
 ## Step 9: Upload the artifact
 
