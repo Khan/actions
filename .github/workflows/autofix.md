@@ -276,11 +276,47 @@ expression allowlist excludes `github.event.label.name` from prompt bodies, and
 the plan resolves the arming itself in Step 2, which is the authoritative answer
 either way.
 
+## Cost: turns are the expensive thing
+
+This workflow's cost is dominated by the number of assistant turns, not by how
+much data any one of them moves. Every turn re-reads the whole accumulated
+context. The first live run took 131 turns and 460 AI credits to land a
+six-line fix, with only ~93 KB of tool output in the entire run: the payload was
+trivial and the turn count was not.
+
+So, concretely:
+
+- **Batch shell work.** One command with `&&` beats three round trips. Create
+  every directory you need in a single `mkdir -p` and do not verify it
+  afterwards; `mkdir -p` does not fail on an existing directory, and `ls` to
+  confirm is a wasted turn.
+- **Do not read the lib source.** `gh-aw-autofix-lib` holds released,
+  tested code. Reading `plan.ts` or `staleness.ts` to work out what the plan
+  will say costs turns and context, and tempts you to re-derive a decision the
+  plan has already made. Run the CLI and read its output.
+- **Do not explore the `safeoutputs` CLI.** Its invocations are written out at
+  each step below. Calling `--help` first is a wasted turn.
+- **Do not re-verify your own writes.** If a command exits zero, it worked.
+- **Prefer a heredoc to a chain of `node -e` scripts.** If you find yourself
+  writing the same inline script twice with small edits, write it to a file once
+  and run it.
+
 ## Step 1: Stage the inputs
 
-Create `/tmp/gh-aw/autofix/` and `/tmp/gh-aw/autofix/out/`, then stage five
-files into the former. Stage them exactly as described: the plan CLI in Step 2
-parses them, and every decision this run makes is derived from them.
+Start with exactly one command, and do not check its result:
+
+```
+mkdir -p /tmp/gh-aw/autofix/out
+```
+
+Then stage five files into `/tmp/gh-aw/autofix/`. Stage them exactly as
+described: the plan CLI in Step 2 parses them, and every decision this run makes
+is derived from them.
+
+Write each file with a single `Write` tool call taking the JSON you already have
+from the `pull_requests` results. Do not shell out to `node -e` to assemble
+them, and do not write a file, read it back, and rewrite it: that pattern cost
+five turns on the first live run.
 
 1. `labels.json` — the PR's current labels as a JSON array of name strings
    (`pull_requests` `get`).
@@ -399,19 +435,52 @@ your edits are against a base that no longer exists. Skip to Step 7, report that
 the run was abandoned for that reason, and remove the labels; the author can
 re-label once their push settles.
 
-Otherwise emit a single `push-to-pull-request-branch` with all your changes.
-The commit message is:
+Otherwise commit your working-tree changes locally, then emit a single
+`push-to-pull-request-branch`. The engine builds its patch and bundle from that
+commit, so both steps are needed:
 
 ```
-autofix: address reviewer feedback
+git -C "$GITHUB_WORKSPACE" add -- <the files you changed>
+git -C "$GITHUB_WORKSPACE" commit -F /tmp/gh-aw/autofix/commitmsg.txt
+printf '{"message":%s}' "$(...)" | safeoutputs push_to_pull_request_branch .
+```
 
-<one line per fixed finding: `<path>:<line>: <what changed>`>
+Write the message to `commitmsg.txt` first rather than passing it inline; it is
+multi-paragraph and shell-quoting it is a reliable way to lose the trailer.
+
+**The commit message must stand on its own.** Someone reading `git log` a year
+from now, with no PR open and no reviewer thread to click through to, should be
+able to tell what changed and why. Write it as you would any commit; the fact
+that a bot wrote it is not the interesting part.
+
+```
+autofix: <what actually changed, in the imperative>
+
+<why it changed: the problem the reviewer identified, stated as a fact about
+the code rather than a reference to the review. Wrapped at 72 columns.>
+
+<one line per fixed finding: `<path>:<line>: <what changed there>`, only when
+there is more than one finding; with a single finding the paragraph above has
+already said it.>
 
 <the plan's `trailer` field, verbatim>
 ```
 
+Rules for the subject line, which is the part that ages worst:
+
+- **Never** use a generic subject. `autofix: address reviewer feedback` is
+  banned: it is identical on every run, so a branch with several autofix
+  commits becomes a wall of indistinguishable `git log --oneline` entries.
+- Name the change, not the process. `autofix: clamp Page start into range`,
+  not `autofix: fix blocking finding` or `autofix: apply review comments`.
+- Under 60 characters, imperative mood, no trailing period.
+
+Do not reference thread ids, run urls, or the reviewer by name in the prose;
+that is what the trailer is for.
+
 The trailer block must be the last paragraph and must be copied exactly as
 `plan.json` renders it. It is what a later run reads to know this one happened.
+It is machine metadata: never describe it, expand it, or move it into the body.
 
 ## Step 6: Reply in each thread
 
@@ -430,31 +499,59 @@ is the one outcome an author cannot debug.
 
 ## Step 7: Post the run summary
 
-Emit exactly one `add-comment`, beginning with this marker line:
+**Post nothing when the run was unremarkable.** A clean run already tells its
+own story in three other places: the thread reply on each fixed finding, the
+commit in the PR timeline, and the engine's own "Commit pushed" comment. A
+fourth notification repeating them is noise, and noise on every run is how a
+bot teaches people to stop reading it.
+
+So decide first. **Skip the comment entirely** when *all* of these hold:
+
+- the plan's `status` is `armed` and every item was fixed,
+- `plan.skipped` contains only `out-of-scope` entries (the expected case: the
+  author chose a scope and the other threads were outside it),
+- `plan.stalePaths` is empty,
+- `plan.degradedNote` is empty.
+
+**Otherwise post exactly one `add-comment`**, because something happened that
+the thread replies cannot convey. That is any of: a refusal, a no-op, a finding
+left unfixed, an abandoned push, a skip for any reason other than
+`out-of-scope`, files gone stale, or a degraded currency check.
+
+The comment begins with this marker line:
 
 ```
 <!-- pr-autofixer:summary -->
 ```
 
-Then, in this order:
+Then, in this order, including only the parts that apply:
 
-1. One sentence: the plan's `reason`, verbatim.
+1. One sentence of plain past-tense prose saying what happened. Take the
+   substance from the plan's `reason` but write it as a sentence to a person:
+   `Fixed 1 blocking finding.`, not `fixing 1 blocking finding(s).` Get the
+   tense and the plural right; the work is already done by the time anyone
+   reads this.
 2. If anything was fixed: a list, one line per finding, `path:line` plus what
    changed. Link each to its thread `url` when the item has one.
-3. If anything was left unfixed: a list, one line each, with the reason.
-4. If `plan.skipped` is non-empty: one line per skipped thread with its
-   `reason` (`out-of-scope`, `outdated-anchor`, `unparseable-label`,
-   `stale-path`), so the author can see what autofix did not consider.
+3. If anything was left unfixed: a list, one line each, with the reason. This
+   is the most important section in the comment; never omit or soften it.
+4. If `plan.skipped` contains entries whose reason is **not** `out-of-scope`:
+   one line each with the reason (`outdated-anchor`, `unparseable-label`,
+   `stale-path`). Put any `out-of-scope` entries in a collapsed
+   `<details><summary>N thread(s) outside this run's scope</summary>` block, or
+   omit them entirely when the comment already has more urgent content: they
+   are the expected consequence of the scope the author picked.
 5. If `plan.stalePaths` is non-empty, one line: `Files changed since the last
    review, so findings in them were not acted on: <paths>.`
 6. If `plan.degradedNote` is non-empty, that note **verbatim** on its own line.
-   This says the file-level currency check could not run and only thread
-   anchors were used. Never omit it and never soften it: a weaker check that
-   goes unmentioned is indistinguishable from the full one.
-7. Last line, exactly: `The reviewer will re-review this push; autofix does not
-   resolve its own threads.` Omit this line when nothing was pushed.
+   Never omit it and never soften it: a weaker check that goes unmentioned is
+   indistinguishable from the full one.
+7. When anything was pushed, last line, exactly: `The reviewer will re-review
+   this push; autofix does not resolve its own threads.`
 
 Write nothing else. No preamble, no summary of the PR, no opinion on the code.
+Do not use em dashes; a semicolon, colon, or full stop reads better and matches
+the rest of this repo's bot output.
 
 ## Step 8: Remove the labels
 

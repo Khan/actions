@@ -1,0 +1,11 @@
+---
+"autofix": patch
+---
+
+Make the commit message stand on its own, post the summary only when it says something, and cut the turn count that drove the first run's cost.
+
+**Commit message.** A generic subject is now banned outright. `autofix: address reviewer feedback` was identical on every run, so a branch with several autofix commits became a wall of indistinguishable `git log --oneline` entries. The subject must name the change in the imperative (`autofix: clamp Page start into range`), under 60 characters, and the body must state the problem as a fact about the code rather than a pointer to a review thread that a reader a year later cannot see. The per-finding list only appears when there is more than one finding.
+
+**Summary comment.** It is now exception-driven. A clean run already tells its story in three other places: the thread reply on each fixed finding, the commit in the PR timeline, and the engine's own "Commit pushed" comment. A fourth notification repeating them trains people to stop reading the bot. The comment is skipped when every item was fixed, the only skips were `out-of-scope`, no paths went stale, and the currency check was not degraded. It still always posts for a refusal, a no-op, anything left unfixed, an abandoned push, a surprising skip, or a degraded check. Expected `out-of-scope` skips collapse into a `<details>` block. Tense and pluralisation are specified, since the first run posted "fixing 1 blocking finding(s)." after the work was already done.
+
+**Cost.** The first live run took 131 assistant turns and 460 AI credits ($4.61) to land a six-line fix, with only ~93 KB of tool output across the whole run: the payload was trivial, the turn count was not. The transcript showed seven turns creating one directory, three reading the workflow's own library source, five hand-assembling staged JSON through repeated `node -e` scripts, and three on `safeoutputs --help`. The prompt now states that turns are the cost, forbids reading the lib source, gives the exact `safeoutputs` invocations so no discovery is needed, folds directory creation into one unchecked `mkdir -p`, and tells the agent to write staged files with a single `Write` call each.
