@@ -201,3 +201,30 @@ describe("DEGRADED_NOTES", () => {
         }
     });
 });
+
+describe("an unreadable diff must not read as a clean check", () => {
+    const stamped = [
+        stampedReview(computeHunkSignature(diffFor({"a.ts": ["x"]}))),
+    ];
+
+    it("degrades on an empty diff rather than reporting current", () => {
+        // Khan/actions#298 review, blocking: computeHunkSignature("") is {},
+        // the stale-path loop is vacuous, and the old code returned `current`
+        // with no note. The guard would report a clean full check having
+        // performed none.
+        expect(assessReviewCurrency(stamped, "")).toEqual({
+            status: "unverifiable",
+            why: "unreadable-diff",
+        });
+    });
+
+    it("degrades on a patch with no file headers", () => {
+        // Raw `get_files` patches carry no diff --git/---/+++ headers, so
+        // splitUnifiedDiff recognises no file section in them.
+        const headerless = "@@ -1,1 +1,9 @@\n context\n+totally different";
+        expect(assessReviewCurrency(stamped, headerless)).toEqual({
+            status: "unverifiable",
+            why: "unreadable-diff",
+        });
+    });
+});

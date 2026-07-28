@@ -145,13 +145,45 @@ describe("buildWorkList", () => {
         );
         expect(items.map((i) => i.threadId)).toEqual(["T1", "T2"]);
     });
+});
 
-    it("handles a thread staged with no comments at all", () => {
+describe("thread ownership", () => {
+    it("excludes a thread a human opened, even with a blocking-looking label", () => {
+        // Khan/actions#298 review: nothing downstream would stop a human thread
+        // whose first line quotes the reviewer's label from becoming a work
+        // item that an agent then edits code for.
+        const {items, skipped} = buildWorkList(
+            [
+                {
+                    ...thread({body: "x"}),
+                    comments: [
+                        {author: "alice", body: "**issue (blocking):** boom"},
+                    ],
+                },
+            ],
+            BLOCKING,
+        );
+        expect(items).toEqual([]);
+        expect(skipped[0].reason).toBe("not-reviewer-thread");
+    });
+
+    it("excludes a thread with no comments at all", () => {
         const {items, skipped} = buildWorkList(
             [{...thread({body: ""}), comments: []}],
             BLOCKING,
         );
         expect(items).toEqual([]);
-        expect(skipped[0].reason).toBe("unparseable-label");
+        expect(skipped[0].reason).toBe("not-reviewer-thread");
+    });
+
+    it("honours a configured bot login", () => {
+        const staged = {
+            ...thread({body: "x"}),
+            comments: [{author: "other-bot", body: "**issue (blocking):** b"}],
+        };
+        expect(buildWorkList([staged], BLOCKING).items).toEqual([]);
+        expect(
+            buildWorkList([staged], BLOCKING, "other-bot").items,
+        ).toHaveLength(1);
     });
 });

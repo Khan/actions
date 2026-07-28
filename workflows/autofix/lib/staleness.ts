@@ -76,7 +76,7 @@ export type CurrencyAssessment =
            * below.
            */
           status: "unverifiable";
-          why: "unstamped" | "overflow";
+          why: "unstamped" | "overflow" | "unreadable-diff";
       }
     | {
           status: "current";
@@ -113,6 +113,18 @@ export const assessReviewCurrency = (
     }
 
     const current = computeHunkSignature(diffText);
+
+    // A signature with no paths means the diff told us nothing: it was empty,
+    // or it carried no `diff --git`/`---`/`+++` headers for `splitUnifiedDiff`
+    // to recognise a file section from. Falling through would make the
+    // stale-path loop vacuous and return `current` with zero stale paths and no
+    // note, i.e. the guard would report a clean full check having performed
+    // none. That is the one failure direction this module must not have, so an
+    // unreadable diff degrades like any other unusable input.
+    if (Object.keys(current).length === 0) {
+        return {status: "unverifiable", why: "unreadable-diff"};
+    }
+
     const divergence = computeDivergence(current, stamp.anchorHunks);
 
     const stalePaths: string[] = [];
@@ -139,8 +151,12 @@ export const REFUSAL_REASONS: Readonly<Record<"no-review", string>> = {
  * the summary so a weaker check is never silent.
  */
 export const DEGRADED_NOTES: Readonly<
-    Record<"unstamped" | "overflow", string>
+    Record<"unstamped" | "overflow" | "unreadable-diff", string>
 > = {
+    "unreadable-diff":
+        "The PR's diff could not be parsed, so the file-level currency check " +
+        "could not run; findings were checked against their thread anchors " +
+        "only.",
     unstamped:
         "The reviewer's review carries no diff fingerprint, so the file-level " +
         "currency check could not run; findings were checked against their " +

@@ -49,7 +49,9 @@ export type SkippedThread = {
         | "outdated-anchor"
         | "unparseable-label"
         /** The file changed after the review that raised this finding. */
-        | "stale-path";
+        | "stale-path"
+        /** Somebody other than the reviewer opened it; not v1's to act on. */
+        | "not-reviewer-thread";
     /** The parsed label when there was one; absent for unparseable. */
     label?: string;
 };
@@ -69,13 +71,29 @@ export type WorkList = {
 export const buildWorkList = (
     threads: readonly StagedThread[],
     findingLabels: readonly string[],
+    botLogin = "github-actions[bot]",
 ): WorkList => {
     const inScope = new Set(findingLabels);
     const items: WorkItem[] = [];
     const skipped: SkippedThread[] = [];
 
     for (const thread of threads) {
-        const opener = thread.comments?.[0]?.body ?? "";
+        const first = thread.comments?.[0];
+        // Whose thread this is decides whether autofix may touch it at all, and
+        // that must be enforced here rather than left to staging. A human can
+        // open a thread whose first line happens to read `**issue (blocking):**`
+        // (quoting the reviewer, for instance), and nothing else downstream
+        // would stop it becoming a work item that an agent then edits code for.
+        // v1 acts on reviewer feedback only; the source axis is not implemented.
+        if (first === undefined || first.author !== botLogin) {
+            skipped.push({
+                threadId: thread.thread_id,
+                path: thread.path,
+                reason: "not-reviewer-thread",
+            });
+            continue;
+        }
+        const opener = first.body;
         const label = parseLeadingLabel(opener);
 
         if (label === null) {
