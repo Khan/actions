@@ -126,11 +126,20 @@ it does nothing, clears any label that armed it, and says why.
 - **The head moved while the run was working.** The edits are against a base
   that no longer exists, so the push is abandoned.
 
-### Degrading when there is no fingerprint
+### Degrading when there is no fingerprint (the normal case)
 
-If the reviewer's review carries no diff fingerprint (no stamp at all, or
-`hunks=overflow` on a very large diff), the file-level check cannot run. Autofix
-**degrades rather than refusing**, and says so in the summary.
+If the reviewer's review carries no diff fingerprint, the file-level check
+cannot run. Autofix **degrades rather than refusing**, and says so in the
+summary.
+
+This is not an edge case. gh-aw's safe-output ingest strips every XML/HTML
+comment before a review posts (`removeXmlComments` in
+`sanitize_content_core.cjs`), so the reviewer's hidden stamp is deleted on the
+way out and has never reached a posted review; Khan/actions#287 documents it end
+to end and gives the reviewer a second carrier in its cache-memory record. That
+carrier is not reachable from here, because cache memory is scoped per workflow
+and autofix is a different workflow. So the per-thread anchor check is what
+autofix actually runs on, and the fingerprint branch is the optimisation.
 
 An earlier version refused outright, which made autofix unusable against the
 reviewer as actually deployed: on Khan/webapp#41130 the reviewer posted a correct
@@ -262,9 +271,18 @@ express: multi-line, cross-file, needs-a-test changes.
 
 ### Division of labour
 
-Code decides; the model edits. `lib/plan.ts` is the determinism boundary: it
-resolves the scope, checks currency, builds the work list, and renders the
-trailer, all before the agent is asked to change anything. The plan is final —
+Code decides; the model edits. Two deterministic stages run before the agent is
+asked to change anything:
+
+- **`lib/stage.ts` runs as a `pre-agent-steps:` step**, before the agent starts,
+  and fetches everything the plan needs (labels, the reviewer's unresolved
+  threads with their full reply chains, prior reviews, the diff, commit
+  messages, the head SHA). It costs zero assistant turns, and a staging failure
+  fails the step before any AI credits are spent. This follows the reviewer's
+  own orchestrator slice 1 (Khan/actions#280): anything that never needed model
+  output belongs in a pre-agent step.
+- **`lib/plan.ts`** then resolves the scope, checks currency, builds the work
+  list, and renders the trailer. The plan is final —
 the prompt's contract is to execute it or stop, never to widen it, narrow it, or
 re-classify a skipped thread. Nothing in `lib/` composes a sentence about the
 code under review.

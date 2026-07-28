@@ -23,10 +23,24 @@
  * items and fix the rest, so the guard degrades to partial work instead of
  * refusal.
  *
+ * **The unstamped path is the NORMAL path, not an edge case.** gh-aw's
+ * safe-output ingest sanitizer strips every XML/HTML comment before a review
+ * posts (`removeXmlComments` in `sanitize_content_core.cjs`, a depth-tracking
+ * scan with no allowlist), so the reviewer's body stamp is deleted on the way
+ * out and has never reached a posted review. Khan/actions#287 documents this
+ * end to end and gives the reviewer a second carrier, its cache-memory record.
+ *
+ * That carrier is not available here: cache memory is scoped per workflow, and
+ * autofix is a different workflow from the reviewer, so it cannot read the
+ * reviewer's. Until that changes, {@link assessReviewCurrency} will return
+ * `unverifiable` on essentially every real run, and the per-thread anchor check
+ * is what autofix actually runs on. Treat the fingerprint branch below as the
+ * optimisation, not the main path.
+ *
  * **Degrading, and why it is not a weakened guard.** An earlier version refused
- * outright whenever no fingerprint could be read. That made autofix unusable
- * against the reviewer as actually deployed: on Khan/webapp#41130 the reviewer
- * posted a correct blocking finding under a body of exactly "Changes requested
+ * outright whenever no fingerprint could be read, which given the above made
+ * autofix refuse every real run: on Khan/webapp#41130 the reviewer posted a
+ * correct blocking finding under a body of exactly "Changes requested
  * — see inline comments." and no stamp, and autofix refused every time.
  *
  * The fingerprint is not the only currency signal, and it is not even the

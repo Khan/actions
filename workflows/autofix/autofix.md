@@ -190,6 +190,31 @@ pre-agent-steps:
       path: gh-aw-autofix-lib
       persist-credentials: false
 
+  # Staging is deterministic and runs BEFORE the agent, so it costs zero
+  # assistant turns. This follows the reviewer's orchestrator slice 1 (#280):
+  # anything that never needed model output belongs in a pre-agent step.
+  #
+  # The first live run measured why. Staging by prose cost roughly fifteen of
+  # that run's 131 turns (seven creating a directory, five hand-assembling JSON
+  # through repeated `node -e` scripts, three reading this workflow's own lib
+  # source), and turns are what autofix costs: each re-reads the whole context,
+  # so 61% of the bill was cache reads. Caching was already near-optimal at a
+  # 40:1 read-to-write ratio; there were simply too many turns.
+  #
+  # A staging failure fails this step before any AI credits are spent.
+  #
+  # The comment body is passed through `env:` rather than interpolated into
+  # `run:`. It is attacker-controlled text, and `env:` keeps it out of the
+  # shell's parse.
+  - name: Stage the plan's inputs (deterministic)
+    working-directory: gh-aw-autofix-lib
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      AUTOFIX_PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+      AUTOFIX_COMMAND_BODY: ${{ github.event_name == 'issue_comment' && github.event.comment.body || '' }}
+    run: npx -y tsx workflows/autofix/lib/stage.ts
+
 # A fix run is a fraction of a review run: no reviewer roster, no lenses, one
 # agent editing a bounded set of files. 1000 credits ($10) is the gh-aw default
 # and is generous for that shape; the daily ceiling stays on, because unlike
@@ -301,57 +326,30 @@ So, concretely:
   writing the same inline script twice with small edits, write it to a file once
   and run it.
 
-## Step 1: Stage the inputs
+## Step 1: Read the staged inputs
 
-Start with exactly one command, and do not check its result:
+**There is nothing to stage.** A deterministic pre-agent step
+(`workflows/autofix/lib/stage.ts`) has already fetched everything and written it
+to `/tmp/gh-aw/autofix/` before you started. Do not fetch any of it again, and
+do not rewrite any of these files:
 
-```
-mkdir -p /tmp/gh-aw/autofix/out
-```
+| file | what it holds |
+| --- | --- |
+| `labels.json` | the PR's current label names |
+| `threads.json` | the reviewer's unresolved threads, each with its full reply chain, verbatim |
+| `prior-reviews.json` | every review by the reviewer bot, whatever its state |
+| `pr.diff` | the PR's unified diff |
+| `commits.json` | commit messages on the head, the autofix cycle ledger |
+| `head-sha.txt` | the head SHA when the run started; Step 5 compares against it |
+| `command.txt` | the `/autofix` comment body, **only** on a command-armed run |
 
-Then stage five files into `/tmp/gh-aw/autofix/`. Stage them exactly as
-described: the plan CLI in Step 2 parses them, and every decision this run makes
-is derived from them.
+You do not need to read most of these. Step 2's CLI parses them; the only ones
+you will open yourself are `plan.json` (which Step 2 produces) and
+`head-sha.txt` (Step 5). Reading `pr.diff` or `threads.json` in full is a waste
+of context: the plan already extracted what matters into `plan.items`.
 
-Write each file with a single `Write` tool call taking the JSON you already have
-from the `pull_requests` results. Do not shell out to `node -e` to assemble
-them, and do not write a file, read it back, and rewrite it: that pattern cost
-five turns on the first live run.
-
-1. `labels.json` — the PR's current labels as a JSON array of name strings
-   (`pull_requests` `get`).
-2. `threads.json` — the unresolved `github-actions[bot]` review threads
-   (`pull_request_read` `get_review_comments`). For each write `thread_id`,
-   `path`, `line` (the RIGHT-side line; `null` when GitHub reports the thread
-   outdated), `url` (the `html_url` of the thread's **first** comment), and
-   `comments`: every comment in the thread in order, each `{author, body}`.
-   Stage each `body` **verbatim as the tool returned it**, markdown included —
-   the label parser reads the leading `**label:**` off the opener, and
-   reformatting it is what makes a thread unclassifiable.
-3. `prior-reviews.json` — every review authored by `github-actions[bot]`,
-   **whatever its state**, each `{"body": "...", "submittedAt": "<ISO>"}`. Do
-   not filter or truncate the bodies: the currency check reads the hidden
-   fingerprint stamp out of them, and a dismissed or comment-only review still
-   carries one.
-4. `pr.diff` — the PR's full diff (`pull_requests` `get_files`, concatenating
-   the per-file patches).
-5. `commits.json` — the commit messages on the PR head, as a JSON array of
-   strings (`pull_requests` `get_commits`). This is the autofix cycle ledger;
-   it is read from the branch rather than from cache memory because the branch
-   cannot be evicted.
-
-Then, **only when this run was triggered by an `/autofix` comment** (the event
-is `issue_comment`), stage one more file:
-
-6. `command.txt` — the triggering comment's body, **verbatim**, including any
-   trailing whitespace. Do not trim it, normalise its line endings, or rewrite
-   it: the parser is deliberately tolerant of the trailing-CRLF shape the GitHub
-   web UI produces, and "helpfully" cleaning the body up here would hide whether
-   that tolerance actually works. On a label-triggered run, do not create this
-   file at all — its absence is what tells the plan to resolve labels instead.
-
-Also record the current head SHA (`pull_requests` `get`, `head.sha`). Step 5
-compares against it.
+If a file is missing, the staging step failed and the run should not have
+reached you. Say so in Step 7 and stop; do not reconstruct it by hand.
 
 ## Step 2: Build the plan (deterministic code)
 
@@ -518,13 +516,15 @@ the thread replies cannot convey. That is any of: a refusal, a no-op, a finding
 left unfixed, an abandoned push, a skip for any reason other than
 `out-of-scope`, files gone stale, or a degraded currency check.
 
-The comment begins with this marker line:
+Do **not** try to add a hidden HTML-comment marker of your own. gh-aw's
+safe-output ingest strips every XML/HTML comment before posting
+(`removeXmlComments` in `sanitize_content_core.cjs`, a depth-tracking scan with
+no allowlist), so such a marker is silently deleted. An earlier version of this
+step asked for `<!-- pr-autofixer:summary -->`; the posted comments never
+carried it. Collapsing older comments still works, because the engine adds its
+own `gh-aw-workflow-call-id` marker after sanitisation.
 
-```
-<!-- pr-autofixer:summary -->
-```
-
-Then, in this order, including only the parts that apply:
+Write the body directly, in this order, including only the parts that apply:
 
 1. One sentence of plain past-tense prose saying what happened. Take the
    substance from the plan's `reason` but write it as a sentence to a person:
