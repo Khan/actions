@@ -1,11 +1,6 @@
 import {describe, expect, it} from "vitest";
 
-import {
-    buildDiff,
-    collectInputs,
-    collectThreads,
-    writeInputs,
-} from "./stage.ts";
+import {collectInputs, collectThreads, writeInputs} from "./stage.ts";
 import type {StageCliFs, StagePort} from "./stage.ts";
 import {computeHunkSignature} from "../../review/lib/rereview-mode.ts";
 
@@ -32,9 +27,11 @@ const portFor = (opts: {
     threadPages?: unknown[];
     rest?: Record<string, unknown>;
     paged?: Record<string, unknown[]>;
+    checkoutSha?: string;
 }): StagePort => {
     let page = 0;
     return {
+        checkoutHeadSha: () => opts.checkoutSha ?? "",
         rest: async () => opts.rest ?? {},
         restPaged: async (path) => {
             for (const [key, value] of Object.entries(opts.paged ?? {})) {
@@ -217,39 +214,6 @@ describe("collectThreads", () => {
     });
 });
 
-describe("buildDiff", () => {
-    it("emits headers the hunk-signature parser can read back", () => {
-        const diff = buildDiff([
-            {filename: "src/a.ts", patch: "@@ -1,1 +1,2 @@\n context\n+added"},
-        ]);
-        expect(diff).toContain("diff --git a/src/a.ts b/src/a.ts");
-        // The round trip is the point: the currency check parses this text.
-        expect(Object.keys(computeHunkSignature(diff))).toEqual(["src/a.ts"]);
-    });
-
-    it("skips a file with no patch rather than emitting a broken section", () => {
-        // Binary or too-large files carry no patch; half a section would
-        // corrupt the parse rather than merely omit the file.
-        const diff = buildDiff([
-            {filename: "img.png"},
-            {filename: "src/a.ts", patch: "@@ -1,1 +1,2 @@\n c\n+x"},
-        ]);
-        expect(diff).not.toContain("img.png");
-        expect(Object.keys(computeHunkSignature(diff))).toEqual(["src/a.ts"]);
-    });
-
-    it("terminates a patch that arrived without a trailing newline", () => {
-        const diff = buildDiff([
-            {filename: "a.ts", patch: "@@ -1,1 +1,2 @@\n c\n+x"},
-        ]);
-        expect(diff.endsWith("\n")).toBe(true);
-    });
-
-    it("returns empty for no files", () => {
-        expect(buildDiff([])).toBe("");
-    });
-});
-
 describe("collectInputs", () => {
     const port = portFor({
         rest: {
@@ -352,5 +316,92 @@ describe("writeInputs", () => {
         const {fs, written} = fsFor();
         writeInputs(fs, inputs, "/d");
         expect(written["/d/pr.diff"]).toBe("diff --git a/a b/a\n");
+    });
+});
+
+describe("the head SHA comes from the checkout", () => {
+    const base = {
+        rest: {labels: [], head: {sha: "from-api"}},
+        threadPages: [onePage([])],
+    };
+
+    it("prefers the checked-out HEAD over the API", () => {
+        // Khan/actions#298 review: the edits are made against the checkout, so
+        // comparing an API read leaves a window where both reads agree while
+        // the working tree is already stale.
+        return collectInputs(
+            portFor({...base, checkoutSha: "from-checkout"}),
+            "o",
+            "r",
+            1,
+            BOT,
+        ).then((i) => expect(i.headSha).toBe("from-checkout"));
+    });
+
+    it("falls back to the API when no checkout is available", async () => {
+        const inputs = await collectInputs(portFor(base), "o", "r", 1, BOT);
+        expect(inputs.headSha).toBe("from-api");
+    });
+});
+
+describe("the staged diff round-trips into the currency check", () => {
+    // autofix rebuilds the diff with the reviewer's `buildUnifiedDiff` and then
+    // parses it with the reviewer's `computeHunkSignature`. Both live in the
+    // other package, so this pins the contract between them from this side: if
+    // either changes shape, the currency guard silently stops seeing files.
+    it("produces a signature keyed by path", async () => {
+        const inputs = await collectInputs(
+            portFor({
+                rest: {labels: [], head: {sha: "s"}},
+                paged: {
+                    "/files": [
+                        {
+                            filename: "src/a.ts",
+                            status: "modified",
+                            patch: "@@ -1,1 +1,2 @@\n context\n+added",
+                        },
+                    ],
+                },
+                threadPages: [onePage([])],
+            }),
+            "o",
+            "r",
+            1,
+            BOT,
+        );
+        expect(Object.keys(computeHunkSignature(inputs.diffText))).toEqual([
+            "src/a.ts",
+        ]);
+    });
+
+    it("keeps a renamed file keyed by its new path", async () => {
+        // The reason for using the shared builder: a local copy emitted the new
+        // name on both sides, which is wrong for a rename.
+        const inputs = await collectInputs(
+            portFor({
+                rest: {labels: [], head: {sha: "s"}},
+                paged: {
+                    "/files": [
+                        {
+                            filename: "src/new.ts",
+                            previous_filename: "src/old.ts",
+                            status: "renamed",
+                            patch: "@@ -1,1 +1,2 @@\n c\n+x",
+                        },
+                    ],
+                },
+                threadPages: [onePage([])],
+            }),
+            "o",
+            "r",
+            1,
+            BOT,
+        );
+        expect(inputs.diffText).toContain(
+            "diff --git a/src/old.ts b/src/new.ts",
+        );
+        expect(Object.keys(computeHunkSignature(inputs.diffText))).toEqual([
+            "src/new.ts",
+        ]);
     });
 });

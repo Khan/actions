@@ -122,3 +122,26 @@ describe("summariseLedger", () => {
         expect(summariseLedger([one]).attemptedThreadIds).toEqual(["A", "C"]);
     });
 });
+
+describe("trailers are read from the final paragraph only", () => {
+    it("ignores a quoted trailer in the body", () => {
+        // Khan/actions#298 review: a revert or doc commit quoting the trailer
+        // parsed as an autofix commit and inflated the cycle count.
+        const quoting =
+            "revert: back out the autofix commit\n\n" +
+            "It carried `Autofix-Version: 1` and `Autofix-Cycle: 4`, which\n" +
+            "we no longer want.\n\n" +
+            "Reverts: abc123\n";
+        expect(parseTrailer(quoting)).toBeNull();
+        expect(summariseLedger([quoting]).cycles).toBe(0);
+    });
+
+    it("still reads a real trailer in the final paragraph", () => {
+        const real = commit(renderTrailer({...trailer, cycle: 4}));
+        expect(parseTrailer(real)?.cycle).toBe(4);
+    });
+
+    it("reads a trailer that is the whole message", () => {
+        expect(parseTrailer(renderTrailer(trailer))?.cycle).toBe(1);
+    });
+});

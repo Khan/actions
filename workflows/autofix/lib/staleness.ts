@@ -88,8 +88,13 @@ export type CurrencyAssessment =
 /**
  * Compare the current diff against the most recent stamped review.
  *
- * `diffText` should be the same stripped diff the reviewer fingerprints
- * (`full-stripped.diff`), so generated-file churn does not read as staleness.
+ * `diffText` is the PR's full diff, NOT the reviewer's generated-file-stripped
+ * copy, so a lockfile or bundle churning after the review does appear in the
+ * signature and does land in `stalePaths`. That is harmless here and the
+ * asymmetry is deliberate: `plan.ts` consults `stalePaths` only for paths that
+ * carry a finding, and the reviewer does not raise findings on generated files,
+ * so a stale generated path can never drop real work. Stripping would mean
+ * threading the router's `generatedFiles` through staging to buy nothing.
  */
 export const assessReviewCurrency = (
     reviews: readonly PriorReview[],

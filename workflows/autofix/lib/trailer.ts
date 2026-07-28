@@ -55,9 +55,27 @@ export const renderTrailer = (trailer: AutofixTrailer): string =>
         `${KEYS.threads}: ${trailer.threadIds.join(",")}`,
     ].join("\n");
 
+/**
+ * The final paragraph of a commit message, which is where git looks for
+ * trailers.
+ *
+ * Scoping to it matters: an earlier version matched keys anywhere in the
+ * message via a multiline regex, so a revert, or a doc commit quoting
+ * `Autofix-Version: 1`, parsed as an autofix commit and inflated the cycle
+ * count. Harmless while the count is only reported, load-bearing the moment a
+ * cadence axis caps cycles on it.
+ */
+const lastParagraph = (message: string): string => {
+    const paragraphs = message
+        .split(/\r?\n\s*\r?\n/)
+        .map((p) => p.trim())
+        .filter((p) => p !== "");
+    return paragraphs.length === 0 ? "" : paragraphs[paragraphs.length - 1];
+};
+
 const valueOf = (message: string, key: string): string | null => {
     const re = new RegExp(`^${key}:[ \\t]*(.*)$`, "m");
-    const match = re.exec(message);
+    const match = re.exec(lastParagraph(message));
     return match === null ? null : match[1].trim();
 };
 

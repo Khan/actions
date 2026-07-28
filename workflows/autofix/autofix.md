@@ -425,9 +425,21 @@ Edit the files directly in the workspace. Rules, all hard:
 - If a fix would require a design decision the reviewer did not make for you,
   leave it unfixed and say so.
 
+**Verify what you can, and be honest about what you cannot.** Nothing between
+your edit and the push checks that the code still compiles or that its tests
+still pass; the re-review and the repo's CI both run only after the commit is on
+the author's branch. If this repository has a cheap check you can run from the
+allowlisted commands, run it. If you cannot verify (no allowlisted runner, or
+the check needs a toolchain that is not installed), that is expected, not a
+failure; say so in the Step 7 summary rather than implying the fix was
+validated. An unverified fix presented as a verified one is the thing to
+avoid.
+
 ## Step 5: Push one commit
 
-First re-read the PR's head SHA and compare it to the one recorded in Step 1.
+Compare the live head SHA against `/tmp/gh-aw/autofix/head-sha.txt`, which
+staging captured from the job's checkout (`git rev-parse HEAD`) rather than from
+the API, because the checkout is what your edits are actually against.
 **If it changed, do not push.** The author pushed while you were working, and
 your edits are against a base that no longer exists. Skip to Step 7, report that
 the run was abandoned for that reason, and remove the labels; the author can
@@ -543,10 +555,13 @@ Write the body directly, in this order, including only the parts that apply:
    are the expected consequence of the scope the author picked.
 5. If `plan.stalePaths` is non-empty, one line: `Files changed since the last
    review, so findings in them were not acted on: <paths>.`
-6. If `plan.degradedNote` is non-empty, that note **verbatim** on its own line.
+6. If you could not run any check against your own edit, one line saying so, in
+   plain terms: `Not verified locally: no test or build command is available to
+   this workflow.` Never imply a fix was validated when it was not.
+7. If `plan.degradedNote` is non-empty, that note **verbatim** on its own line.
    Never omit it and never soften it: a weaker check that goes unmentioned is
    indistinguishable from the full one.
-7. When anything was pushed, last line, exactly: `The reviewer will re-review
+8. When anything was pushed, last line, exactly: `The reviewer will re-review
    this push; autofix does not resolve its own threads.`
 
 Write nothing else. No preamble, no summary of the PR, no opinion on the code.

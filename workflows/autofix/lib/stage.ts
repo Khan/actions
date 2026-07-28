@@ -27,8 +27,16 @@
  * `fetch` Node provides, unlike the thumbs sweep, which predates that and pulls
  * in octokit. Network access sits behind {@link StagePort} so the whole module
  * is unit-testable without a socket.
+ *
+ * The unified diff is rebuilt by the reviewer's own `buildUnifiedDiff`
+ * (`stage-pr.ts`, the orchestrator's staging slice) rather than a local copy.
+ * An earlier local copy emitted `diff --git a/<name> b/<name>` from `filename`
+ * alone, which is wrong for a rename and for an add or delete; the shared one
+ * carries `previous_filename` and the `/dev/null` sides. One rebuilder also
+ * means one thing for `splitUnifiedDiff` to keep parsing.
  */
 
+import {buildUnifiedDiff} from "../../review/lib/stage-pr.ts";
 import type {StagedThread} from "../../review/lib/rereview.ts";
 import type {PriorReview} from "../../review/lib/rereview-mode.ts";
 
@@ -39,12 +47,21 @@ export type StagedInputs = {
     priorReviews: PriorReview[];
     diffText: string;
     commitMessages: string[];
-    /** Recorded so Step 5 can detect the author pushing mid-run. */
+    /**
+     * The SHA the agent's edits are actually made against.
+     *
+     * Read from the job's checkout, not from the API. Khan/actions#298 review:
+     * comparing an API read against a checkout taken earlier leaves a window in
+     * which a push lands between the two, and both reads then agree while the
+     * working tree is already stale. The checkout's own HEAD closes it.
+     */
     headSha: string;
 };
 
 /** Everything this module needs from the outside world. */
 export type StagePort = {
+    /** The checked-out HEAD (`git rev-parse HEAD`), or "" when unavailable. */
+    checkoutHeadSha: () => string;
     /** A REST GET, following pagination; returns the concatenated array. */
     restPaged: (path: string) => Promise<unknown[]>;
     /** A single REST GET returning one object. */
@@ -190,34 +207,6 @@ export const collectThreads = async (
     return out;
 };
 
-/**
- * Build the unified diff from the per-file patches.
- *
- * A file with no `patch` (binary, or too large for the API to render)
- * contributes nothing rather than a malformed section: the hunk-signature
- * parser downstream reads this text, and a half-written section would corrupt
- * the currency check rather than merely omit a file from it.
- */
-export const buildDiff = (files: readonly unknown[]): string => {
-    const parts: string[] = [];
-    for (const file of files) {
-        if (!isRecord(file)) {
-            continue;
-        }
-        const filename = str(file["filename"]);
-        const patch = str(file["patch"]);
-        if (filename === "" || patch === "") {
-            continue;
-        }
-        parts.push(
-            `diff --git a/${filename} b/${filename}\n` +
-                `--- a/${filename}\n+++ b/${filename}\n` +
-                `${patch}${patch.endsWith("\n") ? "" : "\n"}`,
-        );
-    }
-    return parts.join("");
-};
-
 /** Fetch everything the plan needs. */
 export const collectInputs = async (
     port: StagePort,
@@ -228,6 +217,7 @@ export const collectInputs = async (
 ): Promise<StagedInputs> => {
     const base = `/repos/${owner}/${repo}/pulls/${number}`;
 
+    const checkoutSha = port.checkoutHeadSha();
     const pr = await port.rest(base);
     const prRec = isRecord(pr) ? pr : {};
     const rawLabels = Array.isArray(prRec["labels"]) ? prRec["labels"] : [];
@@ -259,14 +249,18 @@ export const collectInputs = async (
                 body: str(r["body"]),
                 submittedAt: str(r["submitted_at"]),
             })) as PriorReview[],
-        diffText: buildDiff(files),
+        diffText: buildUnifiedDiff(
+            files as Parameters<typeof buildUnifiedDiff>[0],
+        ),
         commitMessages: commits
             .filter(isRecord)
             .map((c) =>
                 isRecord(c["commit"]) ? str(c["commit"]["message"]) : "",
             )
             .filter((m) => m !== ""),
-        headSha: str(head["sha"]),
+        // Prefer the checkout; fall back to the API only when the working tree
+        // is unavailable, in which case a stale-base push is still possible.
+        headSha: checkoutSha !== "" ? checkoutSha : str(head["sha"]),
     };
 };
 
@@ -335,7 +329,20 @@ if (typeof require !== "undefined" && require.main === module) {
         "user-agent": "khan-autofix",
     };
 
+    const {execFileSync} = require("node:child_process");
     const port: StagePort = {
+        checkoutHeadSha: () => {
+            try {
+                return String(
+                    execFileSync("git", ["rev-parse", "HEAD"], {
+                        cwd: process.env.GITHUB_WORKSPACE || process.cwd(),
+                        encoding: "utf-8",
+                    }),
+                ).trim();
+            } catch {
+                return "";
+            }
+        },
         rest: async (path) => {
             const res = await fetch(`${api}${path}`, {headers});
             if (!res.ok) {
