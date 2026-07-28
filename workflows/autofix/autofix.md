@@ -187,6 +187,64 @@ pre-agent-steps:
 # re-click.
 max-ai-credits: 1000
 
+# ─────────────────────────────────────────────────────────────────────────────
+# WORKAROUND for a gh-aw bug. Remove once it is fixed upstream.
+#
+# THE BUG. The safe-outputs job checks out with `actions/checkout` and no
+# `fetch-depth`, so it gets a depth-1 shallow clone of `refs/pull/N/merge` — the
+# merge commit alone, without its parents. `push_to_pull_request_branch.cjs:935`
+# then fetches the PR branch with NO `--depth`:
+#
+#     git fetch origin <branch>:refs/remotes/origin/<branch>
+#
+# The branch tip is a parent of the merge commit and therefore absent, and its
+# history never reaches the existing shallow boundary, so git walks the branch
+# all the way back: a full-history fetch. On a small repo this is invisible
+# (the branch's parent usually IS the boundary). On Khan/webapp it is fatal.
+#
+# MEASURED, reproducing the exact command against Khan/webapp from a faithful
+# depth-1 checkout of refs/pull/41130/merge:
+#   - as gh-aw runs it:      >14 min, 5.6 GB and still climbing, never finished
+#     (this is what cancelled the safe_outputs job on Khan/webapp#41130)
+#   - with the filter below:  91 s, ~557 MB, exit 0
+#
+# THE FIX WE CANNOT APPLY. `--depth=1` on that fetch. git has no `fetch.depth`
+# config, so it cannot be injected; there is no gh-aw option for it (none of the
+# 20 `push-to-pull-request-branch` keys touch fetch or checkout); `checkout:` in
+# frontmatter configures the AGENT job only; and `pre-agent-steps`/`post-steps`
+# cannot add steps to the safe-outputs job. gh-aw's own
+# `checkout_pr_branch.cjs:229` does pass `--depth`, and this same file passes
+# `--depth=1` at :1001 and `--filter=blob:none` at :1065, so the omission at
+# :935 is an oversight rather than a design choice.
+#
+# WHAT THIS DOES. git honours `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` /
+# `GIT_CONFIG_VALUE_<n>` as if passed via `-c`. The handler runs the fetch with
+# `env: {...process.env, ...gitAuthEnv}` (`:934`) and `gitAuthEnv` is empty
+# (`:343`), so these reach it. We cannot bound the DEPTH, but we can make the
+# fetch a partial clone that skips blobs, which is where the bulk sits.
+#
+# SAFE AGAINST gh-aw's OWN USE. `ensureSafeDirectoryTrust`
+# (`git_helpers.cjs:64-76`) reads the existing `GIT_CONFIG_COUNT` and APPENDS
+# its `safe.directory` entry at the next free index, so indices 0 and 1 here
+# compose with it rather than clobbering it.
+#
+# KNOWN TRADE-OFFS.
+#   - Workflow-level `env:` reaches every job, so the agent job's checkout also
+#     becomes a partial clone and file reads lazily fetch blobs. For an agent
+#     that reads a handful of files that is fine and probably faster; gh-aw
+#     itself notes the lazy-fetch cost at `push_to_pull_request_branch.cjs:1062`.
+#     gh-aw exposes no per-job env, so this cannot be scoped more tightly.
+#   - The fetch still pulls all tags. `remote.origin.tagOpt=--no-tags` would
+#     trim more, but it is NOT set here because it has not been measured; add it
+#     only with a number behind it.
+# ─────────────────────────────────────────────────────────────────────────────
+env:
+  GIT_CONFIG_COUNT: "2"
+  GIT_CONFIG_KEY_0: remote.origin.promisor
+  GIT_CONFIG_VALUE_0: "true"
+  GIT_CONFIG_KEY_1: remote.origin.partialclonefilter
+  GIT_CONFIG_VALUE_1: "blob:none"
+
 source: Khan/actions/workflows/autofix/autofix.md@autofix-v0.0.0
 ---
 
