@@ -111,14 +111,18 @@ locally at compile/run time, not from this repo). Create them under
 | `ci-tooling.md` | **Required** | The lint/format/type/test issues your CI already catches. Imported into `correctness-reviewer` so it doesn't flag them, and into `claim-validator` so it drops any correctness claim that flags a CI-caught issue. |
 | `skills.md` | **Required** | The catalog of best-practice skill files (and when each applies). Imported into `skill-auditor` to evaluate the diff against, and into `claim-validator` so it can verify a flagged skill violation against the skill's actual rule. |
 | `ROUTING` | Optional | The machine-readable path map the deterministic router reads (see below). Without it the router spawns no specialist lenses and floors the run budget, and the review notes the missing config on the PR. |
+| `lenses/<lens>.md` | Optional | Per-lens payloads: your repo's surface-specific review rules and extra hunts, imported into the matching reviewer (see [Per-lens payloads](#per-lens-payloads-lenseslensmd)). Absent files import nothing. |
+| `correctness-checks.md` | Deprecated | Alias for `lenses/correctness.md`; still imported for compatibility, and removed in the next major release. Carry only one: when both exist, both are imported (duplicating the checks) and the router warns; an alias carried alone gets a deprecation note on each review. |
 
-All four are **required**, but validated at different times. `config.md` is a
+The first four are **required**, but validated at different times. `config.md` is a
 frontmatter import, embedded and checked at **compile time** — `gh aw compile` fails if
 it's missing. The other three are `{{#runtime-import}}` body imports inside the
 sub-agent prompts; they resolve when the workflow **runs**, so a missing one surfaces as
 a `Runtime import file not found` failure on the next PR — not at compile time. The
-optional `{{#runtime-import? … }}` form was dropped either way, so a missing config
-fails loudly rather than silently degrading the review.
+required configs deliberately avoid the optional `{{#runtime-import? … }}` form, so a
+missing one fails loudly rather than silently degrading the review. The lens payloads
+(and the deprecated `correctness-checks.md`) use the optional form: a repo that
+defines none is valid, and a missing payload file imports nothing.
 
 These imported snippets are plain Markdown — they must not contain
 `${{ }}` expressions (gh-aw rejects those inside imports). `add-reviewer` lives
@@ -128,6 +132,52 @@ main workflow would override the import and discard your allowlist.
 Repo-specific frontmatter that imports can't merge (e.g. an `if:` condition to skip
 deploy/automation branches or forks) goes directly in your installed `review.md` as
 a local edit; `gh aw update` preserves it.
+
+### Per-lens payloads (`lenses/<lens>.md`)
+
+A consuming repo may define surface-specific review rules and extra hunts for any
+reviewer lens by adding `.github/aw/review/lenses/<lens>.md`. Each file is imported
+at runtime into the matching reviewer prompt, in a "Repo-specific rules and hunts"
+section the reviewer treats exactly like its built-in rules and tri-state hunts. All
+imports are optional: a repo with no `lenses/` directory gets exactly the shared
+behavior, and lens names never vary per repo; only their payloads do.
+
+Valid names are the eleven specialist lenses (`security-auth`,
+`ai-safety-moderation`, `mass-comms-coppa`, `caching-resource`, `data-migrations`,
+`concurrency-async`, `api-federation-compat`, `cross-deploy-serialization`,
+`deploy-infra-config`, `money-payments`, `content-i18n`) plus `correctness`, which
+feeds the always-on `correctness-reviewer`. `lenses/correctness.md` supersedes the
+older `correctness-checks.md` (still imported as a deprecated alias until the next
+major release; carry at most one of the two). A payload only reaches a specialist
+lens on PRs where the router actually spawns that lens, so a payload without
+matching `ROUTING` `lens=` rules is inert. The router warns in the review body's
+note lines when a payload would be silently inert: a filename that matches no
+imported payload, a specialist payload no `ROUTING` rule routes, the correctness
+alias carried alongside its replacement (or, as a deprecation nudge, carried at
+all), or a `lenses` path that is not a readable directory.
+
+Payloads are **additive**: they extend the lens's shared rules and hunts but never
+relax or override them, and the shared rules win on any conflict (the lens prompts
+state this next to the import). A payload cannot whitelist a defect or lower the
+evidence bar; it can only add repo-specific things to check.
+
+**Where a rule belongs** (the three-way contribution rule):
+
+- **Shared skeleton** (this repo's `review.md`): rules that hold for every consumer
+  on every stack. If a rule needs stack-specific phrasing ("Datastore query",
+  "DOM sink"), it does not belong here; keep only its surface-neutral core.
+- **Lens payload** (your repo's `lenses/<lens>.md`): rules and hunts specific to
+  your repo's surface. Server repos carry server-surface checks (query bounds,
+  datastore idioms); client repos carry client-surface checks (DOM XSS sinks, token
+  storage, postMessage origins).
+- **Skills** (your repo's `skills.md` catalog): house conventions and sanctioned
+  fixes, audited by `skill-auditor` rather than baked into a lens.
+
+Payloads are model-facing prose owned by the consuming repo's engineers, like
+`risk-classification.md` and the skills catalog before them; the repo's normal code
+review is the bar for editing them. Note that a payload changes reviewer behavior
+without touching Khan/actions: when in doubt about a large payload change, ask the
+workflow maintainers for an eval run over payload-carrying corpus cases.
 
 ### Per-directory `REVIEW.md` contracts (optional)
 
