@@ -71,7 +71,7 @@ export type WorkList = {
 export const buildWorkList = (
     threads: readonly StagedThread[],
     findingLabels: readonly string[],
-    botLogin = "github-actions[bot]",
+    botLogin: string | undefined = "github-actions[bot]",
 ): WorkList => {
     const inScope = new Set(findingLabels);
     const items: WorkItem[] = [];
@@ -92,7 +92,10 @@ export const buildWorkList = (
             login.endsWith("[bot]")
                 ? login.slice(0, -"[bot]".length).toLowerCase()
                 : login.toLowerCase();
-        if (first === undefined || strip(first.author) !== strip(botLogin)) {
+        if (
+            first === undefined ||
+            strip(first.author) !== strip(botLogin ?? "github-actions[bot]")
+        ) {
             skipped.push({
                 threadId: thread.thread_id,
                 path: thread.path,

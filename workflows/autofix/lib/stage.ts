@@ -56,6 +56,15 @@ export type StagedInputs = {
      * working tree is already stale. The checkout's own HEAD closes it.
      */
     headSha: string;
+    /**
+     * Whether the PR's head is a fork.
+     *
+     * Staged because the command path cannot gate on it: `issue_comment`
+     * carries no `github.event.pull_request`, so the workflow's `if:` can check
+     * neither the fork nor `skip-ai-review` there, and both have to be enforced
+     * after the job starts.
+     */
+    isFork: boolean;
 };
 
 /** Everything this module needs from the outside world. */
@@ -245,6 +254,10 @@ export const collectInputs = async (
     const prRec = isRecord(pr) ? pr : {};
     const rawLabels = Array.isArray(prRec["labels"]) ? prRec["labels"] : [];
     const head = isRecord(prRec["head"]) ? prRec["head"] : {};
+    const headRepo = isRecord(head["repo"]) ? head["repo"] : {};
+    // Absent or unreadable repo data reads as a fork, so the guard fails closed.
+    const headRepoName = str(headRepo["full_name"]);
+    const isFork = headRepoName === "" || headRepoName !== `${owner}/${repo}`;
 
     const [reviews, files, commits, threads] = await Promise.all([
         port.restPaged(`${base}/reviews`),
@@ -282,6 +295,7 @@ export const collectInputs = async (
                 isRecord(c["commit"]) ? str(c["commit"]["message"]) : "",
             )
             .filter((m) => m !== ""),
+        isFork,
         // Prefer the checkout; fall back to the API only when the working tree
         // is unavailable, in which case a stale-base push is still possible.
         headSha: checkoutSha !== "" ? checkoutSha : str(head["sha"]),
@@ -322,6 +336,7 @@ export const writeInputs = (
     fs.writeFileSync(`${dir}/pr.diff`, inputs.diffText);
     fs.writeFileSync(`${dir}/commits.json`, json(inputs.commitMessages));
     fs.writeFileSync(`${dir}/head-sha.txt`, `${inputs.headSha}\n`);
+    fs.writeFileSync(`${dir}/context.json`, json({isFork: inputs.isFork}));
     if (command !== undefined && command.trim() !== "") {
         // Verbatim, trailing CRLF included: the parser's tolerance of the shape
         // the GitHub web UI produces is only meaningful if the shape survives.

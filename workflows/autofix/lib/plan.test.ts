@@ -44,6 +44,7 @@ const input = (over: Partial<PlanInput> = {}): PlanInput => ({
     priorReviews: [reviewStamped(DIFF)],
     diffText: DIFF,
     commitMessages: [],
+    isFork: false,
     ...over,
 });
 
@@ -265,6 +266,7 @@ describe("runPlanCli", () => {
             ]),
             "/tmp/gh-aw/autofix/pr.diff": DIFF,
             "/tmp/gh-aw/autofix/commits.json": JSON.stringify([]),
+            "/tmp/gh-aw/autofix/context.json": JSON.stringify({isFork: false}),
         });
         const plan = runPlanCli(fs);
         expect(plan.status).toBe("armed");
@@ -398,6 +400,7 @@ describe("runPlanCli command staging", () => {
             ]),
             "/tmp/gh-aw/autofix/pr.diff": DIFF,
             "/tmp/gh-aw/autofix/commits.json": JSON.stringify([]),
+            "/tmp/gh-aw/autofix/context.json": JSON.stringify({isFork: false}),
             "/tmp/gh-aw/autofix/command.txt": "/autofix blocking\r\n",
         };
         const plan = runPlanCli({
@@ -422,6 +425,7 @@ describe("runPlanCli command staging", () => {
             ]),
             "/tmp/gh-aw/autofix/pr.diff": DIFF,
             "/tmp/gh-aw/autofix/commits.json": JSON.stringify([]),
+            "/tmp/gh-aw/autofix/context.json": JSON.stringify({isFork: false}),
         };
         const plan = runPlanCli({
             existsSync: (path) => files[path] !== undefined,
@@ -430,5 +434,46 @@ describe("runPlanCli command staging", () => {
         });
         expect(plan.status).toBe("armed");
         expect(plan.surface).toBe("label");
+    });
+});
+
+describe("guards the command path cannot express in the workflow if:", () => {
+    // Khan/actions#298 review, blocking: the issue_comment branch of the gate
+    // carries neither check, and both the workflow comment and the README said
+    // they "move into the plan" while the plan did not implement them.
+    it("refuses a fork", () => {
+        const plan = buildPlan(input({isFork: true}));
+        expect(plan.status).toBe("refused");
+        expect(plan.reason).toContain("fork");
+    });
+
+    it("refuses when the fork status is unknown", () => {
+        // Fail closed: an unreadable context must not authorise a push.
+        const plan = buildPlan(input({isFork: undefined}));
+        expect(plan.status).toBe("refused");
+        expect(plan.reason).toContain("could not be");
+    });
+
+    it("refuses a PR carrying skip-ai-review", () => {
+        const plan = buildPlan(
+            input({
+                isFork: false,
+                labels: ["autofix: blocking", "skip-ai-review"],
+            }),
+        );
+        expect(plan.status).toBe("refused");
+        expect(plan.reason).toContain("skip-ai-review");
+    });
+
+    it("proceeds on a same-repo PR without the label", () => {
+        expect(buildPlan(input({isFork: false})).status).toBe("armed");
+    });
+
+    it("enforces them on the command path too", () => {
+        const plan = buildPlan(
+            input({labels: [], command: "/autofix blocking", isFork: true}),
+        );
+        expect(plan.status).toBe("refused");
+        expect(plan.reason).toContain("fork");
     });
 });

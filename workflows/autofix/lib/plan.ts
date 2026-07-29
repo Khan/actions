@@ -83,6 +83,13 @@ export type PlanInput = {
      * Absent on a label-triggered run.
      */
     command?: string;
+    /**
+     * Whether the PR head is a fork. Defaults to treating unknown as a fork, so
+     * an unreadable context refuses rather than proceeds.
+     */
+    isFork?: boolean;
+    /** Login the reviewer posts as; threaded to the ownership guard. */
+    botLogin?: string;
 };
 
 /** Every autofix label present, so a label-armed refusal still clears the PR. */
@@ -145,6 +152,36 @@ export const buildPlan = (input: PlanInput): AutofixPlan => {
         return {...base, status: "refused", reason: resolution.reason};
     }
 
+    // The `pull_request` branch of the workflow's `if:` gates on these two
+    // before the job starts. The `issue_comment` branch CANNOT: that event
+    // carries no `github.event.pull_request`, so a command-armed run reaches
+    // here ungated. An earlier version of the workflow comment and the README
+    // both said these checks "move into the plan" while the plan did not
+    // implement them, which is how Khan/actions#298's review found it.
+    //
+    // Enforced on every path, not just the command one: a duplicated guard is
+    // cheap, and a missing one authorises a code push.
+    if (input.isFork !== false) {
+        return {
+            ...base,
+            status: "refused",
+            scopes: resolution.request.scopes,
+            reason:
+                "this PR's head is a fork, or its origin could not be " +
+                "determined, and autofix does not push to forks.",
+        };
+    }
+    if (input.labels.includes("skip-ai-review")) {
+        return {
+            ...base,
+            status: "refused",
+            scopes: resolution.request.scopes,
+            reason:
+                "this PR carries `skip-ai-review`, so its reviewer feedback is " +
+                "not authoritative and autofix will not act on it.",
+        };
+    }
+
     const currency = assessReviewCurrency(input.priorReviews, input.diffText);
     if (currency.status === "no-review") {
         return {
@@ -168,6 +205,7 @@ export const buildPlan = (input: PlanInput): AutofixPlan => {
     const {items, skipped} = buildWorkList(
         input.threads,
         resolution.request.findingLabels,
+        input.botLogin,
     );
 
     // Drop findings whose file moved on after the review that raised them. The
@@ -275,6 +313,11 @@ export const runPlanCli = (fs: PlanCliFs, dir = AUTOFIX_DIR): AutofixPlan => {
         command: fs.existsSync(`${dir}/command.txt`)
             ? fs.readFileSync(`${dir}/command.txt`)
             : undefined,
+        // Missing context reads as a fork, so a staging gap refuses.
+        isFork:
+            readJson<{isFork?: boolean}>(fs, `${dir}/context.json`, {})
+                .isFork !== false,
+        botLogin: process.env.AUTOFIX_BOT_LOGIN?.trim() || undefined,
     });
     fs.writeFileSync(`${dir}/plan.json`, `${JSON.stringify(plan, null, 2)}\n`);
     return plan;

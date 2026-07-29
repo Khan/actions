@@ -45,7 +45,8 @@ The run then:
 1. checks that the reviewer's feedback is current for this head,
 2. fixes what it can, in one commit pushed to the PR branch,
 3. replies in each thread saying what it did (or why it did not),
-4. posts one summary comment,
+4. posts one summary comment, but only when it has something non-obvious to
+   say (see below); a clean run stays quiet,
 5. **removes the label** (label-armed runs only).
 
 The label is a button, not a mode. It comes off on every outcome, including
@@ -238,10 +239,19 @@ cannot be evaluated in the `if:` at all — they move into the plan, after the
 agent job has started. An `/autofix` on a PR the label path would have rejected
 for free still costs a job.
 
+They are instead enforced in `plan.ts`, from the staged `context.json` and
+labels, on every path rather than only the command one. A duplicated guard is
+cheap; a missing one authorises a code push.
+
 The gate that actually matters is unaffected: gh-aw's `roles` check still runs,
 compiling to an `author_association` test against `OWNER`/`MEMBER`/
 `COLLABORATOR`, so a comment from someone without write access never reaches the
 agent. That is the gate standing between a drive-by comment and a code push.
+
+**`/autofix` only works from the default branch.** `issue_comment` is a
+repository-level event, so GitHub reads the workflow from the default branch and
+never from a PR head. An install that exists only on a branch cannot be driven
+by the command at all; the label is the only surface available to it.
 
 ### Why the label, and not a 🚀 on a comment
 

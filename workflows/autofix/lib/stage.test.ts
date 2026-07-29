@@ -275,6 +275,7 @@ describe("writeInputs", () => {
 
     const inputs = {
         labels: ["autofix: blocking"],
+        isFork: false,
         threads: [],
         priorReviews: [],
         diffText: "diff --git a/a b/a\n",
@@ -288,6 +289,7 @@ describe("writeInputs", () => {
         expect(dirs).toEqual(["/d/out"]);
         expect(Object.keys(written).sort()).toEqual([
             "/d/commits.json",
+            "/d/context.json",
             "/d/head-sha.txt",
             "/d/labels.json",
             "/d/pr.diff",

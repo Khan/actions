@@ -42,11 +42,24 @@ on:
 #
 # COMMAND PATH — deliberately weaker, and worth understanding before you touch
 # it. `issue_comment` carries no `github.event.pull_request`, so the fork guard
-# and the `skip-ai-review` check CANNOT be evaluated here at all; they move into
-# the plan, after the agent job has already started. That means an `/autofix` on
-# a PR the label path would have rejected for free still costs a job. The gate
-# that actually matters is unaffected: gh-aw's `roles` check above still runs,
-# so a comment from someone without write access never reaches the agent.
+# and the `skip-ai-review` check CANNOT be evaluated here at all. They are
+# instead enforced in `plan.ts`, which refuses a fork or a `skip-ai-review` PR
+# from the staged `context.json` and labels. That is real code, not an
+# aspiration: an earlier version of this comment claimed the checks "move into
+# the plan" while the plan did not implement them, and Khan/actions#298's review
+# caught it. The cost is that an `/autofix` on a PR the label path would have
+# rejected for free still burns a job before refusing.
+#
+# The gate that actually matters is unaffected: gh-aw's `roles` check above
+# still runs, so a comment from someone without write access never reaches the
+# agent.
+#
+# ONE STRUCTURAL LIMIT. `issue_comment` is a repository-level event, so GitHub
+# reads the workflow file from the DEFAULT BRANCH, never from the PR's head.
+# `/autofix` therefore cannot fire for an install that only exists on a branch,
+# which is why every run of the Khan/webapp#41140 trial was `pull_request` and a
+# reviewer's `/autofix` comment there did nothing. The command surface can only
+# be exercised once this workflow is on the consuming repo's default branch.
 #
 # The command match is written out longhand rather than using gh-aw's
 # `slash_command` trigger. gh-aw's compiled gate only matches the command
