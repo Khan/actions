@@ -272,9 +272,12 @@ re-review scoped
   the full review body, and stages `submission-plan.json`; the orchestrator
   emits safe outputs that must match the plan (the gate blocks any
   deviation), which reduces its model role to typing MCP calls the plan
-  dictates. The safe-output emission itself is the one seam only an upstream
-  gh-aw change could remove (the queue's credentials never enter the
-  sandbox). Scripted mode is the production probe of the
+  dictates. The safe-output emission itself is the remaining seam: the queue
+  is a run-local JSONL append that needs no credentials, but the agent
+  sandbox mounts `${RUNNER_TEMP}/gh-aw` read-only, so only the safeoutputs
+  MCP container can write it. Removing the seam wants a writable path into
+  the queue (an upstream mount change, or a post-agent step on the host);
+  neither is tested yet. Scripted mode is the production probe of the
   deterministic-orchestrator migration and is live-trial-gated; an unknown
   mode degrades to `task` with a warning.
 

@@ -11,14 +11,26 @@
  * This is the end-state shape the migration plan names (the no-post runner's
  * pipeline in production): staging (slice 1) → dispatch/validation (slice 2)
  * → verdict/render/plan (here) → emit → gate. What remains model work is the
- * sub-agents themselves plus the safe-output EMISSION: under gh-aw, safe
- * outputs are queued through the engine's MCP tools, whose credentials never
- * enter the sandbox, so code cannot queue them directly. That emission seam
- * is the one piece only an upstream gh-aw change could delete (the plan
- * doc's Q1 scope note); until then the orchestrator is a typist for MCP
- * calls, and the gate makes mis-typing a red run.
+ * sub-agents themselves plus the safe-output EMISSION, and the reason is a
+ * filesystem permission, not a credential: queueing a safe output is an
+ * append to `$GH_AW_SAFE_OUTPUTS`
+ * (`${RUNNER_TEMP}/gh-aw/safeoutputs/outputs.jsonl`) and needs no token at
+ * queue time (the credentialed posting is the later `safe_outputs` job).
+ * What this CLI cannot do is write that file: the agent sandbox mounts
+ * `${RUNNER_TEMP}/gh-aw` read-only (`awf --mount ...:ro` in the compiled
+ * lock; only `safeoutputs/upload-artifacts` is rw), while the safeoutputs
+ * MCP container gets `safeoutputs/` read-write. So the seam is real today
+ * but likely cheaper to delete than the plan doc's Q1 note recorded: it
+ * wants a writable path into the queue: an upstream mount/ingest change,
+ * or a repo-controlled post-agent step writing the ingested queue on the
+ * host the way this workflow's gate already rewrites it. Untested either
+ * way; until one is proven the orchestrator is a typist for MCP calls, and
+ * the gate makes mis-typing a red run.
  *
  * Verdict rules encoded (review.md Step 4, mechanically):
+ *   - Claims anchored on a line in the reconciler's `skipLines` are dropped
+ *     first (Step 5's defer-to-open-human-threads rule), so they neither
+ *     post nor count toward the verdict.
  *   - REQUEST_CHANGES iff at least one posted claim carries a blocking label
  *     (via computeVerdict, threshold 1).
  *   - The reduced-depth flip rule: at flip-gated/fast depth over a prior
@@ -73,6 +85,25 @@ export type SubmissionPlan = {
 };
 
 export type SubmissionFs = RereviewCliFs;
+
+/**
+ * The reconciler's open-human-thread lines as `path:line` keys (review.md
+ * Step 5's "defer to open human threads"). Anything unparseable is dropped:
+ * the filter degrades to posting, never to a crash.
+ */
+const parseSkipLines = (raw: unknown): Set<string> => {
+    const keys = new Set<string>();
+    if (!Array.isArray(raw)) {
+        return keys;
+    }
+    for (const entry of raw) {
+        const {path, line} = (entry ?? {}) as {path?: unknown; line?: unknown};
+        if (typeof path === "string" && typeof line === "number") {
+            keys.add(`${path}:${line}`);
+        }
+    }
+    return keys;
+};
 
 const readJson = (fs: SubmissionFs, path: string): unknown => {
     if (!fs.existsSync(path)) {
@@ -193,7 +224,7 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
         | {
               claims?: unknown;
               noteLines?: unknown;
-              reconciliation?: {resolve?: unknown};
+              reconciliation?: {resolve?: unknown; skipLines?: unknown};
               depth?: unknown;
           }
         | undefined;
@@ -202,9 +233,28 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
             `dispatch-result.json not staged under ${REVIEW_DIR}: run the dispatcher first`,
         );
     }
-    const claims = (
+    const validated = (
         Array.isArray(dispatch.claims) ? dispatch.claims : []
     ) as Claim[];
+    // Defer to open human threads (review.md Step 5): drop any claim anchored
+    // on a line the reconciler flagged, silently; a human conversation is
+    // already open there and a bot comment would talk over it. This runs
+    // BEFORE the verdict, because Step 4 counts only the labels on comments
+    // that actually post; rule 7 then forbids the orchestrator from dropping
+    // anything itself, so the filter has to live here or not at all.
+    const skipLines = parseSkipLines(dispatch.reconciliation?.skipLines);
+    const claims = validated.filter((claim) => {
+        const skipped =
+            claim.path !== undefined &&
+            claim.line !== undefined &&
+            skipLines.has(`${claim.path}:${claim.line}`);
+        if (skipped) {
+            notes.push(
+                `claim ${claim.id} dropped: open human thread at ${claim.path}:${claim.line}`,
+            );
+        }
+        return !skipped;
+    });
     const noteLines = Array.isArray(dispatch.noteLines)
         ? dispatch.noteLines.filter(
               (line): line is string => typeof line === "string",

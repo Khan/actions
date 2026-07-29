@@ -605,7 +605,7 @@ describe("re-review hardening (slice 4 feedback)", () => {
                 )}`;
         const planWithUrl = {
             ...plan,
-            body: `${plan.body}\nSee https://github.com/Khan/actions/pull/1 for context.`,
+            body: `${plan.body}\nSee https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal for context.`,
         };
         const result = evaluateDispatchConformance({
             ...gateInput(planWithUrl),
@@ -619,7 +619,10 @@ describe("re-review hardening (slice 4 feedback)", () => {
                 {
                     type: "submit_pull_request_review",
                     event: plan.event,
-                    body: `${plan.body}\nSee https://redirect.github.example/rewritten for context.`,
+                    // The domain-redaction shape the sanitizer actually
+                    // produces for a non-allowlisted host: the host is kept,
+                    // the path is replaced.
+                    body: `${plan.body}\nSee (developer.mozilla.org/redacted) for context.`,
                 },
             ],
         });
@@ -631,6 +634,176 @@ describe("re-review hardening (slice 4 feedback)", () => {
         // mangle() is used above only for the URL clause; keep the linter
         // honest about it.
         expect(mangle("guard")).toContain("GUARD");
+    });
+
+    it("tolerates a zero-width or CGJ character the sanitizer stripped", () => {
+        // hardenUnicodeText deletes zero-width space/non-joiner/joiner,
+        // the word joiner, the BOM, and the combining grapheme joiner. A
+        // plan whose prose carries one and a queued copy that dropped it
+        // are the SAME submission; only the strip arms of normalizeBody
+        // keep that from reading as a splice.
+        // Alternation, not a character class: the ZWJ and the CGJ are
+        // combining/joining characters that no-misleading-character-class
+        // rejects inside `[...]`.
+        const ZERO_WIDTH = /\u200b|\u200c|\u200d|\u2060|\ufeff|\u034f/g;
+        const invisible = claim({
+            discussion:
+                "The\u200bguard\u200cwas\u200dremoved\u2060from\ufeffthe\u034ffast path.",
+        });
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged({
+                    depth: "full",
+                    claims: [invisible],
+                    reconciliation: {resolve: [], keep: []},
+                }),
+            ),
+        );
+        const stripped = plan.comments.map((comment) => ({
+            ...comment,
+            body: comment.body.replace(ZERO_WIDTH, ""),
+        }));
+        // The queued copy really did lose characters.
+        expect(stripped[0]?.body).not.toBe(plan.comments[0]?.body);
+        const result = evaluateDispatchConformance({
+            ...gateInput(plan),
+            items: [
+                ...stripped.map((comment) => ({
+                    type: "create_pull_request_review_comment",
+                    ...comment,
+                })),
+                {
+                    type: "submit_pull_request_review",
+                    event: plan.event,
+                    body: plan.body.replace(ZERO_WIDTH, ""),
+                },
+            ],
+        });
+        expect(result.violations).toEqual([]);
+    });
+
+    it("blocks a link-target splice that swaps the host", () => {
+        // URL folding is host-bearing, so the sanitizer's own rewrites pass
+        // (test above) while an "improvement" that points the reader at a
+        // different site does not; the #244 splice class.
+        const plan = rcPlan();
+        const planWithUrl = {
+            ...plan,
+            body: `${plan.body}\nSee https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal for context.`,
+        };
+        const result = evaluateDispatchConformance({
+            ...gateInput(planWithUrl),
+            items: [
+                ...plan.comments.map((comment) => ({
+                    type: "create_pull_request_review_comment",
+                    ...comment,
+                })),
+                {
+                    type: "submit_pull_request_review",
+                    event: plan.event,
+                    body: `${plan.body}\nSee https://stackoverflow.com/questions/1 for context.`,
+                },
+            ],
+        });
+        expect(
+            result.violations.filter(
+                (v) => v.code === "submission-plan-mismatch",
+            ).length,
+        ).toBe(1);
+    });
+
+    it("blocks queueing nothing when the APPROVE plan carries a disclosure note", () => {
+        // The redundant-approval skip is only for the bare comment-less
+        // approve body. An APPROVE that shed a lens carries a mandatory
+        // "not assessed this run" disclosure; dropping that submission would
+        // withhold both the disclosure and the approval.
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged({
+                    depth: "full",
+                    claims: [],
+                    noteLines: [
+                        "Note: security-lens not assessed this run (output unavailable).",
+                    ],
+                }),
+            ),
+        );
+        expect(plan.event).toBe("APPROVE");
+        expect(plan.comments).toEqual([]);
+        expect(plan.body).toContain("not assessed this run");
+        const result = evaluateDispatchConformance({
+            ...gateInput(plan),
+            items: [],
+        });
+        expect(result.violations.map((v) => v.code)).toEqual([
+            "submission-plan-mismatch",
+        ]);
+    });
+
+    it("drops a claim on an open human-thread line from the comments AND the verdict", () => {
+        // review.md Step 5: a bot comment on a line with an open human
+        // review thread talks over the conversation. Scripted mode has to
+        // apply the filter here, because rule 7 forbids the orchestrator
+        // from dropping the comment itself.
+        const fs = makeFakeFs(
+            staged({
+                depth: "full",
+                claims: [
+                    claim({id: "c1", path: "a.ts", line: 2}),
+                    claim({id: "c2", path: "b.ts", line: 7}),
+                ],
+                reconciliation: {
+                    resolve: [],
+                    keep: [],
+                    skipLines: [{path: "a.ts", line: 2}],
+                },
+            }),
+        );
+        const plan = runSubmissionCli(fs);
+        expect(plan.comments.map((comment) => comment.path)).toEqual(["b.ts"]);
+        expect(plan.notes).toContain(
+            "claim c1 dropped: open human thread at a.ts:2",
+        );
+        // c2 is still blocking, so the verdict stands on its own.
+        expect(plan.event).toBe("REQUEST_CHANGES");
+    });
+
+    it("approves when every blocking claim sits on an open human-thread line", () => {
+        // The verdict counts only the labels on comments that actually
+        // post; a filtered blocking claim cannot drive REQUEST_CHANGES.
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged({
+                    depth: "full",
+                    claims: [claim({id: "c1", path: "a.ts", line: 2})],
+                    reconciliation: {
+                        resolve: [],
+                        keep: [],
+                        skipLines: [{path: "a.ts", line: 2}],
+                    },
+                }),
+            ),
+        );
+        expect(plan.comments).toEqual([]);
+        expect(plan.event).toBe("APPROVE");
+    });
+
+    it("ignores malformed skipLines entries rather than crashing", () => {
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged({
+                    depth: "full",
+                    claims: [claim()],
+                    reconciliation: {
+                        resolve: [],
+                        keep: [],
+                        skipLines: ["a.ts:2", {path: "a.ts"}, null, 7],
+                    },
+                }),
+            ),
+        );
+        expect(plan.comments).toHaveLength(1);
+        expect(plan.event).toBe("REQUEST_CHANGES");
     });
 
     it("appends the tripwire note with the 2-decimal share", () => {

@@ -75,9 +75,10 @@
  */
 
 import {extractJsonValue} from "./agent-json";
-import {isBlockingLabel} from "./render-comment";
+import {isBlockingLabel, renderReviewBody} from "./render-comment";
 import {parseLeadingLabel} from "./rereview";
 import {findLatestStamp, stampFromCacheMemory} from "./rereview-mode";
+import {normalizeBody} from "./sanitizer-normalize";
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -516,65 +517,19 @@ export const evaluateDispatchConformance = (
     }
 
     // Rule 7 (scripted mode, slice 4): when a submission plan is staged, the
-    // queued outputs must match it. gh-aw's ingest sanitizer may neutralize
-    // mentions and rewrite disallowed links, so bodies are compared under a
-    // normalization that survives it (case, whitespace, backticks, and URL
-    // bodies, which the sanitizer may rewrite); anything beyond that is a
-    // splice (#244) and blocks. The rule also owns the NO-submission shapes:
-    // queued comments with no submit would land as a COMMENT review, and a
-    // silently-dropped plan would withhold a REQUEST_CHANGES verdict, so only
-    // an APPROVE plan with no comments may legitimately queue nothing (the
-    // Step 6 redundant-approval skip).
+    // queued outputs must match it. gh-aw's ingest sanitizer rewrites what
+    // the agent queued before the gate sees it, so bodies are compared under
+    // `normalizeBody` (sanitizer-normalize.ts, which documents every absorbed
+    // transform); anything beyond that is a splice (#244) and blocks. The
+    // rule also owns the NO-submission shapes: queued comments with no submit
+    // would land as a COMMENT review, and a silently-dropped plan would
+    // withhold a REQUEST_CHANGES verdict (or a disclosure), so only
+    // an APPROVE plan with no comments and a bare approve body may
+    // legitimately queue nothing (the Step 6 redundant-approval skip, whose
+    // shape the skip branch below checks in full).
     const planStaged = input.submissionPlan as
         | {event?: unknown; body?: unknown; comments?: unknown}
         | undefined;
-    const normalizeBody = (text: string): string =>
-        text
-            // The ingest sanitizer deletes ALL XML/HTML comments
-            // (removeXmlComments), so the queued body can never carry the
-            // plan's fingerprint stamp; comparing modulo comments is what
-            // "sanitizer-tolerant" requires (trial run 29893634730 blocked
-            // a byte-faithful transcription on exactly this).
-            .replace(/<!--[\s\S]*?-->/g, "")
-            // The sanitizer's hardenUnicodeText applies NFKC and strips
-            // zero-width characters (gh-aw sanitize_content_core.cjs), which
-            // rewrites compatibility characters: trial run 29903306596
-            // blocked a jq-verbatim emission because one reviewer-authored
-            // ellipsis came back as three dots (NFKC). Apply the same
-            // normalization on both sides, plus the typographic quote/dash
-            // folds NFKC does not cover.
-            .normalize("NFKC")
-            .replace(/\u034f/g, "")
-            // Zero-width, bidi-control (sanitizer step 4), C0/DEL (its
-            // control-strip): all deleted on the queued side only, so
-            // delete them on both.
-            .replace(/[\u00ad\u200b-\u200f\u2060-\u2064\ufeff]/g, "")
-            .replace(/[\u202a-\u202e\u2066-\u2069]/g, "")
-            // eslint-disable-next-line no-control-regex
-            .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
-            .replace(/[\u2018\u2019\u201a\u201b]/g, "'")
-            .replace(/[\u201c\u201d\u201e\u201f]/g, '"')
-            .replace(/[\u2012\u2013\u2014\u2015]/g, "-")
-            .toLowerCase()
-            .replace(/`/g, "")
-            // neutralizeTemplateDelimiters escapes {{ ${ {% {# <%= outside
-            // code regions; drop the escaping backslashes on both sides.
-            .replace(/\\(?=[{$%#<])/g, "")
-            // URL sanitization applies even inside code regions under the
-            // deployed allowed-only policy: a non-allowlisted domain or a
-            // non-https scheme is rewritten to "(host/redacted)" or
-            // "(redacted)" (sanitizeUrlDomains / sanitizeUrlProtocols,
-            // gh-aw v0.81.6). Fold every URL form and every redaction
-            // token to one placeholder so a cited MDN link cannot false-
-            // block the submission.
-            .replace(/[a-z][a-z0-9+.-]*:\/\/\S+/g, "<url>")
-            .replace(
-                /(?:mailto|javascript|vbscript|data|about|tel|magnet):\S+/g,
-                "<url>",
-            )
-            .replace(/\((?:[a-z0-9.-]+\/)?redacted\)/g, "<url>")
-            .replace(/\s+/g, " ")
-            .trim();
     if (planStaged !== undefined && submit === undefined) {
         const planComments = Array.isArray(planStaged.comments)
             ? planStaged.comments
@@ -587,16 +542,38 @@ export const evaluateDispatchConformance = (
                     planStaged.event,
                 )} submission`,
             });
-        } else if (planStaged.event !== "APPROVE" || planComments.length > 0) {
-            violations.push({
-                code: "submission-plan-mismatch",
-                dimension: "verdict",
-                detail: `nothing queued but the staged plan is ${String(
-                    planStaged.event,
-                )} with ${
-                    planComments.length
-                } comment(s); only an APPROVE plan with no comments may skip the submission`,
-            });
+        } else {
+            // review.md's redundant-approval skip is narrower than "APPROVE
+            // with no comments": the body must ALSO carry no `Note:` lines
+            // and no accountability section, i.e. it is exactly the bare
+            // comment-less-approve line (the fingerprint stamp is an HTML
+            // comment, which normalizeBody already drops). Without the body
+            // check, an APPROVE that shed a lens (carrying a mandatory
+            // "Note: <lens> not assessed this run" disclosure) could be
+            // dropped on the floor and still pass the gate green, silently
+            // withholding both the disclosure and the approval.
+            const bareApprove = normalizeBody(
+                renderReviewBody({event: "APPROVE", hasInlineComments: false}),
+            );
+            const planBody =
+                typeof planStaged.body === "string" ? planStaged.body : "";
+            if (
+                planStaged.event !== "APPROVE" ||
+                planComments.length > 0 ||
+                normalizeBody(planBody) !== bareApprove
+            ) {
+                violations.push({
+                    code: "submission-plan-mismatch",
+                    dimension: "verdict",
+                    detail: `nothing queued but the staged plan is ${String(
+                        planStaged.event,
+                    )} with ${
+                        planComments.length
+                    } comment(s); only an APPROVE plan with no comments and a bare "${renderReviewBody(
+                        {event: "APPROVE", hasInlineComments: false},
+                    )}" body may skip the submission`,
+                });
+            }
         }
     }
     if (planStaged !== undefined && submit !== undefined) {
