@@ -157,21 +157,52 @@ network:
     - github
 
 # Pinned to a specific model version rather than a floating tier alias, so the
-# autofixer does not silently change behaviour when a new Opus ships.
+# autofixer does not silently change behaviour when a new Opus ships. Matches
+# the roster Khan/actions#294 moves the reviewer to.
 #
-# Deliberately AHEAD of the reviewer's orchestrator pin (claude-opus-4-8): the
-# reviewer's version is bound to its eval-suite calibration, whereas autofix has
-# no such tie, and writing the fix is the harder half of this pair.
+# THE PRICING FALLBACK BELOW IS LOAD-BEARING, NOT ACCOUNTING. `claude-opus-5`
+# is in no gh-aw-firewall release's curated AI-credits pricing table, nor in its
+# bundled models.dev catalog fallback (#294 checked through v0.27.41 and
+# firewall `main`), and the api-proxy's AI-credits guard rejects any un-priced
+# model with a 400 before the request reaches the model. Pinning a newer
+# `sandbox.agent.version` cannot fix that, because no release prices it.
 #
-# Claude 5 pricing has to be known to the firewall api-proxy or it rejects the
-# model with a 400; that is the trap review.md documents for claude-fable-5 on
-# gh-aw <= v0.81.x. This workflow compiles on gh-aw v0.83.4, whose default
-# firewall is 0.27.42, past the 0.27.27 release that added curated Claude 5
-# pricing, so no `sandbox.agent.version` or `models:` override is needed here.
-# Re-check that if this workflow is ever compiled on an older gh-aw.
+# Observed here, not theorised: the first run of this workflow on Opus 5 died at
+# turn 1 with `API Error: 400 Model "claude-opus-5" has no AI credits pricing`
+# (Khan/webapp#41140, run 30416237794). An earlier version of this comment
+# asserted the opposite, reasoning that firewall 0.27.42 is past the 0.27.27
+# release that priced Fable 5. Fable 5 being priced says nothing about Opus 5.
+#
+# `models.default-ai-credits-pricing` (gh-aw >= v0.83.0) suppresses the
+# rejection and prices the usage. Opus 5 lists at Opus 4.8's rate, so the
+# fallback is the real rate rather than an approximation. Two caveats, both
+# inherited from #294: the proxy's default-pricing path does not bill cache
+# writes, so credit accounting under-counts that component (the `providers`
+# block carries the full rate for the run's cost summary), and the fallback
+# applies to ANY un-priced model, so a future typo'd model id bills at Opus
+# rates instead of failing loudly. Drop both blocks once a firewall release
+# prices `claude-opus-5`.
 engine:
   id: claude
 model: claude-opus-5
+
+models:
+  # $/1M tokens. `input` and `output` are the only rates the schema accepts, so
+  # the cache rates are the proxy's derivations, not ours.
+  default-ai-credits-pricing:
+    input: 5.0
+    output: 25.0
+  # $/token.
+  providers:
+    anthropic:
+      models:
+        claude-opus-5:
+          cost:
+            input: 5.0e-06
+            output: 2.5e-05
+            cache_read: 5.0e-07
+            cache_write: 6.25e-06
+
 timeout-minutes: 20
 
 # Autofix reads the reviewer's staged artifacts and the reviewer's own label

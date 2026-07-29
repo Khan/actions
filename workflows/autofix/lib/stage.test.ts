@@ -405,3 +405,66 @@ describe("the staged diff round-trips into the currency check", () => {
         ]);
     });
 });
+
+describe("the REST/GraphQL bot-suffix split", () => {
+    // Khan/webapp#41140 run 30416237794 staged threadCount: 0 on a PR with five
+    // reviewer threads: GraphQL reports the App as `github-actions`, REST as
+    // `github-actions[bot]`, and one configured spelling cannot match both.
+    it("matches a GraphQL thread author that carries no [bot] suffix", async () => {
+        const node = threadNode({
+            comments: {
+                nodes: [
+                    {
+                        author: {login: "github-actions"},
+                        body: "**issue (blocking):** boom",
+                    },
+                ],
+            },
+        });
+        const threads = await collectThreads(
+            portFor({threadPages: [onePage([node])]}),
+            "o",
+            "r",
+            1,
+            "github-actions[bot]",
+        );
+        expect(threads).toHaveLength(1);
+    });
+
+    it("matches a REST review author that carries the suffix", async () => {
+        const inputs = await collectInputs(
+            portFor({
+                rest: {labels: [], head: {sha: "s"}},
+                paged: {
+                    "/reviews": [
+                        {
+                            user: {login: "github-actions[bot]"},
+                            body: "b",
+                            submitted_at: "2026-07-01T00:00:00Z",
+                        },
+                    ],
+                },
+                threadPages: [onePage([])],
+            }),
+            "o",
+            "r",
+            1,
+            "github-actions",
+        );
+        expect(inputs.priorReviews).toHaveLength(1);
+    });
+
+    it("still excludes a genuinely different author", async () => {
+        const node = threadNode({
+            comments: {nodes: [{author: {login: "alice"}, body: "hi"}]},
+        });
+        const threads = await collectThreads(
+            portFor({threadPages: [onePage([node])]}),
+            "o",
+            "r",
+            1,
+            "github-actions[bot]",
+        );
+        expect(threads).toEqual([]);
+    });
+});

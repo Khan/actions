@@ -79,6 +79,26 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
 /**
+ * Compare two GitHub logins across the REST/GraphQL bot-suffix split.
+ *
+ * REST reports an App's login as `github-actions[bot]`; GraphQL reports the
+ * same actor as `github-actions`. Staging reads threads over GraphQL and
+ * reviews over REST, so a single spelling cannot match both. Comparing on the
+ * suffix-stripped form does.
+ *
+ * This is not hypothetical: the first run with deterministic staging staged
+ * `threadCount: 0` on a PR carrying five reviewer threads, because every
+ * GraphQL author was `github-actions` and the configured login was
+ * `github-actions[bot]` (Khan/webapp#41140, run 30416237794). Unit tests could
+ * not have caught it; the fixtures were written in the REST spelling.
+ */
+const baseLogin = (login: string): string =>
+    login.endsWith("[bot]") ? login.slice(0, -"[bot]".length) : login;
+
+const sameLogin = (a: string, b: string): boolean =>
+    baseLogin(a).toLowerCase() === baseLogin(b).toLowerCase();
+
+/**
  * Review threads with their full reply chain.
  *
  * `comments(first: 100)` rather than the sweep's `first: 1`: the reconciler
@@ -177,7 +197,10 @@ export const collectThreads = async (
                 // unclassifiable.
                 body: str(c["body"]),
             }));
-            if (comments.length === 0 || comments[0].author !== botLogin) {
+            if (
+                comments.length === 0 ||
+                !sameLogin(comments[0].author, botLogin)
+            ) {
                 continue;
             }
 
@@ -243,7 +266,8 @@ export const collectInputs = async (
             .filter(isRecord)
             .filter(
                 (r) =>
-                    isRecord(r["user"]) && str(r["user"]["login"]) === botLogin,
+                    isRecord(r["user"]) &&
+                    sameLogin(str(r["user"]["login"]), botLogin),
             )
             .map((r) => ({
                 body: str(r["body"]),

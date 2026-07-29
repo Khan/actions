@@ -85,7 +85,14 @@ export const buildWorkList = (
         // (quoting the reviewer, for instance), and nothing else downstream
         // would stop it becoming a work item that an agent then edits code for.
         // v1 acts on reviewer feedback only; the source axis is not implemented.
-        if (first === undefined || first.author !== botLogin) {
+        // Suffix-insensitive for the same reason staging is: REST spells an
+        // App's login `github-actions[bot]`, GraphQL spells it
+        // `github-actions`, and a staged thread can carry either.
+        const strip = (login: string): string =>
+            login.endsWith("[bot]")
+                ? login.slice(0, -"[bot]".length).toLowerCase()
+                : login.toLowerCase();
+        if (first === undefined || strip(first.author) !== strip(botLogin)) {
             skipped.push({
                 threadId: thread.thread_id,
                 path: thread.path,
