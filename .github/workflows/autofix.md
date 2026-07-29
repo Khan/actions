@@ -156,31 +156,43 @@ network:
     - defaults
     - github
 
-# BLOCKED ON OPUS 5. This should be `claude-opus-5`, matching the roster
-# Khan/actions#294 moves the reviewer to. It is not, because the documented
-# mechanism for making that model usable does not work on any firewall release
-# that currently exists.
+# HELD AT OPUS 4.8. This should be `claude-opus-5`, matching the roster
+# Khan/actions#294 moves the reviewer to. Three live runs on Khan/webapp#41140
+# failed to get there, and the cause is not yet established, so the model stays
+# where it demonstrably works rather than where we want it.
 #
-# `claude-opus-5` is in no gh-aw-firewall release's curated AI-credits pricing
-# table, and the api-proxy's credits guard rejects an un-priced model with a 400
-# before the request reaches the model. #294's remedy is
-# `models.default-ai-credits-pricing` (gh-aw >= v0.83.0), and it states awf
-# v0.27.27 is verified to accept and map `apiProxy.defaultAiCreditsPricing`.
-#
-# Three live runs on Khan/webapp#41140 say otherwise:
+# WHAT WAS OBSERVED. The api-proxy's AI-credits guard rejects an un-priced model
+# with a 400 before the request reaches the model, and `claude-opus-5` is in no
+# firewall release's curated pricing table.
 #   - 30416237794: no fallback configured. 400, as expected.
-#   - 30421726630: fallback configured, firewall v0.27.42 (the compiler
-#     default). The staged awf-config.json carried
+#   - 30421726630: `models.default-ai-credits-pricing` configured, firewall
+#     v0.27.42 (the compiler default). Staged awf-config.json confirmed to carry
 #     `apiProxy.defaultAiCreditsPricing: {input: 5, output: 25}`. Still 400.
-#   - 30422315631: same fallback, firewall pinned to v0.27.27 (the version #294
-#     names). Config confirmed present, image confirmed pulled. Still 400.
-# v0.27.42 is the newest firewall release, so there is no version left to try.
+#   - 30422315631: same, firewall pinned to v0.27.27. Config confirmed present,
+#     image confirmed pulled. Still 400.
 #
-# The model is therefore held at claude-opus-4-8, which is what the first
-# successful autofix run used (Khan/webapp#41130). Restore claude-opus-5, its
-# `models:` block and the `sandbox.agent.version` pin together, in one change,
-# once a firewall release prices the model or the fallback demonstrably works.
-# This blocks #294 the same way: its whole roster would 400.
+# WHAT IS ESTABLISHED. The mechanism exists and is documented: awf-config-spec
+# 10.7.3 says a configured fallback makes an unresolvable model "proceed
+# normally", and `config-mapper.ts` maps the field to
+# `AWF_DEFAULT_AI_CREDITS_PRICING` in BOTH v0.27.27 and v0.27.42. So the pin to
+# v0.27.27 above was pointless and has been removed; version is not the
+# variable. Note also that #294's own `review.lock.yml` contains zero
+# occurrences of `claude-opus-5` (only the shared review.md was edited, never
+# recompiled), so its "verified" claim is a reading of the spec rather than a
+# run, which is consistent with these three failures.
+#
+# WHAT IS UNTESTED, and the next thing to try. Spec 10.7.1 applies the fallback
+# only when the model "cannot be resolved from the curated table or the bundled
+# models.dev catalog". These runs supplied BOTH the fallback AND a
+# `models.providers.anthropic.models.claude-opus-5.cost` entry (copied from
+# #294). If that providers entry makes the model *resolve* to something carrying
+# no AI-credits pricing, it would short-circuit the fallback and reject, which
+# is exactly the symptom. The untried combination is: keep
+# `default-ai-credits-pricing`, DROP the `models.providers` block, leave the
+# firewall at the default. One run settles it.
+#
+# Until then this is a one-line change plus its `models:` block. Do not restore
+# them without a run that reaches the model.
 engine:
   id: claude
 model: claude-opus-4-8
