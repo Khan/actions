@@ -750,7 +750,11 @@ rate.
 (`pull_request_read` `get_review_comments`) and stage two files from them (leave all
 other threads untouched):
 - `/tmp/gh-aw/review/threads.json` — the unresolved `github-actions[bot]` threads. For
-  each write `thread_id`, `path`, `line`, `url` — the `html_url` of the thread's
+  each write `thread_id`, `path`, `line`, `resolved` (the thread's `is_resolved` from
+  the `get_review_comments` output, copied verbatim; it is `false` for every thread
+  that belongs in this file, but write it anyway: the dispatcher's open-thread
+  suppression checks the field in code rather than trusting this instruction, and a
+  thread missing it simply never suppresses), `url` — the `html_url` of the thread's
   **first** comment, from the same `get_review_comments` output (omit the field if the
   output carries none) — and its **full reply chain** as
   `comments`: every comment in the thread in order, each `{author, body}` — including

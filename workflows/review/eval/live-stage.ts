@@ -148,6 +148,10 @@ const stageRereview = (
         thread_id: `t-${thread.key}`,
         path: thread.path,
         line: thread.line,
+        // Corpus threads are open by definition; staged explicitly because
+        // the dispatcher's open-thread suppression only trusts the flag it
+        // can read (dedup.ts `openThreadsFromStaged`).
+        resolved: false,
         comments: [
             {author: "github-actions[bot]", body: thread.body},
             ...(thread.authorReply !== undefined

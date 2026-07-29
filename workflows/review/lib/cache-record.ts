@@ -18,21 +18,22 @@
  * no staged submission plan the writer no-ops and the orchestrator's Step 9
  * write stands.
  *
- * What it refuses to write: anything it cannot corroborate. When the
- * in-run safe-output queue (`GH_AW_SAFE_OUTPUTS`, the JSONL the safeoutputs
- * MCP appends as the orchestrator emits) is readable, the record is only
- * written when the staged plan and the queued submission agree (or the
- * queue is legitimately empty: the Step 6 redundant-approval skip) and the
- * staged diff facts are present; on any doubt the previous run's record
- * survives untouched, which degrades the next run toward a fuller review,
- * never a cheaper one. When the queue is NOT readable, the plan alone is
- * trusted (the dispatch-conformance gate reds any run whose emission
- * diverges from the plan) and the two queue-derived supplements
- * (risksPatternsKey adoption, requestedTeams growth) degrade to
- * carry-forward. Note the same seam the model-written record always had:
- * the cache is committed before the gate runs, so a gate-blocked run's
- * record can persist either way; the divergence tripwire's full-review
- * re-arm is the backstop.
+ * What it refuses to write: anything it cannot corroborate. The record is
+ * only written when the staged plan and the in-run safe-output queue
+ * (`GH_AW_SAFE_OUTPUTS`, the JSONL the safeoutputs MCP appends as the
+ * orchestrator emits) agree and the staged diff facts are present; on any
+ * doubt the previous run's record survives untouched, which degrades the next
+ * run toward a fuller review, never a cheaper one. An UNREADABLE queue is
+ * doubt too, and refuses: the dispatch-conformance gate that would red a
+ * divergent emission runs on the post-ingest `agent_output.json`, after
+ * cache-memory has been committed, so it cannot vouch for this record. The
+ * single exception is the shape that legitimately queues nothing at all (the
+ * Step 6 redundant-approval skip: an APPROVE plan with zero comments), where
+ * the two queue-derived supplements (risksPatternsKey adoption,
+ * requestedTeams growth) degrade to carry-forward. Note the same seam the
+ * model-written record always had: the cache is committed before the gate
+ * runs, so a gate-blocked run's record can persist either way; the divergence
+ * tripwire's full-review re-arm is the backstop.
  *
  * `risksPatternsKey` is code-computed here too ({@link
  * computeRisksPatternsKey}): the submission CLI stages the canonical
@@ -260,22 +261,31 @@ export const runCacheRecordCli = (
         return refuse("the staged plan carries no submittable event");
     }
 
-    // When the queue is readable, the queued submission must corroborate
-    // the plan (the gate enforces the full match; this is the writer's own
-    // refusal to record a review that never queued). The one legitimate
-    // no-submission shape is the Step 6 redundant-approval skip: an APPROVE
-    // plan with zero comments. An unreadable queue trusts the plan alone
-    // (the gate reds any run whose emission diverges from it).
+    // The queued submission must corroborate the plan (the gate enforces the
+    // full match; this is the writer's own refusal to record a review that
+    // never queued). The one legitimate no-submission shape is the Step 6
+    // redundant-approval skip: an APPROVE plan with zero comments, which
+    // queues nothing at all, and so leaves no queue file to read in the
+    // agent step.
+    //
+    // Every other shape needs a readable queue. The gate that would red a
+    // divergent emission runs on the post-ingest agent_output.json, AFTER
+    // cache-memory has been committed and uploaded, so it cannot protect this
+    // record: writing on an unreadable queue would let a run whose emission
+    // silently failed record "review posted" with the current fingerprints,
+    // and the next run would then stamp against an unreviewed diff. Refusing
+    // keeps the failure pointed at a fuller next review, the only direction
+    // this module fails in.
     const {items, readable} = readQueue(fs, queuePath);
+    const redundantApproval =
+        plan.event === "APPROVE" &&
+        (Array.isArray(plan.comments) ? plan.comments : []).length === 0;
     if (readable) {
         const submit = items.find(
             (item) => item["type"] === "submit_pull_request_review",
         );
         if (submit === undefined) {
-            const planComments = Array.isArray(plan.comments)
-                ? plan.comments
-                : [];
-            if (plan.event !== "APPROVE" || planComments.length > 0) {
+            if (!redundantApproval) {
                 return refuse(
                     "no review submission queued and the plan is not the redundant-approval shape: the prior record stands",
                 );
@@ -285,6 +295,10 @@ export const runCacheRecordCli = (
                 "the queued submission does not match the staged plan: the prior record stands",
             );
         }
+    } else if (!redundantApproval) {
+        return refuse(
+            "no readable safe-output queue, so nothing corroborates that the review posted: the prior record stands",
+        );
     }
 
     const prContext = readJson(fs, `${REVIEW_DIR}/pr-context.json`) as
@@ -392,7 +406,7 @@ export const runCacheRecordCli = (
         written: true,
         reason: readable
             ? `wrote ${recordPath}`
-            : `wrote ${recordPath} (safe-output queue unreadable: plan trusted, supplements carried forward)`,
+            : `wrote ${recordPath} (redundant-approval skip: nothing queued, supplements carried forward)`,
         record,
     };
 };

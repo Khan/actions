@@ -536,6 +536,44 @@ describe("suppressOpenThreadDuplicates (trial suggestion g)", () => {
         ]);
     });
 
+    it("reads every blocking label off the opener, not just the bare `(blocking)` one", () => {
+        const reflag = claim({
+            id: "correctness-reviewer-2",
+            source: "correctness-reviewer",
+            line: 42,
+            label: "issue (blocking, best-practice)",
+            subject:
+                "Missing deletion test: the expiration path has no test covering the delete.",
+            discussion:
+                "No test exercises the deletion path; TestExpiration asserts expired keys are identified but a regression that never deletes expired memories stays green.",
+            failure_scenario:
+                "A regression that identifies expired memories but skips the deletion is not caught by TestExpiration and ships green.",
+        });
+        // `issue (blocking, best-practice)` is a BLOCKING_LABELS entry: a
+        // suppression that recorded it as advisory would let the run flip to
+        // APPROVE over a still-open, re-confirmed blocking objection.
+        for (const opener of [
+            "**issue (blocking, best-practice):**",
+            "issue (blocking, best-practice):",
+            "**issue (blocking,best-practice)**:",
+            "**todo (blocking):**",
+        ]) {
+            const {suppressed} = suppressOpenThreadDuplicates(
+                [reflag],
+                [
+                    openThread({
+                        body: openThread().body.replace(
+                            "**issue (blocking):**",
+                            opener,
+                        ),
+                    }),
+                ],
+            );
+            expect(suppressed).toHaveLength(1);
+            expect(suppressed[0].threadBlocking).toBe(true);
+        }
+    });
+
     it("records the matched thread's opener as non-blocking when it is", () => {
         const reflag = claim({
             id: "correctness-reviewer-2",
@@ -614,6 +652,7 @@ describe("openThreadsFromStaged", () => {
     const staged = (over: Record<string, unknown> = {}) => ({
         thread_id: "T1",
         path: "a.ts",
+        resolved: false,
         comments: [
             {
                 author: "github-actions[bot]",
@@ -644,6 +683,30 @@ describe("openThreadsFromStaged", () => {
                 body: "**issue (blocking):** opener",
             },
         ]);
+    });
+
+    it("requires the staged resolution state to say open, under either spelling", () => {
+        // Unresolvedness is prompt-enforced exactly like bot-authorship was,
+        // so it is checked here too: a mis-staged resolved thread would
+        // suppress a genuine regression re-flag. Fails closed: an absent or
+        // unparseable flag never suppresses.
+        expect(
+            openThreadsFromStaged([staged({resolved: true})], new Set()),
+        ).toEqual([]);
+        expect(
+            openThreadsFromStaged([staged({resolved: undefined})], new Set()),
+        ).toEqual([]);
+        expect(
+            openThreadsFromStaged([staged({resolved: "false"})], new Set()),
+        ).toEqual([]);
+        for (const open of [
+            {resolved: undefined, is_resolved: false},
+            {resolved: undefined, isResolved: false},
+        ]) {
+            expect(
+                openThreadsFromStaged([staged(open)], new Set()),
+            ).toHaveLength(1);
+        }
     });
 
     it("is empty for non-array staging and tolerates a missing opener body", () => {

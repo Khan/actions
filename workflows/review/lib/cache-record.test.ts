@@ -332,8 +332,27 @@ describe("the in-run safe-output queue (GH_AW_SAFE_OUTPUTS)", () => {
         expect(result.reason).not.toMatch(/queue unreadable/);
     });
 
-    it("trusts the plan when no queue is readable, carrying the supplements forward", () => {
+    it("refuses when no queue is readable: nothing corroborates that the review posted", () => {
+        const base = staged();
+        delete base[QUEUE];
+        const fs = makeFakeFs(base);
+        const result = runCacheRecordCli(fs, NOW);
+        // The gate runs on the post-ingest agent_output.json, after
+        // cache-memory is committed, so it cannot vouch for this record: a
+        // run whose emission silently failed must not stamp the current
+        // fingerprints as reviewed.
+        expect(result.written).toBe(false);
+        expect(result.warn).toBe(true);
+        expect(result.reason).toMatch(/nothing corroborates/);
+        expect(fs.files[`${CACHE}/pr-41.json`]).toBeUndefined();
+    });
+
+    it("still writes on the one shape that queues nothing at all (redundant approval), carrying the supplements forward", () => {
         const base = staged({
+            [`${REVIEW}/submission-plan.json`]: JSON.stringify({
+                event: "APPROVE",
+                comments: [],
+            }),
             [`${CACHE}/pr-41.json`]: JSON.stringify({
                 risksPatternsKey: "prior-key",
             }),
@@ -342,13 +361,12 @@ describe("the in-run safe-output queue (GH_AW_SAFE_OUTPUTS)", () => {
         delete base[QUEUE];
         const fs = makeFakeFs(base);
         const result = runCacheRecordCli(fs, NOW);
-        // The gate reds any emission that diverges from the plan, so the
-        // plan alone is recorded; the staged key is NOT adopted (whether
-        // the guidance comment queued is unknowable here).
         expect(result.written).toBe(true);
-        expect(result.reason).toMatch(/queue unreadable/);
+        expect(result.reason).toMatch(/redundant-approval skip/);
         const record = JSON.parse(fs.files[`${CACHE}/pr-41.json`]);
-        expect(record.verdict).toBe("REQUEST_CHANGES");
+        expect(record.verdict).toBe("APPROVE");
+        // The staged key is NOT adopted: with nothing queued, no guidance
+        // comment posted this run either.
         expect(record.risksPatternsKey).toBe("prior-key");
     });
 });

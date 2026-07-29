@@ -255,6 +255,7 @@ describe("open-thread suppression (trial suggestion g)", () => {
             path: "a.ts",
             line: 60,
             url: "https://github.com/x/y/pull/1#discussion_r1",
+            resolved: false,
             comments: [
                 {
                     author: "github-actions[bot]",

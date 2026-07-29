@@ -184,11 +184,26 @@ export type ThreadSuppression = {
 /**
  * Whether an open thread's opener is a blocking finding, read from the
  * leading `**label:**` template (tolerating the markdown-stripped form the
- * staged bodies sometimes carry). A body with no recognizable label reads
- * as non-blocking: an unvalidated floor is the failure mode this guards.
+ * staged bodies sometimes carry) and classified by {@link isBlockingLabel},
+ * the single owner of that rule, so a label the taxonomy blocks on cannot be
+ * missed here (`issue (blocking, best-practice)` is a blocking label too, and
+ * a hand-rolled `\(blocking\)` match silently reads it as advisory). Spacing
+ * inside the parentheses is normalized before the lookup; a body with no
+ * recognizable label reads as non-blocking, since an unvalidated floor is the
+ * failure mode this guards.
  */
-const threadOpenerIsBlocking = (body: string): boolean =>
-    /^\s*\*{0,2}[a-z]+ \(blocking\)/i.test(body);
+const threadOpenerIsBlocking = (body: string): boolean => {
+    const label = /^\s*\*{0,2}([a-z]+ \([^)]*\))\*{0,2}:?/i.exec(body)?.[1];
+    return (
+        label !== undefined &&
+        isBlockingLabel(
+            label
+                .toLowerCase()
+                .replace(/\s+/g, " ")
+                .replace(/\s*,\s*/g, ", "),
+        )
+    );
+};
 
 /**
  * The prose of a previously-posted bot comment, for similarity comparison:
@@ -207,16 +222,30 @@ const threadProse = (body: string): string =>
         .replace(/^\s*\*{0,2}[a-z]+ \([^)]*\)\*{0,2}:?\*{0,2}\s*/i, "");
 
 /**
+ * Whether a staged thread carries the tool's own "still open" state. The
+ * orchestrator stages `resolved` copied from `get_review_comments`'
+ * `is_resolved`; both the tool's spelling and the camelCase form are accepted
+ * so a verbatim copy also lands. Absent reads as unknown, not as open.
+ */
+const stagedResolvedState = (thread: Record<string, unknown>): unknown =>
+    thread["resolved"] ?? thread["is_resolved"] ?? thread["isResolved"];
+
+/**
  * Build the suppression inputs from staged threads.json. The staging is
  * prompt-executed (review.md asks the orchestrator for the unresolved
  * github-actions[bot] threads; stage-pr.ts deliberately does not stage
- * threads yet), so the bot-only property is enforced HERE in code: only a
- * thread whose OPENING comment the bot authored may suppress. A mis-staged
- * human thread must never silently kill a candidate, and its free-text
- * opener would also read as non-blocking and skip the verdict floor.
- * Threads in resolvedIds (reconciler-resolved this run) are exempt: a fixed
- * defect posting again is a fresh finding. Fails closed: a thread without a
- * bot-authored opener never suppresses (worst case is a duplicate comment).
+ * threads yet), so BOTH properties suppression depends on are enforced HERE
+ * in code rather than trusted from the prompt:
+ * - the opener is the bot's. A mis-staged human thread must never silently
+ *   kill a candidate, and its free-text opener would also read as
+ *   non-blocking and skip the verdict floor.
+ * - the thread is still open, per the `resolved` flag staged from the tool's
+ *   own `is_resolved`. A mis-staged already-resolved thread would otherwise
+ *   suppress a genuine regression re-flag with nothing to check it against.
+ * Threads in resolvedIds (reconciler-resolved this run) are exempt as well: a
+ * fixed defect posting again is a fresh finding. Fails closed on each: a
+ * thread without a bot-authored opener, or without an explicit
+ * `resolved: false`, never suppresses (worst case is a duplicate comment).
  */
 export const openThreadsFromStaged = (
     threads: unknown,
@@ -233,6 +262,7 @@ export const openThreadsFromStaged = (
             if (
                 typeof thread["thread_id"] !== "string" ||
                 resolvedIds.has(thread["thread_id"]) ||
+                stagedResolvedState(thread) !== false ||
                 opener?.["author"] !== "github-actions[bot]"
             ) {
                 return [];
