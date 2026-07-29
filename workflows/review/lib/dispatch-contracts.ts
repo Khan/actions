@@ -502,6 +502,16 @@ export const applyVerifications = (
         }
         if (state === "confirmed" && verdict.corrected !== undefined) {
             const corrected = verdict.corrected;
+            // Validate per key, not with one string-or-number check for all
+            // of them: `fromLabelShape` already gates label drift on the
+            // FINDER side, and leaving it ungated here is the same defect
+            // one step later. A confirmed blocking claim whose `corrected.
+            // label` drifts out of vocabulary (a truncated "issue") fails
+            // `isBlockingLabel` and silently drops out of the
+            // REQUEST_CHANGES verdict; a string in `line` lands a
+            // non-numeric anchor. A rejected correction keeps the original
+            // field, which is the safe direction: the claim still posts as
+            // the finder wrote it.
             for (const key of [
                 "line",
                 "label",
@@ -510,12 +520,26 @@ export const applyVerifications = (
                 "suggestion",
             ] as const) {
                 const value = corrected[key];
-                if (
-                    value !== undefined &&
-                    (typeof value === "string" || typeof value === "number")
-                ) {
-                    updated = {...updated, [key]: value};
+                if (value === undefined) {
+                    continue;
                 }
+                if (key === "line") {
+                    if (
+                        typeof value === "number" &&
+                        Number.isInteger(value) &&
+                        value > 0
+                    ) {
+                        updated = {...updated, line: value};
+                    }
+                    continue;
+                }
+                if (typeof value !== "string" || value.trim() === "") {
+                    continue;
+                }
+                if (key === "label" && !KNOWN_LABELS.has(value)) {
+                    continue;
+                }
+                updated = {...updated, [key]: value};
             }
         }
         if (state !== "confirmed" && updated.author_dispute !== undefined) {

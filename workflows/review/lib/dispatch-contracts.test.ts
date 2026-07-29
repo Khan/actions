@@ -1,14 +1,34 @@
 import {describe, it, expect} from "vitest";
 
-import {joinProse, parseFinderOutput} from "./dispatch-contracts";
+import {
+    applyVerifications,
+    joinProse,
+    parseFinderOutput,
+    type Claim,
+} from "./dispatch-contracts";
 
 /**
  * Contract-parse tests for the label-shape mapping (dispatch-contracts.ts),
  * split from dispatch.test.ts alongside the module split. These pin the
  * run-29897276810 fixes: the ReportFindings-shape near-miss salvage, the
  * label-contract rejection that feeds the malformed-output retry, and the
- * punctuation-aware subject/discussion join.
+ * punctuation-aware subject/discussion join, plus the per-key validation
+ * of the validator's `corrected` fields.
  */
+
+const claim = (overrides: Partial<Claim> = {}): Claim =>
+    ({
+        id: "c1",
+        source: "correctness-reviewer",
+        path: "a.ts",
+        line: 2,
+        label: "issue (blocking)",
+        subject: "s",
+        discussion: "The guard was removed.",
+        failure_scenario: "f",
+        confidence: 0.9,
+        ...overrides,
+    } as Claim);
 
 describe("label-contract enforcement (run 29897276810)", () => {
     it("salvages a ReportFindings-style near-miss that still carries a valid label", () => {
@@ -218,5 +238,42 @@ describe("label-contract enforcement (run 29897276810)", () => {
         );
         expect(joinProse("Only a subject", "")).toBe("Only a subject");
         expect(joinProse("", "Only a discussion.")).toBe("Only a discussion.");
+    });
+});
+
+describe("applyVerifications: corrected-field validation", () => {
+    it("rejects out-of-vocabulary corrected labels and non-integer corrected lines", () => {
+        // The drift `fromLabelShape` guards on the finder side, one step
+        // later: a truncated label would fail `isBlockingLabel` and silently
+        // drop a confirmed blocking claim out of the verdict.
+        const result = applyVerifications([claim({id: "c1"})], {
+            c1: {
+                verification: "confirmed",
+                corrected: {
+                    label: "issue",
+                    line: "7" as unknown as number,
+                    subject: "  ",
+                    discussion: "a real correction",
+                },
+            },
+        });
+        expect(result).toHaveLength(1);
+        // Rejected corrections keep the finder's originals...
+        expect(result[0].label).toBe("issue (blocking)");
+        expect(result[0].line).toBe(claim({}).line);
+        expect(result[0].subject).toBe(claim({}).subject);
+        // ...while a well-formed one still applies.
+        expect(result[0].discussion).toBe("a real correction");
+    });
+
+    it("accepts an in-vocabulary corrected label", () => {
+        const result = applyVerifications([claim({id: "c1"})], {
+            c1: {
+                verification: "confirmed",
+                corrected: {label: "suggestion (non-blocking)", line: 12},
+            },
+        });
+        expect(result[0].label).toBe("suggestion (non-blocking)");
+        expect(result[0].line).toBe(12);
     });
 });
