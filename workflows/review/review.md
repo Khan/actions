@@ -320,10 +320,13 @@ helpful. State facts, not opinions about code taste.
 
 **The staging is already on disk.** A deterministic pre-agent step (the
 frontmatter's `Stage the review context` step, `lib/stage-pr.ts`) ran before you
-started and populated `/tmp/gh-aw/review/`. Read these files; do **not** re-fetch
+started and populated `/tmp/gh-aw/review/`. Use these files; do **not** re-fetch
 their content with GitHub tools or recompute them yourself (every re-fetch wastes
 the context budget, and the staged copies are the authoritative inputs every
-downstream CLI and sub-agent reads):
+downstream CLI and sub-agent reads). Read only what a step asks you to read:
+`pr-context.json` and `files.json` are yours; the rest are inputs the later
+steps and the sub-agents consume, and pulling one in here spends your context
+budget on content you never act on.
 
 - `pr-context.json` — the PR metadata (number, title, description, author,
   `baseBranch`, `headSha`, `isDraft`, `repo`). The one authoritative PR-level
