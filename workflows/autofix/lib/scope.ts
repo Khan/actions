@@ -39,6 +39,7 @@
 
 import {
     BLOCKING_LABELS,
+    DOCUMENTATION_LABEL,
     NON_BLOCKING_LABELS,
 } from "../../review/lib/render-comment.ts";
 
@@ -51,9 +52,17 @@ export const AUTOFIX_COMMAND = "/autofix";
 /**
  * The scope axis: which class of review finding a token puts in scope.
  * `blocking` is the default a repo reaches for (it terminates naturally at the
- * merge gate); `nits` is the deliberate one-shot tidy-up.
+ * merge gate); `nits` is the deliberate one-shot tidy-up; `docs` is the
+ * narrowest, and the only one whose edits cannot change program behaviour.
+ *
+ * **`docs` is a subset of `nits`, not a peer of it.** Documentation findings
+ * are non-blocking, so `nits` already covers them and arming both is the same
+ * as arming `nits`. The reason `docs` exists as its own token is that the
+ * reverse is not true: arming `nits` to clear three stale comments also invites
+ * the fixer into every other cosmetic thread on the PR. The flat namespace
+ * cannot show this containment, so it is stated here and in the README.
  */
-export const AUTOFIX_SCOPES = ["blocking", "nits"] as const;
+export const AUTOFIX_SCOPES = ["blocking", "nits", "docs"] as const;
 
 export type AutofixScope = typeof AUTOFIX_SCOPES[number];
 
@@ -63,6 +72,7 @@ export type AutofixScope = typeof AUTOFIX_SCOPES[number];
 export const SCOPE_TOKENS: Readonly<Record<string, AutofixScope>> = {
     blocking: "blocking",
     nits: "nits",
+    docs: "docs",
 };
 
 /**
@@ -112,13 +122,39 @@ export const DEFAULT_COMMAND_SCOPE: AutofixScope = "blocking";
  * terminate at the merge gate; non-blocking ones have no fixed point. This
  * version has no loop, but the rule is encoded now because it is the constraint
  * most likely to be violated by whoever adds one later.
+ *
+ * `docs` is the case worth pausing on, because it looks convergent and is only
+ * half so. Its deletion half has a fixed point (a comment that restates the
+ * code is either gone or not), which is exactly the argument someone will make
+ * for looping it. Its other half does not: the documentation reviewer also
+ * flags a *missing* explanation, the fixer answers with prose, and prose is
+ * the thing a reviewer can always want written better. So `docs` stays
+ * ineligible until something measures which half dominates in practice. That
+ * is a claim about evidence we do not have, not a claim about the domain.
  */
 export const isLoopEligible = (scope: AutofixScope): boolean =>
     scope === "blocking";
 
-/** The Conventional-Comment labels a given autofix scope covers. */
-export const findingLabelsForScope = (scope: AutofixScope): readonly string[] =>
-    scope === "blocking" ? BLOCKING_LABELS : NON_BLOCKING_LABELS;
+/**
+ * The Conventional-Comment labels a given autofix scope covers.
+ *
+ * `docs` resolves to the single label the documentation reviewer mints. That
+ * label is the only thing distinguishing a documentation thread from any other
+ * nit by the time autofix sees it: the worklist reads threads off the PR and
+ * parses their leading label, so nothing else about the finding survives.
+ */
+export const findingLabelsForScope = (
+    scope: AutofixScope,
+): readonly string[] => {
+    switch (scope) {
+        case "blocking":
+            return BLOCKING_LABELS;
+        case "docs":
+            return [DOCUMENTATION_LABEL];
+        case "nits":
+            return NON_BLOCKING_LABELS;
+    }
+};
 
 /** How this run was armed. Recorded so the summary can say which surface. */
 export type RequestSurface = "label" | "command";

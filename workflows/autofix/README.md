@@ -17,12 +17,14 @@ Two ways to arm it, and they are peers. Neither is a shorthand for the other.
 | ------------------ | ---------------------------------------------------------- |
 | `autofix: blocking` | The reviewer's open blocking threads (`issue (blocking)`, `issue (blocking, best-practice)`, `todo (blocking)`) |
 | `autofix: nits`     | The reviewer's open non-blocking threads (suggestions, nitpicks, questions, thoughts, notes) |
+| `autofix: docs`     | Only the `documentation` reviewer's threads (`suggestion (non-blocking, documentation)`) — a subset of `nits`, see below |
 
 **Or comment on the PR:**
 
 ```
 /autofix                 # same as /autofix blocking
 /autofix nits
+/autofix docs
 /autofix blocking nits
 ```
 
@@ -122,9 +124,17 @@ names a value on exactly one of them:
 
 | Axis        | Tokens                        | Combination rule       | Implemented |
 | ----------- | ----------------------------- | ---------------------- | ----------- |
-| **scope**   | `blocking`, `nits`            | union                  | yes         |
+| **scope**   | `blocking`, `nits`, `docs`    | union                  | yes         |
 | **cadence** | `loop` (absent = once)        | flag                   | no          |
 | **source**  | `human`, `author` (absent = the reviewer bot) | union  | no          |
+
+The three scope values are not three disjoint classes. `blocking` and `nits`
+partition the reviewer's threads between them; **`docs` is a subset of `nits`**,
+selecting only the `documentation` reviewer's label. Arming both is the same as
+arming `nits`, and the containment runs one way only: `docs` exists because
+arming `nits` to clear three stale comments also invites the fixer into every
+other cosmetic thread on the PR. A flat namespace cannot show that, so it is
+written down here and in `scope.ts`.
 
 Read this before adding a token to the vocabulary. `nits` and `loop` look like
 peers and are not, and the day both are requested the rule that resolves them
@@ -151,6 +161,32 @@ Non-blocking findings have no fixed point — the reviewer will always find
 something cosmetic in the autofixer's own output — so a nits-scoped loop cannot
 converge. Blocking scope terminates naturally at the merge gate, which is why it
 is the scope a cadence axis would be built on.
+
+`docs` is the value worth pausing on, because it looks like the exception and is
+only half one. Its deletion half genuinely converges: a comment that restates
+the code is either gone or it is not. Its other half does not, because the
+documentation reviewer also flags a *missing* explanation, the fixer answers
+with prose, and prose is the thing a reviewer can always want written better.
+So `docs` is ineligible too, and that is a statement about evidence we do not
+have rather than about the domain. If the cadence axis is ever built, `docs` is
+the first candidate to re-examine, and the thing to measure first is which half
+dominates in practice.
+
+### Why `docs` is the safest scope
+
+Its edits cannot change program behaviour, which no other scope can say. That
+makes it the natural first scope to trial in a repo that has not run autofix
+before, and the prompt holds the line in Step 4: if the honest fix for a
+documentation finding would touch an executable line, the item is left unfixed
+and reported rather than quietly becoming a code change wearing a documentation
+label.
+
+Note the version coupling. Autofix selects threads by parsing the
+Conventional-Comment label off each posted comment, so `autofix: docs` finds
+threads only when the reviewer that posted them minted the documentation label.
+A repo needs a `review` release carrying that label **installed** before this
+scope does anything; against an older reviewer it is not broken, it is simply
+always empty.
 
 ## What it refuses to do
 
@@ -266,8 +302,9 @@ autofix reads its threads, its label taxonomy, and its fingerprint stamp.
 
 ### Repository setup
 
-Create the two labels (`autofix: blocking`, `autofix: nits`) if you want the
-label surface; the `/autofix` command needs no setup. Nothing else is
+Create the labels you want (`autofix: blocking`, `autofix: nits`,
+`autofix: docs`) if you want the label surface; the `/autofix` command needs no
+setup, and an uncreated label simply cannot be applied. Nothing else is
 configured per repo: scope is chosen per PR by label or argument.
 
 ## Design notes

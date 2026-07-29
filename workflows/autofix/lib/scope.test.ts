@@ -14,6 +14,7 @@ import {
 } from "./scope.ts";
 import {
     BLOCKING_LABELS,
+    DOCUMENTATION_LABEL,
     NON_BLOCKING_LABELS,
 } from "../../review/lib/render-comment.ts";
 
@@ -121,17 +122,46 @@ describe("isLoopEligible", () => {
     it("forbids nits from ever looping", () => {
         expect(isLoopEligible("nits")).toBe(false);
     });
+
+    // Docs looks convergent (a restating comment is either deleted or not) and
+    // is only half so: the same reviewer flags MISSING explanations, and prose
+    // can always be wanted better. Ineligible until measured.
+    it("forbids docs from looping, despite its deletion half converging", () => {
+        expect(isLoopEligible("docs")).toBe(false);
+    });
 });
 
 describe("findingLabelsForScope", () => {
     it("maps each scope onto the reviewer's own taxonomy", () => {
         expect(findingLabelsForScope("blocking")).toEqual(BLOCKING_LABELS);
         expect(findingLabelsForScope("nits")).toEqual(NON_BLOCKING_LABELS);
+        expect(findingLabelsForScope("docs")).toEqual([DOCUMENTATION_LABEL]);
     });
 
     it("keeps the two classes disjoint", () => {
         const blocking = new Set<string>(findingLabelsForScope("blocking"));
         for (const label of findingLabelsForScope("nits")) {
+            expect(blocking.has(label)).toBe(false);
+        }
+    });
+
+    // The containment the flat label namespace cannot show: arming `nits`
+    // already includes every docs thread, so `nits + docs` is just `nits`.
+    // `docs` earns its token by being the narrowing, not by adding anything.
+    it("makes docs a strict subset of nits", () => {
+        const nits = new Set<string>(findingLabelsForScope("nits"));
+        for (const label of findingLabelsForScope("docs")) {
+            expect(nits.has(label)).toBe(true);
+        }
+        expect(findingLabelsForScope("docs").length).toBeLessThan(
+            findingLabelsForScope("nits").length,
+        );
+    });
+
+    // A docs run must never be able to touch a thread that blocks the merge.
+    it("never puts a blocking label in docs scope", () => {
+        const blocking = new Set<string>(BLOCKING_LABELS);
+        for (const label of findingLabelsForScope("docs")) {
             expect(blocking.has(label)).toBe(false);
         }
     });
