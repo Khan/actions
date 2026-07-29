@@ -117,8 +117,11 @@ MCP calls the plan dictates. Step 9's cache record is code as well
 (`lib/cache-record.ts`, invoked once after the emission): the
 fingerprint-carrier fields are copied verbatim from staged files and
 corroborated against the safe-output queue, never serialized from the model's
-memory. The safe-output emission itself is the one seam only an upstream gh-aw
-change could remove (the queue's credentials never enter the sandbox).
+memory. The safe-output emission itself is the remaining seam: the queue is a
+run-local JSONL append that needs no credentials, but the agent sandbox mounts
+`${RUNNER_TEMP}/gh-aw` read-only, so only the safeoutputs MCP container can
+write it. Removing the seam wants a writable path into the queue (an upstream
+mount change, or a post-agent step on the host); neither is tested yet.
 
 ## Install
 
