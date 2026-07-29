@@ -725,8 +725,9 @@ should only ever be one current risks/patterns comment:
 - **Only post when the guidance actually changed — judge by substance, not
   wording.** Never compose a signature
   yourself: the plan CLI staged the canonical one (each moderate/high-risk
-  file's owning team and path, each pattern's sorted file set, and the sorted
-  excluded-file set, in one stable string) at
+  file's owning team and path, each pattern's sorted file set, the sorted
+  excluded-file set, and the NOTIFIED match signature the CLI computes
+  itself, in one stable string) at
   `/tmp/gh-aw/review/risks-patterns-key.txt` (Step 3). Compare that string
   verbatim against `risksPatternsKey` in cache memory; the deterministic cache
   writer (Step 9) records the same string when your comment queues, so the
