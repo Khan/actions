@@ -186,7 +186,13 @@ network:
 engine:
   id: claude
   model: claude-opus-4-8
-timeout-minutes: 20
+# KHAN/ACTIONS LOCAL OVERRIDE: matches the shared default bumped to 40 at source
+# (this pinned v1.7.0 copy predates the bump; drop this override at the next
+# installed-reviewer version bump). Motivation: on 2026-07-21 four high-tier runs
+# on four PRs here were killed at the old 20-minute ceiling after landing their
+# reviews but before the cache-memory update, and high's 20-minute runBudget soft
+# target sat exactly on the kill line, so shedding could never save them.
+timeout-minutes: 40
 
 # claude-fable-5 (pinned by first-principles and correctness-reviewer) is not in the
 # AI-credits pricing table of the firewall api-proxy that gh-aw <= v0.81.x pins
