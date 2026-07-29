@@ -115,6 +115,40 @@ describe("computeRisksPatternsKey", () => {
         expect(key).not.toContain("c.ts");
     });
 
+    it("folds notified.json's signature in, so a NOTIFIED-only change reposts", () => {
+        // Step 7 posts ONE Review Guidance comment covering risks, patterns,
+        // AND notifications, so the notified set is an independent repost
+        // trigger: a key that omitted it would read as unchanged and the
+        // newly-subscribed @team would never be mentioned.
+        const risks = {
+            riskFiles: [{path: "a.ts", risk: "high"}],
+            patterns: ["bump-deps"],
+            excludedFiles: ["gen.ts"],
+            owners: {},
+        };
+        const none = computeRisksPatternsKey(risks);
+        const first = computeRisksPatternsKey({
+            ...risks,
+            notifiedSignature: "@team-infra=deploys:infra/a.yaml",
+        });
+        const changed = computeRisksPatternsKey({
+            ...risks,
+            notifiedSignature: "@team-infra=deploys:infra/b.yaml",
+        });
+
+        expect(first).not.toBe(none);
+        expect(changed).not.toBe(first);
+        expect(first).toContain("notified:@team-infra=deploys:infra/a.yaml");
+        // An empty or absent signature contributes nothing, so a repo with no
+        // `.github/NOTIFIED` keeps the pre-NOTIFIED key.
+        expect(computeRisksPatternsKey({...risks, notifiedSignature: ""})).toBe(
+            none,
+        );
+        expect(
+            computeRisksPatternsKey({...risks, notifiedSignature: undefined}),
+        ).toBe(none);
+    });
+
     it("is order-insensitive on every input list", () => {
         const a = computeRisksPatternsKey({
             riskFiles: [

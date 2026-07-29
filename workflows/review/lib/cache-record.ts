@@ -136,11 +136,18 @@ const readQueue = (
 /**
  * Step 7's canonical signature of the risks/patterns guidance, as code: for
  * each medium/high-risk file its path and owning teams, for each common
- * pattern its identity and the sorted file set it covers, plus the sorted
- * excluded-file set, all sorted into one stable string. Both sides of the
- * repost decision, the compare (Step 7 reads the staged copy) and the
- * record (this writer), use THIS function, so "unchanged" can never be an
- * artifact of two composers wording the same guidance differently.
+ * pattern its identity and the sorted file set it covers, the sorted
+ * excluded-file set, plus `notified.json`'s own signature, all sorted into
+ * one stable string. Both sides of the repost decision, the compare (Step 7
+ * reads the staged copy) and the record (this writer), use THIS function, so
+ * "unchanged" can never be an artifact of two composers wording the same
+ * guidance differently.
+ *
+ * The NOTIFIED match set is a component because Step 7 posts ONE Review
+ * Guidance comment covering risks, patterns, and notifications: a run where
+ * only the NOTIFIED matches changed still has to re-post, and a key that
+ * omitted them would read as unchanged and silently swallow the new
+ * mentions.
  *
  * Tolerant of the triage contract's looseness: a pattern may be a bare
  * string or an object naming its files; unknown shapes contribute their
@@ -152,6 +159,8 @@ export const computeRisksPatternsKey = (input: {
     excludedFiles?: unknown;
     /** `routing.json` `teams.owners`: path -> owning team list. */
     owners?: unknown;
+    /** `notified.json` `signature`: the canonical NOTIFIED match set. */
+    notifiedSignature?: unknown;
 }): string => {
     const owners = isRecord(input.owners) ? input.owners : {};
     const entries: string[] = [];
@@ -204,6 +213,12 @@ export const computeRisksPatternsKey = (input: {
         if (typeof excluded === "string") {
             entries.push(`excluded:${excluded}`);
         }
+    }
+    if (
+        typeof input.notifiedSignature === "string" &&
+        input.notifiedSignature !== ""
+    ) {
+        entries.push(`notified:${input.notifiedSignature}`);
     }
     return entries.sort().join("|");
 };

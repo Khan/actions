@@ -282,6 +282,14 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
         const routing = readJson(fs, `${REVIEW_DIR}/routing.json`) as
             | {teams?: {owners?: unknown}}
             | undefined;
+        // The NOTIFIED match set rides the same key: Step 7 posts one Review
+        // Guidance comment for risks, patterns, AND notifications, so a run
+        // that changed only the notified set must still re-post. An absent
+        // notified.json (no `.github/NOTIFIED` in the consumer) contributes
+        // nothing, which is the same key this produced before the feature.
+        const notified = readJson(fs, `${REVIEW_DIR}/notified.json`) as
+            | {signature?: unknown}
+            | undefined;
         fs.writeFileSync(
             RISKS_PATTERNS_KEY_PATH,
             computeRisksPatternsKey({
@@ -289,6 +297,7 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
                 patterns: dispatch.patterns,
                 excludedFiles: dispatch.excludedFiles,
                 owners: routing?.teams?.owners,
+                notifiedSignature: notified?.signature,
             }),
         );
     }
