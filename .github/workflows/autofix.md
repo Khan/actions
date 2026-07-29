@@ -1,9 +1,10 @@
 ---
 description: >
-  Addresses the PR reviewer's own feedback on demand. Opt in per PR with an
-  `autofix: blocking` or `autofix: nits` label; the run fixes the reviewer's
-  open threads in that scope, pushes one commit, replies in each thread, and
-  removes the label. One run per arming.
+  Addresses the PR reviewer's own feedback on demand, one run per arming. Arm it
+  with an `/autofix [blocking|nits]` comment, or with an `autofix: blocking` /
+  `autofix: nits` label; the two are peers. The run fixes the reviewer's open
+  threads in that scope, pushes one commit, replies in each thread, and clears
+  the label if one armed it.
 
 on:
   # Two arming surfaces, and they are PEERS — neither is a shorthand for the
