@@ -542,6 +542,7 @@ export const evaluateDispatchConformance = (
                   event?: unknown;
                   body?: unknown;
                   comments?: unknown;
+                  skipSubmission?: unknown;
               })
             : undefined;
     if (planStaged !== undefined && submit === undefined) {
@@ -571,11 +572,18 @@ export const evaluateDispatchConformance = (
             );
             const planBody =
                 typeof planStaged.body === "string" ? planStaged.body : "";
-            if (
-                planStaged.event !== "APPROVE" ||
-                planComments.length > 0 ||
-                normalizeBody(planBody) !== bareApprove
-            ) {
+            // The plan CLI owns this predicate (`skipSubmission`) so the
+            // prompt and this gate cannot describe the skip differently —
+            // they diverged once, over the collapsed low-confidence section
+            // riding the body. Fall back to deriving it only for a plan
+            // staged before the field existed.
+            const planSkips =
+                typeof planStaged.skipSubmission === "boolean"
+                    ? planStaged.skipSubmission
+                    : planStaged.event === "APPROVE" &&
+                      planComments.length === 0 &&
+                      normalizeBody(planBody) === bareApprove;
+            if (!planSkips) {
                 violations.push({
                     code: "submission-plan-mismatch",
                     dimension: "verdict",

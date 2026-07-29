@@ -54,6 +54,7 @@ import type {Claim} from "./dispatch-contracts";
 import {runCli as runNotifiedCli} from "./notified";
 import {isBlockingLabel, renderReviewBody} from "./render-comment";
 import {runRereviewCli, type RereviewCliFs} from "./rereview";
+import {normalizeBody} from "./sanitizer-normalize";
 import {
     findLatestStamp,
     runRereviewStampCli,
@@ -76,6 +77,15 @@ export type SubmissionPlan = {
     event: "APPROVE" | "REQUEST_CHANGES";
     /** The full review body, stamp included; submit verbatim. */
     body: string;
+    /**
+     * Whether the orchestrator may emit NO submission at all (the
+     * redundant-approval skip). Code-owned so review.md's Step 6 and the
+     * dispatch-conformance gate read one predicate rather than each
+     * describing it: true only for an APPROVE plan with no inline comments
+     * whose body is the bare approve line (modulo the ingest sanitizer) on a
+     * PR whose last stamped verdict was already APPROVE.
+     */
+    skipSubmission: boolean;
     /** The inline comments to post, one safe output each, verbatim. */
     comments: PlannedComment[];
     /** Thread ids to resolve (the reconciler's decision, passed through). */
@@ -343,24 +353,27 @@ export const runSubmissionCli = (
     // The accountability section (renders and stages rereview.json too).
     const rereview = runRereviewCli(fs);
 
+    // The prior verdict, read once: the reduced-depth flip floor needs a
+    // prior REQUEST_CHANGES, the redundant-approval skip needs a prior
+    // APPROVE. Posted bodies never keep their stamp (the ingest sanitizer
+    // strips HTML comments), so both anchor on the same cache-memory carrier
+    // gate rule 5 reads.
+    const priorRaw = readJson(fs, `${REVIEW_DIR}/prior-reviews.json`);
+    const priors: PriorReview[] = Array.isArray(priorRaw)
+        ? priorRaw.filter(
+              (entry): entry is PriorReview =>
+                  typeof (entry as {body?: unknown}).body === "string",
+          )
+        : [];
+    const priorStamp =
+        findLatestStamp(priors) ??
+        stampFromCacheMemory(readCacheMemoryRecord(fs));
+
     // The reduced-depth flip floor (Step 4): only over a prior
     // REQUEST_CHANGES stamp at flip-gated/fast depth.
     let keptBlockingFloor = 0;
     if (depth === "flip-gated" || depth === "fast") {
-        const priorRaw = readJson(fs, `${REVIEW_DIR}/prior-reviews.json`);
-        const priors: PriorReview[] = Array.isArray(priorRaw)
-            ? priorRaw.filter(
-                  (entry): entry is PriorReview =>
-                      typeof (entry as {body?: unknown}).body === "string",
-              )
-            : [];
-        // Posted bodies never keep their stamp (the ingest sanitizer strips
-        // HTML comments), so the floor anchors on the same cache-memory
-        // carrier the plan CLI and gate rule 5 read.
-        const stamp =
-            findLatestStamp(priors) ??
-            stampFromCacheMemory(readCacheMemoryRecord(fs));
-        if (stamp !== null && stamp.verdict === "REQUEST_CHANGES") {
+        if (priorStamp !== null && priorStamp.verdict === "REQUEST_CHANGES") {
             keptBlockingFloor = rereview.keptBlockingCount;
         }
     }
@@ -513,9 +526,30 @@ export const runSubmissionCli = (
         .concat(stamp === null ? "" : `\n${stamp}`)
         .replace(/^\n+/, "");
 
+    // The redundant-approval skip, code-owned so the prompt (Step 6) and the
+    // conformance gate share ONE predicate instead of two prose descriptions
+    // that can drift: they diverged once already, when the collapsed
+    // low-confidence `<details>` section started riding the body — it is
+    // neither a `Note:` line nor an accountability section, so the prompt's
+    // old wording let the orchestrator skip a submission the gate then
+    // red-flagged, withholding the approval AND the observations on every
+    // later run. Compared modulo the ingest sanitizer (`normalizeBody`), the
+    // same way the gate compares, so the fingerprint stamp is not a
+    // difference.
+    const skipSubmission =
+        event === "APPROVE" &&
+        inline.length === 0 &&
+        normalizeBody(body) ===
+            normalizeBody(
+                renderReviewBody({event: "APPROVE", hasInlineComments: false}),
+            ) &&
+        priorStamp !== null &&
+        priorStamp.verdict === "APPROVE";
+
     const submission: SubmissionPlan = {
         event,
         body,
+        skipSubmission,
         comments: inline,
         resolve: Array.isArray(dispatch.reconciliation?.resolve)
             ? dispatch.reconciliation.resolve.filter(

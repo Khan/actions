@@ -70,6 +70,19 @@ const staged = (
     ...extra,
 });
 
+/**
+ * Stage a prior APPROVE via the cache-memory carrier (posted bodies never
+ * keep their stamp), which is what makes a redundant-approval skip legitimate.
+ */
+const priorApprove = (): Record<string, string> => ({
+    [`${REVIEW}/pr-context.json`]: JSON.stringify({number: 41007}),
+    "/tmp/gh-aw/cache-memory/pr-41007.json": JSON.stringify({
+        verdict: "APPROVE",
+        stampHunks: {"a.ts": ["deadbeef00000000"]},
+        wasDraft: false,
+    }),
+});
+
 describe("renderClaimComment", () => {
     it("renders the Conventional Comment with the post-validation label", () => {
         expect(
@@ -511,8 +524,9 @@ describe("the gate's plan-match rule (slice 4)", () => {
 
     it("the redundant-approval skip queues nothing only for an APPROVE plan with no comments", () => {
         const approvePlan = runSubmissionCli(
-            makeFakeFs(staged({depth: "full", claims: []})),
+            makeFakeFs(staged({depth: "full", claims: []}, priorApprove())),
         );
+        expect(approvePlan.skipSubmission).toBe(true);
         const result = evaluateDispatchConformance({
             items: [],
             plan: {depth: "full"},
@@ -584,13 +598,60 @@ describe("re-review hardening (slice 4 feedback)", () => {
 
     it("permits queueing nothing only for an APPROVE plan with no comments", () => {
         const plan = runSubmissionCli(
-            makeFakeFs(staged({depth: "full", claims: []})),
+            makeFakeFs(staged({depth: "full", claims: []}, priorApprove())),
         );
         const result = evaluateDispatchConformance({
             ...gateInput(plan),
             items: [],
         });
         expect(result.conformant).toBe(true);
+    });
+
+    it("refuses the skip when the body carries only a collapsed low-confidence section", () => {
+        // The divergence this field exists to remove: the collapsed
+        // `<details>` section is neither a `Note:` line nor an accountability
+        // section, so the prompt's old prose predicate let the orchestrator
+        // skip a submission the gate then red-flagged, withholding the
+        // approval AND the observations on every later run.
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged(
+                    {
+                        depth: "full",
+                        claims: [
+                            claim({
+                                id: "weak",
+                                label: "thought (non-blocking)",
+                                confidence: 0.3,
+                                subject: "a hunch",
+                            }),
+                        ],
+                    },
+                    priorApprove(),
+                ),
+            ),
+        );
+        expect(plan.event).toBe("APPROVE");
+        expect(plan.comments).toEqual([]);
+        expect(plan.body).toContain("Lower-confidence observations");
+        expect(plan.skipSubmission).toBe(false);
+        // ...and queueing nothing for it is a red run, not a silent skip.
+        const dropped = evaluateDispatchConformance({
+            ...gateInput(plan),
+            items: [],
+        });
+        expect(dropped.conformant).toBe(false);
+    });
+
+    it("refuses the skip without a prior APPROVE (a first approval must post)", () => {
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims: []})),
+        );
+        expect(plan.skipSubmission).toBe(false);
+        expect(
+            evaluateDispatchConformance({...gateInput(plan), items: []})
+                .conformant,
+        ).toBe(false);
     });
 
     it("tolerates sanitizer-shaped drift: case, backticks, whitespace, URL rewrites", () => {
