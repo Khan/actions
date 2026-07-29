@@ -1,0 +1,15 @@
+"""
+A quiz item as delivered to the learner during a practice session.
+"""
+type SimpleQuizItem {
+  """The unique identifier for the item."""
+  id: ID!
+
+  """The rendered content of the item without answers."""
+  content: String!
+}
+
+extend type Query {
+  """Get the next quiz item in a managed sequence."""
+  getNextQuizItem: SimpleQuizItem
+}

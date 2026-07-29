@@ -1,0 +1,113 @@
+{
+    "id": "incident-workflow-pwn-request",
+    "tags": [
+        "incident",
+        "security-auth",
+        "live"
+    ],
+    "category": "incident-repro",
+    "description": "Repro of the canonical CI pwn-request: the PR adds a workflow triggered on pull_request_target, which runs in the BASE repository's context with full secret access and a write-capable token for every PR including fork-authored ones. It then checks out the attacker-controlled PR head (ref: github.event.pull_request.head.sha) and executes code from it -- pnpm install via ./.github/actions/setup runs arbitrary lifecycle scripts, and pnpm fix-workflows runs dev/tools/fix-workflows.ts from the PR branch -- while holding secrets.CI_BOT_TOKEN, then pushes. Anyone with a GitHub account can fork, open a PR, and obtain arbitrary code execution on a trusted runner: every secret in scope is exfiltratable and the bot token allows pushes to protected branches. The workflow comment even states the trigger was chosen BECAUSE plain pull_request withholds secrets from fork runs, so the reviewer must recognize that the stated rationale is the vulnerability. The security-auth lens must flag the trigger/permission/checkout/execute chain, not merely the autofix-commits-back pattern. The setup action and fix-workflows.ts are staged in the tree as the discoverability chain for what untrusted code the job actually runs.",
+    "changedFiles": [
+        {
+            "path": ".github/actions/setup/action.yml",
+            "status": "added"
+        },
+        {
+            "path": ".github/workflows/lint-workflows.yml",
+            "status": "added"
+        },
+        {
+            "path": "dev/tools/fix-workflows.ts",
+            "status": "added"
+        },
+        {
+            "path": "package.json",
+            "status": "modified"
+        }
+    ],
+    "findings": [
+        {
+            "source": "security-auth",
+            "finding": {
+                "schema_version": 2,
+                "id": "workflow-pwn-request",
+                "lens": "security-auth",
+                "anchor": {
+                    "type": "line",
+                    "path": ".github/workflows/lint-workflows.yml",
+                    "line": 6,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.9,
+                "evidence_trace": [
+                    ".github/workflows/lint-workflows.yml:6 triggers on pull_request_target, which runs in the base repository's context with full secrets access and a write-capable token, for fork-authored PRs included",
+                    ".github/workflows/lint-workflows.yml:14-15 grants the job contents: write and pull-requests: write",
+                    ".github/workflows/lint-workflows.yml:22-23 checks out the attacker-controlled PR head (ref: github.event.pull_request.head.sha) with a privileged bot token (secrets.CI_BOT_TOKEN)",
+                    ".github/workflows/lint-workflows.yml:26 ./.github/actions/setup runs pnpm install (action.yml:20), executing arbitrary lifecycle scripts from the checked-out PR",
+                    ".github/workflows/lint-workflows.yml:30 pnpm fix-workflows runs dev/tools/fix-workflows.ts from the PR branch; line 39 pushes the result back with the bot token",
+                    ".github/workflows/lint-workflows.yml:3-4 the comment states pull_request_target was chosen because plain pull_request withholds secrets from fork runs -- the stated rationale is the vulnerability"
+                ],
+                "failure_scenario": "Any GitHub user forks the repo and opens a PR that edits dev/tools/fix-workflows.ts (or a package.json script, or the ./.github/actions/setup action) and touches any .github/**/*.yml file. Because the trigger is pull_request_target, the job runs in the base repo's context with secrets available, checks out the attacker's head SHA, and executes their code via pnpm install lifecycle scripts and pnpm fix-workflows -- while holding secrets.CI_BOT_TOKEN and contents: write. The attacker reads every secret in scope out of the runner (the bot PAT, registry and cloud credentials, all of which outlive the run), pushes to protected branches under the bot identity, and can poison downstream releases. No prior repository access is required -- only a GitHub account.",
+                "producing_hunt": "security-auth:workflow-pwn-request",
+                "model_authored_prose": "This is a pwn-request, and it is exploitable by anyone with a GitHub account. `pull_request_target` runs in the base repository's context -- full `secrets` access and a write-capable token -- for every PR, forks included. This workflow then checks out the attacker's head SHA (`ref: ${{ github.event.pull_request.head.sha }}`) and executes code from it: `pnpm install` runs arbitrary lifecycle scripts via `./.github/actions/setup`, and `pnpm fix-workflows` runs `dev/tools/fix-workflows.ts` straight off the PR branch -- all while holding `CI_BOT_TOKEN` and `contents: write`. A stranger forks, edits the fixer script, touches any `.github/**/*.yml`, and gets arbitrary code execution on a trusted runner: every secret in scope is exfiltratable and outlives the run, and the bot token pushes to protected branches. The comment above the trigger has it backwards -- plain `pull_request` withholding secrets from fork runs is the safety property, not an obstacle to route around. Never check out or execute PR head code under `pull_request_target`: keep the trigger on `pull_request`, and if the autofix must push, split it into a separate trusted-trigger job that consumes only inert artifacts (never executing PR code), or run the linter read-only and comment instead of pushing."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "postedCommentCount": 1,
+        "mustCatch": [
+            "workflow-pwn-request"
+        ]
+    },
+    "diff": "diff --git a/.github/actions/setup/action.yml b/.github/actions/setup/action.yml\nnew file mode 100644\nindex 0000000..1cf8997\n--- /dev/null\n+++ b/.github/actions/setup/action.yml\n@@ -0,0 +1,20 @@\n+name: \"Setup\"\n+description: \"Install pnpm, Node.js, and the workspace's node modules\"\n+\n+runs:\n+    using: \"composite\"\n+    steps:\n+        - name: Install pnpm\n+          uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4\n+          with:\n+              run_install: false\n+\n+        - name: Use Node.js 24.x\n+          uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4\n+          with:\n+              node-version: \"24.x\"\n+              cache: \"pnpm\"\n+\n+        - name: Install dependencies\n+          shell: bash\n+          run: pnpm install --frozen-lockfile\ndiff --git a/.github/workflows/lint-workflows.yml b/.github/workflows/lint-workflows.yml\nnew file mode 100644\nindex 0000000..a1501b9\n--- /dev/null\n+++ b/.github/workflows/lint-workflows.yml\n@@ -0,0 +1,40 @@\n+name: Lint Workflows and Actions\n+\n+# pull_request_target so the autofix can push back to PRs opened from forks:\n+# on the plain pull_request trigger those runs get no secrets.\n+on:\n+    pull_request_target:\n+        paths:\n+            - \".github/**/*.yml\"\n+\n+jobs:\n+    lint-workflows:\n+        runs-on: ubuntu-latest\n+        permissions:\n+            contents: write\n+            pull-requests: write\n+        steps:\n+            # We need the bot token here to be able to push fixes back, and\n+            # an explicit ref so we lint the PR's code rather than the base.\n+            - name: Checking out the PR\n+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4\n+              with:\n+                  ref: ${{ github.event.pull_request.head.sha }}\n+                  token: ${{ secrets.CI_BOT_TOKEN }}\n+\n+            - name: Setup\n+              uses: ./.github/actions/setup\n+\n+            - name: Autofix checkout-followed-by-setup\n+              shell: bash\n+              run: pnpm fix-workflows\n+\n+            - name: Push autofixes\n+              shell: bash\n+              run: |\n+                  if [ -n \"$(git status --porcelain)\" ]; then\n+                      git config user.name \"ci-bot\"\n+                      git config user.email \"ci-bot@example.com\"\n+                      git commit -am \"Apply workflow autofixes\"\n+                      git push\n+                  fi\ndiff --git a/dev/tools/fix-workflows.ts b/dev/tools/fix-workflows.ts\nnew file mode 100755\nindex 0000000..f3624c6\n--- /dev/null\n+++ b/dev/tools/fix-workflows.ts\n@@ -0,0 +1,63 @@\n+#!/usr/bin/env -S node --experimental-strip-types\n+\n+/**\n+ * Auto-fixes GitHub Actions workflow YAML: every `actions/checkout` step must\n+ * be immediately followed by a `./.github/actions/setup` step. Comments are\n+ * preserved via the yaml package's document API.\n+ */\n+import * as fs from \"node:fs\";\n+import * as path from \"node:path\";\n+\n+import {isMap, isSeq, parseDocument, type Document, type YAMLSeq} from \"yaml\";\n+\n+const WORKFLOW_DIR = \".github/workflows\";\n+\n+/** Insert a setup step after every checkout step that lacks one. */\n+export function fixSteps(doc: Document, steps: YAMLSeq): boolean {\n+    let changed = false;\n+    // Reverse order so insertions do not shift indices still to visit.\n+    for (let i = steps.items.length - 1; i >= 0; i--) {\n+        const step = steps.items[i];\n+        if (!isMap(step)) {\n+            continue;\n+        }\n+        const uses = step.get(\"uses\");\n+        if (typeof uses !== \"string\" || !uses.startsWith(\"actions/checkout\")) {\n+            continue;\n+        }\n+        const next = steps.items[i + 1];\n+        const nextUses = isMap(next) ? String(next.get(\"uses\") ?? \"\") : \"\";\n+        if (nextUses.includes(\".github/actions/setup\")) {\n+            continue;\n+        }\n+        steps.items.splice(\n+            i + 1,\n+            0,\n+            doc.createNode({name: \"Setup\", uses: \"./.github/actions/setup\"}),\n+        );\n+        changed = true;\n+    }\n+    return changed;\n+}\n+\n+let fixed = 0;\n+for (const name of fs.readdirSync(WORKFLOW_DIR)) {\n+    const file = path.join(WORKFLOW_DIR, name);\n+    const doc = parseDocument(fs.readFileSync(file, \"utf8\"));\n+    const jobs = doc.get(\"jobs\");\n+    if (!isMap(jobs)) {\n+        continue;\n+    }\n+    let changed = false;\n+    for (const {value: job} of jobs.items) {\n+        const steps = isMap(job) ? job.get(\"steps\") : undefined;\n+        if (isSeq(steps)) {\n+            changed = fixSteps(doc, steps) || changed;\n+        }\n+    }\n+    if (changed) {\n+        fs.writeFileSync(file, doc.toString({indent: 4}), \"utf8\");\n+        fixed++;\n+    }\n+}\n+console.log(fixed > 0 ? `Fixed ${fixed} file(s).` : \"No violations found.\");\ndiff --git a/package.json b/package.json\nindex da0296d..bb0ce4b 100644\n--- a/package.json\n+++ b/package.json\n@@ -6,6 +6,7 @@\n         \"build\": \"turbo run build\",\n         \"lint\": \"eslint --ext .js,.ts .\",\n         \"test\": \"vitest\",\n+        \"fix-workflows\": \"./dev/tools/fix-workflows.ts\",\n         \"prettier\": \"prettier\"\n     },\n     \"devDependencies\": {\n",
+    "live": {
+        "prContext": {
+            "title": "Add a unified setup action and a fix-workflows linter",
+            "description": "## Summary\n\nAdds a composite `setup` action that consolidates the previously-scattered pnpm, Node.js, and dependency-install steps into a single reusable action.\n\nAlso adds a `lint-workflows` CI workflow and `dev/tools/fix-workflows.ts` linter enforcing the rule: every `actions/checkout` must be immediately followed by `./.github/actions/setup`. Violations are auto-fixed and committed back to the PR branch, so contributors do not have to apply the fix by hand.\n\n## Test plan\n\nCI/CD infrastructure only -- no local verification path exists. After landing, monitor the first set of workflow runs to confirm the consolidated setup action works.",
+            "author": "dev-infra",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "workflow-pwn-request",
+                "path": ".github/workflows/lint-workflows.yml",
+                "lineStart": 3,
+                "lineEnd": 23,
+                "mechanism": [
+                    "pwn.?request",
+                    "pull_request_target",
+                    "untrusted (code|PR)",
+                    "fork\\w*\\b.{0,80}(secret|token|privileg|trusted|base repo)",
+                    "checkout.*(PR|head).*(run|execut|untrusted)",
+                    "(head\\.sha|head\\.ref|head sha|head ref).{0,80}(write|bot token|PAT|git push|execut|arbitrary)",
+                    "(arbitrary code execution|code execution|exfiltrat)"
+                ],
+                "lens": "security-auth",
+                "altLocations": [
+                    {
+                        "path": ".github/workflows/lint-workflows.yml",
+                        "lineStart": 13,
+                        "lineEnd": 15
+                    },
+                    {
+                        "path": ".github/workflows/lint-workflows.yml",
+                        "lineStart": 25,
+                        "lineEnd": 40
+                    }
+                ]
+            }
+        ]
+    },
+    "routerConfig": {
+        "lensRules": [
+            {
+                "pattern": ".github/workflows/lint-workflows.yml",
+                "lenses": [
+                    "security-auth"
+                ]
+            }
+        ]
+    }
+}

@@ -2731,6 +2731,12 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   `pickle.loads`, unsafe YAML load, prototype-polluting merges).
 - **Guards are not silently removed.** A removed (`-`) auth/permission/validation
   check on a path the change keeps is a finding — judge the effect of the removal.
+- **Documentation that promises a guarantee must match the code.** A docstring,
+  schema comment, or field description promising a security/privacy property
+  ("without answers", "without PII", "redacted for non-owners") is a contract
+  clients trust; a resolver or handler whose runtime contradicts it means the
+  schema lies. Verify docstring/runtime parity on every changed field or
+  endpoint that carries such a promise.
 
 ### Incident-derived hunts (tri-state)
 - **`authz-on-new-endpoint`** — for each added/modified endpoint, handler, resolver, or
@@ -2744,6 +2750,30 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`injection-sink`** — trace user-controlled input to a SQL/HTML/path/URL/shell/
   deserialization sink without validation or parameterization. `found` on an unguarded
   sink.
+- **`pwn-request`** — when `.github/workflows/*.yml` changes: a workflow
+  combining a `pull_request`-family trigger, write permissions
+  (`contents:write` / `pull-requests:write`), checkout of the PR head, and any
+  step executing untrusted code (install/build/lint that runs or mutates files).
+  `found` on the full combination — treat as blocking.
+- **`push-ref-race`** — when `.github/workflows/*.yml` changes: a workflow
+  `git push` targeting a ref name rather than the head commit SHA observed at
+  checkout. `found` when the pushed ref can move between checkout and push.
+- **`over-scoped-secret`** — when `.github/workflows/*.yml` changes: a workflow
+  granting `secrets.GITHUB_TOKEN` or a custom org token a permission no step
+  uses (e.g., `contents: write` when every step only reads, or a broad PAT
+  where the default `GITHUB_TOKEN` suffices). `found` names the unneeded
+  permission and the step-by-step reason no step needs it.
+- **`unpinned-action`** — when `.github/workflows/*.yml` changes: a
+  non-GitHub-owned action referenced by tag or branch (`@v3`, `@main`) rather
+  than a commit SHA. `found` per unpinned reference.
+
+### Repo-specific rules and hunts (optional)
+Additional review rules and hunts the host repo defines for this lens, imported when
+present; ignore this section if it is empty. Treat its rules exactly like the review
+rules above, and report any hunts it defines in `hunts` with the same tri-state.
+Payload rules are additive: they never relax or override the rules above, and the
+rules above win on any conflict:
+{{#runtime-import? .github/aw/review/lenses/security-auth.md}}
 
 ### Repo-specific rules and hunts (optional)
 Additional review rules and hunts the host repo defines for this lens, imported when
