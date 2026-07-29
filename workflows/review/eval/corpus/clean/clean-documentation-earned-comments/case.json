@@ -1,0 +1,53 @@
+{
+    "id": "clean-documentation-earned-comments",
+    "tags": ["clean", "documentation", "live"],
+    "category": "clean",
+    "description": "The documentation reviewer's precision guard. Every comment this change adds earns its line by recording something the code cannot show: why ties break on id (cross-service determinism), and where the 0.35 threshold came from. Each one is anchored on an added line and sits next to the code it explains, which is exactly the shape a reviewer reaching for a finding would flag. The run must post nothing.",
+    "changedFiles": [{"path": "src/search/ranking.ts", "status": "modified"}],
+    "routerConfig": {
+        "enabledReviewers": ["documentation"]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 0,
+        "mustNotPost": []
+    },
+    "diff": "diff --git a/src/search/ranking.ts b/src/search/ranking.ts\n--- a/src/search/ranking.ts\n+++ b/src/search/ranking.ts\n@@ -5,6 +5,18 @@\n-/** Order results for display. */\n-export const rankResults = (results: readonly Result[]): Result[] =>\n-    [...results].sort((a, b) => b.score - a.score);\n+/**\n+ * Order results for display.\n+ *\n+ * Ties break on id rather than relying on sort stability: ranking runs on two\n+ * services with different V8 versions, and a differing tie order surfaces as a\n+ * phantom diff in the cached page.\n+ */\n+export const rankResults = (results: readonly Result[]): Result[] =>\n+    [...results].sort(\n+        (a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),\n+    );\n \n+// 0.35 came out of the 2026-05 relevance sweep: below it, keyword-only matches\n+// pushed curated content off the first page.\n+export const MIN_SCORE = 0.35;\n+\n export const visible = (results: readonly Result[]): Result[] =>\n-    rankResults(results);\n+    rankResults(results).filter((result) => result.score >= MIN_SCORE);\n",
+    "live": {
+        "prContext": {
+            "title": "search: break ranking ties deterministically and drop low-score results",
+            "description": "Two ranking fixes: ties now break on id so the two ranking services agree, and results below the relevance floor stop reaching the page.",
+            "author": "dev-search",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "doc-trap-tiebreak-docstring",
+                "path": "src/search/ranking.ts",
+                "lineStart": 5,
+                "lineEnd": 11,
+                "lens": "documentation",
+                "mechanism": [
+                    "docstring restates the signature",
+                    "comment repeats what the sort does",
+                    "verbose docstring",
+                    "delete the tie-break comment"
+                ]
+            },
+            {
+                "key": "doc-trap-threshold-rationale",
+                "path": "src/search/ranking.ts",
+                "lineStart": 17,
+                "lineEnd": 19,
+                "lens": "documentation",
+                "mechanism": [
+                    "comment restates the constant",
+                    "0.35 comment is redundant",
+                    "comment names the value the line already shows"
+                ]
+            }
+        ]
+    }
+}

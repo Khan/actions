@@ -1,0 +1,115 @@
+{
+    "id": "golden-documentation-stale-and-narrated",
+    "tags": ["golden", "documentation", "live"],
+    "category": "golden",
+    "description": "A correct behaviour change (expiry window 30 -> 90 days, clock injected) that leaves two documentation defects behind: a comment the change falsified, and a comment that narrates the change instead of the code. The change is otherwise sound, so the run must APPROVE while posting both as non-blocking documentation suggestions. The trap is the EXPIRY_SLACK_MS comment: it sits on a constant and looks like a restatement, but it records a real constraint (a reader holding an expiring note) that the code does not show, so it must not be flagged.",
+    "changedFiles": [{"path": "src/notes/expiry.ts", "status": "modified"}],
+    "routerConfig": {
+        "enabledReviewers": ["documentation"]
+    },
+    "findings": [
+        {
+            "source": "documentation",
+            "finding": {
+                "schema_version": 2,
+                "id": "doc-stale-expiry-days",
+                "lens": "documentation",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/notes/expiry.ts",
+                    "line": 10,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.85,
+                "evidence_trace": [
+                    "src/notes/expiry.ts:9 comment reads \"// Notes expire after 30 days.\"",
+                    "src/notes/expiry.ts:10 sets EXPIRY_DAYS to 90 in this change"
+                ],
+                "failure_scenario": "The next reader takes the 30-day figure from the comment and reasons about retention with a window three times shorter than the one the code enforces.",
+                "producing_hunt": "documentation:falsified-by-diff",
+                "model_authored_prose": "The comment above still says notes expire after 30 days, but this line changes the window to 90."
+            }
+        },
+        {
+            "source": "documentation",
+            "finding": {
+                "schema_version": 2,
+                "id": "doc-narrated-clock",
+                "lens": "documentation",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/notes/expiry.ts",
+                    "line": 12,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/notes/expiry.ts:12 adds \"// Updated to take the clock from the caller instead of reading Date.now().\"",
+                    "src/notes/expiry.ts:13 the signature already shows `now` is a parameter"
+                ],
+                "failure_scenario": "The comment describes a past the next reader cannot see; once the PR is merged it documents a Date.now() call that no longer exists anywhere in the file.",
+                "producing_hunt": "documentation:narrates-the-change",
+                "model_authored_prose": "This comment describes the change rather than the code: the signature already shows the clock is a parameter, and \"updated to\" stops meaning anything once this merges."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": ["doc-stale-expiry-days", "doc-narrated-clock"],
+        "postedCommentCount": 2
+    },
+    "diff": "diff --git a/src/notes/expiry.ts b/src/notes/expiry.ts\n--- a/src/notes/expiry.ts\n+++ b/src/notes/expiry.ts\n@@ -3,12 +3,18 @@\n const DAY_MS = 86_400_000;\n \n+// Rounded up: a note that expires mid-request must stay readable for the rest\n+// of that request, or the delete job races a reader holding it open.\n+const EXPIRY_SLACK_MS = 60_000;\n+\n // Notes expire after 30 days.\n-export const EXPIRY_DAYS = 30;\n+export const EXPIRY_DAYS = 90;\n \n-export const isExpired = (createdAt: number): boolean =>\n-    Date.now() - createdAt > EXPIRY_DAYS * DAY_MS;\n+// Updated to take the clock from the caller instead of reading Date.now().\n+export const isExpired = (createdAt: number, now: number): boolean =>\n+    now - createdAt > EXPIRY_DAYS * DAY_MS + EXPIRY_SLACK_MS;\n \n // Return the notes that have not expired yet.\n export const liveNotes = <T extends {createdAt: number}>(\n     notes: readonly T[],\n-): T[] => notes.filter((note) => !isExpired(note.createdAt));\n+    now: number,\n+): T[] => notes.filter((note) => !isExpired(note.createdAt, now));\n",
+    "live": {
+        "prContext": {
+            "title": "notes: extend the expiry window to 90 days and inject the clock",
+            "description": "Retention asked for 90 days. Also takes `now` from the caller so the sweep job and its tests agree on the clock.",
+            "author": "dev-notes",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "doc-stale-expiry-days",
+                "path": "src/notes/expiry.ts",
+                "lineStart": 9,
+                "lineEnd": 10,
+                "lens": "documentation",
+                "mechanism": [
+                    "comment says 30 days but the constant is 90",
+                    "stale comment",
+                    "falsified by the change",
+                    "comment contradicts EXPIRY_DAYS"
+                ]
+            },
+            {
+                "key": "doc-narrated-clock",
+                "path": "src/notes/expiry.ts",
+                "lineStart": 12,
+                "lineEnd": 13,
+                "lens": "documentation",
+                "mechanism": [
+                    "comment narrates the change rather than the code",
+                    "updated to.*instead of",
+                    "change-log comment",
+                    "meaningful only at the time of the diff"
+                ]
+            }
+        ],
+        "mustNotFlagSpecs": [
+            {
+                "key": "doc-trap-slack-rationale",
+                "path": "src/notes/expiry.ts",
+                "lineStart": 5,
+                "lineEnd": 7,
+                "lens": "documentation",
+                "mechanism": [
+                    "EXPIRY_SLACK_MS comment is redundant",
+                    "restates the constant",
+                    "delete the slack comment"
+                ]
+            }
+        ]
+    }
+}

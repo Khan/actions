@@ -227,6 +227,7 @@ describe("the label-shape reviewers still carry their own disciplines", () => {
         "test-adequacy",
         "first-principles",
         "conventions",
+        "documentation",
     ]) {
         it(`${agent}: keeps its own bounded-investigation block`, () => {
             expect(lensSection(agent)).toContain("**Bounded investigation.**");

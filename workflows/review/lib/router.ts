@@ -103,6 +103,7 @@ export const ALWAYS_ON_LENSES = [
     "holistic",
     "completeness",
     "test-adequacy",
+    "documentation",
 ] as const;
 
 // `satisfies readonly Lens[]` is the natural spelling, but the repo's

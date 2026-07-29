@@ -87,6 +87,30 @@ describe("labelForFinding — deterministic from severity + lens", () => {
         ).toBe("suggestion (non-blocking, best-practice)");
     });
 
+    it("advisory + documentation lens -> suggestion (non-blocking, documentation)", () => {
+        expect(
+            labelForFinding(
+                makeFinding({severity: "advisory", lens: "documentation"}),
+            ),
+        ).toBe("suggestion (non-blocking, documentation)");
+    });
+
+    // The documentation variant is what a documentation-scoped autofix selects
+    // on, so it must be reachable from the advisory row and ONLY from it: a
+    // blocking documentation label would enlarge BLOCKING_LABELS, which is the
+    // set the blocking autofix scope acts on.
+    it("blocking + documentation lens -> plain issue (blocking), no docs variant", () => {
+        expect(labelForFinding(makeFinding({lens: "documentation"}))).toBe(
+            "issue (blocking)",
+        );
+    });
+
+    it("mints no blocking documentation label", () => {
+        expect(
+            BLOCKING_LABELS.filter((label) => label.includes("documentation")),
+        ).toEqual([]);
+    });
+
     it("maps every specialist correctness lens to a plain (non-best-practice) label", () => {
         const specialist: Lens[] = [
             "security-auth",

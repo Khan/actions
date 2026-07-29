@@ -48,7 +48,11 @@ import {
     type VerificationState,
 } from "./corpus/loader";
 import type {ExtractedAgent} from "./agent-extract";
-import type {ReReviewMode} from "../lib/routing-config";
+import {
+    ENABLEABLE_REVIEWERS,
+    type EnableableReviewer,
+    type ReReviewMode,
+} from "../lib/routing-config";
 import {extractJsonObject} from "./extract-json";
 import {
     rewriteAgentPrompt,
@@ -178,6 +182,46 @@ const LABEL_SHAPE_CONFIDENCE = 0.7;
 
 /** The always-on finders (pattern-triage and thread-reconciler excluded). */
 const DEFAULT_FINDERS = ["correctness-reviewer", "skill-auditor"] as const;
+
+/**
+ * The opt-in whole-change reviewers a case turns on, read from its
+ * `routerConfig.enabledReviewers` (the case-level stand-in for the consumer
+ * `ROUTING` file's `enable` lines, which the router threads in separately from
+ * {@link RouterConfig}).
+ *
+ * Production dispatches these alongside the defaults; the live producer did
+ * not, so an opt-in reviewer had no live arm at all and could not earn its
+ * `enable` line the way the repo's policy says it must. Cases that name none
+ * (every case before this existed) are unaffected: the roster is the defaults
+ * plus routed lenses, exactly as before.
+ *
+ * An unrecognised name throws rather than being skipped. A typo here would
+ * otherwise produce a full, green, expensive run that silently measured
+ * nothing about the reviewer the case exists to measure.
+ */
+const enabledReviewersOf = (corpusCase: CorpusCase): EnableableReviewer[] => {
+    const raw = corpusCase.routerConfig?.["enabledReviewers"];
+    if (raw === undefined) {
+        return [];
+    }
+    if (!Array.isArray(raw) || !raw.every((n) => typeof n === "string")) {
+        throw new Error(
+            `case "${corpusCase.id}": routerConfig.enabledReviewers must be an array of strings`,
+        );
+    }
+    const known: ReadonlySet<string> = new Set(ENABLEABLE_REVIEWERS);
+    const unknown = raw.filter((name) => !known.has(name));
+    if (unknown.length > 0) {
+        throw new Error(
+            `case "${corpusCase.id}": unknown enabledReviewers ${unknown.join(
+                ", ",
+            )}; known: ${ENABLEABLE_REVIEWERS.join(", ")}`,
+        );
+    }
+    // Canonical order, deduplicated: the roster (and so the report) must not
+    // depend on the order a case happened to list them in.
+    return ENABLEABLE_REVIEWERS.filter((name) => raw.includes(name));
+};
 
 const VALIDATOR = "claim-validator";
 
@@ -322,9 +366,24 @@ const parseAgentFindings = (
         throw new Error("output JSON has no findings array");
     }
 
+    // Every reviewer that emits the label-bearing shape rather than the
+    // structured finding schema: the two defaults, plus the opt-in
+    // whole-change reviewers (reachable since a case may `enable` them). A
+    // name missing here falls through to the specialist-lens branch and
+    // throws on the first finding, so keep this in step with
+    // ENABLEABLE_REVIEWERS.
     const labelLens: Record<string, {lens: Lens; source: string}> = {
         "correctness-reviewer": {lens: "correctness", source: "correctness"},
         "skill-auditor": {lens: "conventions", source: "skill"},
+        holistic: {lens: "holistic", source: "holistic"},
+        completeness: {lens: "completeness", source: "completeness"},
+        "test-adequacy": {lens: "test-adequacy", source: "test-adequacy"},
+        "first-principles": {
+            lens: "first-principles",
+            source: "first-principles",
+        },
+        conventions: {lens: "conventions", source: "conventions"},
+        documentation: {lens: "documentation", source: "documentation"},
     };
 
     const findings = rawFindings.map((raw, index): LiveFinding => {
@@ -547,10 +606,11 @@ export const produceLive = async (
         reReviewMode: options.reReviewMode ?? "full",
     });
 
-    // Roster: default finders + routed specialist lenses — sized by the
-    // re-review depth plan when the case is an open-PR snapshot. `scoped`
-    // keeps the full roster (over the scoped diff the staging already wrote);
-    // `flip-gated` keeps only the correctness pass; `fast` keeps none.
+    // Roster: default finders + the case's enabled opt-in reviewers + routed
+    // specialist lenses — sized by the re-review depth plan when the case is
+    // an open-PR snapshot. `scoped` keeps the full roster (over the scoped
+    // diff the staging already wrote); `flip-gated` keeps only the correctness
+    // pass; `fast` keeps none.
     const routerConfig: RouterConfig = {
         generatedPatterns: [],
         ...(corpusCase.routerConfig as Partial<RouterConfig>),
@@ -559,7 +619,11 @@ export const produceLive = async (
     const dispatch = staged.rereviewPlan?.dispatch ?? "all";
     const rosterNames =
         dispatch === "all"
-            ? [...DEFAULT_FINDERS, ...routing.lensesToSpawn]
+            ? [
+                  ...DEFAULT_FINDERS,
+                  ...enabledReviewersOf(corpusCase),
+                  ...routing.lensesToSpawn,
+              ]
             : dispatch === "reconcile+correctness"
             ? ["correctness-reviewer"]
             : [];

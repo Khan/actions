@@ -268,7 +268,8 @@ re-review scoped
 - `lens=` names the specialist lenses to spawn when the pattern is touched; when
   several rules match a path their lenses are unioned (lenses are additive).
 - `enable` lines turn on the opt-in whole-change reviewers (`holistic`,
-  `completeness`, `test-adequacy`, `first-principles`, `conventions`). Neither
+  `completeness`, `test-adequacy`, `first-principles`, `conventions`,
+  `documentation`). Neither
   lenses nor opt-in reviewers run anywhere by default: a repo opts into each
   explicitly, and the policy is that a reviewer earns its line here through the
   eval suite.
@@ -293,6 +294,50 @@ and are skipped; routing degrades to fewer lenses, never to a crashed review.
 `ROUTING` is the machine-readable complement to `risk-classification.md`, which
 stays the model-facing prose about file *contents*; team ownership stays in
 `.github/REVIEWERS`, unchanged.
+
+### The `documentation` reviewer (opt-in)
+
+`enable documentation` turns on a reviewer that checks the **comments and prose docs
+the diff adds or changes** against a documentation policy. It is advisory-only and
+opt-in like `conventions`, and it exists because comment quality is an enforcement
+problem rather than a prompt problem: every author, human or agent, is told what a
+good comment looks like, and nothing checks.
+
+The policy is one paragraph with a list under it, and it lives **inline in the
+reviewer's definition** in `review.md` (like the specialist lenses' `Review rules`
+sections), not in a consumer config file. Two reasons: the baseline is universal
+(a comment earns its line by carrying information the code does not), and a fifth
+required `{{#runtime-import}}` would make the review fail at run time in any repo
+that had not yet written the file. Repo-specific calibration rides the per-directory
+`REVIEW.md` contracts that already exist, which is also the answer to "backend and
+frontend want different things here": they can, per directory, without a global
+decision.
+
+Two things it deliberately does not do:
+
+- **It never reasons about who wrote the text.** It cannot tell whether a human or a
+  model wrote a comment, and the policy is the same either way. A finding that reads
+  as an accusation of AI authorship is out of bounds even when the comment is bad.
+- **It does not review the PR title or description.** Those carry no line anchor and
+  no fix path today; `completeness` and `first-principles` already read them.
+
+**The label is load-bearing.** Its findings render as
+`suggestion (non-blocking, documentation)` rather than a plain `suggestion
+(non-blocking)`. That variant is the only channel by which a downstream consumer can
+tell a documentation thread from any other nit: the autofix workflow selects the
+threads it may act on by parsing the Conventional-Comment label off each posted
+comment, so a documentation-scoped autofix is exactly "the threads carrying this
+label". A consequence for consumers: autofix reads labels minted by whichever
+reviewer version the repo has **installed**, so a repo must be on a review release
+carrying this label before a documentation-scoped autofix finds anything.
+
+The eval corpus carries a matched pair
+(`golden-documentation-stale-and-narrated`, `clean-documentation-earned-comments`):
+one change that leaves two real documentation defects, one whose comments all earn
+their line and must draw no comment at all. Both are live-enabled, which required
+teaching the live producer to dispatch a case's `enable`d reviewers — before that,
+no opt-in reviewer had a live arm at all and could not earn its `enable` line the
+way the policy above says it must.
 
 ### The `.github/NOTIFIED` file (optional)
 
@@ -442,6 +487,7 @@ sub-agent models — this table is the human-facing summary:
 | `completeness` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
 | `test-adequacy` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
 | `conventions` | `claude-opus-4-8` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
+| `documentation` | `claude-opus-4-8` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
 | `first-principles` | `claude-fable-5` | high | Opt-in advisory-only; reviews the change's justification |
 | `claim-validator` | `claude-opus-4-8` | xhigh | Adversarial claim validation; stays Opus (the Fable arm did not improve precision) |
 | specialist lenses | `claude-opus-4-8` | high | Opt-in via `lens=` in `ROUTING`; the security & auth lens is xhigh |

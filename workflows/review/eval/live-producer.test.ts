@@ -223,6 +223,111 @@ describe("produceLive", () => {
         expect(result.perAgent.every((a) => a.usd === 0.25)).toBe(true);
     });
 
+    it("dispatches the opt-in reviewers a case enables, in canonical order", async () => {
+        const enabledCase = parseCase(
+            {
+                ...CASE,
+                id: "produce-enabled",
+                routerConfig: {
+                    lensRules: [
+                        {pattern: "src/**", lenses: ["money-payments"]},
+                    ],
+                    // Listed out of canonical order deliberately.
+                    enabledReviewers: ["documentation", "conventions"],
+                },
+            },
+            "/corpus/incidents/produce-enabled/case.json",
+        );
+        const {runner, requests} = scriptedRunner({
+            "correctness-reviewer": [JSON.stringify({findings: []})],
+            "skill-auditor": [JSON.stringify({findings: []})],
+            "money-payments": [JSON.stringify({findings: [], hunts: []})],
+            conventions: [JSON.stringify({findings: []})],
+            documentation: [
+                JSON.stringify({
+                    findings: [
+                        {
+                            path: "src/a.ts",
+                            line: 1,
+                            label: "suggestion (non-blocking, documentation)",
+                            failure_scenario:
+                                "the next reader trusts a comment the change made false.",
+                            subject: "Comment describes the old value",
+                            discussion:
+                                '"// a is always 1" no longer holds: line 1 sets it to 2.',
+                        },
+                    ],
+                }),
+            ],
+            "claim-validator": [
+                validatorOutput([
+                    {
+                        id: "produce-enabled:live-documentation-1",
+                        verification: "confirmed",
+                    },
+                ]),
+            ],
+        });
+        const agents = new Map(AGENTS);
+        agents.set("conventions", agent("conventions"));
+        agents.set("documentation", agent("documentation"));
+
+        const result = await produceLive(enabledCase, agents, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(
+                Volume.fromJSON({
+                    "/corpus/incidents/produce-enabled/tree/src/a.ts":
+                        "const a = 2;\nexport {a};\n",
+                }),
+            ),
+        });
+
+        // Canonical ENABLEABLE_REVIEWERS order, not the case's listing order.
+        const finders = requests
+            .map((r) => r.name)
+            .filter((name) => name !== "claim-validator");
+        expect(finders).toEqual([
+            "correctness-reviewer",
+            "skill-auditor",
+            "conventions",
+            "documentation",
+            "money-payments",
+        ]);
+
+        // The opt-in reviewer's label-shape output is mapped, not thrown on.
+        const docs = result.findings.find((f) => f.source === "documentation");
+        expect(docs?.finding.lens).toBe("documentation");
+        expect(docs?.finding.severity).toBe("advisory");
+        expect(
+            result.perAgent.find((a) => a.name === "documentation")?.failed,
+        ).toBeFalsy();
+    });
+
+    it("throws on an unknown enabledReviewers entry rather than measuring nothing", async () => {
+        const typoCase = parseCase(
+            {
+                ...CASE,
+                id: "produce-typo",
+                routerConfig: {enabledReviewers: ["documentaton"]},
+            },
+            "/corpus/incidents/produce-typo/case.json",
+        );
+        const {runner} = scriptedRunner({});
+        await expect(
+            produceLive(typoCase, AGENTS, {
+                runner,
+                stageDir: "/stage",
+                fs: volFs(
+                    Volume.fromJSON({
+                        "/corpus/incidents/produce-typo/tree/src/a.ts":
+                            "const a = 2;\n",
+                    }),
+                ),
+            }),
+        ).rejects.toThrow(/unknown enabledReviewers documentaton/);
+    });
+
     it("retries once on malformed output and keeps the second answer", async () => {
         const {runner, requests} = scriptedRunner({
             "correctness-reviewer": [

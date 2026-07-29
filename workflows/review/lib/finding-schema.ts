@@ -63,6 +63,7 @@ export const KNOWN_LENSES = [
     "holistic",
     "completeness",
     "test-adequacy",
+    "documentation",
 ] as const;
 
 export type Lens = typeof KNOWN_LENSES[number];

@@ -164,6 +164,7 @@ const DEFAULT_FINDERS = ["correctness-reviewer", "skill-auditor"] as const;
  * `conventions` (generic before targeted).
  */
 const SHED_RANKING = [
+    "documentation",
     "conventions",
     "first-principles",
     "holistic",
