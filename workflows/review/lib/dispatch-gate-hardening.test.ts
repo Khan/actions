@@ -410,6 +410,37 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
         expect(full.conformant).toBe(true);
     });
 
+    it("vetoes the flip from a cache-memory stamp when posted bodies carry none (the production shape)", () => {
+        // Prior bodies exist but the ingest sanitizer stripped their stamps;
+        // the flip rule anchors on the same cache-memory carrier the plan
+        // CLI used.
+        const vetoed = evaluate({
+            items: [submitItem("APPROVE", "")],
+            plan: {depth: "fast"},
+            outFiles: {"thread-reconciler.json": "{}"},
+            priorReviews: [{body: "Changes requested — see inline comments."}],
+            cacheMemory: {
+                verdict: "REQUEST_CHANGES",
+                stampHunks: {"a.ts": ["deadbeef00000000"]},
+                wasDraft: false,
+            },
+            rereviewAccounting: {keptBlockingCount: 2},
+        });
+        expect(vetoed.violations.map((v) => v.code)).toEqual([
+            "flip-vetoed-kept-blocking",
+        ]);
+        // An invalid cache record anchors nothing: fail-open, no veto.
+        const open = evaluate({
+            items: [submitItem("APPROVE", "")],
+            plan: {depth: "fast"},
+            outFiles: {"thread-reconciler.json": "{}"},
+            priorReviews: [{body: "no stamp"}],
+            cacheMemory: {verdict: "COMMENTED"},
+            rereviewAccounting: {keptBlockingCount: 2},
+        });
+        expect(open.conformant).toBe(true);
+    });
+
     it("rejects a queued resolution the reconciler did not decide", () => {
         const resolveItem = (id: string): SafeOutputItem => ({
             type: "resolve_pull_request_review_thread",

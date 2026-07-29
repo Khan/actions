@@ -372,9 +372,9 @@ budget on content you never act on.
   whatever its state (a dismissed or comment-only review still carries its
   fingerprint stamp, which is why states are not filtered). In practice
   gh-aw's safe-output sanitizer strips the stamp comment before a review
-  posts, so these bodies usually carry none; the plan CLI then anchors on the
-  Step 9 cache-memory record instead. The body stamp is still read first
-  whenever it exists.
+  posts, so these bodies usually carry none; the plan CLI then anchors on
+  the Step 9 cache-memory record instead (its `rereview-plan.json` records
+  which carrier won as `stampSource`).
 - `routing.json`, `provenance.json`, `full-stripped.diff`,
   `full-stripped-annotated.diff`, `rereview-plan.json` (also copied to
   `out/rereview-plan.json` for the run artifact), and, on a reduced-depth

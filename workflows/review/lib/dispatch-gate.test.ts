@@ -613,6 +613,9 @@ describe("runDispatchGateCli", () => {
         expect(okSummary).toContain("Nothing to gate");
     });
 });
+
+/* -------------------------------------------------------------------------- */
+/* Lenient out-file parsing (run 29893634730)                                 */
 /* -------------------------------------------------------------------------- */
 
 describe("prose-tolerant out-file parsing", () => {
