@@ -95,12 +95,10 @@ export type ReReviewMode = typeof RE_REVIEW_MODES[number];
 export const DEFAULT_RE_REVIEW_MODE: ReReviewMode = "full";
 
 /**
- * The dispatch-mode dial (deterministic-orchestrator slice 2): `task` keeps
- * the orchestrator's Task-tool dispatch (today's behavior); `scripted` has
- * the orchestrator invoke the deterministic dispatcher (`lib/dispatch.ts`)
- * once, which runs Step 3's phases as code. Scripted is the ONLY mode since
- * the lifecycle trial held (task mode was removed); the constant survives as
- * the type routing.json's `dispatchMode` field carries.
+ * How Step 3 runs: the orchestrator invokes the deterministic dispatcher
+ * (`lib/dispatch.ts`) once, which runs Step 3's phases as code. `scripted`
+ * is the only mode; the constant survives as the type routing.json's
+ * `dispatchMode` field carries.
  */
 export const DISPATCH_MODES = ["scripted"] as const;
 
@@ -116,7 +114,7 @@ export type RoutingFileConfig = {
     enabledReviewers: EnableableReviewer[];
     /** The repo's re-review mode (`re-review` line; default `full`). */
     reReviewMode: ReReviewMode;
-    /** The dispatch mode: always `scripted` (task mode was removed). */
+    /** The dispatch mode: always `scripted`. */
     dispatchMode: DispatchMode;
     /** Fixed-format parse warnings (unknown lens/tier, no-op rule). */
     warnings: string[];
@@ -223,20 +221,19 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
         }
 
         if (pattern === "dispatch") {
-            // The dial is retired: task mode was removed and scripted always
-            // runs. A leftover line is tolerated (never a crashed run); any
-            // value other than `scripted` earns a visible warning so the
-            // consumer deletes the line.
+            // The dial is retired: scripted dispatch always runs. A leftover
+            // line is tolerated (never a crashed run); any value other than
+            // `scripted` earns a visible warning so the consumer deletes the
+            // line.
             if (fields.length !== 1 || fields[0] !== "scripted") {
                 warnings.push(
                     `ROUTING line ${lineNo}: the dispatch dial is retired ` +
-                        `(task mode was removed; scripted dispatch always ` +
-                        `runs) — delete this line`,
+                        `(scripted dispatch always runs): delete this line`,
                 );
             } else if (!dispatchLineSeen) {
                 warnings.push(
                     `ROUTING line ${lineNo}: the dispatch line is obsolete ` +
-                        `(scripted dispatch is the only mode) — delete it`,
+                        `(scripted dispatch is the only mode): delete it`,
                 );
             }
             dispatchLineSeen = true;

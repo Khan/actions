@@ -343,8 +343,9 @@ export const findLatestStamp = (
 
 /**
  * Reconstruct a stamp from the Step 9 cache-memory record (the fallback
- * fingerprint carrier; see the module header). The record is model-written
- * in task mode, so every field is validated and any gap returns null: a
+ * fingerprint carrier; see the module header). Records written before the
+ * cache-record CLI landed are model-written, so every field is validated and
+ * any gap returns null: a
  * fingerprint we cannot trust anchors nothing, and the depth decision
  * degrades to `full`. The executed depth is not recorded there, so the
  * reconstructed stamp carries `full` (the field is informational; no

@@ -140,15 +140,15 @@ const readCacheMemoryRecord = (fs: SubmissionFs): unknown => {
 const MAX_SUGGESTION_LINES = 8;
 
 /**
- * At most this many inline comments post; the rest collapse (task mode's
- * Step 5 cap, as code). MUST match the frontmatter's
+ * At most this many inline comments post; the rest collapse (the Step 5 cap,
+ * as code). MUST match the frontmatter's
  * `create-pull-request-review-comment: max:` in review.md: the engine
  * rejects safe outputs past that number, and a plan the engine cannot fully
  * emit is a conformance-gate red after full spend.
  */
 export const MAX_INLINE_COMMENTS = 20;
 
-/** The medium-confidence inline floor (task mode's Step 5 posting bar). */
+/** The medium-confidence inline floor (the Step 5 posting bar). */
 const MIN_INLINE_CONFIDENCE = 0.5;
 
 const lineHasCodeSignal = (line: string): boolean =>
@@ -380,7 +380,7 @@ export const runSubmissionCli = (
         }
     }
 
-    // The posting bar (task mode's Step 5 ranked bar, as code): rank
+    // The posting bar (the Step 5 ranked bar, as code): rank
     // blocking before non-blocking, then confidence descending (the sort is
     // stable, so dispatch order breaks ties). A claim below medium
     // confidence (< 0.5) never posts inline (a blocking claim always

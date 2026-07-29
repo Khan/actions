@@ -94,9 +94,31 @@ queue and fails the job. A run that skipped its own dispatch protocol (observed 
 zero sub-agents dispatched, verdict submitted, nothing disclosed) becomes a
 red run that posts nothing instead of a normal-looking review; the run
 artifact keeps the original queue and the gate report for diagnosis. The gate
-proves the reviewer outputs were staged; script-driven dispatch (the only
-mode since task mode was removed) makes skipping dispatch structural rather
-than detected.
+proves the reviewer outputs were staged; script-driven dispatch makes skipping
+dispatch structural rather than detected.
+
+Most of the run is code rather than model turns. The prompt's Step 3 is one
+CLI invocation (`lib/dispatch.ts`) that runs triage, the reviewer fan-out
+(roster, budget cap, and planned sheds computed from `routing.json`), the
+provenance gate, the scope filter, cross-source dedup, open-thread suppression
+(a candidate describing a defect an open bot thread already tracks posts no
+duplicate; a suppressed blocking candidate still floors the verdict), and
+claim validation, inside the same firewall sandbox (the api-proxy meters and
+caps script-spawned sub-agents exactly like Task-spawned ones). Each sub-agent
+delivers its result through an in-process `submit_result` MCP tool whose input
+is validated against the agent's exact output contract at the tool boundary
+(`lib/dispatch-runner.ts`), so a drifted shape is corrected in-session instead
+of voiding the dimension; free-text finals remain the fallback. Steps 4-6 are
+code too: the submission CLI (`lib/submission.ts`) computes the verdict,
+renders the comments and the full review body, and stages
+`submission-plan.json`; the orchestrator emits safe outputs that must match the
+plan (the gate blocks any deviation), which reduces its model role to typing
+MCP calls the plan dictates. Step 9's cache record is code as well
+(`lib/cache-record.ts`, invoked once after the emission): the
+fingerprint-carrier fields are copied verbatim from staged files and
+corroborated against the safe-output queue, never serialized from the model's
+memory. The safe-output emission itself is the one seam only an upstream gh-aw
+change could remove (the queue's credentials never enter the sandbox).
 
 ## Install
 
@@ -258,32 +280,6 @@ re-review scoped
 - `re-review` sets the repo's re-review mode (see the next section). Default
   `full`; when several lines set it, the last one wins with a warning. An
   unknown mode degrades to `full`: toward more review, never less.
-- Step 3 always runs through the deterministic dispatcher
-  (`lib/dispatch.ts`); the `dispatch` dial is retired (task mode was removed
-  after the lifecycle trial held; a leftover `dispatch` line warns and is
-  ignored). The orchestrator invokes one CLI that runs triage, the reviewer
-  fan-out (roster, budget cap, and planned sheds computed from
-  `routing.json`), the provenance gate, the scope filter, cross-source dedup,
-  open-thread suppression (a candidate describing a defect an open bot thread
-  already tracks posts no duplicate; a suppressed blocking candidate still
-  floors the verdict), and claim validation as code, inside the same firewall
-  sandbox (the api-proxy meters and caps script-spawned sub-agents exactly
-  like Task-spawned ones). Each sub-agent delivers its result through an
-  in-process `submit_result` MCP tool whose input is validated against the
-  agent's exact output contract at the tool boundary
-  (`lib/dispatch-runner.ts`), so a drifted shape is corrected in-session
-  instead of voiding the dimension; free-text finals remain the fallback.
-  Steps 4-6 are code too: the submission CLI (`lib/submission.ts`) computes
-  the verdict, renders the comments and the full review body, and stages
-  `submission-plan.json`; the orchestrator emits safe outputs that must match
-  the plan (the gate blocks any deviation), which reduces its model role to
-  typing MCP calls the plan dictates. Step 9's cache record is code as well
-  (`lib/cache-record.ts`, invoked once after the emission): the
-  fingerprint-carrier fields are copied verbatim from staged files and
-  corroborated against the safe-output queue, never serialized from the
-  model's memory. The safe-output emission itself is the one seam only an
-  upstream gh-aw change could remove (the queue's credentials never enter the
-  sandbox).
 
 Glob semantics are a practical subset of gitignore/CODEOWNERS: `**` crosses
 directories, `*` and `?` stay within a segment, a trailing `/` matches everything
