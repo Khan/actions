@@ -156,68 +156,34 @@ network:
     - defaults
     - github
 
-# Pinned to a specific model version rather than a floating tier alias, so the
-# autofixer does not silently change behaviour when a new Opus ships. Matches
-# the roster Khan/actions#294 moves the reviewer to.
+# BLOCKED ON OPUS 5. This should be `claude-opus-5`, matching the roster
+# Khan/actions#294 moves the reviewer to. It is not, because the documented
+# mechanism for making that model usable does not work on any firewall release
+# that currently exists.
 #
-# THE PRICING FALLBACK BELOW IS LOAD-BEARING, NOT ACCOUNTING. `claude-opus-5`
-# is in no gh-aw-firewall release's curated AI-credits pricing table, nor in its
-# bundled models.dev catalog fallback (#294 checked through v0.27.41 and
-# firewall `main`), and the api-proxy's AI-credits guard rejects any un-priced
-# model with a 400 before the request reaches the model. Pinning a newer
-# `sandbox.agent.version` cannot fix that, because no release prices it.
+# `claude-opus-5` is in no gh-aw-firewall release's curated AI-credits pricing
+# table, and the api-proxy's credits guard rejects an un-priced model with a 400
+# before the request reaches the model. #294's remedy is
+# `models.default-ai-credits-pricing` (gh-aw >= v0.83.0), and it states awf
+# v0.27.27 is verified to accept and map `apiProxy.defaultAiCreditsPricing`.
 #
-# Observed here, not theorised: the first run of this workflow on Opus 5 died at
-# turn 1 with `API Error: 400 Model "claude-opus-5" has no AI credits pricing`
-# (Khan/webapp#41140, run 30416237794). An earlier version of this comment
-# asserted the opposite, reasoning that firewall 0.27.42 is past the 0.27.27
-# release that priced Fable 5. Fable 5 being priced says nothing about Opus 5.
+# Three live runs on Khan/webapp#41140 say otherwise:
+#   - 30416237794: no fallback configured. 400, as expected.
+#   - 30421726630: fallback configured, firewall v0.27.42 (the compiler
+#     default). The staged awf-config.json carried
+#     `apiProxy.defaultAiCreditsPricing: {input: 5, output: 25}`. Still 400.
+#   - 30422315631: same fallback, firewall pinned to v0.27.27 (the version #294
+#     names). Config confirmed present, image confirmed pulled. Still 400.
+# v0.27.42 is the newest firewall release, so there is no version left to try.
 #
-# `models.default-ai-credits-pricing` (gh-aw >= v0.83.0) suppresses the
-# rejection and prices the usage. Opus 5 lists at Opus 4.8's rate, so the
-# fallback is the real rate rather than an approximation. Two caveats, both
-# inherited from #294: the proxy's default-pricing path does not bill cache
-# writes, so credit accounting under-counts that component (the `providers`
-# block carries the full rate for the run's cost summary), and the fallback
-# applies to ANY un-priced model, so a future typo'd model id bills at Opus
-# rates instead of failing loudly. Drop both blocks once a firewall release
-# prices `claude-opus-5`.
+# The model is therefore held at claude-opus-4-8, which is what the first
+# successful autofix run used (Khan/webapp#41130). Restore claude-opus-5, its
+# `models:` block and the `sandbox.agent.version` pin together, in one change,
+# once a firewall release prices the model or the fallback demonstrably works.
+# This blocks #294 the same way: its whole roster would 400.
 engine:
   id: claude
-model: claude-opus-5
-
-# Pinned because the pricing fallback below does not work on the compiler's
-# default firewall. Khan/actions#294 verified that awf v0.27.27 accepts and maps
-# `apiProxy.defaultAiCreditsPricing`; gh-aw v0.83.4 defaults to v0.27.42, which
-# demonstrably does not. Evidence, from Khan/webapp#41140 run 30421726630: the
-# staged `awf-config.json` carried
-# `apiProxy.defaultAiCreditsPricing: {input: 5, output: 25}` and the proxy still
-# rejected the request with "no default pricing is configured". The field
-# reaches the config and the 0.27.42 proxy ignores it.
-#
-# So this pin is load-bearing, not hygiene. Re-test before raising it, and
-# raise it only together with a run that proves the fallback still applies.
-sandbox:
-  agent:
-    id: awf
-    version: v0.27.27
-
-models:
-  # $/1M tokens. `input` and `output` are the only rates the schema accepts, so
-  # the cache rates are the proxy's derivations, not ours.
-  default-ai-credits-pricing:
-    input: 5.0
-    output: 25.0
-  # $/token.
-  providers:
-    anthropic:
-      models:
-        claude-opus-5:
-          cost:
-            input: 5.0e-06
-            output: 2.5e-05
-            cache_read: 5.0e-07
-            cache_write: 6.25e-06
+model: claude-opus-4-8
 
 timeout-minutes: 20
 
