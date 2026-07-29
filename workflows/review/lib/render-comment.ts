@@ -44,11 +44,19 @@ export const BLOCKING_LABELS = [
     "todo (blocking)",
 ] as const;
 
+/**
+ * The label the `documentation` reviewer's findings carry. Named because it is
+ * a selection key, not only a description: a documentation-scoped autofix is
+ * defined as "the posted threads whose label is this one", so the string is
+ * imported rather than re-spelled downstream.
+ */
+export const DOCUMENTATION_LABEL = "suggestion (non-blocking, documentation)";
+
 /** Every other Conventional-Comment label; none of these block. */
 export const NON_BLOCKING_LABELS = [
     "suggestion (non-blocking)",
     "suggestion (non-blocking, best-practice)",
-    "suggestion (non-blocking, documentation)",
+    DOCUMENTATION_LABEL,
     "nitpick (non-blocking)",
     "question (non-blocking)",
     "thought (non-blocking)",
@@ -136,7 +144,7 @@ export const labelForFinding = (finding: Finding): ConventionalLabel => {
             : "issue (blocking)";
     }
     if (DOCUMENTATION_LENSES.has(finding.lens)) {
-        return "suggestion (non-blocking, documentation)";
+        return DOCUMENTATION_LABEL;
     }
     return bestPractice
         ? "suggestion (non-blocking, best-practice)"
