@@ -377,6 +377,41 @@ describe("verification mechanics", () => {
         expect(result[2].label).toBe("issue (blocking)");
     });
 
+    it("rejects out-of-vocabulary corrected labels and non-integer corrected lines", () => {
+        // The drift `fromLabelShape` guards on the finder side, one step
+        // later: a truncated label would fail `isBlockingLabel` and silently
+        // drop a confirmed blocking claim out of the verdict.
+        const result = applyVerifications([claim({id: "c1"})], {
+            c1: {
+                verification: "confirmed",
+                corrected: {
+                    label: "issue",
+                    line: "7" as unknown as number,
+                    subject: "  ",
+                    discussion: "a real correction",
+                },
+            },
+        });
+        expect(result).toHaveLength(1);
+        // Rejected corrections keep the finder's originals...
+        expect(result[0].label).toBe("issue (blocking)");
+        expect(result[0].line).toBe(claim({}).line);
+        expect(result[0].subject).toBe(claim({}).subject);
+        // ...while a well-formed one still applies.
+        expect(result[0].discussion).toBe("a real correction");
+    });
+
+    it("accepts an in-vocabulary corrected label", () => {
+        const result = applyVerifications([claim({id: "c1"})], {
+            c1: {
+                verification: "confirmed",
+                corrected: {label: "suggestion (non-blocking)", line: 12},
+            },
+        });
+        expect(result[0].label).toBe("suggestion (non-blocking)");
+        expect(result[0].line).toBe(12);
+    });
+
     it("caps an author-disputed claim at a question unless confirmed", () => {
         const result = applyVerifications(
             [claim({id: "c1", author_dispute: "author says no"})],
