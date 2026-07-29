@@ -186,6 +186,22 @@ engine:
   id: claude
 model: claude-opus-5
 
+# Pinned because the pricing fallback below does not work on the compiler's
+# default firewall. Khan/actions#294 verified that awf v0.27.27 accepts and maps
+# `apiProxy.defaultAiCreditsPricing`; gh-aw v0.83.4 defaults to v0.27.42, which
+# demonstrably does not. Evidence, from Khan/webapp#41140 run 30421726630: the
+# staged `awf-config.json` carried
+# `apiProxy.defaultAiCreditsPricing: {input: 5, output: 25}` and the proxy still
+# rejected the request with "no default pricing is configured". The field
+# reaches the config and the 0.27.42 proxy ignores it.
+#
+# So this pin is load-bearing, not hygiene. Re-test before raising it, and
+# raise it only together with a run that proves the fallback still applies.
+sandbox:
+  agent:
+    id: awf
+    version: v0.27.27
+
 models:
   # $/1M tokens. `input` and `output` are the only rates the schema accepts, so
   # the cache rates are the proxy's derivations, not ours.
