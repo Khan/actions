@@ -19,6 +19,10 @@
  * noise-floor bands (min/max/mean across arm-samples); the memo's "buy the
  * noise floor" item, rendered as data instead of prose.
  *
+ * Alongside catch rates it reports a per-spec **blocking rate** (catch rate
+ * scores detection only): `./aggregate-severity` holds that metric's
+ * vocabulary and the argument for it. Report-only, like every row here.
+ *
  * CLI:
  *
  *   pnpm dlx tsx workflows/review/eval/aggregate.ts <report.json | run-id>...
@@ -37,6 +41,14 @@ import {mkdirSync, mkdtempSync, readFileSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {dirname} from "node:path";
 
+import {
+    caughtBlocking,
+    isSeveritySplit,
+    severityTableNote,
+    SEVERITY_BAND_METRIC,
+    SEVERITY_SPLIT_NOTE,
+} from "./aggregate-severity";
+
 /* -------------------------------------------------------------------------- */
 /* The report subset this module consumes (structural, version-tolerant)      */
 /* -------------------------------------------------------------------------- */
@@ -47,6 +59,12 @@ export type SampleRun = {
     expectedVerdict: string;
     verdict: string;
     caughtSpecKeys: string[];
+    /**
+     * Caught spec key -> whether the matching candidate blocked. Sparse on
+     * purpose: an absent key means the report recorded no label, which is no
+     * evidence rather than "non-blocking". See `./aggregate-severity`.
+     */
+    caughtSpecBlocking: Record<string, boolean>;
     /** Missed spec key -> drop bucket ("" for a true miss). */
     missedSpecs: {specKey: string; droppedBy?: string}[];
     unmatchedPosted: number;
@@ -158,6 +176,18 @@ const parseArm = (
                 .filter(isRecord)
                 .map((c) => asString(c["specKey"]))
                 .filter((k) => k !== ""),
+            // Only entries carrying the flag: a legacy report contributes no
+            // severity samples rather than a run of `false`.
+            caughtSpecBlocking: Object.fromEntries(
+                caught
+                    .filter(isRecord)
+                    .filter((c) => typeof c["blocking"] === "boolean")
+                    .map((c): [string, boolean] => [
+                        asString(c["specKey"]),
+                        c["blocking"] === true,
+                    ])
+                    .filter(([key]) => key !== ""),
+            ),
             missedSpecs,
             unmatchedPosted: unmatched,
             posted: asNumber(match["postedCount"]),
@@ -275,6 +305,14 @@ export const rateStat = (numerator: number, denominator: number): RateStat => ({
 export type SpecAggregate = {
     specKey: string;
     caught: RateStat;
+    /**
+     * Of the catches whose report recorded a label, how many were blocking.
+     * Denominator is *labelled* catches, so a pre-instrumentation pool reads
+     * `0/0` (the renderer omits the row) instead of 0%. Read against
+     * {@link caught}: `caught 6/6, blocking 4/6` is a defect the reviewer
+     * always finds and inconsistently blocks on.
+     */
+    blocking: RateStat;
     trueMisses: number;
     /** Drop bucket -> count, for found-but-dropped misses. */
     droppedBy: Record<string, number>;
@@ -353,7 +391,15 @@ const aggregateArm = (
             verdictOk: number;
             specs: Map<
                 string,
-                {caught: number; seen: number; dropped: Map<string, number>}
+                {
+                    caught: number;
+                    seen: number;
+                    /** Catches whose report recorded a label. */
+                    labeled: number;
+                    /** Of those, catches that carried a blocking label. */
+                    blocking: number;
+                    dropped: Map<string, number>;
+                }
             >;
         }
     >();
@@ -391,6 +437,8 @@ const aggregateArm = (
                 const s = entry.specs.get(key) ?? {
                     caught: 0,
                     seen: 0,
+                    labeled: 0,
+                    blocking: 0,
                     dropped: new Map<string, number>(),
                 };
                 entry.specs.set(key, s);
@@ -402,6 +450,14 @@ const aggregateArm = (
                 s.seen += 1;
                 specCaught += 1;
                 specTotal += 1;
+                // Absent (legacy report) is not evidence of non-blocking.
+                const blocking = caughtBlocking(run.caughtSpecBlocking, key);
+                if (blocking !== undefined) {
+                    s.labeled += 1;
+                    if (blocking) {
+                        s.blocking += 1;
+                    }
+                }
             }
             for (const miss of run.missedSpecs) {
                 const s = spec(miss.specKey);
@@ -438,6 +494,7 @@ const aggregateArm = (
                     return {
                         specKey,
                         caught: rateStat(s.caught, s.seen),
+                        blocking: rateStat(s.blocking, s.labeled),
                         trueMisses: s.seen - s.caught - droppedCount,
                         droppedBy,
                     };
@@ -488,6 +545,8 @@ const sampleRates = (sample: ArmSample): Record<string, number> => {
     let verdictOk = 0;
     let unmatched = 0;
     let posted = 0;
+    let blocking = 0;
+    let labeled = 0;
     for (const run of sample.runs) {
         caught += run.caughtSpecKeys.length;
         specs += run.caughtSpecKeys.length + run.missedSpecs.length;
@@ -496,12 +555,24 @@ const sampleRates = (sample: ArmSample): Record<string, number> => {
         }
         unmatched += run.unmatchedPosted;
         posted += run.posted;
+        for (const key of run.caughtSpecKeys) {
+            const specBlocking = caughtBlocking(run.caughtSpecBlocking, key);
+            if (specBlocking !== undefined) {
+                labeled += 1;
+                if (specBlocking) {
+                    blocking += 1;
+                }
+            }
+        }
     }
     return {
         "must-catch recall": specs === 0 ? 0 : caught / specs,
         "verdict agreement":
             sample.runs.length === 0 ? 0 : verdictOk / sample.runs.length,
         "noise (unmatched posted)": posted === 0 ? 0 : unmatched / posted,
+        // Omitted rather than zeroed when no catch carried a label: a 0% band
+        // would read as "nothing ever blocks" (see ./aggregate-severity).
+        ...(labeled > 0 ? {[SEVERITY_BAND_METRIC]: blocking / labeled} : {}),
         ...(sample.judgeMeanQuality !== undefined
             ? {"judge mean quality": sample.judgeMeanQuality}
             : {}),
@@ -623,11 +694,19 @@ const dropNote = (spec: SpecAggregate): string => {
     return parts.join(", ");
 };
 
+const splitNote = (spec: SpecAggregate): string =>
+    isSeveritySplit(spec.blocking.numerator, spec.blocking.denominator)
+        ? SEVERITY_SPLIT_NOTE
+        : "";
+
 /**
  * The aggregate as a markdown report: the noise-floor bands first when the
  * pool was an identical-arm control (they are that pool's product), then a
- * per-case table (spec catch rates and verdict agreement, both arms, Wilson
- * intervals) and the pooled rows.
+ * per-case table (spec catch rates, spec blocking rates, and verdict
+ * agreement, both arms, Wilson intervals) and the pooled rows.
+ *
+ * Every row is **report-only**. Nothing here gates a run; the adversarial hard
+ * gate in `gates.ts` is still the only thing that fails a job.
  */
 export const renderAggregateMarkdown = (report: AggregateReport): string => {
     const {baseline, candidate} = report.arms;
@@ -733,6 +812,7 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
     }
 
     lines.push(
+        ...severityTableNote(identicalArms),
         `| Case / spec | ${armALabel} | 95% CI | ${armBLabel} | 95% CI | Miss classes |`,
         "| --- | --- | --- | --- | --- | --- |",
     );
@@ -742,6 +822,21 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
             ...candidate.cases.map((c) => c.caseId),
         ]),
     ].sort();
+    /** The four rate cells of one row: `A | A-CI | B | B-CI`. */
+    const rateCells = (a: RateStat | undefined, b: RateStat | undefined) =>
+        `${a ? statCell(a) : "n/a"} | ${a ? intervalCell(a) : ""} | ${
+            b ? statCell(b) : "n/a"
+        } | ${b ? intervalCell(b) : ""}`;
+    /** The notes cell: each arm's note, prefixed with that arm's name. */
+    const armNotes = (
+        a: SpecAggregate | undefined,
+        b: SpecAggregate | undefined,
+        note: (spec: SpecAggregate) => string,
+    ) =>
+        [
+            ...(a && note(a) !== "" ? [`${armANote}: ${note(a)}`] : []),
+            ...(b && note(b) !== "" ? [`${armBNote}: ${note(b)}`] : []),
+        ].join("; ");
     for (const caseId of caseIds) {
         const base = baseline.cases.find((c) => c.caseId === caseId);
         const cand = candidate.cases.find((c) => c.caseId === caseId);
@@ -754,28 +849,30 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
         for (const specKey of specKeys) {
             const b = base?.specs.find((s) => s.specKey === specKey);
             const c = cand?.specs.find((s) => s.specKey === specKey);
-            const notes = [
-                ...(b && dropNote(b) !== ""
-                    ? [`${armANote}: ${dropNote(b)}`]
-                    : []),
-                ...(c && dropNote(c) !== ""
-                    ? [`${armBNote}: ${dropNote(c)}`]
-                    : []),
-            ];
             lines.push(
-                `| ${caseId}:${specKey} | ${b ? statCell(b.caught) : "n/a"} | ${
-                    b ? intervalCell(b.caught) : ""
-                } | ${c ? statCell(c.caught) : "n/a"} | ${
-                    c ? intervalCell(c.caught) : ""
-                } | ${notes.join("; ")} |`,
+                `| ${caseId}:${specKey} | ${rateCells(
+                    b?.caught,
+                    c?.caught,
+                )} | ${armNotes(b, c, dropNote)} |`,
             );
+            // Severity row only when some catch carried a recorded label: a
+            // pre-instrumentation pool gets no row, not a misleading 0/0.
+            const labeled =
+                (b?.blocking.denominator ?? 0) + (c?.blocking.denominator ?? 0);
+            if (labeled > 0) {
+                lines.push(
+                    `| ${caseId}:${specKey} (blocking) | ${rateCells(
+                        b?.blocking,
+                        c?.blocking,
+                    )} | ${armNotes(b, c, splitNote)} |`,
+                );
+            }
         }
         lines.push(
-            `| ${caseId} (verdict) | ${
-                base ? statCell(base.verdictOk) : "n/a"
-            } | ${base ? intervalCell(base.verdictOk) : ""} | ${
-                cand ? statCell(cand.verdictOk) : "n/a"
-            } | ${cand ? intervalCell(cand.verdictOk) : ""} |  |`,
+            `| ${caseId} (verdict) | ${rateCells(
+                base?.verdictOk,
+                cand?.verdictOk,
+            )} |  |`,
         );
     }
 
