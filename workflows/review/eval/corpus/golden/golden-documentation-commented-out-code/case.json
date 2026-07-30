@@ -1,0 +1,95 @@
+{
+    "id": "golden-documentation-commented-out-code",
+    "tags": ["golden", "documentation", "live"],
+    "category": "golden",
+    "description": "Commented-out code, as a matched pair inside one diff so the case tests the policy rather than a keyword. The change swaps the legacy ledger for the append-only one and leaves the old calls commented out in two places: in post() with a dated reason and a ticket (kept deliberately, must not flag), and in voidInvoice() with nothing at all (must flag). A reviewer that greps for commented-out lines fails this case in both directions.",
+    "changedFiles": [
+        {
+            "path": "src/billing/invoice.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": ["documentation"]
+    },
+    "findings": [
+        {
+            "source": "documentation",
+            "finding": {
+                "schema_version": 2,
+                "id": "doc-commented-out-void-calls",
+                "lens": "documentation",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/billing/invoice.ts",
+                    "line": 19,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/billing/invoice.ts:19-20 add the commented-out legacyLedger.void and legacyLedger.audit calls with no explanation",
+                    "src/billing/invoice.ts:6-8 show the same construct done deliberately: the commented legacy post carries a reason, a date, and PLAT-4412"
+                ],
+                "failure_scenario": "The next reader cannot tell whether the commented void and audit calls are a planned fallback like the one in post() or forgotten scaffolding, so they leave dead code in place indefinitely rather than delete it.",
+                "producing_hunt": "documentation:commented-out-code",
+                "model_authored_prose": "The two commented-out legacy calls in voidInvoice() carry no explanation, unlike the commented legacy post above them, which records why it is kept and until when. As written a reader cannot tell a deliberate fallback from a leftover."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": ["doc-commented-out-void-calls"],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/billing/invoice.ts b/src/billing/invoice.ts\n--- a/src/billing/invoice.ts\n+++ b/src/billing/invoice.ts\n@@ -1,12 +1,26 @@\n-import {legacyLedger} from \"./legacy-ledger\";\n+import {ledger} from \"./ledger\";\n \n export type Invoice = {id: string; cents: number};\n \n export const post = async (invoice: Invoice): Promise<void> => {\n-    await legacyLedger.post(invoice.id, invoice.cents);\n+    // Kept until the 2026-09 ledger cutover completes (PLAT-4412): if the new\n+    // ledger rejects a backfilled invoice, ops replays it through this call.\n+    // await legacyLedger.post(invoice.id, invoice.cents);\n+    await ledger.append({\n+        id: invoice.id,\n+        amountCents: invoice.cents,\n+        // The ledger is append-only, so a retry has to reuse the invoice id as\n+        // the idempotency key rather than minting one per attempt.\n+        idempotencyKey: invoice.id,\n+    });\n };\n \n export const voidInvoice = async (invoice: Invoice): Promise<void> => {\n-    await legacyLedger.void(invoice.id);\n-    await legacyLedger.audit(invoice.id, \"voided\");\n+    // await legacyLedger.void(invoice.id);\n+    // await legacyLedger.audit(invoice.id, \"voided\");\n+    await ledger.append({\n+        id: invoice.id,\n+        amountCents: -invoice.cents,\n+        idempotencyKey: `${invoice.id}:void`,\n+    });\n };\n",
+    "live": {
+        "prContext": {
+            "title": "billing: post invoices through the append-only ledger",
+            "description": "Moves invoice posting and voiding onto the new append-only ledger, keyed idempotently on the invoice id. The legacy calls stay commented out in post() until the 2026-09 cutover is signed off.",
+            "author": "dev-platform",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "doc-commented-out-void-calls",
+                "path": "src/billing/invoice.ts",
+                "lineStart": 19,
+                "lineEnd": 20,
+                "lens": "documentation",
+                "mechanism": [
+                    "commented-out code with no explanation",
+                    "dead code left behind in voidInvoice",
+                    "commented legacy void and audit calls",
+                    "unexplained commented-out lines"
+                ]
+            }
+        ],
+        "mustNotFlagSpecs": [
+            {
+                "key": "doc-trap-kept-legacy-post",
+                "path": "src/billing/invoice.ts",
+                "lineStart": 6,
+                "lineEnd": 8,
+                "lens": "documentation",
+                "mechanism": [
+                    "commented-out legacy post call",
+                    "delete the commented legacy post",
+                    "commented-out code should be removed"
+                ]
+            },
+            {
+                "key": "doc-trap-idempotency-why",
+                "path": "src/billing/invoice.ts",
+                "lineStart": 12,
+                "lineEnd": 13,
+                "lens": "documentation",
+                "mechanism": [
+                    "idempotency comment restates the key",
+                    "comment repeats idempotencyKey: invoice.id"
+                ]
+            }
+        ]
+    }
+}

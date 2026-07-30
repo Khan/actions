@@ -1,0 +1,96 @@
+{
+    "id": "golden-documentation-restated-docstring",
+    "tags": ["golden", "documentation", "live"],
+    "category": "golden",
+    "description": "A discriminating documentation case: the change is a real, correct paging fix (over-fetch by one to answer hasMore, replacing a length === 50 test that could not tell a full last page from a truncated one), and it adds a docstring whose every line is recoverable from the signature. Nothing about that docstring is false or stale, which is what makes it invisible to the correctness pass and a genuine test of the documentation lens. Two must-not-flag traps sit in the same diff: the append-only rationale that justifies offset paging, and the over-fetch rationale that justifies limit + 1.",
+    "changedFiles": [
+        {
+            "path": "src/reports/pager.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": ["documentation"]
+    },
+    "findings": [
+        {
+            "source": "documentation",
+            "finding": {
+                "schema_version": 2,
+                "id": "doc-restated-param-docstring",
+                "lens": "documentation",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/reports/pager.ts",
+                    "line": 13,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/reports/pager.ts:13-15 the added docstring lists @param pageIndex, @param pageSize and @returns",
+                    "src/reports/pager.ts:17-20 the signature already states both parameter names, their types, the default, and the return type"
+                ],
+                "failure_scenario": "The next reader maintains three doc lines that restate the signature, and the first parameter rename leaves them wrong while the signature stays right.",
+                "producing_hunt": "documentation:restated-docstring",
+                "model_authored_prose": "The added docstring says nothing the signature does not: `@param pageIndex The page index.` and `@param pageSize The number of rows per page.` restate the parameter list, and `@returns The page of rows.` restates `Promise<Page>`."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": ["doc-restated-param-docstring"],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/reports/pager.ts b/src/reports/pager.ts\n--- a/src/reports/pager.ts\n+++ b/src/reports/pager.ts\n@@ -2,7 +2,27 @@ import {query, type Row} from \"./db\";\n \n export type Page = {items: Row[]; hasMore: boolean};\n \n-export const fetchPage = async (pageIndex: number): Promise<Page> => {\n-    const rows = await query({limit: 50, offset: pageIndex * 50});\n-    return {items: rows, hasMore: rows.length === 50};\n+// The reports table is append-only and paging runs newest-first, so a row\n+// inserted mid-scan lands on a page the caller has already passed; that is what\n+// makes offset paging safe here instead of cursors.\n+const DEFAULT_PAGE_SIZE = 50;\n+\n+/**\n+ * Fetch a page of rows.\n+ *\n+ * @param pageIndex The page index.\n+ * @param pageSize The number of rows per page.\n+ * @returns The page of rows.\n+ */\n+export const fetchPage = async (\n+    pageIndex: number,\n+    pageSize: number = DEFAULT_PAGE_SIZE,\n+): Promise<Page> => {\n+    // Over-fetch by one: the extra row answers hasMore without a second count\n+    // query, which doubled p99 on the reports dashboard.\n+    const rows = await query({\n+        limit: pageSize + 1,\n+        offset: pageIndex * pageSize,\n+    });\n+    return {items: rows.slice(0, pageSize), hasMore: rows.length > pageSize};\n };\n",
+    "live": {
+        "prContext": {
+            "title": "reports: answer hasMore by over-fetching one row",
+            "description": "The old `rows.length === 50` test reported hasMore on a full final page. Over-fetch one row instead and slice it off, so the flag is exact without a second count query.",
+            "author": "dev-platform",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "doc-restated-param-docstring",
+                "path": "src/reports/pager.ts",
+                "lineStart": 10,
+                "lineEnd": 17,
+                "lens": "documentation",
+                "mechanism": [
+                    "docstring restates the signature",
+                    "@param lines add nothing the signature does not",
+                    "docstring only lists parameters and types",
+                    "boilerplate JSDoc"
+                ]
+            }
+        ],
+        "mustNotFlagSpecs": [
+            {
+                "key": "doc-trap-append-only-rationale",
+                "path": "src/reports/pager.ts",
+                "lineStart": 5,
+                "lineEnd": 7,
+                "lens": "documentation",
+                "mechanism": [
+                    "append-only comment is redundant",
+                    "comment restates that paging uses offsets",
+                    "delete the append-only comment"
+                ]
+            },
+            {
+                "key": "doc-trap-overfetch-rationale",
+                "path": "src/reports/pager.ts",
+                "lineStart": 21,
+                "lineEnd": 22,
+                "lens": "documentation",
+                "mechanism": [
+                    "over-fetch comment restates limit + 1",
+                    "comment repeats the code below it",
+                    "delete the over-fetch comment"
+                ]
+            }
+        ]
+    }
+}

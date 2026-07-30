@@ -1,0 +1,108 @@
+{
+    "id": "golden-documentation-missing-why",
+    "tags": ["golden", "documentation", "live"],
+    "category": "golden",
+    "description": "The missing-why half of the policy, set up so the gap is unmistakable rather than a matter of taste: the change adds three constants, and two of them carry the rationale a reader cannot recover from the code (why four attempts, why jitter at all). BASE_DELAY_MS = 1_700 carries none, and 1700 is specific enough that it plainly came from somewhere. The reviewer has to notice the one constant its neighbours explain and it does not. Both explaining comments, plus the terminal-status comment inside the loop, are must-not-flag traps.",
+    "changedFiles": [
+        {
+            "path": "src/sync/retry.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": ["documentation"]
+    },
+    "findings": [
+        {
+            "source": "documentation",
+            "finding": {
+                "schema_version": 2,
+                "id": "doc-missing-why-base-delay",
+                "lens": "documentation",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/sync/retry.ts",
+                    "line": 8,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/sync/retry.ts:8 adds `const BASE_DELAY_MS = 1_700;` with no comment",
+                    "src/sync/retry.ts:5-6 and :9 explain MAX_ATTEMPTS and JITTER_MS, so the omission is local to this constant",
+                    "src/sync/retry.ts:27 uses it as the base of `BASE_DELAY_MS * 2 ** attempt`, which makes the waits 1.7s, 3.4s, 6.8s"
+                ],
+                "failure_scenario": "The next reader has no way to tell whether 1700 encodes a remote rate-limit window or an arbitrary pick, so they cannot safely tune it when the retry budget has to change.",
+                "producing_hunt": "documentation:missing-why",
+                "model_authored_prose": "`const BASE_DELAY_MS = 1_700;` is the one added constant with no rationale, between two that have one. 1700 is too specific to be arbitrary and the code cannot show where it came from."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": ["doc-missing-why-base-delay"],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/sync/retry.ts b/src/sync/retry.ts\n--- a/src/sync/retry.ts\n+++ b/src/sync/retry.ts\n@@ -1,5 +1,32 @@\n+import {sleep} from \"./sleep\";\n+\n export type Attempt = {ok: boolean; status?: number};\n \n+// Four attempts is the sync window: the remote's queue drains in under a\n+// minute, and a fifth attempt would outlive the caller's 30s deadline.\n+const MAX_ATTEMPTS = 4;\n+const BASE_DELAY_MS = 1_700;\n+// Jitter spreads the retry storm when a whole shard fails at once.\n+const JITTER_MS = 250;\n+\n+/** Retry `send` with exponential backoff until it succeeds or is terminal. */\n export const withRetry = async (\n     send: () => Promise<Attempt>,\n-): Promise<Attempt> => send();\n+): Promise<Attempt> => {\n+    let last: Attempt = {ok: false};\n+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {\n+        last = await send();\n+        // 400 and 404 are terminal for this API: it returns 400 for a payload\n+        // the schema will never accept, and 404 once the remote has deleted the\n+        // record.\n+        if (last.ok || last.status === 400 || last.status === 404) {\n+            return last;\n+        }\n+        if (attempt < MAX_ATTEMPTS - 1) {\n+            await sleep(\n+                BASE_DELAY_MS * 2 ** attempt + Math.random() * JITTER_MS,\n+            );\n+        }\n+    }\n+    return last;\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "sync: retry failed pushes with exponential backoff",
+            "description": "Wraps the push in a bounded retry with exponential backoff and jitter. Terminal 4xx statuses return immediately instead of burning the attempt budget.",
+            "author": "dev-platform",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "doc-missing-why-base-delay",
+                "path": "src/sync/retry.ts",
+                "lineStart": 7,
+                "lineEnd": 10,
+                "lens": "documentation",
+                "mechanism": [
+                    "BASE_DELAY_MS has no explanation",
+                    "magic constant 1700 unexplained",
+                    "no rationale for the base delay",
+                    "why 1.7 seconds"
+                ]
+            }
+        ],
+        "mustNotFlagSpecs": [
+            {
+                "key": "doc-trap-max-attempts-why",
+                "path": "src/sync/retry.ts",
+                "lineStart": 5,
+                "lineEnd": 6,
+                "lens": "documentation",
+                "mechanism": [
+                    "MAX_ATTEMPTS comment restates the constant",
+                    "comment says four attempts, so does the code",
+                    "delete the attempts comment"
+                ]
+            },
+            {
+                "key": "doc-trap-jitter-why",
+                "path": "src/sync/retry.ts",
+                "lineStart": 9,
+                "lineEnd": 9,
+                "lens": "documentation",
+                "mechanism": [
+                    "jitter comment restates JITTER_MS",
+                    "comment names what the constant already says"
+                ]
+            },
+            {
+                "key": "doc-trap-terminal-status-why",
+                "path": "src/sync/retry.ts",
+                "lineStart": 19,
+                "lineEnd": 21,
+                "lens": "documentation",
+                "mechanism": [
+                    "comment restates the 400 and 404 check",
+                    "comment repeats the if condition",
+                    "delete the terminal-status comment"
+                ]
+            }
+        ]
+    }
+}
