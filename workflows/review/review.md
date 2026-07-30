@@ -185,38 +185,26 @@ engine:
     BASH_MAX_TIMEOUT_MS: "1200000"
 timeout-minutes: 40
 
-# claude-fable-5 (pinned by first-principles and correctness-reviewer) is not in the
-# AI-credits pricing table of the firewall api-proxy that gh-aw <= v0.81.x pins
-# (gh-aw-firewall v0.27.11), and the proxy rejects any un-priced model with a 400,
-# so the first-principles dispatch fails on every run where it is enabled. Two
-# pieces fix that, and BOTH pin to the same upstream source of truth
-# (gh-aw-firewall v0.27.27, the release that added curated Claude 5 pricing:
-# $10/M input, $1/M cache read, $12.50/M cache write, $50/M output):
-#
-# 1. `sandbox.agent.version` below runs that firewall version, whose api-proxy
-#    guard knows the model. This is the piece that actually unblocks the dispatch;
-#    the `models:` frontmatter only feeds gh-aw's cost-summary display and does
-#    NOT reach the proxy guard (verified empirically on gh-aw v0.81.6).
-# 2. The `models:` block keeps the run's cost accounting/display correct for the
-#    same model.
-#
-# Remove both once the workflow runs on a gh-aw release whose default firewall
-# is >= v0.27.27.
+# The awf sandbox stays declared (its api-proxy is what meters AI credits and
+# caps a runaway fan-out), but its version now floats with the gh-aw release
+# rather than being pinned here. History: claude-fable-5 (pinned by
+# first-principles and correctness-reviewer) was missing from the AI-credits
+# pricing table of the firewall api-proxy that gh-aw <= v0.81.x defaulted to
+# (v0.27.11), and the proxy rejects an un-priced model with a 400, so that
+# dispatch failed on every run. This block therefore pinned v0.27.27 (the
+# release that added curated Claude 5 pricing) and carried a `models:` pricing
+# override for the cost display. gh-aw v0.83.4 defaults to firewall v0.27.42,
+# which prices claude-fable-5 and pins each container by digest, so both are
+# retired: keeping the pin would freeze the firewall at the old floor (and give
+# up those digests) while gh-aw moves on. Re-pin a version here only to hold a
+# firewall release BACK, never to move one forward. Before pinning any sub-agent
+# to a newly shipped model, check that the api-proxy prices it
+# (gh-aw-firewall `containers/api-proxy/ai-credits-pricing.js`, falling back to
+# its bundled `models.dev.catalog.json`); an un-priced model is rejected with a
+# 400 on every dispatch.
 sandbox:
   agent:
     id: awf
-    version: v0.27.27
-
-models:
-  providers:
-    anthropic:
-      models:
-        claude-fable-5:
-          cost:
-            input: 1.0e-05
-            output: 5.0e-05
-            cache_read: 1.0e-06
-            cache_write: 1.25e-05
 
 # The shared review workflow is more than this markdown file: its deterministic
 # pieces (the finding schema and validator today; the router, computed verdict, and
