@@ -21,14 +21,34 @@
  *      reconciliation, and a REQUEST_CHANGES→APPROVE flip is vetoed by any
  *      validated blocking finding from that pass; the findings gate the
  *      flip instead of being discarded.
- *   3. **Divergence tripwire.** Every full-depth review stamps a
- *      content-hashed hunk signature into its review body as a hidden
- *      comment (so it survives cache eviction AND branch protection's
- *      dismiss-stale-approvals; a dismissed review keeps its body). Each
- *      later push compares its current signature against that last
- *      fully-reviewed fingerprint; when the unreviewed share crosses
- *      {@link DEFAULT_TRIPWIRE_THRESHOLD}, full-review mode re-arms and the
- *      divergent push gets the whole roster.
+ *   3. **Divergence tripwire.** Every full-depth review records a
+ *      content-hashed hunk signature. Each later push compares its current
+ *      signature against that last fully-reviewed fingerprint; when the
+ *      unreviewed share crosses {@link DEFAULT_TRIPWIRE_THRESHOLD},
+ *      full-review mode re-arms and the divergent push gets the whole
+ *      roster.
+ *
+ * **Fingerprint carriers.** The signature is written to two places and read
+ * back in priority order:
+ *
+ *   1. The hidden-comment stamp in the review body. This was designed as the
+ *      durable carrier (it would survive cache eviction and branch
+ *      protection's dismiss-stale-approvals), but gh-aw's safe-output ingest
+ *      sanitizer strips ALL XML/HTML comments (`removeXmlComments` in
+ *      gh-aw-actions `sanitize_content_core.cjs`), so a stamp posted through
+ *      `submit_pull_request_review` never reaches the PR. Measured in
+ *      production 2026-07-21 (Khan/webapp#40996: every re-review planned
+ *      `no-prior-fingerprint` and escalated to full). The stamp is still
+ *      emitted and still parsed first: it costs nothing, it documents the
+ *      run, and it becomes load-bearing again the day the sanitizer allows
+ *      it through or another submission path posts it verbatim.
+ *   2. The cache-memory record (`/tmp/gh-aw/cache-memory/pr-<n>.json`),
+ *      whose Step 9 fields (`verdict`, `stampHunks` — falling back to
+ *      `reviewedHunks` where a consumer's Step 9 wrote the code-computed
+ *      signature there — and `wasDraft`) carry the same information. This
+ *      is the carrier that works today. Cache eviction degrades to `full`
+ *      (more review, never less), which is exactly the pre-fix steady
+ *      state.
  *
  * Two interactions are handled by construction:
  *
@@ -343,6 +363,71 @@ export const findLatestStamp = (
     return null;
 };
 
+/**
+ * Reconstruct a stamp from the Step 9 cache-memory record (the fallback
+ * fingerprint carrier; see the module header). The record is model-written
+ * in task mode, so every field is validated and any gap returns null: a
+ * fingerprint we cannot trust anchors nothing, and the depth decision
+ * degrades to `full`. The executed depth is not recorded there, so the
+ * reconstructed stamp carries `full` (the field is informational; no
+ * consumer branches on it).
+ */
+export const stampFromCacheMemory = (raw: unknown): ReReviewStamp | null => {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        return null;
+    }
+    const record = raw as {
+        verdict?: unknown;
+        stampHunks?: unknown;
+        reviewedHunks?: unknown;
+        wasDraft?: unknown;
+    };
+    if (record.verdict !== "APPROVE" && record.verdict !== "REQUEST_CHANGES") {
+        return null;
+    }
+    if (typeof record.wasDraft !== "boolean") {
+        return null;
+    }
+    const validSignature = (hunks: unknown): HunkSignature | null => {
+        if (
+            typeof hunks !== "object" ||
+            hunks === null ||
+            Array.isArray(hunks)
+        ) {
+            return null;
+        }
+        const signature: HunkSignature = {};
+        for (const [path, hashes] of Object.entries(hunks)) {
+            if (
+                !Array.isArray(hashes) ||
+                hashes.some((hash) => typeof hash !== "string" || hash === "")
+            ) {
+                return null;
+            }
+            signature[path] = hashes as string[];
+        }
+        return Object.keys(signature).length === 0 ? null : signature;
+    };
+    // `stampHunks` is the field Step 9 copies verbatim from the plan CLI's
+    // own computation; `reviewedHunks` is accepted for consumers whose
+    // Step 9 wrote the code-computed signature there (the scripted-mode
+    // staging layer does). A hash-regime mismatch inside either one cannot
+    // be detected here; it surfaces as full divergence, i.e. a full review.
+    const signature =
+        validSignature(record.stampHunks) ??
+        validSignature(record.reviewedHunks);
+    if (signature === null) {
+        return null;
+    }
+    return {
+        schemaVersion: STAMP_SCHEMA_VERSION,
+        depth: "full",
+        verdict: record.verdict,
+        anchorDraft: record.wasDraft,
+        anchorHunks: signature,
+    };
+};
+
 /* -------------------------------------------------------------------------- */
 /* The depth decision                                                         */
 /* -------------------------------------------------------------------------- */
@@ -520,10 +605,16 @@ export const buildScopedDiff = (
  * `full-stripped.diff` (the provenance CLI's generated-stripped diff) over
  * `full.diff`, so generated churn (a lockfile push) neither enters the
  * fingerprint nor counts as divergence. It also reads `routing.json` (for
- * `reReviewMode`), `pr-context.json` (for `isDraft`), and
+ * `reReviewMode`), `pr-context.json` (for `isDraft` and `number`), and
  * `prior-reviews.json` (the bot's prior reviews of this PR, each
  * `{body, submittedAt?}`, every state included, DISMISSED and COMMENTED
- * too), and writes `rereview-plan.json` (the {@link ReReviewPlan}). When the
+ * too). When no prior-review body carries a stamp (in production none ever
+ * does; the ingest sanitizer strips it, see the module header), the anchor
+ * falls back to `/tmp/gh-aw/cache-memory/pr-<number>.json` via
+ * {@link stampFromCacheMemory}. It writes `rereview-plan.json` (the
+ * {@link ReReviewPlan}, plus `stampSource`:
+ * `"review-body" | "cache-memory" | null`, recording which carrier
+ * anchored the plan). When the
  * plan stages `new-hunks` it also writes `scoped.diff` (generated-stripped
  * whenever the stripped diff was the input). A missing or unreadable input
  * degrades the plan to `full` with a fixed-format reason, never to a crash
@@ -539,6 +630,7 @@ const STRIPPED_DIFF_PATH = `${REVIEW_DIR}/full-stripped.diff`;
 const ROUTING_PATH = `${REVIEW_DIR}/routing.json`;
 const PR_CONTEXT_PATH = `${REVIEW_DIR}/pr-context.json`;
 const PRIOR_REVIEWS_PATH = `${REVIEW_DIR}/prior-reviews.json`;
+const CACHE_MEMORY_DIR = "/tmp/gh-aw/cache-memory";
 const PLAN_OUT = `${REVIEW_DIR}/rereview-plan.json`;
 const SCOPED_DIFF_OUT = `${REVIEW_DIR}/scoped.diff`;
 
@@ -560,10 +652,14 @@ const readJsonIfPresent = (fs: RereviewCliFs, path: string): unknown => {
     }
 };
 
+/** Which carrier anchored the plan's prior fingerprint. */
+export type StampSource = "review-body" | "cache-memory" | null;
+
 export type RereviewPlanCliResult = {
     plan: ReReviewPlan;
     /** Fixed-format staging problems (each also forced the plan to full). */
     warnings: string[];
+    stampSource: StampSource;
 };
 
 /**
@@ -590,7 +686,7 @@ export const runRereviewPlanCli = (
     }
 
     const prContext = readJsonIfPresent(fs, PR_CONTEXT_PATH) as
-        | {isDraft?: unknown}
+        | {isDraft?: unknown; number?: unknown}
         | undefined;
     let isDraft = false;
     if (prContext !== undefined && typeof prContext.isDraft === "boolean") {
@@ -633,7 +729,19 @@ export const runRereviewPlanCli = (
               }))
         : [];
 
-    const priorStamp = findLatestStamp(priorReviews);
+    let priorStamp = findLatestStamp(priorReviews);
+    let stampSource: StampSource = priorStamp === null ? null : "review-body";
+    if (priorStamp === null && typeof prContext?.number === "number") {
+        priorStamp = stampFromCacheMemory(
+            readJsonIfPresent(
+                fs,
+                `${CACHE_MEMORY_DIR}/pr-${prContext.number}.json`,
+            ),
+        );
+        if (priorStamp !== null) {
+            stampSource = "cache-memory";
+        }
+    }
     const plan = decideReReviewDepth({
         mode,
         isDraft,
@@ -642,7 +750,7 @@ export const runRereviewPlanCli = (
     });
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});
-    fs.writeFileSync(PLAN_OUT, JSON.stringify(plan, null, 2));
+    fs.writeFileSync(PLAN_OUT, JSON.stringify({...plan, stampSource}, null, 2));
     // A `new-hunks` plan implies a usable anchor (every guard that loses the
     // anchor resolves to full, whose staging is the whole diff).
     if (
@@ -657,7 +765,7 @@ export const runRereviewPlanCli = (
         );
     }
 
-    return {plan, warnings};
+    return {plan, warnings, stampSource};
 };
 
 /**
@@ -714,6 +822,7 @@ if (typeof require !== "undefined" && require.main === module) {
                 tripwireRearmed: result.plan.tripwireRearmed,
                 unreviewedShare:
                     result.plan.divergence?.unreviewedShare ?? null,
+                stampSource: result.stampSource,
                 warnings: result.warnings,
             }),
         );

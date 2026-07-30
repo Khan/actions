@@ -76,6 +76,21 @@ sheds remaining work (each shed reviewer becomes a skipped-dimension note) and
 submits the verdict from the findings validated so far, so a run never dies at a
 ceiling with everything spent and nothing posted.
 
+One more gate sits after the agent itself: the **dispatch-conformance gate**
+(`lib/dispatch-gate.ts`, a `post-steps:` step in the agent job). gh-aw queues
+every safe output during the agent run and executes the queue from a separate
+`safe_outputs` job, so the gate runs at the hand-off: it checks the queued
+verdict and findings against the staged `out/` sub-agent outputs (per re-review
+depth: the correctness pass wherever the depth dispatches one, the
+claim-validator whenever findings post, a disclosure note for every planned
+shed) and, on violation, strips the posting items from the queue and fails the
+job. A run that skipped its own dispatch protocol (observed in production:
+zero sub-agents dispatched, verdict submitted, nothing disclosed) becomes a
+red run that posts nothing instead of a normal-looking review; the run
+artifact keeps the original queue and the gate report for diagnosis. The gate
+proves the reviewer outputs were staged, not that a model authored them;
+script-driven dispatch (the next migration slice) is what closes that.
+
 ## Install
 
 ```sh
