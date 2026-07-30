@@ -41,30 +41,68 @@ missing, stop and ask; do not improvise a defect table from the branch diff.
 4. **Lifecycle plan** (optional): the push-2 content (fixes mixed with fresh
    seeds, plus their defect-table rows) and the push-3 content (everything
    fixed).
-5. **Budget approval**: project the cost FIRST and confirm. Measured basis:
-   roughly $7-10 per workflow-arm run; total is arms x (1 + lifecycle
+5. **Budget approval**: project the cost FIRST and confirm. Project in the
+   units the cap enforces: the firewall api-proxy's credit meter
+   (`ai_credits_this_response` sums in the run's token-usage log), NOT the
+   run-summary "AI credits" figure, which reads ~2.5x lower. Measured basis:
+   a full-depth, full-roster run of the memory-expiration shape meters
+   1,050-1,077 proxy credits (~$10.50); total is arms x (1 + lifecycle
    pushes), hosted-arm runs billed separately by the app. Print the
    projection and get an explicit yes before creating any PR.
 
 ## Step 1: isolated arm PRs
 
-For each arm, create `trial/<slug>/<arm>` from the seeded branch and open a
-PR in the consumer repo (title prefixed `[reviewer-trial]`, body stating it
-is a trial and will be closed unmerged). One PR per arm; never point two arms
-at the same PR, or their comments contaminate each other.
+Each arm is TWO branches and TWO PRs (the trial3 preview pattern):
+
+- A **scaffolding branch** cut from the seeded content's parent commit. It
+  carries everything trial-specific: the arm's compiled workflow, any
+  ROUTING override, and the removal of competing reviewer surfaces (below).
+  Open a scaffolding PR against the default branch (title prefixed
+  `[reviewer-trial]`, body disclosing the trial, the repo's opt-out label,
+  e.g. `skip-ai-review`, applied); it exists for review/audit only and is
+  closed unmerged.
+- A **content branch** stacking the operator's seeded commits on the
+  scaffolding, with its PR based on the scaffolding branch, so the diff
+  under review is ONLY the seeded change.
+
+**The arm PR must look like a real PR.** The reviewer reads the PR title
+and description (`pr-context.json`), so a `[reviewer-trial]` prefix, a
+body describing the trial, or any mention of seeded defects taints the
+run. Give the arm PR the seeded change's own realistic title and body
+(reuse the prior trial PR's body verbatim when replicating); the trial
+disclosure lives on the scaffolding PR and in the closing comment only.
+One PR per arm; never point two arms at the same PR, or their comments
+contaminate each other.
 
 Per-arm trigger setup:
 
 - `repo-default`: nothing extra; the repo's reviewer triggers normally.
-- `workflow @ ref`: commit the compiled workflow for that ref onto the arm
-  branch. **Give it a workflow name distinct from the repo's own reviewer
-  and from every other arm**: same-named gh-aw workflows share a per-PR
-  concurrency group and silently cancel each other (this ate a run in the
-  original trial). Then suppress the repo's default reviewer on this PR via
-  its documented opt-out (`skip-ai-review` label in Khan repos), so exactly
-  one reviewer runs per PR.
-- `hosted`: suppress the default reviewer the same way, then trigger with an
-  `@claude review` comment.
+- `workflow @ ref`: commit the compiled workflow for that ref onto the
+  scaffolding branch. **Give it a workflow name distinct from the repo's
+  own reviewer and from every other arm**: same-named gh-aw workflows share
+  a per-PR concurrency group and silently cancel each other (this ate a run
+  in the original trial). Its `if:` must exclude the scaffolding branch
+  itself (`head.ref != '<scaffolding branch>'`), so the scaffolding PR
+  burns no credits. **Replicate the trial credit cap**: set
+  `max-ai-credits: 2500` and the `REVIEW_MAX_AI_CREDITS: "2500"` env mirror
+  in the arm workflow; the shared default of 1000 sits BELOW the
+  proxy-metered cost of a full-depth, full-roster run (1,050-1,077 measured
+  on the memory-expiration shape), and a capped run dies mid-tail with the
+  review emitted but the cache record and artifact upload unfinished.
+- `hosted`: trigger with an `@claude review` comment after suppression.
+
+**Suppressing every other reviewer: do NOT label the arm PR.** The shared
+review workflow carries the same opt-out label gate as the repo's installed
+reviewer, so the repo's documented opt-out label (`skip-ai-review` in Khan
+repos) skips the TRIAL arm too (observed: 2-second skipped runs). Instead,
+remove the competing surfaces from the scaffolding branch so they are absent
+from the PR's merge ref: the repo's installed reviewer workflow files AND
+any pull_request-triggered shim that posts the reviewer's slash command
+(webapp's `review-kore-prs.yml` auto-posts `/review`, which launches the
+PRODUCTION reviewer from the default branch onto the trial PR). Note the
+limit: command-triggered workflows execute from the default branch, so file
+removal cannot stop a human typing the slash command; the shim removal
+plus nobody commenting is the actual protection.
 
 Draft PRs generally do not trigger reviewers; open the PRs ready-for-review.
 
