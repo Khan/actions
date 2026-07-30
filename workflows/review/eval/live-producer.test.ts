@@ -223,6 +223,162 @@ describe("produceLive", () => {
         expect(result.perAgent.every((a) => a.usd === 0.25)).toBe(true);
     });
 
+    it("dispatches the opt-in reviewers a case enables, in canonical order", async () => {
+        const enabledCase = parseCase(
+            {
+                ...CASE,
+                id: "produce-enabled",
+                routerConfig: {
+                    lensRules: [
+                        {pattern: "src/**", lenses: ["money-payments"]},
+                    ],
+                    // Listed out of canonical order deliberately.
+                    enabledReviewers: ["documentation", "conventions"],
+                },
+            },
+            "/corpus/incidents/produce-enabled/case.json",
+        );
+        const {runner, requests} = scriptedRunner({
+            "correctness-reviewer": [JSON.stringify({findings: []})],
+            "skill-auditor": [JSON.stringify({findings: []})],
+            "money-payments": [JSON.stringify({findings: [], hunts: []})],
+            conventions: [JSON.stringify({findings: []})],
+            documentation: [
+                JSON.stringify({
+                    findings: [
+                        {
+                            path: "src/a.ts",
+                            line: 1,
+                            label: "suggestion (non-blocking, documentation)",
+                            failure_scenario:
+                                "the next reader trusts a comment the change made false.",
+                            subject: "Comment describes the old value",
+                            discussion:
+                                '"// a is always 1" no longer holds: line 1 sets it to 2.',
+                        },
+                    ],
+                }),
+            ],
+            "claim-validator": [
+                validatorOutput([
+                    {
+                        id: "produce-enabled:live-documentation-1",
+                        verification: "confirmed",
+                    },
+                ]),
+            ],
+        });
+        const agents = new Map(AGENTS);
+        agents.set("conventions", agent("conventions"));
+        agents.set("documentation", agent("documentation"));
+
+        const result = await produceLive(enabledCase, agents, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(
+                Volume.fromJSON({
+                    "/corpus/incidents/produce-enabled/tree/src/a.ts":
+                        "const a = 2;\nexport {a};\n",
+                }),
+            ),
+        });
+
+        // Canonical ENABLEABLE_REVIEWERS order, not the case's listing order.
+        const finders = requests
+            .map((r) => r.name)
+            .filter((name) => name !== "claim-validator");
+        expect(finders).toEqual([
+            "correctness-reviewer",
+            "skill-auditor",
+            "conventions",
+            "documentation",
+            "money-payments",
+        ]);
+
+        // The opt-in reviewer's label-shape output is mapped, not thrown on.
+        const docs = result.findings.find((f) => f.source === "documentation");
+        expect(docs?.finding.lens).toBe("documentation");
+        expect(docs?.finding.severity).toBe("advisory");
+        expect(
+            result.perAgent.find((a) => a.name === "documentation")?.failed,
+        ).toBeFalsy();
+    });
+
+    it("records an enabled reviewer this arm does not define instead of throwing", async () => {
+        // The A/B baseline arm over a case that enables a reviewer the PR
+        // adds: the base tip's review.md cannot define it. Throwing here
+        // killed the whole run before any report (`runArm` does not wrap
+        // its produce call), so the missing dimension is recorded instead.
+        const enabledCase = parseCase(
+            {
+                ...CASE,
+                id: "produce-absent",
+                routerConfig: {enabledReviewers: ["documentation"]},
+            },
+            "/corpus/incidents/produce-absent/case.json",
+        );
+        const {runner, requests} = scriptedRunner({
+            "correctness-reviewer": [JSON.stringify({findings: []})],
+            "skill-auditor": [JSON.stringify({findings: []})],
+        });
+
+        const result = await produceLive(enabledCase, AGENTS, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(
+                Volume.fromJSON({
+                    "/corpus/incidents/produce-absent/tree/src/a.ts":
+                        "const a = 2;\nexport {a};\n",
+                }),
+            ),
+        });
+
+        expect(requests.map((r) => r.name)).not.toContain("documentation");
+        const entry = result.perAgent.find((a) => a.name === "documentation");
+        expect(entry?.absent).toBe(true);
+        expect(entry?.failed).toBeUndefined();
+        expect(entry?.usd).toBe(0);
+    });
+
+    it("still throws when an always-on finder is missing from the arm", async () => {
+        const agents = new Map(AGENTS);
+        agents.delete("skill-auditor");
+        const {runner} = scriptedRunner({
+            "correctness-reviewer": [JSON.stringify({findings: []})],
+        });
+        await expect(
+            produceLive(CASE, agents, {
+                runner,
+                stageDir: "/stage",
+                fs: volFs(caseVol()),
+            }),
+        ).rejects.toThrow(/"skill-auditor" is not defined/);
+    });
+
+    it("throws on an unknown enabledReviewers entry rather than measuring nothing", async () => {
+        const typoCase = parseCase(
+            {
+                ...CASE,
+                id: "produce-typo",
+                routerConfig: {enabledReviewers: ["documentaton"]},
+            },
+            "/corpus/incidents/produce-typo/case.json",
+        );
+        const {runner} = scriptedRunner({});
+        await expect(
+            produceLive(typoCase, AGENTS, {
+                runner,
+                stageDir: "/stage",
+                fs: volFs(
+                    Volume.fromJSON({
+                        "/corpus/incidents/produce-typo/tree/src/a.ts":
+                            "const a = 2;\n",
+                    }),
+                ),
+            }),
+        ).rejects.toThrow(/unknown enabledReviewers documentaton/);
+    });
+
     it("retries once on malformed output and keeps the second answer", async () => {
         const {runner, requests} = scriptedRunner({
             "correctness-reviewer": [

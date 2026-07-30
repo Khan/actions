@@ -239,6 +239,9 @@ export const runArm = async (
             failedAgents: produced.perAgent
                 .filter((a) => a.failed !== undefined)
                 .map((a) => `${a.name}: ${a.failed}`),
+            absentAgents: produced.perAgent
+                .filter((a) => a.absent === true)
+                .map((a) => a.name),
             ...(rereviewScore !== undefined ? {rereview: rereviewScore} : {}),
         });
     }

@@ -11,7 +11,12 @@
  * code under review.
  */
 
-import {validateFinding, type Anchor, type Finding} from "./finding-schema";
+import {
+    validateFinding,
+    type Anchor,
+    type Finding,
+    type Lens,
+} from "./finding-schema";
 import {extractJsonObject} from "./agent-json";
 import {
     BLOCKING_LABELS,
@@ -233,6 +238,21 @@ const fromOutOfLane = (
 };
 
 /**
+ * The `lens` each label-shape reviewer's findings carry. `lens` is
+ * code-assigned and never read from model output, and it is not merely
+ * descriptive: `labelForFinding` derives the rendered Conventional-Comment
+ * label from `severity` + `lens`, so this map is what makes a `documentation`
+ * finding post as `suggestion (non-blocking, documentation)` — the only
+ * channel by which a downstream consumer (autofix, which parses the label off
+ * the posted comment) can tell a documentation thread from any other
+ * non-blocking one. A reviewer absent from this map is correctness-shaped.
+ */
+const LABEL_SHAPE_LENS: Record<string, Lens> = {
+    "skill-auditor": "conventions",
+    documentation: "documentation",
+};
+
+/**
  * Parse one finder's output into candidates, per its contract. Every
  * label-shape reviewer (the defaults and the enabled whole-change reviewers)
  * returns `findings[]` with a `label` per finding; a routed specialist lens
@@ -267,7 +287,7 @@ export const parseFinderOutput = (
         if (!isLens) {
             return fromLabelShape(
                 agentName,
-                agentName === "skill-auditor" ? "conventions" : "correctness",
+                LABEL_SHAPE_LENS[agentName] ?? "correctness",
                 raw,
                 index,
             );

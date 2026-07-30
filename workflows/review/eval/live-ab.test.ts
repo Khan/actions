@@ -187,7 +187,58 @@ describe("runArm", () => {
         expect(report.perCase[0]?.failedAgents).toEqual([
             "skill-auditor: malformed output",
         ]);
+        expect(report.perCase[0]?.absentAgents).toEqual([]);
         expect(report.skippedCases).toEqual([]);
+    });
+
+    it("keeps an absent reviewer out of the failure list and reports it", async () => {
+        // The baseline arm of a new-reviewer A/B: the case enables a reviewer
+        // the arm's review.md does not define, so the dimension is absent
+        // rather than failed, and the run still produces a report.
+        const produceAbsent: ArmProduce = async () => ({
+            findings: [],
+            validation: [],
+            perAgent: [
+                {
+                    name: "correctness-reviewer",
+                    model: "m",
+                    usd: 1,
+                    turns: 1,
+                    wallMs: 10,
+                    retried: false,
+                },
+                {
+                    name: "documentation",
+                    model: "",
+                    usd: 0,
+                    turns: 0,
+                    wallMs: 0,
+                    retried: false,
+                    absent: true,
+                },
+            ],
+        });
+        const report = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            produceAbsent,
+            {maxUsd: 10},
+        );
+        expect(report.perCase[0]?.failedAgents).toEqual([]);
+        expect(report.perCase[0]?.absentAgents).toEqual(["documentation"]);
+        const markdown = renderMarkdownReport({
+            baseRef: "abc",
+            reviewMdSha: {baseline: "a".repeat(64), candidate: "b".repeat(64)},
+            arms: {baseline: report, candidate: {...report, arm: "candidate"}},
+            regressions: {lost: [], gained: []},
+            adversarialFailures: [],
+            gateRetries: [],
+        });
+        expect(markdown).toContain("### Arm asymmetry");
+        expect(markdown).toContain(
+            "case-1: `documentation` is not defined in the baseline arm's review.md",
+        );
+        expect(markdown).not.toContain("### Agent failures");
     });
 
     it("stops dispatching when the next case would cross the budget", async () => {
@@ -396,6 +447,63 @@ describe("renderMultiMarkdownReport", () => {
         expect(markdown).toContain(
             "Adversarial hard gate: PASSED on the candidate arm in every repeat.",
         );
+    });
+
+    it("carries the arm-asymmetry caveat, once, across repeats", async () => {
+        // The pooled report is what a multi-repeat run posts, so the caveat
+        // has to survive aggregation: the first run of this pair reported the
+        // absence only in the JSON, and the markdown a reader actually sees
+        // credited the delta with no note that the baseline arm never had the
+        // dimension.
+        const produceAbsent: ArmProduce = async () => ({
+            findings: [],
+            validation: [],
+            perAgent: [
+                {
+                    name: "documentation",
+                    model: "",
+                    usd: 0,
+                    turns: 0,
+                    wallMs: 0,
+                    retried: false,
+                    absent: true,
+                },
+            ],
+        });
+        const cases = [liveCase("case-1")];
+        const repeats: AbReport[] = [];
+        for (const _ of [1, 2]) {
+            const baseline = await runArm("baseline", cases, produceAbsent, {
+                maxUsd: 100,
+            });
+            const candidate = await runArm("candidate", cases, produceHit(1), {
+                maxUsd: 100,
+            });
+            repeats.push({
+                baseRef: "origin/main",
+                reviewMdSha: {
+                    baseline: "a".repeat(64),
+                    candidate: "b".repeat(64),
+                },
+                arms: {baseline, candidate},
+                regressions: diffRegressions(baseline, candidate),
+                adversarialFailures: [],
+                gateRetries: [],
+            });
+        }
+        const markdown = renderMultiMarkdownReport({
+            repeatCount: repeats.length,
+            repeats,
+            aggregate: aggregateSamples(
+                repeats.flatMap((r, i) => extractSamples(`repeat-${i + 1}`, r)),
+            ),
+            gate: [],
+            adversarialFailures: [],
+        });
+        const note =
+            "case-1: `documentation` is not defined in the baseline arm's review.md";
+        expect(markdown).toContain("### Arm asymmetry");
+        expect(markdown.split(note).length - 1).toBe(1);
     });
 
     it("reports minority gate flips as flakes and majorities as confirmed", async () => {

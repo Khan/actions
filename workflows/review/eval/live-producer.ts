@@ -48,7 +48,11 @@ import {
     type VerificationState,
 } from "./corpus/loader";
 import type {ExtractedAgent} from "./agent-extract";
-import type {ReReviewMode} from "../lib/routing-config";
+import {
+    ENABLEABLE_REVIEWERS,
+    type EnableableReviewer,
+    type ReReviewMode,
+} from "../lib/routing-config";
 import {extractJsonObject} from "./extract-json";
 import {
     rewriteAgentPrompt,
@@ -109,6 +113,13 @@ export type PerAgentReport = {
     retried: boolean;
     /** Fixed-format failure note; the agent contributed nothing when set. */
     failed?: string;
+    /**
+     * This arm's `review.md` does not define the reviewer, so it was never
+     * dispatched. Not a failure: it is the shape of a new-reviewer A/B, where
+     * the baseline arm cannot have the reviewer the candidate arm adds. Kept
+     * distinct from `failed` so the report can say which it was.
+     */
+    absent?: boolean;
 };
 
 /** The thread-reconciler's parsed decision over the staged prior threads. */
@@ -178,6 +189,46 @@ const LABEL_SHAPE_CONFIDENCE = 0.7;
 
 /** The always-on finders (pattern-triage and thread-reconciler excluded). */
 const DEFAULT_FINDERS = ["correctness-reviewer", "skill-auditor"] as const;
+
+/**
+ * The opt-in whole-change reviewers a case turns on, read from its
+ * `routerConfig.enabledReviewers` (the case-level stand-in for the consumer
+ * `ROUTING` file's `enable` lines, which the router threads in separately from
+ * {@link RouterConfig}).
+ *
+ * Production dispatches these alongside the defaults; the live producer did
+ * not, so an opt-in reviewer had no live arm at all and could not earn its
+ * `enable` line the way the repo's policy says it must. Cases that name none
+ * (every case before this existed) are unaffected: the roster is the defaults
+ * plus routed lenses, exactly as before.
+ *
+ * An unrecognised name throws rather than being skipped. A typo here would
+ * otherwise produce a full, green, expensive run that silently measured
+ * nothing about the reviewer the case exists to measure.
+ */
+const enabledReviewersOf = (corpusCase: CorpusCase): EnableableReviewer[] => {
+    const raw = corpusCase.routerConfig?.["enabledReviewers"];
+    if (raw === undefined) {
+        return [];
+    }
+    if (!Array.isArray(raw) || !raw.every((n) => typeof n === "string")) {
+        throw new Error(
+            `case "${corpusCase.id}": routerConfig.enabledReviewers must be an array of strings`,
+        );
+    }
+    const known: ReadonlySet<string> = new Set(ENABLEABLE_REVIEWERS);
+    const unknown = raw.filter((name) => !known.has(name));
+    if (unknown.length > 0) {
+        throw new Error(
+            `case "${corpusCase.id}": unknown enabledReviewers ${unknown.join(
+                ", ",
+            )}; known: ${ENABLEABLE_REVIEWERS.join(", ")}`,
+        );
+    }
+    // Canonical order, deduplicated: the roster (and so the report) must not
+    // depend on the order a case happened to list them in.
+    return ENABLEABLE_REVIEWERS.filter((name) => raw.includes(name));
+};
 
 const VALIDATOR = "claim-validator";
 
@@ -322,9 +373,24 @@ const parseAgentFindings = (
         throw new Error("output JSON has no findings array");
     }
 
+    // Every reviewer that emits the label-bearing shape rather than the
+    // structured finding schema: the two defaults, plus the opt-in
+    // whole-change reviewers (reachable since a case may `enable` them). A
+    // name missing here falls through to the specialist-lens branch and
+    // throws on the first finding, so keep this in step with
+    // ENABLEABLE_REVIEWERS.
     const labelLens: Record<string, {lens: Lens; source: string}> = {
         "correctness-reviewer": {lens: "correctness", source: "correctness"},
         "skill-auditor": {lens: "conventions", source: "skill"},
+        holistic: {lens: "holistic", source: "holistic"},
+        completeness: {lens: "completeness", source: "completeness"},
+        "test-adequacy": {lens: "test-adequacy", source: "test-adequacy"},
+        "first-principles": {
+            lens: "first-principles",
+            source: "first-principles",
+        },
+        conventions: {lens: "conventions", source: "conventions"},
+        documentation: {lens: "documentation", source: "documentation"},
     };
 
     const findings = rawFindings.map((raw, index): LiveFinding => {
@@ -547,30 +613,53 @@ export const produceLive = async (
         reReviewMode: options.reReviewMode ?? "full",
     });
 
-    // Roster: default finders + routed specialist lenses — sized by the
-    // re-review depth plan when the case is an open-PR snapshot. `scoped`
-    // keeps the full roster (over the scoped diff the staging already wrote);
-    // `flip-gated` keeps only the correctness pass; `fast` keeps none.
+    // Roster: default finders + the case's enabled opt-in reviewers + routed
+    // specialist lenses — sized by the re-review depth plan when the case is
+    // an open-PR snapshot. `scoped` keeps the full roster (over the scoped
+    // diff the staging already wrote); `flip-gated` keeps only the correctness
+    // pass; `fast` keeps none.
     const routerConfig: RouterConfig = {
         generatedPatterns: [],
         ...(corpusCase.routerConfig as Partial<RouterConfig>),
     };
     const routing = route({files: corpusCase.changedFiles}, routerConfig);
     const dispatch = staged.rereviewPlan?.dispatch ?? "all";
+    const enabled = enabledReviewersOf(corpusCase);
     const rosterNames =
         dispatch === "all"
-            ? [...DEFAULT_FINDERS, ...routing.lensesToSpawn]
+            ? [...DEFAULT_FINDERS, ...enabled, ...routing.lensesToSpawn]
             : dispatch === "reconcile+correctness"
             ? ["correctness-reviewer"]
             : [];
-    const roster = rosterNames.map((name) => {
+
+    /**
+     * An enabled opt-in reviewer this arm's `review.md` does not define is an
+     * **asymmetric arm**, not a broken one, and it is the normal shape of the
+     * A/B that graduates a new reviewer: the baseline arm is built from the
+     * base tip, which by construction predates the reviewer the candidate arm
+     * adds. Throwing here killed the whole A/B run before any report, since
+     * `runArm` does not wrap its `produce` call.
+     *
+     * Tolerating absence cannot mask a typo, which is the failure mode the
+     * `enabledReviewers` validation exists to prevent: the name is already
+     * checked against `ENABLEABLE_REVIEWERS`, so absence can only mean this
+     * arm predates the reviewer. Every other roster member stays a hard
+     * error: the default finders are always-on, and a routed lens name is not
+     * validated anywhere, so its absence really may be a mistake.
+     */
+    const absent: string[] = [];
+    const roster = rosterNames.flatMap((name) => {
         const agent = agents.get(name);
         if (agent === undefined) {
+            if ((enabled as readonly string[]).includes(name)) {
+                absent.push(name);
+                return [];
+            }
             throw new Error(
                 `sub-agent "${name}" is not defined in the extracted review.md`,
             );
         }
-        return agent;
+        return [agent];
     });
 
     const resolvePrompt = (agent: ExtractedAgent): string =>
@@ -581,7 +670,18 @@ export const produceLive = async (
 
     const usedIds = new Set<string>();
     const findings: LiveFinding[] = [];
-    const perAgent: PerAgentReport[] = [];
+    // The absent reviewers lead the report: a dimension this arm never had is
+    // recorded, never silent, so a reader can tell an asymmetric arm from an
+    // arm whose reviewer ran and found nothing.
+    const perAgent: PerAgentReport[] = absent.map((name) => ({
+        name,
+        model: "",
+        usd: 0,
+        turns: 0,
+        wallMs: 0,
+        retried: false,
+        absent: true,
+    }));
 
     const finderResults = await mapWithConcurrency(
         roster,

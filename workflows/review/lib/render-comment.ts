@@ -44,10 +44,19 @@ export const BLOCKING_LABELS = [
     "todo (blocking)",
 ] as const;
 
+/**
+ * The label the `documentation` reviewer's findings carry. Named because it is
+ * a selection key, not only a description: a documentation-scoped autofix is
+ * defined as "the posted threads whose label is this one", so the string is
+ * imported rather than re-spelled downstream.
+ */
+export const DOCUMENTATION_LABEL = "suggestion (non-blocking, documentation)";
+
 /** Every other Conventional-Comment label; none of these block. */
 export const NON_BLOCKING_LABELS = [
     "suggestion (non-blocking)",
     "suggestion (non-blocking, best-practice)",
+    DOCUMENTATION_LABEL,
     "nitpick (non-blocking)",
     "question (non-blocking)",
     "thought (non-blocking)",
@@ -85,13 +94,41 @@ export const isBlockingLabel = (label: string): boolean =>
 const BEST_PRACTICE_LENSES: ReadonlySet<Lens> = new Set<Lens>(["conventions"]);
 
 /**
+ * Lenses whose findings render as *documentation* labels. Same code-owned
+ * mapping as {@link BEST_PRACTICE_LENSES}, but the variant exists for a second
+ * reason beyond describing the finding to a human: it is the **only** channel
+ * by which a downstream consumer can tell a documentation thread from any other
+ * non-blocking thread.
+ *
+ * The autofix workflow selects the threads it may act on by parsing the
+ * Conventional-Comment label off each posted comment (`parseLeadingLabel`); it
+ * reads the PR's threads, not this run's artifact, so nothing else about the
+ * finding survives to reach it. A documentation-scoped autofix is therefore
+ * exactly "the threads carrying this label", and dropping the variant would
+ * silently widen that scope to every nit on the PR.
+ */
+const DOCUMENTATION_LENSES: ReadonlySet<Lens> = new Set<Lens>([
+    "documentation",
+]);
+
+/**
  * The Conventional-Comment label a finding renders with. Deterministic function
  * of the finding's `severity` and `lens` only:
  *
- *   - blocking  + best-practice lens -> `issue (blocking, best-practice)`
- *   - blocking  + other lens         -> `issue (blocking)`
- *   - advisory  + best-practice lens -> `suggestion (non-blocking, best-practice)`
- *   - advisory  + other lens         -> `suggestion (non-blocking)`
+ *   - blocking  + best-practice lens  -> `issue (blocking, best-practice)`
+ *   - blocking  + other lens          -> `issue (blocking)`
+ *   - advisory  + best-practice lens  -> `suggestion (non-blocking, best-practice)`
+ *   - advisory  + documentation lens  -> `suggestion (non-blocking, documentation)`
+ *   - advisory  + other lens          -> `suggestion (non-blocking)`
+ *
+ * There is deliberately **no blocking documentation variant**. The
+ * documentation reviewer is advisory-only (its definition permits it one
+ * label), so the blocking row is unreachable for it in practice; and minting a
+ * blocking docs label would enlarge `BLOCKING_LABELS`, which is the set
+ * `autofix: blocking` acts on. A documentation finding that somehow arrives
+ * blocking renders as a plain `issue (blocking)`: it keeps its severity and
+ * loses only its eligibility for the documentation autofix scope, which is the
+ * safe direction (a blocking finding wants a human, not a scoped bulk fix).
  *
  * The finer labels a human reviewer might pick (`todo`, `nitpick`, `question`,
  * `thought`, `note`) are not expressible in the two-value schema, so lenses fold
@@ -105,6 +142,9 @@ export const labelForFinding = (finding: Finding): ConventionalLabel => {
         return bestPractice
             ? "issue (blocking, best-practice)"
             : "issue (blocking)";
+    }
+    if (DOCUMENTATION_LENSES.has(finding.lens)) {
+        return DOCUMENTATION_LABEL;
     }
     return bestPractice
         ? "suggestion (non-blocking, best-practice)"
