@@ -42,6 +42,7 @@
 import {
     dedupeClaims,
     openThreadsFromStaged,
+    stagedThreadShapeFailure,
     suppressOpenThreadDuplicates,
     type ClaimMerge,
     type ThreadSuppression,
@@ -341,6 +342,8 @@ export type DispatchResult = {
      * (submission.ts): the open thread is the actionable feedback.
      */
     threadSuppressions: ThreadSuppression[];
+    /** Set when every staged thread failed the filter (see dedup.ts). */
+    threadSuppressionUnavailable?: {unusableThreads: number; warning: string};
     /** The reconciler's decision, when it ran and parsed. */
     reconciliation?: {resolve: string[]; keep: string[]; skipLines: unknown};
     /** correctness-reviewer `files[]` risk levels (Steps 7-8). */
@@ -837,14 +840,22 @@ export const runDispatch = async (
     // re-posted at a new anchor. Threads the reconciler resolves this run
     // are exempt; when the reconciler was unavailable, nothing resolves, so
     // every staged bot thread suppresses (fail toward fewer duplicate
-    // threads). Only bot-authored openers may suppress: the filter lives in
-    // openThreadsFromStaged (dedup.ts), since threads.json staging is
-    // prompt-executed and unenforced upstream.
-    const suppression = suppressOpenThreadDuplicates(
-        claims,
-        openThreadsFromStaged(threads, new Set(reconciliation?.resolve ?? [])),
-    );
+    // threads). The bot-opener filter, and the check for a staging whose shape
+    // defeats it and so suppresses nothing, both live in dedup.ts: threads.json
+    // staging is prompt-executed and unenforced upstream.
+    const resolvedIds = new Set(reconciliation?.resolve ?? []);
+    const openThreads = openThreadsFromStaged(threads, resolvedIds);
+    const suppression = suppressOpenThreadDuplicates(claims, openThreads);
     claims = suppression.kept;
+    const threadSuppressionUnavailable = stagedThreadShapeFailure(
+        threads,
+        openThreads,
+        resolvedIds,
+    );
+    if (threadSuppressionUnavailable !== undefined) {
+        // eslint-disable-next-line no-console
+        console.error(threadSuppressionUnavailable.warning);
+    }
 
     // Phase 3: claim validation.
     let validatorRan = false;
@@ -922,6 +933,9 @@ export const runDispatch = async (
         claims,
         merges: deduped.merges,
         threadSuppressions: suppression.suppressed,
+        ...(threadSuppressionUnavailable !== undefined
+            ? {threadSuppressionUnavailable}
+            : {}),
         ...(reconciliation !== undefined ? {reconciliation} : {}),
         ...(riskFiles !== undefined ? {riskFiles} : {}),
         ...(patterns !== undefined ? {patterns} : {}),
