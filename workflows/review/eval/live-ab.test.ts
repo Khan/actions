@@ -449,6 +449,63 @@ describe("renderMultiMarkdownReport", () => {
         );
     });
 
+    it("carries the arm-asymmetry caveat, once, across repeats", async () => {
+        // The pooled report is what a multi-repeat run posts, so the caveat
+        // has to survive aggregation: the first run of this pair reported the
+        // absence only in the JSON, and the markdown a reader actually sees
+        // credited the delta with no note that the baseline arm never had the
+        // dimension.
+        const produceAbsent: ArmProduce = async () => ({
+            findings: [],
+            validation: [],
+            perAgent: [
+                {
+                    name: "documentation",
+                    model: "",
+                    usd: 0,
+                    turns: 0,
+                    wallMs: 0,
+                    retried: false,
+                    absent: true,
+                },
+            ],
+        });
+        const cases = [liveCase("case-1")];
+        const repeats: AbReport[] = [];
+        for (const _ of [1, 2]) {
+            const baseline = await runArm("baseline", cases, produceAbsent, {
+                maxUsd: 100,
+            });
+            const candidate = await runArm("candidate", cases, produceHit(1), {
+                maxUsd: 100,
+            });
+            repeats.push({
+                baseRef: "origin/main",
+                reviewMdSha: {
+                    baseline: "a".repeat(64),
+                    candidate: "b".repeat(64),
+                },
+                arms: {baseline, candidate},
+                regressions: diffRegressions(baseline, candidate),
+                adversarialFailures: [],
+                gateRetries: [],
+            });
+        }
+        const markdown = renderMultiMarkdownReport({
+            repeatCount: repeats.length,
+            repeats,
+            aggregate: aggregateSamples(
+                repeats.flatMap((r, i) => extractSamples(`repeat-${i + 1}`, r)),
+            ),
+            gate: [],
+            adversarialFailures: [],
+        });
+        const note =
+            "case-1: `documentation` is not defined in the baseline arm's review.md";
+        expect(markdown).toContain("### Arm asymmetry");
+        expect(markdown.split(note).length - 1).toBe(1);
+    });
+
     it("reports minority gate flips as flakes and majorities as confirmed", async () => {
         const adversarial = liveCase("adv-1", {
             category: "adversarial-injection",

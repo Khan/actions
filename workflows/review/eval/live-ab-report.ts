@@ -175,6 +175,17 @@ export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
         renderAggregateMarkdown(report.aggregate),
         "",
     ];
+    const asymmetry = armAsymmetryLines(
+        report.repeats.map((repeat) => repeat.arms),
+    );
+    if (asymmetry.length > 0) {
+        lines.push(
+            ASYMMETRY_HEADING,
+            "",
+            ...asymmetry.map((a) => `- ${a}`),
+            "",
+        );
+    }
     if (report.gate.length === 0) {
         lines.push(
             "Adversarial hard gate: PASSED on the candidate arm in every repeat.",
@@ -199,6 +210,38 @@ export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
     }
     return lines.join("\n");
 };
+
+/**
+ * Arm asymmetry is a caveat on the delta, not a failure: a reviewer only the
+ * candidate arm defines makes its dimension pure gain by construction, which
+ * the reader has to know before crediting the delta to a prompt change. Shared
+ * by both renderers, and deduplicated, since a repeated run reports the same
+ * absence once per repeat.
+ */
+const armAsymmetryLines = (
+    pairs: readonly {baseline: ArmRunReport; candidate: ArmRunReport}[],
+): string[] => [
+    ...new Set(
+        pairs.flatMap(({baseline, candidate}) =>
+            (
+                [
+                    ["baseline", baseline],
+                    ["candidate", candidate],
+                ] as const
+            ).flatMap(([arm, report]) =>
+                report.perCase.flatMap((c) =>
+                    (c.absentAgents ?? []).map(
+                        (agent) =>
+                            `${c.caseId}: \`${agent}\` is not defined in the ${arm} arm's review.md, so that arm ran without the dimension`,
+                    ),
+                ),
+            ),
+        ),
+    ),
+];
+
+const ASYMMETRY_HEADING =
+    "### Arm asymmetry (expected when the PR adds a reviewer)";
 
 /** Total anchor-snaps across an arm's case runs (see `perCase.snapped`). */
 const snappedTotal = (arm: ArmRunReport): number =>
@@ -492,26 +535,10 @@ export const renderMarkdownReport = (report: AbReport): string => {
             "",
         );
     }
-    // Arm asymmetry is a caveat on the delta, not a failure: a reviewer only
-    // the candidate arm defines makes its dimension pure gain by construction,
-    // which the reader has to know before crediting the delta to a prompt
-    // change.
-    const asymmetry = (
-        [
-            ["baseline", baseline],
-            ["candidate", candidate],
-        ] as const
-    ).flatMap(([arm, report]) =>
-        report.perCase.flatMap((c) =>
-            (c.absentAgents ?? []).map(
-                (agent) =>
-                    `${c.caseId}: \`${agent}\` is not defined in the ${arm} arm's review.md, so that arm ran without the dimension`,
-            ),
-        ),
-    );
+    const asymmetry = armAsymmetryLines([{baseline, candidate}]);
     if (asymmetry.length > 0) {
         lines.push(
-            "### Arm asymmetry (expected when the PR adds a reviewer)",
+            ASYMMETRY_HEADING,
             "",
             ...asymmetry.map((a) => `- ${a}`),
             "",
