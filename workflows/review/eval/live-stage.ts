@@ -35,7 +35,7 @@ import {
     writeFileSync,
 } from "node:fs";
 
-import {annotateDiffLineNumbers} from "../lib/diff";
+import {annotateDiffLineNumbers, splitUnifiedDiff} from "../lib/diff";
 import {computeDiffProvenance} from "../lib/provenance";
 import {
     buildScopedDiff,
@@ -148,6 +148,10 @@ const stageRereview = (
         thread_id: `t-${thread.key}`,
         path: thread.path,
         line: thread.line,
+        // Corpus threads are open by definition; staged explicitly because
+        // the dispatcher's open-thread suppression only trusts the flag it
+        // can read (dedup.ts `openThreadsFromStaged`).
+        resolved: false,
         comments: [
             {author: "github-actions[bot]", body: thread.body},
             ...(thread.authorReply !== undefined
@@ -205,6 +209,27 @@ const stageRereview = (
             scopedAnnotated,
         );
         fs.writeFileSync(`${contextDir}/pr-annotated.diff`, scopedAnnotated);
+        // Production parity (stage-pr.ts): with the review diff shrunk to
+        // the unseen hunks, the reviewed-file roster shrinks with it, so the
+        // dispatched reviewers see the same file list in both harnesses.
+        const scopedPaths = new Set(
+            splitUnifiedDiff(scoped).map((section) => section.path),
+        );
+        const files = JSON.parse(
+            fs.readFileSync(`${contextDir}/review-files.json`, "utf8"),
+        ) as {path?: unknown}[];
+        fs.writeFileSync(
+            `${contextDir}/review-files.json`,
+            JSON.stringify(
+                files.filter(
+                    (entry) =>
+                        typeof entry.path === "string" &&
+                        scopedPaths.has(entry.path),
+                ),
+                null,
+                2,
+            ),
+        );
     }
     return plan;
 };

@@ -178,6 +178,36 @@ export const splitUnifiedDiff = (diff: string): DiffFileSection[] => {
     return sections;
 };
 
+/** Whole-line hunk header (used to split hunk bodies out of patch text). */
+const PATCH_HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/;
+
+/**
+ * Split patch text into its hunks (header line included in each). Works on a
+ * bare per-file `patch` (GitHub's file API shape) and on a file section's
+ * text alike; anything before the first hunk header is dropped. The single
+ * shared splitter for the scope hasher (stage-pr.ts) and the re-review
+ * fingerprint (rereview-mode.ts), so their hunk boundaries cannot drift
+ * apart.
+ */
+export const splitPatchHunks = (patch: string): string[] => {
+    const hunks: string[] = [];
+    let current: string[] | null = null;
+    for (const line of patch.split("\n")) {
+        if (PATCH_HUNK_HEADER_RE.test(line)) {
+            if (current !== null) {
+                hunks.push(current.join("\n"));
+            }
+            current = [line];
+        } else if (current !== null) {
+            current.push(line);
+        }
+    }
+    if (current !== null) {
+        hunks.push(current.join("\n"));
+    }
+    return hunks;
+};
+
 /**
  * Compute the per-file changed-line map for a unified diff. Pure: same diff
  * text, same map. Line arrays are sorted ascending and deduplicated.

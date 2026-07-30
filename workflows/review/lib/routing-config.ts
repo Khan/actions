@@ -94,6 +94,20 @@ export type ReReviewMode = typeof RE_REVIEW_MODES[number];
 
 export const DEFAULT_RE_REVIEW_MODE: ReReviewMode = "full";
 
+/**
+ * The dispatch-mode dial (deterministic-orchestrator slice 2): `task` keeps
+ * the orchestrator's Task-tool dispatch (today's behavior); `scripted` has
+ * the orchestrator invoke the deterministic dispatcher (`lib/dispatch.ts`)
+ * once, which runs Step 3's phases as code. Opt-in per repo while the
+ * scripted path is live-trial-gated; the default flips with a release once
+ * the trial holds.
+ */
+export const DISPATCH_MODES = ["task", "scripted"] as const;
+
+export type DispatchMode = typeof DISPATCH_MODES[number];
+
+export const DEFAULT_DISPATCH_MODE: DispatchMode = "task";
+
 /** Parsed `.github/aw/review/ROUTING` config. */
 export type RoutingFileConfig = {
     lensRules: LensRule[];
@@ -102,6 +116,8 @@ export type RoutingFileConfig = {
     enabledReviewers: EnableableReviewer[];
     /** The repo's re-review mode (`re-review` line; default `full`). */
     reReviewMode: ReReviewMode;
+    /** The repo's dispatch mode (`dispatch` line; default `task`). */
+    dispatchMode: DispatchMode;
     /** Fixed-format parse warnings (unknown lens/tier, no-op rule). */
     warnings: string[];
 };
@@ -115,6 +131,7 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  *     <pattern> [lens=<lens>[,<lens>…]] [tier=trivial|low|medium|high] [direction-dependent]
  *     enable <reviewer>[,<reviewer>…]
  *     re-review full|scoped|flip-gated|fast
+ *     dispatch task|scripted
  *
  * `lens=` names specialist lenses to spawn when the pattern is touched (multiple
  * matching rules union their lenses). `tier=` assigns a risk tier; when several
@@ -128,7 +145,9 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  * ({@link ENABLEABLE_REVIEWERS}) for every review in this repo.
  * `re-review` sets the repo's re-review mode ({@link RE_REVIEW_MODES}); when
  * several lines set it the LAST one wins (with a warning), matching the
- * file's last-rule-wins convention.
+ * file's last-rule-wins convention. `dispatch` sets the dispatch mode
+ * ({@link DISPATCH_MODES}) with the same last-one-wins rule; an unknown mode
+ * degrades to `task` (today's behavior).
  *
  * Malformed fields and unknown lens/reviewer names produce a warning and skip
  * the lens or line rather than aborting the run: routing degrades to fewer
@@ -141,6 +160,8 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
     const enabled = new Set<EnableableReviewer>();
     let reReviewMode: ReReviewMode = DEFAULT_RE_REVIEW_MODE;
     let reReviewLineSeen = false;
+    let dispatchMode: DispatchMode = DEFAULT_DISPATCH_MODE;
+    let dispatchLineSeen = false;
     const warnings: string[] = [];
 
     const lines = content.split(/\r?\n/);
@@ -201,6 +222,33 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
             }
             reReviewMode = mode as ReReviewMode;
             reReviewLineSeen = true;
+            continue;
+        }
+
+        if (pattern === "dispatch") {
+            if (fields.length !== 1) {
+                warnings.push(
+                    `ROUTING line ${lineNo}: dispatch takes exactly one ` +
+                        `mode (line skipped)`,
+                );
+                continue;
+            }
+            const mode = fields[0];
+            if (!(DISPATCH_MODES as readonly string[]).includes(mode)) {
+                warnings.push(
+                    `ROUTING line ${lineNo}: unknown dispatch mode ` +
+                        `"${mode}" (kept ${dispatchMode})`,
+                );
+                continue;
+            }
+            if (dispatchLineSeen) {
+                warnings.push(
+                    `ROUTING line ${lineNo}: duplicate dispatch line ` +
+                        `(last one wins)`,
+                );
+            }
+            dispatchMode = mode as DispatchMode;
+            dispatchLineSeen = true;
             continue;
         }
 
@@ -278,6 +326,7 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
             enabled.has(reviewer),
         ),
         reReviewMode,
+        dispatchMode,
         warnings,
     };
 };

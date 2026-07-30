@@ -9,9 +9,13 @@ import type {RunBudget} from "./router";
 import type {RiskTier} from "./routing-config";
 
 /**
- * Default budget table, sized inside the workflow's assumed 20-minute / $10
- * per-run ceiling. Every field scales monotonically with the tier; the table
- * is exported so the eval suite and consumers can override it.
+ * Default budget table, originally sized inside the workflow's 20-minute /
+ * $10 per-run ceiling. The job ceiling is 40 minutes as of 2026-07-21 (four
+ * high-tier runs died at the old ceiling in one evening); the soft targets
+ * below were deliberately left unchanged, so `high`'s 20-minute wall-clock
+ * target is now a genuine landing target with headroom instead of sitting
+ * exactly on the kill line. Every field scales monotonically with the tier;
+ * the table is exported so the eval suite and consumers can override it.
  *
  * Calibration (re-measured 2026-07-10 against production runs on Khan/actions
  * #232/#238): a run spends ~3 minutes of fixed overhead (staging, router,
