@@ -36,8 +36,8 @@
  * at all. {@link isLoopEligible} states the rule for whoever adds the cadence
  * axis and has no caller until they write one; calling it is their job.
  *
- * The generator is a **memoryless re-derivation over the whole diff**, not the
- * fixer's own prose, which is what this comment used to guess.
+ * The generator observed was a **memoryless re-derivation over the whole
+ * diff**, not the fixer's own prose, which is what this comment used to guess.
  * Khan/webapp#41194 measured one blocking-scoped cycle: the fix cleared its
  * finding, the re-review resolved that thread and approved, and then filed two
  * fresh non-blocking findings against code the fixer never wrote (`counts.go:7`
@@ -48,6 +48,17 @@
  * review. Open non-blocking threads went 3 → 5 in one cycle with no nits-scoped
  * work done. The fixer does not have to have written anything for this to
  * happen.
+ *
+ * Read memorylessness as a **condition, not a property**: it was a consumer
+ * version artifact with a named remedy. That repo pins `review-v1.7.0`
+ * (2026-07-21), which carries no `stage-pr.ts` and no `stampSource` at all, so
+ * its only fingerprint carrier was the review-body stamp that gh-aw's ingest
+ * sanitizer strips; `review-v1.8.0` (2026-07-30) has both, so a consumer on it
+ * can anchor a re-review and scope one. What a cadence axis must not assume is
+ * that any given consumer is on it. (Distinct from autofix's own currency
+ * check, which is degraded for an unrelated and non-version reason: cache
+ * memory is scoped per workflow, so the reviewer's carrier is unreachable from
+ * here. See `staleness.ts`.)
  */
 
 import {
