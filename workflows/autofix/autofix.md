@@ -120,9 +120,16 @@ safe-outputs:
   # The commit. `KHAN_ACTIONS_BOT_TOKEN` rather than the default GITHUB_TOKEN is
   # load-bearing, not incidental: GitHub does not create workflow runs for
   # events triggered by GITHUB_TOKEN, so a push made with it would emit no
-  # `synchronize` and the reviewer would never re-review the fix. The re-review
-  # IS the verification step for an autofix commit, so an unverified push is
-  # worse than no push at all.
+  # `synchronize` and the reviewer would never re-review the fix.
+  #
+  # That re-review is the INTENDED verification for an autofix commit, and it is
+  # best-effort rather than guaranteed: the chain from this push to a posted
+  # review has several links and any of them can fail. Khan/webapp#41194 lost
+  # one to a gh-aw setup failure that was invisible on the PR. So the reason for
+  # the token is the stronger one: GITHUB_TOKEN guarantees zero re-review, the
+  # bot token buys a best-effort one. Step 7 states the pending status on the PR
+  # so the human re-arm can act as the backstop, and the README's "Verification
+  # is best-effort" carries the measured numbers.
   #
   # `if-no-changes: ignore` because "the agent decided nothing needed changing"
   # is a legitimate outcome that Step 7 already reports in prose; failing the
@@ -548,8 +555,8 @@ specific: "Renamed to `parsedConfig` and updated the three call sites" beats
 "Fixed".
 
 Do **not** resolve any thread. The next review decides whether the fix settled
-the finding; that is the whole verification story for this workflow, and
-resolving here would erase it.
+the finding; that is the whole verification story for this workflow, it is
+best-effort (see Step 7), and resolving here would erase it.
 
 For an item you deliberately left unfixed (Step 3 or Step 4), reply saying so
 and why, in one sentence. A finding that was handed to you and silently skipped
@@ -557,24 +564,25 @@ is the one outcome an author cannot debug.
 
 ## Step 7: Post the run summary
 
-**Post nothing when the run was unremarkable.** A clean run already tells its
-own story in three other places: the thread reply on each fixed finding, the
-commit in the PR timeline, and the engine's own "Commit pushed" comment. A
-fourth notification repeating them is noise, and noise on every run is how a
-bot teaches people to stop reading it.
+**Post exactly one `add-comment`, on every path through this workflow.** A
+refusal, a no-op, a finding left unfixed, an abandoned push, a run that fixed
+everything cleanly: all of them get one comment, and never more than one.
 
-So decide first. **Skip the comment entirely** when *all* of these hold:
+An earlier version of this step stayed quiet when a run was unremarkable, on the
+reasoning that a clean run already tells its own story in three other places:
+the thread reply on each fixed finding, the commit in the PR timeline, and the
+engine's own "Commit pushed" comment, so a fourth notification repeating them is
+noise. That reasoning was right about noise and wrong about what still needed
+saying. All three of those places record that something *changed*; none of them
+records that nothing has *checked* it. Item 8 below is the only place a reader
+learns that, so the comment carrying it cannot be optional.
 
-- the plan's `status` is `armed` and every item was fixed,
-- `plan.skipped` contains only `out-of-scope` entries (the expected case: the
-  author chose a scope and the other threads were outside it),
-- `plan.stalePaths` is empty,
-- `plan.degradedNote` is empty.
-
-**Otherwise post exactly one `add-comment`**, because something happened that
-the thread replies cannot convey. That is any of: a refusal, a no-op, a finding
-left unfixed, an abandoned push, a skip for any reason other than
-`out-of-scope`, files gone stale, or a degraded currency check.
+The quiet branch was therefore retracted deliberately, not lost. It was also
+unreachable in practice: it required `plan.degradedNote` to be empty, and the
+reviewer's hidden fingerprint stamp is stripped from every posted review (the
+README's "Degrading when there is no fingerprint" documents it), so that note is
+essentially always set. Do not reintroduce the branch without first answering
+where the pending-verification statement goes instead.
 
 Do **not** try to add a hidden HTML-comment marker of your own. gh-aw's
 safe-output ingest strips every XML/HTML comment before posting
@@ -609,8 +617,27 @@ Write the body directly, in this order, including only the parts that apply:
 7. If `plan.degradedNote` is non-empty, that note **verbatim** on its own line.
    Never omit it and never soften it: a weaker check that goes unmentioned is
    indistinguishable from the full one.
-8. When anything was pushed, last line, exactly: `The reviewer will re-review
-   this push; autofix does not resolve its own threads.`
+8. When anything was pushed, last two lines, exactly:
+
+   `Not verified: nothing has checked this commit. Autofix does not resolve its
+   own threads; whether these fixes settled the findings is decided by the
+   reviewer's next review of this branch, not by this run.`
+
+   `That re-review can fail, or never trigger at all; a /review comment asks for
+   one at any time.`
+
+Items 6 and 8 are different claims and both can appear in the same comment: item
+6 is about what this run could check *before* pushing, item 8 about what checks
+the commit *after*. Do not merge them or drop one as a duplicate.
+
+Both of item 8's lines have to still be true a week later, once the re-review
+has landed and approved. The first is tensed to the moment of writing, which is
+what makes it safe. The second states a standing fact and a standing capability,
+not a conditional instruction, because a one-shot run can never come back and
+retract one: `If no review appears, comment /review` would leave every verified
+PR permanently carrying an instruction to go and trigger a review. The same
+objection rules out putting verification state in the commit trailer, where
+nothing could ever update it either.
 
 Write nothing else. No preamble, no summary of the PR, no opinion on the code.
 Do not use em dashes; a semicolon, colon, or full stop reads better and matches

@@ -57,10 +57,59 @@ A command-armed run removes nothing, and that is deliberate: a comment is
 already self-clearing, and any autofix label sitting on the PR was not what
 armed the run. Clearing it would discard an intent nobody acted on.
 
-The push is made with `KHAN_ACTIONS_BOT_TOKEN`, so it triggers a re-review.
-**That re-review is the verification step**: autofix never resolves a thread,
-and whether a fix actually settled a finding is decided by the next review, not
-by the run that wrote it.
+The push is made with `KHAN_ACTIONS_BOT_TOKEN`, so it can trigger a re-review.
+That re-review is the **intended** verification: autofix never resolves a
+thread, and whether a fix actually settled a finding is decided by the next
+review, not by the run that wrote it.
+
+### Verification is best-effort
+
+Nothing between the fix and the merge gate is guaranteed to check an autofix
+commit, and the summary comment says so on every push.
+
+The chain from the push to a posted review has links, and how many depends on
+the consumer. With the shared push-triggered reviewer it is two (push →
+`synchronize` → reviewer). In Khan/webapp, where the reviewer is an
+`issue_comment` local override, it is four (push → `synchronize` →
+`review-kore-prs.yml` posts `/review` → reviewer). Any link can fail
+independently of gh-aw.
+
+Whether a break is *visible* also depends on the consumer, and this is the part
+worth knowing before trialling autofix in a new repo:
+
+- **Push-triggered reviewer:** the reviewer's jobs join the PR's check suite, so
+  a failed re-review is a red X on the commit autofix pushed.
+- **`issue_comment`-triggered reviewer:** the run's head SHA is a default-branch
+  merge commit, so it never joins the PR's check suite at all. With
+  `status-comment: false` it posts nothing either. gh-aw's own fallback
+  (`failure-report-as-issue`) is then the last line of defence, and it is
+  unavailable in a repo with issues disabled.
+
+In Khan/webapp all three of those conditions hold at once: the reviewer is an
+`issue_comment` override, `status-comment` is false, and issues are disabled. On
+#41194 the re-review of the autofix commit `ad8da8d4` failed in `Install AWF
+binary`, before the model ran, so it cost zero AI credits and produced no
+output; gh-aw tried to file its failure issue and got `410 Issues has been
+disabled in this repository`. The only trace
+on the PR was the 👀 the activation job had already put on the `/review`
+comment, which is indistinguishable from "still running". The commit sat
+unverified for 36 minutes, and the human who eventually re-triggered it found it
+by querying the Actions runs list, not from anything on the PR. This is not a
+rare shape: of that repo's last 100 reviewer runs, 15 of the 53 that started
+ended in `failure`.
+
+**The human re-arming loop is the backstop, and that is accepted for v1.** It is
+the same loop that arms autofix in the first place. What v1 owes it is the
+pending statement, not machinery.
+
+A detector is deferred, not blocked, and needs nothing added here. It does not
+require reading the trailer back: the question is "does a review by the reviewer
+bot exist whose `commit_id` is this autofix commit or later", answerable from
+the SHA alone. What it needs is a home that runs *later* than the autofix run,
+which a one-shot workflow does not have. Note also that verification state must
+never go **in** the trailer: nothing in v1 could ever flip an `Autofix-Verified:
+pending` field, so it would sit permanently wrong on every commit that was in
+fact verified.
 
 ## The axis model
 
@@ -210,8 +259,10 @@ autofix reads its threads, its label taxonomy, and its fingerprint stamp.
 - `ANTHROPIC_API_KEY` — the `claude` engine.
 - `KHAN_ACTIONS_BOT_TOKEN` — the push. **Not optional and not substitutable
   with `GITHUB_TOKEN`**: GitHub creates no workflow runs for events triggered by
-  `GITHUB_TOKEN`, so a push made with it emits no `synchronize`, the reviewer
-  never re-reviews, and the fix ships unverified.
+  `GITHUB_TOKEN`, so a push made with it emits no `synchronize` and the reviewer
+  is never even asked to re-review. With the bot token it is asked; see
+  [Verification is best-effort](#verification-is-best-effort) for what that does
+  and does not guarantee.
 
 ### Repository setup
 
