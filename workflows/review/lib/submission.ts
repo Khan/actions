@@ -51,6 +51,7 @@
 
 import {computeRisksPatternsKey, RISKS_PATTERNS_KEY_PATH} from "./cache-record";
 import type {Claim} from "./dispatch-contracts";
+import {runCli as runNotifiedCli} from "./notified";
 import {isBlockingLabel, renderReviewBody} from "./render-comment";
 import {runRereviewCli, type RereviewCliFs} from "./rereview";
 import {
@@ -219,7 +220,20 @@ export const renderClaimComment = (claim: Claim): string => {
  * Writes `submission-plan.json` (and, via the rereview CLI it invokes,
  * `rereview.json`). Returns what was written.
  */
-export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
+/**
+ * `repoRoot` is the reviewed repo's root, which the NOTIFIED computation
+ * below reads `.github/NOTIFIED` from. It is a parameter rather than an
+ * environment read inside the function so a test can pin it: under Actions
+ * `GITHUB_WORKSPACE` is always set, so an env-derived default silently sends
+ * a fake-filesystem test looking under the runner's real workspace path, and
+ * the case passes locally while failing in CI.
+ */
+export const runSubmissionCli = (
+    fs: SubmissionFs,
+    repoRoot: string = process.env.REVIEW_REPO_ROOT ??
+        process.env.GITHUB_WORKSPACE ??
+        ".",
+): SubmissionPlan => {
     const notes: string[] = [];
     const dispatch = readJson(fs, `${REVIEW_DIR}/dispatch-result.json`) as
         | {
@@ -284,12 +298,24 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
             | undefined;
         // The NOTIFIED match set rides the same key: Step 7 posts one Review
         // Guidance comment for risks, patterns, AND notifications, so a run
-        // that changed only the notified set must still re-post. An absent
-        // notified.json (no `.github/NOTIFIED` in the consumer) contributes
-        // nothing, which is the same key this produced before the feature.
-        const notified = readJson(fs, `${REVIEW_DIR}/notified.json`) as
-            | {signature?: unknown}
-            | undefined;
+        // that changed only the notified set must still re-post.
+        //
+        // COMPUTED HERE, not read from notified.json. The notified CLI does
+        // not run until Step 7, long after this one, so reading the file
+        // would find nothing on every real run: `signature` would always be
+        // undefined, the `notified:` component would always drop out, and a
+        // `.github/NOTIFIED`-only change would stage a key identical to the
+        // prior run's — leaving Step 7 to read the guidance as unchanged and
+        // never mention a newly-subscribed team. That is precisely the bug
+        // this fold exists to fix, so the fold has to own the computation.
+        //
+        // `runCli` is pure over staged inputs that the pre-agent step writes
+        // as hard prerequisites (`files.json`, `full.diff`), so it is safe to
+        // call this early; it also stages `notified.json`, which makes Step
+        // 7's own invocation idempotent rather than first-of-its-kind. A repo
+        // with no `.github/NOTIFIED` yields an empty signature, the same key
+        // this produced before the feature.
+        const notified = runNotifiedCli(fs, repoRoot);
         fs.writeFileSync(
             RISKS_PATTERNS_KEY_PATH,
             computeRisksPatternsKey({
@@ -297,7 +323,7 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
                 patterns: dispatch.patterns,
                 excludedFiles: dispatch.excludedFiles,
                 owners: routing?.teams?.owners,
-                notifiedSignature: notified?.signature,
+                notifiedSignature: notified.signature,
             }),
         );
     }
