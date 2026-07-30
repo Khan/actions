@@ -186,40 +186,33 @@ network:
 engine:
   id: claude
   model: claude-opus-4-8
-timeout-minutes: 20
+# KHAN/ACTIONS LOCAL OVERRIDE: matches the shared default bumped to 40 at source
+# (this pinned v1.7.0 copy predates the bump; drop this override at the next
+# installed-reviewer version bump). Motivation: on 2026-07-21 four high-tier runs
+# on four PRs here were killed at the old 20-minute ceiling after landing their
+# reviews but before the cache-memory update, and high's 20-minute runBudget soft
+# target sat exactly on the kill line, so shedding could never save them.
+timeout-minutes: 40
 
-# claude-fable-5 (pinned by first-principles and correctness-reviewer) is not in the
-# AI-credits pricing table of the firewall api-proxy that gh-aw <= v0.81.x pins
-# (gh-aw-firewall v0.27.11), and the proxy rejects any un-priced model with a 400,
-# so the first-principles dispatch fails on every run where it is enabled. Two
-# pieces fix that, and BOTH pin to the same upstream source of truth
-# (gh-aw-firewall v0.27.27, the release that added curated Claude 5 pricing:
-# $10/M input, $1/M cache read, $12.50/M cache write, $50/M output):
-#
-# 1. `sandbox.agent.version` below runs that firewall version, whose api-proxy
-#    guard knows the model. This is the piece that actually unblocks the dispatch;
-#    the `models:` frontmatter only feeds gh-aw's cost-summary display and does
-#    NOT reach the proxy guard (verified empirically on gh-aw v0.81.6).
-# 2. The `models:` block keeps the run's cost accounting/display correct for the
-#    same model.
-#
-# Remove both once the workflow runs on a gh-aw release whose default firewall
-# is >= v0.27.27.
+# KHAN/ACTIONS LOCAL OVERRIDE: the `sandbox.agent.version: v0.27.27` pin and the
+# `models:` claude-fable-5 pricing block that review-v1.7.0 ships are deleted here,
+# ahead of the release that removes them upstream, because gh-aw v0.83.4 makes the
+# pin actively BREAK the run rather than merely freeze it. v0.83.4 compiles the
+# agent to reach the MCP gateway over a bridge network (`MCP_GATEWAY_DOMAIN:
+# awmg-mcpg`, `network.isolation`, `network.topologyAttach`); firewall v0.27.27
+# implements none of those keys, drops them from its resolved config, and its squid
+# allowlist therefore has no route to `awmg-mcpg` — so every agent call to the
+# gateway is denied 403. Observed live on run 30290472047 (PR #296): 3 TCP_DENIED
+# POSTs to `awmg-mcpg:8080/mcp/github` and `/mcp/safeoutputs`, zero `tools/call` in
+# the gateway RPC log for the whole run, i.e. no GitHub tools and no ability to post
+# a review; the reviewer fell back to Bash and burned the 20-minute step timeout.
+# Dropping the pin takes the gh-aw default (v0.27.42), which implements the topology
+# keys and also prices claude-fable-5, making the `models:` override redundant.
+# Restore neither. This override goes away when this install bumps to the release
+# carrying the same removal in the shared source.
 sandbox:
   agent:
     id: awf
-    version: v0.27.27
-
-models:
-  providers:
-    anthropic:
-      models:
-        claude-fable-5:
-          cost:
-            input: 1.0e-05
-            output: 5.0e-05
-            cache_read: 1.0e-06
-            cache_write: 1.25e-05
 
 # The shared review workflow is more than this markdown file: its deterministic
 # pieces (the finding schema and validator today; the router, computed verdict, and

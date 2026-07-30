@@ -40,6 +40,20 @@
  *   3. Planned-but-undispatched reviewers must be disclosed: every name in
  *      `routing.json`'s `enabledReviewers`/`lensesToSpawn` with no `out/`
  *      file needs its "not assessed this run" note in the verdict body.
+ *   4. An APPROVE cannot carry a blocking inline comment (Step 4's verdict
+ *      is a mechanical function of the labels; slice 3).
+ *   5. The reduced-depth flip veto (Step 4): at flip-gated/fast depth over a
+ *      prior REQUEST_CHANGES stamp, APPROVE requires `rereview.json`'s
+ *      `keptBlockingCount` to be zero (slice 3; the #246 flip-gate
+ *      chokepoint).
+ *   6. Every queued thread resolution must be one the reconciler decided
+ *      (`out/thread-reconciler.json` `resolve`); the deficit direction is
+ *      reported as executed-vs-decided accounting, never blocked (slice 3;
+ *      the #244 ledger).
+ *   7. When a submission plan is staged (`submission-plan.json`, scripted
+ *      mode, slice 4), the queued event, body, and inline comments must
+ *      match it under a sanitizer-tolerant normalization; any splice or
+ *      omission blocks (the #244 accountability-splice check, as code).
  *
  * Violation behavior: strip every posting/mutating item from the queue
  * (keeping the diagnostics and the `out/` artifact upload so the evidence
@@ -61,6 +75,10 @@
  */
 
 import {extractJsonValue} from "./agent-json";
+import {isBlockingLabel, renderReviewBody} from "./render-comment";
+import {parseLeadingLabel} from "./rereview";
+import {findLatestStamp, stampFromCacheMemory} from "./rereview-mode";
+import {normalizeBody} from "./sanitizer-normalize";
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -87,7 +105,11 @@ export type DispatchGateViolationCode =
     | "correctness-missing"
     | "correctness-unparseable-undisclosed"
     | "validator-missing-with-findings"
-    | "shed-undisclosed";
+    | "shed-undisclosed"
+    | "approve-with-blocking-comment"
+    | "flip-vetoed-kept-blocking"
+    | "resolve-not-decided"
+    | "submission-plan-mismatch";
 
 export type DispatchGateViolation = {
     /** Fixed-format code (never prose). */
@@ -120,6 +142,19 @@ export type DispatchGateInput = {
     routing: unknown;
     /** `out/` basename → raw file text, e.g. `correctness-reviewer.json`. */
     outFiles: Record<string, string>;
+    /** Parsed `prior-reviews.json` (the flip rule's stamp source). */
+    priorReviews?: unknown;
+    /**
+     * Parsed cache-memory record (`pr-<n>.json`), the fallback stamp
+     * carrier: posted bodies never keep their stamp (the ingest sanitizer
+     * strips HTML comments), so the flip rule reads the same carrier the
+     * plan CLI anchored on.
+     */
+    cacheMemory?: unknown;
+    /** Parsed `rereview.json` (the accountability result; `keptBlockingCount`). */
+    rereviewAccounting?: unknown;
+    /** Parsed `submission-plan.json` (scripted mode; slice 4). */
+    submissionPlan?: unknown;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -128,6 +163,8 @@ export type DispatchGateInput = {
 
 const SUBMIT_TYPE = "submit_pull_request_review";
 const COMMENT_TYPE = "create_pull_request_review_comment";
+const RESOLVE_TYPE = "resolve_pull_request_review_thread";
+const RECONCILER_OUT = "thread-reconciler.json";
 
 const CORRECTNESS_OUT = "correctness-reviewer.json";
 const VALIDATOR_OUT = "claim-validator.json";
@@ -358,6 +395,264 @@ export const evaluateDispatchConformance = (
         }
     }
 
+    // Rule 4: an APPROVE cannot carry a blocking inline comment (Step 4 is a
+    // mechanical function of the labels: a surviving validated blocking
+    // finding means REQUEST_CHANGES at every depth). The inverse direction is
+    // legitimate (a REQUEST_CHANGES may ride entirely on kept prior threads),
+    // so only the APPROVE direction is enforced.
+    if (verdictEvent === "APPROVE") {
+        for (const item of input.items) {
+            if (item.type !== COMMENT_TYPE || typeof item.body !== "string") {
+                continue;
+            }
+            const label = parseLeadingLabel(item.body);
+            if (label !== null && isBlockingLabel(label)) {
+                violations.push({
+                    code: "approve-with-blocking-comment",
+                    dimension: "verdict",
+                    detail:
+                        `APPROVE queued alongside an inline comment labeled "${label}" ` +
+                        `(a surviving blocking finding mechanically requires REQUEST_CHANGES)`,
+                });
+                break;
+            }
+        }
+    }
+
+    // Rule 5: the re-review flip veto (Step 4, reduced depths only): at
+    // flip-gated/fast depth, a prior REQUEST_CHANGES (read from the stamp,
+    // not the review state) may flip to APPROVE only when the code-rendered
+    // accountability result says every blocking thread was resolved.
+    if (
+        verdictEvent === "APPROVE" &&
+        (depth === "flip-gated" || depth === "fast")
+    ) {
+        const bodyStamp = Array.isArray(input.priorReviews)
+            ? findLatestStamp(
+                  // Defensive over agent-writable staged input, like every
+                  // sibling parse in this file: a null or non-object element
+                  // must not throw (a throw here escapes before the gate
+                  // decides and fail-opens ALL rules).
+                  input.priorReviews.filter(
+                      (review): review is {body: string} =>
+                          typeof review === "object" &&
+                          review !== null &&
+                          typeof (review as {body?: unknown}).body === "string",
+                  ),
+              )
+            : null;
+        const priorStamp = bodyStamp ?? stampFromCacheMemory(input.cacheMemory);
+        if (priorStamp !== null && priorStamp.verdict === "REQUEST_CHANGES") {
+            const kept = (
+                input.rereviewAccounting as
+                    | {keptBlockingCount?: unknown}
+                    | undefined
+            )?.keptBlockingCount;
+            if (typeof kept === "number" && kept > 0) {
+                violations.push({
+                    code: "flip-vetoed-kept-blocking",
+                    dimension: "verdict",
+                    detail:
+                        `APPROVE queued at ${depth} depth over a prior REQUEST_CHANGES stamp with ` +
+                        `${kept} kept blocking thread(s) (rereview.json keptBlockingCount); the flip rule requires zero`,
+                });
+            } else if (typeof kept !== "number") {
+                notes.push(
+                    "flip rule: rereview.json accounting not staged or unparseable (veto not evaluable; fail-open)",
+                );
+            }
+        }
+    }
+
+    // Rule 6: every queued thread resolution must be one the reconciler
+    // decided. Resolving a thread the reconciler said to keep (or resolving
+    // with no reconciler run at all) is the freelancing move this gate
+    // exists for. The deficit direction (decided but not queued) is
+    // accounting, not a violation: it is reported as a note.
+    const queuedResolves = input.items
+        .filter((item) => item.type === RESOLVE_TYPE)
+        .map((item) =>
+            typeof item["thread_id"] === "string" ? item["thread_id"] : "",
+        );
+    if (queuedResolves.length > 0) {
+        const reconciler = parseAgentOutFile(
+            input.outFiles[RECONCILER_OUT] ?? "",
+        ) as {resolve?: unknown} | undefined;
+        const decided = new Set(
+            Array.isArray(reconciler?.resolve)
+                ? reconciler.resolve.filter(
+                      (id): id is string => typeof id === "string",
+                  )
+                : [],
+        );
+        for (const threadId of queuedResolves) {
+            if (!decided.has(threadId)) {
+                violations.push({
+                    code: "resolve-not-decided",
+                    dimension: "thread-reconciler",
+                    detail:
+                        `thread resolution queued for "${
+                            threadId || "(missing thread_id)"
+                        }" but ` +
+                        `out/${RECONCILER_OUT} ${
+                            reconciler === undefined
+                                ? "is missing or unparseable"
+                                : "does not list it in resolve"
+                        }`,
+                });
+            }
+        }
+        const deficit = [...decided].filter(
+            (id) => !queuedResolves.includes(id),
+        );
+        if (deficit.length > 0) {
+            notes.push(
+                `executed-vs-decided: ${
+                    deficit.length
+                } reconciler-decided resolution(s) not queued (${deficit.join(
+                    ", ",
+                )})`,
+            );
+        }
+    }
+
+    // Rule 7 (scripted mode, slice 4): when a submission plan is staged, the
+    // queued outputs must match it. gh-aw's ingest sanitizer rewrites what
+    // the agent queued before the gate sees it, so bodies are compared under
+    // `normalizeBody` (sanitizer-normalize.ts, which documents every absorbed
+    // transform); anything beyond that is a splice (#244) and blocks. The
+    // rule also owns the NO-submission shapes: queued comments with no submit
+    // would land as a COMMENT review, and a silently-dropped plan would
+    // withhold a REQUEST_CHANGES verdict (or a disclosure), so only
+    // an APPROVE plan with no comments and a bare approve body may
+    // legitimately queue nothing (the Step 6 redundant-approval skip, whose
+    // shape the skip branch below checks in full).
+    // Defensive over agent-writable staged input, like every sibling parse in
+    // this file. `readJsonIfPresent` passes `JSON.parse("null")` straight
+    // through, so a `submission-plan.json` containing literal `null` reaches
+    // here as `null` — which a bare `!== undefined` guard admits, and the
+    // property reads below then throw. That throw escapes to the CLI entry
+    // catch, which exits 0 with the queue untouched: not a rule-7 failure but
+    // a fail-open of ALL SEVEN rules. The sibling `priorReviews` parse was
+    // hardened against exactly this shape; this one has to match it.
+    const planStaged =
+        typeof input.submissionPlan === "object" &&
+        input.submissionPlan !== null
+            ? (input.submissionPlan as {
+                  event?: unknown;
+                  body?: unknown;
+                  comments?: unknown;
+              })
+            : undefined;
+    if (planStaged !== undefined && submit === undefined) {
+        const planComments = Array.isArray(planStaged.comments)
+            ? planStaged.comments
+            : [];
+        if (commentCount > 0) {
+            violations.push({
+                code: "submission-plan-mismatch",
+                dimension: "verdict",
+                detail: `${commentCount} inline comment(s) queued with no review submission (they would land as an ungated COMMENT review); the staged plan requires a ${String(
+                    planStaged.event,
+                )} submission`,
+            });
+        } else {
+            // review.md's redundant-approval skip is narrower than "APPROVE
+            // with no comments": the body must ALSO carry no `Note:` lines
+            // and no accountability section, i.e. it is exactly the bare
+            // comment-less-approve line (the fingerprint stamp is an HTML
+            // comment, which normalizeBody already drops). Without the body
+            // check, an APPROVE that shed a lens (carrying a mandatory
+            // "Note: <lens> not assessed this run" disclosure) could be
+            // dropped on the floor and still pass the gate green, silently
+            // withholding both the disclosure and the approval.
+            const bareApprove = normalizeBody(
+                renderReviewBody({event: "APPROVE", hasInlineComments: false}),
+            );
+            const planBody =
+                typeof planStaged.body === "string" ? planStaged.body : "";
+            if (
+                planStaged.event !== "APPROVE" ||
+                planComments.length > 0 ||
+                normalizeBody(planBody) !== bareApprove
+            ) {
+                violations.push({
+                    code: "submission-plan-mismatch",
+                    dimension: "verdict",
+                    detail: `nothing queued but the staged plan is ${String(
+                        planStaged.event,
+                    )} with ${
+                        planComments.length
+                    } comment(s); only an APPROVE plan with no comments and a bare "${renderReviewBody(
+                        {event: "APPROVE", hasInlineComments: false},
+                    )}" body may skip the submission`,
+                });
+            }
+        }
+    }
+    if (planStaged !== undefined && submit !== undefined) {
+        if (
+            typeof planStaged.event === "string" &&
+            verdictEvent !== planStaged.event
+        ) {
+            violations.push({
+                code: "submission-plan-mismatch",
+                dimension: "verdict",
+                detail: `queued event ${
+                    verdictEvent || "(none)"
+                } does not match the staged submission plan's ${
+                    planStaged.event
+                }`,
+            });
+        }
+        if (
+            typeof planStaged.body === "string" &&
+            normalizeBody(body) !== normalizeBody(planStaged.body)
+        ) {
+            violations.push({
+                code: "submission-plan-mismatch",
+                dimension: "review body",
+                detail: "queued review body does not match the staged submission plan (normalized comparison)",
+            });
+        }
+        if (Array.isArray(planStaged.comments)) {
+            const planned = planStaged.comments
+                .filter(
+                    (
+                        comment,
+                    ): comment is {path: string; line: number; body: string} =>
+                        typeof (comment as {path?: unknown}).path ===
+                            "string" &&
+                        typeof (comment as {body?: unknown}).body === "string",
+                )
+                .map(
+                    (comment) =>
+                        `${comment.path}:${comment.line}:${normalizeBody(
+                            comment.body,
+                        )}`,
+                )
+                .sort();
+            const queued = input.items
+                .filter((item) => item.type === COMMENT_TYPE)
+                .map(
+                    (item) =>
+                        `${
+                            typeof item["path"] === "string" ? item["path"] : ""
+                        }:${String(item["line"] ?? "")}:${normalizeBody(
+                            typeof item.body === "string" ? item.body : "",
+                        )}`,
+                )
+                .sort();
+            if (JSON.stringify(planned) !== JSON.stringify(queued)) {
+                violations.push({
+                    code: "submission-plan-mismatch",
+                    dimension: "inline comments",
+                    detail: `queued inline comments (${queued.length}) do not match the staged submission plan (${planned.length})`,
+                });
+            }
+        }
+    }
+
     return {
         conformant: violations.length === 0,
         violations,
@@ -484,12 +779,38 @@ export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
             `routing.json is present but unparseable (${ROUTING_PATH}): treated as not staged`,
         );
     }
+    const priorReviews = readJsonIfPresent(
+        fs,
+        `${REVIEW_DIR}/prior-reviews.json`,
+    );
+    const rereviewAccounting = readJsonIfPresent(
+        fs,
+        `${REVIEW_DIR}/rereview.json`,
+    );
+    const prContext = readJsonIfPresent(fs, `${REVIEW_DIR}/pr-context.json`) as
+        | {number?: unknown}
+        | undefined;
+    const cacheMemory =
+        typeof prContext?.number === "number"
+            ? readJsonIfPresent(
+                  fs,
+                  `/tmp/gh-aw/cache-memory/pr-${prContext.number}.json`,
+              )
+            : undefined;
+    const submissionPlan = readJsonIfPresent(
+        fs,
+        `${REVIEW_DIR}/submission-plan.json`,
+    );
 
     const evaluation = evaluateDispatchConformance({
         items,
         plan,
         routing,
         outFiles,
+        priorReviews,
+        rereviewAccounting,
+        cacheMemory,
+        submissionPlan,
     });
     evaluation.notes.unshift(...notes);
 

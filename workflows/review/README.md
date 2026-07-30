@@ -89,8 +89,10 @@ every safe output during the agent run and executes the queue from a separate
 verdict and findings against the staged `out/` sub-agent outputs (per re-review
 depth: the correctness pass wherever the depth dispatches one, the
 claim-validator whenever findings post, a disclosure note for every planned
-shed) and, on violation, strips the posting items from the queue and fails the
-job. A run that skipped its own dispatch protocol (observed in production:
+shed, no blocking inline comment under an APPROVE, the reduced-depth flip veto
+over kept blocking threads, and every queued thread resolution backed by the
+reconciler's decision) and, on violation, strips the posting items from the
+queue and fails the job. A run that skipped its own dispatch protocol (observed in production:
 zero sub-agents dispatched, verdict submitted, nothing disclosed) becomes a
 red run that posts nothing instead of a normal-looking review; the run
 artifact keeps the original queue and the gate report for diagnosis. The gate
@@ -132,14 +134,18 @@ locally at compile/run time, not from this repo). Create them under
 | `ci-tooling.md` | **Required** | The lint/format/type/test issues your CI already catches. Imported into `correctness-reviewer` so it doesn't flag them, and into `claim-validator` so it drops any correctness claim that flags a CI-caught issue. |
 | `skills.md` | **Required** | The catalog of best-practice skill files (and when each applies). Imported into `skill-auditor` to evaluate the diff against, and into `claim-validator` so it can verify a flagged skill violation against the skill's actual rule. |
 | `ROUTING` | Optional | The machine-readable path map the deterministic router reads (see below). Without it the router spawns no specialist lenses and floors the run budget, and the review notes the missing config on the PR. |
+| `lenses/<lens>.md` | Optional | Per-lens payloads: your repo's surface-specific review rules and extra hunts, imported into the matching reviewer (see [Per-lens payloads](#per-lens-payloads-lenseslensmd)). Absent files import nothing. |
+| `correctness-checks.md` | Deprecated | Alias for `lenses/correctness.md`; still imported for compatibility, and removed in the next major release. Carry only one: when both exist, both are imported (duplicating the checks) and the router warns; an alias carried alone gets a deprecation note on each review. |
 
-All four are **required**, but validated at different times. `config.md` is a
+The first four are **required**, but validated at different times. `config.md` is a
 frontmatter import, embedded and checked at **compile time** — `gh aw compile` fails if
 it's missing. The other three are `{{#runtime-import}}` body imports inside the
 sub-agent prompts; they resolve when the workflow **runs**, so a missing one surfaces as
 a `Runtime import file not found` failure on the next PR — not at compile time. The
-optional `{{#runtime-import? … }}` form was dropped either way, so a missing config
-fails loudly rather than silently degrading the review.
+required configs deliberately avoid the optional `{{#runtime-import? … }}` form, so a
+missing one fails loudly rather than silently degrading the review. The lens payloads
+(and the deprecated `correctness-checks.md`) use the optional form: a repo that
+defines none is valid, and a missing payload file imports nothing.
 
 These imported snippets are plain Markdown — they must not contain
 `${{ }}` expressions (gh-aw rejects those inside imports). `add-reviewer` lives
@@ -149,6 +155,52 @@ main workflow would override the import and discard your allowlist.
 Repo-specific frontmatter that imports can't merge (e.g. an `if:` condition to skip
 deploy/automation branches or forks) goes directly in your installed `review.md` as
 a local edit; `gh aw update` preserves it.
+
+### Per-lens payloads (`lenses/<lens>.md`)
+
+A consuming repo may define surface-specific review rules and extra hunts for any
+reviewer lens by adding `.github/aw/review/lenses/<lens>.md`. Each file is imported
+at runtime into the matching reviewer prompt, in a "Repo-specific rules and hunts"
+section the reviewer treats exactly like its built-in rules and tri-state hunts. All
+imports are optional: a repo with no `lenses/` directory gets exactly the shared
+behavior, and lens names never vary per repo; only their payloads do.
+
+Valid names are the eleven specialist lenses (`security-auth`,
+`ai-safety-moderation`, `mass-comms-coppa`, `caching-resource`, `data-migrations`,
+`concurrency-async`, `api-federation-compat`, `cross-deploy-serialization`,
+`deploy-infra-config`, `money-payments`, `content-i18n`) plus `correctness`, which
+feeds the always-on `correctness-reviewer`. `lenses/correctness.md` supersedes the
+older `correctness-checks.md` (still imported as a deprecated alias until the next
+major release; carry at most one of the two). A payload only reaches a specialist
+lens on PRs where the router actually spawns that lens, so a payload without
+matching `ROUTING` `lens=` rules is inert. The router warns in the review body's
+note lines when a payload would be silently inert: a filename that matches no
+imported payload, a specialist payload no `ROUTING` rule routes, the correctness
+alias carried alongside its replacement (or, as a deprecation nudge, carried at
+all), or a `lenses` path that is not a readable directory.
+
+Payloads are **additive**: they extend the lens's shared rules and hunts but never
+relax or override them, and the shared rules win on any conflict (the lens prompts
+state this next to the import). A payload cannot whitelist a defect or lower the
+evidence bar; it can only add repo-specific things to check.
+
+**Where a rule belongs** (the three-way contribution rule):
+
+- **Shared skeleton** (this repo's `review.md`): rules that hold for every consumer
+  on every stack. If a rule needs stack-specific phrasing ("Datastore query",
+  "DOM sink"), it does not belong here; keep only its surface-neutral core.
+- **Lens payload** (your repo's `lenses/<lens>.md`): rules and hunts specific to
+  your repo's surface. Server repos carry server-surface checks (query bounds,
+  datastore idioms); client repos carry client-surface checks (DOM XSS sinks, token
+  storage, postMessage origins).
+- **Skills** (your repo's `skills.md` catalog): house conventions and sanctioned
+  fixes, audited by `skill-auditor` rather than baked into a lens.
+
+Payloads are model-facing prose owned by the consuming repo's engineers, like
+`risk-classification.md` and the skills catalog before them; the repo's normal code
+review is the bar for editing them. Note that a payload changes reviewer behavior
+without touching Khan/actions: when in doubt about a large payload change, ask the
+workflow maintainers for an eval run over payload-carrying corpus cases.
 
 ### Per-directory `REVIEW.md` contracts (optional)
 
@@ -180,6 +232,7 @@ rule per line:
 # <pattern> [lens=<lens>,…] [tier=trivial|low|medium|high] [direction-dependent]
 # enable <reviewer>[,<reviewer>…]
 # re-review full|scoped|flip-gated|fast
+# dispatch task|scripted
 services/**/migrations/**  tier=high lens=data-migrations
 **/*.graphql               lens=api-federation-compat
 pkg/auth/**                tier=high direction-dependent lens=security-auth
@@ -207,6 +260,36 @@ re-review scoped
 - `re-review` sets the repo's re-review mode (see the next section). Default
   `full`; when several lines set it, the last one wins with a warning. An
   unknown mode degrades to `full`: toward more review, never less.
+- `dispatch` sets how Step 3 runs (default `task`): `task` is the
+  orchestrator's own Task-tool dispatch; `scripted` opts the repo into the
+  deterministic dispatcher (`lib/dispatch.ts`): the orchestrator invokes one
+  CLI that runs triage, the reviewer fan-out (roster, budget cap, and planned
+  sheds computed from `routing.json`), the provenance gate, the scope filter,
+  cross-source dedup, open-thread suppression (a candidate describing a
+  defect an open bot thread already tracks posts no duplicate; a suppressed
+  blocking candidate still floors the verdict), and claim validation as
+  code, inside the same firewall sandbox (the api-proxy meters and caps
+  script-spawned sub-agents exactly like Task-spawned ones). Each sub-agent
+  delivers its result through an in-process `submit_result` MCP tool whose
+  input is validated against the agent's exact output contract at the tool
+  boundary (`lib/dispatch-runner.ts`), so a drifted shape is corrected
+  in-session instead of voiding the dimension; free-text finals remain the
+  fallback. In scripted mode Steps 4-6 are code too: the submission CLI
+  (`lib/submission.ts`) computes the verdict, renders the comments and
+  the full review body, and stages `submission-plan.json`; the orchestrator
+  emits safe outputs that must match the plan (the gate blocks any
+  deviation), which reduces its model role to typing MCP calls the plan
+  dictates. Step 9's cache record is code as well (`lib/cache-record.ts`,
+  invoked once after the emission): the fingerprint-carrier fields are
+  copied verbatim from staged files and corroborated against the safe-output
+  queue, never serialized from the model's memory. The safe-output emission
+  itself is the remaining seam: the queue is a run-local JSONL append that
+  needs no credentials, but the agent sandbox mounts `${RUNNER_TEMP}/gh-aw`
+  read-only, so only the safeoutputs MCP container can write it. Removing
+  the seam wants a writable path into the queue (an upstream mount change,
+  or a post-agent step on the host); neither is tested yet. Scripted mode is
+  the production probe of the deterministic-orchestrator migration and is
+  live-trial-gated; an unknown mode degrades to `task` with a warning.
 
 Glob semantics are a practical subset of gitignore/CODEOWNERS: `**` crosses
 directories, `*` and `?` stay within a segment, a trailing `/` matches everything

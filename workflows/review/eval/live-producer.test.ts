@@ -259,6 +259,29 @@ describe("produceLive", () => {
         expect(retryPrompt).toMatch(/previous output was rejected/);
     });
 
+    it("parses a payload preceded by quoted template-literal braces, no retry", async () => {
+        const {runner} = scriptedRunner({
+            "correctness-reviewer": [
+                "The key `user-profile:${tenantId}:${userId}` drops the" +
+                    ` tenant. ${JSON.stringify({findings: [LABEL_FINDING]})}`,
+            ],
+            "skill-auditor": [JSON.stringify({findings: []})],
+            "money-payments": [JSON.stringify({findings: []})],
+            "claim-validator": [validatorOutput([])],
+        });
+        const result = await produceLive(CASE, AGENTS, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        const report = result.perAgent.find(
+            (a) => a.name === "correctness-reviewer",
+        );
+        expect(report?.retried).toBe(false);
+        expect(report?.failed).toBeUndefined();
+        expect(result.findings.length).toBe(1);
+    });
+
     it("marks a twice-failed agent failed and keeps everyone else", async () => {
         const {runner} = scriptedRunner({
             "correctness-reviewer": ["not json", "still not json"],
@@ -360,18 +383,35 @@ describe("produceLive", () => {
 });
 
 describe("resolveRuntimeImports", () => {
-    it("inlines imports present in the checkout and notes absent ones", () => {
+    it("inlines imports present in the checkout and notes absent required ones", () => {
         const vol = Volume.fromJSON({
             "/checkout/.github/aw/review/skills.md": "## skills index",
         });
         const fs = volFs(vol);
         const prompt = [
             "Skills:\n{{#runtime-import .github/aw/review/skills.md}}",
-            "CI:\n{{#runtime-import? .github/aw/review/ci-tooling.md}}",
+            "CI:\n{{#runtime-import .github/aw/review/ci-tooling.md}}",
         ].join("\n");
         const resolved = resolveRuntimeImports(prompt, "/checkout", fs);
         expect(resolved).toContain("## skills index");
         expect(resolved).toContain("(not configured for this eval case)");
+        expect(resolved).not.toMatch(/runtime-import/);
+    });
+
+    it("resolves a missing optional import to nothing, like production", () => {
+        const vol = Volume.fromJSON({
+            "/checkout/.github/aw/review/lenses/security-auth.md":
+                "## repo security payload",
+        });
+        const fs = volFs(vol);
+        const prompt = [
+            "Payload:\n{{#runtime-import? .github/aw/review/lenses/security-auth.md}}",
+            "Absent:\n{{#runtime-import? .github/aw/review/lenses/money-payments.md}}",
+        ].join("\n");
+        const resolved = resolveRuntimeImports(prompt, "/checkout", fs);
+        expect(resolved).toContain("## repo security payload");
+        expect(resolved).toContain("Absent:\n");
+        expect(resolved).not.toContain("(not configured for this eval case)");
         expect(resolved).not.toMatch(/runtime-import/);
     });
 

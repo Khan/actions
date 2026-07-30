@@ -83,6 +83,14 @@ describe("parseArbiterAnswer", () => {
         expect(parseArbiterAnswer("")).toBe(false);
         expect(parseArbiterAnswer("{broken json")).toBe(false);
     });
+
+    it("reads a yes past prose braces (the old first-brace slice returned a silent no)", () => {
+        expect(
+            parseArbiterAnswer(
+                'The `${key}` snippet drops the tenant. {"match": true}',
+            ),
+        ).toBe(true);
+    });
 });
 
 describe("PINNED_ARBITER_MODEL", () => {
