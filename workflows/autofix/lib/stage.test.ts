@@ -1,6 +1,11 @@
 import {describe, expect, it} from "vitest";
 
-import {collectInputs, collectThreads, writeInputs} from "./stage.ts";
+import {
+    assertNoGraphqlErrors,
+    collectInputs,
+    collectThreads,
+    writeInputs,
+} from "./stage.ts";
 import type {StageCliFs, StagePort} from "./stage.ts";
 import {computeHunkSignature} from "../../review/lib/rereview-mode.ts";
 
@@ -41,7 +46,12 @@ const portFor = (opts: {
             }
             return [];
         },
-        graphql: async () => (opts.threadPages ?? [])[page++] ?? {},
+        // Falls back to a well-formed EMPTY page, not `{}`. Staging now throws
+        // on a body it cannot parse, so the default has to be a valid response
+        // that simply carries no threads; `{}` would make every test that does
+        // not care about threads fail as a rate-limit. Evaluated lazily, after
+        // `onePage` is initialised.
+        graphql: async () => (opts.threadPages ?? [])[page++] ?? onePage([]),
     };
 };
 
@@ -201,16 +211,88 @@ describe("collectThreads", () => {
         expect(threads).toHaveLength(1);
     });
 
-    it("returns nothing for a malformed GraphQL body", async () => {
-        expect(
-            await collectThreads(
+    // These four pin the fail-CLOSED direction. Staging zero threads on a PR
+    // that has open findings is the one failure this module cannot absorb: the
+    // plan becomes a no-op, the no-op removes the arming label, and the author
+    // is told there is nothing to fix. Nothing is left to re-arm from, so the
+    // findings stay open silently. Throwing instead fails the staging step
+    // before any AI spend, and the label survives for a retry.
+    it("throws when GraphQL reports a rate limit as HTTP 200 with errors", async () => {
+        await expect(
+            collectThreads(
+                portFor({threadPages: [{errors: [{type: "RATE_LIMITED"}]}]}),
+                "o",
+                "r",
+                1,
+                BOT,
+            ),
+        ).rejects.toThrow(/RATE_LIMITED/);
+    });
+
+    it("throws on partial data carrying errors, rather than staging the subset", async () => {
+        await expect(
+            collectThreads(
+                portFor({
+                    threadPages: [
+                        {
+                            ...onePage([threadNode()]),
+                            errors: [{type: "FORBIDDEN"}],
+                        },
+                    ],
+                }),
+                "o",
+                "r",
+                1,
+                BOT,
+            ),
+        ).rejects.toThrow(/FORBIDDEN/);
+    });
+
+    it("throws for a malformed GraphQL body", async () => {
+        await expect(
+            collectThreads(
                 portFor({threadPages: [{errors: []}]}),
                 "o",
                 "r",
                 1,
                 BOT,
             ),
+        ).rejects.toThrow(/no reviewThreads connection/);
+    });
+
+    it("still returns an empty list for a well-formed PR with no threads", async () => {
+        expect(
+            await collectThreads(
+                portFor({threadPages: [onePage([])]}),
+                "o",
+                "r",
+                1,
+                BOT,
+            ),
         ).toEqual([]);
+    });
+});
+
+describe("assertNoGraphqlErrors", () => {
+    it("passes a clean body", () => {
+        expect(() => assertNoGraphqlErrors(onePage([]))).not.toThrow();
+    });
+
+    it("passes an empty errors array", () => {
+        // GitHub omits `errors` on success; an empty array is not a failure.
+        expect(() =>
+            assertNoGraphqlErrors({data: {}, errors: []}),
+        ).not.toThrow();
+    });
+
+    it("throws on any error entry, and names it", () => {
+        expect(() =>
+            assertNoGraphqlErrors({errors: [{type: "RATE_LIMITED"}]}),
+        ).toThrow(/RATE_LIMITED/);
+    });
+
+    it("ignores a non-object body", () => {
+        expect(() => assertNoGraphqlErrors(null)).not.toThrow();
     });
 });
 

@@ -8,7 +8,7 @@ Arm a PR with an `autofix: blocking` / `autofix: nits` label or an `/autofix [sc
 
 Everything except the code edit is deterministic. `lib/stage.ts` runs as a pre-agent step and fetches the inputs before the agent starts; `lib/plan.ts` then resolves scope, checks review currency, builds the work list, and renders the commit trailer. The plan is final: the prompt may execute it or stop, never widen it.
 
-Guards fail closed. Currency is checked per file so one unrelated push doesn't refuse the whole run; unparseable labels, outdated anchors, threads a human opened, an unreadable diff, and a head that moves mid-run are all excluded. Refusal is reserved for a PR with no review at all.
+Guards fail closed. Currency is checked per file so one unrelated push doesn't refuse the whole run; unparseable labels, outdated anchors, threads a human opened, an unreadable diff, and a head that moves mid-run are all excluded. Refusal is reserved for a PR with no review at all, and for a thread fetch that fails: GitHub reports GraphQL rate limits and node-access failures as HTTP 200 with an `errors` array, so staging treats any `errors` entry or an unparseable body as fatal rather than as "this PR has no threads", which would clear the arming label while the findings it was armed for stayed open.
 
 The reviewer's `skip-ai-review` label does not disarm autofix. It stops the reviewer's next run without withdrawing a review already posted, so a labelled PR can still carry current findings, and an explicit `autofix:` label or `/autofix` from someone with write access is the authorisation to act on them. A PR with no review is still refused, by the guard that checks for one.
 

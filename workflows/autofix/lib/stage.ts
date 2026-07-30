@@ -134,6 +134,31 @@ query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
     }
 }`;
 
+/**
+ * Throw when a GraphQL body carries errors, mirroring the REST paths' `throw`.
+ *
+ * GraphQL does not use HTTP status to report failure. GitHub answers
+ * `RATE_LIMITED`, node-access failures, and partial field failures with HTTP
+ * **200** and an `errors` array, `data` absent or partial. A transport that
+ * only checks `res.ok` therefore reads a throttled response as a successful
+ * one, and every downstream reader sees a PR with no threads.
+ *
+ * Any `errors` entry is fatal here, including the partial-data case. Staging a
+ * subset of the reviewer's threads is worse than refusing: the plan would fix
+ * the threads that happened to arrive, clear the arming label, and report a
+ * clean run, leaving the rest silently unaddressed with nothing left to
+ * re-arm.
+ */
+export const assertNoGraphqlErrors = (body: unknown): void => {
+    if (!isRecord(body)) {
+        return;
+    }
+    const errors = body["errors"];
+    if (Array.isArray(errors) && errors.length > 0) {
+        throw new Error(`GraphQL errors: ${JSON.stringify(errors)}`);
+    }
+};
+
 const threadsConnectionOf = (
     body: unknown,
 ): Record<string, unknown> | undefined => {
@@ -181,9 +206,23 @@ export const collectThreads = async (
             number,
             cursor,
         });
+        // Fail closed on both shapes a failed query can take. `errors` is the
+        // throttled/partial case; a missing connection is any other malformed
+        // body. Neither means "this PR has no threads", and reading them that
+        // way is the one mistake this module cannot afford: an empty
+        // threads.json makes the plan a no-op, the no-op populates
+        // `labelsToRemove`, and the run tells the author there is nothing to
+        // fix while the blocking findings it was armed for sit open. The label
+        // is gone, so nothing survives to re-arm from. The REST paths already
+        // throw on `!res.ok` for exactly this reason; this is that contract
+        // applied to the transport that does not signal failure by status.
+        assertNoGraphqlErrors(body);
         const conn = threadsConnectionOf(body);
         if (conn === undefined) {
-            break;
+            throw new Error(
+                `GraphQL returned no reviewThreads connection for ` +
+                    `${owner}/${repo}#${number}`,
+            );
         }
 
         const nodes = Array.isArray(conn["nodes"]) ? conn["nodes"] : [];
@@ -421,7 +460,14 @@ if (typeof require !== "undefined" && require.main === module) {
             if (!res.ok) {
                 throw new Error(`GraphQL failed: ${res.status}`);
             }
-            return res.json();
+            // Duplicated in `collectThreads`, deliberately. The guard is cheap
+            // and its absence clears the arming label on a PR with open
+            // findings, so it belongs both at the transport (any future
+            // GraphQL caller inherits it) and at the reader (which is the one
+            // the unit tests can reach).
+            const body = await res.json();
+            assertNoGraphqlErrors(body);
+            return body;
         },
     };
 
