@@ -718,4 +718,89 @@ describe("openThreadsFromStaged", () => {
         );
         expect(noBody).toEqual([{thread_id: "T1", path: "a.ts", body: ""}]);
     });
+
+    // The fixtures above all spell the bot `github-actions[bot]`, which is the
+    // REST spelling (`user.login`) that stage-pr.ts reads for prior reviews.
+    // `get_review_comments`, the tool that stages THESE threads, renders the
+    // same account as bare `github-actions` and carries `path` on the comment
+    // rather than the thread. Every fixture agreeing with the code is why
+    // suppression passed its unit tests while suppressing nothing across three
+    // rounds of a seeded lifecycle (webapp#41197). This case is the real tool
+    // shape, verbatim, so the fixtures can no longer drift back toward the code.
+    it("accepts the get_review_comments shape: bare `github-actions`, path on the comment", () => {
+        const fromTool = {
+            thread_id: "PRRT_kwDOAJgNW86VOObT",
+            is_resolved: false,
+            is_outdated: true,
+            comments: [
+                {
+                    author: "github-actions",
+                    body: "**issue (blocking):** Retention cutoff subtracts 180 months, not 180 days.",
+                    path: "services/ai-guide/memory/expiration.go",
+                },
+            ],
+        };
+        expect(openThreadsFromStaged([fromTool], new Set())).toEqual([
+            {
+                thread_id: "PRRT_kwDOAJgNW86VOObT",
+                path: "services/ai-guide/memory/expiration.go",
+                body: "**issue (blocking):** Retention cutoff subtracts 180 months, not 180 days.",
+            },
+        ]);
+    });
+
+    it("suppresses a re-flag against a thread staged in the tool's shape", () => {
+        // The end-to-end assertion the unit suite never made: a claim
+        // re-describing an open thread's defect must not post again. Without
+        // the author and path fixes this returns the claim unsuppressed, which
+        // is exactly what production did.
+        const claim: Claim = {
+            id: "correctness-reviewer-1",
+            source: "correctness-reviewer",
+            label: "issue (blocking)",
+            path: "services/ai-guide/memory/expiration.go",
+            line: 38,
+            subject: "AddDate passes the day count into the months slot",
+            discussion:
+                "The retention cutoff subtracts 180 months rather than 180 days, so expiration never fires.",
+            failure_scenario:
+                "No memory is ever old enough to match the cutoff, so the retention feature is a silent no-op.",
+            confidence: 0.9,
+        };
+        const thread = {
+            thread_id: "PRRT_1",
+            is_resolved: false,
+            comments: [
+                {
+                    author: "github-actions",
+                    body: "**issue (blocking):** Retention cutoff subtracts 180 months, not 180 days — expiration never fires. AddDate's signature is (years, months, days), so the retention window is 15 years and no memory ever matches.",
+                    path: "services/ai-guide/memory/expiration.go",
+                },
+            ],
+        };
+        const result = suppressOpenThreadDuplicates(
+            [claim],
+            openThreadsFromStaged([thread], new Set()),
+        );
+        expect(result.kept).toEqual([]);
+        expect(result.suppressed).toHaveLength(1);
+        expect(result.suppressed[0]?.thread_id).toBe("PRRT_1");
+        // The thread's opener is blocking, so the verdict floor still applies:
+        // suppressing the duplicate must not let a verdict flip to APPROVE.
+        expect(result.suppressed[0]?.threadBlocking).toBe(true);
+    });
+
+    it("still refuses a human-opened thread in the tool's shape", () => {
+        // The author fix widens the accepted spellings; it must not widen them
+        // to anyone. A human thread killing a candidate would drop a finding
+        // outright and skip the verdict floor with it.
+        const humanThread = {
+            thread_id: "PRRT_2",
+            is_resolved: false,
+            comments: [
+                {author: "jwbron", body: "please also check X", path: "a.ts"},
+            ],
+        };
+        expect(openThreadsFromStaged([humanThread], new Set())).toEqual([]);
+    });
 });

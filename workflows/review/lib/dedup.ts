@@ -231,14 +231,26 @@ const stagedResolvedState = (thread: Record<string, unknown>): unknown =>
     thread["resolved"] ?? thread["is_resolved"] ?? thread["isResolved"];
 
 /**
+ * The bot's author spellings, both of which are the same identity. The REST
+ * surfaces (`user.login` on a review, which stage-pr.ts reads) render a bot
+ * as `github-actions[bot]`; `get_review_comments`, which stages the threads
+ * this module consumes, renders the SAME account as bare `github-actions`.
+ * Accepting only the bracketed form is what made suppression unreachable on
+ * every conforming run: the prompt tells the orchestrator to copy `author`
+ * from the tool output verbatim, so a correct staging never matched.
+ */
+const BOT_AUTHORS = new Set(["github-actions[bot]", "github-actions"]);
+
+/**
  * Build the suppression inputs from staged threads.json. The staging is
  * prompt-executed (review.md asks the orchestrator for the unresolved
  * github-actions[bot] threads; stage-pr.ts deliberately does not stage
  * threads yet), so BOTH properties suppression depends on are enforced HERE
  * in code rather than trusted from the prompt:
- * - the opener is the bot's. A mis-staged human thread must never silently
- *   kill a candidate, and its free-text opener would also read as
- *   non-blocking and skip the verdict floor.
+ * - the opener is the bot's, in either spelling ({@link BOT_AUTHORS}). A
+ *   mis-staged human thread must never silently kill a candidate, and its
+ *   free-text opener would also read as non-blocking and skip the verdict
+ *   floor.
  * - the thread is still open, per the `resolved` flag staged from the tool's
  *   own `is_resolved`. A mis-staged already-resolved thread would otherwise
  *   suppress a genuine regression re-flag with nothing to check it against.
@@ -246,6 +258,12 @@ const stagedResolvedState = (thread: Record<string, unknown>): unknown =>
  * fixed defect posting again is a fresh finding. Fails closed on each: a
  * thread without a bot-authored opener, or without an explicit
  * `resolved: false`, never suppresses (worst case is a duplicate comment).
+ *
+ * `path` is read from the thread and falls back to the opening comment, since
+ * `get_review_comments` carries `path` per comment rather than per thread and
+ * a verbatim staging inherits that shape. The fallback is not cosmetic:
+ * {@link suppressOpenThreadDuplicates} matches on `path`, so a thread staged
+ * without one silently suppresses nothing.
  */
 export const openThreadsFromStaged = (
     threads: unknown,
@@ -259,20 +277,26 @@ export const openThreadsFromStaged = (
                 Array.isArray(comments) && isRecord(comments[0])
                     ? comments[0]
                     : undefined;
+            const author = opener?.["author"];
             if (
                 typeof thread["thread_id"] !== "string" ||
                 resolvedIds.has(thread["thread_id"]) ||
                 stagedResolvedState(thread) !== false ||
-                opener?.["author"] !== "github-actions[bot]"
+                typeof author !== "string" ||
+                !BOT_AUTHORS.has(author)
             ) {
                 return [];
             }
+            const path =
+                typeof thread["path"] === "string"
+                    ? thread["path"]
+                    : typeof opener?.["path"] === "string"
+                    ? (opener["path"] as string)
+                    : undefined;
             return [
                 {
                     thread_id: thread["thread_id"],
-                    ...(typeof thread["path"] === "string"
-                        ? {path: thread["path"]}
-                        : {}),
+                    ...(path !== undefined ? {path} : {}),
                     body:
                         typeof opener["body"] === "string"
                             ? opener["body"]
@@ -328,6 +352,36 @@ export const describesOpenThreadDefect = (
  * the candidate's re-confirmation at blocking severity is what makes the
  * floor more than a stale thread).
  */
+/**
+ * Whether staged threads ALL failed {@link openThreadsFromStaged}'s filter, so
+ * suppression could not run at all. Lives here beside the filter because it is
+ * the filter's own failure mode, and the caller only logs what it returns.
+ *
+ * An empty {@link ThreadSuppression} list cannot distinguish "nothing to
+ * suppress" from "suppression silently did nothing", and that ambiguity is how
+ * the author-spelling mismatch above reached production: it survived a whole
+ * three-round seeded lifecycle (webapp#41197) posting duplicate comments while
+ * every run reported an empty suppression list and looked correct. Threads the
+ * reconciler resolved this run are excluded from the count, since those are
+ * legitimately unusable.
+ */
+export const stagedThreadShapeFailure = (
+    threads: unknown,
+    openThreads: readonly OpenThread[],
+    resolvedThisRun: number,
+): {stagedThreads: number; warning: string} | undefined => {
+    const stagedThreads = Array.isArray(threads) ? threads.length : 0;
+    if (stagedThreads <= resolvedThisRun || openThreads.length > 0) {
+        return undefined;
+    }
+    return {
+        stagedThreads,
+        warning:
+            `::warning title=open-thread suppression::${stagedThreads} staged thread(s), none usable ` +
+            `(each needs thread_id, an explicit resolved: false, and a bot-authored opener); duplicates may re-post`,
+    };
+};
+
 export const suppressOpenThreadDuplicates = (
     claims: Claim[],
     threads: OpenThread[],
