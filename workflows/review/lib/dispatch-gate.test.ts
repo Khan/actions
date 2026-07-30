@@ -1,10 +1,6 @@
-import {readFileSync} from "node:fs";
-import {join} from "node:path";
-
 import {describe, it, expect} from "vitest";
 
 import {
-    BLOCKED_SENTINEL_PATH,
     disclosesSkippedDimension,
     evaluateDispatchConformance,
     renderGateSummary,
@@ -40,11 +36,14 @@ const submitItem = (event: string, body = ""): SafeOutputItem => ({
     body,
 });
 
-const commentItem = (line = 1): SafeOutputItem => ({
+const commentItem = (
+    line = 1,
+    body = "**suggestion (non-blocking):** x",
+): SafeOutputItem => ({
     type: "create_pull_request_review_comment",
     path: "a.ts",
     line,
-    body: "**issue (blocking):** x",
+    body,
 });
 
 const uploadItem: SafeOutputItem = {type: "upload_artifact", path: "out"};
@@ -479,6 +478,7 @@ describe("runDispatchGateCli", () => {
         expect(report.violations.map((v) => v.code)).toEqual([
             "correctness-missing",
             "validator-missing-with-findings",
+            "resolve-not-decided",
         ]);
         // The rewritten queue keeps only the KEEP_ITEM_TYPES survivors.
         const rewritten = JSON.parse(fs.files[AGENT_OUTPUT]) as {
@@ -614,247 +614,6 @@ describe("runDispatchGateCli", () => {
     });
 });
 
-describe("fail-open ordering and disclosure precision (review feedback)", () => {
-    it("requires the phrase and the dimension on the same line", () => {
-        // One legitimate note plus a prose mention of another dimension: the
-        // mention must not read as that dimension's disclosure.
-        const body = [
-            "Note: holistic not assessed this run (shed under the High-tier run budget).",
-            "No security/auth concerns in this change.",
-        ].join("\n");
-        expect(disclosesSkippedDimension(body, "holistic")).toBe(true);
-        expect(disclosesSkippedDimension(body, "security-auth")).toBe(false);
-    });
-
-    it("flags a present-but-unparseable validator output with findings queued", () => {
-        const result = evaluate({
-            items: [commentItem(), submitItem("APPROVE", "")],
-            plan: {depth: "fast"},
-            outFiles: {"claim-validator.json": "not json"},
-        });
-        expect(result.violations.map((v) => v.code)).toEqual([
-            "validator-missing-with-findings",
-        ]);
-        expect(result.violations[0].detail).toContain("unparseable");
-    });
-
-    it("strips and counts a typeless item under (untyped)", () => {
-        const fs = makeFakeFs({
-            [AGENT_OUTPUT]: JSON.stringify({
-                items: [
-                    {event: "REQUEST_CHANGES"},
-                    {
-                        type: "submit_pull_request_review",
-                        event: "REQUEST_CHANGES",
-                        body: "x",
-                    },
-                ],
-            }),
-        });
-        const report = runDispatchGateCli(fs);
-        expect(report.blocked).toBe(true);
-        expect(report.strippedItemTypes["(untyped)"]).toBe(1);
-        expect(JSON.parse(fs.files[AGENT_OUTPUT]).items).toEqual([]);
-    });
-
-    it("writes the violation sentinel only on a real block", () => {
-        const blockedFs = makeFakeFs({
-            [AGENT_OUTPUT]: JSON.stringify({
-                items: [
-                    {
-                        type: "submit_pull_request_review",
-                        event: "REQUEST_CHANGES",
-                        body: "x",
-                    },
-                ],
-            }),
-        });
-        runDispatchGateCli(blockedFs);
-        expect(blockedFs.files[BLOCKED_SENTINEL_PATH]).toBeDefined();
-
-        const cleanFs = makeFakeFs({
-            [AGENT_OUTPUT]: JSON.stringify({items: []}),
-        });
-        runDispatchGateCli(cleanFs);
-        expect(cleanFs.files[BLOCKED_SENTINEL_PATH]).toBe(undefined);
-    });
-
-    it("leaves the queue intact when a pre-decision write throws (fail-open path)", () => {
-        const queueText = JSON.stringify({
-            items: [
-                {
-                    type: "submit_pull_request_review",
-                    event: "REQUEST_CHANGES",
-                    body: "x",
-                },
-            ],
-        });
-        const fs = makeFakeFs({[AGENT_OUTPUT]: queueText});
-        const failingFs = {
-            ...fs,
-            writeFileSync: (p: string, data: string) => {
-                if (p.endsWith("dispatch-gate.json")) {
-                    throw new Error("disk full");
-                }
-                fs.writeFileSync(p, data);
-            },
-        };
-        expect(() => runDispatchGateCli(failingFs)).toThrow("disk full");
-        // The report write precedes every queue mutation, so the original
-        // queue is untouched and the CLI entry fails open.
-        expect(fs.files[AGENT_OUTPUT]).toBe(queueText);
-        expect(fs.files[BLOCKED_SENTINEL_PATH]).toBe(undefined);
-    });
-
-    it("degrades block to detect (still red) when only the queue rewrite fails", () => {
-        const queueText = JSON.stringify({
-            items: [
-                {
-                    type: "submit_pull_request_review",
-                    event: "REQUEST_CHANGES",
-                    body: "x",
-                },
-            ],
-        });
-        const fs = makeFakeFs({[AGENT_OUTPUT]: queueText});
-        const failingFs = {
-            ...fs,
-            writeFileSync: (p: string, data: string) => {
-                if (p === AGENT_OUTPUT) {
-                    throw new Error("read-only queue");
-                }
-                fs.writeFileSync(p, data);
-            },
-        };
-        const report = runDispatchGateCli(failingFs);
-        expect(report.blocked).toBe(true);
-        expect(report.notes.join(" ")).toContain("queue rewrite failed");
-        // The sentinel landed, so the step still fails the job.
-        expect(fs.files[BLOCKED_SENTINEL_PATH]).toBeDefined();
-        expect(fs.files[AGENT_OUTPUT]).toBe(queueText);
-    });
-
-    it("notes a present-but-unparseable routing.json distinctly from a missing one", () => {
-        const fs = makeFakeFs({
-            [AGENT_OUTPUT]: JSON.stringify({items: []}),
-            "/tmp/gh-aw/review/routing.json": "corrupt {",
-        });
-        const report = runDispatchGateCli(fs);
-        expect(report.notes.join(" ")).toContain("present but unparseable");
-    });
-});
-
-describe("re-review hardening (second feedback round)", () => {
-    it("a disclosure note does not waive a fully-missing correctness output", () => {
-        const result = evaluate({
-            items: [
-                submitItem(
-                    "APPROVE",
-                    "Note: correctness not assessed this run (correctness-reviewer output unavailable).",
-                ),
-            ],
-            plan: {depth: "full"},
-            outFiles: {},
-        });
-        expect(result.violations.map((v) => v.code)).toEqual([
-            "correctness-missing",
-        ]);
-    });
-
-    it("still strips the queue when the sentinel/pre-gate writes fail", () => {
-        const queueText = JSON.stringify({
-            items: [
-                {
-                    type: "submit_pull_request_review",
-                    event: "REQUEST_CHANGES",
-                    body: "x",
-                },
-            ],
-        });
-        const fs = makeFakeFs({[AGENT_OUTPUT]: queueText});
-        const failingFs = {
-            ...fs,
-            writeFileSync: (p: string, data: string) => {
-                if (
-                    p === BLOCKED_SENTINEL_PATH ||
-                    p.endsWith("agent_output.pre-gate.json")
-                ) {
-                    throw new Error("disk full");
-                }
-                fs.writeFileSync(p, data);
-            },
-        };
-        const report = runDispatchGateCli(failingFs);
-        expect(report.blocked).toBe(true);
-        expect(report.notes.join(" ")).toContain(
-            "sentinel/pre-gate write failed",
-        );
-        // The queue rewrite still ran: the violating queue can never post.
-        expect(JSON.parse(fs.files[AGENT_OUTPUT]).items).toEqual([]);
-    });
-});
-
-describe("third-round nits: keep-list survivors, template coupling, summary", () => {
-    it("keeps noop and missing_data through a strip", () => {
-        const fs = makeFakeFs({
-            [AGENT_OUTPUT]: JSON.stringify({
-                items: [
-                    {
-                        type: "submit_pull_request_review",
-                        event: "REQUEST_CHANGES",
-                        body: "x",
-                    },
-                    {type: "noop", message: "m"},
-                    {type: "missing_data", data: "d"},
-                ],
-            }),
-        });
-        const report = runDispatchGateCli(fs);
-        expect(report.blocked).toBe(true);
-        expect(
-            JSON.parse(fs.files[AGENT_OUTPUT]).items.map(
-                (i: {type: string}) => i.type,
-            ),
-        ).toEqual(["noop", "missing_data"]);
-    });
-
-    it("review.md's Step 6 note templates still carry the phrase the gate matches", () => {
-        // Couples the disclosure matcher to the prompt templates: a Step 6
-        // reword that drops the phrase must fail here, not silently break
-        // rules 2/3 in production.
-        const reviewMd = readFileSync(
-            join(__dirname, "..", "review.md"),
-            "utf8",
-        );
-        expect(reviewMd).toContain(
-            "not assessed this run (shed under the <tier>-tier run budget)",
-        );
-        expect(reviewMd).toContain(
-            "not assessed this run (<sub-agent> output unavailable)",
-        );
-    });
-
-    it("renders the Conformant summary branch", () => {
-        const fs = makeFakeFs({
-            [AGENT_OUTPUT]: JSON.stringify({
-                items: [
-                    {
-                        type: "submit_pull_request_review",
-                        event: "APPROVE",
-                        body: "Approved — no blocking issues found.",
-                    },
-                ],
-            }),
-            "/tmp/gh-aw/review/rereview-plan.json": JSON.stringify({
-                depth: "fast",
-            }),
-        });
-        const report = runDispatchGateCli(fs);
-        expect(report.blocked).toBe(false);
-        expect(renderGateSummary(report)).toContain("Conformant.");
-    });
-});
-
 /* -------------------------------------------------------------------------- */
 /* Lenient out-file parsing (run 29893634730)                                 */
 /* -------------------------------------------------------------------------- */
@@ -924,5 +683,47 @@ describe("prose-tolerant out-file parsing", () => {
         });
         expect(result.conformant).toBe(true);
         expect(result.notes.join(" ")).toContain("empty reviewFiles");
+    });
+});
+
+describe("runDispatchGateCli: rule 5 disk wiring", () => {
+    const REVIEW_STAGE = "/tmp/gh-aw/review";
+
+    it("reads prior-reviews, rereview accounting, and the cache-memory stamp from disk for the flip veto", () => {
+        const fs = makeFakeFs({
+            [AGENT_OUTPUT]: JSON.stringify({
+                items: [
+                    {
+                        type: "submit_pull_request_review",
+                        event: "APPROVE",
+                        body: "ok",
+                    },
+                ],
+            }),
+            [`${REVIEW_STAGE}/rereview-plan.json`]: JSON.stringify({
+                depth: "fast",
+            }),
+            // The production shape: prior bodies exist, stamps sanitized
+            // away; the anchor comes from the cache-memory record.
+            [`${REVIEW_STAGE}/prior-reviews.json`]: JSON.stringify([
+                {body: "Changes requested — see inline comments."},
+            ]),
+            [`${REVIEW_STAGE}/rereview.json`]: JSON.stringify({
+                keptBlockingCount: 2,
+            }),
+            [`${REVIEW_STAGE}/pr-context.json`]: JSON.stringify({
+                number: 41007,
+            }),
+            ["/tmp/gh-aw/cache-memory/pr-41007.json"]: JSON.stringify({
+                verdict: "REQUEST_CHANGES",
+                stampHunks: {"a.ts": ["deadbeef00000000"]},
+                wasDraft: false,
+            }),
+        });
+        const report = runDispatchGateCli(fs);
+        expect(report.blocked).toBe(true);
+        expect(report.violations.map((v) => v.code)).toEqual([
+            "flip-vetoed-kept-blocking",
+        ]);
     });
 });

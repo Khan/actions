@@ -101,6 +101,7 @@ const SCOPED_DIFF_PATH = `${REVIEW_DIR}/scoped.diff`;
 const PR_DIFF_OUT = `${REVIEW_DIR}/pr.diff`;
 const PR_ANNOTATED_OUT = `${REVIEW_DIR}/pr-annotated.diff`;
 const REVIEW_FILES_OUT = `${REVIEW_DIR}/review-files.json`;
+const DISCIPLINES_OUT = `${REVIEW_DIR}/disciplines.md`;
 
 export type StagePrFs = {
     readFileSync: (p: string, enc: "utf8") => string;
@@ -136,6 +137,8 @@ export type StagePrOptions = {
     env?: Record<string, string | undefined>;
     /** Cache-memory dir override (tests). */
     cacheMemoryDir?: string;
+    /** Rendered-prompt path override (tests); default gh-aw's prompt.txt. */
+    promptPath?: string;
 };
 
 export type StagePrResult = {
@@ -480,6 +483,39 @@ export const runStagePrCli = async (
         );
     }
     write(PRIOR_REVIEWS_OUT, JSON.stringify(priorReviews, null, 2));
+
+    // 5b. The shared disciplines (#247: extraction becomes a pre-step, its
+    // verify becomes code). The specialist-lens disciplines live once in the
+    // rendered prompt; the marker-delimited section is extracted mechanically
+    // and verified to carry the schema section every lens depends on. A
+    // failed extraction is a warning, not a crash: the orchestrator prompt
+    // keeps a byte-for-byte fallback for exactly that case.
+    const promptPath = options.promptPath ?? "/tmp/gh-aw/aw-prompts/prompt.txt";
+    if (fs.existsSync(promptPath)) {
+        const promptLines = fs.readFileSync(promptPath, "utf8").split("\n");
+        const from = promptLines.indexOf("<!-- BEGIN REVIEW DISCIPLINES -->");
+        const to = promptLines.indexOf("<!-- END REVIEW DISCIPLINES -->");
+        const section =
+            from !== -1 && to > from
+                ? `${promptLines.slice(from, to + 1).join("\n")}\n`
+                : null;
+        if (
+            section !== null &&
+            section.includes("## Structured finding schema and hunts")
+        ) {
+            write(DISCIPLINES_OUT, section);
+        } else {
+            warnings.push(
+                section === null
+                    ? `disciplines markers not found in ${promptPath}: not staged (orchestrator fallback applies)`
+                    : "disciplines section fails the schema-heading verify: not staged (orchestrator fallback applies)",
+            );
+        }
+    } else {
+        warnings.push(
+            `rendered prompt not found (${promptPath}): disciplines not staged (orchestrator fallback applies)`,
+        );
+    }
 
     // 6-8. The deterministic CLI chain, in the order review.md Step 3 ran it:
     // router pass 1 → provenance → re-review plan.

@@ -2,8 +2,10 @@ import {describe, it, expect} from "vitest";
 
 import {
     applyVerifications,
+    buildClaims,
     joinProse,
     parseFinderOutput,
+    parseValidatorOutput,
     type Claim,
 } from "./dispatch-contracts";
 
@@ -15,6 +17,20 @@ import {
  * punctuation-aware subject/discussion join, plus the per-key validation
  * of the validator's `corrected` fields.
  */
+
+const CORRECTNESS_OUT = JSON.stringify({
+    findings: [
+        {
+            path: "a.ts",
+            line: 2,
+            label: "issue (blocking)",
+            subject: "Broken guard.",
+            discussion: "The guard was removed.",
+            failure_scenario: "nil deref on empty input",
+        },
+    ],
+    files: [{path: "a.ts", risk: "high"}],
+});
 
 const claim = (overrides: Partial<Claim> = {}): Claim =>
     ({
@@ -238,6 +254,136 @@ describe("label-contract enforcement (run 29897276810)", () => {
         );
         expect(joinProse("Only a subject", "")).toBe("Only a subject");
         expect(joinProse("", "Only a discussion.")).toBe("Only a discussion.");
+    });
+});
+
+describe("verification mechanics", () => {
+    const claim = (overrides: Partial<Claim>): Claim => ({
+        id: "c1",
+        source: "correctness-reviewer",
+        path: "a.ts",
+        line: 2,
+        label: "issue (blocking)",
+        subject: "s",
+        discussion: "d",
+        failure_scenario: "f",
+        confidence: 0.7,
+        ...overrides,
+    });
+
+    it("parses the validator's claims-array contract, skipping malformed entries", () => {
+        // The contract (review.md and the eval producer alike) is
+        // {"claims": [{id, verification, ...}]}.
+        const parsed = parseValidatorOutput(
+            JSON.stringify({
+                claims: [
+                    {id: "c1", verification: "confirmed", confidence: 0.95},
+                    {id: "c2", verification: "nonsense"},
+                    "not an object",
+                    {verification: "refuted"},
+                ],
+            }),
+        );
+        expect(Object.keys(parsed)).toEqual(["c1"]);
+        expect(() => parseValidatorOutput(JSON.stringify({c1: {}}))).toThrow(
+            /no claims array/,
+        );
+    });
+
+    it("drops refuted, downgrades plausible to non-blocking, applies corrections", () => {
+        const claims = [
+            claim({id: "refuted"}),
+            claim({id: "plausible"}),
+            claim({id: "confirmed"}),
+            claim({id: "unmentioned"}),
+        ];
+        const result = applyVerifications(claims, {
+            refuted: {verification: "refuted"},
+            plausible: {verification: "plausible", confidence: 0.4},
+            confirmed: {
+                verification: "confirmed",
+                corrected: {line: 3, subject: "fixed subject"},
+            },
+        });
+        expect(result.map((c) => c.id)).toEqual([
+            "plausible",
+            "confirmed",
+            "unmentioned",
+        ]);
+        const plausible = result[0];
+        expect(plausible.label).toBe("suggestion (non-blocking)");
+        expect(plausible.confidence).toBe(0.4);
+        const confirmed = result[1];
+        expect(confirmed.line).toBe(3);
+        expect(confirmed.subject).toBe("fixed subject");
+        expect(confirmed.label).toBe("issue (blocking)");
+        expect(result[2].label).toBe("issue (blocking)");
+    });
+
+    it("rejects out-of-vocabulary corrected labels and non-integer corrected lines", () => {
+        // The drift `fromLabelShape` guards on the finder side, one step
+        // later: a truncated label would fail `isBlockingLabel` and silently
+        // drop a confirmed blocking claim out of the verdict.
+        const result = applyVerifications([claim({id: "c1"})], {
+            c1: {
+                verification: "confirmed",
+                corrected: {
+                    label: "issue",
+                    line: "7" as unknown as number,
+                    subject: "  ",
+                    discussion: "a real correction",
+                },
+            },
+        });
+        expect(result).toHaveLength(1);
+        // Rejected corrections keep the finder's originals...
+        expect(result[0].label).toBe("issue (blocking)");
+        expect(result[0].line).toBe(claim({}).line);
+        expect(result[0].subject).toBe(claim({}).subject);
+        // ...while a well-formed one still applies.
+        expect(result[0].discussion).toBe("a real correction");
+    });
+
+    it("accepts an in-vocabulary corrected label", () => {
+        const result = applyVerifications([claim({id: "c1"})], {
+            c1: {
+                verification: "confirmed",
+                corrected: {label: "suggestion (non-blocking)", line: 12},
+            },
+        });
+        expect(result[0].label).toBe("suggestion (non-blocking)");
+        expect(result[0].line).toBe(12);
+    });
+
+    it("caps an author-disputed claim at a question unless confirmed", () => {
+        const result = applyVerifications(
+            [claim({id: "c1", author_dispute: "author says no"})],
+            {c1: {verification: "plausible"}},
+        );
+        expect(result[0].label).toBe("question (non-blocking)");
+        const confirmed = applyVerifications(
+            [claim({id: "c1", author_dispute: "author says no"})],
+            {c1: {verification: "confirmed"}},
+        );
+        expect(confirmed[0].label).toBe("issue (blocking)");
+    });
+
+    it("builds claims with the producer label and prose split", () => {
+        const candidates = parseFinderOutput(
+            "correctness-reviewer",
+            CORRECTNESS_OUT,
+            new Set(),
+        ).candidates;
+        const claims = buildClaims(candidates);
+        expect(claims[0]).toMatchObject({
+            id: "correctness-reviewer-1",
+            source: "correctness-reviewer",
+            path: "a.ts",
+            line: 2,
+            label: "issue (blocking)",
+            failure_scenario: "nil deref on empty input",
+            confidence: 0.7,
+        });
     });
 });
 
