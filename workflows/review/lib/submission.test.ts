@@ -897,6 +897,59 @@ describe("risks/patterns key staging (trial suggestion b)", () => {
         );
     });
 
+    // The NOTIFIED fold has to compute its own signature. Reading
+    // notified.json would find nothing on every real run: the notified CLI
+    // does not run until Step 7, long after this CLI, so the `notified:`
+    // component would always drop out and a NOTIFIED-only change would stage
+    // a key identical to the prior run's — Step 7 would read the guidance as
+    // unchanged and never mention the newly-subscribed team.
+    it("folds the NOTIFIED signature in from the repo, without notified.json being staged first", () => {
+        const withNotified = (rules: string) =>
+            makeFakeFs(
+                staged(
+                    {depth: "full", ...triaged},
+                    {
+                        ".github/NOTIFIED": ["[ON PULL REQUEST]", rules].join(
+                            "\n",
+                        ),
+                        [`${REVIEW}/files.json`]: JSON.stringify([
+                            {path: "a.ts"},
+                            {path: "b.ts"},
+                        ]),
+                        [`${REVIEW}/full.diff`]: "",
+                    },
+                ),
+            );
+
+        const fs = withNotified("infra: a.ts  @Org/team-infra");
+        runSubmissionCli(fs);
+        // notified.json was NOT staged by the test; the key still carries the
+        // component, which is only possible if the CLI computed it.
+        expect(fs.files[KEY_PATH]).toContain("notified:");
+        expect(fs.files[`${REVIEW}/notified.json`]).toBeDefined();
+
+        // A NOTIFIED-only change moves the key. This is the assertion that
+        // fails when the signature is read from an unstaged file: both keys
+        // come out identical and the re-post never fires.
+        const changed = withNotified("infra: a.ts  @Org/team-platform");
+        runSubmissionCli(changed);
+        expect(changed.files[KEY_PATH]).not.toBe(fs.files[KEY_PATH]);
+    });
+
+    it("stages the pre-feature key when the repo has no .github/NOTIFIED", () => {
+        const fs = makeFakeFs(
+            staged(
+                {depth: "full", ...triaged},
+                {
+                    [`${REVIEW}/files.json`]: JSON.stringify([{path: "a.ts"}]),
+                    [`${REVIEW}/full.diff`]: "",
+                },
+            ),
+        );
+        runSubmissionCli(fs);
+        expect(fs.files[KEY_PATH]).not.toContain("notified:");
+    });
+
     it("stages nothing at any reduced depth (Step 7 skips them; a scoped subset must not overwrite the full signature)", () => {
         for (const depth of ["scoped", "flip-gated", "fast"]) {
             const fs = makeFakeFs(staged({depth, ...triaged}));
