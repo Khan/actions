@@ -33,23 +33,32 @@ on:
 # One gate per surface. Double-quoted YAML so the `\n`/`\r`/`\t` escapes below
 # become real characters in the expression rather than literal backslashes.
 #
-# LABEL PATH — three cheap gates before the agent starts:
+# LABEL PATH. Two cheap gates before the agent starts:
 #   1. Same-repo branches only. A fork PR gets no secrets, so the push would
 #      fail anyway.
 #   2. The label that fired this event is an autofix label. Every other label
 #      addition on the PR is a run we never pay for.
-#   3. Never on a PR the reviewer was told to skip: with no review there is
-#      nothing to fix, and the plan would refuse in Step 2 regardless.
+#
+# `skip-ai-review` is deliberately NOT a gate here, and that is a decision, not
+# an omission. The label stops the reviewer from running again; it does not
+# dismiss a review already posted (the reviewer's own `if:` says so: "adding it
+# prevents the *next* run"). The reviewer even suggests the label from inside a
+# review body it just posted, so "labelled" and "has current findings" is a
+# state the workflow steers users into, not a corner case. Reading the label as
+# "no AI may act on this PR" would silently swallow an explicit `autofix:` label
+# from someone with write access; that opt-in IS the authorisation, while
+# autofix only ever runs when a human arms it. Revisit when autofix runs
+# automatically: that is when a push nobody asked for becomes possible, and when
+# autofix should get its own opt-out rather than borrowing the reviewer's.
 #
 # COMMAND PATH — deliberately weaker, and worth understanding before you touch
 # it. `issue_comment` carries no `github.event.pull_request`, so the fork guard
-# and the `skip-ai-review` check CANNOT be evaluated here at all. They are
-# instead enforced in `plan.ts`, which refuses a fork or a `skip-ai-review` PR
-# from the staged `context.json` and labels. That is real code, not an
-# aspiration: an earlier version of this comment claimed the checks "move into
-# the plan" while the plan did not implement them, and Khan/actions#298's review
-# caught it. The cost is that an `/autofix` on a PR the label path would have
-# rejected for free still burns a job before refusing.
+# CANNOT be evaluated here at all. It is instead enforced in `plan.ts`, which
+# refuses a fork from the staged `context.json`. That is real code, not an
+# aspiration: an earlier version of this comment claimed the check "moves into
+# the plan" while the plan did not implement it, and Khan/actions#298's review
+# caught it. The cost is that an `/autofix` on a fork PR the label path would
+# have rejected for free still burns a job before refusing.
 #
 # The gate that actually matters is unaffected: gh-aw's `roles` check above
 # still runs, so a comment from someone without write access never reaches the
@@ -69,7 +78,7 @@ on:
 # the command — never activates the workflow. That silently killed `/review` in
 # Khan/webapp#40943. `scope.ts`'s parser tolerates the same shapes; keep the two
 # in step.
-if: "(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.label.name, 'autofix: ') && !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')) || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && (github.event.comment.body == '/autofix' || startsWith(github.event.comment.body, '/autofix ') || startsWith(github.event.comment.body, '/autofix\n') || startsWith(github.event.comment.body, '/autofix\r') || startsWith(github.event.comment.body, '/autofix\t')))"
+if: "(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.label.name, 'autofix: ')) || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && (github.event.comment.body == '/autofix' || startsWith(github.event.comment.body, '/autofix ') || startsWith(github.event.comment.body, '/autofix\n') || startsWith(github.event.comment.body, '/autofix\r') || startsWith(github.event.comment.body, '/autofix\t')))"
 
 permissions:
   contents: read

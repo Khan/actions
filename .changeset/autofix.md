@@ -10,4 +10,6 @@ Everything except the code edit is deterministic. `lib/stage.ts` runs as a pre-a
 
 Guards fail closed. Currency is checked per file so one unrelated push doesn't refuse the whole run; unparseable labels, outdated anchors, threads a human opened, an unreadable diff, and a head that moves mid-run are all excluded. Refusal is reserved for a PR with no review at all.
 
+The reviewer's `skip-ai-review` label does not disarm autofix. It stops the reviewer's next run without withdrawing a review already posted, so a labelled PR can still carry current findings, and an explicit `autofix:` label or `/autofix` from someone with write access is the authorisation to act on them. A PR with no review is still refused, by the guard that checks for one.
+
 The push uses `KHAN_ACTIONS_BOT_TOKEN`, because GitHub creates no workflow runs for `GITHUB_TOKEN`-triggered events and the re-review of the autofix commit is the only verification a fix gets. Ships with a documented workaround for gh-aw's unbounded PR-branch fetch, which is otherwise fatal on large monorepos.

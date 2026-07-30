@@ -152,15 +152,22 @@ export const buildPlan = (input: PlanInput): AutofixPlan => {
         return {...base, status: "refused", reason: resolution.reason};
     }
 
-    // The `pull_request` branch of the workflow's `if:` gates on these two
-    // before the job starts. The `issue_comment` branch CANNOT: that event
-    // carries no `github.event.pull_request`, so a command-armed run reaches
-    // here ungated. An earlier version of the workflow comment and the README
-    // both said these checks "move into the plan" while the plan did not
-    // implement them, which is how Khan/actions#298's review found it.
+    // The `pull_request` branch of the workflow's `if:` gates on this before the
+    // job starts. The `issue_comment` branch CANNOT: that event carries no
+    // `github.event.pull_request`, so a command-armed run reaches here ungated.
+    // An earlier version of the workflow comment and the README both said this
+    // check "moves into the plan" while the plan did not implement it, which is
+    // how Khan/actions#298's review found it.
     //
     // Enforced on every path, not just the command one: a duplicated guard is
     // cheap, and a missing one authorises a code push.
+    //
+    // `skip-ai-review` is NOT checked here, deliberately. It stops the reviewer
+    // from running again; it does not withdraw a review already posted, so a
+    // labelled PR can still carry current findings, and an explicit `autofix:`
+    // label or `/autofix` from someone with write access is the authorisation
+    // for acting on them. See the reasoning in `autofix.md`'s gate comment, and
+    // revisit it if autofix ever runs without a human arming it.
     if (input.isFork !== false) {
         return {
             ...base,
@@ -169,16 +176,6 @@ export const buildPlan = (input: PlanInput): AutofixPlan => {
             reason:
                 "this PR's head is a fork, or its origin could not be " +
                 "determined, and autofix does not push to forks.",
-        };
-    }
-    if (input.labels.includes("skip-ai-review")) {
-        return {
-            ...base,
-            status: "refused",
-            scopes: resolution.request.scopes,
-            reason:
-                "this PR carries `skip-ai-review`, so its reviewer feedback is " +
-                "not authoritative and autofix will not act on it.",
         };
     }
 

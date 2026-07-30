@@ -2,6 +2,7 @@ import {describe, expect, it} from "vitest";
 
 import {buildPlan, runPlanCli} from "./plan.ts";
 import type {PlanCliFs, PlanInput} from "./plan.ts";
+import {REFUSAL_REASONS} from "./staleness.ts";
 import {parseTrailer} from "./trailer.ts";
 import {
     computeHunkSignature,
@@ -439,8 +440,8 @@ describe("runPlanCli command staging", () => {
 
 describe("guards the command path cannot express in the workflow if:", () => {
     // Khan/actions#298 review, blocking: the issue_comment branch of the gate
-    // carries neither check, and both the workflow comment and the README said
-    // they "move into the plan" while the plan did not implement them.
+    // carried no fork check, and both the workflow comment and the README said
+    // it "moves into the plan" while the plan did not implement it.
     it("refuses a fork", () => {
         const plan = buildPlan(input({isFork: true}));
         expect(plan.status).toBe("refused");
@@ -454,26 +455,61 @@ describe("guards the command path cannot express in the workflow if:", () => {
         expect(plan.reason).toContain("could not be");
     });
 
-    it("refuses a PR carrying skip-ai-review", () => {
+    it("proceeds on a same-repo PR without the label", () => {
+        expect(buildPlan(input({isFork: false})).status).toBe("armed");
+    });
+
+    it("enforces it on the command path too", () => {
+        const plan = buildPlan(
+            input({labels: [], command: "/autofix blocking", isFork: true}),
+        );
+        expect(plan.status).toBe("refused");
+        expect(plan.reason).toContain("fork");
+    });
+});
+
+describe("skip-ai-review does not disarm autofix", () => {
+    // The label stops the reviewer's NEXT run; it does not withdraw a review
+    // already posted, so a labelled PR can still carry current findings. The
+    // reviewer even suggests the label from inside a review body it just posted.
+    // An explicit `autofix:` label from someone with write access is the
+    // authorisation to act on those findings, and swallowing it silently was the
+    // behaviour that made the Khan/webapp#41177 docs trial unable to run both a
+    // suppressed reviewer and autofix. Revisit if autofix ever runs unarmed.
+    it("arms a labelled PR that still has a current review", () => {
         const plan = buildPlan(
             input({
                 isFork: false,
                 labels: ["autofix: blocking", "skip-ai-review"],
             }),
         );
-        expect(plan.status).toBe("refused");
-        expect(plan.reason).toContain("skip-ai-review");
+        expect(plan.status).toBe("armed");
+        expect(plan.reason).not.toContain("skip-ai-review");
     });
 
-    it("proceeds on a same-repo PR without the label", () => {
-        expect(buildPlan(input({isFork: false})).status).toBe("armed");
-    });
-
-    it("enforces them on the command path too", () => {
+    it("arms on the command path too", () => {
         const plan = buildPlan(
-            input({labels: [], command: "/autofix blocking", isFork: true}),
+            input({
+                isFork: false,
+                labels: ["skip-ai-review"],
+                command: "/autofix blocking",
+            }),
+        );
+        expect(plan.status).toBe("armed");
+    });
+
+    it("still refuses a labelled PR with no review, on the review guard", () => {
+        // The old gate was justified as "with no review there is nothing to
+        // fix". That case is real; it is just already covered here, by the
+        // guard that actually checks for a review.
+        const plan = buildPlan(
+            input({
+                isFork: false,
+                labels: ["autofix: blocking", "skip-ai-review"],
+                priorReviews: [],
+            }),
         );
         expect(plan.status).toBe("refused");
-        expect(plan.reason).toContain("fork");
+        expect(plan.reason).toBe(REFUSAL_REASONS["no-review"]);
     });
 });

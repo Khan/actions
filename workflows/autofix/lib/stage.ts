@@ -60,9 +60,8 @@ export type StagedInputs = {
      * Whether the PR's head is a fork.
      *
      * Staged because the command path cannot gate on it: `issue_comment`
-     * carries no `github.event.pull_request`, so the workflow's `if:` can check
-     * neither the fork nor `skip-ai-review` there, and both have to be enforced
-     * after the job starts.
+     * carries no `github.event.pull_request`, so the workflow's `if:` cannot
+     * check the fork there, and it has to be enforced after the job starts.
      */
     isFork: boolean;
 };

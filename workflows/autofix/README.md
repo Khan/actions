@@ -234,14 +234,29 @@ must stay in step, and there is a test pinning the CRLF case specifically.
 ### The command path's gates are weaker
 
 Worth knowing before relying on it. `issue_comment` carries no
-`github.event.pull_request`, so the fork guard and the `skip-ai-review` check
-cannot be evaluated in the `if:` at all — they move into the plan, after the
-agent job has started. An `/autofix` on a PR the label path would have rejected
-for free still costs a job.
+`github.event.pull_request`, so the fork guard cannot be evaluated in the `if:`
+at all; it moves into the plan, after the agent job has started. An `/autofix`
+on a fork PR the label path would have rejected for free still costs a job.
 
-They are instead enforced in `plan.ts`, from the staged `context.json` and
-labels, on every path rather than only the command one. A duplicated guard is
-cheap; a missing one authorises a code push.
+It is instead enforced in `plan.ts`, from the staged `context.json`, on every
+path rather than only the command one. A duplicated guard is cheap; a missing
+one authorises a code push.
+
+### `skip-ai-review` does not disarm autofix
+
+Deliberately. That label stops the reviewer's *next* run; it does not withdraw a
+review already posted, so a labelled PR can still be carrying current findings.
+The reviewer even suggests the label from inside a review body it just posted, so
+that state is one the workflow steers people into. An explicit `autofix:` label
+or `/autofix` from someone with write access is the authorisation to act on those
+findings, and the earlier gate swallowed it silently.
+
+The case that gate was justified by ("no review, so nothing to fix") is real and
+still covered, by the review-currency guard that actually checks for a review.
+
+Revisit when autofix runs automatically rather than only when a human arms it:
+that is when a push nobody asked for becomes possible, and autofix should then
+get its own opt-out rather than borrowing the reviewer's.
 
 The gate that actually matters is unaffected: gh-aw's `roles` check still runs,
 compiling to an `author_association` test against `OWNER`/`MEMBER`/
