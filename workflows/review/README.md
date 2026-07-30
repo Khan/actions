@@ -338,6 +338,15 @@ teaching the live producer to dispatch a case's `enable`d reviewers — before t
 no opt-in reviewer had a live arm at all and could not earn its `enable` line the
 way the policy above says it must.
 
+Neither case carries the `smoke` tag, so the per-PR A/B skips them; price this
+reviewer with a targeted `workflow_dispatch` of *Review Eval A/B*
+(`cases=golden-documentation-stale-and-narrated,clean-documentation-earned-comments`,
+`repeats=3`, since precision on the clean case is the stochastic half). On the
+A/B that introduces any new reviewer the **baseline arm cannot define it**: the
+producer records that as an absent dimension rather than failing the run, and the
+report flags it under *Arm asymmetry*, because the candidate arm's findings there
+are pure gain by construction rather than a measured improvement.
+
 ### The `.github/NOTIFIED` file (optional)
 
 If the repo has a Gerald [`.github/NOTIFIED`](https://khanacademy.atlassian.net/wiki/spaces/FRONTEND/pages/598278672/Gerald+Documentation)

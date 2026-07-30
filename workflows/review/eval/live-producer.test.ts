@@ -304,6 +304,57 @@ describe("produceLive", () => {
         ).toBeFalsy();
     });
 
+    it("records an enabled reviewer this arm does not define instead of throwing", async () => {
+        // The A/B baseline arm over a case that enables a reviewer the PR
+        // adds: the base tip's review.md cannot define it. Throwing here
+        // killed the whole run before any report (`runArm` does not wrap
+        // its produce call), so the missing dimension is recorded instead.
+        const enabledCase = parseCase(
+            {
+                ...CASE,
+                id: "produce-absent",
+                routerConfig: {enabledReviewers: ["documentation"]},
+            },
+            "/corpus/incidents/produce-absent/case.json",
+        );
+        const {runner, requests} = scriptedRunner({
+            "correctness-reviewer": [JSON.stringify({findings: []})],
+            "skill-auditor": [JSON.stringify({findings: []})],
+        });
+
+        const result = await produceLive(enabledCase, AGENTS, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(
+                Volume.fromJSON({
+                    "/corpus/incidents/produce-absent/tree/src/a.ts":
+                        "const a = 2;\nexport {a};\n",
+                }),
+            ),
+        });
+
+        expect(requests.map((r) => r.name)).not.toContain("documentation");
+        const entry = result.perAgent.find((a) => a.name === "documentation");
+        expect(entry?.absent).toBe(true);
+        expect(entry?.failed).toBeUndefined();
+        expect(entry?.usd).toBe(0);
+    });
+
+    it("still throws when an always-on finder is missing from the arm", async () => {
+        const agents = new Map(AGENTS);
+        agents.delete("skill-auditor");
+        const {runner} = scriptedRunner({
+            "correctness-reviewer": [JSON.stringify({findings: []})],
+        });
+        await expect(
+            produceLive(CASE, agents, {
+                runner,
+                stageDir: "/stage",
+                fs: volFs(caseVol()),
+            }),
+        ).rejects.toThrow(/"skill-auditor" is not defined/);
+    });
+
     it("throws on an unknown enabledReviewers entry rather than measuring nothing", async () => {
         const typoCase = parseCase(
             {

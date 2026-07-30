@@ -53,6 +53,13 @@ export type ArmRunReport = {
         snapped: number;
         /** `<agent>: <reason>` per failed agent (diagnosable from the report). */
         failedAgents: string[];
+        /**
+         * Reviewers the case enabled that this arm's `review.md` does not
+         * define, so the arm never had the dimension. Expected on the baseline
+         * arm of a new-reviewer A/B, and reported so a missing dimension is
+         * never read as a reviewer that ran and stayed quiet.
+         */
+        absentAgents?: string[];
         /** Present iff the case is an open-PR (rereview) case. */
         rereview?: RereviewCaseScore;
     }[];
@@ -482,6 +489,31 @@ export const renderMarkdownReport = (report: AbReport): string => {
             "### Agent failures",
             "",
             ...failedAgents.map((f) => `- ${f}`),
+            "",
+        );
+    }
+    // Arm asymmetry is a caveat on the delta, not a failure: a reviewer only
+    // the candidate arm defines makes its dimension pure gain by construction,
+    // which the reader has to know before crediting the delta to a prompt
+    // change.
+    const asymmetry = (
+        [
+            ["baseline", baseline],
+            ["candidate", candidate],
+        ] as const
+    ).flatMap(([arm, report]) =>
+        report.perCase.flatMap((c) =>
+            (c.absentAgents ?? []).map(
+                (agent) =>
+                    `${c.caseId}: \`${agent}\` is not defined in the ${arm} arm's review.md, so that arm ran without the dimension`,
+            ),
+        ),
+    );
+    if (asymmetry.length > 0) {
+        lines.push(
+            "### Arm asymmetry (expected when the PR adds a reviewer)",
+            "",
+            ...asymmetry.map((a) => `- ${a}`),
             "",
         );
     }

@@ -113,6 +113,13 @@ export type PerAgentReport = {
     retried: boolean;
     /** Fixed-format failure note; the agent contributed nothing when set. */
     failed?: string;
+    /**
+     * This arm's `review.md` does not define the reviewer, so it was never
+     * dispatched. Not a failure: it is the shape of a new-reviewer A/B, where
+     * the baseline arm cannot have the reviewer the candidate arm adds. Kept
+     * distinct from `failed` so the report can say which it was.
+     */
+    absent?: boolean;
 };
 
 /** The thread-reconciler's parsed decision over the staged prior threads. */
@@ -617,24 +624,42 @@ export const produceLive = async (
     };
     const routing = route({files: corpusCase.changedFiles}, routerConfig);
     const dispatch = staged.rereviewPlan?.dispatch ?? "all";
+    const enabled = enabledReviewersOf(corpusCase);
     const rosterNames =
         dispatch === "all"
-            ? [
-                  ...DEFAULT_FINDERS,
-                  ...enabledReviewersOf(corpusCase),
-                  ...routing.lensesToSpawn,
-              ]
+            ? [...DEFAULT_FINDERS, ...enabled, ...routing.lensesToSpawn]
             : dispatch === "reconcile+correctness"
             ? ["correctness-reviewer"]
             : [];
-    const roster = rosterNames.map((name) => {
+
+    /**
+     * An enabled opt-in reviewer this arm's `review.md` does not define is an
+     * **asymmetric arm**, not a broken one, and it is the normal shape of the
+     * A/B that graduates a new reviewer: the baseline arm is built from the
+     * base tip, which by construction predates the reviewer the candidate arm
+     * adds. Throwing here killed the whole A/B run before any report, since
+     * `runArm` does not wrap its `produce` call.
+     *
+     * Tolerating absence cannot mask a typo, which is the failure mode the
+     * `enabledReviewers` validation exists to prevent: the name is already
+     * checked against `ENABLEABLE_REVIEWERS`, so absence can only mean this
+     * arm predates the reviewer. Every other roster member stays a hard
+     * error: the default finders are always-on, and a routed lens name is not
+     * validated anywhere, so its absence really may be a mistake.
+     */
+    const absent: string[] = [];
+    const roster = rosterNames.flatMap((name) => {
         const agent = agents.get(name);
         if (agent === undefined) {
+            if ((enabled as readonly string[]).includes(name)) {
+                absent.push(name);
+                return [];
+            }
             throw new Error(
                 `sub-agent "${name}" is not defined in the extracted review.md`,
             );
         }
-        return agent;
+        return [agent];
     });
 
     const resolvePrompt = (agent: ExtractedAgent): string =>
@@ -645,7 +670,18 @@ export const produceLive = async (
 
     const usedIds = new Set<string>();
     const findings: LiveFinding[] = [];
-    const perAgent: PerAgentReport[] = [];
+    // The absent reviewers lead the report: a dimension this arm never had is
+    // recorded, never silent, so a reader can tell an asymmetric arm from an
+    // arm whose reviewer ran and found nothing.
+    const perAgent: PerAgentReport[] = absent.map((name) => ({
+        name,
+        model: "",
+        usd: 0,
+        turns: 0,
+        wallMs: 0,
+        retried: false,
+        absent: true,
+    }));
 
     const finderResults = await mapWithConcurrency(
         roster,
