@@ -156,11 +156,35 @@ two forms would be indistinguishable at a glance.
 
 ### One constraint that outlives v1: nits never loop
 
-`isLoopEligible` is enforced in code rather than left to convention.
-Non-blocking findings have no fixed point — the reviewer will always find
-something cosmetic in the autofixer's own output — so a nits-scoped loop cannot
-converge. Blocking scope terminates naturally at the merge gate, which is why it
-is the scope a cadence axis would be built on.
+What enforces this in v1 is the **token table**: `loop` sits in
+`UNIMPLEMENTED_TOKENS`, so `autofix: loop` is rejected and no cadence can be
+armed at all. `isLoopEligible` in `scope.ts` states the rule itself and has no
+production caller, because there is no cadence axis to call it; it exists so the
+rule does not have to be rediscovered. **Whoever builds the cadence axis must
+call it**; until then it is a documented intent with a test, not a gate.
+
+The rule: non-blocking findings have no fixed point, so a nits-scoped loop
+cannot converge. Blocking scope terminates at the merge gate, which is why it is
+the scope a cadence axis would be built on. But note what that rests on: the
+merge gate is a claim about a human eventually merging, not something the
+pipeline enforces, and the one mechanism that does bound re-flagging exempts
+blocking from itself: the reviewer's newly-changed-code scope filter
+(`applyScopeFilter` in `review/lib/dispatch-contracts.ts`) keeps plain
+`issue (blocking)` / `todo (blocking)` findings regardless of scope, so blocking
+is the one class that can be re-raised on previously-reviewed, untouched lines on
+every cycle. The filter bounds nits; it does not bound blocking.
+
+Khan/webapp#41194 is the first live evidence, and it corrects what this section
+used to claim the generator was. One blocking-scoped cycle fixed its finding, and
+the re-review resolved that thread and approved, then filed two fresh
+non-blocking findings against code autofix never wrote (`counts.go:7` is
+`func MergeCounts`, twelve lines above its first added line; `counts.go:16` is a
+context line in its own hunk). That run planned `no-prior-fingerprint`, so the
+scope filter was a no-op and the whole diff was re-derived with no memory of what
+the previous review had already said. Open non-blocking threads went 3 → 5 in one
+cycle with no nits-scoped work done. The generator is a **memoryless
+re-derivation over the whole diff**, not the fixer's own prose; it does not need
+the fixer to have written anything.
 
 `docs` is the value worth pausing on, because it looks like the exception and is
 only half one. Its deletion half genuinely converges: a comment that restates

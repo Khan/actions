@@ -29,12 +29,25 @@
  * working loop that stopped after one cycle, which is the worst of both
  * behaviours.
  *
- * One constraint outlives this version and is enforced here rather than left to
- * convention: **`nits` is never loop-eligible**. Non-blocking findings have no
- * fixed point (the reviewer will always find something cosmetic in the
- * autofixer's own output), so a nits-scoped loop cannot converge and must not be
- * offered. See {@link isLoopEligible}; when the cadence axis lands, the loop
- * token has to consult it.
+ * One constraint outlives this version: **`nits` is never loop-eligible**.
+ * Non-blocking findings have no fixed point, so a nits-scoped loop cannot
+ * converge and must not be offered. What enforces that *here* is the token
+ * table: `loop` is in {@link UNIMPLEMENTED_TOKENS}, so no cadence can be armed
+ * at all. {@link isLoopEligible} states the rule for whoever adds the cadence
+ * axis and has no caller until they write one; calling it is their job.
+ *
+ * The generator is a **memoryless re-derivation over the whole diff**, not the
+ * fixer's own prose, which is what this comment used to guess.
+ * Khan/webapp#41194 measured one blocking-scoped cycle: the fix cleared its
+ * finding, the re-review resolved that thread and approved, and then filed two
+ * fresh non-blocking findings against code the fixer never wrote (`counts.go:7`
+ * is `func MergeCounts`, twelve lines above its first added line;
+ * `counts.go:16` is a context line in its own hunk). That run planned
+ * `no-prior-fingerprint`, so the reviewer's newly-changed-code scope filter was
+ * a no-op and the whole diff was re-derived with no memory of the previous
+ * review. Open non-blocking threads went 3 → 5 in one cycle with no nits-scoped
+ * work done. The fixer does not have to have written anything for this to
+ * happen.
  */
 
 import {
@@ -122,6 +135,17 @@ export const DEFAULT_COMMAND_SCOPE: AutofixScope = "blocking";
  * terminate at the merge gate; non-blocking ones have no fixed point. This
  * version has no loop, but the rule is encoded now because it is the constraint
  * most likely to be violated by whoever adds one later.
+ *
+ * Note what `blocking`'s eligibility actually rests on: the merge gate is a
+ * claim about a human eventually merging, not a termination proof, and nothing
+ * in the reviewer backs it. The one mechanism that bounds re-flagging exempts
+ * blocking from itself: `applyScopeFilter` in
+ * `review/lib/dispatch-contracts.ts` keeps plain `issue (blocking)` /
+ * `todo (blocking)` findings whether or not they land on newly-changed code, so
+ * blocking is the one class that can be re-raised on previously-reviewed,
+ * untouched lines every cycle. The scope filter bounds nits; it does not bound
+ * blocking. A cadence axis needs its own stop condition and cannot inherit one
+ * from this predicate.
  *
  * `docs` is the case worth pausing on, because it looks convergent and is only
  * half so. Its deletion half has a fixed point (a comment that restates the
