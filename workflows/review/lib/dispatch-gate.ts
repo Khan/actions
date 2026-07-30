@@ -527,9 +527,23 @@ export const evaluateDispatchConformance = (
     // an APPROVE plan with no comments and a bare approve body may
     // legitimately queue nothing (the Step 6 redundant-approval skip, whose
     // shape the skip branch below checks in full).
-    const planStaged = input.submissionPlan as
-        | {event?: unknown; body?: unknown; comments?: unknown}
-        | undefined;
+    // Defensive over agent-writable staged input, like every sibling parse in
+    // this file. `readJsonIfPresent` passes `JSON.parse("null")` straight
+    // through, so a `submission-plan.json` containing literal `null` reaches
+    // here as `null` — which a bare `!== undefined` guard admits, and the
+    // property reads below then throw. That throw escapes to the CLI entry
+    // catch, which exits 0 with the queue untouched: not a rule-7 failure but
+    // a fail-open of ALL SEVEN rules. The sibling `priorReviews` parse was
+    // hardened against exactly this shape; this one has to match it.
+    const planStaged =
+        typeof input.submissionPlan === "object" &&
+        input.submissionPlan !== null
+            ? (input.submissionPlan as {
+                  event?: unknown;
+                  body?: unknown;
+                  comments?: unknown;
+              })
+            : undefined;
     if (planStaged !== undefined && submit === undefined) {
         const planComments = Array.isArray(planStaged.comments)
             ? planStaged.comments

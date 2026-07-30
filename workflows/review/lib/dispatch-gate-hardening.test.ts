@@ -508,4 +508,44 @@ describe("staged-input robustness (slice 3 re-review)", () => {
             "flip-vetoed-kept-blocking",
         ]);
     });
+
+    // `readJsonIfPresent` passes `JSON.parse("null")` through unchanged, so a
+    // `submission-plan.json` holding literal `null` arrives as `null` rather
+    // than `undefined`. A bare `!== undefined` guard admits it and the
+    // property reads throw — and because the CLI entry catch exits 0 with the
+    // queue untouched, that throw fails open ALL SEVEN rules, not just rule 7.
+    it("does not throw on a null submission plan, and still runs the other rules", () => {
+        const run = () =>
+            evaluate({
+                items: [commentItem()],
+                plan: {depth: "full"},
+                outFiles: {},
+                submissionPlan: null,
+            });
+        expect(run).not.toThrow();
+
+        // A null plan is treated as "no plan staged", so rule 7 has nothing to
+        // bind against — but the rules that do not depend on it must still
+        // fire. Here: comments queued with no submission, over a full-depth
+        // staging that dispatched nothing.
+        const codes = run().violations.map((v) => v.code);
+        expect(codes.length).toBeGreaterThan(0);
+        expect(codes).not.toContain("submission-plan-mismatch");
+    });
+
+    it("still binds the queue to a well-formed plan (the null guard is not a bypass)", () => {
+        const result = evaluate({
+            items: [submitItem("APPROVE", "")],
+            plan: {depth: "full"},
+            outFiles: conformingOutFiles(),
+            submissionPlan: {
+                event: "REQUEST_CHANGES",
+                body: "blocking finding",
+                comments: [],
+            },
+        });
+        expect(result.violations.map((v) => v.code)).toContain(
+            "submission-plan-mismatch",
+        );
+    });
 });
