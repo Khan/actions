@@ -8,6 +8,7 @@ import {
     parseValidatorOutput,
     type Claim,
 } from "./dispatch-contracts";
+import {labelForFinding} from "./render-comment";
 
 /**
  * Contract-parse tests for the label-shape mapping (dispatch-contracts.ts),
@@ -254,6 +255,52 @@ describe("label-contract enforcement (run 29897276810)", () => {
         );
         expect(joinProse("Only a subject", "")).toBe("Only a subject");
         expect(joinProse("", "Only a discussion.")).toBe("Only a discussion.");
+    });
+});
+
+describe("label-shape lens assignment", () => {
+    const docFinding = JSON.stringify({
+        findings: [
+            {
+                path: "src/notes/expiry.ts",
+                line: 12,
+                label: "suggestion (non-blocking, documentation)",
+                subject: "The comment above still says 30 days.",
+                discussion:
+                    "`// notes expire after 30 days` vs `EXPIRY_DAYS = 90`.",
+                failure_scenario: "the next reader trusts a false claim",
+            },
+        ],
+    });
+
+    it("assigns the documentation lens, so the finding renders with the documentation label", () => {
+        const {candidates} = parseFinderOutput(
+            "documentation",
+            docFinding,
+            new Set(),
+        );
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0].finding.lens).toBe("documentation");
+        // The rendered label is a function of severity + lens, and it is the
+        // only channel autofix has for telling a documentation thread apart.
+        expect(labelForFinding(candidates[0].finding)).toBe(
+            "suggestion (non-blocking, documentation)",
+        );
+    });
+
+    it("keeps skill-auditor on conventions and everything else on correctness", () => {
+        const skill = parseFinderOutput(
+            "skill-auditor",
+            CORRECTNESS_OUT,
+            new Set(),
+        );
+        expect(skill.candidates[0].finding.lens).toBe("conventions");
+        const holistic = parseFinderOutput(
+            "holistic",
+            CORRECTNESS_OUT,
+            new Set(),
+        );
+        expect(holistic.candidates[0].finding.lens).toBe("correctness");
     });
 });
 

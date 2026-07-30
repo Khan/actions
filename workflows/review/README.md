@@ -269,10 +269,9 @@ re-review scoped
   several rules match a path their lenses are unioned (lenses are additive).
 - `enable` lines turn on the opt-in whole-change reviewers (`holistic`,
   `completeness`, `test-adequacy`, `first-principles`, `conventions`,
-  `documentation`). Neither
-  lenses nor opt-in reviewers run anywhere by default: a repo opts into each
-  explicitly, and the policy is that a reviewer earns its line here through the
-  eval suite.
+  `documentation`). Neither lenses nor opt-in reviewers run anywhere by default:
+  a repo opts into each explicitly, and the policy is that a reviewer earns its
+  line here through the eval suite.
 - `tier=` assigns the path a risk tier. When several rules match, the **last
   matching rule in file order wins** (gitignore/CODEOWNERS-style): write the broad
   rule first and its exceptions after it, as with `services/**` and
