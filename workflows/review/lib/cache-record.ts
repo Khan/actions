@@ -233,7 +233,8 @@ export type CacheRecordResult = {
     /**
      * Set on refusals that indicate something WRONG (a corroboration
      * mismatch, missing staged facts), as opposed to the benign no-ops
-     * (task mode, gate-blocked run). The CLI surfaces these as `::warning`:
+     * (a gate-blocked run, a run that ended before the plan). The CLI
+     * surfaces these as `::warning`:
      * a systematic refusal permanently stales the fingerprint and forces
      * full-depth reviews indefinitely, which must not stay invisible.
      */
@@ -264,7 +265,7 @@ export const runCacheRecordCli = (
         | undefined;
     if (plan === undefined) {
         return skip(
-            "no submission plan staged (task mode, or the run ended before the plan): the cache write stays with the orchestrator",
+            "no submission plan staged (the run ended before the plan): the cache write stays with the orchestrator",
         );
     }
     if (fs.existsSync(BLOCKED_SENTINEL_PATH)) {

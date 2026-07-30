@@ -54,6 +54,7 @@ import type {Claim} from "./dispatch-contracts";
 import {runCli as runNotifiedCli} from "./notified";
 import {isBlockingLabel, renderReviewBody} from "./render-comment";
 import {runRereviewCli, type RereviewCliFs} from "./rereview";
+import {normalizeBody} from "./sanitizer-normalize";
 import {
     findLatestStamp,
     runRereviewStampCli,
@@ -76,6 +77,15 @@ export type SubmissionPlan = {
     event: "APPROVE" | "REQUEST_CHANGES";
     /** The full review body, stamp included; submit verbatim. */
     body: string;
+    /**
+     * Whether the orchestrator may emit NO submission at all (the
+     * redundant-approval skip). Code-owned so review.md's Step 6 and the
+     * dispatch-conformance gate read one predicate rather than each
+     * describing it: true only for an APPROVE plan with no inline comments
+     * whose body is the bare approve line (modulo the ingest sanitizer) on a
+     * PR whose last stamped verdict was already APPROVE.
+     */
+    skipSubmission: boolean;
     /** The inline comments to post, one safe output each, verbatim. */
     comments: PlannedComment[];
     /** Thread ids to resolve (the reconciler's decision, passed through). */
@@ -138,6 +148,18 @@ const readCacheMemoryRecord = (fs: SubmissionFs): unknown => {
  * with; anything longer is a sketch, not a drop-in.
  */
 const MAX_SUGGESTION_LINES = 8;
+
+/**
+ * At most this many inline comments post; the rest collapse (the Step 5 cap,
+ * as code). MUST match the frontmatter's
+ * `create-pull-request-review-comment: max:` in review.md: the engine
+ * rejects safe outputs past that number, and a plan the engine cannot fully
+ * emit is a conformance-gate red after full spend.
+ */
+export const MAX_INLINE_COMMENTS = 20;
+
+/** The medium-confidence inline floor (the Step 5 posting bar). */
+const MIN_INLINE_CONFIDENCE = 0.5;
 
 const lineHasCodeSignal = (line: string): boolean =>
     /\w\(/.test(line) || // a call
@@ -331,45 +353,97 @@ export const runSubmissionCli = (
     // The accountability section (renders and stages rereview.json too).
     const rereview = runRereviewCli(fs);
 
+    // The prior verdict, read once: the reduced-depth flip floor needs a
+    // prior REQUEST_CHANGES, the redundant-approval skip needs a prior
+    // APPROVE. Posted bodies never keep their stamp (the ingest sanitizer
+    // strips HTML comments), so both anchor on the same cache-memory carrier
+    // gate rule 5 reads.
+    const priorRaw = readJson(fs, `${REVIEW_DIR}/prior-reviews.json`);
+    const priors: PriorReview[] = Array.isArray(priorRaw)
+        ? priorRaw.filter(
+              (entry): entry is PriorReview =>
+                  typeof (entry as {body?: unknown}).body === "string",
+          )
+        : [];
+    const priorStamp =
+        findLatestStamp(priors) ??
+        stampFromCacheMemory(readCacheMemoryRecord(fs));
+
     // The reduced-depth flip floor (Step 4): only over a prior
     // REQUEST_CHANGES stamp at flip-gated/fast depth.
     let keptBlockingFloor = 0;
     if (depth === "flip-gated" || depth === "fast") {
-        const priorRaw = readJson(fs, `${REVIEW_DIR}/prior-reviews.json`);
-        const priors: PriorReview[] = Array.isArray(priorRaw)
-            ? priorRaw.filter(
-                  (entry): entry is PriorReview =>
-                      typeof (entry as {body?: unknown}).body === "string",
-              )
-            : [];
-        // Posted bodies never keep their stamp (the ingest sanitizer strips
-        // HTML comments), so the floor anchors on the same cache-memory
-        // carrier the plan CLI and gate rule 5 read.
-        const stamp =
-            findLatestStamp(priors) ??
-            stampFromCacheMemory(readCacheMemoryRecord(fs));
-        if (stamp !== null && stamp.verdict === "REQUEST_CHANGES") {
+        if (priorStamp !== null && priorStamp.verdict === "REQUEST_CHANGES") {
             keptBlockingFloor = rereview.keptBlockingCount;
         }
     }
 
     // Inline comments need a path and a line; a PR-level claim folds into
     // the body instead (rare: a pr-anchored finding).
-    const inline: PlannedComment[] = [];
+    const anchored: Claim[] = [];
     const prLevelLines: string[] = [];
     for (const claim of claims) {
         if (claim.path !== undefined && claim.line !== undefined) {
-            inline.push({
-                path: claim.path,
-                line: claim.line,
-                body: renderClaimComment(claim),
-            });
+            anchored.push(claim);
         } else {
             prLevelLines.push(`**${claim.label}:** ${claim.discussion}`);
             notes.push(
                 `pr-level claim ${claim.id} folded into the review body`,
             );
         }
+    }
+
+    // The posting bar (the Step 5 ranked bar, as code): rank
+    // blocking before non-blocking, then confidence descending (the sort is
+    // stable, so dispatch order breaks ties). A claim below medium
+    // confidence (< 0.5) never posts inline (a blocking claim always
+    // qualifies: it is validator-confirmed by construction), and at most
+    // MAX_INLINE_COMMENTS post inline: the frontmatter caps the
+    // create-pull-request-review-comment safe output at the same number, so
+    // a longer plan would have the engine reject the overflow and the
+    // conformance gate red the run after full spend. Everything else
+    // collapses to one terse line each in a single <details> block riding
+    // the highest-ranked inline comment (or the review body when nothing
+    // posts inline), so it is surfaced without scattering noise. The
+    // verdict is computed from ALL claims, so a collapsed blocking claim
+    // (a 21st blocking finding) still blocks.
+    const ranked = [...anchored].sort((a, b) => {
+        const blocking =
+            Number(isBlockingLabel(b.label)) - Number(isBlockingLabel(a.label));
+        return blocking !== 0 ? blocking : b.confidence - a.confidence;
+    });
+    const inlineWorthy = ranked.filter(
+        (claim) =>
+            isBlockingLabel(claim.label) ||
+            claim.confidence >= MIN_INLINE_CONFIDENCE,
+    );
+    const inlineClaims = new Set(inlineWorthy.slice(0, MAX_INLINE_COMMENTS));
+    const collapsed = ranked.filter((claim) => !inlineClaims.has(claim));
+    const inline: PlannedComment[] = [...inlineClaims].map((claim) => ({
+        path: claim.path as string,
+        line: claim.line as number,
+        body: renderClaimComment(claim),
+    }));
+    if (collapsed.length > 0) {
+        const section = [
+            "<details>",
+            `<summary>Lower-confidence observations (${collapsed.length})</summary>`,
+            "",
+            ...collapsed.map(
+                (claim) =>
+                    `- \`${claim.path}:${claim.line}\` ${claim.label}: ${claim.subject}`,
+            ),
+            "",
+            "</details>",
+        ].join("\n");
+        if (inline.length > 0) {
+            inline[0] = {...inline[0], body: `${inline[0].body}\n\n${section}`};
+        } else {
+            prLevelLines.push(section);
+        }
+        notes.push(
+            `${collapsed.length} claim(s) collapsed below the inline bar (cap ${MAX_INLINE_COMMENTS}, medium-confidence floor)`,
+        );
     }
 
     // A blocking candidate the dispatcher suppressed as a duplicate of a
@@ -452,9 +526,30 @@ export const runSubmissionCli = (
         .concat(stamp === null ? "" : `\n${stamp}`)
         .replace(/^\n+/, "");
 
+    // The redundant-approval skip, code-owned so the prompt (Step 6) and the
+    // conformance gate share ONE predicate instead of two prose descriptions
+    // that can drift: they diverged once already, when the collapsed
+    // low-confidence `<details>` section started riding the body — it is
+    // neither a `Note:` line nor an accountability section, so the prompt's
+    // old wording let the orchestrator skip a submission the gate then
+    // red-flagged, withholding the approval AND the observations on every
+    // later run. Compared modulo the ingest sanitizer (`normalizeBody`), the
+    // same way the gate compares, so the fingerprint stamp is not a
+    // difference.
+    const skipSubmission =
+        event === "APPROVE" &&
+        inline.length === 0 &&
+        normalizeBody(body) ===
+            normalizeBody(
+                renderReviewBody({event: "APPROVE", hasInlineComments: false}),
+            ) &&
+        priorStamp !== null &&
+        priorStamp.verdict === "APPROVE";
+
     const submission: SubmissionPlan = {
         event,
         body,
+        skipSubmission,
         comments: inline,
         resolve: Array.isArray(dispatch.reconciliation?.resolve)
             ? dispatch.reconciliation.resolve.filter(

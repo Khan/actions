@@ -202,11 +202,11 @@ describe("runCacheRecordCli", () => {
         });
     });
 
-    it("no-ops without a staged plan (task mode keeps the orchestrator's write)", () => {
+    it("no-ops without a staged plan (the orchestrator's write stands)", () => {
         const fs = makeFakeFs();
         const result = runCacheRecordCli(fs, NOW);
         expect(result.written).toBe(false);
-        expect(result.reason).toMatch(/task mode/);
+        expect(result.reason).toMatch(/no submission plan staged/);
         // Benign no-op: never surfaced as a workflow warning.
         expect(result.warn).toBeUndefined();
     });

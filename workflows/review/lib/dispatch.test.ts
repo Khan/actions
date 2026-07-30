@@ -313,29 +313,26 @@ describe("applyScopeFilter", () => {
 });
 
 describe("ROUTING dispatch directive", () => {
-    it("defaults to task and accepts scripted", () => {
-        expect(parseRoutingConfig("").dispatchMode).toBe("task");
+    it("always resolves to scripted, whatever the retired dial says", () => {
+        expect(parseRoutingConfig("").dispatchMode).toBe("scripted");
         expect(parseRoutingConfig("dispatch scripted\n").dispatchMode).toBe(
+            "scripted",
+        );
+        expect(parseRoutingConfig("dispatch task\n").dispatchMode).toBe(
             "scripted",
         );
     });
 
-    it("warns and keeps the default on an unknown mode", () => {
-        const config = parseRoutingConfig("dispatch warp\n");
-        expect(config.dispatchMode).toBe("task");
-        expect(config.warnings.join(" ")).toContain("unknown dispatch mode");
-    });
-
-    it("skips a dispatch line with the wrong arity", () => {
-        const config = parseRoutingConfig("dispatch task scripted\n");
-        expect(config.dispatchMode).toBe("task");
-        expect(config.warnings.join("\n")).toContain("exactly one");
-    });
-
-    it("lets the last of duplicate dispatch lines win, with a warning", () => {
-        const config = parseRoutingConfig("dispatch task\ndispatch scripted\n");
-        expect(config.dispatchMode).toBe("scripted");
-        expect(config.warnings.join("\n")).toContain("duplicate dispatch");
+    it("warns that a leftover dispatch line is obsolete", () => {
+        expect(
+            parseRoutingConfig("dispatch scripted\n").warnings.join(" "),
+        ).toContain("obsolete");
+        // A `task` (or unknown) value gets the stronger retired-dial wording.
+        for (const line of ["dispatch task\n", "dispatch warp\n"]) {
+            const config = parseRoutingConfig(line);
+            expect(config.dispatchMode).toBe("scripted");
+            expect(config.warnings.join(" ")).toContain("retired");
+        }
     });
 });
 
@@ -673,13 +670,12 @@ describe("re-review hardening (slice 2 feedback)", () => {
         );
     });
 
-    it("warns on dispatch directive arity and duplicates (last one wins)", () => {
+    it("stays scripted whatever a leftover dispatch line says", () => {
         const arity = parseRoutingConfig("dispatch task scripted\n");
-        expect(arity.dispatchMode).toBe("task");
-        expect(arity.warnings.join(" ")).toContain("exactly one");
+        expect(arity.dispatchMode).toBe("scripted");
+        expect(arity.warnings.join(" ")).toContain("retired");
         const dupe = parseRoutingConfig("dispatch task\ndispatch scripted\n");
         expect(dupe.dispatchMode).toBe("scripted");
-        expect(dupe.warnings.join(" ")).toContain("duplicate dispatch");
     });
 
     it("emits dispatchMode through the router CLI's routing.json", () => {

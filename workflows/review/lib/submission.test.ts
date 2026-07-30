@@ -70,6 +70,19 @@ const staged = (
     ...extra,
 });
 
+/**
+ * Stage a prior APPROVE via the cache-memory carrier (posted bodies never
+ * keep their stamp), which is what makes a redundant-approval skip legitimate.
+ */
+const priorApprove = (): Record<string, string> => ({
+    [`${REVIEW}/pr-context.json`]: JSON.stringify({number: 41007}),
+    "/tmp/gh-aw/cache-memory/pr-41007.json": JSON.stringify({
+        verdict: "APPROVE",
+        stampHunks: {"a.ts": ["deadbeef00000000"]},
+        wasDraft: false,
+    }),
+});
+
 describe("renderClaimComment", () => {
     it("renders the Conventional Comment with the post-validation label", () => {
         expect(
@@ -511,8 +524,9 @@ describe("the gate's plan-match rule (slice 4)", () => {
 
     it("the redundant-approval skip queues nothing only for an APPROVE plan with no comments", () => {
         const approvePlan = runSubmissionCli(
-            makeFakeFs(staged({depth: "full", claims: []})),
+            makeFakeFs(staged({depth: "full", claims: []}, priorApprove())),
         );
+        expect(approvePlan.skipSubmission).toBe(true);
         const result = evaluateDispatchConformance({
             items: [],
             plan: {depth: "full"},
@@ -584,13 +598,60 @@ describe("re-review hardening (slice 4 feedback)", () => {
 
     it("permits queueing nothing only for an APPROVE plan with no comments", () => {
         const plan = runSubmissionCli(
-            makeFakeFs(staged({depth: "full", claims: []})),
+            makeFakeFs(staged({depth: "full", claims: []}, priorApprove())),
         );
         const result = evaluateDispatchConformance({
             ...gateInput(plan),
             items: [],
         });
         expect(result.conformant).toBe(true);
+    });
+
+    it("refuses the skip when the body carries only a collapsed low-confidence section", () => {
+        // The divergence this field exists to remove: the collapsed
+        // `<details>` section is neither a `Note:` line nor an accountability
+        // section, so the prompt's old prose predicate let the orchestrator
+        // skip a submission the gate then red-flagged, withholding the
+        // approval AND the observations on every later run.
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged(
+                    {
+                        depth: "full",
+                        claims: [
+                            claim({
+                                id: "weak",
+                                label: "thought (non-blocking)",
+                                confidence: 0.3,
+                                subject: "a hunch",
+                            }),
+                        ],
+                    },
+                    priorApprove(),
+                ),
+            ),
+        );
+        expect(plan.event).toBe("APPROVE");
+        expect(plan.comments).toEqual([]);
+        expect(plan.body).toContain("Lower-confidence observations");
+        expect(plan.skipSubmission).toBe(false);
+        // ...and queueing nothing for it is a red run, not a silent skip.
+        const dropped = evaluateDispatchConformance({
+            ...gateInput(plan),
+            items: [],
+        });
+        expect(dropped.conformant).toBe(false);
+    });
+
+    it("refuses the skip without a prior APPROVE (a first approval must post)", () => {
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims: []})),
+        );
+        expect(plan.skipSubmission).toBe(false);
+        expect(
+            evaluateDispatchConformance({...gateInput(plan), items: []})
+                .conformant,
+        ).toBe(false);
     });
 
     it("tolerates sanitizer-shaped drift: case, backticks, whitespace, URL rewrites", () => {
@@ -859,133 +920,5 @@ describe("re-review hardening (slice 4 feedback)", () => {
             }) as never,
         );
         expect(viaClaim).toBe(canonical);
-    });
-});
-
-describe("risks/patterns key staging (trial suggestion b)", () => {
-    const KEY_PATH = `${REVIEW}/risks-patterns-key.txt`;
-    const triaged = {
-        claims: [],
-        riskFiles: [
-            {path: "a.ts", risk: "High"},
-            {path: "b.ts", risk: "Medium"},
-            {path: "c.ts", risk: "Low"},
-        ],
-        patterns: ["bump-deps"],
-        excludedFiles: ["gen.ts"],
-    };
-
-    it("stages the canonical signature at full depth, owners from routing.json", () => {
-        const fs = makeFakeFs(
-            staged(
-                {depth: "full", ...triaged},
-                {
-                    [`${REVIEW}/routing.json`]: JSON.stringify({
-                        teams: {owners: {"a.ts": ["team-b", "team-a"]}},
-                    }),
-                },
-            ),
-        );
-        runSubmissionCli(fs);
-        expect(fs.files[KEY_PATH]).toBe(
-            [
-                "excluded:gen.ts",
-                "pattern:bump-deps=",
-                "risk:a.ts=team-a+team-b",
-                "risk:b.ts=",
-            ].join("|"),
-        );
-    });
-
-    it("stages nothing at any reduced depth (Step 7 skips them; a scoped subset must not overwrite the full signature)", () => {
-        for (const depth of ["scoped", "flip-gated", "fast"]) {
-            const fs = makeFakeFs(staged({depth, ...triaged}));
-            runSubmissionCli(fs);
-            expect(fs.files[KEY_PATH]).toBeUndefined();
-        }
-    });
-});
-
-describe("open-thread suppression verdict floor (trial suggestion g)", () => {
-    it("floors the verdict at REQUEST_CHANGES when a blocking claim was suppressed as a duplicate of an open BLOCKING thread", () => {
-        const fs = makeFakeFs(
-            staged({
-                depth: "full",
-                claims: [],
-                noteLines: [
-                    "Note: 1 finding(s) not re-posted (already tracked in open review threads).",
-                ],
-                threadSuppressions: [
-                    {
-                        id: "correctness-reviewer-1",
-                        source: "correctness-reviewer",
-                        label: "todo (blocking)",
-                        path: "a.ts",
-                        line: 42,
-                        thread_id: "T1",
-                        threadBlocking: true,
-                    },
-                ],
-            }),
-        );
-        const plan = runSubmissionCli(fs);
-        // The reviewer re-confirmed a defect an open blocking thread tracks:
-        // no duplicate comment posts, but the run must not flip to APPROVE.
-        expect(plan.event).toBe("REQUEST_CHANGES");
-        expect(plan.reasons).toContainEqual({
-            code: "kept-blocking-thread",
-            count: 1,
-        });
-        expect(plan.comments).toEqual([]);
-        expect(plan.body).toContain("not re-posted");
-    });
-
-    it("does not floor on a suppressed non-blocking duplicate", () => {
-        const fs = makeFakeFs(
-            staged({
-                depth: "full",
-                claims: [],
-                noteLines: [],
-                threadSuppressions: [
-                    {
-                        id: "c1",
-                        source: "holistic",
-                        label: "suggestion (non-blocking)",
-                        path: "a.ts",
-                        thread_id: "T2",
-                        threadBlocking: true,
-                    },
-                ],
-            }),
-        );
-        expect(runSubmissionCli(fs).event).toBe("APPROVE");
-    });
-
-    it("does not floor a blocking candidate matched to a NON-blocking open thread", () => {
-        // Suppression runs before validation, so the candidate's blocking
-        // label is unvalidated; the matched thread's opener is the severity
-        // that survived a prior run's validation. A false-positive blocking
-        // candidate that text-matches an open suggestion thread must not
-        // force REQUEST_CHANGES with no validation and no visible blocking
-        // comment.
-        const fs = makeFakeFs(
-            staged({
-                depth: "full",
-                claims: [],
-                noteLines: [],
-                threadSuppressions: [
-                    {
-                        id: "correctness-reviewer-1",
-                        source: "correctness-reviewer",
-                        label: "issue (blocking)",
-                        path: "a.ts",
-                        line: 42,
-                        thread_id: "T3",
-                        threadBlocking: false,
-                    },
-                ],
-            }),
-        );
-        expect(runSubmissionCli(fs).event).toBe("APPROVE");
     });
 });

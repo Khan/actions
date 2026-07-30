@@ -296,19 +296,18 @@ describe("third-round nits: keep-list survivors, template coupling, summary", ()
         ).toEqual(["noop", "missing_data"]);
     });
 
-    it("review.md's Step 6 note templates still carry the phrase the gate matches", () => {
-        // Couples the disclosure matcher to the prompt templates: a Step 6
-        // reword that drops the phrase must fail here, not silently break
-        // rules 2/3 in production.
-        const reviewMd = readFileSync(
-            join(__dirname, "..", "review.md"),
-            "utf8",
+    it("the dispatcher's note templates still carry the phrase the gate matches", () => {
+        // Couples the disclosure matcher to the note templates. They lived in
+        // review.md's Step 6 while the orchestrator composed notes; with task
+        // mode removed they are code-rendered (dispatch.ts noteLine), so a
+        // template reword that drops the phrase must fail here, not silently
+        // break rules 2/3 in production.
+        const dispatchTs = readFileSync(join(__dirname, "dispatch.ts"), "utf8");
+        expect(dispatchTs).toContain(
+            "not assessed this run (shed under the ${tier}-tier run budget)",
         );
-        expect(reviewMd).toContain(
-            "not assessed this run (shed under the <tier>-tier run budget)",
-        );
-        expect(reviewMd).toContain(
-            "not assessed this run (<sub-agent> output unavailable)",
+        expect(dispatchTs).toContain(
+            "not assessed this run (${agent} output unavailable)",
         );
     });
 

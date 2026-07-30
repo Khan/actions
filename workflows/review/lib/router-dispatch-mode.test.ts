@@ -4,9 +4,10 @@ import {runCli} from "./router";
 import {ROUTING_CONFIG_PATH} from "./routing-config";
 
 /**
- * The `dispatch` directive's CLI wiring, split from router.test.ts for its
- * max-lines budget: the ROUTING line reaches `routing.json`'s `dispatchMode`
- * so the orchestrator can read the repo's mode from one staged surface.
+ * The retired `dispatch` directive's CLI wiring, split from router.test.ts
+ * for its max-lines budget: `routing.json` always carries `scripted`, and a
+ * leftover ROUTING line earns a visible obsolete warning rather than
+ * changing behaviour.
  * The fs fixture is a small local copy of router.test.ts's, the same way
  * dispatch-gate-hardening.test.ts copies its parent's.
  */
@@ -51,22 +52,24 @@ const fakeFs = (inputs: Record<string, string>) => {
 };
 
 describe("runCli: dispatch mode", () => {
-    it("surfaces a configured dispatch scripted line in routing.json", () => {
+    it("always emits scripted (the dial is retired), warning on a leftover line", () => {
         const {fs} = fakeFs({
             ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
                 {path: "a.ts", status: "modified"},
             ]),
             [ROUTING_CONFIG_PATH]: "dispatch scripted",
         });
-        expect(runCli(fs).dispatchMode).toBe("scripted");
+        const routing = runCli(fs);
+        expect(routing.dispatchMode).toBe("scripted");
+        expect(routing.routingConfig.warnings.join(" ")).toContain("obsolete");
     });
 
-    it("defaults to task without a dispatch line", () => {
+    it("emits scripted without a dispatch line", () => {
         const {fs} = fakeFs({
             ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
                 {path: "a.ts", status: "modified"},
             ]),
         });
-        expect(runCli(fs).dispatchMode).toBe("task");
+        expect(runCli(fs).dispatchMode).toBe("scripted");
     });
 });

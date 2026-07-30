@@ -72,14 +72,12 @@ requires every finding to trace to the change: a finding whose anchor is not an
 added or modified line of the diff cannot carry a blocking label and does not post
 at all — such pre-existing observations are recorded in the run artifact only; a
 pre-existing defect the diff materially amplifies passes naturally because it
-anchors on the amplifying line. And the **budget guardrail** (a prompt discipline,
-backed in code only by the investigation-cap CLI)
-makes the orchestrator land short of the run's hard ceilings (the per-run
-AI-credits cap and the job timeout). The agent cannot see its own credit spend, so
-it tracks observable proxies (elapsed wall-clock, dispatch counts, the shared
-investigation journal) against the router's soft budget targets; nearing one, it
-sheds remaining work (each shed reviewer becomes a skipped-dimension note) and
-submits the verdict from the findings validated so far, so a run never dies at a
+anchors on the amplifying line. And the **run budget** is enforced where the
+spending happens: the dispatcher caps the roster at
+`runBudget.maxReviewerInvocations` (every capped-out reviewer becomes a
+code-rendered skipped-dimension note), the investigation-cap CLI bounds
+per-finding tool calls, and the per-sub-agent timeout is a hang backstop, so a
+run lands with whatever validated findings it has instead of dying at a
 ceiling with everything spent and nothing posted.
 
 One more gate sits after the agent itself: the **dispatch-conformance gate**
@@ -96,8 +94,34 @@ queue and fails the job. A run that skipped its own dispatch protocol (observed 
 zero sub-agents dispatched, verdict submitted, nothing disclosed) becomes a
 red run that posts nothing instead of a normal-looking review; the run
 artifact keeps the original queue and the gate report for diagnosis. The gate
-proves the reviewer outputs were staged, not that a model authored them;
-script-driven dispatch (the next migration slice) is what closes that.
+proves the reviewer outputs were staged; script-driven dispatch makes skipping
+dispatch structural rather than detected.
+
+Most of the run is code rather than model turns. The prompt's Step 3 is one
+CLI invocation (`lib/dispatch.ts`) that runs triage, the reviewer fan-out
+(roster, budget cap, and planned sheds computed from `routing.json`), the
+provenance gate, the scope filter, cross-source dedup, open-thread suppression
+(a candidate describing a defect an open bot thread already tracks posts no
+duplicate; a suppressed blocking candidate still floors the verdict), and
+claim validation, inside the same firewall sandbox (the api-proxy meters and
+caps script-spawned sub-agents exactly like Task-spawned ones). Each sub-agent
+delivers its result through an in-process `submit_result` MCP tool whose input
+is validated against the agent's exact output contract at the tool boundary
+(`lib/dispatch-runner.ts`), so a drifted shape is corrected in-session instead
+of voiding the dimension; free-text finals remain the fallback. Steps 4-6 are
+code too: the submission CLI (`lib/submission.ts`) computes the verdict,
+renders the comments and the full review body, and stages
+`submission-plan.json`; the orchestrator emits safe outputs that must match the
+plan (the gate blocks any deviation), which reduces its model role to typing
+MCP calls the plan dictates. Step 9's cache record is code as well
+(`lib/cache-record.ts`, invoked once after the emission): the
+fingerprint-carrier fields are copied verbatim from staged files and
+corroborated against the safe-output queue, never serialized from the model's
+memory. The safe-output emission itself is the remaining seam: the queue is a
+run-local JSONL append that needs no credentials, but the agent sandbox mounts
+`${RUNNER_TEMP}/gh-aw` read-only, so only the safeoutputs MCP container can
+write it. Removing the seam wants a writable path into the queue (an upstream
+mount change, or a post-agent step on the host); neither is tested yet.
 
 ## Install
 
@@ -232,7 +256,6 @@ rule per line:
 # <pattern> [lens=<lens>,…] [tier=trivial|low|medium|high] [direction-dependent]
 # enable <reviewer>[,<reviewer>…]
 # re-review full|scoped|flip-gated|fast
-# dispatch task|scripted
 services/**/migrations/**  tier=high lens=data-migrations
 **/*.graphql               lens=api-federation-compat
 pkg/auth/**                tier=high direction-dependent lens=security-auth
@@ -260,36 +283,6 @@ re-review scoped
 - `re-review` sets the repo's re-review mode (see the next section). Default
   `full`; when several lines set it, the last one wins with a warning. An
   unknown mode degrades to `full`: toward more review, never less.
-- `dispatch` sets how Step 3 runs (default `task`): `task` is the
-  orchestrator's own Task-tool dispatch; `scripted` opts the repo into the
-  deterministic dispatcher (`lib/dispatch.ts`): the orchestrator invokes one
-  CLI that runs triage, the reviewer fan-out (roster, budget cap, and planned
-  sheds computed from `routing.json`), the provenance gate, the scope filter,
-  cross-source dedup, open-thread suppression (a candidate describing a
-  defect an open bot thread already tracks posts no duplicate; a suppressed
-  blocking candidate still floors the verdict), and claim validation as
-  code, inside the same firewall sandbox (the api-proxy meters and caps
-  script-spawned sub-agents exactly like Task-spawned ones). Each sub-agent
-  delivers its result through an in-process `submit_result` MCP tool whose
-  input is validated against the agent's exact output contract at the tool
-  boundary (`lib/dispatch-runner.ts`), so a drifted shape is corrected
-  in-session instead of voiding the dimension; free-text finals remain the
-  fallback. In scripted mode Steps 4-6 are code too: the submission CLI
-  (`lib/submission.ts`) computes the verdict, renders the comments and
-  the full review body, and stages `submission-plan.json`; the orchestrator
-  emits safe outputs that must match the plan (the gate blocks any
-  deviation), which reduces its model role to typing MCP calls the plan
-  dictates. Step 9's cache record is code as well (`lib/cache-record.ts`,
-  invoked once after the emission): the fingerprint-carrier fields are
-  copied verbatim from staged files and corroborated against the safe-output
-  queue, never serialized from the model's memory. The safe-output emission
-  itself is the remaining seam: the queue is a run-local JSONL append that
-  needs no credentials, but the agent sandbox mounts `${RUNNER_TEMP}/gh-aw`
-  read-only, so only the safeoutputs MCP container can write it. Removing
-  the seam wants a writable path into the queue (an upstream mount change,
-  or a post-agent step on the host); neither is tested yet. Scripted mode is
-  the production probe of the deterministic-orchestrator migration and is
-  live-trial-gated; an unknown mode degrades to `task` with a warning.
 
 Glob semantics are a practical subset of gitignore/CODEOWNERS: `**` crosses
 directories, `*` and `?` stay within a segment, a trailing `/` matches everything
