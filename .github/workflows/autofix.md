@@ -1,10 +1,10 @@
 ---
 description: >
   Addresses the PR reviewer's own feedback on demand, one run per arming. Arm it
-  with an `/autofix [blocking|nits]` comment, or with an `autofix: blocking` /
-  `autofix: nits` label; the two are peers. The run fixes the reviewer's open
-  threads in that scope, pushes one commit, replies in each thread, and clears
-  the label if one armed it.
+  with an `/autofix [blocking|nits|docs]` comment, or with an `autofix: blocking`
+  / `autofix: nits` / `autofix: docs` label; the two are peers. The run fixes the
+  reviewer's open threads in that scope, pushes one commit, replies in each
+  thread, and clears the label if one armed it.
 
 on:
   # Two arming surfaces, and they are PEERS — neither is a shorthand for the
@@ -167,6 +167,7 @@ safe-outputs:
     allowed:
       - "autofix: blocking"
       - "autofix: nits"
+      - "autofix: docs"
       - "autofix: loop"
       - "autofix: human"
       - "autofix: author"
@@ -472,6 +473,16 @@ Edit the files directly in the workspace. Rules, all hard:
   the finding unfixed and explain why in Step 7. Deleting an assertion, loosening
   a matcher, adding a skip, or widening an expected range to make something pass
   is never an acceptable outcome of this workflow.
+- **A documentation item changes text, never code.** An item labelled
+  `suggestion (non-blocking, documentation)` is a finding about a comment or a
+  prose doc, and the whole reason its scope exists is that its edits cannot
+  alter behaviour. Deleting a comment the finding calls redundant is the
+  expected fix, not an overreach, and such a finding often carries no
+  suggestion block precisely because a deletion cannot be expressed as one. But
+  if the honest fix would touch an executable line — renaming the symbol the
+  comment misdescribes, changing the constant the comment contradicts — that is
+  a code change wearing a documentation label: leave the item unfixed and say
+  why in Step 7. Fix the sentence, or fix nothing.
 - **Do not touch files no item points at.** The one exception is a change that
   is mechanically forced by a fix (a caller that must be updated for a changed
   signature); note any such file in Step 7.
