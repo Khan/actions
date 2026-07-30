@@ -569,8 +569,16 @@ exactly this sequence:
    (`pull_request_read` `get_review_comments`) and stage two files from them
    (leave all other threads untouched); the dispatcher's reconciler dispatch
    reads them from disk:
-   - `/tmp/gh-aw/review/threads.json` — the unresolved `github-actions[bot]`
-     threads. For each write `thread_id`, `path`, `line`, `resolved` (the
+   - `/tmp/gh-aw/review/threads.json` — the unresolved threads opened by THIS
+     bot. Treat **either** spelling of its author as the bot:
+     `get_review_comments` renders the account as bare `github-actions`, while
+     the REST review surfaces render the same account as
+     `github-actions[bot]`, so which one you see depends on the surface the
+     output came from. (Matching only the bracketed form is what made
+     open-thread suppression unreachable on every conforming run until the
+     code filter was widened: webapp#41197 re-posted findings against open
+     threads for three straight rounds.) For each write
+     `thread_id`, `path`, `line`, `resolved` (the
      thread's `is_resolved` from the `get_review_comments` output, copied
      verbatim; it is `false` for every thread that belongs in this file, but
      write it anyway: the dispatcher's open-thread suppression checks the
@@ -589,10 +597,13 @@ exactly this sequence:
      `url` is what lets the re-review accountability section link each
      still-open thread to its prior comment.
    - `/tmp/gh-aw/review/human-threads.json` — the `{path, line}` of every
-     **unresolved thread started by a human** (any author other than
-     `github-actions[bot]`). These are never resolved or replied to; they
-     mark lines where a human review conversation is already open, so the
-     dispatcher defers there.
+     **unresolved thread started by a human**: any author that is neither
+     `github-actions` nor `github-actions[bot]` (both spellings are this bot,
+     per the note above). Getting this wrong is worse than a duplicate
+     comment: a bot thread misfiled here lands in `skipLines` and makes the
+     submission drop a fresh finding on that line. These are never resolved
+     or replied to; they mark lines where a human review conversation is
+     already open, so the dispatcher defers there.
 2. If any staged bot thread's reply chain shows the author factually
    disputing a claim on the merits, write
    `/tmp/gh-aw/review/author-disputes.json`: a list of `{path, line, quote}`

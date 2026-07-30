@@ -336,6 +336,54 @@ export const describesOpenThreadDefect = (
 };
 
 /**
+ * Whether staged threads ALL failed {@link openThreadsFromStaged}'s filter, so
+ * suppression could not run at all. Lives here beside the filter because it is
+ * the filter's own failure mode; the caller only logs what this returns.
+ *
+ * An empty {@link ThreadSuppression} list cannot distinguish "nothing to
+ * suppress" from "suppression silently did nothing", and that ambiguity is how
+ * the author-spelling mismatch above reached production: it survived a whole
+ * three-round seeded lifecycle (webapp#41197) posting duplicate comments while
+ * every run reported an empty suppression list and looked correct.
+ *
+ * Threads the reconciler resolved this run are excluded, since those are
+ * legitimately unusable — counted per thread against `resolvedIds` rather than
+ * by list length, because the reconciler's `resolve` list is never validated
+ * against the staged `thread_id`s: a long resolve list would otherwise mask a
+ * total shape failure in a short staging, silencing this very warning.
+ *
+ * Deliberate limit: ONE usable thread returns undefined, so partial shape
+ * drift (some threads malformed, others fine) stays invisible. This is a
+ * total-failure tripwire, not a per-thread audit; the per-thread version wants
+ * a rejection reason on each dropped thread, which is more machinery than the
+ * failure it would catch currently justifies.
+ */
+export const stagedThreadShapeFailure = (
+    threads: unknown,
+    openThreads: readonly OpenThread[],
+    resolvedIds: ReadonlySet<string>,
+): {unusableThreads: number; warning: string} | undefined => {
+    if (openThreads.length > 0) {
+        return undefined;
+    }
+    const unusableThreads = (Array.isArray(threads) ? threads : [])
+        .filter(isRecord)
+        .filter((thread) => {
+            const id = thread["thread_id"];
+            return typeof id !== "string" || !resolvedIds.has(id);
+        }).length;
+    if (unusableThreads === 0) {
+        return undefined;
+    }
+    return {
+        unusableThreads,
+        warning:
+            `::warning title=open-thread suppression::${unusableThreads} staged thread(s), none usable ` +
+            `(each needs thread_id, an explicit resolved: false, and a bot-authored opener); duplicates may re-post`,
+    };
+};
+
+/**
  * Drop candidate claims that describe a defect an open bot thread already
  * tracks (trial run S4 r2: the missing-test defect re-flagged at
  * expiration.go:42 while its round-1 thread at :62 was still open, so the
@@ -352,36 +400,6 @@ export const describesOpenThreadDefect = (
  * the candidate's re-confirmation at blocking severity is what makes the
  * floor more than a stale thread).
  */
-/**
- * Whether staged threads ALL failed {@link openThreadsFromStaged}'s filter, so
- * suppression could not run at all. Lives here beside the filter because it is
- * the filter's own failure mode, and the caller only logs what it returns.
- *
- * An empty {@link ThreadSuppression} list cannot distinguish "nothing to
- * suppress" from "suppression silently did nothing", and that ambiguity is how
- * the author-spelling mismatch above reached production: it survived a whole
- * three-round seeded lifecycle (webapp#41197) posting duplicate comments while
- * every run reported an empty suppression list and looked correct. Threads the
- * reconciler resolved this run are excluded from the count, since those are
- * legitimately unusable.
- */
-export const stagedThreadShapeFailure = (
-    threads: unknown,
-    openThreads: readonly OpenThread[],
-    resolvedThisRun: number,
-): {stagedThreads: number; warning: string} | undefined => {
-    const stagedThreads = Array.isArray(threads) ? threads.length : 0;
-    if (stagedThreads <= resolvedThisRun || openThreads.length > 0) {
-        return undefined;
-    }
-    return {
-        stagedThreads,
-        warning:
-            `::warning title=open-thread suppression::${stagedThreads} staged thread(s), none usable ` +
-            `(each needs thread_id, an explicit resolved: false, and a bot-authored opener); duplicates may re-post`,
-    };
-};
-
 export const suppressOpenThreadDuplicates = (
     claims: Claim[],
     threads: OpenThread[],

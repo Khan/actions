@@ -343,7 +343,7 @@ export type DispatchResult = {
      */
     threadSuppressions: ThreadSuppression[];
     /** Set when every staged thread failed the filter (see dedup.ts). */
-    threadSuppressionUnavailable?: {stagedThreads: number; warning: string};
+    threadSuppressionUnavailable?: {unusableThreads: number; warning: string};
     /** The reconciler's decision, when it ran and parsed. */
     reconciliation?: {resolve: string[]; keep: string[]; skipLines: unknown};
     /** correctness-reviewer `files[]` risk levels (Steps 7-8). */
@@ -850,7 +850,7 @@ export const runDispatch = async (
     const threadSuppressionUnavailable = stagedThreadShapeFailure(
         threads,
         openThreads,
-        resolvedIds.size,
+        resolvedIds,
     );
     if (threadSuppressionUnavailable !== undefined) {
         // eslint-disable-next-line no-console

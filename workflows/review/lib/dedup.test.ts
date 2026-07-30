@@ -3,6 +3,7 @@ import {describe, it, expect} from "vitest";
 import {
     dedupeClaims,
     openThreadsFromStaged,
+    stagedThreadShapeFailure,
     suppressOpenThreadDuplicates,
 } from "./dedup";
 import type {Claim} from "./dispatch-contracts";
@@ -788,6 +789,58 @@ describe("openThreadsFromStaged", () => {
         // The thread's opener is blocking, so the verdict floor still applies:
         // suppressing the duplicate must not let a verdict flip to APPROVE.
         expect(result.suppressed[0]?.threadBlocking).toBe(true);
+    });
+
+    it("reports a staging whose shape defeats the filter entirely", () => {
+        // The tripwire itself. Untested, an edit flipping its condition would
+        // silently restore the webapp#41197 blindness this exists to catch.
+        const unusable = {
+            thread_id: "PRRT_1",
+            is_resolved: false,
+            comments: [{author: "some-human", body: "x", path: "a.ts"}],
+        };
+        const failure = stagedThreadShapeFailure([unusable], [], new Set());
+        expect(failure?.unusableThreads).toBe(1);
+        expect(failure?.warning).toContain("none usable");
+    });
+
+    it("reports nothing when suppression had usable threads or no threads", () => {
+        const usable = {
+            thread_id: "PRRT_1",
+            is_resolved: false,
+            comments: [{author: "github-actions", body: "b", path: "a.ts"}],
+        };
+        const open = openThreadsFromStaged([usable], new Set());
+        expect(open).toHaveLength(1);
+        // A usable thread means suppression ran; nothing to report.
+        expect(
+            stagedThreadShapeFailure([usable], open, new Set()),
+        ).toBeUndefined();
+        // No staging at all is the ordinary first-review case, not a failure.
+        expect(stagedThreadShapeFailure([], [], new Set())).toBeUndefined();
+        expect(
+            stagedThreadShapeFailure(undefined, [], new Set()),
+        ).toBeUndefined();
+    });
+
+    it("counts resolved threads per id, not by resolve-list length", () => {
+        // The reconciler's `resolve` list is never validated against the
+        // staged thread_ids, so a long list must not mask a total shape
+        // failure in a short staging by arithmetic alone.
+        const unusable = {
+            thread_id: "PRRT_staged",
+            is_resolved: false,
+            comments: [{author: "some-human", body: "x", path: "a.ts"}],
+        };
+        const unrelatedResolves = new Set(["PRRT_a", "PRRT_b", "PRRT_c"]);
+        expect(
+            stagedThreadShapeFailure([unusable], [], unrelatedResolves)
+                ?.unusableThreads,
+        ).toBe(1);
+        // A staged thread the reconciler DID resolve is legitimately unusable.
+        expect(
+            stagedThreadShapeFailure([unusable], [], new Set(["PRRT_staged"])),
+        ).toBeUndefined();
     });
 
     it("still refuses a human-opened thread in the tool's shape", () => {
