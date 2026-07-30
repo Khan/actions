@@ -153,8 +153,13 @@ export const DEFAULT_COMMAND_SCOPE: AutofixScope = "blocking";
  * for looping it. Its other half does not: the documentation reviewer also
  * flags a *missing* explanation, the fixer answers with prose, and prose is
  * the thing a reviewer can always want written better. So `docs` stays
- * ineligible until something measures which half dominates in practice. That
- * is a claim about evidence we do not have, not a claim about the domain.
+ * ineligible until something measures which half dominates in practice.
+ * Khan/webapp#41194 is the first data point and it lands on the non-convergent
+ * half: `counts.go:16` flags a doc comment that covers tie resolution but not
+ * the empty/nil-map case, raised unprompted against the fixer's own PR. That is
+ * one observation of the shape, from a reviewer too old to mint the
+ * `documentation` label (so `autofix: docs` would not have selected it), and it
+ * says nothing yet about which half dominates.
  */
 export const isLoopEligible = (scope: AutofixScope): boolean =>
     scope === "blocking";

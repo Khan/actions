@@ -191,10 +191,16 @@ only half one. Its deletion half genuinely converges: a comment that restates
 the code is either gone or it is not. Its other half does not, because the
 documentation reviewer also flags a *missing* explanation, the fixer answers
 with prose, and prose is the thing a reviewer can always want written better.
-So `docs` is ineligible too, and that is a statement about evidence we do not
-have rather than about the domain. If the cadence axis is ever built, `docs` is
-the first candidate to re-examine, and the thing to measure first is which half
-dominates in practice.
+So `docs` is ineligible too. Khan/webapp#41194 gives that its first data point,
+and it lands on the half that does not converge: `counts.go:16` is a *missing*
+explanation (`TopKey`'s doc comment "covers tie resolution but not the
+empty/nil-map case"), raised unprompted against the fixer's own PR. Read it as
+one observation of the shape rather than a measurement of the domain, and note
+it did not come from the documentation reviewer: that repo runs a `review`
+release too old to mint the `documentation` label, so the finding was a plain
+`note (non-blocking)` and `autofix: docs` would not have selected it. If the
+cadence axis is ever built, `docs` is still the first candidate to re-examine,
+and which half dominates in practice is still the thing to measure first.
 
 ### Why `docs` is the safest scope
 
