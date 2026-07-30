@@ -21,7 +21,7 @@
  * Determinism boundary: pure text arithmetic; no model call, no filesystem.
  */
 
-import type {Claim} from "./dispatch-contracts";
+import {isRecord, type Claim} from "./dispatch-contracts";
 import {isBlockingLabel} from "./render-comment";
 
 export type ClaimMerge = {
@@ -153,6 +153,216 @@ export const describesSameDefect = (a: Claim, b: Claim): boolean => {
  * a cross-file pair needs its own strictly higher calibration; a missed
  * merge only costs a duplicate comment.
  */
+/* -------------------------------------------------------------------------- */
+/* Open-thread suppression (trial suggestion g)                               */
+/* -------------------------------------------------------------------------- */
+
+/** One still-open bot thread a candidate claim may duplicate. */
+export type OpenThread = {
+    thread_id: string;
+    path?: string;
+    /** The thread's opening comment body (the bot's original finding). */
+    body: string;
+};
+
+export type ThreadSuppression = {
+    id: string;
+    source: string;
+    label: string;
+    path: string;
+    line?: number;
+    thread_id: string;
+    /**
+     * Whether the matched thread's OPENING comment carries a blocking label.
+     * The verdict floor keys on this, not on the candidate's own label: the
+     * thread's severity survived last run's validation, while a suppressed
+     * candidate is dropped before validation ever sees it.
+     */
+    threadBlocking: boolean;
+};
+
+/**
+ * Whether an open thread's opener is a blocking finding, read from the
+ * leading `**label:**` template (tolerating the markdown-stripped form the
+ * staged bodies sometimes carry) and classified by {@link isBlockingLabel},
+ * the single owner of that rule, so a label the taxonomy blocks on cannot be
+ * missed here (`issue (blocking, best-practice)` is a blocking label too, and
+ * a hand-rolled `\(blocking\)` match silently reads it as advisory). Spacing
+ * inside the parentheses is normalized before the lookup; a body with no
+ * recognizable label reads as non-blocking, since an unvalidated floor is the
+ * failure mode this guards.
+ */
+const threadOpenerIsBlocking = (body: string): boolean => {
+    const label = /^\s*\*{0,2}([a-z]+ \([^)]*\))\*{0,2}:?/i.exec(body)?.[1];
+    return (
+        label !== undefined &&
+        isBlockingLabel(
+            label
+                .toLowerCase()
+                .replace(/\s+/g, " ")
+                .replace(/\s*,\s*/g, ", "),
+        )
+    );
+};
+
+/**
+ * The prose of a previously-posted bot comment, for similarity comparison:
+ * the leading `**label:**` template (tolerating the markdown-stripped form
+ * the staged bodies sometimes carry) and everything from the first code
+ * fence on (a suggestion block) are dropped, as are rule-quote lines:
+ * boilerplate shared by ALL bot comments would inflate similarity between
+ * unrelated findings.
+ */
+const threadProse = (body: string): string =>
+    body
+        .split("```")[0]
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith(">"))
+        .join(" ")
+        .replace(/^\s*\*{0,2}[a-z]+ \([^)]*\)\*{0,2}:?\*{0,2}\s*/i, "");
+
+/**
+ * Whether a staged thread carries the tool's own "still open" state. The
+ * orchestrator stages `resolved` copied from `get_review_comments`'
+ * `is_resolved`; both the tool's spelling and the camelCase form are accepted
+ * so a verbatim copy also lands. Absent reads as unknown, not as open.
+ */
+const stagedResolvedState = (thread: Record<string, unknown>): unknown =>
+    thread["resolved"] ?? thread["is_resolved"] ?? thread["isResolved"];
+
+/**
+ * Build the suppression inputs from staged threads.json. The staging is
+ * prompt-executed (review.md asks the orchestrator for the unresolved
+ * github-actions[bot] threads; stage-pr.ts deliberately does not stage
+ * threads yet), so BOTH properties suppression depends on are enforced HERE
+ * in code rather than trusted from the prompt:
+ * - the opener is the bot's. A mis-staged human thread must never silently
+ *   kill a candidate, and its free-text opener would also read as
+ *   non-blocking and skip the verdict floor.
+ * - the thread is still open, per the `resolved` flag staged from the tool's
+ *   own `is_resolved`. A mis-staged already-resolved thread would otherwise
+ *   suppress a genuine regression re-flag with nothing to check it against.
+ * Threads in resolvedIds (reconciler-resolved this run) are exempt as well: a
+ * fixed defect posting again is a fresh finding. Fails closed on each: a
+ * thread without a bot-authored opener, or without an explicit
+ * `resolved: false`, never suppresses (worst case is a duplicate comment).
+ */
+export const openThreadsFromStaged = (
+    threads: unknown,
+    resolvedIds: ReadonlySet<string>,
+): OpenThread[] =>
+    (Array.isArray(threads) ? threads : [])
+        .filter(isRecord)
+        .flatMap((thread) => {
+            const comments = thread["comments"];
+            const opener =
+                Array.isArray(comments) && isRecord(comments[0])
+                    ? comments[0]
+                    : undefined;
+            if (
+                typeof thread["thread_id"] !== "string" ||
+                resolvedIds.has(thread["thread_id"]) ||
+                stagedResolvedState(thread) !== false ||
+                opener?.["author"] !== "github-actions[bot]"
+            ) {
+                return [];
+            }
+            return [
+                {
+                    thread_id: thread["thread_id"],
+                    ...(typeof thread["path"] === "string"
+                        ? {path: thread["path"]}
+                        : {}),
+                    body:
+                        typeof opener["body"] === "string"
+                            ? opener["body"]
+                            : "",
+                },
+            ];
+        });
+
+/** Whether a claim clearly describes the defect an open thread tracks. */
+export const describesOpenThreadDefect = (
+    claim: Claim,
+    thread: OpenThread,
+): boolean => {
+    const tokensA = contentTokens(
+        `${claim.subject} ${claim.discussion} ${claim.failure_scenario}`,
+    );
+    const tokensB = contentTokens(threadProse(thread.body));
+    const setA = new Set(tokensA);
+    const setB = new Set(tokensB);
+    if (setA.size === 0 || setB.size === 0) {
+        return false;
+    }
+    const shared = intersectionSize(setA, setB);
+    const jaccard = shared / (setA.size + setB.size - shared);
+    const overlap = shared / Math.min(setA.size, setB.size);
+    const sharedBigrams = intersectionSize(bigrams(tokensA), bigrams(tokensB));
+    // The different-line tier: this match has no line window at all (see
+    // `suppressOpenThreadDuplicates`), so it pays for the loose anchor with
+    // the higher bigram floor, exactly as a cross-source pair on mismatched
+    // lines does. Erring strict is the safe direction: a missed suppression
+    // posts a duplicate comment, a false one silently drops a finding.
+    return (
+        jaccard >= OTHER_LINE_FLOOR.jaccard &&
+        overlap >= OTHER_LINE_FLOOR.overlap &&
+        sharedBigrams >= OTHER_LINE_FLOOR.sharedBigrams
+    );
+};
+
+/**
+ * Drop candidate claims that describe a defect an open bot thread already
+ * tracks (trial run S4 r2: the missing-test defect re-flagged at
+ * expiration.go:42 while its round-1 thread at :62 was still open, so the
+ * same defect briefly had two open threads). The match is same-path plus the
+ * calibrated #245 text-similarity floor, deliberately with NO line window:
+ * a persisting defect's re-flag routinely lands on a different line
+ * of the same file (the observed pair sat 20 lines apart); the similarity
+ * floor carries the precision. The caller excludes threads the reconciler
+ * resolves this run, so a fixed defect's fresh regression still posts, and
+ * each suppression records both the candidate's label and the matched
+ * thread's blocking-ness so the verdict cannot flip to APPROVE over a
+ * still-open, re-confirmed blocking objection (submission.ts floors only
+ * when BOTH are blocking: the thread's severity is the validated one, and
+ * the candidate's re-confirmation at blocking severity is what makes the
+ * floor more than a stale thread).
+ */
+export const suppressOpenThreadDuplicates = (
+    claims: Claim[],
+    threads: OpenThread[],
+): {kept: Claim[]; suppressed: ThreadSuppression[]} => {
+    if (threads.length === 0) {
+        return {kept: claims, suppressed: []};
+    }
+    const kept: Claim[] = [];
+    const suppressed: ThreadSuppression[] = [];
+    for (const claim of claims) {
+        const match =
+            claim.path === undefined
+                ? undefined
+                : threads.find(
+                      (thread) =>
+                          thread.path === claim.path &&
+                          describesOpenThreadDefect(claim, thread),
+                  );
+        if (match === undefined) {
+            kept.push(claim);
+            continue;
+        }
+        suppressed.push({
+            id: claim.id,
+            source: claim.source,
+            label: claim.label,
+            path: claim.path as string,
+            ...(claim.line !== undefined ? {line: claim.line} : {}),
+            thread_id: match.thread_id,
+            threadBlocking: threadOpenerIsBlocking(match.body),
+        });
+    }
+    return {kept, suppressed};
+};
+
 const mergeable = (a: Claim, b: Claim): boolean =>
     a.source !== b.source &&
     a.path !== undefined &&

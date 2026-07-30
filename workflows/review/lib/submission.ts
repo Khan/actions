@@ -49,8 +49,10 @@
  * under review.
  */
 
+import {computeRisksPatternsKey, RISKS_PATTERNS_KEY_PATH} from "./cache-record";
 import type {Claim} from "./dispatch-contracts";
-import {renderReviewBody} from "./render-comment";
+import {runCli as runNotifiedCli} from "./notified";
+import {isBlockingLabel, renderReviewBody} from "./render-comment";
 import {runRereviewCli, type RereviewCliFs} from "./rereview";
 import {
     findLatestStamp,
@@ -218,7 +220,20 @@ export const renderClaimComment = (claim: Claim): string => {
  * Writes `submission-plan.json` (and, via the rereview CLI it invokes,
  * `rereview.json`). Returns what was written.
  */
-export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
+/**
+ * `repoRoot` is the reviewed repo's root, which the NOTIFIED computation
+ * below reads `.github/NOTIFIED` from. It is a parameter rather than an
+ * environment read inside the function so a test can pin it: under Actions
+ * `GITHUB_WORKSPACE` is always set, so an env-derived default silently sends
+ * a fake-filesystem test looking under the runner's real workspace path, and
+ * the case passes locally while failing in CI.
+ */
+export const runSubmissionCli = (
+    fs: SubmissionFs,
+    repoRoot: string = process.env.REVIEW_REPO_ROOT ??
+        process.env.GITHUB_WORKSPACE ??
+        ".",
+): SubmissionPlan => {
     const notes: string[] = [];
     const dispatch = readJson(fs, `${REVIEW_DIR}/dispatch-result.json`) as
         | {
@@ -226,6 +241,10 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
               noteLines?: unknown;
               reconciliation?: {resolve?: unknown; skipLines?: unknown};
               depth?: unknown;
+              threadSuppressions?: unknown;
+              riskFiles?: unknown;
+              patterns?: unknown;
+              excludedFiles?: unknown;
           }
         | undefined;
     if (dispatch === undefined) {
@@ -261,6 +280,53 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
           )
         : [];
     const depth = typeof dispatch.depth === "string" ? dispatch.depth : "full";
+
+    // Stage the code-computed risks/patterns signature (trial suggestion b):
+    // Step 7 compares THIS string against cache memory's `risksPatternsKey`
+    // instead of composing its own, and the deterministic cache writer
+    // (cache-record.ts) records the same string when the guidance comment
+    // queues, so one code-owned format sits on both sides of the repost
+    // decision.
+    // Full depth only: Step 7 skips every reduced depth (`scoped` included),
+    // so the existing comment stands and the key carries forward. A scoped
+    // run DOES compute triage, but against the scoped subset; staging that
+    // narrower signature could collapse the standing full-run guidance the
+    // next time any comment queues.
+    if (depth === "full") {
+        const routing = readJson(fs, `${REVIEW_DIR}/routing.json`) as
+            | {teams?: {owners?: unknown}}
+            | undefined;
+        // The NOTIFIED match set rides the same key: Step 7 posts one Review
+        // Guidance comment for risks, patterns, AND notifications, so a run
+        // that changed only the notified set must still re-post.
+        //
+        // COMPUTED HERE, not read from notified.json. The notified CLI does
+        // not run until Step 7, long after this one, so reading the file
+        // would find nothing on every real run: `signature` would always be
+        // undefined, the `notified:` component would always drop out, and a
+        // `.github/NOTIFIED`-only change would stage a key identical to the
+        // prior run's — leaving Step 7 to read the guidance as unchanged and
+        // never mention a newly-subscribed team. That is precisely the bug
+        // this fold exists to fix, so the fold has to own the computation.
+        //
+        // `runCli` is pure over staged inputs that the pre-agent step writes
+        // as hard prerequisites (`files.json`, `full.diff`), so it is safe to
+        // call this early; it also stages `notified.json`, which makes Step
+        // 7's own invocation idempotent rather than first-of-its-kind. A repo
+        // with no `.github/NOTIFIED` yields an empty signature, the same key
+        // this produced before the feature.
+        const notified = runNotifiedCli(fs, repoRoot);
+        fs.writeFileSync(
+            RISKS_PATTERNS_KEY_PATH,
+            computeRisksPatternsKey({
+                riskFiles: dispatch.riskFiles,
+                patterns: dispatch.patterns,
+                excludedFiles: dispatch.excludedFiles,
+                owners: routing?.teams?.owners,
+                notifiedSignature: notified.signature,
+            }),
+        );
+    }
 
     // The accountability section (renders and stages rereview.json too).
     const rereview = runRereviewCli(fs);
@@ -306,6 +372,30 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
         }
     }
 
+    // A blocking candidate the dispatcher suppressed as a duplicate of a
+    // still-open BLOCKING bot thread (trial suggestion g) blocks like a
+    // fresh one: the reviewer re-confirmed the defect, and the open thread
+    // is the actionable feedback. Without this floor, suppression could
+    // flip the verdict to APPROVE over an unfixed blocking objection. Both
+    // sides must be blocking: suppression happens before validation, so the
+    // candidate's own label is unvalidated; the matched thread's opener
+    // label is the severity that DID survive a prior run's validation. A
+    // blocking candidate matching a non-blocking open thread therefore
+    // never floors (it would force REQUEST_CHANGES with no validation and
+    // no visible blocking comment). (A thread the reduced-depth floor above
+    // already counted may add one more here; the verdict is the same either
+    // way, only the reason count differs.)
+    const suppressedBlocking = (
+        Array.isArray(dispatch.threadSuppressions)
+            ? dispatch.threadSuppressions
+            : []
+    ).filter(
+        (entry) =>
+            typeof (entry as {label?: unknown}).label === "string" &&
+            isBlockingLabel((entry as {label: string}).label) &&
+            (entry as {threadBlocking?: unknown}).threadBlocking === true,
+    ).length;
+
     const verdict = computeVerdict({
         postedLabels: claims.map((claim) => claim.label),
         dimensions: {
@@ -313,7 +403,7 @@ export const runSubmissionCli = (fs: SubmissionFs): SubmissionPlan => {
             skillSeverity: "assessed",
             patternTriage: "assessed",
         },
-        keptBlockingCount: keptBlockingFloor,
+        keptBlockingCount: keptBlockingFloor + suppressedBlocking,
     });
     // With every dimension reported assessed (the dispatcher's unavailable
     // dimensions surface as note lines instead), the two-state Step 4 rule

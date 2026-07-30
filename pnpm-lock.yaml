@@ -62,6 +62,9 @@ importers:
       vitest:
         specifier: ^4.0.10
         version: 4.0.10(@types/node@25.3.3)(yaml@2.8.3)
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   actions/apply-terraform-plan: {}
 
@@ -118,6 +121,9 @@ importers:
       octokit:
         specifier: 5.0.5
         version: 5.0.5
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
 
 packages:
 
