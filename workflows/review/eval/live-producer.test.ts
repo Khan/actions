@@ -438,6 +438,68 @@ describe("produceLive", () => {
         expect(result.findings.length).toBe(1);
     });
 
+    it("falls back to another model when the pinned one refuses", async () => {
+        // A refusal is deterministic in the model (run 30656579898), so the
+        // retry must change the pin, and the swap must be visible.
+        const models: string[] = [];
+        const runner = async (request: {model: string}) => {
+            models.push(request.model);
+            return models.length === 1
+                ? {output: "", usd: 0.1, turns: 1, wallMs: 1, refused: true}
+                : {
+                      output: JSON.stringify({findings: []}),
+                      usd: 0.1,
+                      turns: 1,
+                      wallMs: 1,
+                  };
+        };
+        // The fixture pins Opus 4.8, which deliberately has no fallback; pin
+        // the measured refuser so the fallback path is the one under test.
+        const agents = new Map(AGENTS);
+        agents.set("correctness-reviewer", {
+            ...agent("correctness-reviewer"),
+            model: "claude-fable-5",
+        });
+        const result = await produceLive(CASE, agents, {
+            runner: runner as never,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        const report = result.perAgent.find(
+            (a) => a.name === "correctness-reviewer",
+        );
+        expect(models[0]).toBe("claude-fable-5");
+        expect(models[1]).toBe("claude-opus-4-8");
+        expect(report?.fellBackTo).toBe("claude-opus-4-8");
+        expect(report?.failed).toBeUndefined();
+    });
+
+    it("names an empty final as empty output, not malformed", async () => {
+        // Both harnesses produced this on the security-adjacent corpus cases
+        // (run 30650071285): the agent returns nothing at all. Reporting it as
+        // malformed output hid the signature for three eval runs.
+        const {runner} = scriptedRunner({
+            "correctness-reviewer": ["", ""],
+            "skill-auditor": [JSON.stringify({findings: []})],
+            "security-auth": [JSON.stringify({findings: []})],
+            "caching-resource": [JSON.stringify({findings: []})],
+            "concurrency-async": [JSON.stringify({findings: []})],
+            "data-migrations": [JSON.stringify({findings: []})],
+            "money-payments": [JSON.stringify({findings: []})],
+            "claim-validator": [validatorOutput([])],
+        });
+        const result = await produceLive(CASE, AGENTS, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        const failed = result.perAgent.find(
+            (a) => a.name === "correctness-reviewer",
+        )?.failed;
+        expect(failed).toMatch(/empty output/);
+        expect(failed).not.toMatch(/malformed/);
+    });
+
     it("marks a twice-failed agent failed and keeps everyone else", async () => {
         const {runner} = scriptedRunner({
             "correctness-reviewer": ["not json", "still not json"],
@@ -468,10 +530,15 @@ describe("produceLive", () => {
             stageDir: "/stage",
             fs: volFs(vol),
         });
-        expect(
-            result.perAgent.find((a) => a.name === "correctness-reviewer")
-                ?.failed,
-        ).toMatch(/malformed output/);
+        const failedAgent = result.perAgent.find(
+            (a) => a.name === "correctness-reviewer",
+        );
+        expect(failedAgent?.failed).toMatch(/malformed output/);
+        // The raw text of the last attempt is kept so the failure is
+        // diagnosable from the report instead of costing an eval run per
+        // hypothesis (runs 30592964392 / 30596474354).
+        expect(failedAgent?.rawOutput).toBeDefined();
+        expect(failedAgent?.rawOutput).toContain("not json");
         const skill = result.findings.find((f) => f.source === "skill");
         expect(skill?.finding.lens).toBe("conventions");
         // The skill name rides into the claims for the validator.

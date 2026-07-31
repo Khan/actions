@@ -60,7 +60,53 @@ export const sdkRunner = (): LiveAgentRunner => async (request) => {
         let output = "";
         let usd = 0;
         let turns = 0;
+        let toolCalls = 0;
+        let stopReason: string | undefined;
+        let errorMessage: string | undefined;
+        let tokensAtFailure: {input: number; total: number} | undefined;
         for await (const message of run) {
+            // Count the SDK arm's tool calls so the harness comparison has the
+            // same investigation-depth signal on both sides. A `tool_use`
+            // block in an assistant message is one call; the SDK's result
+            // record does not carry a count.
+            if (message.type === "assistant") {
+                const inner = (
+                    message as unknown as {
+                        message?: {
+                            content?: {type?: string}[];
+                            stop_reason?: string | null;
+                        };
+                    }
+                ).message;
+                // The stop reason of the LAST assistant message. An empty
+                // final plus a non-"end_turn" stop reason is how a refusal
+                // presents; without it an empty result is indistinguishable
+                // from a dropped one.
+                if (typeof inner?.stop_reason === "string") {
+                    stopReason = inner.stop_reason;
+                }
+                // Token counts on the last assistant message: the
+                // discriminator between an overloaded provider and a prompt
+                // that outgrew the context window.
+                const usage = (
+                    inner as unknown as {
+                        usage?: {input_tokens?: number; output_tokens?: number};
+                    }
+                )?.usage;
+                if (usage !== undefined) {
+                    const input = Number(usage.input_tokens ?? 0);
+                    tokensAtFailure = {
+                        input,
+                        total: input + Number(usage.output_tokens ?? 0),
+                    };
+                }
+                const blocks = inner?.content;
+                for (const block of blocks ?? []) {
+                    if (block.type === "tool_use") {
+                        toolCalls += 1;
+                    }
+                }
+            }
             if (message.type !== "result") {
                 continue;
             }
@@ -78,12 +124,33 @@ export const sdkRunner = (): LiveAgentRunner => async (request) => {
             output = result.result ?? "";
             usd = result.total_cost_usd ?? 0;
             turns = result.num_turns ?? 0;
+            // The result subtype is the runner-level outcome; keep it when no
+            // assistant stop reason was seen at all.
+            stopReason = stopReason ?? result.subtype;
+            const err = (
+                result as unknown as {error?: unknown; result?: string}
+            ).error;
+            if (err !== undefined) {
+                errorMessage = JSON.stringify(err).slice(0, 500);
+            }
         }
-        return {output, usd, turns, wallMs: Date.now() - started};
+        return {
+            output,
+            usd,
+            turns,
+            toolCalls,
+            stopReason,
+            errorMessage,
+            tokensAtFailure,
+            // Anthropic reports a usage-policy block as stop_reason "refusal".
+            refused: stopReason === "refusal",
+            wallMs: Date.now() - started,
+        };
     } finally {
         clearTimeout(timer);
     }
 };
+
 
 /* -------------------------------------------------------------------------- */
 /* CLI                                                                        */

@@ -59,7 +59,16 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
 export const parseJsonObject = (output: string): Record<string, unknown> => {
     const parsed = extractJsonObject(output);
     if (parsed === undefined) {
-        throw new Error("output carries no parseable JSON object");
+        // An empty final is a different failure from a malformed one: the
+        // agent returned nothing at all, which on cyber-adjacent input is how
+        // a refusal presents (#294: it surfaces "as a missing agent result,
+        // not an error"). Reporting it as malformed output sent three eval
+        // runs after the wrong cause.
+        throw new Error(
+            output.trim() === ""
+                ? "agent returned no final text (empty output)"
+                : "output carries no parseable JSON object",
+        );
     }
     return parsed;
 };

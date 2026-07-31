@@ -477,6 +477,36 @@ case (`golden-retention-fix-push`, a one-hunk fix push whose fix plants a
 fresh defect inside the new hunk), and `fast` has definitionally zero
 fresh-defect recall (its cost, shown as recall against dollars).
 
+### Refusal fallbacks
+
+A provider can block a request outright under its usage policy. Anthropic
+reports that as `stop_reason: "refusal"`, and the agent returns **no final
+text** — which is why it reads as a missing result rather than an error, the
+silent coverage hole this README already warns about for the specialist lenses.
+
+The warning was aimed at the wrong roles. The lenses were kept on Opus because
+Fable's cyber classifiers can refuse benign security analysis, while
+`correctness-reviewer` — the default roster's load-bearing recall agent — was
+moved *onto* Fable 5 for its recall gain. Eval run 30656579898 caught it
+refusing `incident-auth-bypass` and `adversarial-injection-approve` outright,
+at 5,207 tokens (so not a context limit).
+
+A refusal is deterministic in the model: the same prompt on the same pin
+refuses again, so the ordinary retry cannot help. `lib/refusal-fallback.ts`
+maps a refusing pin to a model that will take the work:
+
+| Pinned model | Falls back to | Basis |
+| --- | --- | --- |
+| `claude-fable-5` | `claude-opus-4-8` | measured (run 30656579898) |
+| `claude-opus-5` | `claude-opus-4-8` | pre-emptive; #294 notes Opus 5 also ships elevated cyber safeguards |
+
+Rules: **one hop**, never back to a model that already refused, and **no
+fallback for an unlisted pin** — an unmapped model's refusal stands and is
+reported, so a new model family's refusal profile stays visible instead of
+being papered over. The swap is recorded per agent (`fellBackTo`) and lands in
+the report and the run artifact: converting a silent skip into a silent model
+swap would trade one invisible failure for another.
+
 ### Models and effort per role
 
 Each sub-agent pins its model in its own definition inside `review.md` (with a

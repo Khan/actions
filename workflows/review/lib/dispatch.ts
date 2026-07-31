@@ -134,6 +134,40 @@ export type AgentResult = {
     usd: number;
     turns: number;
     wallMs: number;
+    /**
+     * Tool calls the agent made. The harness-parity signal: a loop that
+     * investigates with fewer tool calls and scores lower has a toolbox
+     * problem, not a model problem. Optional because a runner that cannot
+     * count them reports nothing rather than a misleading zero.
+     */
+    toolCalls?: number;
+    /**
+     * The provider's stop reason for the agent's last assistant message, when
+     * the runner can see one. Load-bearing for one specific diagnosis: an
+     * EMPTY final on cyber-adjacent input is the signature of a refusal, which
+     * #294 documents as surfacing "as a missing agent result, not an error".
+     * Without this the empty result is indistinguishable from a dropped one.
+     */
+    stopReason?: string;
+    /**
+     * Why the call failed, when the runner can see it. `stopReason=error`
+     * alone does not distinguish an overloaded provider from a prompt that
+     * outgrew the context window, and those have opposite fixes (retries vs
+     * compaction). `tokensAtFailure` is the discriminator: near the model's
+     * context window means overflow.
+     */
+    errorMessage?: string;
+    /** The provider's own stop reason, before the runner normalizes it. */
+    rawStopReason?: string;
+    /** Input and total tokens on the last assistant message. */
+    tokensAtFailure?: {input: number; total: number};
+    /**
+     * The provider blocked the request under its usage policy. Distinct from
+     * every other failure because it is deterministic in the model, not
+     * transient: retrying the same pin returns the same refusal, so the only
+     * useful response is a different model.
+     */
+    refused?: boolean;
     /** The output came through the structured-final tool, pre-validated. */
     structured?: boolean;
 };

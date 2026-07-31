@@ -138,30 +138,6 @@ claiming a band.
   arms both sit inside a band is wobble. Detecting a 20-point recall change
   needs ~60 spec-samples per arm; 10 points needs ~140 (two-proportion, 80%
   power). Repeats are the cheap axis: no authoring, no review.
-- **Blocking rate (severity stability, report-only):** every per-spec row is
-  followed by a `<case>:<spec> (blocking)` row — of the repeats that CAUGHT
-  that spec, how many labelled it blocking — and the pooled bands carry
-  `blocking rate (caught specs)`. It exists because **matching scores
-  detection, not severity**: a spec is satisfied by anchor agreement plus a
-  mechanism regex, and no `mustCatchSpecs` entry in the corpus constrains the
-  label (the only two `blockingOnly` flags are on `mustNotFlagSpecs` traps,
-  where the field means the opposite thing). So a run can score 100%
-  must-catch recall while calling every seeded defect a nitpick. Verdict
-  agreement does not cover the gap either, being per case: any *other*
-  blocking finding compensates. Khan/webapp#41194 is the worked example —
-  `TopKey`'s zero-floor bug was labelled blocking and held the verdict at
-  REQUEST_CHANGES while a claim-validator-**confirmed** nil-map panic posted
-  as `suggestion (non-blocking)`.
-  On an **identical-arm** pool (the weekly drift run, or any `--force-arms`
-  wobble control) a blocking rate strictly between 0 and 1 is **unstable by
-  construction**: same prompt, same input, split vote, which is the definition
-  of noise rather than a number to compare against a threshold. Those rows
-  print `severity split`. **No threshold tuning is intended and nothing gates
-  on this metric** — it is instrumentation, and what to do about a split is a
-  separate, deliberately deferred decision (asserting which defect classes
-  must block is a ground-truth call for the repo owner). Rows are omitted, not
-  zeroed, for report artifacts predating the instrumentation: an unrecorded
-  label is no evidence, never "non-blocking".
 - **Miss classes:** a true miss is a recall problem; found-but-dropped
   (provenance/scope/validation buckets) is an anchoring or gate-calibration
   problem. They route to different fixes; never collapse them. The
@@ -238,6 +214,31 @@ corpus x3 repeats x both arms ~$60 (cap it at $85 to avoid budget skips).
 The judge and the match arbiter are pinned to `claude-haiku-4-5-20251001`.
 Every model-spending path degrades to a partial report rather than dying
 at a cap, and judge/arbiter failures degrade to notes/non-matches.
+
+When an agent fails contract parsing, the report keeps the **raw final text**
+of its last attempt (truncated to 4000 chars) and renders it inline under
+"Raw output of each failed agent", alongside per-agent **tool-call counts**
+from both arms. Reach for those before forming a hypothesis: the failure
+reason on its own cannot distinguish a prose answer from a refusal from a
+contract cut off mid-emission, and two harness runs (30592964392,
+30596474354) cost ~$10 each to establish only that the same two cases fail.
+
+**Empty finals are reported as their own failure**, not as malformed output,
+and carry the provider stop reason when the runner can see one
+(`empty output: the agent returned no final text (stopReason=...)`). Run
+30650071285 showed both harnesses returning length-0 finals from
+`correctness-reviewer` on the security-adjacent cases; while that read as
+"malformed output" it looked like a contract bug, and three runs chased it as
+one. An empty final on cyber-adjacent input is the refusal signature #294
+describes as surfacing "as a missing agent result, not an error", so the stop
+reason is what separates a refusal from a dropped result.
+
+Standing rule, same class as the SDK-version rule: the budget cap is enforced
+from the runner's reported cost, so a runner that cannot price the model under
+test turns `--max-usd` into a no-op on precisely that arm. Pi reports a
+per-component `cost` breakdown from its own catalog; check that a newly pinned
+model is in that catalog before running an arm on it. `resolveModelId` throws
+on an unknown pin rather than silently substituting.
 
 ## Historical limits
 
