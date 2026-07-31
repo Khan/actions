@@ -604,6 +604,67 @@ describe("suppressOpenThreadDuplicates (trial suggestion g)", () => {
         expect(suppressed[0].threadBlocking).toBe(false);
     });
 
+    it("attributes a candidate to its best match, not the first staged thread", () => {
+        // webapp#41204 run 30650642317, the first live run where suppression
+        // fired: this todo cleared the floor against BOTH the older blocking
+        // thread and its own non-blocking counterpart, and staging order
+        // handed it the blocking one, inflating submission.ts's verdict floor.
+        const reflag = claim({
+            id: "test-adequacy-1",
+            source: "test-adequacy",
+            line: 42,
+            label: "todo (blocking)",
+            subject:
+                "No test covers the documented deletion path for expired memories.",
+            discussion:
+                "No test exercises the deletion path; TestExpiration asserts expired keys are identified but a regression that never deletes expired memories stays green.",
+            failure_scenario:
+                "A regression that identifies expired memories but skips the deletion is not caught by TestExpiration and ships green.",
+        });
+        const counterpart = openThread({
+            thread_id: "T2",
+            body: "**nitpick (non-blocking):** No test exercises the deletion path for expired memories. TestExpiration asserts expired keys are identified, so a regression that identifies but never deletes expired memories stays green and the documented deletion behavior is untested.",
+        });
+        // Staged blocking-thread-first, the order that produced the live
+        // mis-attribution.
+        const {suppressed} = suppressOpenThreadDuplicates(
+            [reflag],
+            [openThread(), counterpart],
+        );
+        expect(suppressed).toHaveLength(1);
+        expect(suppressed[0].thread_id).toBe("T2");
+        expect(suppressed[0].threadBlocking).toBe(false);
+        // Order must not decide it: the same pair staged the other way round
+        // reaches the same thread.
+        expect(
+            suppressOpenThreadDuplicates([reflag], [counterpart, openThread()])
+                .suppressed[0],
+        ).toEqual(suppressed[0]);
+    });
+
+    it("keeps the first staged thread when two match equally well", () => {
+        const reflag = claim({
+            id: "correctness-reviewer-2",
+            source: "correctness-reviewer",
+            line: 42,
+            label: "todo (blocking)",
+            subject:
+                "Missing deletion test: the expiration path has no test covering the delete.",
+            discussion:
+                "No test exercises the deletion path; TestExpiration asserts expired keys are identified but a regression that never deletes expired memories stays green.",
+            failure_scenario:
+                "A regression that identifies expired memories but skips the deletion is not caught by TestExpiration and ships green.",
+        });
+        // Identical openers, so every metric ties and staging order decides;
+        // determinism here is what keeps dispatch-result.json reproducible.
+        const {suppressed} = suppressOpenThreadDuplicates(
+            [reflag],
+            [openThread({thread_id: "T1"}), openThread({thread_id: "T2"})],
+        );
+        expect(suppressed).toHaveLength(1);
+        expect(suppressed[0].thread_id).toBe("T1");
+    });
+
     it("keeps a distinct defect on the same path", () => {
         const distinct = claim({
             id: "correctness-reviewer-3",
