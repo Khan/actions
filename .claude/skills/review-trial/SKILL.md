@@ -169,6 +169,37 @@ force-pushed round is exactly the round where that goes unnoticed and gets
 blamed on the rebase. If a future change starts validating `commitSha` on
 restore, this paragraph is what goes stale, not the `stampSource` rule above.
 
+**A closed trial PR is usually a cheaper source of the round you need than a
+new lifecycle.** Before building a two-run push-2, check whether a previous
+trial already left the shape lying around: a CLOSED PR whose last round's
+comments are still unresolved is a partially-fixed round waiting to be
+resumed, because its findings were never addressed. webapp#41204 was reopened
+this way to get the round that made open-thread suppression fire in production
+for the first time (run 30650642317: six threads kept, six suppressions,
+REQUEST_CHANGES floored by the suppression floor alone), which the plan had
+budgeted two runs for and got in one.
+
+Control the run count through the events, not through hope. On a closed PR no
+`pull_request` event fires at all, so pushes are free; `reopened` IS in the
+reviewer's trigger list, so reopening fires exactly one run; and pushing to an
+already-open PR fires `synchronize`, which is one more run each time. The
+sequence that costs a single run is therefore: push the fixture state while the
+PR is still closed, adjust thread resolution, then reopen. Unresolving a thread
+is a GraphQL mutation (`unresolveReviewThread`) that an agent's tooling may
+refuse; hand it to the operator rather than working around it.
+
+**Fault injection: keep it out of the diff under review.** Exercising a
+fail-open reporter by deliberately mis-staging works (run 30654454047 tripped
+`threadSuppressionUnavailable` with `unusableThreads: 9` by telling the
+orchestrator to omit `resolved`), but if the injection edits the prompt or lock
+file ON the trial branch, that edit becomes the newly-changed code: every one
+of that run's five candidates landed on `review-preview.md` and none on the Go
+fixture, so the reporter fired while the duplicate re-posting it warns about
+went unobserved, and the reviewers spent the round flagging the injected prose
+as blocking (correctly: it reads as instructions aimed at the agent). Land the
+injection in the same push as the fixture change you want re-reviewed, or force
+full depth, and expect the injected text itself to draw findings.
+
 When an arm runs a reduced re-review mode (`re-review` in ROUTING), also
 record per push: the executed depth and tripwire fields from the run's
 `out/rereview-plan.json` artifact, and the billed cost, so the report can
@@ -219,6 +250,15 @@ Close every trial PR with a comment linking the report, delete the
 onto a long-lived branch. Leave the collected transcripts with the operator
 (attach the report to the PR or issue that motivated the trial).
 
+One exception, and it is the reason the closed-PR shortcut above works: keep a
+branch whose round you expect to resume, and then leave it in a state someone
+can reopen safely. Revert every deliberate fault on it (reintroduced defects,
+mis-staging injections) in the same pass that closes the PR, and put the
+resumable state in the closing comment: which threads are still unresolved,
+which run IDs the round produced, and what a reopen would trigger. A surviving
+trial branch that still carries a planted panic or a prompt injection is a trap
+for whoever reopens it, and the reopen fires a review immediately.
+
 ## Guardrails (recap)
 
 - Costs projected and approved before the first PR exists.
@@ -228,5 +268,9 @@ onto a long-lived branch. Leave the collected transcripts with the operator
 - Forward-only pushes once a round has been reviewed; no force-pushes mid-trial.
 - Read `stampSource` from every round's plan artifact; scoped-cost samples from
   non-anchored rounds are void.
+- Budget runs by counting the events a step fires (`reopened` and `synchronize`
+  each cost one review; a closed PR fires none), not by counting pushes.
+- Any branch that outlives its PR is reverted to a safe state, with the
+  resumable details in the closing comment.
 - Score before cleanup; export before cleanup; never lose transcripts.
 - Faithful reporting, including the arm you expected to win losing.
