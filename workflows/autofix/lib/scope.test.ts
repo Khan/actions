@@ -123,10 +123,18 @@ describe("isLoopEligible", () => {
         expect(isLoopEligible("nits")).toBe(false);
     });
 
-    // Docs looks convergent (a restating comment is either deleted or not) and
-    // is only half so: the same reviewer flags MISSING explanations, and prose
-    // can always be wanted better. Ineligible until measured.
-    it("forbids docs from looping, despite its deletion half converging", () => {
+    // Docs looks convergent and is not, mechanically: a docs fix's `+` lines
+    // are comment text, which is the documentation reviewer's own subject
+    // matter, so they land in the next cycle's newly-changed-code scope by
+    // construction (webapp#41207: 5 of 5 threads fixed, three fresh
+    // documentation findings minted on the prose the fixer had just written).
+    // Deleting instead of rewriting does converge, by erasing the subject
+    // matter (webapp#41204 left `staleAfter` undocumented). The documentation
+    // reviewer's volume caps bound how many findings a cycle emits, not whether
+    // the fixer's prose lands in the next cycle's scope, so they slow the
+    // re-arming without stopping it. Permanently ineligible under the current
+    // scope model, not pending measurement; see scope.ts for the full argument.
+    it("forbids docs from looping, whichever half the fixer favours", () => {
         expect(isLoopEligible("docs")).toBe(false);
     });
 });

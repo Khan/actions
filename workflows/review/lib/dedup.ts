@@ -71,6 +71,11 @@
 
 import {isRecord, type Claim, type ProposedCluster} from "./dispatch-contracts";
 import {isBlockingLabel} from "./render-comment";
+// The identity of the review bot, shared with the producer that stages the
+// threads this module filters (stage-pr.ts). `threads.ts` owns a GitHub fetch
+// but runs nothing at import time and reaches the network only through an
+// injected port, so the determinism boundary above still holds here.
+import {isReviewBotAuthor} from "./threads";
 
 /** Which tier identified a merged group (dispatch-result.json audit). */
 export type MergeVia = "similarity" | "clusterer" | "both";
@@ -435,7 +440,9 @@ export type ThreadSuppression = {
      * Whether the matched thread's OPENING comment carries a blocking label.
      * The verdict floor keys on this, not on the candidate's own label: the
      * thread's severity survived last run's validation, while a suppressed
-     * candidate is dropped before validation ever sees it.
+     * candidate is dropped before validation ever sees it. Read off the
+     * BEST-matching thread ({@link bestOpenThreadMatch}), since among several
+     * threads that clear the floor their labels can differ.
      */
     threadBlocking: boolean;
 };
@@ -481,48 +488,41 @@ const threadProse = (body: string): string =>
         .replace(/^\s*\*{0,2}[a-z]+ \([^)]*\)\*{0,2}:?\*{0,2}\s*/i, "");
 
 /**
- * Whether a staged thread carries the tool's own "still open" state. The
- * orchestrator stages `resolved` copied from `get_review_comments`'
- * `is_resolved`; both the tool's spelling and the camelCase form are accepted
- * so a verbatim copy also lands. Absent reads as unknown, not as open.
+ * Whether a staged thread carries a "still open" state. `stage-pr.ts` writes
+ * `resolved: false` on every thread it stages; the `get_review_comments`
+ * spelling (`is_resolved`) and the camelCase form are still accepted, because
+ * a staging assembled from that tool's output (the eval's producers, and any
+ * hand-built staging used to reproduce a run) inherits its shape. Absent
+ * reads as unknown, not as open.
  */
 const stagedResolvedState = (thread: Record<string, unknown>): unknown =>
     thread["resolved"] ?? thread["is_resolved"] ?? thread["isResolved"];
 
 /**
- * The bot's author spellings, both of which are the same identity. The REST
- * surfaces (`user.login` on a review, which stage-pr.ts reads) render a bot
- * as `github-actions[bot]`; `get_review_comments`, which stages the threads
- * this module consumes, renders the SAME account as bare `github-actions`.
- * Accepting only the bracketed form is what made suppression unreachable on
- * every conforming run: the prompt tells the orchestrator to copy `author`
- * from the tool output verbatim, so a correct staging never matched.
- */
-const BOT_AUTHORS = new Set(["github-actions[bot]", "github-actions"]);
-
-/**
- * Build the suppression inputs from staged threads.json. The staging is
- * prompt-executed (review.md asks the orchestrator for the unresolved
- * github-actions[bot] threads; stage-pr.ts deliberately does not stage
- * threads yet), so BOTH properties suppression depends on are enforced HERE
- * in code rather than trusted from the prompt:
- * - the opener is the bot's, in either spelling ({@link BOT_AUTHORS}). A
- *   mis-staged human thread must never silently kill a candidate, and its
- *   free-text opener would also read as non-blocking and skip the verdict
- *   floor.
- * - the thread is still open, per the `resolved` flag staged from the tool's
- *   own `is_resolved`. A mis-staged already-resolved thread would otherwise
- *   suppress a genuine regression re-flag with nothing to check it against.
+ * Build the suppression inputs from staged threads.json. `stage-pr.ts` is the
+ * producer (one GraphQL fetch, partitioned by opener), and it selects the
+ * bot's threads through the SAME {@link isReviewBotAuthor} predicate this
+ * filter admits them by, which is the point of the shared constant: the two
+ * layers spelling the identity separately is precisely how suppression became
+ * unreachable for a release (Khan/actions#302). The guards below nonetheless
+ * stay, because they are the properties suppression depends on and a producer
+ * bug must degrade to a duplicate comment rather than to a dropped finding:
+ * - the opener is the bot's, in either spelling. A human thread must never
+ *   silently kill a candidate, and its free-text opener would also read as
+ *   non-blocking and skip the verdict floor.
+ * - the thread is still open, per the staged `resolved` flag. An
+ *   already-resolved thread would otherwise suppress a genuine regression
+ *   re-flag with nothing to check it against.
  * Threads in resolvedIds (reconciler-resolved this run) are exempt as well: a
  * fixed defect posting again is a fresh finding. Fails closed on each: a
  * thread without a bot-authored opener, or without an explicit
  * `resolved: false`, never suppresses (worst case is a duplicate comment).
  *
- * `path` is read from the thread and falls back to the opening comment, since
- * `get_review_comments` carries `path` per comment rather than per thread and
- * a verbatim staging inherits that shape. The fallback is not cosmetic:
- * {@link suppressOpenThreadDuplicates} matches on `path`, so a thread staged
- * without one silently suppresses nothing.
+ * `path` is read from the thread and falls back to the opening comment: the
+ * code producer carries `path` per thread, while `get_review_comments` carries
+ * it per comment, so a staging built from that tool inherits the other shape.
+ * The fallback is not cosmetic: {@link suppressOpenThreadDuplicates} matches
+ * on `path`, so a thread staged without one silently suppresses nothing.
  */
 export const openThreadsFromStaged = (
     threads: unknown,
@@ -542,7 +542,7 @@ export const openThreadsFromStaged = (
                 resolvedIds.has(thread["thread_id"]) ||
                 stagedResolvedState(thread) !== false ||
                 typeof author !== "string" ||
-                !BOT_AUTHORS.has(author)
+                !isReviewBotAuthor(author)
             ) {
                 return [];
             }
@@ -564,11 +564,14 @@ export const openThreadsFromStaged = (
             ];
         });
 
-/** Whether a claim clearly describes the defect an open thread tracks. */
-export const describesOpenThreadDefect = (
-    claim: Claim,
-    thread: OpenThread,
-): boolean => {
+/** How strongly a claim's text matches one open thread's opener. */
+type OpenThreadScore = {
+    jaccard: number;
+    overlap: number;
+    sharedBigrams: number;
+};
+
+const openThreadScore = (claim: Claim, thread: OpenThread): OpenThreadScore => {
     const tokensA = contentTokens(
         `${claim.subject} ${claim.discussion} ${claim.failure_scenario}`,
     );
@@ -576,12 +579,22 @@ export const describesOpenThreadDefect = (
     const setA = new Set(tokensA);
     const setB = new Set(tokensB);
     if (setA.size === 0 || setB.size === 0) {
-        return false;
+        return {jaccard: 0, overlap: 0, sharedBigrams: 0};
     }
     const shared = intersectionSize(setA, setB);
-    const jaccard = shared / (setA.size + setB.size - shared);
-    const overlap = shared / Math.min(setA.size, setB.size);
-    const sharedBigrams = intersectionSize(bigrams(tokensA), bigrams(tokensB));
+    return {
+        jaccard: shared / (setA.size + setB.size - shared),
+        overlap: shared / Math.min(setA.size, setB.size),
+        sharedBigrams: intersectionSize(bigrams(tokensA), bigrams(tokensB)),
+    };
+};
+
+/** Whether a claim clearly describes the defect an open thread tracks. */
+export const describesOpenThreadDefect = (
+    claim: Claim,
+    thread: OpenThread,
+): boolean => {
+    const {jaccard, overlap, sharedBigrams} = openThreadScore(claim, thread);
     // The different-line tier: this match has no line window at all (see
     // `suppressOpenThreadDuplicates`), so it pays for the loose anchor with
     // the higher bigram floor, exactly as a cross-source pair on mismatched
@@ -595,6 +608,60 @@ export const describesOpenThreadDefect = (
 };
 
 /**
+ * The open thread a candidate BEST matches, not merely the first one it clears
+ * the floor against.
+ *
+ * More than one open thread can describe the same area of a file, and taking
+ * the first match in staging order reads `threadBlocking` off a thread that is
+ * not the candidate's counterpart. Measured on webapp#41204 run 30650642317,
+ * the first live run where suppression fired: the fresh test-adequacy todo
+ * ("no test covers Record's documented zero-valued-Window guarantee") cleared
+ * the floor against BOTH the blocking nil-map panic thread and its own exact
+ * counterpart, a non-blocking nitpick whose opener reads "The documented
+ * zero-value-Window guarantee has no test". Staging order put the blocking
+ * thread first because it was the older one, so the suppression recorded
+ * `threadBlocking: true` and added a second entry to submission.ts's verdict
+ * floor. That run's verdict was already floored correctly by another
+ * suppression, so nothing was mis-decided, but the direction is the dangerous
+ * one: attributing a candidate to a blocking thread that is not its match
+ * forces REQUEST_CHANGES on thinner evidence than the both-sides-blocking rule
+ * intends.
+ *
+ * Ranked on `jaccard` first because it is the length-normalized metric: raw
+ * `sharedBigrams` grows with the opener's length, and `overlap` divides by the
+ * smaller token set, which favors the longer, more discursive thread. On the
+ * observed pair both jaccard (0.253 vs 0.218) and bigrams (13 vs 12) pick the
+ * true counterpart while overlap alone (0.468 vs 0.511) picks the wrong one,
+ * so bigrams break jaccard ties and overlap never ranks. Strictly-better
+ * comparisons keep staging order as the final tiebreak, so an exact scoring
+ * tie behaves as it did before.
+ */
+const bestOpenThreadMatch = (
+    claim: Claim,
+    threads: readonly OpenThread[],
+): OpenThread | undefined => {
+    let best: {thread: OpenThread; score: OpenThreadScore} | undefined;
+    for (const thread of threads) {
+        if (
+            thread.path !== claim.path ||
+            !describesOpenThreadDefect(claim, thread)
+        ) {
+            continue;
+        }
+        const score = openThreadScore(claim, thread);
+        const better =
+            best === undefined ||
+            score.jaccard > best.score.jaccard ||
+            (score.jaccard === best.score.jaccard &&
+                score.sharedBigrams > best.score.sharedBigrams);
+        if (better) {
+            best = {thread, score};
+        }
+    }
+    return best?.thread;
+};
+
+/**
  * Whether staged threads ALL failed {@link openThreadsFromStaged}'s filter, so
  * suppression could not run at all. Lives here beside the filter because it is
  * the filter's own failure mode; the caller only logs what this returns.
@@ -604,6 +671,16 @@ export const describesOpenThreadDefect = (
  * the author-spelling mismatch above reached production: it survived a whole
  * three-round seeded lifecycle (webapp#41197) posting duplicate comments while
  * every run reported an empty suppression list and looked correct.
+ *
+ * Kept after the producer became code, not deleted. A conforming `stage-pr.ts`
+ * run can no longer trip it (it stages only bot-opened, unresolved threads,
+ * selected by this filter's own predicate, and a mass reconciler-resolve is
+ * excluded per id below), which is the point: a fire now means either that the
+ * producer and this consumer have drifted apart inside one repo (a code bug,
+ * still the exact failure class #302 was), or that the staging came from
+ * somewhere else (the eval's live producer, a hand-built reproduction).
+ * A tripwire that cannot fire on today's code costs one comparison and is the
+ * only thing standing between the next shape drift and another silent release.
  *
  * Threads the reconciler resolved this run are excluded, since those are
  * legitimately unusable — counted per thread against `resolvedIds` rather than
@@ -636,11 +713,29 @@ export const stagedThreadShapeFailure = (
     }
     return {
         unusableThreads,
-        warning:
-            `::warning title=open-thread suppression::${unusableThreads} staged thread(s), none usable ` +
-            `(each needs thread_id, an explicit resolved: false, and a bot-authored opener); duplicates may re-post`,
+        warning: threadSuppressionUnavailableWarning(unusableThreads),
     };
 };
+
+/**
+ * The tripwire's run-log line, built from the count alone.
+ *
+ * Shared with `dispatch-gate.ts`, which re-emits it from a real workflow step.
+ * The dispatcher runs inside the agent's Bash tool, where a `::warning` is only
+ * text: measured on webapp#41204 run 30654454047, a mis-staged run reported
+ * `threadSuppressionUnavailable` on dispatch-result.json and printed this line
+ * into the run log and the step summary, yet raised no annotation on any of the
+ * six jobs, while the pre-agent staging step's own `::warning` in the same run
+ * did annotate. The gate rebuilds the line from `unusableThreads` rather than
+ * forwarding the stored string, so a `dispatch-result.json` an agent could
+ * rewrite cannot inject workflow commands into a trusted step; that is also why
+ * this takes a number rather than free text.
+ */
+export const threadSuppressionUnavailableWarning = (
+    unusableThreads: number,
+): string =>
+    `::warning title=open-thread suppression::${unusableThreads} staged thread(s), none usable ` +
+    `(each needs thread_id, an explicit resolved: false, and a bot-authored opener); duplicates may re-post`;
 
 /**
  * Drop candidate claims that describe a defect an open bot thread already
@@ -657,7 +752,9 @@ export const stagedThreadShapeFailure = (
  * still-open, re-confirmed blocking objection (submission.ts floors only
  * when BOTH are blocking: the thread's severity is the validated one, and
  * the candidate's re-confirmation at blocking severity is what makes the
- * floor more than a stale thread).
+ * floor more than a stale thread). Which thread a candidate is attributed to
+ * is {@link bestOpenThreadMatch}'s call, not staging order's, because
+ * `threadBlocking` is read off it.
  */
 export const suppressOpenThreadDuplicates = (
     claims: Claim[],
@@ -672,11 +769,7 @@ export const suppressOpenThreadDuplicates = (
         const match =
             claim.path === undefined
                 ? undefined
-                : threads.find(
-                      (thread) =>
-                          thread.path === claim.path &&
-                          describesOpenThreadDefect(claim, thread),
-                  );
+                : bestOpenThreadMatch(claim, threads);
         if (match === undefined) {
             kept.push(claim);
             continue;

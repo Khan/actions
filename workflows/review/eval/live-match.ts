@@ -36,6 +36,33 @@ export type SpecMatch = {
     /** The posted candidate that satisfied the spec. */
     findingId: string;
     via: MatchVia;
+    /**
+     * Whether the candidate that satisfied the spec carried a **blocking**
+     * label (copied from {@link RunCandidate.blocking}, which `render-comment`
+     * computes from the finding's `severity` — it is never model-authored
+     * text).
+     *
+     * Recorded because **matching scores detection, not severity**. A spec is
+     * satisfied by anchor agreement plus a mechanism-regex hit; the label plays
+     * no part unless the spec sets `blockingOnly`, and no `mustCatchSpecs`
+     * entry in the corpus does (the two that set it are `mustNotFlagSpecs`
+     * traps, where it means the opposite thing). So a run that finds every
+     * seeded defect and labels every one of them `nitpick (non-blocking)`
+     * scores 100% must-catch recall today.
+     *
+     * `verdictAgreement` cannot stand in for this. It is a whole-case check,
+     * so any *other* blocking finding compensates for a defect that shipped
+     * non-blocking. Khan/webapp#41194 is the worked example: `TopKey`'s
+     * zero-floor bug was labelled blocking and held the verdict at
+     * REQUEST_CHANGES while a claim-validator-**confirmed** nil-map panic
+     * posted as `suggestion (non-blocking)` — verdict agreement green, one
+     * confirmed panic out the door as a suggestion.
+     *
+     * Carrying the flag here makes per-defect severity observable downstream
+     * (`aggregate.ts` turns it into a per-spec blocking rate and a noise-floor
+     * band). It changes no matching decision: report-only, nothing gates on it.
+     */
+    blocking: boolean;
 };
 
 /** The deterministic gate a produced-but-not-posted candidate died at. */
@@ -200,6 +227,7 @@ export const matchCase = async (
                     specKey: spec.key,
                     findingId: candidate.id,
                     via: "deterministic",
+                    blocking: candidate.blocking,
                 };
             }
         }
@@ -221,6 +249,7 @@ export const matchCase = async (
                     specKey: spec.key,
                     findingId: candidate.id,
                     via: "fallback",
+                    blocking: candidate.blocking,
                 };
             }
         }
@@ -275,6 +304,7 @@ export const matchCase = async (
                     specKey: spec.key,
                     findingId: candidate.id,
                     via: "deterministic",
+                    blocking: candidate.blocking,
                 });
                 break;
             }

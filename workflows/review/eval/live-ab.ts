@@ -285,6 +285,12 @@ export const runArm = async (
             failedAgents: produced.perAgent
                 .filter((a) => a.failed !== undefined)
                 .map((a) => `${a.name}: ${a.failed}`),
+            failedAgentOutputs: produced.perAgent
+                .filter((a) => a.rawOutput !== undefined)
+                .map((a) => ({agent: a.name, output: a.rawOutput as string})),
+            toolCalls: produced.perAgent
+                .filter((a) => a.toolCalls !== undefined)
+                .map((a) => ({agent: a.name, count: a.toolCalls as number})),
             absentAgents: produced.perAgent
                 .filter((a) => a.absent === true)
                 .map((a) => a.name),

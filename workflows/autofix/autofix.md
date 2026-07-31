@@ -242,7 +242,7 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: autofix-v0.1.0
+      ref: autofix-v0.2.0
       path: gh-aw-autofix-lib
       persist-credentials: false
 
@@ -336,7 +336,7 @@ env:
   GIT_CONFIG_KEY_1: remote.origin.partialclonefilter
   GIT_CONFIG_VALUE_1: "blob:none"
 
-source: Khan/actions/workflows/autofix/autofix.md@autofix-v0.1.0
+source: Khan/actions/workflows/autofix/autofix.md@autofix-v0.2.0
 ---
 
 # PR Autofixer
@@ -476,13 +476,31 @@ Edit the files directly in the workspace. Rules, all hard:
 - **A documentation item changes text, never code.** An item labelled
   `suggestion (non-blocking, documentation)` is a finding about a comment or a
   prose doc, and the whole reason its scope exists is that its edits cannot
-  alter behaviour. Deleting a comment the finding calls redundant is the
-  expected fix, not an overreach, and such a finding often carries no
-  suggestion block precisely because a deletion cannot be expressed as one. But
-  if the honest fix would touch an executable line — renaming the symbol the
-  comment misdescribes, changing the constant the comment contradicts — that is
-  a code change wearing a documentation label: leave the item unfixed and say
-  why in Step 7. Fix the sentence, or fix nothing.
+  alter behaviour. Such a finding often carries no suggestion block precisely
+  because the fix is a deletion, which cannot be expressed as one. But if the
+  honest fix would touch an executable line — renaming the symbol the comment
+  misdescribes, changing the constant the comment contradicts — that is a code
+  change wearing a documentation label: leave the item unfixed and say why in
+  Step 7. Fix the sentence, or fix nothing.
+- **On a documentation item, rewrite before you delete.** Deleting a comment the
+  finding calls redundant is a legitimate fix and not an overreach, but it is
+  the *second* choice. If the code the comment sits on has a non-obvious reason
+  to be the way it is — a magic value, a timeout, a retry count, an ordering
+  requirement, a workaround — and that reason is recoverable from the diff, the
+  surrounding code, or the reviewer's own thread, replace the restatement with
+  the reason. Deleting is right when the comment is pure restatement of
+  something that needs no explanation. What makes the difference is whether the
+  reason is *recoverable*, not whether it would be nice to have: **never invent
+  a rationale.** A plausible-sounding reason you cannot source is worse than no
+  comment, because the next reader will trust it and the reviewer cannot tell
+  the difference.
+- **Say when a deletion left a hole.** If you delete a comment off a constant,
+  magic value, or workaround without being able to state why the value is what
+  it is, the thread is fixed and the code is still unexplained. Report both in
+  Step 7, naming the symbol, so the author knows there is a sentence only they
+  can write (`staleAfter`'s restating comment is gone; nothing records why the
+  window is that long). Reporting it as plainly fixed hides the one thing a
+  human still needs to do.
 - **Do not touch files no item points at.** The one exception is a change that
   is mechanically forced by a fix (a caller that must be updated for a changed
   signature); note any such file in Step 7.
@@ -611,7 +629,11 @@ Write the body directly, in this order, including only the parts that apply:
    tense and the plural right; the work is already done by the time anyone
    reads this.
 2. If anything was fixed: a list, one line per finding, `path:line` plus what
-   changed. Link each to its thread `url` when the item has one.
+   changed. Link each to its thread `url` when the item has one. When a
+   documentation fix **deleted** a comment without being able to record why the
+   code is the way it is (Step 4), say so on that line and name the symbol: the
+   thread is fixed and the value is still unexplained, and this is the only
+   place a human learns there is a sentence only they can write.
 3. If anything was left unfixed: a list, one line each, with the reason. This
    is the most important section in the comment; never omit or soften it.
 4. If `plan.skipped` contains entries whose reason is **not** `out-of-scope`:

@@ -17,6 +17,7 @@ import {
     type GhGet,
     type StagePrFs,
 } from "./stage-pr";
+import type {GhGraphql} from "./threads";
 
 /**
  * Pre-agent staging tests (deterministic-orchestrator slice 1).
@@ -59,6 +60,24 @@ const ghGetFromMap =
         }
         return Promise.resolve(routes[path]);
     };
+
+/**
+ * A PR with no review threads: one well-formed, empty `reviewThreads` page.
+ * The thread staging itself is exercised in stage-threads.test.ts.
+ */
+const noThreads = (): GhGraphql => () =>
+    Promise.resolve({
+        data: {
+            repository: {
+                pullRequest: {
+                    reviewThreads: {
+                        pageInfo: {hasNextPage: false},
+                        nodes: [],
+                    },
+                },
+            },
+        },
+    });
 
 const PR_META = {
     number: 7,
@@ -212,6 +231,7 @@ describe("runStagePrCli", () => {
                     {filename: "bin.png", status: "modified", additions: 1},
                 ]),
             ),
+            noThreads(),
             options,
         );
 
@@ -273,6 +293,7 @@ describe("runStagePrCli", () => {
                     {filename: "a.ts", status: "modified", patch: PATCH_ONE},
                 ]),
             ),
+            noThreads(),
             options,
         );
         expect(JSON.parse(fs.files[`${REVIEW}/new-scope.json`])).toEqual({
@@ -294,7 +315,12 @@ describe("runStagePrCli", () => {
             ],
         };
         const fs = makeFakeFs();
-        const result = await runStagePrCli(fs, ghGetFromMap(routes), options);
+        const result = await runStagePrCli(
+            fs,
+            ghGetFromMap(routes),
+            noThreads(),
+            options,
+        );
         expect(result.changedFileCount).toBe(101);
         expect(
             JSON.parse(fs.files[`${REVIEW}/files.json`]).map(
@@ -309,7 +335,12 @@ describe("runStagePrCli", () => {
         ]);
         delete routes["/repos/o/r/pulls/7/reviews?per_page=100&page=1"];
         const fs = makeFakeFs();
-        const result = await runStagePrCli(fs, ghGetFromMap(routes), options);
+        const result = await runStagePrCli(
+            fs,
+            ghGetFromMap(routes),
+            noThreads(),
+            options,
+        );
         expect(JSON.parse(fs.files[`${REVIEW}/prior-reviews.json`])).toEqual(
             [],
         );
@@ -335,7 +366,7 @@ describe("runStagePrCli", () => {
             {user: {login: "human"}, body: "lgtm", state: "APPROVED"},
         ];
         const fs = makeFakeFs();
-        await runStagePrCli(fs, ghGetFromMap(routes), options);
+        await runStagePrCli(fs, ghGetFromMap(routes), noThreads(), options);
         expect(JSON.parse(fs.files[`${REVIEW}/prior-reviews.json`])).toEqual([
             {body: "dismissed body", submittedAt: "2026-07-01T00:00:00Z"},
         ]);
@@ -378,7 +409,12 @@ describe("runStagePrCli", () => {
         const fs = makeFakeFs({
             "/work/.github/aw/review/ROUTING": "re-review flip-gated\n",
         });
-        const result = await runStagePrCli(fs, ghGetFromMap(routes), options);
+        const result = await runStagePrCli(
+            fs,
+            ghGetFromMap(routes),
+            noThreads(),
+            options,
+        );
 
         expect(result.depth).toBe("flip-gated");
         const scoped = fs.files[`${REVIEW}/scoped.diff`];
@@ -395,7 +431,7 @@ describe("runStagePrCli", () => {
     it("fails hard when the PR metadata fetch fails (staging is a prerequisite)", async () => {
         const fs = makeFakeFs();
         await expect(
-            runStagePrCli(fs, ghGetFromMap({}), options),
+            runStagePrCli(fs, ghGetFromMap({}), noThreads(), options),
         ).rejects.toThrow("unexpected GET /repos/o/r/pulls/7");
         expect(fs.files[`${REVIEW}/pr-context.json`]).toBe(undefined);
     });
@@ -413,6 +449,7 @@ describe("review-feedback coverage (slice 1 hardening)", () => {
         const result = await runStagePrCli(
             fs,
             ghGetFromMap(oneFile()),
+            noThreads(),
             options,
         );
         expect(JSON.parse(fs.files[`${REVIEW}/new-scope.json`])).toEqual({
@@ -440,7 +477,7 @@ describe("review-feedback coverage (slice 1 hardening)", () => {
             },
         ];
         const fs = makeFakeFs();
-        await runStagePrCli(fs, ghGetFromMap(routes), options);
+        await runStagePrCli(fs, ghGetFromMap(routes), noThreads(), options);
         const staged = JSON.parse(fs.files[`${REVIEW}/prior-reviews.json`]);
         expect(staged).toHaveLength(101);
         expect(staged.at(-1).body).toBe("newest");
@@ -451,7 +488,7 @@ describe("review-feedback coverage (slice 1 hardening)", () => {
         routes["/repos/o/r/pulls/7"] = {number: 7, title: "t"};
         const fs = makeFakeFs();
         await expect(
-            runStagePrCli(fs, ghGetFromMap(routes), options),
+            runStagePrCli(fs, ghGetFromMap(routes), noThreads(), options),
         ).rejects.toThrow(/load-bearing fields/);
         expect(fs.files[`${REVIEW}/pr-context.json`]).toBe(undefined);
     });
@@ -460,7 +497,12 @@ describe("review-feedback coverage (slice 1 hardening)", () => {
         const routes = oneFile();
         routes["/repos/o/r/pulls/7/files?per_page=100&page=1"] = {oops: true};
         await expect(
-            runStagePrCli(makeFakeFs(), ghGetFromMap(routes), options),
+            runStagePrCli(
+                makeFakeFs(),
+                ghGetFromMap(routes),
+                noThreads(),
+                options,
+            ),
         ).rejects.toThrow(/non-array/);
     });
 
@@ -496,7 +538,12 @@ describe("review-feedback coverage (slice 1 hardening)", () => {
         const fs = makeFakeFs({
             "/work/.github/aw/review/ROUTING": "re-review scoped\n",
         });
-        const result = await runStagePrCli(fs, ghGetFromMap(routes), options);
+        const result = await runStagePrCli(
+            fs,
+            ghGetFromMap(routes),
+            noThreads(),
+            options,
+        );
         expect(result.depth).toBe("scoped");
         const scoped = fs.files[`${REVIEW}/scoped.diff`];
         expect(scoped).toContain("beta");
@@ -529,7 +576,7 @@ describe("review-feedback coverage (slice 1 hardening)", () => {
             {filename: "pkg/auth/x.ts", status: "modified", patch: PATCH_ONE},
             {filename: "yarn.lock", status: "modified", patch: PATCH_ONE},
         ]);
-        await runStagePrCli(fs, ghGetFromMap(routes), options);
+        await runStagePrCli(fs, ghGetFromMap(routes), noThreads(), options);
         const first = JSON.parse(fs.files[`${REVIEW}/routing.json`]);
         // Second pass: answers staged, router re-run (as the orchestrator
         // does mid-run).
@@ -567,7 +614,12 @@ describe("disciplines extraction (slice 3, #247)", () => {
         const fs = makeFakeFs({
             [PROMPT]: `preamble\n${disciplines}\ntrailer\n`,
         });
-        const result = await runStagePrCli(fs, ghGetFromMap(routes()), options);
+        const result = await runStagePrCli(
+            fs,
+            ghGetFromMap(routes()),
+            noThreads(),
+            options,
+        );
         expect(fs.files[`${REVIEW}/disciplines.md`]).toBe(`${disciplines}\n`);
         expect(
             result.warnings.filter((w) => w.includes("disciplines")),
@@ -580,7 +632,12 @@ describe("disciplines extraction (slice 3, #247)", () => {
             "## Something else",
         );
         const fs = makeFakeFs({[PROMPT]: broken});
-        const result = await runStagePrCli(fs, ghGetFromMap(routes()), options);
+        const result = await runStagePrCli(
+            fs,
+            ghGetFromMap(routes()),
+            noThreads(),
+            options,
+        );
         expect(fs.files[`${REVIEW}/disciplines.md`]).toBe(undefined);
         expect(result.warnings.join(" ")).toContain("schema-heading verify");
     });
@@ -590,6 +647,7 @@ describe("disciplines extraction (slice 3, #247)", () => {
         const r1 = await runStagePrCli(
             noPrompt,
             ghGetFromMap(routes()),
+            noThreads(),
             options,
         );
         expect(r1.warnings.join(" ")).toContain("rendered prompt not found");
@@ -597,6 +655,7 @@ describe("disciplines extraction (slice 3, #247)", () => {
         const r2 = await runStagePrCli(
             noMarkers,
             ghGetFromMap(routes()),
+            noThreads(),
             options,
         );
         expect(r2.warnings.join(" ")).toContain("markers not found");

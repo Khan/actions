@@ -10,6 +10,7 @@ import {
     type DispatchGateInput,
     type SafeOutputItem,
 } from "./dispatch-gate";
+import {forwardedRunWarnings} from "./forwarded-warnings";
 
 /**
  * Dispatch-conformance gate tests.
@@ -617,6 +618,81 @@ describe("runDispatchGateCli", () => {
 /* -------------------------------------------------------------------------- */
 /* Lenient out-file parsing (run 29893634730)                                 */
 /* -------------------------------------------------------------------------- */
+
+describe("forwardedRunWarnings", () => {
+    // webapp#41204 run 30654454047: a deliberately mis-staged threads.json set
+    // this field, the dispatcher's own `::warning` reached the run log and the
+    // step summary, and no annotation on any of the run's six jobs mentioned
+    // suppression, because the dispatcher prints from inside the agent's Bash
+    // tool. The gate step is where the same line does annotate.
+    const resultWith = (unavailable: unknown): Record<string, string> => ({
+        "dispatch-result.json": JSON.stringify({
+            threadSuppressions: [],
+            ...(unavailable === undefined
+                ? {}
+                : {threadSuppressionUnavailable: unavailable}),
+        }),
+    });
+
+    it("re-emits the suppression tripwire, rebuilt from the count", () => {
+        expect(
+            forwardedRunWarnings(
+                resultWith({
+                    unusableThreads: 9,
+                    warning: "::warning title=x::stored text is not forwarded",
+                }),
+            ),
+        ).toEqual([
+            "::warning title=open-thread suppression::9 staged thread(s), none usable " +
+                "(each needs thread_id, an explicit resolved: false, and a bot-authored opener); duplicates may re-post",
+        ]);
+    });
+
+    it("never forwards the stored string, so a rewritten result cannot inject workflow commands", () => {
+        const [line] = forwardedRunWarnings(
+            resultWith({
+                unusableThreads: 2,
+                warning:
+                    "::warning title=x::y\n::error title=injected::fail the job\n::add-mask::secret",
+            }),
+        );
+        expect(line).not.toContain("injected");
+        expect(line).not.toContain("add-mask");
+        expect(line.split("\n")).toHaveLength(1);
+    });
+
+    it("is silent when the field is absent, zero, or the wrong shape", () => {
+        expect(forwardedRunWarnings({})).toEqual([]);
+        expect(forwardedRunWarnings(resultWith(undefined))).toEqual([]);
+        expect(forwardedRunWarnings(resultWith({unusableThreads: 0}))).toEqual(
+            [],
+        );
+        expect(
+            forwardedRunWarnings(resultWith({unusableThreads: "9"})),
+        ).toEqual([]);
+        expect(
+            forwardedRunWarnings({"dispatch-result.json": "not json"}),
+        ).toEqual([]);
+    });
+
+    it("reaches the report and the step summary through the CLI", () => {
+        const fs = makeFakeFs({
+            [AGENT_OUTPUT]: JSON.stringify({items: []}),
+            "/tmp/gh-aw/review/out/dispatch-result.json": JSON.stringify({
+                threadSuppressionUnavailable: {unusableThreads: 6},
+            }),
+        });
+        const report = runDispatchGateCli(fs);
+        expect(report.forwardedWarnings).toEqual([
+            expect.stringContaining("6 staged thread(s), none usable"),
+        ]);
+        // Rendered without the workflow-command envelope; the annotation is
+        // raised on stdout by the CLI entry, not by the markdown summary.
+        const summary = renderGateSummary(report);
+        expect(summary).toContain("- warning: 6 staged thread(s), none usable");
+        expect(summary).not.toContain("::warning");
+    });
+});
 
 describe("prose-tolerant out-file parsing", () => {
     // The production shape that falsely blocked a conforming scripted run:

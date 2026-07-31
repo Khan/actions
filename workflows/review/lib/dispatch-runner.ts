@@ -131,7 +131,32 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
             let output = "";
             let usd = 0;
             let turns = 0;
+            let stopReason: string | undefined;
+            let toolCalls = 0;
             for await (const message of run) {
+                // The refusal detector. Anthropic reports a usage-policy block
+                // as stop_reason "refusal" on the assistant message, and the
+                // agent returns no final text; the result record carries
+                // neither. Without this the production refusal fallback in
+                // dispatch.ts can never fire, because nothing sets `refused`.
+                if (message["type"] === "assistant") {
+                    const inner = (
+                        message as unknown as {
+                            message?: {
+                                content?: {type?: string}[];
+                                stop_reason?: string | null;
+                            };
+                        }
+                    ).message;
+                    if (typeof inner?.stop_reason === "string") {
+                        stopReason = inner.stop_reason;
+                    }
+                    for (const block of inner?.content ?? []) {
+                        if (block.type === "tool_use") {
+                            toolCalls += 1;
+                        }
+                    }
+                }
                 if (message["type"] !== "result") {
                     continue;
                 }
@@ -151,11 +176,22 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                     output: JSON.stringify(captured),
                     usd,
                     turns,
+                    toolCalls,
+                    stopReason,
+                    refused: stopReason === "refusal",
                     wallMs: Date.now() - started,
                     structured: true,
                 };
             }
-            return {output, usd, turns, wallMs: Date.now() - started};
+            return {
+                output,
+                usd,
+                turns,
+                toolCalls,
+                stopReason,
+                refused: stopReason === "refusal",
+                wallMs: Date.now() - started,
+            };
         } catch (error) {
             // A payload the tool already accepted is complete and validated:
             // salvage it even when the session then dies (a hang after

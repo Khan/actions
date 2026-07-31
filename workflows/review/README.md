@@ -24,7 +24,9 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
    stages the whole review context on disk: the PR metadata and changed files
    (fetched from the GitHub API), the rebuilt unified diff, the diff facts
    (fingerprint and hunk signature) and newly-changed-code scope, the prior bot
-   reviews, the router's first pass, the changed-line provenance map, a
+   reviews, the PR's unresolved review threads (split into this bot's own, with
+   their full reply chains, and the `{path, line}` of everyone else's, which the
+   review defers to), the router's first pass, the changed-line provenance map, a
    whole-change diff with `linguist-generated` files stripped (what every
    whole-change reviewer and specialist lens reads, so a lock-file-heavy PR
    cannot balloon their context), and the re-review depth plan. The
@@ -330,6 +332,31 @@ label". A consequence for consumers: autofix reads labels minted by whichever
 reviewer version the repo has **installed**, so a repo must be on a review release
 carrying this label before a documentation-scoped autofix finds anything.
 
+**Volume is part of its policy.** The definition caps this reviewer at one finding per
+comment, two per file, and five per review, and ranks the policy's clauses so the tail
+is dropped from the bottom (restatement cleanups go first; a comment the diff falsified
+never does). The cap is there because the failure mode is not precision, it is
+attention: on a 70-line fixture the reviewer returned seven findings, several of them the
+docstring half of a blocking finding whose code fix resolved the observation anyway, and
+one the *fourth* thread on a single comment. Two other rules do the same work from
+different directions — the definition refuses the docstring half of a code defect
+outright, and `dedup.ts` merges cross-source duplicates before validation. Note which
+way that merge resolves: the survivor is the highest-severity copy, so a documentation
+finding merged into a blocking one loses the `documentation` label and with it its
+eligibility for `autofix: docs`. That is the right outcome (the code fix settles both)
+and it means tightening dedup narrows the docs autofix worklist toward standalone
+comment defects rather than shrinking review coverage.
+
+**It does not converge with the docs autofix scope, by construction.** A docs-scoped
+autofix commit's added lines are comment text, which is this reviewer's subject matter,
+so they land in the next re-review's newly-changed-code scope by construction: in
+Khan/webapp#41207 a clean 5-of-5 docs fix drew three fresh documentation findings on the
+prose the fixer had just written. That is why `autofix: docs` is loop-ineligible
+permanently under the current scope model; the volume caps above bound how many
+findings such a cycle emits, not whether the fixer's prose lands in the next
+cycle's in-scope set. `workflows/autofix/lib/scope.ts` carries the full argument, and any
+future cadence axis needs an authorship-aware scope bound before it can include `docs`.
+
 The eval corpus carries a matched pair
 (`golden-documentation-stale-and-narrated`, `clean-documentation-earned-comments`):
 one change that leaves two real documentation defects, one whose comments all earn
@@ -477,6 +504,45 @@ case (`golden-retention-fix-push`, a one-hunk fix push whose fix plants a
 fresh defect inside the new hunk), and `fast` has definitionally zero
 fresh-defect recall (its cost, shown as recall against dollars).
 
+### Refusal fallbacks
+
+A provider can block a request outright under its usage policy. Anthropic
+reports that as `stop_reason: "refusal"`, and the agent returns **no final
+text** — which is why it reads as a missing result rather than an error, the
+silent coverage hole this README already warns about for the specialist lenses.
+
+The warning was aimed at the wrong roles. The lenses were kept on Opus because
+Fable's cyber classifiers can refuse benign security analysis, while
+`correctness-reviewer` — the default roster's load-bearing recall agent — was
+moved *onto* Fable 5 for its recall gain. Eval run 30656579898 caught it
+refusing `incident-auth-bypass` and `adversarial-injection-approve` outright,
+at 5,207 tokens (so not a context limit).
+
+Refusals are **intermittent**: probe run 30658862532 saw the same Fable pin
+clear both cases that run 30656579898 blocked. The ordinary retry still cannot
+recover one, because it appends a corrective note about output shape and a
+blocked request never produced an output. `lib/refusal-fallback.ts` maps a
+refusing pin to a model with a different refusal profile:
+
+| Pinned model | Falls back to | Basis |
+| --- | --- | --- |
+| `claude-fable-5` | `claude-opus-4-8` | measured (run 30656579898) |
+| `claude-opus-5` | `claude-opus-4-8` | pre-emptive; #294 notes Opus 5 also ships elevated cyber safeguards |
+
+Rules: **one hop**, never back to a model that already refused, and **no
+fallback for an unlisted pin** — an unmapped model's refusal stands and is
+reported, so a new model family's refusal profile stays visible instead of
+being papered over. The swap is recorded per agent (`fellBackTo`) and lands in
+the report and the run artifact: converting a silent skip into a silent model
+swap would trade one invisible failure for another.
+
+Because refusals are intermittent, the **rate** is what matters, and the weekly
+live counters report it: `lib/counters.ts` reads `fellBackTo` from each run's
+`out/dispatch-result.json`, and the job summary gains a "Refusal fallbacks"
+section per agent and model, including an explicit zero. A rate concentrated on
+one reviewer is a pin to change; a rate spread across many is a corpus or
+provider-policy shift.
+
 ### Models and effort per role
 
 Each sub-agent pins its model in its own definition inside `review.md` (with a
@@ -599,6 +665,20 @@ Two known interactions:
   export (observed on Khan/actions#241). A repo without these secrets must
   comment out the `observability:` block in its installed `review.md` as a
   local edit (which `gh aw update` preserves) and recompile.
+
+Optional:
+
+- `REVIEW_BOT_LOGIN` — the account this workflow posts reviews as, default
+  `github-actions[bot]`. Set it only in a repo that posts under its own GitHub
+  App, in the installed `review.md`'s workflow-level `env:` block (the one
+  carrying `REVIEW_MAX_AI_CREDITS`), which reaches both the staging step and
+  the dispatcher. It is read by one predicate (`lib/threads.ts`'s
+  `isReviewBotAuthor`), which both the thread staging and open-thread
+  suppression go through, so the two layers cannot disagree about the identity.
+  Getting it wrong is not cosmetic: threads the bot opened would be filed as
+  human ones, which puts their lines in `skipLines` and DROPS fresh findings
+  there. Either spelling works (`name` or `name[bot]`); the comparison strips
+  the suffix.
 
 ## Versioning
 

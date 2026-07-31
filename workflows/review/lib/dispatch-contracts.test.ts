@@ -7,6 +7,7 @@ import {
     joinProse,
     parseClustererOutput,
     parseFinderOutput,
+    parseJsonObject,
     parseValidatorOutput,
     type Claim,
 } from "./dispatch-contracts";
@@ -530,5 +531,22 @@ describe("parseClustererOutput", () => {
         const check = contractValidator("claim-clusterer", "clusterer");
         expect(check({clusters: []})).toBeNull();
         expect(check({groups: []})).toMatch(/no clusters array/);
+    });
+});
+
+describe("parseJsonObject empty-vs-malformed", () => {
+    it("names an empty final as empty, not malformed", () => {
+        // An empty final is how a refusal presents (#294). Calling it
+        // malformed sent three eval runs after the wrong cause.
+        expect(() => parseJsonObject("")).toThrow(
+            /no final text \(empty output\)/,
+        );
+        expect(() => parseJsonObject("   \n ")).toThrow(/empty output/);
+    });
+
+    it("still names unparseable prose as malformed", () => {
+        expect(() =>
+            parseJsonObject("I reviewed it and found nothing."),
+        ).toThrow(/no parseable JSON object/);
     });
 });

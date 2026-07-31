@@ -69,3 +69,45 @@ describe("normalizeRunArtifacts: re-review depth", () => {
         expect(run.rereviewDepth).toBeUndefined();
     });
 });
+
+describe("refusal fallbacks", () => {
+    const runWith = (
+        runId: string,
+        fallbacks: {agent: string; model: string}[],
+    ): RunArtifacts => ({
+        runId,
+        verdict: "APPROVE",
+        postedCommentCount: 0,
+        validatorDecisions: [],
+        ...(fallbacks.length > 0 ? {refusalFallbacks: fallbacks} : {}),
+    });
+
+    it("reports zero when nothing refused", () => {
+        const counters = computeRunCounters([runWith("1", [])]);
+        expect(counters.refusalFallbacks).toEqual({
+            total: 0,
+            runsAffected: 0,
+            byAgent: [],
+        });
+    });
+
+    it("counts per agent and model, and counts affected runs once", () => {
+        const counters = computeRunCounters([
+            runWith("1", [
+                {agent: "correctness-reviewer", model: "claude-opus-4-8"},
+                {agent: "security-auth", model: "claude-opus-4-8"},
+            ]),
+            runWith("2", [
+                {agent: "correctness-reviewer", model: "claude-opus-4-8"},
+            ]),
+            runWith("3", []),
+        ]);
+        expect(counters.refusalFallbacks.total).toBe(3);
+        expect(counters.refusalFallbacks.runsAffected).toBe(2);
+        // Sorted by agent for a stable weekly report.
+        expect(counters.refusalFallbacks.byAgent).toEqual([
+            {agent: "correctness-reviewer", model: "claude-opus-4-8", count: 2},
+            {agent: "security-auth", model: "claude-opus-4-8", count: 1},
+        ]);
+    });
+});

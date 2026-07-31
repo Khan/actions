@@ -323,11 +323,45 @@ describe("matchCase", () => {
         });
         const match = await matchCase(corpusCase, result);
         expect(match.caught).toEqual([
-            {specKey: "float-bug", findingId: "f-float", via: "deterministic"},
+            {
+                specKey: "float-bug",
+                findingId: "f-float",
+                via: "deterministic",
+                blocking: true,
+            },
         ]);
         expect(match.missed).toEqual(["never-found"]);
         expect(match.unmatchedFindingIds).toEqual(["f-noise"]);
         expect(match.postedCount).toBe(2);
+    });
+
+    it("records the matching candidate's label without letting it decide the match", async () => {
+        // The point of the field: an advisory-labelled candidate still
+        // SATISFIES the spec (matching scores detection — anchor plus
+        // mechanism — and no mustCatchSpec constrains severity), so recall
+        // reads 1/1 while the recorded label says the reviewer did not block
+        // on it. This is the Khan/webapp#41194 shape: correctly diagnosed,
+        // shipped as a suggestion.
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [spec({key: "float-bug"})],
+            findings: [
+                finding(
+                    "f-float",
+                    "floating point totals round late.",
+                    "advisory",
+                ),
+            ],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.missed).toEqual([]);
+        expect(match.caught).toEqual([
+            {
+                specKey: "float-bug",
+                findingId: "f-float",
+                via: "deterministic",
+                blocking: false,
+            },
+        ]);
     });
 
     it("never lets one candidate satisfy two specs", async () => {
@@ -371,7 +405,12 @@ describe("matchCase", () => {
         });
         expect(calls).toEqual(["f-vague->subtle"]);
         expect(match.caught).toEqual([
-            {specKey: "subtle", findingId: "f-vague", via: "fallback"},
+            {
+                specKey: "subtle",
+                findingId: "f-vague",
+                via: "fallback",
+                blocking: true,
+            },
         ]);
 
         const capped = await matchCase(corpusCase, result, {

@@ -29,12 +29,14 @@
  * working loop that stopped after one cycle, which is the worst of both
  * behaviours.
  *
- * One constraint outlives this version: **`nits` is never loop-eligible**.
- * Non-blocking findings have no fixed point, so a nits-scoped loop cannot
- * converge and must not be offered. What enforces that *here* is the token
- * table: `loop` is in {@link UNIMPLEMENTED_TOKENS}, so no cadence can be armed
- * at all. {@link isLoopEligible} states the rule for whoever adds the cadence
- * axis and has no caller until they write one; calling it is their job.
+ * Two constraints outlive this version: **`nits` is never loop-eligible**, and
+ * neither is `docs`. Non-blocking findings have no fixed point, so a
+ * nits-scoped loop cannot converge and must not be offered; `docs` looks like
+ * the exception and is ruled out for its own, now-settled reason, argued at
+ * {@link isLoopEligible}. What enforces both *here* is the token table: `loop`
+ * is in {@link UNIMPLEMENTED_TOKENS}, so no cadence can be armed at all.
+ * {@link isLoopEligible} states the rules for whoever adds the cadence axis and
+ * has no caller until they write one; calling it is their job.
  *
  * The generator observed was a **memoryless re-derivation over the whole
  * diff**, not the fixer's own prose, which is what this comment used to guess.
@@ -158,19 +160,61 @@ export const DEFAULT_COMMAND_SCOPE: AutofixScope = "blocking";
  * blocking. A cadence axis needs its own stop condition and cannot inherit one
  * from this predicate.
  *
- * `docs` is the case worth pausing on, because it looks convergent and is only
- * half so. Its deletion half has a fixed point (a comment that restates the
- * code is either gone or not), which is exactly the argument someone will make
- * for looping it. Its other half does not: the documentation reviewer also
- * flags a *missing* explanation, the fixer answers with prose, and prose is
- * the thing a reviewer can always want written better. So `docs` stays
- * ineligible until something measures which half dominates in practice.
- * Khan/webapp#41194 is the first data point and it lands on the non-convergent
- * half: `counts.go:16` flags a doc comment that covers tie resolution but not
- * the empty/nil-map case, raised unprompted against the fixer's own PR. That is
- * one observation of the shape, from a reviewer too old to mint the
- * `documentation` label (so `autofix: docs` would not have selected it), and it
- * says nothing yet about which half dominates.
+ * `docs` is the case worth pausing on, because it looks convergent. It is not,
+ * and the reason is **mechanical** rather than a matter of which half of the
+ * documentation policy dominates in practice — which is what this comment used
+ * to defer the decision to.
+ *
+ * What bounds re-flagging is `computeNewScope` in `review/lib/stage-pr.ts`,
+ * which builds the in-scope line set from each unseen hunk's **added** lines.
+ * A docs-scoped fix writes comment text and nothing else (`autofix.md` Step 4:
+ * a documentation item changes text, never code), and comment text is exactly
+ * the documentation reviewer's subject matter. So the two halves are not two
+ * tendencies to be weighed; they are two mechanical outcomes:
+ *
+ *   - **Deletion converges, and only by erasure.** A deleted comment
+ *     contributes no `+` lines, so it puts nothing in the next cycle's scope
+ *     and cannot be re-flagged. Khan/webapp#41204 is what that costs: a
+ *     "restates the constant" finding on `staleAfter` was fixed by deleting
+ *     the comment rather than supplying the rationale — defensible for pure
+ *     restatement, and it still left the constant undocumented.
+ *   - **Rewriting re-arms.** Replacement prose *is* `+` lines, so the next
+ *     cycle's in-scope set is very nearly all prose the fixer just wrote,
+ *     handed back to the reviewer that asked for it. Khan/webapp#41207
+ *     measured one cycle: `autofix: docs` fixed 5 of 5 documentation threads
+ *     at perfect precision (7 non-documentation threads untouched, one file
+ *     modified, all four edits comments), and the re-review its own push
+ *     triggered minted THREE fresh documentation findings, on `isAlnum`'s and
+ *     `Slugify`'s docs, that did not exist when the run was armed.
+ *
+ * #41207 is the data point #41194 could not be: that consumer's reviewer mints
+ * the `documentation` label, so those were threads `autofix: docs` selects, and
+ * the re-mints landed on lines the autofix commit *itself* introduced rather
+ * than on a memoryless whole-diff re-derivation. No scope filter keyed on
+ * newly-changed lines can bound that, because the fixer is the author of the
+ * newly-changed lines.
+ *
+ * #41207 predates the per-lens volume caps `review.md` now puts on the
+ * documentation reviewer, so the re-mint COUNT it measured is an upper bound on
+ * what the capped reviewer would post. That does not soften the conclusion: the
+ * caps bound how many findings a cycle emits, not whether the fixer's own prose
+ * lands in the next cycle's in-scope set, and convergence needs the latter to be
+ * empty. A capped loop re-arms more slowly; it still re-arms.
+ *
+ * So `docs` is ineligible **permanently under the current scope model**, not
+ * pending measurement, and the two configurations fail in opposite directions:
+ * deletion-only converges while erasing rationale, rewrite-enabled preserves
+ * rationale and re-arms. One-shot
+ * mode has no cadence to protect, so the fixer is deliberately biased toward
+ * rewrite-with-why (Step 4) — quality per shot is the only metric it has. That
+ * bias is what a cadence axis would have to undo, and undoing it buys #41204's
+ * behaviour, not convergence. Whoever wants `docs` in a cadence axis needs an
+ * authorship-aware bound as a **precondition**, not a better prompt: exclude
+ * hunks whose commit carries `Autofix-Scope: docs` (see `trailer.ts`, whose
+ * store is the branch precisely so a later cycle can read it) from the
+ * documentation lens's in-scope set. It is not built now because in one-shot
+ * mode the re-mint costs three advisory threads on a PR its author is already
+ * reading, and every further cycle needs a fresh human arming.
  */
 export const isLoopEligible = (scope: AutofixScope): boolean =>
     scope === "blocking";

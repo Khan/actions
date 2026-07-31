@@ -240,6 +240,31 @@ The judge and the match arbiter are pinned to `claude-haiku-4-5-20251001`.
 Every model-spending path degrades to a partial report rather than dying
 at a cap, and judge/arbiter failures degrade to notes/non-matches.
 
+When an agent fails contract parsing, the report keeps the **raw final text**
+of its last attempt (truncated to 4000 chars) and renders it inline under
+"Raw output of each failed agent", alongside per-agent **tool-call counts**
+from both arms. Reach for those before forming a hypothesis: the failure
+reason on its own cannot distinguish a prose answer from a refusal from a
+contract cut off mid-emission, and two harness runs (30592964392,
+30596474354) cost ~$10 each to establish only that the same two cases fail.
+
+**Empty finals are reported as their own failure**, not as malformed output,
+and carry the provider stop reason when the runner can see one
+(`empty output: the agent returned no final text (stopReason=...)`). Run
+30650071285 showed both harnesses returning length-0 finals from
+`correctness-reviewer` on the security-adjacent cases; while that read as
+"malformed output" it looked like a contract bug, and three runs chased it as
+one. An empty final on cyber-adjacent input is the refusal signature #294
+describes as surfacing "as a missing agent result, not an error", so the stop
+reason is what separates a refusal from a dropped result.
+
+Standing rule, same class as the SDK-version rule: the budget cap is enforced
+from the runner's reported cost, so a runner that cannot price the model under
+test turns `--max-usd` into a no-op on precisely that arm. Pi reports a
+per-component `cost` breakdown from its own catalog; check that a newly pinned
+model is in that catalog before running an arm on it. `resolveModelId` throws
+on an unknown pin rather than silently substituting.
+
 ## Historical limits
 
 The live A/B executes agent prompts extracted from review.md and validates

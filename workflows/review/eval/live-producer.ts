@@ -35,6 +35,7 @@
  * {@link dedupeLiveFindings} closes that, arm-keyed on the clusterer agent.
  */
 
+import {refusalFallbackFor} from "../lib/refusal-fallback";
 import {
     existsSync,
     mkdirSync,
@@ -109,6 +110,23 @@ export type LiveAgentResult = {
     turns: number;
     /** Wall-clock milliseconds. */
     wallMs: number;
+    /**
+     * Tool calls the agent made. The harness-parity signal: a loop that
+     * investigates with half the tool calls and scores lower has a toolbox
+     * problem, not a model problem. Optional because a runner that cannot
+     * count them reports nothing rather than a misleading zero.
+     */
+    toolCalls?: number;
+    /** Provider stop reason for the last assistant message, when visible. */
+    stopReason?: string;
+    /** Why the call failed, when the runner can see it. */
+    errorMessage?: string;
+    /** The provider's own stop reason, before normalization. */
+    rawStopReason?: string;
+    /** Input and total tokens on the last assistant message. */
+    tokensAtFailure?: {input: number; total: number};
+    /** The provider blocked the request under its usage policy. */
+    refused?: boolean;
 };
 
 /** The injected model runner; the ONLY place a real model is invoked. */
@@ -129,8 +147,27 @@ export type PerAgentReport = {
     wallMs: number;
     /** Whether the malformed-output retry fired. */
     retried: boolean;
+    /** Tool calls across every attempt; see `LiveAgentResult.toolCalls`. */
+    toolCalls?: number;
+    /** Stop reason of the last attempt; set alongside `failed`. */
+    stopReason?: string;
+    /**
+     * The pinned model refused and the dispatch fell back to this one. Never
+     * silent: a fallback that nobody can see trades an invisible skip for an
+     * invisible model swap.
+     */
+    fellBackTo?: string;
     /** Fixed-format failure note; the agent contributed nothing when set. */
     failed?: string;
+    /**
+     * The raw final text of the LAST attempt, captured ONLY when the agent
+     * failed, and truncated. Exists because the failure note alone
+     * ("no parseable JSON object") cannot distinguish a prose answer from a
+     * refusal from a truncated contract, so diagnosing one cost a whole eval
+     * run per hypothesis. Runs 30592964392 and 30596474354 each burned ~$10
+     * establishing nothing more than that the same two cases fail.
+     */
+    rawOutput?: string;
     /**
      * This arm's `review.md` does not define the reviewer, so it was never
      * dispatched. Not a failure: it is the shape of a new-reviewer A/B, where
@@ -686,6 +723,20 @@ const mapWithConcurrency = async <T, R>(
  * back verbatim and the agent gets exactly one more attempt; a second failure
  * marks the agent failed and the run continues without it.
  */
+/**
+ * How much of a failing agent's raw final text the report keeps. Enough to
+ * see whether the model answered in prose, refused, or emitted a truncated
+ * contract; short enough that a nine-case report stays readable.
+ */
+const RAW_OUTPUT_CAP = 4000;
+
+export const capRawOutput = (text: string): string =>
+    text.length <= RAW_OUTPUT_CAP
+        ? text
+        : `${text.slice(0, RAW_OUTPUT_CAP)}\n[truncated: ${
+              text.length - RAW_OUTPUT_CAP
+          } more characters]`;
+
 const dispatchWithRetry = async <R>(
     agent: ExtractedAgent,
     prompt: string,
@@ -702,21 +753,85 @@ const dispatchWithRetry = async <R>(
         retried: false,
     };
     let attemptPrompt = prompt;
+    let lastOutput: string | undefined;
+    let failureDetail = "";
+    // The model this attempt runs on. A refusal is deterministic in the model,
+    // so the fallback swaps the pin rather than retrying it (see
+    // lib/refusal-fallback.ts); every other failure keeps the pin and retries.
+    let model = request.model;
+    const tried: string[] = [model];
     for (let attempt = 0; attempt < 2; attempt++) {
         let failure: string;
         try {
-            const result = await runner({...request, prompt: attemptPrompt});
+            const result = await runner({
+                ...request,
+                model,
+                prompt: attemptPrompt,
+            });
             report.usd += result.usd;
             report.turns += result.turns;
             report.wallMs += result.wallMs;
+            if (result.toolCalls !== undefined) {
+                report.toolCalls = (report.toolCalls ?? 0) + result.toolCalls;
+            }
+            lastOutput = result.output;
+            report.stopReason = result.stopReason;
+            failureDetail = [
+                result.rawStopReason === undefined
+                    ? undefined
+                    : `rawStopReason=${result.rawStopReason}`,
+                result.tokensAtFailure === undefined
+                    ? undefined
+                    : `tokens=${result.tokensAtFailure.input}in/${result.tokensAtFailure.total}total`,
+                result.errorMessage === undefined
+                    ? undefined
+                    : `error=${result.errorMessage}`,
+            ]
+                .filter((part) => part !== undefined)
+                .join(" ");
             try {
                 return {report, parsed: parse(result.output)};
             } catch (parseError) {
-                failure = `malformed output: ${String(
-                    parseError instanceof Error
-                        ? parseError.message
-                        : parseError,
-                )}`;
+                // An EMPTY final is not malformed output, and conflating the
+                // two hid the real signature for three eval runs: the agent
+                // returned nothing at all, which on cyber-adjacent input is
+                // how a refusal presents (#294: "a missing agent result, not
+                // an error"). Say which one happened, and carry the stop
+                // reason that distinguishes a refusal from a dropped result.
+                failure =
+                    result.output.trim() === ""
+                        ? `empty output: the agent returned no final text${
+                              result.stopReason === undefined
+                                  ? ""
+                                  : ` (stopReason=${result.stopReason})`
+                          }${failureDetail === "" ? "" : ` ${failureDetail}`}`
+                        : `malformed output: ${String(
+                              parseError instanceof Error
+                                  ? parseError.message
+                                  : parseError,
+                          )}`;
+            }
+            if (result.refused === true) {
+                // The contract-parse retry cannot recover a refusal: it
+                // corrects output shape, and a blocked request never produced
+                // one. Keep the ORIGINAL prompt: the
+                // rejection note is about output shape, and this failure was
+                // not the model's output.
+                // Only on a non-final attempt: `continue` from the last
+                // iteration exits the loop, so recording a fallback there
+                // would claim a dispatch that never happens.
+                const fallback =
+                    attempt === 0
+                        ? refusalFallbackFor(model, tried)
+                        : undefined;
+                if (fallback !== undefined) {
+                    model = fallback;
+                    tried.push(fallback);
+                    report.fellBackTo = fallback;
+                    attemptPrompt = prompt;
+                    report.retried = true;
+                    continue;
+                }
             }
             attemptPrompt =
                 `${prompt}\n\n` +
@@ -731,6 +846,9 @@ const dispatchWithRetry = async <R>(
             report.retried = true;
         } else {
             report.failed = failure;
+            if (lastOutput !== undefined) {
+                report.rawOutput = capRawOutput(lastOutput);
+            }
         }
     }
     return {report};

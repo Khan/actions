@@ -24,6 +24,30 @@ import type {Claim} from "./dispatch-contracts";
  * pass supplies no `failure_scenario` and so compared its own one-line
  * subject against itself; it merged the handoff into an unrelated
  * missing-test todo 24 lines away instead.
+ *
+ * KNOWN COVERAGE GAP, read this before touching `comparedText`. The
+ * false-merge guards below ("never merges the AddDate issue with the
+ * untested-behavior thought on the very same line", "keeps the run's
+ * test-adequacy todo and first-principles thought apart", "keeps run
+ * 30301235749's TTL handoff and missing-test todo apart") leave `discussion`
+ * at the `claim()` default `"d"`, a single character the tokenizer drops. So
+ * they cannot refute a change to which fields `comparedText` reads: widening
+ * it to always append `discussion` leaves every one of them green, while
+ * `dedup.ts`'s own comment records the opposite result on the REAL claims
+ * ("feeding it to every claim pulls run 29943085279's distinct same-line
+ * issue/thought pair up to ten shared bigrams, past every real duplicate").
+ * Measured on webapp#41204 run 30650642317, which is what raises the
+ * question: three claims from three sources described one defect (the
+ * zero-value doc/panic contradiction) and the run merged none of them, yet
+ * suppression matched all three to the same open thread on a STRICTER floor.
+ * Two of those pairs clear the merge floor once `discussion` is read
+ * (correctness/documentation 2 -> 12 shared bigrams; first-principles /
+ * documentation 2 -> 4 at the same line), so the narrower text basis, not the
+ * thresholds, is what keeps them apart. Suppression masked the cost there; on
+ * a resolved thread the same three post three comments for one defect, which
+ * is the #245 problem. Re-deriving that tradeoff needs the real claim sets
+ * for runs 29943085279 and 30301235749 WITH their discussions, which these
+ * fixtures do not carry; until then a green suite here is not evidence.
  */
 
 const claim = (over: Partial<Claim> & {id: string; source: string}): Claim => ({
@@ -611,6 +635,67 @@ describe("suppressOpenThreadDuplicates (trial suggestion g)", () => {
         // floors the verdict on an unvalidated blocking candidate alone.
         expect(suppressed).toHaveLength(1);
         expect(suppressed[0].threadBlocking).toBe(false);
+    });
+
+    it("attributes a candidate to its best match, not the first staged thread", () => {
+        // webapp#41204 run 30650642317, the first live run where suppression
+        // fired: this todo cleared the floor against BOTH the older blocking
+        // thread and its own non-blocking counterpart, and staging order
+        // handed it the blocking one, inflating submission.ts's verdict floor.
+        const reflag = claim({
+            id: "test-adequacy-1",
+            source: "test-adequacy",
+            line: 42,
+            label: "todo (blocking)",
+            subject:
+                "No test covers the documented deletion path for expired memories.",
+            discussion:
+                "No test exercises the deletion path; TestExpiration asserts expired keys are identified but a regression that never deletes expired memories stays green.",
+            failure_scenario:
+                "A regression that identifies expired memories but skips the deletion is not caught by TestExpiration and ships green.",
+        });
+        const counterpart = openThread({
+            thread_id: "T2",
+            body: "**nitpick (non-blocking):** No test exercises the deletion path for expired memories. TestExpiration asserts expired keys are identified, so a regression that identifies but never deletes expired memories stays green and the documented deletion behavior is untested.",
+        });
+        // Staged blocking-thread-first, the order that produced the live
+        // mis-attribution.
+        const {suppressed} = suppressOpenThreadDuplicates(
+            [reflag],
+            [openThread(), counterpart],
+        );
+        expect(suppressed).toHaveLength(1);
+        expect(suppressed[0].thread_id).toBe("T2");
+        expect(suppressed[0].threadBlocking).toBe(false);
+        // Order must not decide it: the same pair staged the other way round
+        // reaches the same thread.
+        expect(
+            suppressOpenThreadDuplicates([reflag], [counterpart, openThread()])
+                .suppressed[0],
+        ).toEqual(suppressed[0]);
+    });
+
+    it("keeps the first staged thread when two match equally well", () => {
+        const reflag = claim({
+            id: "correctness-reviewer-2",
+            source: "correctness-reviewer",
+            line: 42,
+            label: "todo (blocking)",
+            subject:
+                "Missing deletion test: the expiration path has no test covering the delete.",
+            discussion:
+                "No test exercises the deletion path; TestExpiration asserts expired keys are identified but a regression that never deletes expired memories stays green.",
+            failure_scenario:
+                "A regression that identifies expired memories but skips the deletion is not caught by TestExpiration and ships green.",
+        });
+        // Identical openers, so every metric ties and staging order decides;
+        // determinism here is what keeps dispatch-result.json reproducible.
+        const {suppressed} = suppressOpenThreadDuplicates(
+            [reflag],
+            [openThread({thread_id: "T1"}), openThread({thread_id: "T2"})],
+        );
+        expect(suppressed).toHaveLength(1);
+        expect(suppressed[0].thread_id).toBe("T1");
     });
 
     it("keeps a distinct defect on the same path", () => {

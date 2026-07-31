@@ -155,6 +155,19 @@ describe("the shared disciplines section", () => {
                               base: {ref: "main"},
                           },
                 ),
+            () =>
+                Promise.resolve({
+                    data: {
+                        repository: {
+                            pullRequest: {
+                                reviewThreads: {
+                                    pageInfo: {hasNextPage: false},
+                                    nodes: [],
+                                },
+                            },
+                        },
+                    },
+                }),
             {repo: "o/r", prNumber: 1, repoRoot: "/work"},
         );
         const staged = files["/tmp/gh-aw/review/disciplines.md"];
