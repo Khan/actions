@@ -236,6 +236,25 @@ export const runArm = async (
             caught: match.caught.length,
             missed: match.missed,
             snapped: result.snappedByProvenance.length,
+            ...(produced.dedup === undefined
+                ? {}
+                : {
+                      dedup: {
+                          candidates: produced.dedup.candidates,
+                          merged: produced.dedup.merges.reduce(
+                              (sum, merge) => sum + merge.merged.length,
+                              0,
+                          ),
+                          clusterMerged: produced.dedup.merges
+                              .filter((merge) => merge.via !== "similarity")
+                              .reduce(
+                                  (sum, merge) => sum + merge.merged.length,
+                                  0,
+                              ),
+                          rejected: produced.dedup.rejected.length,
+                          clustererAbsent: produced.dedup.clustererAbsent,
+                      },
+                  }),
             failedAgents: produced.perAgent
                 .filter((a) => a.failed !== undefined)
                 .map((a) => `${a.name}: ${a.failed}`),

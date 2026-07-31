@@ -13,7 +13,11 @@ import type {
     RecordedFinding,
 } from "./corpus/loader";
 import type {LiveCaseRun, LiveMetricsReport} from "./live-match";
-import type {LiveReconciliation, PerAgentReport} from "./live-producer";
+import type {
+    LiveDedupReport,
+    LiveReconciliation,
+    PerAgentReport,
+} from "./live-producer";
 import type {RereviewCaseScore, RereviewMetricsReport} from "./rereview-match";
 
 export type ArmId = "baseline" | "candidate";
@@ -25,6 +29,8 @@ export type ArmProduceResult = {
     perAgent: PerAgentReport[];
     /** The reconciler's decision, for open-PR (rereview) cases. */
     reconciliation?: LiveReconciliation;
+    /** What the cross-source merge did (absent only for a stub producer). */
+    dedup?: LiveDedupReport;
 };
 
 export type ArmProduce = (corpusCase: CorpusCase) => Promise<ArmProduceResult>;
@@ -51,6 +57,22 @@ export type ArmRunReport = {
          * here as candidate-arm snaps falling to zero.
          */
         snapped: number;
+        /**
+         * The cross-source merge, per case: `candidates` is the pre-merge claim
+         * count, `merged` the claims it absorbed, and `clusterMerged` the subset
+         * tier 2 (the `claim-clusterer`) contributed to. Read the duplicate rate
+         * from these, never from the posted set — merges happen upstream of
+         * every drop the pipeline applies afterwards, and in production autofix
+         * later satisfies surviving duplicates with one edit and hides them.
+         * `clustererAbsent` marks the arm that never had tier 2 at all.
+         */
+        dedup?: {
+            candidates: number;
+            merged: number;
+            clusterMerged: number;
+            rejected: number;
+            clustererAbsent: boolean;
+        };
         /** `<agent>: <reason>` per failed agent (diagnosable from the report). */
         failedAgents: string[];
         /**
@@ -247,6 +269,32 @@ const ASYMMETRY_HEADING =
 const snappedTotal = (arm: ArmRunReport): number =>
     arm.perCase.reduce((sum, c) => sum + c.snapped, 0);
 
+/**
+ * The arm's cross-source merge rate: claims absorbed over claims produced,
+ * with tier 2's share and any rejected proposal in parentheses. `tier 1 only`
+ * marks an arm whose review.md defines no `claim-clusterer` — the expected
+ * shape of the baseline in the A/B that graduates it, and the reason a zero in
+ * the clusterer column there is asymmetry, not a negative result.
+ */
+const mergedTotal = (arm: ArmRunReport): string => {
+    const dedup = arm.perCase.flatMap((c) => (c.dedup ? [c.dedup] : []));
+    if (dedup.length === 0) {
+        return "n/a";
+    }
+    const sum = (pick: (d: typeof dedup[number]) => number): number =>
+        dedup.reduce((total, d) => total + pick(d), 0);
+    const absent = dedup.every((d) => d.clustererAbsent);
+    const notes = [
+        absent ? "tier 1 only" : `${sum((d) => d.clusterMerged)} by clusterer`,
+        ...(sum((d) => d.rejected) > 0
+            ? [`${sum((d) => d.rejected)} proposal(s) rejected`]
+            : []),
+    ];
+    return `${sum((d) => d.merged)} / ${sum((d) => d.candidates)} (${notes.join(
+        ", ",
+    )})`;
+};
+
 /** `caseId:specKey` -> drop bucket, for every found-but-dropped miss. */
 const dropClassByKey = (arm: ArmRunReport): Map<string, string> => {
     const map = new Map<string, string>();
@@ -440,6 +488,11 @@ export const renderMarkdownReport = (report: AbReport): string => {
             "Findings anchor-snapped",
             String(snappedTotal(baseline)),
             String(snappedTotal(candidate)),
+        ),
+        row(
+            "Cross-source claims merged (of candidates)",
+            mergedTotal(baseline),
+            mergedTotal(candidate),
         ),
         "",
     ];

@@ -604,3 +604,135 @@ describe("resolveRuntimeImports", () => {
         expect(skillPrompt).toContain("## the case skills index");
     });
 });
+
+/**
+ * The cross-source merge, in the arm shape the A/B prices: tier 1 is shared
+ * code and runs in both arms, while the `claim-clusterer` agent is carried by
+ * each arm's own review.md, so a baseline predating it measures tier 1 alone.
+ *
+ * The fixture is run 30587343777's real shape, trimmed: two reviewers on one
+ * wrong doc comment, worded with almost nothing in common, which is what tier 1
+ * cannot reach.
+ */
+describe("produceLive cross-source dedup", () => {
+    const CAP_NOTE = {
+        path: "src/a.ts",
+        line: 1,
+        label: "note (non-blocking)",
+        subject: "Comment says the per-key cap is 10 but maxSamples is 25.",
+        discussion:
+            'The comment on `maxSamples` reads "Keeps at most 10 samples per key" while the constant is 25.',
+        failure_scenario:
+            "Comment says the per-key cap is 10 but maxSamples is 25",
+    };
+    const CAP_NITPICK = {
+        path: "src/a.ts",
+        line: 1,
+        label: "nitpick (non-blocking)",
+        subject: "Declaration doc comment doesn't begin with the symbol name.",
+        discussion:
+            "Every declaration comment here starts with the declared name; `// Keeps at most 10 samples per key.` above `const maxSamples = 25` is the only one that omits the prefix.",
+        failure_scenario:
+            "A `go doc` reader won't associate the comment with `maxSamples`.",
+    };
+    const CLUSTER_OUT = JSON.stringify({
+        clusters: [
+            {
+                evidence:
+                    "the doc comment on `maxSamples` says 10 while the constant is 25",
+                ids: [
+                    "produce-case:live-correctness-reviewer-1",
+                    "produce-case:live-skill-auditor-1",
+                ],
+            },
+        ],
+    });
+
+    const scripts = () => ({
+        "correctness-reviewer": [JSON.stringify({findings: [CAP_NOTE]})],
+        "skill-auditor": [JSON.stringify({findings: [CAP_NITPICK]})],
+        "money-payments": [JSON.stringify({findings: []})],
+        "claim-clusterer": [CLUSTER_OUT],
+        "claim-validator": [validatorOutput([])],
+    });
+
+    const withClusterer = new Map([
+        ...AGENTS,
+        ["claim-clusterer", agent("claim-clusterer")],
+    ]);
+
+    it("merges on the clusterer's proposal, and validates only the survivor", async () => {
+        const {runner, requests} = scriptedRunner(scripts());
+        const vol = caseVol();
+        const result = await produceLive(CASE, withClusterer, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(vol),
+        });
+        expect(requests.map((r) => r.name)).toContain("claim-clusterer");
+        // The clusterer reads its own staged file: the PRE-merge candidates.
+        expect(
+            JSON.parse(
+                vol.readFileSync(
+                    "/stage/context/candidates.json",
+                    "utf8",
+                ) as string,
+            ),
+        ).toHaveLength(2);
+        // One finding survives, carrying the attribution note, and the
+        // validator is dispatched over the merged set only.
+        expect(result.findings).toHaveLength(1);
+        expect(result.findings[0].finding.model_authored_prose).toContain(
+            "Also flagged by skill.",
+        );
+        expect(
+            JSON.parse(
+                vol.readFileSync(
+                    "/stage/context/claims.json",
+                    "utf8",
+                ) as string,
+            ),
+        ).toHaveLength(1);
+        expect(result.dedup).toMatchObject({
+            candidates: 2,
+            proposed: 1,
+            rejected: [],
+            clustererAbsent: false,
+        });
+        expect(result.dedup.merges[0].via).toBe("clusterer");
+    });
+
+    it("runs tier 1 alone on an arm whose review.md has no clusterer", async () => {
+        const {runner, requests} = scriptedRunner(scripts());
+        const result = await produceLive(CASE, AGENTS, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        expect(requests.map((r) => r.name)).not.toContain("claim-clusterer");
+        // Both copies post: the asymmetric-arm baseline, recorded rather than
+        // silent, so a reader can tell it from a clusterer that found nothing.
+        expect(result.findings).toHaveLength(2);
+        expect(result.dedup).toEqual({
+            candidates: 2,
+            merges: [],
+            proposed: 0,
+            rejected: [],
+            clustererAbsent: true,
+        });
+    });
+
+    it("never dispatches the clusterer when one source produced everything", async () => {
+        const {runner, requests} = scriptedRunner({
+            ...scripts(),
+            "skill-auditor": [JSON.stringify({findings: []})],
+        });
+        const result = await produceLive(CASE, withClusterer, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        expect(requests.map((r) => r.name)).not.toContain("claim-clusterer");
+        expect(result.dedup.candidates).toBe(1);
+    });
+});

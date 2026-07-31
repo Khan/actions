@@ -145,6 +145,19 @@ claiming a band.
   a few lines off or past a short file's end) is what the gate's
   anchor-snap fallback repairs; a finding still landing in this bucket was
   outside both snap windows.
+- **Cross-source merges:** the report's "Cross-source claims merged (of
+  candidates)" row is the duplicate-comment observable, read from the merge
+  stage rather than from the posted set (merges happen upstream of every later
+  drop, and in production autofix satisfies surviving duplicates with one edit,
+  which hides the symptom on the PR). Tier 1, the calibrated text-similarity
+  floor, is shared code and runs in BOTH arms; tier 2, the `claim-clusterer`
+  agent, is carried by each arm's own review.md, so a baseline built from a ref
+  that predates the agent reports `tier 1 only` and the arm delta prices the
+  clusterer alone. Read it beside recall: a false merge drops a distinct
+  finding, so it shows up as candidate-arm recall loss, not as a better
+  duplicate number. `rejected` counts proposals the merge rules refused
+  (`unknown-id` there means the clusterer named claims that do not exist, which
+  is a prompt or staging failure rather than a quiet zero).
 - **Anchor-snap and the arms:** the deterministic pipeline is shared by
   both arms, but the provenance gate emulates each arm's OWN review.md gate
   version, keyed on the literal `anchor-snap` marker in the gate step. A

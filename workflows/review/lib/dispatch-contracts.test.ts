@@ -3,7 +3,9 @@ import {describe, it, expect} from "vitest";
 import {
     applyVerifications,
     buildClaims,
+    contractValidator,
     joinProse,
+    parseClustererOutput,
     parseFinderOutput,
     parseValidatorOutput,
     type Claim,
@@ -468,5 +470,65 @@ describe("applyVerifications: corrected-field validation", () => {
         });
         expect(result[0].label).toBe("suggestion (non-blocking)");
         expect(result[0].line).toBe(12);
+    });
+});
+
+describe("parseClustererOutput", () => {
+    it("keeps well-formed clusters and dedupes the ids inside one", () => {
+        expect(
+            parseClustererOutput(
+                JSON.stringify({
+                    clusters: [
+                        {
+                            evidence:
+                                "the `maxSamples` comment says 10, not 25",
+                            ids: ["a", "b", "a", "c"],
+                        },
+                    ],
+                }),
+            ),
+        ).toEqual([
+            {
+                evidence: "the `maxSamples` comment says 10, not 25",
+                ids: ["a", "b", "c"],
+            },
+        ]);
+    });
+
+    it("skips entries that cannot merge anything, rather than voiding the dispatch", () => {
+        // A single-id "cluster", a missing evidence string, and a non-array
+        // `ids` each merge nothing on their own; dropping them keeps the rest
+        // of a mostly-good reply usable (a missed merge costs a duplicate
+        // comment, so partial credit is the safe direction here).
+        expect(
+            parseClustererOutput(
+                JSON.stringify({
+                    clusters: [
+                        {evidence: "`maxSamples` cap", ids: ["only-one"]},
+                        {ids: ["a", "b"]},
+                        {evidence: "`maxSamples` cap", ids: "a,b"},
+                        {evidence: "`maxSamples` cap", ids: ["a", 7, "b"]},
+                    ],
+                }),
+            ),
+        ).toEqual([{evidence: "`maxSamples` cap", ids: ["a", "b"]}]);
+    });
+
+    it("throws on a drifted shape so the corrective re-dispatch fires", () => {
+        // Reading a drifted reply as "no duplicates" is how a paid-for
+        // dimension goes missing without a trace.
+        expect(() =>
+            parseClustererOutput(JSON.stringify({groups: []})),
+        ).toThrow(/no clusters array/);
+        expect(() => parseClustererOutput("not json")).toThrow();
+        expect(parseClustererOutput(JSON.stringify({clusters: []}))).toEqual(
+            [],
+        );
+    });
+
+    it("is the clusterer's structured-final contract check", () => {
+        const check = contractValidator("claim-clusterer", "clusterer");
+        expect(check({clusters: []})).toBeNull();
+        expect(check({groups: []})).toMatch(/no clusters array/);
     });
 });
