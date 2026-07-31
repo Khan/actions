@@ -41,15 +41,29 @@ export type GhGraphql = (
     variables: Record<string, unknown>,
 ) => Promise<unknown>;
 
+/** The login assumed when `REVIEW_BOT_LOGIN` is unset. */
+export const DEFAULT_REVIEW_BOT_LOGIN = "github-actions[bot]";
+
 /**
  * The login this workflow's own review comments are authored by, and the
  * single source of truth for that identity across the producer
  * (`stage-pr.ts`, which selects the bot's threads) and the consumers
- * (`dedup.ts`'s suppression guard). A consumer repo that posts reviews under a
- * different account changes this constant, which moves both layers at once:
- * the property #302 lost when the two layers each spelled it themselves.
+ * (`dedup.ts`'s suppression guard). Both layers read it here, which is the
+ * property #302 lost when each spelled the identity itself.
+ *
+ * Deployment config, not a compiled-in constant, because the identity is a
+ * property of the consumer's installation: a repo posting reviews under its own
+ * GitHub App has a different login, and a login it cannot change would misfile
+ * every one of its bot threads as human, which puts them in `skipLines` and
+ * DROPS fresh findings on those lines. `REVIEW_BOT_LOGIN` matches the env its
+ * siblings already take (autofix's `AUTOFIX_BOT_LOGIN`, the thumbs sweep's
+ * `REVIEW_SWEEP_BOT_LOGIN`), same default.
+ *
+ * Read per call rather than captured at import so the value a CLI sets after
+ * this module loads is still seen.
  */
-export const REVIEW_BOT_LOGIN = "github-actions[bot]";
+export const reviewBotLogin = (): string =>
+    process.env.REVIEW_BOT_LOGIN?.trim() || DEFAULT_REVIEW_BOT_LOGIN;
 
 /**
  * Strip GitHub's App-login suffix.
@@ -65,17 +79,26 @@ export const REVIEW_BOT_LOGIN = "github-actions[bot]";
  * bare one (Khan/webapp#41140, run 30416237794), and the reviewer's
  * open-thread suppression matched only the bracketed form for a whole release
  * (Khan/actions#302).
+ *
+ * Case-folded BEFORE the suffix test, not after: stripping first would leave a
+ * `…[BOT]` spelling intact and compare it against an already-stripped login,
+ * so the two would not match. Both GitHub surfaces emit the suffix lowercase
+ * today, so this is cheap insurance rather than an observed failure.
  */
-const baseLogin = (login: string): string =>
-    login.endsWith("[bot]") ? login.slice(0, -"[bot]".length) : login;
+const baseLogin = (login: string): string => {
+    const lowered = login.toLowerCase();
+    return lowered.endsWith("[bot]")
+        ? lowered.slice(0, -"[bot]".length)
+        : lowered;
+};
 
 /** Whether two logins name the same account across the bot-suffix split. */
 export const sameLogin = (a: string, b: string): boolean =>
-    baseLogin(a).toLowerCase() === baseLogin(b).toLowerCase();
+    baseLogin(a) === baseLogin(b);
 
 /** Whether a comment author is this workflow's review bot, either spelling. */
 export const isReviewBotAuthor = (login: string): boolean =>
-    sameLogin(login, REVIEW_BOT_LOGIN);
+    sameLogin(login, reviewBotLogin());
 
 /**
  * Review threads with their full reply chain.
@@ -135,6 +158,50 @@ export const assertNoGraphqlErrors = (body: unknown): void => {
     if (Array.isArray(errors) && errors.length > 0) {
         throw new Error(`GraphQL errors: ${JSON.stringify(errors)}`);
     }
+};
+
+/**
+ * Wrap a GraphQL transport so an HTTP-200 `RATE_LIMITED` answer is retried.
+ *
+ * This has to live at the transport and not beside one caller. GitHub reports a
+ * throttle as HTTP **200** with a `RATE_LIMITED` entry in `errors`, so a
+ * status-based retry (the REST path's) never sees it, and the thread fetch is a
+ * hard prerequisite for both workflows: refusing is correct but expensive, and
+ * a throttled runner must not fail a whole review over a retryable answer.
+ * Owned here so autofix inherits it too; its port had none, so the first
+ * throttle failed the run.
+ *
+ * Only `RATE_LIMITED` is retried. Every other error entry (a bad token, a
+ * missing PR, a node-access failure) will not heal, so it propagates on the
+ * first attempt rather than costing three.
+ *
+ * `sleep` is injected alongside the transport so a test can assert both
+ * directions (retry-then-succeed, and propagate-without-retry) without waiting.
+ */
+export const withGraphqlRateLimitRetry = (
+    graphql: GhGraphql,
+    sleep: (ms: number) => Promise<void>,
+    attempts = 3,
+): GhGraphql => {
+    return async (query, variables) => {
+        let lastError: unknown;
+        for (let attempt = 0; attempt < attempts; attempt++) {
+            const body = await graphql(query, variables);
+            try {
+                assertNoGraphqlErrors(body);
+                return body;
+            } catch (error) {
+                lastError = error;
+                if (!/RATE_LIMITED/.test(String(error))) {
+                    throw error;
+                }
+            }
+            if (attempt < attempts - 1) {
+                await sleep(1000 * (attempt + 1));
+            }
+        }
+        throw lastError;
+    };
 };
 
 const threadsConnectionOf = (
@@ -234,9 +301,18 @@ export const collectUnresolvedThreads = async (
         }
         const next = pageInfo["endCursor"];
         if (typeof next !== "string" || next === "") {
-            // A page claiming a successor without a cursor would loop forever
-            // on the same request; stop with what arrived.
-            return out;
+            // A page claiming a successor without a cursor cannot be followed
+            // (re-issuing the same request would loop forever), so the only
+            // choices are a partial list or a refusal. Refuse, for the reason
+            // `assertNoGraphqlErrors` refuses partial data: the threads that
+            // did not arrive are neither resolved nor accounted for, and a
+            // reduced-depth re-review can flip a prior REQUEST_CHANGES to
+            // APPROVE past blocking threads it never saw. Unreachable against
+            // GitHub, which always supplies the cursor.
+            throw new Error(
+                `GraphQL reported another page of review threads for ` +
+                    `${owner}/${repo}#${number} without an endCursor`,
+            );
         }
         cursor = next;
     }

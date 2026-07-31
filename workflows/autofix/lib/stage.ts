@@ -43,6 +43,7 @@ import {
     assertNoGraphqlErrors,
     collectUnresolvedThreads,
     sameLogin,
+    withGraphqlRateLimitRetry,
 } from "../../review/lib/threads.ts";
 
 // Re-exported for the CLI transport below and for this module's tests: the
@@ -245,6 +246,8 @@ if (typeof require !== "undefined" && require.main === module) {
     const botLogin =
         process.env.AUTOFIX_BOT_LOGIN?.trim() || "github-actions[bot]";
     const api = process.env.GITHUB_API_URL?.trim() || "https://api.github.com";
+    const sleep = (ms: number): Promise<void> =>
+        new Promise((resolve) => setTimeout(resolve, ms));
 
     const headers = {
         authorization: `Bearer ${token}`,
@@ -297,7 +300,15 @@ if (typeof require !== "undefined" && require.main === module) {
             }
             return out;
         },
-        graphql: async (query, variables) => {
+        // `withGraphqlRateLimitRetry` supplies the transport-level
+        // `assertNoGraphqlErrors` (duplicated in `collectThreads`
+        // deliberately: the guard belongs both at the transport, which any
+        // future GraphQL caller inherits, and at the reader, which is the one
+        // the unit tests can reach) and retries the one error that heals.
+        // GitHub answers a throttle with HTTP 200, so `res.ok` cannot see it,
+        // and without the retry the first throttle ends the run having cleared
+        // the arming label on a PR with open findings.
+        graphql: withGraphqlRateLimitRetry(async (query, variables) => {
             const res = await fetch(`${api}/graphql`, {
                 method: "POST",
                 headers: {...headers, "content-type": "application/json"},
@@ -306,15 +317,8 @@ if (typeof require !== "undefined" && require.main === module) {
             if (!res.ok) {
                 throw new Error(`GraphQL failed: ${res.status}`);
             }
-            // Duplicated in `collectThreads`, deliberately. The guard is cheap
-            // and its absence clears the arming label on a PR with open
-            // findings, so it belongs both at the transport (any future
-            // GraphQL caller inherits it) and at the reader (which is the one
-            // the unit tests can reach).
-            const body = await res.json();
-            assertNoGraphqlErrors(body);
-            return body;
-        },
+            return res.json();
+        }, sleep),
     };
 
     collectInputs(port, owner, repo, number, botLogin)

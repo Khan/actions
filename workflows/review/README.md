@@ -602,6 +602,17 @@ Two known interactions:
   comment out the `observability:` block in its installed `review.md` as a
   local edit (which `gh aw update` preserves) and recompile.
 
+Optional:
+
+- `REVIEW_BOT_LOGIN` — the account this workflow posts reviews as, default
+  `github-actions[bot]`. Set it only in a repo that posts under its own GitHub
+  App. It is read by one predicate (`lib/threads.ts`'s `isReviewBotAuthor`),
+  which both the thread staging and open-thread suppression go through, so the
+  two layers cannot disagree about the identity. Getting it wrong is not
+  cosmetic: threads the bot opened would be filed as human ones, which puts
+  their lines in `skipLines` and DROPS fresh findings there. Either spelling
+  works (`name` or `name[bot]`); the comparison strips the suffix.
+
 ## Versioning
 
 Published as git tags via the repo's changeset → `utils/run-publish.ts` release

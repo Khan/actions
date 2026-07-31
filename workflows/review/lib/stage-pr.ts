@@ -87,9 +87,9 @@ import type {StagedThread} from "./rereview";
 import {runRereviewPlanCli} from "./rereview-mode";
 import {runCli as runRouterCli} from "./router";
 import {
-    assertNoGraphqlErrors,
     collectUnresolvedThreads,
     isReviewBotAuthor,
+    withGraphqlRateLimitRetry,
     type GhGraphql,
 } from "./threads";
 
@@ -554,8 +554,16 @@ export const runStagePrCli = async (
     // `skipLines` entry on a line that may be the bot's own, and that drops a
     // fresh finding; left out, the worst case is a comment landing where a
     // human conversation is open, which is noise.
-    const openerAuthor = (thread: StagedThread): string | undefined =>
-        thread.comments[0]?.author;
+    //
+    // "No opener" is two shapes, not one: no opening comment at all, and an
+    // opening comment whose `author` is null (a deleted account), which
+    // `threads.ts` maps to "". Only the first is absent; the empty string is a
+    // login that matches no bot, so testing for `undefined` alone would send a
+    // null-authored thread down the human path the comment above rules out.
+    const openerAuthor = (thread: StagedThread): string | undefined => {
+        const author = thread.comments[0]?.author;
+        return author === undefined || author === "" ? undefined : author;
+    };
     const openedByBot = (thread: StagedThread): boolean => {
         const author = openerAuthor(thread);
         return author !== undefined && isReviewBotAuthor(author);
@@ -779,40 +787,18 @@ if (typeof require !== "undefined" && require.main === module) {
         throw lastError;
     };
     const ghGet: GhGet = (path) => request(path);
-    const ghGraphql: GhGraphql = async (query, variables) => {
-        // GraphQL reports a rate limit as HTTP 200 with an `errors` array, so
-        // `request`'s status-based retry never sees it. Retry that one case
-        // here (the fetch is a hard prerequisite: a throttled runner must not
-        // fail a whole review over a retryable answer). Any other error entry
-        // (a bad token, a missing PR, a node-access failure) will not heal, so
-        // it propagates on the first attempt.
-        const ATTEMPTS = 3;
-        let lastError: unknown;
-        for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-            const body = await request("/graphql", {
+    // The HTTP-200 `RATE_LIMITED` retry, and the transport-level
+    // `assertNoGraphqlErrors` that detects it, both live in `threads.ts` so
+    // autofix's port inherits them; the reader keeps its own copy of the guard.
+    const ghGraphql: GhGraphql = withGraphqlRateLimitRetry(
+        (query, variables) =>
+            request("/graphql", {
                 method: "POST",
                 contentType: "application/json",
                 body: JSON.stringify({query, variables}),
-            });
-            try {
-                // Duplicated in `collectUnresolvedThreads`, deliberately: the
-                // guard belongs both at the transport (any future GraphQL
-                // caller inherits it) and at the reader (which is the one the
-                // unit tests reach).
-                assertNoGraphqlErrors(body);
-                return body;
-            } catch (error) {
-                lastError = error;
-                if (!/RATE_LIMITED/.test(String(error))) {
-                    throw error;
-                }
-            }
-            if (attempt < ATTEMPTS - 1) {
-                await sleep(1000 * (attempt + 1));
-            }
-        }
-        throw lastError;
-    };
+            }),
+        sleep,
+    );
 
     const repo = process.env.GITHUB_REPOSITORY ?? "";
     const prNumber = Number(process.env.REVIEW_PR_NUMBER ?? "");

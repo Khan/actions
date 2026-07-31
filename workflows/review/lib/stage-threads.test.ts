@@ -3,7 +3,7 @@ import {describe, it, expect} from "vitest";
 import {openThreadsFromStaged, stagedThreadShapeFailure} from "./dedup";
 import {computeRoster} from "./dispatch-roster";
 import {runStagePrCli, type GhGet, type StagePrFs} from "./stage-pr";
-import type {GhGraphql} from "./threads";
+import {withGraphqlRateLimitRetry, type GhGraphql} from "./threads";
 
 /**
  * Review-thread staging: the last load-bearing staging review.md Step 3 asked
@@ -283,14 +283,86 @@ describe("review-thread staging (slice 1)", () => {
         // because the fail-open direction is the expensive one: an
         // unattributable thread staged as human becomes a `skipLines` entry
         // that may sit on the bot's own line, dropping a fresh finding there.
+        //
+        // "No opener" is two shapes. The third node is the one that used to
+        // slip through: a present opening comment whose author is null (a
+        // deleted account), which the fetch maps to "". That is a login, not an
+        // absence, so it matched no bot and took the human path this test's
+        // whole point is to keep it off.
         const {threads, humanThreads} = await stage([
             threadPage([
                 threadNode({id: "PRRT_empty", comments: {nodes: []}}),
                 threadNode({id: "PRRT_nocomments", comments: null}),
+                threadNode({
+                    id: "PRRT_nullauthor",
+                    comments: {nodes: [{author: null, body: "ghost"}]},
+                }),
             ]),
         ]);
         expect(threads).toEqual([]);
         expect(humanThreads).toEqual([]);
+    });
+
+    it("matches the bot across a case-variant [bot] suffix", async () => {
+        // Theoretical (both GitHub surfaces emit the suffix lowercase today),
+        // but the failure it would cause is the expensive direction again: an
+        // unstripped `[BOT]` makes the bot's own thread read as a human's.
+        const {threads, humanThreads} = await stage([
+            threadPage([
+                threadNode({
+                    id: "PRRT_case",
+                    comments: {
+                        nodes: [
+                            {
+                                author: {login: "GitHub-Actions[BOT]"},
+                                body: "**issue (blocking):** x",
+                            },
+                        ],
+                    },
+                }),
+            ]),
+        ]);
+        expect(threads).toHaveLength(1);
+        expect(humanThreads).toEqual([]);
+    });
+
+    it("honours REVIEW_BOT_LOGIN so a consumer's own App is not misfiled", async () => {
+        // A repo posting reviews under its own App has a different login. With
+        // the identity compiled in, every one of its bot threads lands in
+        // human-threads.json, and each becomes a `skipLines` entry that DROPS
+        // a fresh finding on that line.
+        const previous = process.env.REVIEW_BOT_LOGIN;
+        process.env.REVIEW_BOT_LOGIN = "khan-review-bot[bot]";
+        try {
+            const {threads, humanThreads} = await stage([
+                threadPage([
+                    threadNode({
+                        id: "PRRT_app",
+                        comments: {
+                            nodes: [
+                                {
+                                    author: {login: "khan-review-bot"},
+                                    body: "**issue (blocking):** x",
+                                },
+                            ],
+                        },
+                    }),
+                    // The default login is just another human once the env
+                    // names a different account.
+                    threadNode({id: "PRRT_default", line: 3}),
+                ]),
+            ]);
+            expect(
+                threads.map((t: {thread_id: string}) => t.thread_id),
+            ).toEqual(["PRRT_app"]);
+            expect(humanThreads).toEqual([{path: "a.ts", line: 3}]);
+        } finally {
+            if (previous === undefined) {
+                delete process.env.REVIEW_BOT_LOGIN;
+            } else {
+                process.env.REVIEW_BOT_LOGIN = previous;
+            }
+        }
     });
 
     it("follows pagination", async () => {
@@ -351,5 +423,99 @@ describe("review-thread staging (slice 1)", () => {
                 options,
             ),
         ).rejects.toThrow(/no reviewThreads connection/);
+    });
+
+    it("fails the staging when a page promises a successor it cannot address", async () => {
+        // The remaining fail-OPEN path in the fetch: a page claiming
+        // `hasNextPage` with no cursor cannot be followed, and returning the
+        // threads collected so far is the partial staging every other guard
+        // here refuses. Refusing still terminates, which is what the
+        // infinite-loop guard wanted.
+        const noCursor = {
+            data: {
+                repository: {
+                    pullRequest: {
+                        reviewThreads: {
+                            pageInfo: {hasNextPage: true},
+                            nodes: [threadNode()],
+                        },
+                    },
+                },
+            },
+        };
+        await expect(
+            runStagePrCli(
+                makeFakeFs(),
+                ghGetFromMap(routes()),
+                graphqlFromPages([noCursor]),
+                options,
+            ),
+        ).rejects.toThrow(/without an endCursor/);
+    });
+});
+
+/**
+ * The retry the CLI transports depend on and no test used to reach: it was
+ * built inline under `require.main === module`, so a regression (throwing on
+ * attempt 0, or the pattern ceasing to match) would have failed a whole review
+ * over the one GraphQL answer that heals. It lives in `threads.ts` now, which
+ * is also how autofix's port stopped dying on its first throttle.
+ */
+describe("withGraphqlRateLimitRetry", () => {
+    const noSleep = () => Promise.resolve();
+    const rateLimited = {
+        errors: [{type: "RATE_LIMITED", message: "slow down"}],
+    };
+
+    it("retries a throttled answer and returns the one that succeeds", async () => {
+        const pages = [rateLimited, rateLimited, threadPage([])];
+        let calls = 0;
+        const wrapped = withGraphqlRateLimitRetry(() => {
+            calls++;
+            return Promise.resolve(pages.shift());
+        }, noSleep);
+
+        await expect(wrapped("q", {})).resolves.toEqual(threadPage([]));
+        expect(calls).toBe(3);
+    });
+
+    it("gives up after the last attempt rather than looping", async () => {
+        let calls = 0;
+        const wrapped = withGraphqlRateLimitRetry(() => {
+            calls++;
+            return Promise.resolve(rateLimited);
+        }, noSleep);
+
+        await expect(wrapped("q", {})).rejects.toThrow(/RATE_LIMITED/);
+        expect(calls).toBe(3);
+    });
+
+    it("propagates an error that will not heal, without spending a retry", async () => {
+        // A bad token or a missing PR costs one attempt, not three.
+        let calls = 0;
+        const wrapped = withGraphqlRateLimitRetry(() => {
+            calls++;
+            return Promise.resolve({
+                errors: [{type: "NOT_FOUND", message: "Could not resolve PR"}],
+            });
+        }, noSleep);
+
+        await expect(wrapped("q", {})).rejects.toThrow(/NOT_FOUND/);
+        expect(calls).toBe(1);
+    });
+
+    it("waits between attempts, with a backoff", async () => {
+        const waits: number[] = [];
+        const pages = [rateLimited, rateLimited, threadPage([])];
+        const wrapped = withGraphqlRateLimitRetry(
+            () => Promise.resolve(pages.shift()),
+            (ms) => {
+                waits.push(ms);
+                return Promise.resolve();
+            },
+        );
+
+        await wrapped("q", {});
+        expect(waits).toEqual([1000, 2000]);
     });
 });
