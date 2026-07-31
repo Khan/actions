@@ -851,6 +851,11 @@ export const produceLive = async (
     }
 
     // Cross-source dedup, before validation, exactly where production runs it.
+    // The merged set REPLACES the produced one from here on (the claims path,
+    // the validator's `knownIds`, and the returned findings all act on what
+    // production would post), so the collected array is rewritten in place
+    // rather than shadowed: a stray reference to the pre-merge set downstream
+    // would silently re-post the duplicates this stage just merged.
     const {kept: dedupedFindings, dedup} = await dedupeLiveFindings(
         findings,
         agents.get(CLUSTERER),

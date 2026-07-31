@@ -77,6 +77,15 @@ gh workflow run review-eval-ab.yml --ref <branch> \
 gh workflow run review-eval-ab.yml --ref <branch> \
   -f base_ref=origin/<branch> -f force_arms=true -f full=true -f repeats=3 -f max_usd=220
 
+# Powered run for a dedup / duplicate-comment change (~$45): the cases that
+# actually produce multi-source clusters are the `documentation`-enabled ones
+# (that reviewer contributes the extra copy on a comment defect, which is the
+# shape production duplicated in run 30587343777), 5x per arm
+gh workflow run review-eval-ab.yml --ref <branch> \
+  -f base_ref=origin/main \
+  -f cases=golden-documentation-stale-and-narrated,golden-documentation-restated-docstring,golden-documentation-missing-why,golden-documentation-commented-out-code,clean-documentation-earned-comments \
+  -f repeats=5 -f max_usd=50
+
 # Pool reports across dispatches (run ids or local paths)
 pnpm dlx tsx workflows/review/eval/aggregate.ts <run-id> <run-id> ... [--out <path>]
 ```
