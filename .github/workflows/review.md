@@ -246,15 +246,23 @@ pre-agent-steps:
 # Anthropic pricing overlay, so an AI credit means $0.01 of what Khan actually
 # pays.
 #
-# REQUIRES gh-aw >= v0.84.1 TO TAKE EFFECT. `apiProxy.providers` was added to
+# INERT UNTIL gh-aw v0.84.x GOES STABLE. `apiProxy.providers` was added to
 # awf-config-schema.json in AWF v0.27.43, and gh-aw gates emitting it on that
 # floor (`AWFAPIProxyProvidersMinVersion`) because older AWF strict config
 # validation rejects unknown apiProxy properties. gh-aw v0.83.4 (the version
-# this lock was compiled with) defaults to AWF v0.27.42, one patch below, so it
-# SILENTLY DROPS this block: it compiles clean, the rates land only in the
-# informational `GH_AW_INFO_MODEL_COSTS` env var, and metering stays at list
-# price. gh-aw v0.84.1 raises `DefaultFirewallVersion` to v0.27.43, so
-# recompiling on it makes this overlay live with no other change.
+# this lock was compiled with, and still `releases/latest`) defaults to AWF
+# v0.27.42, one patch below, so it SILENTLY DROPS this block: it compiles
+# clean, the rates land only in the informational `GH_AW_INFO_MODEL_COSTS` env
+# var, and metering stays at list price. gh-aw raises `DefaultFirewallVersion`
+# to v0.27.43 as of v0.84.0, but v0.83.5/v0.84.0/v0.84.1 are all prereleases,
+# so recompiling is blocked on that line going stable rather than on any edit
+# here. Do NOT pin the extension to a prerelease to force it: nothing in CI
+# runs `gh aw compile`, so the next compile on stable would silently drop
+# `providers` again with no test failure.
+#
+# VERIFY AFTER ANY TOOLCHAIN BUMP: `providers` must appear inside the
+# `apiProxy` object of both awf-config payloads in review.lock.yml. Its
+# presence in `GH_AW_INFO_MODEL_COSTS` alone means the overlay is NOT live.
 #
 # Deliberately NOT solved by pinning `sandbox.agent.version: v0.27.43`: the
 # sandbox block above documents that a version is re-pinned here only to hold a
