@@ -15,7 +15,8 @@
  * and the record are pure code. No prose about the code under review.
  */
 
-import type {ClaimMerge, ClusterRejection} from "./dedup";
+import type {ClaimMerge} from "./dedup";
+import type {ClusterRejection} from "./dedup-cluster";
 import {type Claim, type ProposedCluster} from "./dispatch-contracts";
 import {isBlockingLabel} from "./render-comment";
 

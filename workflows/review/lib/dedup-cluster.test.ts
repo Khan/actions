@@ -320,8 +320,12 @@ describe("dedupeClaims with model-proposed clusters", () => {
         );
         expect(claims).toHaveLength(2);
         expect(merges).toEqual([]);
+        // Rejected before the union, so the proposal collapses to one member
+        // and that member is recorded too: nothing about this proposal reaches
+        // the merge core, which is what keeps it from reshaping a tier-1 group.
         expect(clusterRejections).toEqual([
             {id: "holistic-9", reason: "blocking-member"},
+            {id: "correctness-reviewer-3", reason: "cluster-collapsed"},
         ]);
     });
 
@@ -376,17 +380,17 @@ describe("dedupeClaims with model-proposed clusters", () => {
         expect(clusterRejections).toEqual([
             {id: "skill-auditor-ool-2", reason: "other-path"},
             {id: "correctness-4", reason: "same-source"},
+            {id: "correctness-reviewer-3", reason: "cluster-collapsed"},
         ]);
     });
 
     it("holds a cluster member to those rules when its text clears the floor too", () => {
         // The test above proves the rules only for members tier 1's floor
         // cannot reach, which is every fixture the clusterer is built for. The
-        // dangerous member is the opposite one: a cluster unions on the model's
-        // word BEFORE any member is checked, so a member whose prose does clear
-        // the floor would take the similarity branch, merge without ever
-        // meeting the path or source rule, and be recorded as
-        // `via: "similarity"`: a reviewer's distinct finding dropped, with the
+        // dangerous member is the opposite one: a member whose prose DOES clear
+        // the floor would, if it ever reached the union, take the similarity
+        // branch and merge without meeting the path or source rule, recorded as
+        // `via: "similarity"` — a reviewer's distinct finding dropped, with the
         // artifact naming the wrong tier. These copies are verbatim identical,
         // so the floor is decidedly not what keeps them apart.
         const [note] = wrongCapClaims();
@@ -421,6 +425,7 @@ describe("dedupeClaims with model-proposed clusters", () => {
         expect(clusterRejections).toEqual([
             {id: "documentation-9", reason: "other-path"},
             {id: "correctness-reviewer-9", reason: "same-source"},
+            {id: "correctness-reviewer-3", reason: "cluster-collapsed"},
         ]);
     });
 
@@ -461,6 +466,114 @@ describe("dedupeClaims with model-proposed clusters", () => {
         ]);
         expect(clusterRejections).toEqual([
             {id: "holistic-2", reason: "no-anchor"},
+        ]);
+    });
+
+    it("never lets an unverifiable proposal cost a merge tier 1 would have made", () => {
+        // The floor under tier 2: it may add merges, never subtract them.
+        // Membership used to be unioned before any member was checked, so a
+        // proposal naming a cross-path claim pulled it into the group, where
+        // its higher severity won the survivor election — and the genuine
+        // tier-1 pair beneath it then collapsed to nothing, recorded in
+        // neither `merges` nor `clusterRejections`. Three comments posted where
+        // two would have, from a tier whose whole purpose is fewer.
+        const [note] = wrongCapClaims();
+        const pair = (over: Partial<Claim> & {id: string; source: string}) =>
+            claim({...note, line: 8, ...over});
+        const {claims, merges, clusterRejections} = dedupeClaims(
+            [
+                // Cross-path, and blocking so it out-ranks both of the others.
+                pair({
+                    id: "holistic-1",
+                    source: "holistic",
+                    path: "dev/af19_trial/other.go",
+                    label: "issue (blocking)",
+                }),
+                pair({id: "documentation-1", source: "documentation"}),
+                pair({id: "conventions-1", source: "conventions"}),
+            ],
+            [
+                {
+                    evidence: "`maxSamples`",
+                    ids: ["holistic-1", "documentation-1"],
+                },
+            ],
+        );
+        // The tier-1 pair survives as a pair; only the cross-path claim posts
+        // separately, exactly as it would have with no clusterer at all.
+        expect(claims.map((c) => c.id)).toEqual([
+            "holistic-1",
+            "documentation-1",
+        ]);
+        expect(merges).toEqual([
+            {
+                survivor: "documentation-1",
+                merged: [
+                    {
+                        id: "conventions-1",
+                        source: "conventions",
+                        label: "note (non-blocking)",
+                    },
+                ],
+                path: "dev/af19_trial/window.go",
+                line: 8,
+                via: "similarity",
+            },
+        ]);
+        expect(clusterRejections).toEqual([
+            {id: "documentation-1", reason: "other-path"},
+            {id: "holistic-1", reason: "cluster-collapsed"},
+        ]);
+    });
+
+    it("re-checks a screened member against the survivor tier 1 elects", () => {
+        // The pre-screen anchors on the proposal's own members; tier 1 can then
+        // bridge in a claim that out-ranks the anchor and becomes the survivor,
+        // which is why the per-member rules run a second time against the
+        // ACTUAL survivor. Here the cluster member and the elected survivor
+        // share a source — legal against the anchor, not against the survivor —
+        // and collapsing them would drop one of that reviewer's two findings.
+        const [note] = wrongCapClaims();
+        const {claims, merges, clusterRejections} = dedupeClaims(
+            [
+                // Bridged to `correctness-reviewer-3` by tier 1 (verbatim
+                // copy, different source), and blocking, so it survives.
+                claim({
+                    ...note,
+                    id: "documentation-2",
+                    source: "documentation",
+                    label: "issue (blocking)",
+                }),
+                claim({...note, id: "correctness-reviewer-3"}),
+                // The clusterer's member: fine against the correctness anchor,
+                // same source as the survivor tier 1 actually elects.
+                claim({
+                    ...note,
+                    id: "documentation-1",
+                    source: "documentation",
+                    subject: "the per-key cap disagrees with `maxSamples`",
+                    discussion: "the per-key cap disagrees with `maxSamples`",
+                    failure_scenario: "the cap disagrees with `maxSamples`",
+                }),
+            ],
+            [
+                {
+                    evidence: "`maxSamples`",
+                    ids: ["correctness-reviewer-3", "documentation-1"],
+                },
+            ],
+        );
+        expect(merges).toHaveLength(1);
+        expect(merges[0].survivor).toBe("documentation-2");
+        expect(merges[0].merged.map((m) => m.id)).toEqual([
+            "correctness-reviewer-3",
+        ]);
+        expect(claims.map((c) => c.id)).toEqual([
+            "documentation-2",
+            "documentation-1",
+        ]);
+        expect(clusterRejections).toEqual([
+            {id: "documentation-1", reason: "same-source"},
         ]);
     });
 

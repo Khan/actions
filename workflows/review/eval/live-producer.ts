@@ -32,7 +32,8 @@
  * the load-bearing one: production has merged duplicate claims before validation
  * since #245, this module never did, so every duplicate production suppressed
  * still posted here and no report column could see a change to the merge rules.
- * {@link dedupeLiveFindings} closes that, arm-keyed on the clusterer agent.
+ * `live-dedup.ts`'s `dedupeLiveFindings` closes that, arm-keyed on the
+ * clusterer agent.
  */
 
 import {refusalFallbackFor} from "../lib/refusal-fallback";
@@ -47,18 +48,8 @@ import {
 import {isBlockingLabel, labelForFinding} from "../lib/render-comment";
 import {route, type RouterConfig} from "../lib/router";
 import {validateFinding, type Finding, type Lens} from "../lib/finding-schema";
-import {
-    dedupeClaims,
-    type ClaimMerge,
-    type ClusterRejection,
-} from "../lib/dedup";
-import {
-    buildClaims as buildLibClaims,
-    parseClustererOutput,
-    type Candidate,
-    type ProposedCluster,
-} from "../lib/dispatch-contracts";
-import {hasClusterableCandidatePair} from "../lib/dispatch-cluster";
+import {CLUSTERER} from "../lib/dispatch-cluster";
+import {dedupeLiveFindings, type LiveDedupReport} from "./live-dedup";
 import {
     VERIFICATION_STATES,
     type CaseVerification,
@@ -354,8 +345,11 @@ export const resolveRuntimeImports = (
 /* Output parsing: the three sub-agent contracts -> RecordedFinding           */
 /* -------------------------------------------------------------------------- */
 
-/** A produced finding plus the claims-path extras the validator reads. */
-type LiveFinding = RecordedFinding & {skill?: string};
+/**
+ * A produced finding plus the claims-path extras the validator reads. Exported
+ * for `live-dedup.ts`, which rewrites a merge survivor's prose in this shape.
+ */
+export type LiveFinding = RecordedFinding & {skill?: string};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
@@ -490,130 +484,6 @@ const parseAgentFindings = (
         usedIds.add(live.finding.id);
     }
     return findings;
-};
-
-/* -------------------------------------------------------------------------- */
-/* Cross-source dedup (production's pre-validation merge)                     */
-/* -------------------------------------------------------------------------- */
-
-const CLUSTERER = "claim-clusterer";
-
-/** What an arm's dedup stage did, for the A/B report. */
-export type LiveDedupReport = {
-    /** Claims entering the merge (the pre-merge candidate count). */
-    candidates: number;
-    /** Merged groups, as `dispatch-result.json` records them. */
-    merges: ClaimMerge[];
-    /** Well-formed clusters the clusterer proposed (0 when it did not run). */
-    proposed: number;
-    /** Proposed members the merge rules rejected. */
-    rejected: ClusterRejection[];
-    /** The arm's review.md defines no clusterer: tier 1 only, by construction. */
-    clustererAbsent: boolean;
-};
-
-/**
- * Run production's cross-source merge over an arm's live findings.
- *
- * Why this exists at all: the A/B never ran dedup, so a change to it was
- * unmeasurable by construction — the pipeline the eval measured posted every
- * duplicate that production merges, and no report column moved when the merge
- * rules changed. Both arms run tier 1 (it is shared code, and production has
- * had it since #245); tier 2 is carried by the arm's OWN review.md, exactly
- * like the provenance gate's anchor-snap emulation, so a baseline built from a
- * ref that predates the `claim-clusterer` agent runs tier 1 alone and the arm
- * delta prices the clusterer and nothing else.
- *
- * The claim projection is the LIB's `buildClaims`, not this module's
- * validator-contract one: the merge compares `subject` against
- * `failure_scenario` (falling back to `discussion`), and the eval's own
- * projection puts the whole prose in `subject` and the evidence trace in
- * `discussion`. Feeding that shape to the floors would measure a similarity
- * arithmetic production never runs.
- *
- * What is shared with production and what is not, since fidelity is the whole
- * point: the merge rules (`dedupeClaims`) and the dispatch precondition
- * (`hasClusterableCandidatePair`) are the SAME code `runClusterStep` runs. What
- * this function re-implements is the plumbing that step cannot lend: the
- * dispatch goes through the eval's own agent runner and per-agent cost report,
- * and the survivor's merged prose is written back onto a `LiveFinding` rather
- * than onto a staged claims.json. That is the seam to keep in step by hand
- * (the provenance gate's anchor-snap emulation has the same shape); a rule
- * change does not need mirroring here, a change to WHEN the step runs does.
- */
-const dedupeLiveFindings = async (
-    findings: LiveFinding[],
-    clusterer: ExtractedAgent | undefined,
-    io: {
-        dispatch: (
-            agent: ExtractedAgent,
-            parse: (output: string) => ProposedCluster[],
-        ) => Promise<{
-            report: PerAgentReport;
-            parsed?: ProposedCluster[];
-        }>;
-        write: (name: string, content: string) => void;
-    },
-): Promise<{
-    kept: LiveFinding[];
-    dedup: {report?: PerAgentReport; result: LiveDedupReport};
-}> => {
-    const claims = buildLibClaims(findings as Candidate[]);
-    const clusterable = hasClusterableCandidatePair(claims);
-    let proposals: ProposedCluster[] = [];
-    let report: PerAgentReport | undefined;
-    if (clusterable && clusterer !== undefined) {
-        io.write("candidates.json", JSON.stringify(claims, null, 2));
-        const dispatched = await io.dispatch(clusterer, parseClustererOutput);
-        report = dispatched.report;
-        proposals = dispatched.parsed ?? [];
-    }
-    const merged = dedupeClaims(claims, proposals);
-    const dropped = new Set(
-        merged.merges.flatMap((merge) => merge.merged.map((m) => m.id)),
-    );
-    const survivors = new Map(
-        merged.claims.map((claim) => [claim.id, claim] as const),
-    );
-    const kept = findings
-        .filter((live) => !dropped.has(live.finding.id))
-        .map((live) => {
-            const survivor = survivors.get(live.finding.id);
-            if (
-                survivor === undefined ||
-                !merged.merges.some(
-                    (merge) => merge.survivor === live.finding.id,
-                )
-            ) {
-                return live;
-            }
-            // The survivor's claim carries the "also flagged by" note (the lib
-            // projection puts the prose in `discussion`) and may have adopted a
-            // merged copy's suggestion; both must reach the rendered comment.
-            return {
-                ...live,
-                finding: {
-                    ...live.finding,
-                    model_authored_prose: survivor.discussion,
-                    ...(survivor.suggestion !== undefined
-                        ? {suggested_patch: survivor.suggestion}
-                        : {}),
-                },
-            };
-        });
-    return {
-        kept,
-        dedup: {
-            ...(report !== undefined ? {report} : {}),
-            result: {
-                candidates: claims.length,
-                merges: merged.merges,
-                proposed: proposals.length,
-                rejected: merged.clusterRejections,
-                clustererAbsent: clusterer === undefined,
-            },
-        },
-    };
 };
 
 /* -------------------------------------------------------------------------- */
@@ -1087,3 +957,5 @@ export const produceLive = async (
 /** Re-exported so the A/B runner types its recorded outputs without reaching
  * into internals. */
 export type {Finding};
+/** Re-exported so the dedup stage keeps one import surface with the producer. */
+export type {LiveDedupReport};

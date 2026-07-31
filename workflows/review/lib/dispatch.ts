@@ -118,9 +118,9 @@ export {
     dedupeClaims,
     suppressOpenThreadDuplicates,
     type ClaimMerge,
-    type ClusterRejection,
     type ThreadSuppression,
 } from "./dedup";
+export {type ClusterRejection} from "./dedup-cluster";
 
 /* -------------------------------------------------------------------------- */
 /* Seams                                                                      */
@@ -216,10 +216,6 @@ const DEFAULT_CONCURRENCY = 4;
 const TRIAGE = "pattern-triage";
 const RECONCILER = "thread-reconciler";
 const VALIDATOR = "claim-validator";
-
-/* -------------------------------------------------------------------------- */
-/* Agent definitions (.claude/agents/<name>.md)                               */
-/* -------------------------------------------------------------------------- */
 
 /* -------------------------------------------------------------------------- */
 /* The dispatch run                                                           */

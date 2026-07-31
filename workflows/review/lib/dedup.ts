@@ -71,6 +71,13 @@
 
 import {isRecord, type Claim, type ProposedCluster} from "./dispatch-contracts";
 import {isBlockingLabel} from "./render-comment";
+import {
+    clusterMemberRejection,
+    salientTokens,
+    sharesSalientToken,
+    verifiableClusters,
+    type ClusterRejection,
+} from "./dedup-cluster";
 // The identity of the review bot, shared with the producer that stages the
 // threads this module filters (stage-pr.ts). `threads.ts` owns a GitHub fetch
 // but runs nothing at import time and reaches the network only through an
@@ -102,27 +109,6 @@ export type ClaimMerge = {
     via: MergeVia;
     /** The clusterer's grounding evidence, when tier 2 found this group. */
     evidence?: string;
-};
-
-/**
- * One member a proposed cluster named that did NOT merge, with the rule that
- * rejected it. Recorded per run because an empty rejection list and an empty
- * proposal list mean opposite things, and the module has already been burned
- * by that ambiguity once (see {@link stagedThreadShapeFailure}): a clusterer
- * naming ids that do not exist is a prompt or staging failure, and it must not
- * read as "no duplicates found".
- */
-export type ClusterRejection = {
-    id: string;
-    reason:
-        | "unknown-id"
-        | "no-anchor"
-        | "other-path"
-        | "same-source"
-        | "blocking-member"
-        | "ungrounded"
-        | "already-clustered"
-        | "cluster-collapsed";
 };
 
 /**
@@ -237,186 +223,6 @@ export const describesSameDefect = (a: Claim, b: Claim): boolean => {
     );
 };
 
-/* -------------------------------------------------------------------------- */
-/* Tier 2: model-proposed defect clusters, code-verified                      */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Whether a token names something in the code rather than in English: an
- * interior case change (`maxSamples`, `AddDate`, `TrimTo`), an all-caps
- * initialism (`TTL`), an underscore (`created_at`, `expiration_test`), or a
- * multi-digit literal (`10`, `25`, `180`).
- *
- * This is the vocabulary tier 2's grounding check runs over, and it is
- * deliberately narrow. A single-digit number is noise (`0` appears in half of
- * all claims), and a bare lowercase word is English until proven otherwise —
- * `cutoff` and `samples` would ground almost any two claims about the same
- * file, which is precisely the confusion between "same code area" and "same
- * defect" that this tier exists to avoid. A defect nameable only in such words
- * is not model-mergeable; it falls back to tier 1, and a missed merge costs a
- * duplicate comment while a wrong one drops a reviewer's distinct finding.
- */
-const isSalientToken = (raw: string): boolean =>
-    /[a-z][A-Z]/.test(raw) ||
-    /^[A-Z]{2,}$/.test(raw) ||
-    raw.includes("_") ||
-    /^\d{2,}$/.test(raw);
-
-/** The code-naming tokens in a text, lowercased for comparison. */
-const salientTokens = (text: string): Set<string> => {
-    const tokens = new Set<string>();
-    for (const raw of text.match(/[A-Za-z_$][A-Za-z0-9_$]*|\d+/g) ?? []) {
-        if (isSalientToken(raw)) {
-            tokens.add(raw.toLowerCase());
-        }
-    }
-    return tokens;
-};
-
-/** Everything a claim says, for the grounding check (evidence lives anywhere). */
-const claimText = (claim: Claim): string =>
-    `${claim.subject} ${claim.discussion} ${claim.failure_scenario}`;
-
-const sharesSalientToken = (
-    evidenceTokens: ReadonlySet<string>,
-    claim: Claim,
-): boolean => {
-    const tokens = salientTokens(claimText(claim));
-    for (const token of evidenceTokens) {
-        if (tokens.has(token)) {
-            return true;
-        }
-    }
-    return false;
-};
-
-/**
- * The per-member rules a model-proposed merge must satisfy, checked against
- * the group's ACTUAL survivor (which union with tier 1 can change after the
- * proposal was made, so re-checking here rather than at parse time is what
- * keeps the guarantee honest):
- *
- * - **same path**, as in tier 1. Cross-file merging stays out of both tiers;
- *   its own calibration is a separate question and a missed merge is cheap.
- * - **different source**, as in tier 1: a reviewer does not duplicate itself,
- *   and collapsing two of one reviewer's findings would silently drop one.
- * - **grounded**: the cluster's evidence must name at least one code element
- *   ({@link isSalientToken}) and the member must mention one of them. This is
- *   the hallucination tripwire — a group whose members share no named code
- *   with the identity the model asserted is not an identity claim this module
- *   can check, so it does not merge.
- * - **non-blocking**: tier 2 may absorb an advisory copy into any survivor,
- *   but a BLOCKING claim only ever merges on tier 1's text floor. This is the
- *   risk grading, and the one place the tiers deliberately differ in power
- *   rather than in method. The model owns identity here, so a wrong grouping IS
- *   possible in a way no code check catches: "same facts, different ask" (run
- *   30301235749's AddDate handoff and the missing-test todo it rode both name
- *   `AddDate`, so grounding cannot separate them; only the clusterer's
- *   judgment does). Capping what such an error can cost is therefore part of
- *   the design: since the survivor is always the highest-severity copy, a false
- *   tier-2 merge can lose an advisory comment and can never lose a blocking
- *   finding or soften the verdict. The price is real and accepted: one defect
- *   flagged blocking by two sources in different words still posts twice
- *   unless tier 1 reaches it.
- *
- * Deliberately absent: any line requirement, and any text-similarity floor.
- * Both are what tier 2 exists to get past.
- */
-const clusterMemberRejection = (
-    survivor: Claim,
-    member: Claim,
-    evidenceTokens: ReadonlySet<string>,
-): ClusterRejection["reason"] | undefined => {
-    if (member.path !== survivor.path) {
-        return "other-path";
-    }
-    if (member.source === survivor.source) {
-        return "same-source";
-    }
-    if (isBlockingLabel(member.label)) {
-        return "blocking-member";
-    }
-    return sharesSalientToken(evidenceTokens, member)
-        ? undefined
-        : "ungrounded";
-};
-
-/**
- * Resolve the clusterer's proposals against the claim set: map ids to claims,
- * hold each claim to at most one cluster (first proposal wins, in the model's
- * own output order, so the result is deterministic), and drop what cannot
- * anchor a comment. Every drop is recorded.
- *
- * A cluster is kept here only as a MEMBERSHIP hint; the merge rules that
- * decide what actually collapses run later against the group's survivor
- * ({@link clusterMemberRejection}).
- */
-const verifiableClusters = (
-    claims: Claim[],
-    proposals: readonly ProposedCluster[],
-): {
-    /** Claim index -> cluster ordinal. */
-    clusterOf: Map<number, number>;
-    /** Cluster ordinal -> the model's grounding evidence. */
-    evidence: string[];
-    rejections: ClusterRejection[];
-} => {
-    const indexById = new Map<string, number>();
-    claims.forEach((claim, index) => {
-        if (!indexById.has(claim.id)) {
-            indexById.set(claim.id, index);
-        }
-    });
-    const clusterOf = new Map<number, number>();
-    const evidence: string[] = [];
-    const rejections: ClusterRejection[] = [];
-    for (const proposal of proposals) {
-        const members: number[] = [];
-        for (const id of proposal.ids) {
-            const index = indexById.get(id);
-            if (index === undefined) {
-                rejections.push({id, reason: "unknown-id"});
-                continue;
-            }
-            if (clusterOf.has(index)) {
-                rejections.push({id, reason: "already-clustered"});
-                continue;
-            }
-            const claim = claims[index];
-            if (claim.path === undefined || claim.line === undefined) {
-                rejections.push({id, reason: "no-anchor"});
-                continue;
-            }
-            members.push(index);
-        }
-        if (members.length < 2) {
-            for (const index of members) {
-                rejections.push({
-                    id: claims[index].id,
-                    reason: "cluster-collapsed",
-                });
-            }
-            continue;
-        }
-        const ordinal = evidence.length;
-        evidence.push(proposal.evidence);
-        for (const index of members) {
-            clusterOf.set(index, ordinal);
-        }
-    }
-    return {clusterOf, evidence, rejections};
-};
-
-/**
- * Same path, any line distance: run 29943085279 posted the
- * missing-deletion-test defect at expiration_test.go:15 and :58 (43 lines
- * apart), and the old two-line window kept both copies separate; the
- * similarity floors carry the precision, tiered on whether the two anchors
- * are identical. Cross-FILE merging stays out: that same run flagged the
- * defect in expiration.go too (:62, :38) and a floor loose enough to catch
- * a cross-file pair needs its own strictly higher calibration; a missed
- * merge only costs a duplicate comment.
- */
 /* -------------------------------------------------------------------------- */
 /* Open-thread suppression (trial suggestion g)                               */
 /* -------------------------------------------------------------------------- */
@@ -787,6 +593,16 @@ export const suppressOpenThreadDuplicates = (
     return {kept, suppressed};
 };
 
+/**
+ * Same path, any line distance: run 29943085279 posted the
+ * missing-deletion-test defect at expiration_test.go:15 and :58 (43 lines
+ * apart), and the old two-line window kept both copies separate; the
+ * similarity floors carry the precision, tiered on whether the two anchors
+ * are identical. Cross-FILE merging stays out: that same run flagged the
+ * defect in expiration.go too (:62, :38) and a floor loose enough to catch
+ * a cross-file pair needs its own strictly higher calibration; a missed
+ * merge only costs a duplicate comment.
+ */
 const mergeable = (a: Claim, b: Claim): boolean =>
     a.source !== b.source &&
     a.path !== undefined &&
