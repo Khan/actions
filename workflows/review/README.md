@@ -509,6 +509,13 @@ being papered over. The swap is recorded per agent (`fellBackTo`) and lands in
 the report and the run artifact: converting a silent skip into a silent model
 swap would trade one invisible failure for another.
 
+Because refusals are intermittent, the **rate** is what matters, and the weekly
+live counters report it: `lib/counters.ts` reads `fellBackTo` from each run's
+`out/dispatch-result.json`, and the job summary gains a "Refusal fallbacks"
+section per agent and model, including an explicit zero. A rate concentrated on
+one reviewer is a pin to change; a rate spread across many is a corpus or
+provider-policy shift.
+
 ### Models and effort per role
 
 Each sub-agent pins its model in its own definition inside `review.md` (with a
