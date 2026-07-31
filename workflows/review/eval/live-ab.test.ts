@@ -172,6 +172,126 @@ describe("selectCases", () => {
     });
 });
 
+describe("runArm dedup accounting", () => {
+    /**
+     * The arm-level half of the duplicate-comment gate. A powered run reads its
+     * merge rate from here, so the plumbing has to carry the numbers AND the
+     * groups: the run that graduated the clusterer could see that four claims
+     * merged but not which, and a false merge is only diagnosable from the ids
+     * and the evidence the clusterer grounded them in.
+     */
+    const produceMerged =
+        (clustererAbsent: boolean): ArmProduce =>
+        async () => ({
+            ...(await produceHit(1)(liveCase("case-1"))),
+            dedup: {
+                candidates: 4,
+                merges: [
+                    {
+                        survivor: "live-hit",
+                        merged: [
+                            {
+                                id: "live-doc-1",
+                                source: "documentation",
+                                label: "suggestion (non-blocking, documentation)",
+                                line: 9,
+                            },
+                        ],
+                        path: "src/a.ts",
+                        line: 1,
+                        via: "clusterer" as const,
+                        evidence: "the `maxSamples` comment says 10, not 25",
+                    },
+                    {
+                        survivor: "live-hit",
+                        merged: [
+                            {
+                                id: "live-conv-1",
+                                source: "conventions",
+                                label: "nitpick (non-blocking)",
+                            },
+                        ],
+                        path: "src/a.ts",
+                        line: 1,
+                        via: "similarity" as const,
+                    },
+                ],
+                proposed: 1,
+                rejected: [],
+                clustererAbsent,
+            },
+        });
+
+    it("carries the per-case counts and the merged groups", async () => {
+        const report = await runArm(
+            "candidate",
+            [liveCase("case-1")],
+            produceMerged(false),
+            {maxUsd: 10},
+        );
+        expect(report.perCase[0].dedup).toEqual({
+            candidates: 4,
+            merged: 2,
+            clusterMerged: 1,
+            rejected: 0,
+            clustererAbsent: false,
+            groups: [
+                {
+                    survivor: "live-hit",
+                    absorbed: ["live-doc-1"],
+                    via: "clusterer",
+                    evidence: "the `maxSamples` comment says 10, not 25",
+                },
+                {
+                    survivor: "live-hit",
+                    absorbed: ["live-conv-1"],
+                    via: "similarity",
+                },
+            ],
+        });
+    });
+
+    it("renders the merge row, marking an arm that never had the clusterer", async () => {
+        const baseline = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            produceMerged(true),
+            {maxUsd: 10},
+        );
+        const candidate = await runArm(
+            "candidate",
+            [liveCase("case-1")],
+            produceMerged(false),
+            {maxUsd: 10},
+        );
+        const markdown = renderMarkdownReport({
+            baseRef: "origin/main",
+            reviewMdSha: {baseline: "a".repeat(12), candidate: "b".repeat(12)},
+            arms: {baseline, candidate},
+            regressions: {lost: [], gained: []},
+            adversarialFailures: [],
+            gateRetries: [],
+        });
+        expect(markdown).toContain(
+            "Cross-source claims merged (of candidates)",
+        );
+        // `tier 1 only` is the expected baseline shape in the A/B that
+        // graduates the clusterer: a zero there is asymmetry, not a result.
+        expect(markdown).toContain("2 / 4 (tier 1 only)");
+        expect(markdown).toContain("2 / 4 (1 by clusterer)");
+    });
+
+    it("omits the block for a producer that runs no dedup at all", async () => {
+        const report = await runArm(
+            "candidate",
+            [liveCase("case-1")],
+            produceHit(1),
+            {maxUsd: 10},
+        );
+        expect(report.perCase[0].dedup).toBeUndefined();
+    });
+});
+
 describe("runArm", () => {
     it("scores cases, accounts cost, and reports agent failures", async () => {
         const report = await runArm(

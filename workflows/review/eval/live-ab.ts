@@ -253,6 +253,21 @@ export const runArm = async (
                               ),
                           rejected: produced.dedup.rejected.length,
                           clustererAbsent: produced.dedup.clustererAbsent,
+                          // The groups themselves, not just the count: the
+                          // powered run that graduated tier 2 could see THAT 4
+                          // claims merged but not WHICH, so auditing a
+                          // suspicious merge meant paying for the run again.
+                          // A false merge is the failure mode here, and it is
+                          // only diagnosable from the ids and the evidence the
+                          // clusterer grounded them in.
+                          groups: produced.dedup.merges.map((merge) => ({
+                              survivor: merge.survivor,
+                              absorbed: merge.merged.map((m) => m.id),
+                              via: merge.via,
+                              ...(merge.evidence !== undefined
+                                  ? {evidence: merge.evidence}
+                                  : {}),
+                          })),
                       },
                   }),
             failedAgents: produced.perAgent

@@ -12,6 +12,7 @@ import type {
     CorpusCase,
     RecordedFinding,
 } from "./corpus/loader";
+import type {MergeVia} from "../lib/dedup";
 import type {LiveCaseRun, LiveMetricsReport} from "./live-match";
 import type {
     LiveDedupReport,
@@ -72,6 +73,19 @@ export type ArmRunReport = {
             clusterMerged: number;
             rejected: number;
             clustererAbsent: boolean;
+            /**
+             * The merged groups themselves, so a suspicious merge is
+             * diagnosable from the artifact instead of from a repeat run: the
+             * survivor, the claim ids absorbed into it, which tier found the
+             * group, and (for a tier-2 group) the code element the clusterer
+             * grounded the identity in.
+             */
+            groups: {
+                survivor: string;
+                absorbed: string[];
+                via: MergeVia;
+                evidence?: string;
+            }[];
         };
         /** `<agent>: <reason>` per failed agent (diagnosable from the report). */
         failedAgents: string[];
