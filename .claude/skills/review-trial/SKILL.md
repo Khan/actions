@@ -151,17 +151,23 @@ that cannot anchor on a prior fingerprint reports `stampSource: null` in
 `out/rereview-plan.json` and executes `depth: full` with `staging: whole-diff`
 even where ROUTING says `scoped`, which is visually indistinguishable from a
 genuine carrier gap and silently voids the scoped-cost sample that round was
-supposed to produce. Note what the carrier does and does not tolerate, because
-it is easy to assume the wrong one: the hunk signature is content-hashed over
-each hunk's added and removed lines, so SHA rewrites and shifted line numbers
-do NOT move it (`workflows/review/lib/rereview-mode.ts`), and the cache
-record's `commitSha` is written but never read back, so a rebase alone should
-not refuse the carrier. What actually loses the anchor is losing the RECORD
-(cache eviction, or a credit-capped run that died before Step 9 wrote it), and
-a force-pushed round is exactly the round where that goes unnoticed and gets
-blamed on the rebase. So: read `stampSource` out of the plan artifact every
-round rather than inferring the carrier state, and discard scoped-cost samples
-from any round that did not anchor.
+supposed to produce. `stampSource` in that artifact is the authoritative answer
+to "did this round anchor?"; read it every round rather than inferring the
+carrier state from the shape of the push, and discard scoped-cost samples from
+any round that did not anchor.
+
+The carrier internals below explain why a rebase is usually the wrong suspect,
+but they are incidental properties of today's implementation rather than
+contracts, so do not reason from them in place of the artifact. As of 2026-07:
+the hunk signature is content-hashed over each hunk's added and removed lines,
+so SHA rewrites and shifted line numbers do NOT move it
+(`workflows/review/lib/rereview-mode.ts`), and the cache record's `commitSha`
+is written but never read back. On that basis a rebase alone should not refuse
+the carrier, and what actually loses the anchor is losing the RECORD (cache
+eviction, or a credit-capped run that died before Step 9 wrote it); a
+force-pushed round is exactly the round where that goes unnoticed and gets
+blamed on the rebase. If a future change starts validating `commitSha` on
+restore, this paragraph is what goes stale, not the `stampSource` rule above.
 
 When an arm runs a reduced re-review mode (`re-review` in ROUTING), also
 record per push: the executed depth and tripwire fields from the run's
@@ -220,5 +226,7 @@ onto a long-lived branch. Leave the collected transcripts with the operator
 - One arm per PR; distinct workflow names; a fresh lock filename per trial;
   exactly one reviewer per PR.
 - Forward-only pushes once a round has been reviewed; no force-pushes mid-trial.
+- Read `stampSource` from every round's plan artifact; scoped-cost samples from
+  non-anchored rounds are void.
 - Score before cleanup; export before cleanup; never lose transcripts.
 - Faithful reporting, including the arm you expected to win losing.
