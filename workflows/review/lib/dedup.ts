@@ -181,7 +181,9 @@ export type ThreadSuppression = {
      * Whether the matched thread's OPENING comment carries a blocking label.
      * The verdict floor keys on this, not on the candidate's own label: the
      * thread's severity survived last run's validation, while a suppressed
-     * candidate is dropped before validation ever sees it.
+     * candidate is dropped before validation ever sees it. Read off the
+     * BEST-matching thread ({@link bestOpenThreadMatch}), since among several
+     * threads that clear the floor their labels can differ.
      */
     threadBlocking: boolean;
 };
@@ -303,11 +305,14 @@ export const openThreadsFromStaged = (
             ];
         });
 
-/** Whether a claim clearly describes the defect an open thread tracks. */
-export const describesOpenThreadDefect = (
-    claim: Claim,
-    thread: OpenThread,
-): boolean => {
+/** How strongly a claim's text matches one open thread's opener. */
+type OpenThreadScore = {
+    jaccard: number;
+    overlap: number;
+    sharedBigrams: number;
+};
+
+const openThreadScore = (claim: Claim, thread: OpenThread): OpenThreadScore => {
     const tokensA = contentTokens(
         `${claim.subject} ${claim.discussion} ${claim.failure_scenario}`,
     );
@@ -315,12 +320,22 @@ export const describesOpenThreadDefect = (
     const setA = new Set(tokensA);
     const setB = new Set(tokensB);
     if (setA.size === 0 || setB.size === 0) {
-        return false;
+        return {jaccard: 0, overlap: 0, sharedBigrams: 0};
     }
     const shared = intersectionSize(setA, setB);
-    const jaccard = shared / (setA.size + setB.size - shared);
-    const overlap = shared / Math.min(setA.size, setB.size);
-    const sharedBigrams = intersectionSize(bigrams(tokensA), bigrams(tokensB));
+    return {
+        jaccard: shared / (setA.size + setB.size - shared),
+        overlap: shared / Math.min(setA.size, setB.size),
+        sharedBigrams: intersectionSize(bigrams(tokensA), bigrams(tokensB)),
+    };
+};
+
+/** Whether a claim clearly describes the defect an open thread tracks. */
+export const describesOpenThreadDefect = (
+    claim: Claim,
+    thread: OpenThread,
+): boolean => {
+    const {jaccard, overlap, sharedBigrams} = openThreadScore(claim, thread);
     // The different-line tier: this match has no line window at all (see
     // `suppressOpenThreadDuplicates`), so it pays for the loose anchor with
     // the higher bigram floor, exactly as a cross-source pair on mismatched
@@ -331,6 +346,60 @@ export const describesOpenThreadDefect = (
         overlap >= OTHER_LINE_FLOOR.overlap &&
         sharedBigrams >= OTHER_LINE_FLOOR.sharedBigrams
     );
+};
+
+/**
+ * The open thread a candidate BEST matches, not merely the first one it clears
+ * the floor against.
+ *
+ * More than one open thread can describe the same area of a file, and taking
+ * the first match in staging order reads `threadBlocking` off a thread that is
+ * not the candidate's counterpart. Measured on webapp#41204 run 30650642317,
+ * the first live run where suppression fired: the fresh test-adequacy todo
+ * ("no test covers Record's documented zero-valued-Window guarantee") cleared
+ * the floor against BOTH the blocking nil-map panic thread and its own exact
+ * counterpart, a non-blocking nitpick whose opener reads "The documented
+ * zero-value-Window guarantee has no test". Staging order put the blocking
+ * thread first because it was the older one, so the suppression recorded
+ * `threadBlocking: true` and added a second entry to submission.ts's verdict
+ * floor. That run's verdict was already floored correctly by another
+ * suppression, so nothing was mis-decided, but the direction is the dangerous
+ * one: attributing a candidate to a blocking thread that is not its match
+ * forces REQUEST_CHANGES on thinner evidence than the both-sides-blocking rule
+ * intends.
+ *
+ * Ranked on `jaccard` first because it is the length-normalized metric: raw
+ * `sharedBigrams` grows with the opener's length, and `overlap` divides by the
+ * smaller token set, which favors the longer, more discursive thread. On the
+ * observed pair both jaccard (0.253 vs 0.218) and bigrams (13 vs 12) pick the
+ * true counterpart while overlap alone (0.468 vs 0.511) picks the wrong one,
+ * so bigrams break jaccard ties and overlap never ranks. Strictly-better
+ * comparisons keep staging order as the final tiebreak, so an exact scoring
+ * tie behaves as it did before.
+ */
+const bestOpenThreadMatch = (
+    claim: Claim,
+    threads: readonly OpenThread[],
+): OpenThread | undefined => {
+    let best: {thread: OpenThread; score: OpenThreadScore} | undefined;
+    for (const thread of threads) {
+        if (
+            thread.path !== claim.path ||
+            !describesOpenThreadDefect(claim, thread)
+        ) {
+            continue;
+        }
+        const score = openThreadScore(claim, thread);
+        const better =
+            best === undefined ||
+            score.jaccard > best.score.jaccard ||
+            (score.jaccard === best.score.jaccard &&
+                score.sharedBigrams > best.score.sharedBigrams);
+        if (better) {
+            best = {thread, score};
+        }
+    }
+    return best?.thread;
 };
 
 /**
@@ -424,7 +493,9 @@ export const threadSuppressionUnavailableWarning = (
  * still-open, re-confirmed blocking objection (submission.ts floors only
  * when BOTH are blocking: the thread's severity is the validated one, and
  * the candidate's re-confirmation at blocking severity is what makes the
- * floor more than a stale thread).
+ * floor more than a stale thread). Which thread a candidate is attributed to
+ * is {@link bestOpenThreadMatch}'s call, not staging order's, because
+ * `threadBlocking` is read off it.
  */
 export const suppressOpenThreadDuplicates = (
     claims: Claim[],
@@ -439,11 +510,7 @@ export const suppressOpenThreadDuplicates = (
         const match =
             claim.path === undefined
                 ? undefined
-                : threads.find(
-                      (thread) =>
-                          thread.path === claim.path &&
-                          describesOpenThreadDefect(claim, thread),
-                  );
+                : bestOpenThreadMatch(claim, threads);
         if (match === undefined) {
             kept.push(claim);
             continue;
