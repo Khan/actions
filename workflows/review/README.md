@@ -330,6 +330,31 @@ label". A consequence for consumers: autofix reads labels minted by whichever
 reviewer version the repo has **installed**, so a repo must be on a review release
 carrying this label before a documentation-scoped autofix finds anything.
 
+**Volume is part of its policy.** The definition caps this reviewer at one finding per
+comment, two per file, and five per review, and ranks the policy's clauses so the tail
+is dropped from the bottom (restatement cleanups go first; a comment the diff falsified
+never does). The cap is there because the failure mode is not precision, it is
+attention: on a 70-line fixture the reviewer returned seven findings, several of them the
+docstring half of a blocking finding whose code fix resolved the observation anyway, and
+one the *fourth* thread on a single comment. Two other rules do the same work from
+different directions — the definition refuses the docstring half of a code defect
+outright, and `dedup.ts` merges cross-source duplicates before validation. Note which
+way that merge resolves: the survivor is the highest-severity copy, so a documentation
+finding merged into a blocking one loses the `documentation` label and with it its
+eligibility for `autofix: docs`. That is the right outcome (the code fix settles both)
+and it means tightening dedup narrows the docs autofix worklist toward standalone
+comment defects rather than shrinking review coverage.
+
+**It does not converge with the docs autofix scope, by construction.** A docs-scoped
+autofix commit's added lines are comment text, which is this reviewer's subject matter,
+so they land in the next re-review's newly-changed-code scope by construction: in
+Khan/webapp#41207 a clean 5-of-5 docs fix drew three fresh documentation findings on the
+prose the fixer had just written. That is why `autofix: docs` is loop-ineligible
+permanently under the current scope model; the volume caps above bound how many
+findings such a cycle emits, not whether the fixer's prose lands in the next
+cycle's in-scope set. `workflows/autofix/lib/scope.ts` carries the full argument, and any
+future cadence axis needs an authorship-aware scope bound before it can include `docs`.
+
 The eval corpus carries a matched pair
 (`golden-documentation-stale-and-narrated`, `clean-documentation-earned-comments`):
 one change that leaves two real documentation defects, one whose comments all earn

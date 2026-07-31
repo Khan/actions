@@ -113,6 +113,8 @@ importers:
 
   actions/shared-node-cache: {}
 
+  workflows/autofix: {}
+
   workflows/review:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
