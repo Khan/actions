@@ -606,12 +606,15 @@ Optional:
 
 - `REVIEW_BOT_LOGIN` — the account this workflow posts reviews as, default
   `github-actions[bot]`. Set it only in a repo that posts under its own GitHub
-  App. It is read by one predicate (`lib/threads.ts`'s `isReviewBotAuthor`),
-  which both the thread staging and open-thread suppression go through, so the
-  two layers cannot disagree about the identity. Getting it wrong is not
-  cosmetic: threads the bot opened would be filed as human ones, which puts
-  their lines in `skipLines` and DROPS fresh findings there. Either spelling
-  works (`name` or `name[bot]`); the comparison strips the suffix.
+  App, in the installed `review.md`'s workflow-level `env:` block (the one
+  carrying `REVIEW_MAX_AI_CREDITS`), which reaches both the staging step and
+  the dispatcher. It is read by one predicate (`lib/threads.ts`'s
+  `isReviewBotAuthor`), which both the thread staging and open-thread
+  suppression go through, so the two layers cannot disagree about the identity.
+  Getting it wrong is not cosmetic: threads the bot opened would be filed as
+  human ones, which puts their lines in `skipLines` and DROPS fresh findings
+  there. Either spelling works (`name` or `name[bot]`); the comparison strips
+  the suffix.
 
 ## Versioning
 
