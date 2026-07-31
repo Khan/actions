@@ -359,6 +359,9 @@ export const runDispatch = async (
         | {depth?: unknown}
         | undefined;
     const depth = typeof plan?.depth === "string" ? plan.depth : "full";
+    // The unresolved bot threads, staged by code before the agent started
+    // (stage-pr.ts). `hasThreads` gates the reconciler dispatch, so it changes
+    // the roster: a first review with no prior threads dispatches none.
     const threads = readJson(fs, `${REVIEW_DIR}/threads.json`);
     const hasThreads = Array.isArray(threads) && threads.length > 0;
 
@@ -761,8 +764,10 @@ export const runDispatch = async (
     // are exempt; when the reconciler was unavailable, nothing resolves, so
     // every staged bot thread suppresses (fail toward fewer duplicate
     // threads). The bot-opener filter, and the check for a staging whose shape
-    // defeats it and so suppresses nothing, both live in dedup.ts: threads.json
-    // staging is prompt-executed and unenforced upstream.
+    // defeats it and so suppresses nothing, both live in dedup.ts beside the
+    // rules they enforce; the staging is code now (stage-pr.ts), and the guards
+    // stay so a producer bug degrades to a duplicate, never to a dropped
+    // finding.
     const resolvedIds = new Set(reconciliation?.resolve ?? []);
     const openThreads = openThreadsFromStaged(threads, resolvedIds);
     const suppression = suppressOpenThreadDuplicates(claims, openThreads);

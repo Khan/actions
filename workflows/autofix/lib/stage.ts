@@ -39,6 +39,16 @@
 import {buildUnifiedDiff} from "../../review/lib/stage-pr.ts";
 import type {StagedThread} from "../../review/lib/rereview.ts";
 import type {PriorReview} from "../../review/lib/rereview-mode.ts";
+import {
+    assertNoGraphqlErrors,
+    collectUnresolvedThreads,
+    sameLogin,
+} from "../../review/lib/threads.ts";
+
+// Re-exported for the CLI transport below and for this module's tests: the
+// guard moved to the shared module with the fetch it protects, and both callers
+// still want it by this name.
+export {assertNoGraphqlErrors};
 
 /** The five files the plan CLI reads, plus the head SHA the prompt re-checks. */
 export type StagedInputs = {
@@ -87,107 +97,18 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
 /**
- * Compare two GitHub logins across the REST/GraphQL bot-suffix split.
- *
- * REST reports an App's login as `github-actions[bot]`; GraphQL reports the
- * same actor as `github-actions`. Staging reads threads over GraphQL and
- * reviews over REST, so a single spelling cannot match both. Comparing on the
- * suffix-stripped form does.
- *
- * This is not hypothetical: the first run with deterministic staging staged
- * `threadCount: 0` on a PR carrying five reviewer threads, because every
- * GraphQL author was `github-actions` and the configured login was
- * `github-actions[bot]` (Khan/webapp#41140, run 30416237794). Unit tests could
- * not have caught it; the fixtures were written in the REST spelling.
- */
-const baseLogin = (login: string): string =>
-    login.endsWith("[bot]") ? login.slice(0, -"[bot]".length) : login;
-
-const sameLogin = (a: string, b: string): boolean =>
-    baseLogin(a).toLowerCase() === baseLogin(b).toLowerCase();
-
-/**
- * Review threads with their full reply chain.
- *
- * `comments(first: 100)` rather than the sweep's `first: 1`: the reconciler
- * contract wants the whole chain, because an author's reply is often what says
- * a finding is already handled. `isResolved` is fetched so resolved threads can
- * be dropped here rather than downstream.
- */
-const THREADS_QUERY = `
-query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
-    repository(owner: $owner, name: $repo) {
-        pullRequest(number: $number) {
-            reviewThreads(first: 100, after: $cursor) {
-                pageInfo { hasNextPage endCursor }
-                nodes {
-                    id
-                    isResolved
-                    path
-                    line
-                    comments(first: 100) {
-                        nodes { author { login } body url }
-                    }
-                }
-            }
-        }
-    }
-}`;
-
-/**
- * Throw when a GraphQL body carries errors, mirroring the REST paths' `throw`.
- *
- * GraphQL does not use HTTP status to report failure. GitHub answers
- * `RATE_LIMITED`, node-access failures, and partial field failures with HTTP
- * **200** and an `errors` array, `data` absent or partial. A transport that
- * only checks `res.ok` therefore reads a throttled response as a successful
- * one, and every downstream reader sees a PR with no threads.
- *
- * Any `errors` entry is fatal here, including the partial-data case. Staging a
- * subset of the reviewer's threads is worse than refusing: the plan would fix
- * the threads that happened to arrive, clear the arming label, and report a
- * clean run, leaving the rest silently unaddressed with nothing left to
- * re-arm.
- */
-export const assertNoGraphqlErrors = (body: unknown): void => {
-    if (!isRecord(body)) {
-        return;
-    }
-    const errors = body["errors"];
-    if (Array.isArray(errors) && errors.length > 0) {
-        throw new Error(`GraphQL errors: ${JSON.stringify(errors)}`);
-    }
-};
-
-const threadsConnectionOf = (
-    body: unknown,
-): Record<string, unknown> | undefined => {
-    if (!isRecord(body)) {
-        return undefined;
-    }
-    const data = body["data"];
-    if (!isRecord(data)) {
-        return undefined;
-    }
-    const repository = data["repository"];
-    if (!isRecord(repository)) {
-        return undefined;
-    }
-    const pullRequest = repository["pullRequest"];
-    if (!isRecord(pullRequest)) {
-        return undefined;
-    }
-    const threads = pullRequest["reviewThreads"];
-    return isRecord(threads) ? threads : undefined;
-};
-
-/**
  * Collect the bot's unresolved threads, newest page last.
  *
  * A thread is kept when it is unresolved and its FIRST comment is the bot's:
  * that opener is the finding. A thread a human started is somebody else's
  * conversation and autofix stays out of it, which is the same line the reviewer
- * draws with its `human-threads.json`.
+ * draws with its `human-threads.json`; and, since that file became code-staged
+ * too, it is drawn from the very same fetch. The GraphQL query, its paging, and
+ * its fail-closed guards now live once in `review/lib/threads.ts`, along with
+ * the suffix-stripped login comparison that a REST/GraphQL split makes
+ * mandatory (Khan/webapp#41140 staged `threadCount: 0` on a PR carrying five
+ * threads because a configured `github-actions[bot]` never matched GraphQL's
+ * bare `github-actions`). All this function adds is the by-opener filter.
  */
 export const collectThreads = async (
     port: StagePort,
@@ -195,87 +116,12 @@ export const collectThreads = async (
     repo: string,
     number: number,
     botLogin: string,
-): Promise<StagedThread[]> => {
-    const out: StagedThread[] = [];
-    let cursor: string | null = null;
-
-    for (;;) {
-        const body = await port.graphql(THREADS_QUERY, {
-            owner,
-            repo,
-            number,
-            cursor,
-        });
-        // Fail closed on both shapes a failed query can take. `errors` is the
-        // throttled/partial case; a missing connection is any other malformed
-        // body. Neither means "this PR has no threads", and reading them that
-        // way is the one mistake this module cannot afford: an empty
-        // threads.json makes the plan a no-op, the no-op populates
-        // `labelsToRemove`, and the run tells the author there is nothing to
-        // fix while the blocking findings it was armed for sit open. The label
-        // is gone, so nothing survives to re-arm from. The REST paths already
-        // throw on `!res.ok` for exactly this reason; this is that contract
-        // applied to the transport that does not signal failure by status.
-        assertNoGraphqlErrors(body);
-        const conn = threadsConnectionOf(body);
-        if (conn === undefined) {
-            throw new Error(
-                `GraphQL returned no reviewThreads connection for ` +
-                    `${owner}/${repo}#${number}`,
-            );
-        }
-
-        const nodes = Array.isArray(conn["nodes"]) ? conn["nodes"] : [];
-        for (const node of nodes) {
-            if (!isRecord(node) || node["isResolved"] === true) {
-                continue;
-            }
-
-            const commentsConn = isRecord(node["comments"])
-                ? node["comments"]
-                : {};
-            const rawComments = Array.isArray(commentsConn["nodes"])
-                ? commentsConn["nodes"]
-                : [];
-            const comments = rawComments.filter(isRecord).map((c) => ({
-                author: isRecord(c["author"]) ? str(c["author"]["login"]) : "",
-                // Verbatim. The label parser reads the leading `**label:**` off
-                // this string; normalising it here is how a finding becomes
-                // unclassifiable.
-                body: str(c["body"]),
-            }));
-            if (
-                comments.length === 0 ||
-                !sameLogin(comments[0].author, botLogin)
-            ) {
-                continue;
-            }
-
-            const firstUrl = isRecord(rawComments[0])
-                ? str(rawComments[0]["url"])
-                : "";
-            out.push({
-                thread_id: str(node["id"]),
-                path: str(node["path"]),
-                line: typeof node["line"] === "number" ? node["line"] : null,
-                ...(firstUrl === "" ? {} : {url: firstUrl}),
-                comments,
-            });
-        }
-
-        const pageInfo = isRecord(conn["pageInfo"]) ? conn["pageInfo"] : {};
-        if (pageInfo["hasNextPage"] !== true) {
-            break;
-        }
-        const next = pageInfo["endCursor"];
-        if (typeof next !== "string" || next === "") {
-            break;
-        }
-        cursor = next;
-    }
-
-    return out;
-};
+): Promise<StagedThread[]> =>
+    (await collectUnresolvedThreads(port.graphql, owner, repo, number)).filter(
+        (thread) =>
+            thread.comments.length > 0 &&
+            sameLogin(thread.comments[0].author, botLogin),
+    );
 
 /** Fetch everything the plan needs. */
 export const collectInputs = async (

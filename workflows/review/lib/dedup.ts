@@ -23,6 +23,11 @@
 
 import {isRecord, type Claim} from "./dispatch-contracts";
 import {isBlockingLabel} from "./render-comment";
+// The identity of the review bot, shared with the producer that stages the
+// threads this module filters (stage-pr.ts). `threads.ts` owns a GitHub fetch
+// but runs nothing at import time and reaches the network only through an
+// injected port, so the determinism boundary above still holds here.
+import {isReviewBotAuthor} from "./threads";
 
 export type ClaimMerge = {
     survivor: string;
@@ -222,48 +227,41 @@ const threadProse = (body: string): string =>
         .replace(/^\s*\*{0,2}[a-z]+ \([^)]*\)\*{0,2}:?\*{0,2}\s*/i, "");
 
 /**
- * Whether a staged thread carries the tool's own "still open" state. The
- * orchestrator stages `resolved` copied from `get_review_comments`'
- * `is_resolved`; both the tool's spelling and the camelCase form are accepted
- * so a verbatim copy also lands. Absent reads as unknown, not as open.
+ * Whether a staged thread carries a "still open" state. `stage-pr.ts` writes
+ * `resolved: false` on every thread it stages; the `get_review_comments`
+ * spelling (`is_resolved`) and the camelCase form are still accepted, because
+ * a staging assembled from that tool's output (the eval's producers, and any
+ * hand-built staging used to reproduce a run) inherits its shape. Absent
+ * reads as unknown, not as open.
  */
 const stagedResolvedState = (thread: Record<string, unknown>): unknown =>
     thread["resolved"] ?? thread["is_resolved"] ?? thread["isResolved"];
 
 /**
- * The bot's author spellings, both of which are the same identity. The REST
- * surfaces (`user.login` on a review, which stage-pr.ts reads) render a bot
- * as `github-actions[bot]`; `get_review_comments`, which stages the threads
- * this module consumes, renders the SAME account as bare `github-actions`.
- * Accepting only the bracketed form is what made suppression unreachable on
- * every conforming run: the prompt tells the orchestrator to copy `author`
- * from the tool output verbatim, so a correct staging never matched.
- */
-const BOT_AUTHORS = new Set(["github-actions[bot]", "github-actions"]);
-
-/**
- * Build the suppression inputs from staged threads.json. The staging is
- * prompt-executed (review.md asks the orchestrator for the unresolved
- * github-actions[bot] threads; stage-pr.ts deliberately does not stage
- * threads yet), so BOTH properties suppression depends on are enforced HERE
- * in code rather than trusted from the prompt:
- * - the opener is the bot's, in either spelling ({@link BOT_AUTHORS}). A
- *   mis-staged human thread must never silently kill a candidate, and its
- *   free-text opener would also read as non-blocking and skip the verdict
- *   floor.
- * - the thread is still open, per the `resolved` flag staged from the tool's
- *   own `is_resolved`. A mis-staged already-resolved thread would otherwise
- *   suppress a genuine regression re-flag with nothing to check it against.
+ * Build the suppression inputs from staged threads.json. `stage-pr.ts` is the
+ * producer (one GraphQL fetch, partitioned by opener), and it selects the
+ * bot's threads through the SAME {@link isReviewBotAuthor} predicate this
+ * filter admits them by, which is the point of the shared constant: the two
+ * layers spelling the identity separately is precisely how suppression became
+ * unreachable for a release (Khan/actions#302). The guards below nonetheless
+ * stay, because they are the properties suppression depends on and a producer
+ * bug must degrade to a duplicate comment rather than to a dropped finding:
+ * - the opener is the bot's, in either spelling. A human thread must never
+ *   silently kill a candidate, and its free-text opener would also read as
+ *   non-blocking and skip the verdict floor.
+ * - the thread is still open, per the staged `resolved` flag. An
+ *   already-resolved thread would otherwise suppress a genuine regression
+ *   re-flag with nothing to check it against.
  * Threads in resolvedIds (reconciler-resolved this run) are exempt as well: a
  * fixed defect posting again is a fresh finding. Fails closed on each: a
  * thread without a bot-authored opener, or without an explicit
  * `resolved: false`, never suppresses (worst case is a duplicate comment).
  *
- * `path` is read from the thread and falls back to the opening comment, since
- * `get_review_comments` carries `path` per comment rather than per thread and
- * a verbatim staging inherits that shape. The fallback is not cosmetic:
- * {@link suppressOpenThreadDuplicates} matches on `path`, so a thread staged
- * without one silently suppresses nothing.
+ * `path` is read from the thread and falls back to the opening comment: the
+ * code producer carries `path` per thread, while `get_review_comments` carries
+ * it per comment, so a staging built from that tool inherits the other shape.
+ * The fallback is not cosmetic: {@link suppressOpenThreadDuplicates} matches
+ * on `path`, so a thread staged without one silently suppresses nothing.
  */
 export const openThreadsFromStaged = (
     threads: unknown,
@@ -283,7 +281,7 @@ export const openThreadsFromStaged = (
                 resolvedIds.has(thread["thread_id"]) ||
                 stagedResolvedState(thread) !== false ||
                 typeof author !== "string" ||
-                !BOT_AUTHORS.has(author)
+                !isReviewBotAuthor(author)
             ) {
                 return [];
             }
@@ -345,6 +343,16 @@ export const describesOpenThreadDefect = (
  * the author-spelling mismatch above reached production: it survived a whole
  * three-round seeded lifecycle (webapp#41197) posting duplicate comments while
  * every run reported an empty suppression list and looked correct.
+ *
+ * Kept after the producer became code, not deleted. A conforming `stage-pr.ts`
+ * run can no longer trip it (it stages only bot-opened, unresolved threads,
+ * selected by this filter's own predicate, and a mass reconciler-resolve is
+ * excluded per id below), which is the point: a fire now means either that the
+ * producer and this consumer have drifted apart inside one repo (a code bug,
+ * still the exact failure class #302 was), or that the staging came from
+ * somewhere else (the eval's live producer, a hand-built reproduction).
+ * A tripwire that cannot fire on today's code costs one comparison and is the
+ * only thing standing between the next shape drift and another silent release.
  *
  * Threads the reconciler resolved this run are excluded, since those are
  * legitimately unusable — counted per thread against `resolvedIds` rather than

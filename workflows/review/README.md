@@ -24,7 +24,9 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
    stages the whole review context on disk: the PR metadata and changed files
    (fetched from the GitHub API), the rebuilt unified diff, the diff facts
    (fingerprint and hunk signature) and newly-changed-code scope, the prior bot
-   reviews, the router's first pass, the changed-line provenance map, a
+   reviews, the PR's unresolved review threads (split into this bot's own, with
+   their full reply chains, and the `{path, line}` of everyone else's, which the
+   review defers to), the router's first pass, the changed-line provenance map, a
    whole-change diff with `linguist-generated` files stripped (what every
    whole-change reviewer and specialist lens reads, so a lock-file-heavy PR
    cannot balloon their context), and the re-review depth plan. The
