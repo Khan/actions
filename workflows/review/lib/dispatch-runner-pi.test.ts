@@ -321,6 +321,8 @@ describe("createPiRunner", () => {
         // The empty-final signature: no text, and a stop reason that says why.
         expect(result.output).toBe("");
         expect(result.stopReason).toBe("refusal");
+        // Either field trips it; the sibling runners key off the normalized one.
+        expect(result.refused).toBe(true);
     });
 
     it("keeps the provider failure detail behind stopReason=error", async () => {
@@ -354,6 +356,48 @@ describe("createPiRunner", () => {
             input: 209_000,
             total: 210_000,
         });
+    });
+
+    it("honors allowedTools, the boundary on what a sub-agent can touch", async () => {
+        let names: string[] = [];
+        loop = ({context}) => {
+            names = (context["tools"] as {name: string}[]).map((t) => t.name);
+            return Promise.resolve([]);
+        };
+        const runner = await createPiRunner({
+            allowedTools: ["Read", "Grep", "Glob"],
+        });
+        await runner(request());
+        expect(names).toEqual(["Read", "Grep", "Glob"]);
+        // The excluded tools must not reach the agent at all: an unregistered
+        // tool cannot be called, which is the guarantee this seam rests on
+        // (Pi has no permission layer to fall back to).
+        expect(names).not.toContain("Bash");
+        expect(names).not.toContain("LS");
+    });
+
+    it("grants the full surface when allowedTools is omitted", async () => {
+        let names: string[] = [];
+        loop = ({context}) => {
+            names = (context["tools"] as {name: string}[]).map((t) => t.name);
+            return Promise.resolve([]);
+        };
+        const runner = await createPiRunner();
+        await runner(request());
+        expect(names).toEqual(["Read", "Grep", "Glob", "LS", "Bash"]);
+    });
+
+    it("keeps submit_result available under a restricted surface", async () => {
+        // The contract channel is not an investigation tool; restricting the
+        // toolbox must not cost the agent its only way to deliver a result.
+        let names: string[] = [];
+        loop = ({context}) => {
+            names = (context["tools"] as {name: string}[]).map((t) => t.name);
+            return Promise.resolve([]);
+        };
+        const runner = await createPiRunner({allowedTools: ["Read"]});
+        await runner(request({validate: () => null}));
+        expect(names).toEqual(["Read", "submit_result"]);
     });
 
     it("frames the sub-agent with a system prompt", async () => {

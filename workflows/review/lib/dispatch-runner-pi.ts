@@ -167,6 +167,11 @@ export const createReviewTools = (cwd: string): PiTool[] => [
     {
         name: "Read",
         label: "Read",
+        // PARITY GAP: the SDK Read takes offset/limit and allows more output;
+        // this one has no windowing and truncates at MAX_TOOL_OUTPUT_CHARS, so
+        // a sub-agent reading a large file gets a silently narrower view under
+        // the Pi harness. Relevant when a Pi arm "misses" something the SDK arm
+        // saw on a big file.
         description:
             "Read a file from the repository. Returns the file with 1-indexed line numbers.",
         parameters: schema(
@@ -206,6 +211,12 @@ export const createReviewTools = (cwd: string): PiTool[] => [
     {
         name: "Glob",
         label: "Glob",
+        // PARITY GAP: `find -path` matches `*` ACROSS `/`, so `src/*.ts` also
+        // matches nested files that a real glob library would exclude, and
+        // `**` differs too. A Pi arm can therefore see a wider file set than
+        // the SDK arm for the same pattern. Documented rather than normalized
+        // because it widens rather than narrows the view; narrow it before
+        // reading any A/B result that turns on file discovery.
         description: "Find files whose path matches a glob pattern.",
         parameters: schema(
             {pattern: str("Glob pattern, e.g. 'src/**/*.ts'.")},
@@ -542,7 +553,8 @@ export const createPiRunner = async (
                     errorMessage,
                     rawStopReason,
                     tokensAtFailure,
-                    refused: rawStopReason === "refusal",
+                    refused:
+                        stopReason === "refusal" || rawStopReason === "refusal",
                     wallMs: Date.now() - started,
                     structured: true,
                 };
@@ -556,7 +568,8 @@ export const createPiRunner = async (
                 errorMessage,
                 rawStopReason,
                 tokensAtFailure,
-                refused: rawStopReason === "refusal",
+                refused:
+                    stopReason === "refusal" || rawStopReason === "refusal",
                 wallMs: Date.now() - started,
             };
         } catch (error) {

@@ -171,10 +171,19 @@ export const piRunner = (): LiveAgentRunner => {
  * The runner the eval should use, chosen by the same `REVIEW_DISPATCH_RUNNER`
  * switch the production dispatcher reads (`sdk` default, `pi` opt-in).
  */
-export const selectedRunner = (): LiveAgentRunner =>
-    (process.env.REVIEW_DISPATCH_RUNNER ?? "sdk") === "pi"
-        ? piRunner()
-        : sdkRunner();
+export const selectedRunner = (): LiveAgentRunner => {
+    // Throw on an unknown value rather than silently falling back to the SDK,
+    // matching dispatch.ts. A typo (`sdkk`, `claude`) would otherwise run the
+    // SDK arm while the operator believed they were measuring Pi — the arm
+    // under test silently swapped, which is the worst failure this seam has.
+    const which = process.env.REVIEW_DISPATCH_RUNNER ?? "sdk";
+    if (which !== "sdk" && which !== "pi") {
+        throw new Error(
+            `REVIEW_DISPATCH_RUNNER must be "sdk" or "pi", got "${which}"`,
+        );
+    }
+    return which === "pi" ? piRunner() : sdkRunner();
+};
 
 /* -------------------------------------------------------------------------- */
 /* CLI                                                                        */
