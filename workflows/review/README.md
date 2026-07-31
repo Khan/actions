@@ -349,8 +349,10 @@ comment defects rather than shrinking review coverage.
 autofix commit's added lines are comment text, which is this reviewer's subject matter,
 so they land in the next re-review's newly-changed-code scope by construction: in
 Khan/webapp#41207 a clean 5-of-5 docs fix drew three fresh documentation findings on the
-prose the fixer had just written. That is why `autofix: docs` is permanently
-loop-ineligible; `workflows/autofix/lib/scope.ts` carries the full argument, and any
+prose the fixer had just written. That is why `autofix: docs` is loop-ineligible
+permanently under the current scope model; the volume caps above bound how many
+findings such a cycle emits, not whether the fixer's prose lands in the next
+cycle's in-scope set. `workflows/autofix/lib/scope.ts` carries the full argument, and any
 future cadence axis needs an authorship-aware scope bound before it can include `docs`.
 
 The eval corpus carries a matched pair

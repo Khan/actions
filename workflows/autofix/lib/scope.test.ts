@@ -129,8 +129,11 @@ describe("isLoopEligible", () => {
     // construction (webapp#41207: 5 of 5 threads fixed, three fresh
     // documentation findings minted on the prose the fixer had just written).
     // Deleting instead of rewriting does converge, by erasing the subject
-    // matter (webapp#41204 left `staleAfter` undocumented). Permanently
-    // ineligible, not pending measurement; see scope.ts for the full argument.
+    // matter (webapp#41204 left `staleAfter` undocumented). The documentation
+    // reviewer's volume caps bound how many findings a cycle emits, not whether
+    // the fixer's prose lands in the next cycle's scope, so they slow the
+    // re-arming without stopping it. Permanently ineligible under the current
+    // scope model, not pending measurement; see scope.ts for the full argument.
     it("forbids docs from looping, whichever half the fixer favours", () => {
         expect(isLoopEligible("docs")).toBe(false);
     });

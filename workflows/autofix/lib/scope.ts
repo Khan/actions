@@ -194,9 +194,17 @@ export const DEFAULT_COMMAND_SCOPE: AutofixScope = "blocking";
  * newly-changed lines can bound that, because the fixer is the author of the
  * newly-changed lines.
  *
- * So `docs` is ineligible **permanently**, not pending measurement, and the two
- * configurations fail in opposite directions: deletion-only converges while
- * erasing rationale, rewrite-enabled preserves rationale and re-arms. One-shot
+ * #41207 predates the per-lens volume caps `review.md` now puts on the
+ * documentation reviewer, so the re-mint COUNT it measured is an upper bound on
+ * what the capped reviewer would post. That does not soften the conclusion: the
+ * caps bound how many findings a cycle emits, not whether the fixer's own prose
+ * lands in the next cycle's in-scope set, and convergence needs the latter to be
+ * empty. A capped loop re-arms more slowly; it still re-arms.
+ *
+ * So `docs` is ineligible **permanently under the current scope model**, not
+ * pending measurement, and the two configurations fail in opposite directions:
+ * deletion-only converges while erasing rationale, rewrite-enabled preserves
+ * rationale and re-arms. One-shot
  * mode has no cadence to protect, so the fixer is deliberately biased toward
  * rewrite-with-why (Step 4) — quality per shot is the only metric it has. That
  * bias is what a cadence axis would have to undo, and undoing it buys #41204's

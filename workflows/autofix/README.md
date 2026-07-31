@@ -220,11 +220,18 @@ have selected, and it was a memoryless whole-diff re-derivation besides.
 itself introduced, which is why no scope filter keyed on newly-changed lines can
 bound them: the fixer is the author of the newly-changed lines.
 
-So `docs` is ineligible **permanently**, and the two configurations fail in
-opposite directions: deletion-only converges while erasing rationale,
-rewrite-enabled preserves rationale and re-arms. One-shot mode has no cadence to
-protect, so the prompt is deliberately biased toward rewrite-with-why (Step 4),
-which is the right trade for quality per shot and the wrong one for a loop.
+#41207 predates the per-lens volume caps this release puts on the documentation
+reviewer, so the re-mint count it measured is an upper bound on what the capped
+reviewer would post. The caps bound how many findings a cycle emits, not whether
+the fixer's own prose lands in the next cycle's in-scope set, and convergence
+needs the latter to be empty; a capped loop re-arms more slowly, but it re-arms.
+
+So `docs` is ineligible **permanently under the current scope model**, and the
+two configurations fail in opposite directions: deletion-only converges while
+erasing rationale, rewrite-enabled preserves rationale and re-arms. One-shot
+mode has no cadence to protect, so the prompt is deliberately biased toward
+rewrite-with-why (Step 4), which is the right trade for quality per shot and
+the wrong one for a loop.
 Anyone building a cadence axis that includes `docs` needs an authorship-aware
 bound as a **precondition**, not a better prompt: exclude hunks whose commit
 carries `Autofix-Scope: docs` from the documentation lens's in-scope set. It is
