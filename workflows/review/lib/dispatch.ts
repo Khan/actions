@@ -61,7 +61,7 @@ import {
     type Candidate,
     type Claim,
 } from "./dispatch-contracts";
-import {loadAgents, type AgentDefinition} from "./dispatch-agents";
+import {loadAgents, type DispatchFs} from "./dispatch-agents";
 
 import {computeRoster, type RosterShed} from "./dispatch-roster";
 import {refusalFallbackFor} from "./refusal-fallback";
