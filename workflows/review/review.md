@@ -206,58 +206,6 @@ sandbox:
   agent:
     id: awf
 
-# claude-opus-5 is NOT in the firewall api-proxy's curated AI-credits pricing
-# table at v0.27.42, the release gh-aw v0.83.4 defaults to now that this
-# workflow's `sandbox.agent.version` pin is retired (that table carries
-# claude-opus-4-5 through 4-8 and claude-fable-5, and stops there). The proxy's
-# AI-credits guard rejects an un-priced model with a 400 BEFORE the request
-# reaches the model, so without the fallback below every dispatch fails — the
-# #266 failure that killed the first-principles dispatch on every run, except
-# now the whole roster runs the un-priced model rather than two opt-in agents.
-#
-# Both blocks carry claude-opus-5's list price (identical to Opus 4.8's: $5/M
-# input, $0.50/M cache read, $6.25/M cache write, $25/M output) but in DIFFERENT
-# UNITS, and they are not interchangeable: `default-ai-credits-pricing` is
-# $/1M tokens and feeds the proxy's credit guard; `providers` is $/token and
-# feeds the cost display. Because Opus 5 lists at exactly Opus 4.8's price, the
-# fallback is the model's real rate rather than an approximation.
-#
-# Two caveats, unchanged from when this was written: the proxy's default-pricing
-# path does not bill cache writes ($6.25/M real), so credit accounting
-# under-counts that component (the `models:` block below carries the full rate
-# for the cost summary); and the fallback applies to ANY un-priced model, so a
-# future typo'd model id bills at Opus rates instead of failing loudly.
-#
-# MINIMUM COMPILER: gh-aw >= v0.83.0 for `models.default-ai-credits-pricing`.
-# This repo compiles with v0.83.4, so the floor is already met; consumers on an
-# older gh-aw get a COMPILE-time failure rather than a runtime 400.
-#
-# REMOVE THIS BLOCK when a gh-aw release defaults the firewall to v0.27.43 or
-# later: that release DOES carry a curated claude-opus-5 entry, at the same
-# rates ($5/M in, $0.50/M cache read, $6.25/M cache write, $25/M out), and the
-# curated entry is strictly better because it bills cache writes — the one
-# component this fallback path silently under-counts. v0.27.43 is the newest
-# firewall release as of 2026-07-31 and no gh-aw release references it yet.
-# Do NOT reach for `sandbox.agent.version: v0.27.43` to get there early: the
-# note above is explicit that a version is pinned here only to hold a release
-# BACK, never to move one forward, and this fallback works under any firewall.
-models:
-  # $/1M tokens. `input` and `output` are the only rates the schema accepts, so
-  # the cache rates are the proxy's derivations, not ours.
-  default-ai-credits-pricing:
-    input: 5.0
-    output: 25.0
-  # $/token.
-  providers:
-    anthropic:
-      models:
-        claude-opus-5:
-          cost:
-            input: 5.0e-06
-            output: 2.5e-05
-            cache_read: 5.0e-07
-            cache_write: 6.25e-06
-
 # The shared review workflow is more than this markdown file: its deterministic
 # pieces (the finding schema and validator today; the router, computed verdict, and
 # comment renderer as they land) are TypeScript under `workflows/review/lib/` in
@@ -393,6 +341,35 @@ post-steps:
 # Do NOT collapse these to a bare `claude-opus-4` prefix: prefix matching would
 # also capture opus-4-0/4-1, which list at 3x the 4-5+ rate.
 models:
+  # The Opus 5 fallback. claude-opus-5 is NOT in the api-proxy's curated
+  # AI-credits table at v0.27.42, the release gh-aw v0.83.4 defaults to (that
+  # table carries claude-opus-4-5 through 4-8 and claude-fable-5, and stops
+  # there). The credit guard rejects an un-priced model with a 400 BEFORE the
+  # request reaches the model, so without this every dispatch fails: the #266
+  # failure that killed the first-principles dispatch on every run, except now
+  # the whole roster runs the un-priced model rather than two opt-in agents.
+  # `providers` below cannot cover it while that key is dropped under v0.27.42,
+  # so this is what actually keeps the roster running.
+  #
+  # $/1M tokens, NOT the $/token units `providers` uses. Stated at 50% of list
+  # for the same reason `providers` is, so a credit means real spend whichever
+  # path prices a request. `input` and `output` are the only rates the schema
+  # accepts, so cache reads are the proxy's derivation ($0.25/M); the
+  # default-pricing path does not bill cache writes at all, which `providers`
+  # does once live.
+  #
+  # DELETE THIS KEY (not the whole block) once a gh-aw release defaults the
+  # firewall to v0.27.43+: that release carries a curated claude-opus-5 entry,
+  # strictly better because it bills cache writes, and because this fallback
+  # applies to ANY un-priced model a typo'd model id bills at Opus rates
+  # instead of failing loudly.
+  #
+  # MINIMUM COMPILER: gh-aw >= v0.83.0 for `models.default-ai-credits-pricing`.
+  # This repo compiles with v0.83.4, so the floor is met; consumers on an older
+  # gh-aw get a COMPILE-time failure rather than a runtime 400.
+  default-ai-credits-pricing:
+    input: 2.5
+    output: 12.5
   providers:
     anthropic:
       models:
