@@ -138,6 +138,30 @@ claiming a band.
   arms both sit inside a band is wobble. Detecting a 20-point recall change
   needs ~60 spec-samples per arm; 10 points needs ~140 (two-proportion, 80%
   power). Repeats are the cheap axis: no authoring, no review.
+- **Blocking rate (severity stability, report-only):** every per-spec row is
+  followed by a `<case>:<spec> (blocking)` row — of the repeats that CAUGHT
+  that spec, how many labelled it blocking — and the pooled bands carry
+  `blocking rate (caught specs)`. It exists because **matching scores
+  detection, not severity**: a spec is satisfied by anchor agreement plus a
+  mechanism regex, and no `mustCatchSpecs` entry in the corpus constrains the
+  label (the only two `blockingOnly` flags are on `mustNotFlagSpecs` traps,
+  where the field means the opposite thing). So a run can score 100%
+  must-catch recall while calling every seeded defect a nitpick. Verdict
+  agreement does not cover the gap either, being per case: any *other*
+  blocking finding compensates. Khan/webapp#41194 is the worked example —
+  `TopKey`'s zero-floor bug was labelled blocking and held the verdict at
+  REQUEST_CHANGES while a claim-validator-**confirmed** nil-map panic posted
+  as `suggestion (non-blocking)`.
+  On an **identical-arm** pool (the weekly drift run, or any `--force-arms`
+  wobble control) a blocking rate strictly between 0 and 1 is **unstable by
+  construction**: same prompt, same input, split vote, which is the definition
+  of noise rather than a number to compare against a threshold. Those rows
+  print `severity split`. **No threshold tuning is intended and nothing gates
+  on this metric** — it is instrumentation, and what to do about a split is a
+  separate, deliberately deferred decision (asserting which defect classes
+  must block is a ground-truth call for the repo owner). Rows are omitted, not
+  zeroed, for report artifacts predating the instrumentation: an unrecorded
+  label is no evidence, never "non-blocking".
 - **Miss classes:** a true miss is a recall problem; found-but-dropped
   (provenance/scope/validation buckets) is an anchoring or gate-calibration
   problem. They route to different fixes; never collapse them. The

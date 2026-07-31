@@ -23,6 +23,12 @@ const rawRun = (
         verdict?: string;
         expected?: string;
         caught?: string[];
+        /**
+         * Spec key -> the label the catch carried. A key absent from this map
+         * serializes a `caught` entry with no `blocking` field, i.e. an
+         * artifact predating the severity instrumentation.
+         */
+        blocking?: Record<string, boolean>;
         missedDetail?: {specKey: string; droppedBy?: string}[];
         unmatched?: string[];
         posted?: number;
@@ -39,6 +45,9 @@ const rawRun = (
             specKey,
             findingId: `${caseId}:f`,
             via: "deterministic",
+            ...(over.blocking?.[specKey] !== undefined
+                ? {blocking: over.blocking[specKey]}
+                : {}),
         })),
         missed: (over.missedDetail ?? []).map((d) => d.specKey),
         missedDetail: over.missedDetail ?? [],
@@ -134,6 +143,35 @@ describe("extractSamples", () => {
         expect(sample.candidate.runs[0]?.unmatchedPosted).toBe(1);
         expect(sample.candidate.runs[0]?.posted).toBe(2);
         expect(sample.baseline.usd).toBe(1.5);
+    });
+
+    it("carries recorded catch labels and omits unrecorded ones", () => {
+        // Version tolerance, and the reason it matters: a report predating
+        // SpecMatch.blocking carries no label, and reading that as
+        // "non-blocking" would invent severity evidence a legacy artifact
+        // never had.
+        const raw = rawReport({
+            baselineRuns: [
+                rawRun("case-1", {
+                    caught: ["spec-1", "spec-2"],
+                    blocking: {"spec-1": true},
+                    posted: 2,
+                }),
+            ],
+            candidateRuns: [
+                rawRun("case-1", {
+                    caught: ["spec-1"],
+                    blocking: {"spec-1": false},
+                }),
+            ],
+        });
+        const sample = extractSamples("r1", raw)[0]!;
+        expect(sample.baseline.runs[0]?.caughtSpecBlocking).toEqual({
+            "spec-1": true,
+        });
+        expect(sample.candidate.runs[0]?.caughtSpecBlocking).toEqual({
+            "spec-1": false,
+        });
     });
 
     it("flattens a --repeats artifact into one sample per repeat", () => {
@@ -240,6 +278,7 @@ describe("aggregateSamples", () => {
         expectedVerdict: "REQUEST_CHANGES",
         verdict: "REQUEST_CHANGES",
         caughtSpecKeys: [],
+        caughtSpecBlocking: {},
         missedSpecs: [],
         unmatchedPosted: 0,
         posted: 0,
@@ -325,6 +364,45 @@ describe("aggregateSamples", () => {
         expect(report.arms.baseline.pooled.usd).toBe(3);
     });
 
+    it("rates severity over labelled catches only, never over all catches", () => {
+        // Six repeats of one spec, always caught, blocking on four of them:
+        // recall 6/6 says the reviewer never misses it, blocking 4/6 says it
+        // cannot decide whether it matters. Recall alone cannot show that.
+        const caughtAs = (blocking: boolean): SampleRun =>
+            run({
+                caughtSpecKeys: ["spec-1"],
+                caughtSpecBlocking: {"spec-1": blocking},
+            });
+        const samples = [
+            sample([caughtAs(true)], [caughtAs(true)], "r1"),
+            sample([caughtAs(true)], [caughtAs(false)], "r2"),
+            sample([caughtAs(true)], [caughtAs(false)], "r3"),
+        ];
+        const pooled = aggregateSamples(samples);
+        const base = pooled.arms.baseline.cases[0]!.specs[0]!;
+        const cand = pooled.arms.candidate.cases[0]!.specs[0]!;
+        expect(base.caught).toMatchObject({numerator: 3, denominator: 3});
+        expect(base.blocking).toMatchObject({numerator: 3, denominator: 3});
+        expect(cand.caught).toMatchObject({numerator: 3, denominator: 3});
+        expect(cand.blocking).toMatchObject({numerator: 1, denominator: 3});
+
+        // A catch with no recorded label leaves the denominator alone rather
+        // than counting as non-blocking.
+        const legacy = aggregateSamples([
+            sample(
+                [run({caughtSpecKeys: ["spec-1"]}), caughtAs(true)],
+                [run({caughtSpecKeys: ["spec-1"]})],
+                "r4",
+            ),
+        ]);
+        expect(legacy.arms.baseline.cases[0]!.specs[0]!.blocking).toMatchObject(
+            {numerator: 1, denominator: 1},
+        );
+        expect(
+            legacy.arms.candidate.cases[0]!.specs[0]!.blocking,
+        ).toMatchObject({numerator: 0, denominator: 0});
+    });
+
     it("keeps cases the pools do not share and counts their runs honestly", () => {
         // r2 ran a second case (e.g. full corpus vs smoke): its case shows
         // one run, not three, and the shared case still shows two.
@@ -406,6 +484,7 @@ describe("computeNoiseFloor", () => {
                     expectedVerdict: "REQUEST_CHANGES",
                     verdict: "REQUEST_CHANGES",
                     caughtSpecKeys: caught ? ["s"] : [],
+                    caughtSpecBlocking: caught ? {s: true} : {},
                     missedSpecs: caught ? [] : [{specKey: "s"}],
                     unmatchedPosted: 1,
                     posted: 2,
@@ -429,6 +508,46 @@ describe("computeNoiseFloor", () => {
         expect(floor.bands["judge mean quality"]?.sd).toBeCloseTo(0.05);
     });
 
+    it("bands the blocking rate, and omits it when no catch carried a label", () => {
+        const mk = (blocking: boolean | undefined): ArmSample => ({
+            arm: "baseline",
+            reviewMdSha: "a".repeat(64),
+            skippedCount: 0,
+            runs: [
+                {
+                    caseId: "case-1",
+                    expectedVerdict: "REQUEST_CHANGES",
+                    verdict: "REQUEST_CHANGES",
+                    caughtSpecKeys: ["s"],
+                    caughtSpecBlocking:
+                        blocking === undefined ? {} : {s: blocking},
+                    missedSpecs: [],
+                    unmatchedPosted: 0,
+                    posted: 1,
+                    snapped: 0,
+                },
+            ],
+            usd: 1,
+        });
+        // Same prompt, same input, two arm-samples disagreeing on severity:
+        // a 0%-100% band is the noise floor for this defect's label.
+        const split = computeNoiseFloor([mk(true), mk(false)]);
+        expect(split.bands["blocking rate (caught specs)"]).toEqual({
+            min: 0,
+            max: 1,
+            mean: 0.5,
+            sd: 0.5,
+        });
+        // Recall is flat at 100% across exactly those samples: catching the
+        // spec says nothing about how the reviewer labelled it.
+        expect(split.bands["must-catch recall"]?.mean).toBe(1);
+
+        // A pool of pre-instrumentation reports contributes no severity
+        // evidence, so the metric is absent rather than banded at 0%.
+        const legacy = computeNoiseFloor([mk(undefined), mk(undefined)]);
+        expect(legacy.bands["blocking rate (caught specs)"]).toBeUndefined();
+    });
+
     it("flags case asymmetry on budget skips or mismatched case sets", () => {
         const mk = (over: Partial<ArmSample>): ArmSample => ({
             arm: "baseline",
@@ -440,6 +559,7 @@ describe("computeNoiseFloor", () => {
                     expectedVerdict: "REQUEST_CHANGES",
                     verdict: "REQUEST_CHANGES",
                     caughtSpecKeys: ["s"],
+                    caughtSpecBlocking: {s: true},
                     missedSpecs: [],
                     unmatchedPosted: 0,
                     posted: 1,
@@ -493,6 +613,62 @@ describe("renderAggregateMarkdown", () => {
         expect(markdown).toContain("| Judge mean quality | 0.90 |  | 0.80 |");
         // No identical arms, so no noise-floor section.
         expect(markdown).not.toContain("Noise floor");
+    });
+
+    it("renders a (blocking) row per spec and marks a split on identical arms", () => {
+        // Three identical-arm repeats: the spec is always caught, and the
+        // label flips. Recall shows 6/6 and nothing else; the blocking row is
+        // the only place the disagreement is visible.
+        const repeat = (baseBlocking: boolean, candBlocking: boolean) =>
+            rawReport({
+                baselineRuns: [
+                    rawRun("case-1", {
+                        caught: ["spec-1"],
+                        blocking: {"spec-1": baseBlocking},
+                    }),
+                ],
+                candidateRuns: [
+                    rawRun("case-1", {
+                        caught: ["spec-1"],
+                        blocking: {"spec-1": candBlocking},
+                    }),
+                ],
+                baselineSha: "a".repeat(64),
+                candidateSha: "a".repeat(64),
+            });
+        const markdown = renderAggregateMarkdown(
+            aggregateSamples([
+                ...extractSamples("r1", repeat(true, true)),
+                ...extractSamples("r2", repeat(true, false)),
+                ...extractSamples("r3", repeat(true, true)),
+            ]),
+        );
+        expect(markdown).toContain("| case-1:spec-1 | 3/3 (100%)");
+        expect(markdown).toContain("| case-1:spec-1 (blocking) | 3/3 (100%)");
+        // Arm B split 2/3: same prompt, same input, different label.
+        expect(markdown).toContain("2/3 (67%)");
+        expect(markdown).toContain("arm B: severity split");
+        expect(markdown).not.toContain("arm A: severity split");
+        expect(markdown).toContain("unstable by construction");
+        expect(markdown).toContain("No threshold tuning is intended");
+        expect(markdown).toContain("| blocking rate (caught specs) |");
+    });
+
+    it("omits the (blocking) row entirely for a pre-instrumentation pool", () => {
+        // Legacy artifacts carry no labels; a 0/0 row would read as "never
+        // blocks" and a 0% band would read as a real measurement.
+        const raw = rawReport({
+            baselineRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+            candidateRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+            baselineSha: "a".repeat(64),
+            candidateSha: "a".repeat(64),
+        });
+        const markdown = renderAggregateMarkdown(
+            aggregateSamples(extractSamples("r1", raw)),
+        );
+        expect(markdown).toContain("| case-1:spec-1 | 1/1 (100%)");
+        expect(markdown).not.toContain("(blocking) |");
+        expect(markdown).not.toContain("| blocking rate (caught specs) |");
     });
 
     it("prints the ruler line and warns when a pool mixes rulers", () => {
