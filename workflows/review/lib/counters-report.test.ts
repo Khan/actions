@@ -228,3 +228,30 @@ describe("renderCountersMarkdown", () => {
         expect(markdown).toContain("thumbs-sweep run's job summary");
     });
 });
+
+describe("refusal-fallback rendering", () => {
+    it("lists each agent and model when fallbacks fired", () => {
+        const counters = computeRunCounters([
+            {
+                runId: "1",
+                verdict: "APPROVE",
+                postedCommentCount: 0,
+                validatorDecisions: [],
+                refusalFallbacks: [
+                    {agent: "correctness-reviewer", model: "claude-opus-4-8"},
+                ],
+            },
+            {
+                runId: "2",
+                verdict: "APPROVE",
+                postedCommentCount: 0,
+                validatorDecisions: [],
+            },
+        ]);
+        const md = renderCountersMarkdown(counters, 0);
+        expect(md).toContain("### Refusal fallbacks");
+        expect(md).toContain("1 fallback across 1 of 2 runs");
+        expect(md).toContain("`correctness-reviewer` -> `claude-opus-4-8`: 1");
+        expect(md).not.toContain("None: no sub-agent");
+    });
+});

@@ -5,6 +5,7 @@ import {
     buildClaims,
     joinProse,
     parseFinderOutput,
+    parseJsonObject,
     parseValidatorOutput,
     type Claim,
 } from "./dispatch-contracts";
@@ -468,5 +469,22 @@ describe("applyVerifications: corrected-field validation", () => {
         });
         expect(result[0].label).toBe("suggestion (non-blocking)");
         expect(result[0].line).toBe(12);
+    });
+});
+
+describe("parseJsonObject empty-vs-malformed", () => {
+    it("names an empty final as empty, not malformed", () => {
+        // An empty final is how a refusal presents (#294). Calling it
+        // malformed sent three eval runs after the wrong cause.
+        expect(() => parseJsonObject("")).toThrow(
+            /no final text \(empty output\)/,
+        );
+        expect(() => parseJsonObject("   \n ")).toThrow(/empty output/);
+    });
+
+    it("still names unparseable prose as malformed", () => {
+        expect(() =>
+            parseJsonObject("I reviewed it and found nothing."),
+        ).toThrow(/no parseable JSON object/);
     });
 });

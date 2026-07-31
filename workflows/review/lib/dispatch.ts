@@ -61,7 +61,10 @@ import {
     type Candidate,
     type Claim,
 } from "./dispatch-contracts";
+import {loadAgents, type DispatchFs} from "./dispatch-agents";
+
 import {computeRoster, type RosterShed} from "./dispatch-roster";
+import {refusalFallbackFor} from "./refusal-fallback";
 import {
     applyProvenanceGate,
     type DiffProvenance,
@@ -90,6 +93,12 @@ export {
     type RosterShed,
 } from "./dispatch-roster";
 export {
+    loadAgents,
+    parseAgentFile,
+    type AgentDefinition,
+    type DispatchFs,
+} from "./dispatch-agents";
+export {
     dedupeClaims,
     suppressOpenThreadDuplicates,
     type ClaimMerge,
@@ -99,14 +108,6 @@ export {
 /* -------------------------------------------------------------------------- */
 /* Seams                                                                      */
 /* -------------------------------------------------------------------------- */
-
-export type DispatchFs = {
-    readFileSync: (p: string, enc: "utf8") => string;
-    writeFileSync: (p: string, data: string) => void;
-    existsSync: (p: string) => boolean;
-    mkdirSync: (p: string, opts: {recursive: boolean}) => void;
-    readdirSync: (p: string) => string[];
-};
 
 /** One sub-agent dispatch request (mirrors the eval's LiveAgentRequest). */
 export type AgentRequest = {
@@ -134,6 +135,40 @@ export type AgentResult = {
     usd: number;
     turns: number;
     wallMs: number;
+    /**
+     * Tool calls the agent made. The harness-parity signal: a loop that
+     * investigates with fewer tool calls and scores lower has a toolbox
+     * problem, not a model problem. Optional because a runner that cannot
+     * count them reports nothing rather than a misleading zero.
+     */
+    toolCalls?: number;
+    /**
+     * The provider's stop reason for the agent's last assistant message, when
+     * the runner can see one. Load-bearing for one specific diagnosis: an
+     * EMPTY final on cyber-adjacent input is the signature of a refusal, which
+     * #294 documents as surfacing "as a missing agent result, not an error".
+     * Without this the empty result is indistinguishable from a dropped one.
+     */
+    stopReason?: string;
+    /**
+     * Why the call failed, when the runner can see it. `stopReason=error`
+     * alone does not distinguish an overloaded provider from a prompt that
+     * outgrew the context window, and those have opposite fixes (retries vs
+     * compaction). `tokensAtFailure` is the discriminator: near the model's
+     * context window means overflow.
+     */
+    errorMessage?: string;
+    /** The provider's own stop reason, before the runner normalizes it. */
+    rawStopReason?: string;
+    /** Input and total tokens on the last assistant message. */
+    tokensAtFailure?: {input: number; total: number};
+    /**
+     * The provider blocked the request under its usage policy. Distinct from
+     * every other failure because it is deterministic in the model, not
+     * transient: retrying the same pin returns the same refusal, so the only
+     * useful response is a different model.
+     */
+    refused?: boolean;
     /** The output came through the structured-final tool, pre-validated. */
     structured?: boolean;
 };
@@ -169,58 +204,6 @@ const VALIDATOR = "claim-validator";
 /* Agent definitions (.claude/agents/<name>.md)                               */
 /* -------------------------------------------------------------------------- */
 
-export type AgentDefinition = {name: string; model: string; prompt: string};
-
-/**
- * Parse one gh-aw inline agent file: YAML-ish frontmatter carrying `name:`
- * and `model:`, body = the prompt. Deliberately minimal — these files are
- * machine-written by gh-aw's extraction, not hand-authored.
- */
-export const parseAgentFile = (text: string): AgentDefinition | null => {
-    const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text);
-    if (match === null) {
-        return null;
-    }
-    const front = match[1];
-    const prompt = match[2].trim();
-    const field = (key: string): string | undefined => {
-        const line = new RegExp(`^${key}:\\s*(.+)$`, "m").exec(front);
-        return line?.[1]?.trim();
-    };
-    const name = field("name");
-    if (name === undefined || prompt === "") {
-        return null;
-    }
-    return {name, model: field("model") ?? "", prompt};
-};
-
-const loadAgents = (
-    fs: DispatchFs,
-    agentsDir: string,
-): Map<string, AgentDefinition> => {
-    const agents = new Map<string, AgentDefinition>();
-    if (!fs.existsSync(agentsDir)) {
-        return agents;
-    }
-    for (const entry of fs.readdirSync(agentsDir)) {
-        if (!entry.endsWith(".md")) {
-            continue;
-        }
-        try {
-            const parsed = parseAgentFile(
-                fs.readFileSync(`${agentsDir}/${entry}`, "utf8"),
-            );
-            if (parsed !== null) {
-                agents.set(parsed.name, parsed);
-            }
-        } catch {
-            // An unreadable definition surfaces later as an unavailable
-            // dimension for whatever roster entry needed it.
-        }
-    }
-    return agents;
-};
-
 /* -------------------------------------------------------------------------- */
 /* The dispatch run                                                           */
 /* -------------------------------------------------------------------------- */
@@ -233,6 +216,12 @@ export type PerAgentReport = {
     wallMs: number;
     /** This entry is the one malformed-output retry of the same agent. */
     retried?: boolean;
+    /**
+     * The pinned model refused under the provider's usage policy and this
+     * dispatch ran on the fallback instead. Recorded, never silent: the whole
+     * failure mode is invisibility, and a hidden model swap would just move it.
+     */
+    fellBackTo?: string;
     /** The result arrived via the structured-final tool (pre-validated). */
     structuredFinal?: boolean;
     failed?: string;
@@ -402,6 +391,7 @@ export const runDispatch = async (
     const dispatchAgent = async (
         name: string,
         malformedNote?: string,
+        modelOverride?: string,
     ): Promise<string | null> => {
         const definition = agents.get(name);
         if (definition === undefined) {
@@ -421,23 +411,55 @@ export const runDispatch = async (
                 malformedNote === undefined
                     ? ""
                     : `\n\nYour previous reply could not be used (${malformedNote}). Submit again now, and this time deliver the complete corrected JSON object through the submit_result tool (or, if that tool is unavailable, as your ENTIRE message: no prose before or after it, no code fence).`;
+            const model = modelOverride ?? definition.model;
             const result = await runner({
                 name,
-                model: definition.model,
+                model,
                 prompt: `${definition.prompt}\n\nProceed now per your definition. Deliver your result by calling the submit_result tool ONCE, passing the ENTIRE JSON object your definition's output contract specifies as its \`result\` argument; if the tool rejects it, correct the object and call the tool again. After it is accepted, end the turn without repeating the JSON. If the submit_result tool is unavailable, your final message must be exactly that JSON object, nothing else.${corrective}`,
                 cwd: repoRoot,
                 maxTurns,
                 timeoutMs,
                 validate: validatorFor(name),
             });
+            // A usage-policy refusal is intermittent (probe 30658862532 saw
+            // the same pin clear cases it blocked in 30656579898), but the
+            // contract-parse retry still cannot recover it: that retry appends
+            // a corrective note about output shape, and a blocked request
+            // never had one. Only a different refusal profile reliably helps.
+            // Production is where this actually costs coverage — a refused
+            // reviewer emits no error, just nothing, and the review proceeds
+            // without it (run 30656579898: correctness-reviewer on Fable 5,
+            // blocked on security-adjacent diffs).
+            const fallback =
+                result.refused === true && modelOverride === undefined
+                    ? refusalFallbackFor(model)
+                    : undefined;
+            if (fallback !== undefined) {
+                // Record the refused attempt before recursing. It really ran
+                // and really cost money, and `totalUsd` sums over `perAgent`,
+                // so dropping it undercounts the run. A separate entry also
+                // keeps the refusal itself visible rather than letting the
+                // fallback's success paper over it (the malformed-output
+                // retry pushes its own entry for the same reason).
+                perAgent.push({
+                    name,
+                    model,
+                    usd: result.usd,
+                    turns: result.turns,
+                    wallMs: result.wallMs,
+                    failed: "refused",
+                });
+                return dispatchAgent(name, malformedNote, fallback);
+            }
             writeOut(name, result.output);
             perAgent.push({
                 name,
-                model: definition.model,
+                model,
                 usd: result.usd,
                 turns: result.turns,
                 wallMs: result.wallMs,
                 ...(malformedNote === undefined ? {} : {retried: true}),
+                ...(modelOverride === undefined ? {} : {fellBackTo: model}),
                 ...(result.structured === true ? {structuredFinal: true} : {}),
             });
             return result.output;
@@ -451,10 +473,13 @@ export const runDispatch = async (
             );
             perAgent.push({
                 name,
-                model: definition.model,
+                model: modelOverride ?? definition.model,
                 usd: 0,
                 turns: 0,
                 wallMs: 0,
+                ...(modelOverride === undefined
+                    ? {}
+                    : {fellBackTo: modelOverride}),
                 failed: "run-failed",
             });
             return null;

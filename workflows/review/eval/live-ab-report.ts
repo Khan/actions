@@ -54,6 +54,19 @@ export type ArmRunReport = {
         /** `<agent>: <reason>` per failed agent (diagnosable from the report). */
         failedAgents: string[];
         /**
+         * The raw final text of each failed agent's last attempt, truncated.
+         * The reason string alone cannot tell a prose answer from a refusal
+         * from a truncated contract, which is what made runs 30592964392 and
+         * 30596474354 cost ~$10 each to learn nothing new.
+         */
+        failedAgentOutputs?: {agent: string; output: string}[];
+        /**
+         * Tool calls per agent. The harness-parity signal: read it alongside
+         * recall, because a loop that investigates less will otherwise read as
+         * a weaker model.
+         */
+        toolCalls?: {agent: string; count: number}[];
+        /**
          * Reviewers the case enabled that this arm's `review.md` does not
          * define, so the arm never had the dimension. Expected on the baseline
          * arm of a new-reviewer A/B, and reported so a missing dimension is
@@ -524,9 +537,37 @@ export const renderMarkdownReport = (report: AbReport): string => {
             "",
         );
     }
+    // The raw final text of each failed agent, inline in the markdown. A
+    // failure reason alone ("no parseable JSON object") sent two eval runs
+    // chasing the wrong hypothesis; the text says immediately whether the
+    // model answered in prose, refused, or was cut off mid-contract.
+    const failedOutputs = [
+        ...baseline.perCase.map((c) => ["baseline", c] as const),
+        ...candidate.perCase.map((c) => ["candidate", c] as const),
+    ].flatMap(([arm, c]) =>
+        (c.failedAgentOutputs ?? []).map(
+            (f) =>
+                // Four backticks: a contract-parse failure is frequently a
+                // code-fenced reply, and a triple-backtick payload would close
+                // a triple-backtick fence early, breaking the <details>
+                // pairing for every section after it.
+                `<details><summary>${arm} / ${c.caseId} / ${f.agent}</summary>\n\n` +
+                "````\n" +
+                f.output +
+                "\n````\n\n</details>",
+        ),
+    );
     const failedAgents = [...baseline.perCase, ...candidate.perCase].flatMap(
         (c) => c.failedAgents.map((agent) => `${c.caseId}: ${agent} failed`),
     );
+    if (failedOutputs.length > 0) {
+        lines.push(
+            "### Raw output of each failed agent",
+            "",
+            ...failedOutputs,
+            "",
+        );
+    }
     if (failedAgents.length > 0) {
         lines.push(
             "### Agent failures",

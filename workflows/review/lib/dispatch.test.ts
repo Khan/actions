@@ -68,6 +68,39 @@ const agentFiles = (...names: string[]): Record<string, string> =>
         names.map((name) => [`${AGENTS}/${name}.md`, agentFile(name)]),
     );
 
+/**
+ * A runner stub whose named agents refuse on their FIRST dispatch, the way a
+ * usage-policy block presents: no final text, `refused: true`. Records the
+ * model each dispatch ran on so the fallback swap is observable.
+ */
+const refusingRunner = (
+    outputs: Record<string, string>,
+    refuseOnce: string[],
+): AgentRunner & {models: {name: string; model: string}[]} => {
+    const models: {name: string; model: string}[] = [];
+    const seen = new Set<string>();
+    const runner = (async (request) => {
+        models.push({name: request.name, model: request.model});
+        if (refuseOnce.includes(request.name) && !seen.has(request.name)) {
+            seen.add(request.name);
+            return {
+                output: "",
+                usd: 0.2,
+                turns: 1,
+                wallMs: 10,
+                refused: true,
+            };
+        }
+        const output = outputs[request.name];
+        if (output === undefined) {
+            throw new Error(`no canned output for ${request.name}`);
+        }
+        return {output, usd: 0.5, turns: 3, wallMs: 100};
+    }) as AgentRunner & {models: {name: string; model: string}[]};
+    runner.models = models;
+    return runner;
+};
+
 /** A runner stub: canned final text per agent, throwing for names in fail. */
 const stubRunner = (
     outputs: Record<string, string>,
@@ -341,6 +374,57 @@ describe("runDispatch", () => {
         fs,
         runner,
         repoRoot: "/work",
+    });
+
+    it("re-dispatches a refused agent on the fallback model", async () => {
+        // Production is where a refusal costs coverage: the agent emits no
+        // error, just nothing, and the review proceeds without it. The
+        // contract-parse retry corrects output shape, which a blocked request
+        // never produced, so the model swap is the recovery.
+        const fs = makeFakeFs({
+            ...baseStaging(),
+            ...agentFiles("pattern-triage", "skill-auditor", "claim-validator"),
+            [`${AGENTS}/correctness-reviewer.md`]: agentFile(
+                "correctness-reviewer",
+                "claude-fable-5",
+            ),
+        });
+        const runner = refusingRunner(
+            {
+                "pattern-triage": JSON.stringify({
+                    patterns: [],
+                    reviewFiles: ["a.ts"],
+                }),
+                "correctness-reviewer": JSON.stringify({findings: []}),
+                "skill-auditor": JSON.stringify({findings: []}),
+                "claim-validator": JSON.stringify({verifications: []}),
+            },
+            ["correctness-reviewer"],
+        );
+        const result = await runDispatch(options(fs, runner));
+        const attempts = runner.models.filter(
+            (m) => m.name === "correctness-reviewer",
+        );
+        expect(attempts.map((a) => a.model)).toEqual([
+            "claude-fable-5",
+            "claude-opus-4-8",
+        ]);
+        const entries = result.perAgent.filter(
+            (a) => a.name === "correctness-reviewer",
+        );
+        // Two entries: the refused attempt and the fallback that replaced it.
+        // The refused one is kept so its cost still reaches totalUsd and the
+        // refusal itself stays visible instead of being papered over.
+        expect(entries).toHaveLength(2);
+        expect(entries[0].failed).toBe("refused");
+        expect(entries[0].model).toBe("claude-fable-5");
+        expect(entries[0].usd).toBeGreaterThan(0);
+        // Recorded, not silent: the drift corpus has to see how often it fires.
+        expect(entries[1].fellBackTo).toBe("claude-opus-4-8");
+        expect(entries[1].failed).toBeUndefined();
+        expect(result.totalUsd).toBeGreaterThanOrEqual(
+            entries[0].usd + entries[1].usd,
+        );
     });
 
     it("runs the full pipeline: triage narrows, finders stage out/, validator applies", async () => {
