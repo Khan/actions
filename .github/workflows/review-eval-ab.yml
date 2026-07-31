@@ -57,6 +57,10 @@ on:
         description: "Repeats per arm in this one dispatch; >1 reports pooled pass rates with binomial intervals"
         required: false
         default: "1"
+      dispatch_runner:
+        description: "Sub-agent harness for BOTH arms: sdk (Claude Agent SDK, default) or pi (Pi's multi-provider loop). A harness switch, not a model switch; the review.md pins are unchanged either way, so pi vs sdk on the same base_ref isolates the harness."
+        required: false
+        default: "sdk"
       force_arms:
         description: "Run both arms even when review.md is byte-identical (wobble control / noise floor)"
         type: boolean
@@ -103,11 +107,21 @@ jobs:
           CASES: ${{ inputs.cases || '' }}
           REPEATS: ${{ inputs.repeats || '1' }}
           FORCE_ARMS: ${{ inputs.force_arms == true }}
+          # Read by eval/live-runner.ts's `selectedRunner`, the same switch
+          # lib/dispatch.ts reads in production.
+          REVIEW_DISPATCH_RUNNER: ${{ inputs.dispatch_runner || 'sdk' }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "ANTHROPIC_API_KEY secret not configured; skipping the live A/B." >&2
             exit 0
           fi
+          case "$REVIEW_DISPATCH_RUNNER" in
+            sdk|pi) ;;
+            *)
+              echo "dispatch_runner must be 'sdk' or 'pi', got '$REVIEW_DISPATCH_RUNNER'." >&2
+              exit 1
+              ;;
+          esac
           SCOPE="--smoke-only"
           if [ "$FULL_EVAL" = "true" ]; then
             SCOPE=""

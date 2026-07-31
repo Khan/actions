@@ -25,6 +25,7 @@ import {tmpdir} from "node:os";
 
 import {query} from "@anthropic-ai/claude-agent-sdk";
 
+import {createPiRunner} from "../lib/dispatch-runner-pi";
 import {extractAgents} from "./agent-extract";
 import {loadLiveCorpus} from "./corpus/loader";
 import {produceLive, type LiveAgentRunner} from "./live-producer";
@@ -150,6 +151,30 @@ export const sdkRunner = (): LiveAgentRunner => async (request) => {
         clearTimeout(timer);
     }
 };
+
+/**
+ * The Pi-backed runner for the harness A/B (`REVIEW_DISPATCH_RUNNER=pi`).
+ * The tool surface is pinned to `ALLOWED_TOOLS` so both arms investigate
+ * through the same tools: the arm under test is the loop, not the toolbox.
+ */
+export const piRunner = (): LiveAgentRunner => {
+    let runner: Awaited<ReturnType<typeof createPiRunner>> | undefined;
+    return async (request) => {
+        if (runner === undefined) {
+            runner = await createPiRunner({allowedTools: ALLOWED_TOOLS});
+        }
+        return runner(request);
+    };
+};
+
+/**
+ * The runner the eval should use, chosen by the same `REVIEW_DISPATCH_RUNNER`
+ * switch the production dispatcher reads (`sdk` default, `pi` opt-in).
+ */
+export const selectedRunner = (): LiveAgentRunner =>
+    (process.env.REVIEW_DISPATCH_RUNNER ?? "sdk") === "pi"
+        ? piRunner()
+        : sdkRunner();
 
 /* -------------------------------------------------------------------------- */
 /* CLI                                                                        */

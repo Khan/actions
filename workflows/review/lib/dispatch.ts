@@ -918,8 +918,19 @@ export const runDispatch = async (
 if (typeof require !== "undefined" && require.main === module) {
     const nodeFs = require("node:fs") as DispatchFs;
     void (async () => {
-        const {createSdkRunner} = await import("./dispatch-runner");
-        const runner = await createSdkRunner();
+        const which = process.env.REVIEW_DISPATCH_RUNNER ?? "sdk";
+        if (which !== "sdk" && which !== "pi") {
+            throw new Error(
+                `REVIEW_DISPATCH_RUNNER must be "sdk" or "pi", got "${which}"`,
+            );
+        }
+        // A harness switch, NOT a model switch: both runners honor the same
+        // per-role `model:` pins, which is what lets an A/B hold the pins
+        // fixed and read the harness as the single variable.
+        const runner =
+            which === "pi"
+                ? await (await import("./dispatch-runner-pi")).createPiRunner()
+                : await (await import("./dispatch-runner")).createSdkRunner();
         const repoRoot =
             process.env.REVIEW_REPO_ROOT ?? process.env.GITHUB_WORKSPACE ?? ".";
         const result = await runDispatch({fs: nodeFs, runner, repoRoot});

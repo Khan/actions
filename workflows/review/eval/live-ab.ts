@@ -84,8 +84,8 @@ import {
     type LiveCaseRun,
     type MatchOptions,
 } from "./live-match";
-import {produceLive} from "./live-producer";
-import {sdkRunner} from "./live-runner";
+import {produceLive, type LiveAgentRunner} from "./live-producer";
+import {sdkRunner, selectedRunner} from "./live-runner";
 import {haikuMatchArbiter} from "./match-arbiter";
 import {
     computeRereviewMetrics,
@@ -560,9 +560,20 @@ const main = async (): Promise<void> => {
         candidate: reviewMdHasAnchorSnap(candidateMd),
     };
 
-    const runner = sdkRunner();
+    // PER-ARM runners. Sharing one is right when the variable is `review.md`,
+    // but it made REVIEW_DISPATCH_RUNNER put BOTH arms on the same harness.
+    // The baseline is always the SDK harness (the reference the corpus was
+    // measured on); the candidate takes the selected one. With the env var
+    // unset both resolve to `sdkRunner`, so the default A/B is unchanged.
+    const baselineRunner = sdkRunner();
+    const candidateRunner = selectedRunner();
     const armProduce =
-        (stage: string, markdown: string, mode: ReReviewMode): ArmProduce =>
+        (
+            stage: string,
+            markdown: string,
+            mode: ReReviewMode,
+            runner: LiveAgentRunner,
+        ): ArmProduce =>
         (corpusCase) =>
             produceLive(corpusCase, extractAgents(markdown), {
                 runner,
@@ -634,7 +645,12 @@ const main = async (): Promise<void> => {
             await runArm(
                 "baseline",
                 cases,
-                armProduce(`baseline${suffix}`, baselineMd, "full"),
+                armProduce(
+                    `baseline${suffix}`,
+                    baselineMd,
+                    "full",
+                    baselineRunner,
+                ),
                 {
                     maxUsd: nextArmBudget(),
                     anchorSnap: armSnap.baseline,
@@ -646,7 +662,12 @@ const main = async (): Promise<void> => {
             await runArm(
                 "candidate",
                 cases,
-                armProduce(`candidate${suffix}`, candidateMd, candidateMode),
+                armProduce(
+                    `candidate${suffix}`,
+                    candidateMd,
+                    candidateMode,
+                    candidateRunner,
+                ),
                 {
                     maxUsd: nextArmBudget(),
                     anchorSnap: armSnap.candidate,
@@ -667,7 +688,7 @@ const main = async (): Promise<void> => {
                   (attempt): ArmProduce =>
                       (corpusCase) =>
                           produceLive(corpusCase, extractAgents(candidateMd), {
-                              runner,
+                              runner: candidateRunner,
                               stageDir: `${stageRoot}/candidate${suffix}-retry${attempt}/${corpusCase.id}`,
                           }),
                   match,
