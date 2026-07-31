@@ -334,6 +334,25 @@ export const renderCountersMarkdown = (
             : `- Cost: $${(counters.cost.totalUsd ?? 0).toFixed(2)} total,` +
                   ` $${counters.cost.usdPerRun.toFixed(2)}/run`,
     );
+    // Refusal fallbacks. Reported unconditionally, including the zero: this
+    // covers a failure that used to be invisible (a refused reviewer emits no
+    // error, just no output), so "none this window" is a result worth stating
+    // rather than a section that quietly disappears.
+    lines.push("", "### Refusal fallbacks", "");
+    const {refusalFallbacks: fallbacks} = counters;
+    if (fallbacks.total === 0) {
+        lines.push("- None: no sub-agent's pinned model refused this window");
+    } else {
+        lines.push(
+            `- ${fallbacks.total} fallback${fallbacks.total === 1 ? "" : "s"}` +
+                ` across ${fallbacks.runsAffected} of ${counters.runCount} runs`,
+        );
+        for (const entry of fallbacks.byAgent) {
+            lines.push(
+                `  - \`${entry.agent}\` -> \`${entry.model}\`: ${entry.count}`,
+            );
+        }
+    }
     lines.push("");
     return lines.join("\n");
 };

@@ -85,6 +85,18 @@ export type RunArtifacts = {
      * runs-per-PR lever is judged in dollars per depth, not per run.
      */
     rereviewDepth?: string;
+    /**
+     * Sub-agents whose pinned model refused under the provider's usage policy
+     * and were re-dispatched on a fallback (`out/dispatch-result.json`,
+     * `perAgent[].fellBackTo`). Absent for a run that recorded none.
+     *
+     * This is the production rate the fallback made measurable. The failure it
+     * covers used to be invisible: a refused reviewer emits no error, just no
+     * output, and the review proceeds a dimension short. Refusals are also
+     * intermittent (probe 30658862532), so the rate is the thing to watch, not
+     * any single run.
+     */
+    refusalFallbacks?: readonly {agent: string; model: string}[];
 };
 
 /* -------------------------------------------------------------------------- */
@@ -154,6 +166,18 @@ export type RunCounters = {
     cost: CostCounter;
     /** Cost grouped by executed re-review depth, sorted by `depth`. */
     costByRereviewDepth: DepthCostCounter[];
+    /** Refusal fallbacks across the window, sorted by `agent` for determinism. */
+    refusalFallbacks: RefusalFallbackCounter;
+};
+
+/** How often a pinned model refused and the dispatch fell back. */
+export type RefusalFallbackCounter = {
+    /** Total fallbacks across the window. */
+    total: number;
+    /** Runs in which at least one agent fell back. */
+    runsAffected: number;
+    /** Per agent+model, sorted by `agent` then `model`. */
+    byAgent: {agent: string; model: string; count: number}[];
 };
 
 /** A fresh verdict histogram with every event key initialised to `0`. */
@@ -294,6 +318,43 @@ export const computeRunCounters = (
         }))
         .sort((a, b) => (a.depth < b.depth ? -1 : a.depth > b.depth ? 1 : 0));
 
+    // Refusal fallbacks. Counted per agent+model rather than as a bare total
+    // because "which role keeps getting refused" is the actionable half: a
+    // rate concentrated on one reviewer is a pin to change, spread across many
+    // is a corpus or policy shift.
+    const fallbackCounts = new Map<string, number>();
+    let runsAffected = 0;
+    for (const run of runs) {
+        const entries = run.refusalFallbacks ?? [];
+        if (entries.length > 0) {
+            runsAffected += 1;
+        }
+        for (const entry of entries) {
+            const key = `${entry.agent}\u0000${entry.model}`;
+            fallbackCounts.set(key, (fallbackCounts.get(key) ?? 0) + 1);
+        }
+    }
+    const refusalFallbacks: RefusalFallbackCounter = {
+        total: [...fallbackCounts.values()].reduce((sum, n) => sum + n, 0),
+        runsAffected,
+        byAgent: [...fallbackCounts.entries()]
+            .map(([key, count]) => {
+                const [agent, model] = key.split("\u0000");
+                return {agent, model, count};
+            })
+            .sort((a, b) =>
+                a.agent !== b.agent
+                    ? a.agent < b.agent
+                        ? -1
+                        : 1
+                    : a.model < b.model
+                    ? -1
+                    : a.model > b.model
+                    ? 1
+                    : 0,
+            ),
+    };
+
     return {
         runCount,
         validatorDropBySource,
@@ -304,6 +365,7 @@ export const computeRunCounters = (
         thumbs,
         cost,
         costByRereviewDepth,
+        refusalFallbacks,
     };
 };
 
@@ -342,6 +404,8 @@ export type RawRunArtifacts = {
     validator?: unknown;
     /** The run summary: verdict, posted-comment count, thumbs, cost. */
     summary?: unknown;
+    /** `out/dispatch-result.json`: the scripted dispatcher's per-agent report. */
+    dispatchResult?: unknown;
     /** `out/rereview-plan.json`: the executed re-review plan (mode dial). */
     rereviewPlan?: unknown;
 };
@@ -541,6 +605,26 @@ export const normalizeRunArtifacts = (
     if (rereviewDepth !== undefined) {
         run.rereviewDepth = rereviewDepth;
     }
+    const perAgent = isRecord(raw.dispatchResult)
+        ? raw.dispatchResult["perAgent"]
+        : undefined;
+    if (Array.isArray(perAgent)) {
+        const fallbacks = perAgent.flatMap((entry) => {
+            if (!isRecord(entry)) {
+                return [];
+            }
+            const model = entry["fellBackTo"];
+            const agent = entry["name"];
+            return typeof model === "string" &&
+                model.length > 0 &&
+                typeof agent === "string"
+                ? [{agent, model}]
+                : [];
+        });
+        if (fallbacks.length > 0) {
+            run.refusalFallbacks = fallbacks;
+        }
+    }
     return run;
 };
 
@@ -558,6 +642,8 @@ export type RunArtifactLayout = {
     summary: string;
     /** The executed re-review plan (mode dial), relative to the run dir. */
     rereviewPlan: string;
+    /** The scripted dispatcher's per-agent report, relative to the run dir. */
+    dispatchResult: string;
 };
 
 /**
@@ -572,6 +658,7 @@ export const DEFAULT_RUN_ARTIFACT_LAYOUT: RunArtifactLayout = {
     validator: "out/claim-validator.json",
     summary: "summary.json",
     rereviewPlan: "out/rereview-plan.json",
+    dispatchResult: "out/dispatch-result.json",
 };
 
 const readJsonIfPresent = (path: string): unknown => {
