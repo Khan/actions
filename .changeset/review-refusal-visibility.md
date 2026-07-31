@@ -31,10 +31,16 @@ analysis, and a refused security lens would be a silent coverage hole", while
 `correctness-reviewer` — the default roster's load-bearing recall agent — was
 moved onto Fable 5 by the 2026-07-20 A/B and has been there since.
 
-A refusal is deterministic in the model, so retrying the pin cannot help.
-`lib/refusal-fallback.ts` maps `claude-fable-5` and `claude-opus-5` to
+Refusals are intermittent (probe 30658862532 saw the same pin clear cases that
+30656579898 blocked), but the ordinary retry still cannot recover one: it
+appends a corrective note about output shape, and a blocked request never
+produced an output. `lib/refusal-fallback.ts` maps `claude-fable-5` and `claude-opus-5` to
 `claude-opus-4-8`, the incumbent for every security-sensitive role. One hop,
 never back to a model that already refused, and no fallback for an unlisted pin
 so a new family's refusal profile stays visible rather than papered over. The
 swap is recorded per agent (`fellBackTo`), because turning an invisible skip
 into an invisible model swap would defeat the purpose.
+
+Wired into BOTH paths: the eval producer and, more importantly, the production
+scripted dispatcher (`lib/dispatch.ts`), which is where a refused reviewer
+actually costs coverage.

@@ -17,9 +17,12 @@
  * on the `incident-auth-bypass` and `adversarial-injection-approve` corpus
  * cases, at 5,207 tokens (so not a context problem).
  *
- * A refusal is not a transient error: the same prompt on the same model
- * refuses again, which is why the ordinary retry path cannot help and why the
- * fallback must change the model. Anthropic's own refusal message points
+ * A refusal is INTERMITTENT, not deterministic: probe run 30658862532 saw the
+ * same Fable pin clear both cases that run 30656579898 blocked. It is still not
+ * recoverable by the ordinary retry, which appends a corrective note about
+ * output shape — a blocked request never had an output-shape problem. Switching
+ * to a model with a different refusal profile is the reliable recovery;
+ * re-rolling the refusing pin is not. Anthropic's own refusal message points
  * integrators at a fallback model; gh-aw exposes no such parameter, but
  * scripted dispatch owns its runner, so the policy lives here instead.
  *

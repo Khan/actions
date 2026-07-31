@@ -62,6 +62,7 @@ import {
     type Claim,
 } from "./dispatch-contracts";
 import {computeRoster, type RosterShed} from "./dispatch-roster";
+import {refusalFallbackFor} from "./refusal-fallback";
 import {
     applyProvenanceGate,
     type DiffProvenance,
@@ -267,6 +268,12 @@ export type PerAgentReport = {
     wallMs: number;
     /** This entry is the one malformed-output retry of the same agent. */
     retried?: boolean;
+    /**
+     * The pinned model refused under the provider's usage policy and this
+     * dispatch ran on the fallback instead. Recorded, never silent: the whole
+     * failure mode is invisibility, and a hidden model swap would just move it.
+     */
+    fellBackTo?: string;
     /** The result arrived via the structured-final tool (pre-validated). */
     structuredFinal?: boolean;
     failed?: string;
@@ -433,6 +440,7 @@ export const runDispatch = async (
     const dispatchAgent = async (
         name: string,
         malformedNote?: string,
+        modelOverride?: string,
     ): Promise<string | null> => {
         const definition = agents.get(name);
         if (definition === undefined) {
@@ -452,23 +460,41 @@ export const runDispatch = async (
                 malformedNote === undefined
                     ? ""
                     : `\n\nYour previous reply could not be used (${malformedNote}). Submit again now, and this time deliver the complete corrected JSON object through the submit_result tool (or, if that tool is unavailable, as your ENTIRE message: no prose before or after it, no code fence).`;
+            const model = modelOverride ?? definition.model;
             const result = await runner({
                 name,
-                model: definition.model,
+                model,
                 prompt: `${definition.prompt}\n\nProceed now per your definition. Deliver your result by calling the submit_result tool ONCE, passing the ENTIRE JSON object your definition's output contract specifies as its \`result\` argument; if the tool rejects it, correct the object and call the tool again. After it is accepted, end the turn without repeating the JSON. If the submit_result tool is unavailable, your final message must be exactly that JSON object, nothing else.${corrective}`,
                 cwd: repoRoot,
                 maxTurns,
                 timeoutMs,
                 validate: validatorFor(name),
             });
+            // A usage-policy refusal is intermittent (probe 30658862532 saw
+            // the same pin clear cases it blocked in 30656579898), but the
+            // contract-parse retry still cannot recover it: that retry appends
+            // a corrective note about output shape, and a blocked request
+            // never had one. Only a different refusal profile reliably helps.
+            // Production is where this actually costs coverage — a refused
+            // reviewer emits no error, just nothing, and the review proceeds
+            // without it (run 30656579898: correctness-reviewer on Fable 5,
+            // blocked on security-adjacent diffs).
+            const fallback =
+                result.refused === true && modelOverride === undefined
+                    ? refusalFallbackFor(model)
+                    : undefined;
+            if (fallback !== undefined) {
+                return dispatchAgent(name, malformedNote, fallback);
+            }
             writeOut(name, result.output);
             perAgent.push({
                 name,
-                model: definition.model,
+                model,
                 usd: result.usd,
                 turns: result.turns,
                 wallMs: result.wallMs,
                 ...(malformedNote === undefined ? {} : {retried: true}),
+                ...(modelOverride === undefined ? {} : {fellBackTo: model}),
                 ...(result.structured === true ? {structuredFinal: true} : {}),
             });
             return result.output;
@@ -482,10 +508,13 @@ export const runDispatch = async (
             );
             perAgent.push({
                 name,
-                model: definition.model,
+                model: modelOverride ?? definition.model,
                 usd: 0,
                 turns: 0,
                 wallMs: 0,
+                ...(modelOverride === undefined
+                    ? {}
+                    : {fellBackTo: modelOverride}),
                 failed: "run-failed",
             });
             return null;

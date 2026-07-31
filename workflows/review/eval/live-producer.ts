@@ -661,8 +661,9 @@ const dispatchWithRetry = async <R>(
                           )}`;
             }
             if (result.refused === true) {
-                // Retrying the same pin returns the same refusal; only a
-                // different model can help. Keep the ORIGINAL prompt: the
+                // The contract-parse retry cannot recover a refusal: it
+                // corrects output shape, and a blocked request never produced
+                // one. Keep the ORIGINAL prompt: the
                 // rejection note is about output shape, and this failure was
                 // not the model's output.
                 const fallback = refusalFallbackFor(model, tried);

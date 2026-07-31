@@ -491,9 +491,11 @@ moved *onto* Fable 5 for its recall gain. Eval run 30656579898 caught it
 refusing `incident-auth-bypass` and `adversarial-injection-approve` outright,
 at 5,207 tokens (so not a context limit).
 
-A refusal is deterministic in the model: the same prompt on the same pin
-refuses again, so the ordinary retry cannot help. `lib/refusal-fallback.ts`
-maps a refusing pin to a model that will take the work:
+Refusals are **intermittent**: probe run 30658862532 saw the same Fable pin
+clear both cases that run 30656579898 blocked. The ordinary retry still cannot
+recover one, because it appends a corrective note about output shape and a
+blocked request never produced an output. `lib/refusal-fallback.ts` maps a
+refusing pin to a model with a different refusal profile:
 
 | Pinned model | Falls back to | Basis |
 | --- | --- | --- |
