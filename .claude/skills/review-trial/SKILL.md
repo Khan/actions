@@ -40,7 +40,11 @@ missing, stop and ask; do not improvise a defect table from the branch diff.
    tables isolate the dial's recall and dollar deltas.
 4. **Lifecycle plan** (optional): the push-2 content (fixes mixed with fresh
    seeds, plus their defect-table rows) and the push-3 content (everything
-   fixed).
+   fixed). If the plan means to exercise **open-thread suppression**, it must
+   leave at least one finding unfixed: a push where the fixer repairs
+   everything lets the reconciler resolve every thread, `threads.json` comes
+   back empty, and suppression has nothing left to suppress, so the round
+   proves nothing about it either way.
 5. **Budget approval**: project the cost FIRST and confirm. Project in the
    units the cap enforces: the firewall api-proxy's credit meter
    (`ai_credits_this_response` sums in the run's token-usage log), NOT the
@@ -78,7 +82,17 @@ Per-arm trigger setup:
 
 - `repo-default`: nothing extra; the repo's reviewer triggers normally.
 - `workflow @ ref`: commit the compiled workflow for that ref onto the
-  scaffolding branch. **Give it a workflow name distinct from the repo's
+  scaffolding branch, under a **fresh lock filename per trial** (e.g.
+  `review-preview-v1-9-0.lock.yml`, not a reused `review-preview.lock.yml`).
+  GitHub's workflow registry keys the display name to the file PATH and keeps
+  the stale one: two consecutive trials that reused one filename both showed
+  up in the Actions list as "PR Reviewer" while the files on the branches
+  declared "PR Reviewer Preview v1.8.0" and "...v1.9.0". Nothing about
+  concurrency broke (the groups were distinct, and the production workflow
+  recorded zero runs on either branch), but a run list that names every arm
+  after the production reviewer is unreadable and invites exactly the "did
+  production just run?" scare the naming rule exists to prevent.
+  **Give it a workflow name distinct from the repo's
   own reviewer and from every other arm**: same-named gh-aw workflows share
   a per-PR concurrency group and silently cancel each other (this ate a run
   in the original trial). Its `if:` must exclude the scaffolding branch
@@ -129,6 +143,25 @@ Push the operator's push-2 content to EVERY arm branch (identical commits),
 let each arm re-review, and collect again; repeat for push-3. Score each push
 separately: re-review behavior (thread resolution, duplicate suppression,
 scoping to new hunks) is half the point of the lifecycle.
+
+**Never force-push a trial branch between rounds.** Every push after the first
+review is forward-only; rebase, squash, or re-parent the stack BEFORE the first
+arm reviews it. The reason is measurement integrity, not correctness: a round
+that cannot anchor on a prior fingerprint reports `stampSource: null` in
+`out/rereview-plan.json` and executes `depth: full` with `staging: whole-diff`
+even where ROUTING says `scoped`, which is visually indistinguishable from a
+genuine carrier gap and silently voids the scoped-cost sample that round was
+supposed to produce. Note what the carrier does and does not tolerate, because
+it is easy to assume the wrong one: the hunk signature is content-hashed over
+each hunk's added and removed lines, so SHA rewrites and shifted line numbers
+do NOT move it (`workflows/review/lib/rereview-mode.ts`), and the cache
+record's `commitSha` is written but never read back, so a rebase alone should
+not refuse the carrier. What actually loses the anchor is losing the RECORD
+(cache eviction, or a credit-capped run that died before Step 9 wrote it), and
+a force-pushed round is exactly the round where that goes unnoticed and gets
+blamed on the rebase. So: read `stampSource` out of the plan artifact every
+round rather than inferring the carrier state, and discard scoped-cost samples
+from any round that did not anchor.
 
 When an arm runs a reduced re-review mode (`re-review` in ROUTING), also
 record per push: the executed depth and tripwire fields from the run's
@@ -184,6 +217,8 @@ onto a long-lived branch. Leave the collected transcripts with the operator
 
 - Costs projected and approved before the first PR exists.
 - Seeds and ground truth are operator-authored, always.
-- One arm per PR; distinct workflow names; exactly one reviewer per PR.
+- One arm per PR; distinct workflow names; a fresh lock filename per trial;
+  exactly one reviewer per PR.
+- Forward-only pushes once a round has been reviewed; no force-pushes mid-trial.
 - Score before cleanup; export before cleanup; never lose transcripts.
 - Faithful reporting, including the arm you expected to win losing.
