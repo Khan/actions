@@ -243,6 +243,11 @@ pre-agent-steps:
       path: gh-aw-review-lib
       persist-credentials: false
 
+# KHAN/ACTIONS LOCAL OVERRIDE: the pricing overlay added at source, carried
+# here ahead of the release that ships it (this pinned v1.7.0 copy predates
+# it). Drop this override at the next installed-reviewer version bump, when
+# `gh aw update` brings the same block down from the source workflow.
+#
 # Anthropic pricing overlay, so an AI credit means $0.01 of what Khan actually
 # pays.
 #
