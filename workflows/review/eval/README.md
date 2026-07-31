@@ -166,7 +166,14 @@ claiming a band.
   finding, so it shows up as candidate-arm recall loss, not as a better
   duplicate number. The `by clusterer` share counts absorbed COPIES, not groups,
   so a group both tiers contributed to credits tier 2 only with what it actually
-  brought. `rejected` counts cluster MEMBERS the merge rules refused, so one bad
+  brought; production's `clustering` block records the same per-copy number as
+  `clusterMerged` (its `clusterMerges` counts groups), so the artifact and the
+  report that graduated the tier cannot be read as disagreeing. The share
+  carries tier 2's own dollars and wall-clock beside it, because the dispatch
+  precondition is satisfied by most multi-finding reviews: the steady state is a
+  serial Sonnet call on nearly every run, and a merge count is a graduation
+  argument only next to what those merges cost. `rejected` counts cluster
+  MEMBERS the merge rules refused, so one bad
   proposal naming three ids counts three (`unknown-id` there means the clusterer
   named claims that do not exist, which is a prompt or staging failure rather
   than a quiet zero).

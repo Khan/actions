@@ -182,57 +182,77 @@ describe("runArm dedup accounting", () => {
      */
     const produceMerged =
         (clustererAbsent: boolean): ArmProduce =>
-        async () => ({
-            ...(await produceHit(1)(liveCase("case-1"))),
-            dedup: {
-                candidates: 4,
-                merges: [
-                    {
-                        survivor: "live-hit",
-                        merged: [
-                            {
-                                id: "live-doc-1",
-                                source: "documentation",
-                                label: "suggestion (non-blocking, documentation)",
-                                line: 9,
-                                via: "clusterer" as const,
-                            },
-                        ],
-                        path: "src/a.ts",
-                        line: 1,
-                        via: "clusterer" as const,
-                        evidence: "the `maxSamples` comment says 10, not 25",
-                    },
-                    // A group BOTH tiers contributed to: tier 1 reached the
-                    // conventions copy on its own and only the holistic one
-                    // needed the clusterer, so exactly one of these two copies
-                    // is tier 2's to claim.
-                    {
-                        survivor: "live-hit-2",
-                        merged: [
-                            {
-                                id: "live-conv-1",
-                                source: "conventions",
-                                label: "nitpick (non-blocking)",
-                            },
-                            {
-                                id: "live-holistic-1",
-                                source: "holistic",
-                                label: "note (non-blocking)",
-                                via: "clusterer" as const,
-                            },
-                        ],
-                        path: "src/a.ts",
-                        line: 4,
-                        via: "both" as const,
-                        evidence: "the `staleAfter` window",
-                    },
-                ],
-                proposed: 1,
-                rejected: [],
-                clustererAbsent,
-            },
-        });
+        async () => {
+            const base = await produceHit(1)(liveCase("case-1"));
+            return {
+                ...base,
+                // The clusterer's own per-agent entry is where the merge row reads
+                // tier 2's price: an arm that never had the agent contributes no
+                // entry and therefore no cost.
+                perAgent: clustererAbsent
+                    ? base.perAgent
+                    : [
+                          ...base.perAgent,
+                          {
+                              name: "claim-clusterer",
+                              model: "sonnet",
+                              usd: 0.25,
+                              turns: 2,
+                              wallMs: 21_000,
+                              retried: false,
+                          },
+                      ],
+                dedup: {
+                    candidates: 4,
+                    merges: [
+                        {
+                            survivor: "live-hit",
+                            merged: [
+                                {
+                                    id: "live-doc-1",
+                                    source: "documentation",
+                                    label: "suggestion (non-blocking, documentation)",
+                                    line: 9,
+                                    via: "clusterer" as const,
+                                },
+                            ],
+                            path: "src/a.ts",
+                            line: 1,
+                            via: "clusterer" as const,
+                            evidence:
+                                "the `maxSamples` comment says 10, not 25",
+                        },
+                        // A group BOTH tiers contributed to: tier 1 reached the
+                        // conventions copy on its own and only the holistic one
+                        // needed the clusterer, so exactly one of these two copies
+                        // is tier 2's to claim.
+                        {
+                            survivor: "live-hit-2",
+                            merged: [
+                                {
+                                    id: "live-conv-1",
+                                    source: "conventions",
+                                    label: "nitpick (non-blocking)",
+                                },
+                                {
+                                    id: "live-holistic-1",
+                                    source: "holistic",
+                                    label: "note (non-blocking)",
+                                    via: "clusterer" as const,
+                                },
+                            ],
+                            path: "src/a.ts",
+                            line: 4,
+                            via: "both" as const,
+                            evidence: "the `staleAfter` window",
+                        },
+                    ],
+                    proposed: 1,
+                    rejected: [],
+                    clustererAbsent,
+                },
+            };
+        };
 
     it("carries the per-case counts and the merged groups", async () => {
         const report = await runArm(
@@ -251,6 +271,8 @@ describe("runArm dedup accounting", () => {
             clusterMerged: 2,
             rejected: 0,
             clustererAbsent: false,
+            clustererUsd: 0.25,
+            clustererWallMs: 21_000,
             groups: [
                 {
                     survivor: "live-hit",
@@ -298,7 +320,10 @@ describe("runArm dedup accounting", () => {
         // `tier 1 only` is the expected baseline shape in the A/B that
         // graduates the clusterer: a zero there is asymmetry, not a result.
         expect(markdown).toContain("3 / 4 (tier 1 only)");
-        expect(markdown).toContain("3 / 4 (2 by clusterer)");
+        // Tier 2's share carries its price: a merge count with no cost beside
+        // it cannot answer whether a serial dispatch on nearly every run is
+        // worth its place, which is the question graduation turns on.
+        expect(markdown).toContain("3 / 4 (2 by clusterer at $0.25 / 21s)");
     });
 
     it("omits the block for a producer that runs no dedup at all", async () => {

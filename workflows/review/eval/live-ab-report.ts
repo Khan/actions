@@ -79,6 +79,15 @@ export type ArmRunReport = {
             rejected: number;
             clustererAbsent: boolean;
             /**
+             * The clusterer's own spend and wall-clock on this case, absent
+             * when it never ran. Tier 2 is a serial dispatch on nearly every
+             * multi-finding review and absorbs a fraction of a group per run,
+             * so its merge count alone cannot answer whether it earns its
+             * place; these price the count.
+             */
+            clustererUsd?: number;
+            clustererWallMs?: number;
+            /**
              * The merged groups themselves, so a suspicious merge is
              * diagnosable from the artifact instead of from a repeat run: the
              * survivor, the claim ids absorbed into it, which tier found the
@@ -308,6 +317,13 @@ const snappedTotal = (arm: ArmRunReport): number =>
  * marks an arm whose review.md defines no `claim-clusterer` — the expected
  * shape of the baseline in the A/B that graduates it, and the reason a zero in
  * the clusterer column there is asymmetry, not a negative result.
+ *
+ * Tier 2's share carries its PRICE beside it, because the two numbers are only
+ * meaningful together: the dispatch precondition is satisfied by most
+ * multi-finding reviews, so the steady state is a serial Sonnet call on nearly
+ * every run, and "4 merges" is a graduation argument only next to what those
+ * four merges cost. Tier 1 is free by comparison (pure text arithmetic), so no
+ * price is shown for it.
  */
 const mergedTotal = (arm: ArmRunReport): string => {
     const dedup = arm.perCase.flatMap((c) => (c.dedup ? [c.dedup] : []));
@@ -317,8 +333,16 @@ const mergedTotal = (arm: ArmRunReport): string => {
     const sum = (pick: (d: typeof dedup[number]) => number): number =>
         dedup.reduce((total, d) => total + pick(d), 0);
     const absent = dedup.every((d) => d.clustererAbsent);
+    const clustererUsd = sum((d) => d.clustererUsd ?? 0);
+    const clustererWallMs = sum((d) => d.clustererWallMs ?? 0);
     const notes = [
-        absent ? "tier 1 only" : `${sum((d) => d.clusterMerged)} by clusterer`,
+        absent
+            ? "tier 1 only"
+            : `${sum(
+                  (d) => d.clusterMerged,
+              )} by clusterer at $${clustererUsd.toFixed(2)} / ${Math.round(
+                  clustererWallMs / 1000,
+              )}s`,
         ...(sum((d) => d.rejected) > 0
             ? [`${sum((d) => d.rejected)} proposed member(s) rejected`]
             : []),

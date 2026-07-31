@@ -235,6 +235,7 @@ describe("runDispatch defect clustering (dedup tier 2)", () => {
             candidates: 2,
             proposed: 1,
             clusterMerges: 1,
+            clusterMerged: 1,
             rejected: [],
         });
         expect(
@@ -271,6 +272,7 @@ describe("runDispatch defect clustering (dedup tier 2)", () => {
             candidates: 2,
             proposed: 0,
             clusterMerges: 0,
+            clusterMerged: 0,
             rejected: [],
             unavailable: true,
         });
@@ -391,6 +393,7 @@ describe("runDispatch defect clustering (dedup tier 2)", () => {
             candidates: 2,
             proposed: 1,
             clusterMerges: 0,
+            clusterMerged: 0,
             rejected: [
                 {id: "holistic-4", reason: "unknown-id"},
                 {id: "correctness-reviewer-1", reason: "cluster-collapsed"},

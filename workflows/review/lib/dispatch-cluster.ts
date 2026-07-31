@@ -65,6 +65,16 @@ export type DispatchClustering = {
     proposed: number;
     /** Groups that merged with a tier-2 contribution (`via` is not similarity). */
     clusterMerges: number;
+    /**
+     * Copies tier 2 is what absorbed, counted per copy rather than per group.
+     * Both numbers are recorded because they answer different questions and
+     * differ on any run with a `both` group: `clusterMerges` is how many
+     * comments tier 2 had a hand in, this is how many duplicate comments it
+     * removed. The live A/B's `clusterMerged` column is THIS quantity — the
+     * one the graduation decision reads — so a run's artifact and the report
+     * that graduated the tier cannot be compared and found to disagree.
+     */
+    clusterMerged: number;
     /** Proposed members that did not merge, with the rule that stopped them. */
     rejected: ClusterRejection[];
     /** The clusterer ran and returned nothing usable (tier 1 only this run). */
@@ -148,6 +158,13 @@ export const clusteringRecord = (
               clusterMerges: merged.merges.filter(
                   (merge) => merge.via !== "similarity",
               ).length,
+              clusterMerged: merged.merges.reduce(
+                  (sum, merge) =>
+                      sum +
+                      merge.merged.filter((copy) => copy.via === "clusterer")
+                          .length,
+                  0,
+              ),
               rejected: merged.clusterRejections,
               ...(step.unavailable ? {unavailable: true} : {}),
           }

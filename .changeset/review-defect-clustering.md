@@ -25,6 +25,15 @@ tokens than the real duplicates do (run 29943085279's AddDate issue and its
 MemoryTTLDays, 180, 15). Duplicates are "same ask, different words"; those are
 "same facts, different ask", which is a semantic judgment.
 
+Asking each finder for its own identity key would cluster deterministically at
+zero dispatch, and it fails for the same reason. A finder mints its key blind to
+the other reviewers, so two of them agreeing on one defect would have to
+independently pick the same string; and where a blind key DOES agree is the case
+that must not merge, since the AddDate bug and its missing-test todo would both
+key on `AddDate`. The clusterer's grounding evidence is not that key: it is
+chosen after reading the candidate set, which is what makes it both possible and
+checkable against every member's text.
+
 So the unit of identity is now the defect, not the anchor. Tier 2 requires no
 line agreement at all, which is what makes the same-defect-different-anchor shape
 mergeable for the first time (one missing-test defect drew comments at three
@@ -48,7 +57,8 @@ from two sources, at least one non-blocking), so a run with nothing to find neve
 pays for the step. A missing definition or an unusable reply leaves the run on
 tier 1, exactly today's behavior, and surfaces as a run warning plus a
 `clustering` block in `dispatch-result.json` (`candidates`, `proposed`,
-`clusterMerges`, and every rejected member with the rule that stopped it) rather
+`clusterMerges` per group, `clusterMerged` per absorbed copy, and every rejected
+member with the rule that stopped it) rather
 than as an author-facing note: duplicate hygiene is not a review dimension. Each
 merge in `merges` now carries `via` (`similarity`/`clusterer`/`both`) plus the
 tier and anchor of each absorbed copy, so the merge rate reads off the artifact
@@ -70,9 +80,18 @@ code and production has had it since #245) while tier 2 is carried by each arm's
 own review.md, exactly like the provenance gate's anchor-snap emulation, so the
 arm delta prices the clusterer alone and a false merge shows up as recall loss.
 The report gains a "Cross-source claims merged (of candidates)" row with tier 2's
-share, and per-case dedup counts.
+share, its dollars and wall-clock, and per-case dedup counts.
+
+Tier 2 can add merges and never subtract them, which the structural rules now
+enforce before any membership is unioned rather than only afterward: an
+unverifiable proposal that names a cross-path claim used to pull it into the
+group, where it could out-rank the real survivor and collapse a merge tier 1
+would have made on its own, recorded in neither `merges` nor the rejection list.
+The per-member re-check against the elected survivor stays, since tier-1 bridging
+can still elect a claim the proposal never named.
 
 `dispatch.ts` was at its 1000-line cap again, so the clustering step lands in
 `dispatch-cluster.ts` (dispatch, contract parse, telemetry) rather than raising
-the cap; the tier-2 tests live in `dedup-cluster.test.ts` and
-`dispatch-cluster.test.ts` for the same reason.
+the cap, and tier 2's rules in `lib/dedup-cluster.ts` beside the tests that
+already carried the name; the eval's dedup stage splits to
+`eval/live-dedup.ts` on the same principle.

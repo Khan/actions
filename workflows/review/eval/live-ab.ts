@@ -94,6 +94,7 @@ import {
 } from "./rereview-match";
 import {runCase} from "./runner";
 import {reviewMdHasAnchorSnap} from "../lib/provenance";
+import {CLUSTERER} from "../lib/dispatch-cluster";
 import type {ReReviewMode} from "../lib/routing-config";
 
 // The report shapes and renderers live in ./live-ab-report; re-exported so
@@ -228,6 +229,9 @@ export const runArm = async (
             });
         }
 
+        const clusterer = produced.perAgent.find(
+            (agent) => agent.name === CLUSTERER,
+        );
         perCase.push({
             caseId: corpusCase.id,
             usd: caseUsd,
@@ -260,6 +264,21 @@ export const runArm = async (
                           ),
                           rejected: produced.dedup.rejected.length,
                           clustererAbsent: produced.dedup.clustererAbsent,
+                          // What tier 2 COST, beside what it merged. The
+                          // clusterer is a serial step on nearly every
+                          // multi-finding run while absorbing a fraction of a
+                          // group per run, so a merge count alone cannot say
+                          // whether it is worth dispatching; these two make the
+                          // graduation decision a price per merge rather than a
+                          // count. Read off the clusterer's own per-agent
+                          // entry, so a run where it was skipped or absent
+                          // contributes zero rather than nothing.
+                          ...(clusterer === undefined
+                              ? {}
+                              : {
+                                    clustererUsd: clusterer.usd,
+                                    clustererWallMs: clusterer.wallMs,
+                                }),
                           // The groups themselves, not just the count: the
                           // powered run that graduated tier 2 could see THAT 4
                           // claims merged but not WHICH, so auditing a

@@ -44,6 +44,21 @@
  * missing test). Telling those apart is a semantic judgment, so tier 2 asks a
  * model for it rather than pretending a fourth threshold would find it.
  *
+ * Nor by asking each finder for an identity key of its own, which would
+ * cluster deterministically at zero dispatch and was the first thing tried on
+ * paper. A finder mints its key blind: it has not seen the other reviewers'
+ * findings, so two of them agreeing on one defect would have to independently
+ * choose the SAME string, which is the semantic-agreement problem the text
+ * floors already lose, moved into a shorter string with less to work with
+ * (`maxSamples`, "the doc/constant mismatch" and "window.go:8 comment" are all
+ * defensible keys for run 30587343777's one defect). Where a blind key DOES
+ * agree is the case that must not merge: the AddDate pair above would both key
+ * on `AddDate`, so the scheme collides hardest exactly where "same facts,
+ * different ask" needs separating. The clusterer's `evidence` is not that key
+ * and cannot be produced by a finder, because it is chosen AFTER reading the
+ * candidate set; comparison is what makes it possible, which is why it can be
+ * verified against every member's text here rather than merely trusted.
+ *
  * The unit of identity, restated: the DEFECT, not the anchor. Tier 2 needs no
  * line agreement at all, which is what finally makes the
  * same-defect-different-anchor shape mergeable (one missing-test defect drew

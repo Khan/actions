@@ -526,6 +526,73 @@ describe("dedupeClaims with model-proposed clusters", () => {
         ]);
     });
 
+    it("refuses a cluster whose SURVIVOR does not name the shared evidence", () => {
+        // The grounding check runs against both ends, and the survivor end has
+        // no other fixture: everywhere else the survivor is a cluster member
+        // and names the evidence by construction. The gap it closes is tier 1
+        // electing a survivor the clusterer never proposed — here a blocking
+        // claim bridged in on the text floor, describing the retention window
+        // rather than the cap. Ungrounded against THAT survivor, the identity
+        // the model asserted says nothing about the comment the merge would
+        // post under, so the cluster-only member stays its own comment.
+        const {claims, merges, clusterRejections} = dedupeClaims(
+            [
+                claim({
+                    id: "holistic-1",
+                    source: "holistic",
+                    path: "dev/af19_trial/window.go",
+                    line: 8,
+                    label: "issue (blocking)",
+                    subject:
+                        "The declaration comment above the constant states a retention bound the code does not enforce.",
+                    failure_scenario:
+                        "A maintainer sizes downstream buffers from the stated retention bound and under-provisions.",
+                }),
+                claim({
+                    id: "correctness-reviewer-3",
+                    source: "correctness-reviewer",
+                    path: "dev/af19_trial/window.go",
+                    line: 8,
+                    label: "note (non-blocking)",
+                    subject:
+                        "The declaration comment above `maxSamples` states a retention bound the code does not enforce.",
+                    failure_scenario:
+                        "A maintainer sizes downstream buffers from the stated retention bound and under-provisions.",
+                }),
+                claim({
+                    id: "documentation-1",
+                    source: "documentation",
+                    path: "dev/af19_trial/window.go",
+                    line: 10,
+                    label: "suggestion (non-blocking, documentation)",
+                    subject: "Wrong cap in prose: 10 vs 25.",
+                    failure_scenario:
+                        "`maxSamples` is 25 and the doc says 10, so a reader trusts a number that was never true.",
+                }),
+            ],
+            [
+                {
+                    evidence: "the `maxSamples` cap",
+                    ids: ["correctness-reviewer-3", "documentation-1"],
+                },
+            ],
+        );
+        // Tier 1's merge stands; tier 2 contributes nothing to it.
+        expect(merges).toHaveLength(1);
+        expect(merges[0].survivor).toBe("holistic-1");
+        expect(merges[0].via).toBe("similarity");
+        expect(merges[0].merged.map((m) => m.id)).toEqual([
+            "correctness-reviewer-3",
+        ]);
+        expect(claims.map((c) => c.id)).toEqual([
+            "holistic-1",
+            "documentation-1",
+        ]);
+        expect(clusterRejections).toEqual([
+            {id: "documentation-1", reason: "ungrounded"},
+        ]);
+    });
+
     it("re-checks a screened member against the survivor tier 1 elects", () => {
         // The pre-screen anchors on the proposal's own members; tier 1 can then
         // bridge in a claim that out-ranks the anchor and becomes the survivor,
