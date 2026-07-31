@@ -1,0 +1,9 @@
+---
+"autofix": minor
+---
+
+Settle the `docs` convergence question, and bias the fixer toward rewrite-with-why over deletion.
+
+`docs` is now **permanently** loop-ineligible rather than ineligible pending measurement, and the argument in `scope.ts` is mechanical instead of a guess about which half of the documentation policy dominates. The reviewer's only bound on re-flagging is its newly-changed-code scope, built from each unseen hunk's *added* lines (`computeNewScope`); a docs-scoped fix writes comment text and nothing else, and comment text is the documentation reviewer's subject matter. So deletion converges only by erasure (webapp#41204 fixed a "restates the constant" finding on `staleAfter` by deleting the comment, leaving the constant undocumented), while rewriting re-arms (webapp#41207 fixed 5 of 5 documentation threads at perfect precision, and the re-review its own push triggered minted three fresh documentation findings on the prose the fixer had just written). #41207 is the data point #41194 could not be: real `documentation`-labelled threads, and re-mints on lines the autofix commit itself introduced rather than a memoryless whole-diff re-derivation. A cadence axis that wants `docs` needs an authorship-aware scope bound (exclude hunks whose commit carries `Autofix-Scope: docs`) as a precondition, not a better prompt.
+
+Two prompt rules follow from the same evidence, and they are the right trade only because one-shot mode has no cadence to protect: on a documentation item, **rewrite before you delete** when the code's non-obvious reason is recoverable from the diff, the surrounding code, or the reviewer's thread — and **never invent a rationale**, since a plausible reason nobody can source is worse than no comment. When a deletion does leave a value unexplained, Step 7 must name the symbol and say so, because a thread reported as plainly fixed hides the one sentence only the author can write.

@@ -186,21 +186,51 @@ cycle with no nits-scoped work done. The generator is a **memoryless
 re-derivation over the whole diff**, not the fixer's own prose; it does not need
 the fixer to have written anything.
 
-`docs` is the value worth pausing on, because it looks like the exception and is
-only half one. Its deletion half genuinely converges: a comment that restates
-the code is either gone or it is not. Its other half does not, because the
-documentation reviewer also flags a *missing* explanation, the fixer answers
-with prose, and prose is the thing a reviewer can always want written better.
-So `docs` is ineligible too. Khan/webapp#41194 gives that its first data point,
-and it lands on the half that does not converge: `counts.go:16` is a *missing*
-explanation (`TopKey`'s doc comment "covers tie resolution but not the
-empty/nil-map case"), raised unprompted against the fixer's own PR. Read it as
-one observation of the shape rather than a measurement of the domain, and note
-it did not come from the documentation reviewer: that repo runs a `review`
-release too old to mint the `documentation` label, so the finding was a plain
-`note (non-blocking)` and `autofix: docs` would not have selected it. If the
-cadence axis is ever built, `docs` is still the first candidate to re-examine,
-and which half dominates in practice is still the thing to measure first.
+`docs` is the value worth pausing on, because it looks like the exception. It is
+not, and the reason is mechanical rather than a question of which half of the
+documentation policy dominates in practice — which is what this section used to
+defer the decision to.
+
+The bound on re-flagging is the reviewer's newly-changed-code scope, built from
+each unseen hunk's **added** lines (`computeNewScope` in
+`review/lib/stage-pr.ts`). A docs-scoped fix writes comment text and nothing
+else, and comment text is exactly what the documentation reviewer reviews. So
+the halves are two mechanical outcomes, not two tendencies:
+
+- **Deletion converges, and only by erasure.** A deleted comment adds no lines,
+  so it puts nothing in the next cycle's scope and cannot be re-flagged.
+  Khan/webapp#41204 is the cost: a "restates the constant" finding on
+  `staleAfter` was fixed by deleting the comment instead of supplying the
+  rationale. Defensible for pure restatement, and the constant is still
+  undocumented.
+- **Rewriting re-arms.** Replacement prose *is* added lines, so the next cycle's
+  in-scope set is very nearly all prose the fixer just wrote, handed back to the
+  reviewer that asked for it. Khan/webapp#41207 measured one cycle:
+  `autofix: docs` fixed 5 of 5 documentation threads at perfect precision (7
+  non-documentation threads untouched, one file modified, all four edits
+  comments), and the re-review its own push triggered minted three fresh
+  documentation findings — on `isAlnum`'s and `Slugify`'s docs — that did not
+  exist when the run was armed.
+
+#41207 is the data point #41194 could not be. That earlier run came from a repo
+whose `review` release is too old to mint the `documentation` label, so its
+finding posted as a plain `note (non-blocking)` that `autofix: docs` would never
+have selected, and it was a memoryless whole-diff re-derivation besides.
+#41207's re-mints are real documentation findings on lines the autofix commit
+itself introduced, which is why no scope filter keyed on newly-changed lines can
+bound them: the fixer is the author of the newly-changed lines.
+
+So `docs` is ineligible **permanently**, and the two configurations fail in
+opposite directions: deletion-only converges while erasing rationale,
+rewrite-enabled preserves rationale and re-arms. One-shot mode has no cadence to
+protect, so the prompt is deliberately biased toward rewrite-with-why (Step 4),
+which is the right trade for quality per shot and the wrong one for a loop.
+Anyone building a cadence axis that includes `docs` needs an authorship-aware
+bound as a **precondition**, not a better prompt: exclude hunks whose commit
+carries `Autofix-Scope: docs` from the documentation lens's in-scope set. It is
+not built now because in one-shot mode a re-mint costs three advisory threads on
+a PR its author is already reading, and every further cycle needs a fresh human
+arming.
 
 ### Why `docs` is the safest scope
 

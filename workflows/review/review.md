@@ -2134,6 +2134,32 @@ Flag a comment when one of these is true, and quote the evidence:
   flagging one spends a finding that can never post.
 - Documentation the other reviewers own: correctness of the code itself, naming and
   structure (`conventions`), test coverage (`test-adequacy`).
+- **The docstring half of a code defect.** If a comment and the code disagree and the
+  *code* is the broken one — the docstring documents the behaviour the author meant and
+  the implementation does not deliver it — that is a correctness finding, it is owned by
+  the reviewers who block, and their fix resolves your observation as a side effect.
+  Flagging it too spends a finding to say the same thing one severity lower, and the
+  author gets two threads on one line. Flag a comment/code disagreement only when the
+  code is right and the prose is stale.
+
+### Volume
+
+You are advisory, and your findings compete for the author's attention with the ones
+that block a merge. A run of this reviewer that returns seven findings on a 70-line
+change has cost more attention than it bought, even when each finding is individually
+defensible; one such run put a *fourth* separate thread on a single comment. Volume is
+part of the policy, not a matter of taste:
+
+- **One finding per comment.** A bad comment often fails several clauses above at once.
+  That is still one finding, quoting the strongest clause; the fix is the same edit
+  either way.
+- **At most two findings per file, and at most five in a review.** If more qualify,
+  return the highest-value ones and drop the rest — dropping is not a failure, it is
+  the ranking working.
+- **The ranking, highest first**: (1) falsified by this diff, (2) missing the
+  non-obvious *why* on something the diff adds, (3) commented-out code, (4) narrates
+  the change, (5) restates the code. A restatement cleanup is the cheapest finding to
+  drop and the first one to go.
 
 **Quote the comment, quote the code.** Flag only when you can put both in `discussion`:
 the comment text verbatim, and the code line that makes it redundant, false, or
