@@ -75,6 +75,7 @@
  */
 
 import {extractJsonValue} from "./agent-json";
+import {forwardedRunWarnings} from "./forwarded-warnings";
 import {isBlockingLabel, renderReviewBody} from "./render-comment";
 import {parseLeadingLabel} from "./rereview";
 import {findLatestStamp, stampFromCacheMemory} from "./rereview-mode";
@@ -732,6 +733,8 @@ export type DispatchGateReport = DispatchGateEvaluation & {
     outFilesSeen: string[];
     /** Item types stripped from the queue, with counts (blocked runs). */
     strippedItemTypes: Record<string, number>;
+    /** See {@link forwardedRunWarnings}: re-emitted here so they annotate. */
+    forwardedWarnings: string[];
 };
 
 const readJsonIfPresent = (fs: DispatchGateFs, path: string): unknown => {
@@ -836,6 +839,7 @@ export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
         blocked,
         outFilesSeen: Object.keys(outFiles).sort(),
         strippedItemTypes,
+        forwardedWarnings: forwardedRunWarnings(outFiles),
         ...evaluation,
     };
     fs.mkdirSync(REPORT_DIR, {recursive: true});
@@ -928,6 +932,11 @@ export const renderGateSummary = (report: DispatchGateReport): string => {
             `- **${violation.code}** (${violation.dimension}): ${violation.detail}`,
         );
     }
+    for (const warning of report.forwardedWarnings) {
+        // Envelope stripped: the summary is markdown, and the CLI entry is
+        // what raises the annotation.
+        lines.push(`- warning: ${warning.replace(/^::warning[^:]*::/, "")}`);
+    }
     for (const note of report.notes) {
         lines.push(`- note: ${note}`);
     }
@@ -959,6 +968,12 @@ if (typeof require !== "undefined" && require.main === module) {
     // Reporting is best-effort and must not affect the exit code in either
     // direction.
     try {
+        // From THIS step, not the agent's Bash tool: that is what makes a
+        // `::warning` an annotation.
+        for (const warning of report.forwardedWarnings) {
+            // eslint-disable-next-line no-console
+            console.log(warning);
+        }
         // eslint-disable-next-line no-console
         console.log(JSON.stringify(report, null, 2));
         const summaryPath = process.env.GITHUB_STEP_SUMMARY;

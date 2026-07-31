@@ -385,11 +385,29 @@ export const stagedThreadShapeFailure = (
     }
     return {
         unusableThreads,
-        warning:
-            `::warning title=open-thread suppression::${unusableThreads} staged thread(s), none usable ` +
-            `(each needs thread_id, an explicit resolved: false, and a bot-authored opener); duplicates may re-post`,
+        warning: threadSuppressionUnavailableWarning(unusableThreads),
     };
 };
+
+/**
+ * The tripwire's run-log line, built from the count alone.
+ *
+ * Shared with `dispatch-gate.ts`, which re-emits it from a real workflow step.
+ * The dispatcher runs inside the agent's Bash tool, where a `::warning` is only
+ * text: measured on webapp#41204 run 30654454047, a mis-staged run reported
+ * `threadSuppressionUnavailable` on dispatch-result.json and printed this line
+ * into the run log and the step summary, yet raised no annotation on any of the
+ * six jobs, while the pre-agent staging step's own `::warning` in the same run
+ * did annotate. The gate rebuilds the line from `unusableThreads` rather than
+ * forwarding the stored string, so a `dispatch-result.json` an agent could
+ * rewrite cannot inject workflow commands into a trusted step; that is also why
+ * this takes a number rather than free text.
+ */
+export const threadSuppressionUnavailableWarning = (
+    unusableThreads: number,
+): string =>
+    `::warning title=open-thread suppression::${unusableThreads} staged thread(s), none usable ` +
+    `(each needs thread_id, an explicit resolved: false, and a bot-authored opener); duplicates may re-post`;
 
 /**
  * Drop candidate claims that describe a defect an open bot thread already
