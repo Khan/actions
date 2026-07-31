@@ -1527,9 +1527,13 @@ name: claim-clusterer
 description: Groups the candidate comments that describe ONE defect, so several reviewers flagging the same thing post once; returns JSON.
 model: claude-sonnet-4-6
 # effort: medium — launch default (clustering). Sonnet, not Opus: this is a
-# text-identity judgment over already-written claims, with no code
-# investigation and no prose to author. It is the cheapest agent in the
-# pipeline and it removes claims from the most expensive one (the validator).
+# text-identity judgment over already-written claims, with no prose to author
+# and no investigation to run: it reads the cited lines to see what two claims
+# are pointing at, which is a lookup, not an analysis (the prompt caps it at
+# that: "you are locating claims, not investigating them"). It is the cheapest
+# agent in the pipeline and it removes claims from the most expensive one (the
+# validator). Read-only file access is therefore part of the sizing, not an
+# exception to it.
 ---
 You decide which candidate review comments describe the **same defect**, so that
 several reviewers who found one problem leave one comment instead of four. You judge

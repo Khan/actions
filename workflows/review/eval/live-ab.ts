@@ -245,12 +245,19 @@ export const runArm = async (
                               (sum, merge) => sum + merge.merged.length,
                               0,
                           ),
-                          clusterMerged: produced.dedup.merges
-                              .filter((merge) => merge.via !== "similarity")
-                              .reduce(
-                                  (sum, merge) => sum + merge.merged.length,
-                                  0,
-                              ),
+                          // Counted per absorbed copy, not per group: a `both`
+                          // group merged some of its members on the text floor
+                          // and only the rest on the clusterer's word, and
+                          // crediting the whole group to tier 2 would overstate
+                          // the delta this arm is asked to justify.
+                          clusterMerged: produced.dedup.merges.reduce(
+                              (sum, merge) =>
+                                  sum +
+                                  merge.merged.filter(
+                                      (copy) => copy.via === "clusterer",
+                                  ).length,
+                              0,
+                          ),
                           rejected: produced.dedup.rejected.length,
                           clustererAbsent: produced.dedup.clustererAbsent,
                           // The groups themselves, not just the count: the
@@ -262,7 +269,12 @@ export const runArm = async (
                           // clusterer grounded them in.
                           groups: produced.dedup.merges.map((merge) => ({
                               survivor: merge.survivor,
-                              absorbed: merge.merged.map((m) => m.id),
+                              absorbed: merge.merged.map((copy) => ({
+                                  id: copy.id,
+                                  ...(copy.via !== undefined
+                                      ? {via: copy.via}
+                                      : {}),
+                              })),
                               via: merge.via,
                               ...(merge.evidence !== undefined
                                   ? {evidence: merge.evidence}

@@ -165,10 +165,21 @@ describe("dedupeClaims with model-proposed clusters", () => {
         );
         expect(claims.map((c) => c.id)).toEqual(["correctness-reviewer-3"]);
         // Anchors differ inside the cluster (:8 and :9), which tier 2 does not
-        // care about and the note does report.
+        // care about and the note does report. Each absorbed copy also brings
+        // its own subject, because tier 2 merged claims whose words the
+        // survivor's prose does NOT restate: `conventions` asked for the
+        // symbol-name prefix, not for the wrong number, and one rewritten
+        // comment discharges both asks only if the author is told about both.
         expect(claims[0].discussion).toContain(
-            "Also flagged by skill-auditor (out-of-lane) (at line 9), " +
-                "conventions, documentation.",
+            [
+                "Also flagged by:",
+                "- skill-auditor (out-of-lane) (at line 9): The comment on line 8 " +
+                    'says "Keeps at most 10 samples per key." but `const maxSamples ' +
+                    "= 25`, so the doc and the enforced cap disagree.",
+                "- conventions: Declaration doc comment doesn't begin with the " +
+                    "symbol name.",
+                "- documentation: Comment states the wrong cap (10 vs 25).",
+            ].join("\n"),
         );
         expect(merges).toEqual([
             {
@@ -179,16 +190,19 @@ describe("dedupeClaims with model-proposed clusters", () => {
                         source: "skill-auditor (out-of-lane)",
                         label: "question (non-blocking)",
                         line: 9,
+                        via: "clusterer",
                     },
                     {
                         id: "conventions-1",
                         source: "conventions",
                         label: "nitpick (non-blocking)",
+                        via: "clusterer",
                     },
                     {
                         id: "documentation-1",
                         source: "documentation",
                         label: "suggestion (non-blocking, documentation)",
+                        via: "clusterer",
                     },
                 ],
                 path: "dev/af19_trial/window.go",
@@ -365,6 +379,91 @@ describe("dedupeClaims with model-proposed clusters", () => {
         ]);
     });
 
+    it("holds a cluster member to those rules when its text clears the floor too", () => {
+        // The test above proves the rules only for members tier 1's floor
+        // cannot reach, which is every fixture the clusterer is built for. The
+        // dangerous member is the opposite one: a cluster unions on the model's
+        // word BEFORE any member is checked, so a member whose prose does clear
+        // the floor would take the similarity branch, merge without ever
+        // meeting the path or source rule, and be recorded as
+        // `via: "similarity"`: a reviewer's distinct finding dropped, with the
+        // artifact naming the wrong tier. These copies are verbatim identical,
+        // so the floor is decidedly not what keeps them apart.
+        const [note] = wrongCapClaims();
+        const {claims, merges, clusterRejections} = dedupeClaims(
+            [
+                note,
+                {
+                    ...note,
+                    id: "documentation-9",
+                    source: "documentation",
+                    path: "dev/af19_trial/other.go",
+                },
+                {...note, id: "correctness-reviewer-9"},
+            ],
+            [
+                {
+                    evidence: "the `maxSamples` cap comment says 10, not 25",
+                    ids: [
+                        "correctness-reviewer-3",
+                        "documentation-9",
+                        "correctness-reviewer-9",
+                    ],
+                },
+            ],
+        );
+        expect(claims.map((c) => c.id)).toEqual([
+            "correctness-reviewer-3",
+            "documentation-9",
+            "correctness-reviewer-9",
+        ]);
+        expect(merges).toEqual([]);
+        expect(clusterRejections).toEqual([
+            {id: "documentation-9", reason: "other-path"},
+            {id: "correctness-reviewer-9", reason: "same-source"},
+        ]);
+    });
+
+    it("records a proposed member that cannot anchor a comment", () => {
+        // `path`/`line` are optional on a Claim (a finding whose anchor the
+        // provenance gate could not place keeps its prose and loses its
+        // anchor), and the survivor's anchor is what the merged comment posts
+        // on, so an anchorless member is dropped from the cluster and recorded
+        // rather than silently swallowed by the group it was named in.
+        const [note, question, conventions] = wrongCapClaims();
+        const {line: _, ...anchorless} = {
+            ...conventions,
+            id: "holistic-2",
+            source: "holistic",
+        };
+        const {claims, merges, clusterRejections} = dedupeClaims(
+            [note, question, anchorless],
+            [
+                {
+                    evidence:
+                        "the doc comment on `maxSamples` says 10 while the constant is 25",
+                    ids: [
+                        "correctness-reviewer-3",
+                        "holistic-2",
+                        "skill-auditor-ool-2",
+                    ],
+                },
+            ],
+        );
+        // The rest of the cluster still merges, and the anchorless claim posts
+        // as its own comment (on whatever anchor rendering gives it).
+        expect(claims.map((c) => c.id)).toEqual([
+            "correctness-reviewer-3",
+            "holistic-2",
+        ]);
+        expect(merges[0].merged.map((m) => m.id)).toEqual([
+            "skill-auditor-ool-2",
+        ]);
+        expect(clusterRejections).toEqual([
+            {id: "holistic-2", reason: "no-anchor"},
+        ]);
+    });
+
     it("records ids the clusterer invented, and holds each claim to one cluster", () => {
         // The webapp#41197 lesson applied to tier 2: an empty merge list must
         // never be the only evidence. A clusterer naming claims that do not
@@ -440,7 +539,8 @@ describe("dedupeClaims with model-proposed clusters", () => {
         expect(claims.map((c) => c.id)).toEqual(["test-adequacy-1"]);
         expect(claims[0].label).toBe("todo (blocking)");
         expect(claims[0].discussion).toContain(
-            "Also flagged by first-principles (at line 58).",
+            "Also flagged by:\n- first-principles (at line 58): " +
+                "The suite never reaches the delete.",
         );
         expect(merges[0].via).toBe("clusterer");
         expect(merges[0].line).toBe(15);
@@ -496,9 +596,34 @@ describe("dedupeClaims with model-proposed clusters", () => {
         expect(claims.map((c) => c.id)).toEqual(["correctness-reviewer-3"]);
         expect(merges).toHaveLength(1);
         expect(merges[0].via).toBe("both");
-        expect(merges[0].merged.map((m) => m.id)).toEqual([
-            "skill-auditor-ool-2",
-            "first-principles-4",
+        // Per COPY, not per group: only `first-principles-4` needed the
+        // clusterer, and a reader counting tier 2's contribution from the
+        // group's own `both` would credit it with the pair tier 1 already
+        // had. The A/B's `clusterMerged` column reads this field.
+        expect(merges[0].merged).toEqual([
+            {
+                id: "skill-auditor-ool-2",
+                source: "skill-auditor (out-of-lane)",
+                label: "question (non-blocking)",
+                line: 58,
+            },
+            {
+                id: "first-principles-4",
+                source: "first-principles",
+                label: "note (non-blocking)",
+                line: 58,
+                via: "clusterer",
+            },
         ]);
+        // The note quotes only the copy tier 2 brought: the survivor's own
+        // prose does not restate it, while the tier-1 copy's clearing of the
+        // floor is the evidence that it does.
+        expect(claims[0].discussion).toContain(
+            [
+                "Also flagged by:",
+                "- skill-auditor (out-of-lane) (at line 58)",
+                "- first-principles (at line 58): The suite never reaches the delete.",
+            ].join("\n"),
+        );
     });
 });

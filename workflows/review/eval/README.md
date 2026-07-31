@@ -164,9 +164,12 @@ claiming a band.
   that predates the agent reports `tier 1 only` and the arm delta prices the
   clusterer alone. Read it beside recall: a false merge drops a distinct
   finding, so it shows up as candidate-arm recall loss, not as a better
-  duplicate number. `rejected` counts proposals the merge rules refused
-  (`unknown-id` there means the clusterer named claims that do not exist, which
-  is a prompt or staging failure rather than a quiet zero).
+  duplicate number. The `by clusterer` share counts absorbed COPIES, not groups,
+  so a group both tiers contributed to credits tier 2 only with what it actually
+  brought. `rejected` counts cluster MEMBERS the merge rules refused, so one bad
+  proposal naming three ids counts three (`unknown-id` there means the clusterer
+  named claims that do not exist, which is a prompt or staging failure rather
+  than a quiet zero).
 - **Anchor-snap and the arms:** the deterministic pipeline is shared by
   both arms, but the provenance gate emulates each arm's OWN review.md gate
   version, keyed on the literal `anchor-snap` marker in the gate step. A

@@ -225,7 +225,8 @@ describe("runDispatch defect clustering (dedup tier 2)", () => {
         expect(JSON.parse(fs.files[`${REVIEW}/claims.json`])).toHaveLength(1);
         expect(result.claims).toMatchObject([{id: "correctness-reviewer-1"}]);
         expect(result.claims[0].discussion).toContain(
-            "Also flagged by skill-auditor.",
+            "Also flagged by:\n- skill-auditor: Declaration doc comment " +
+                "doesn't begin with the symbol name.",
         );
         expect(result.merges[0].via).toBe("clusterer");
         // The audit block: candidate count and merge count come from here, not
@@ -300,6 +301,63 @@ describe("runDispatch defect clustering (dedup tier 2)", () => {
         expect(runner.calls).not.toContain("claim-clusterer");
         expect(result.clustering).toBeUndefined();
         expect(fs.files[`${REVIEW}/candidates.json`]).toBeUndefined();
+    });
+
+    it("never spends on clustering when no candidate pair could legally merge", async () => {
+        // Two sources, two claims, and still nothing tier 2 may do with them:
+        // they sit in different files, and cross-file merging is out of both
+        // tiers. The count-and-source gate alone would pay for a serial
+        // dispatch whose every proposal the merge rules must reject.
+        const twoFileDiff = [
+            DIFF.trimEnd(),
+            "diff --git a/b.ts b/b.ts",
+            "--- a/b.ts",
+            "+++ b/b.ts",
+            "@@ -1,2 +1,3 @@",
+            " ctx",
+            "+added line",
+            " ctx",
+            "",
+        ].join("\n");
+        const fs = makeFakeFs({
+            ...baseStaging(),
+            [`${REVIEW}/full.diff`]: twoFileDiff,
+            [`${REVIEW}/provenance.json`]: JSON.stringify(
+                computeDiffProvenance(twoFileDiff),
+            ),
+            [`${REVIEW}/files.json`]: JSON.stringify([
+                {path: "a.ts", status: "modified", hasPatch: true},
+                {path: "b.ts", status: "modified", hasPatch: true},
+            ]),
+            ...agentFiles(
+                "pattern-triage",
+                "correctness-reviewer",
+                "skill-auditor",
+                "claim-clusterer",
+                "claim-validator",
+            ),
+        });
+        const runner = stubRunner({
+            "pattern-triage": JSON.stringify({
+                patterns: [],
+                reviewFiles: ["a.ts", "b.ts"],
+            }),
+            "correctness-reviewer": CAP_NOTE,
+            "skill-auditor": JSON.stringify({
+                findings: [
+                    {
+                        ...JSON.parse(CAP_NITPICK).findings[0],
+                        path: "b.ts",
+                        line: 2,
+                    },
+                ],
+            }),
+            "claim-validator": JSON.stringify({claims: []}),
+        });
+        const result = await runDispatch(options(fs, runner));
+        expect(runner.calls).not.toContain("claim-clusterer");
+        expect(result.clustering).toBeUndefined();
+        expect(result.claims).toHaveLength(2);
     });
 
     it("records the ids a clusterer invents rather than merging on them", async () => {

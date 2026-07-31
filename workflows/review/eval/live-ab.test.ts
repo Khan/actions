@@ -195,6 +195,7 @@ describe("runArm dedup accounting", () => {
                                 source: "documentation",
                                 label: "suggestion (non-blocking, documentation)",
                                 line: 9,
+                                via: "clusterer" as const,
                             },
                         ],
                         path: "src/a.ts",
@@ -202,18 +203,29 @@ describe("runArm dedup accounting", () => {
                         via: "clusterer" as const,
                         evidence: "the `maxSamples` comment says 10, not 25",
                     },
+                    // A group BOTH tiers contributed to: tier 1 reached the
+                    // conventions copy on its own and only the holistic one
+                    // needed the clusterer, so exactly one of these two copies
+                    // is tier 2's to claim.
                     {
-                        survivor: "live-hit",
+                        survivor: "live-hit-2",
                         merged: [
                             {
                                 id: "live-conv-1",
                                 source: "conventions",
                                 label: "nitpick (non-blocking)",
                             },
+                            {
+                                id: "live-holistic-1",
+                                source: "holistic",
+                                label: "note (non-blocking)",
+                                via: "clusterer" as const,
+                            },
                         ],
                         path: "src/a.ts",
-                        line: 1,
-                        via: "similarity" as const,
+                        line: 4,
+                        via: "both" as const,
+                        evidence: "the `staleAfter` window",
                     },
                 ],
                 proposed: 1,
@@ -229,23 +241,31 @@ describe("runArm dedup accounting", () => {
             produceMerged(false),
             {maxUsd: 10},
         );
+        // `clusterMerged` counts absorbed COPIES the clusterer is responsible
+        // for, not every copy in a group it touched: the `both` group below
+        // carries one of each, and crediting tier 2 with the pair would
+        // overstate the delta that decides graduation.
         expect(report.perCase[0].dedup).toEqual({
             candidates: 4,
-            merged: 2,
-            clusterMerged: 1,
+            merged: 3,
+            clusterMerged: 2,
             rejected: 0,
             clustererAbsent: false,
             groups: [
                 {
                     survivor: "live-hit",
-                    absorbed: ["live-doc-1"],
+                    absorbed: [{id: "live-doc-1", via: "clusterer"}],
                     via: "clusterer",
                     evidence: "the `maxSamples` comment says 10, not 25",
                 },
                 {
-                    survivor: "live-hit",
-                    absorbed: ["live-conv-1"],
-                    via: "similarity",
+                    survivor: "live-hit-2",
+                    absorbed: [
+                        {id: "live-conv-1"},
+                        {id: "live-holistic-1", via: "clusterer"},
+                    ],
+                    via: "both",
+                    evidence: "the `staleAfter` window",
                 },
             ],
         });
@@ -277,8 +297,8 @@ describe("runArm dedup accounting", () => {
         );
         // `tier 1 only` is the expected baseline shape in the A/B that
         // graduates the clusterer: a zero there is asymmetry, not a result.
-        expect(markdown).toContain("2 / 4 (tier 1 only)");
-        expect(markdown).toContain("2 / 4 (1 by clusterer)");
+        expect(markdown).toContain("3 / 4 (tier 1 only)");
+        expect(markdown).toContain("3 / 4 (2 by clusterer)");
     });
 
     it("omits the block for a producer that runs no dedup at all", async () => {

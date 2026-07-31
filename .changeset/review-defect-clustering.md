@@ -42,17 +42,27 @@ never lose a blocking finding or soften a verdict. The accepted price: one defec
 flagged blocking by two sources in different words still posts twice unless tier
 1 reaches it.
 
-Degradation is soft in both directions. Fewer than two claims, or one source,
-and the clusterer is never dispatched (no spend). A missing definition or an
-unusable reply leaves the run on tier 1, exactly today's behavior, and surfaces
-as a run warning plus a `clustering` block in `dispatch-result.json`
-(`candidates`, `proposed`, `clusterMerges`, and every rejected member with the
-rule that stopped it) rather than as an author-facing note: duplicate hygiene is
-not a review dimension. Each merge in `merges` now carries `via`
-(`similarity`/`clusterer`/`both`) and the merged copies' own anchors, and the
-"also flagged by" note names a source's line when it differs from the survivor's,
-so the merge rate reads off the artifact instead of off a PR that autofix has
-already tidied.
+Degradation is soft in both directions. The clusterer is dispatched only when the
+candidates hold a pair it could legally merge (two anchored claims on one path
+from two sources, at least one non-blocking), so a run with nothing to find never
+pays for the step. A missing definition or an unusable reply leaves the run on
+tier 1, exactly today's behavior, and surfaces as a run warning plus a
+`clustering` block in `dispatch-result.json` (`candidates`, `proposed`,
+`clusterMerges`, and every rejected member with the rule that stopped it) rather
+than as an author-facing note: duplicate hygiene is not a review dimension. Each
+merge in `merges` now carries `via` (`similarity`/`clusterer`/`both`) plus the
+tier and anchor of each absorbed copy, so the merge rate reads off the artifact
+instead of off a PR that autofix has already tidied.
+
+The "also flagged by" note names a source's line when it differs from the
+survivor's, and quotes the subject of any copy tier 2 absorbed. One edit
+discharging every member's ask does not mean every member asked in the same
+words; run 30587343777's `conventions` copy wanted the symbol-name prefix, not
+the corrected number. Tier 2 is exactly the case where the survivor's own
+prose is known not to restate it (the text floor is what those copies could not
+clear). Tier-1 copies are not quoted: clearing that floor against the survivor is
+the evidence that they say the same thing, and repeating them would move the
+duplicate noise into the surviving comment rather than remove it.
 
 The live A/B now runs dedup, which it never did: a change to the merge rules was
 unmeasurable by construction before this. Tier 1 runs in both arms (it is shared

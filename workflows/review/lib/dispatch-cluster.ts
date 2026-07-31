@@ -17,8 +17,44 @@
 
 import type {ClaimMerge, ClusterRejection} from "./dedup";
 import {type Claim, type ProposedCluster} from "./dispatch-contracts";
+import {isBlockingLabel} from "./render-comment";
 
 export const CLUSTERER = "claim-clusterer";
+
+/**
+ * Whether the candidate set holds a pair tier 2 could legally merge, which is
+ * the dispatch precondition: two ANCHORED claims on the SAME path from
+ * DIFFERENT sources, at least one of them non-blocking. Every conjunct is one
+ * of `dedup.ts`' own rules (a cluster member needs an anchor, cross-file
+ * merging is out of both tiers, a reviewer never duplicates itself, and only a
+ * non-blocking copy may be absorbed on a model's word; the survivor being the
+ * most severe copy, a blocking-only pair has nothing absorbable).
+ *
+ * With no such pair the clusterer cannot produce a merge whatever it proposes,
+ * so the dispatch is pure spend on a serial step. Computed from the candidates
+ * already in hand, so the check itself costs nothing.
+ *
+ * Exported because the live A/B's producer gates on the same precondition; a
+ * drift there would have an arm paying for (or skipping) a dispatch production
+ * would not.
+ */
+export const hasClusterableCandidatePair = (
+    candidates: readonly Claim[],
+): boolean => {
+    const anchored = candidates.filter(
+        (claim) => claim.path !== undefined && claim.line !== undefined,
+    );
+    return anchored.some((a, index) =>
+        anchored
+            .slice(index + 1)
+            .some(
+                (b) =>
+                    a.path === b.path &&
+                    a.source !== b.source &&
+                    (!isBlockingLabel(a.label) || !isBlockingLabel(b.label)),
+            ),
+    );
+};
 
 /** Dedup tier 2 telemetry (dedup.ts owns the rules; this is the audit). */
 export type DispatchClustering = {
@@ -58,9 +94,10 @@ export type ClusterStep = {
  * set the validator reads.
  *
  * Skipped, with no spend, unless there is something only this tier can find:
- * two claims from two different sources. A single reviewer's findings are never
- * merged into each other (dedup.ts' rule, both tiers), so a one-source run has
- * no candidate pair at all.
+ * a pair {@link hasClusterableCandidatePair} would let merge. A one-source run
+ * has no candidate pair at all (dedup.ts never merges a reviewer's findings
+ * into each other, in either tier), and neither does a run whose only
+ * cross-source pairs sit in different files or are blocking on both sides.
  *
  * Failure is soft in both directions. A missing definition (an extraction
  * failure, since review.md and this lib ship at one pinned ref) or an unusable
@@ -74,8 +111,7 @@ export const runClusterStep = async (
     candidates: Claim[],
     io: ClusterStepIo,
 ): Promise<ClusterStep> => {
-    const sources = new Set(candidates.map((claim) => claim.source));
-    if (candidates.length < 2 || sources.size < 2) {
+    if (!hasClusterableCandidatePair(candidates)) {
         return {proposals: [], dispatched: false, unavailable: false};
     }
     io.write(JSON.stringify(candidates, null, 2));

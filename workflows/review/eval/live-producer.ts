@@ -57,6 +57,7 @@ import {
     type Candidate,
     type ProposedCluster,
 } from "../lib/dispatch-contracts";
+import {hasClusterableCandidatePair} from "../lib/dispatch-cluster";
 import {
     VERIFICATION_STATES,
     type CaseVerification,
@@ -492,6 +493,16 @@ export type LiveDedupReport = {
  * projection puts the whole prose in `subject` and the evidence trace in
  * `discussion`. Feeding that shape to the floors would measure a similarity
  * arithmetic production never runs.
+ *
+ * What is shared with production and what is not, since fidelity is the whole
+ * point: the merge rules (`dedupeClaims`) and the dispatch precondition
+ * (`hasClusterableCandidatePair`) are the SAME code `runClusterStep` runs. What
+ * this function re-implements is the plumbing that step cannot lend: the
+ * dispatch goes through the eval's own agent runner and per-agent cost report,
+ * and the survivor's merged prose is written back onto a `LiveFinding` rather
+ * than onto a staged claims.json. That is the seam to keep in step by hand
+ * (the provenance gate's anchor-snap emulation has the same shape); a rule
+ * change does not need mirroring here, a change to WHEN the step runs does.
  */
 const dedupeLiveFindings = async (
     findings: LiveFinding[],
@@ -511,8 +522,7 @@ const dedupeLiveFindings = async (
     dedup: {report?: PerAgentReport; result: LiveDedupReport};
 }> => {
     const claims = buildLibClaims(findings as Candidate[]);
-    const sources = new Set(claims.map((claim) => claim.source));
-    const clusterable = claims.length > 1 && sources.size > 1;
+    const clusterable = hasClusterableCandidatePair(claims);
     let proposals: ProposedCluster[] = [];
     let report: PerAgentReport | undefined;
     if (clusterable && clusterer !== undefined) {

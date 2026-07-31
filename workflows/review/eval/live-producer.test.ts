@@ -683,7 +683,8 @@ describe("produceLive cross-source dedup", () => {
         // validator is dispatched over the merged set only.
         expect(result.findings).toHaveLength(1);
         expect(result.findings[0].finding.model_authored_prose).toContain(
-            "Also flagged by skill.",
+            "Also flagged by:\n- skill: Declaration doc comment doesn't begin " +
+                "with the symbol name.",
         );
         expect(
             JSON.parse(

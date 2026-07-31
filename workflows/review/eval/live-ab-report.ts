@@ -60,12 +60,17 @@ export type ArmRunReport = {
         snapped: number;
         /**
          * The cross-source merge, per case: `candidates` is the pre-merge claim
-         * count, `merged` the claims it absorbed, and `clusterMerged` the subset
-         * tier 2 (the `claim-clusterer`) contributed to. Read the duplicate rate
-         * from these, never from the posted set — merges happen upstream of
-         * every drop the pipeline applies afterwards, and in production autofix
-         * later satisfies surviving duplicates with one edit and hides them.
-         * `clustererAbsent` marks the arm that never had tier 2 at all.
+         * count, `merged` the claims it absorbed, and `clusterMerged` how many
+         * of those copies tier 2 (the `claim-clusterer`) is what absorbed,
+         * counted per copy since a `both` group absorbed some of its members on
+         * the text floor. `rejected` counts proposed MEMBERS the merge rules
+         * turned down, so one bad proposal naming three ids counts three.
+         *
+         * Read the duplicate rate from these, never from the posted set: merges
+         * happen upstream of every drop the pipeline applies afterwards, and in
+         * production autofix later satisfies surviving duplicates with one edit
+         * and hides them. `clustererAbsent` marks the arm that never had tier 2
+         * at all.
          */
         dedup?: {
             candidates: number;
@@ -82,7 +87,7 @@ export type ArmRunReport = {
              */
             groups: {
                 survivor: string;
-                absorbed: string[];
+                absorbed: {id: string; via?: "clusterer"}[];
                 via: MergeVia;
                 evidence?: string;
             }[];
@@ -285,7 +290,8 @@ const snappedTotal = (arm: ArmRunReport): number =>
 
 /**
  * The arm's cross-source merge rate: claims absorbed over claims produced,
- * with tier 2's share and any rejected proposal in parentheses. `tier 1 only`
+ * with tier 2's share and any rejected cluster MEMBER in parentheses (one
+ * proposal naming three ids that all fail is three). `tier 1 only`
  * marks an arm whose review.md defines no `claim-clusterer` — the expected
  * shape of the baseline in the A/B that graduates it, and the reason a zero in
  * the clusterer column there is asymmetry, not a negative result.
@@ -301,7 +307,7 @@ const mergedTotal = (arm: ArmRunReport): string => {
     const notes = [
         absent ? "tier 1 only" : `${sum((d) => d.clusterMerged)} by clusterer`,
         ...(sum((d) => d.rejected) > 0
-            ? [`${sum((d) => d.rejected)} proposal(s) rejected`]
+            ? [`${sum((d) => d.rejected)} proposed member(s) rejected`]
             : []),
     ];
     return `${sum((d) => d.merged)} / ${sum((d) => d.candidates)} (${notes.join(

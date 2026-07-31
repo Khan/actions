@@ -52,9 +52,11 @@
  * inside tier 1 and as the survivor's posting anchor, and nothing more.
  *
  * The survivor is the highest-severity copy, its discussion gains an "also
- * flagged by" note (naming each other source's anchor when it differs), and
- * every merge is recorded for dispatch-result.json with the tier that found
- * it, so the merge rate is readable from the artifact rather than from what
+ * flagged by" note (naming each other source's anchor when it differs, and
+ * quoting the subject of any copy tier 2 absorbed, whose ask the survivor's own
+ * prose is not known to restate), and every merge is recorded for
+ * dispatch-result.json with the tier that found it (per group and per absorbed
+ * copy), so the merge rate is readable from the artifact rather than from what
  * survives on the PR.
  *
  * Determinism boundary: every merge RULE is code — pure text arithmetic, no
@@ -81,6 +83,14 @@ export type ClaimMerge = {
         label: string;
         /** The merged copy's own anchor, when it differs from the survivor's. */
         line?: number;
+        /**
+         * Present when THIS copy was absorbed on the clusterer's assertion
+         * rather than on the text floor; absent means tier 1 merged it. Per
+         * member because a group's own `via` can be `both`, and a reader
+         * counting tier 2's contribution from the group would then attribute
+         * tier 1's members to the clusterer.
+         */
+        via?: "clusterer";
     }[];
     path: string;
     line: number;
@@ -804,8 +814,8 @@ export const dedupeClaims = (
             evidenceTokens !== undefined &&
             evidenceTokens.size > 0 &&
             sharesSalientToken(evidenceTokens, survivor);
-        // Star guard: only a member that clears the floor against the
-        // survivor DIRECTLY merges. Union-find alone chains A~B~C through a
+        // Star guard: only a member {@link mergeable} against the survivor
+        // DIRECTLY merges on tier 1. Union-find alone chains A~B~C through a
         // bridging claim that bundles two defects (a test-adequacy finding
         // naming both a missing test and an unbounded read links the two
         // distinct correctness findings), and collapsing the chain would
@@ -814,6 +824,14 @@ export const dedupeClaims = (
         // their own claims. Both recorded trial merges are unaffected: run
         // 29897276810's four-way group is pairwise-complete and run
         // 29943085279's is a direct pair.
+        //
+        // The full pairwise predicate, not the text floor alone: a group can
+        // now contain a member tier 1 never proposed (a cluster unions on the
+        // model's word, which {@link verifiableClusters} does not screen for
+        // path or source), and a cross-path or same-source member whose prose
+        // happens to clear the floor must not slip in through this branch and
+        // be recorded as `via: "similarity"`. It falls through to the tier-2
+        // rules below, which reject it by name.
         //
         // A cluster member takes the tier-2 path instead: it did not clear the
         // floor (that is why the clusterer exists), so it merges on the
@@ -824,7 +842,7 @@ export const dedupeClaims = (
             if (index === survivorIndex) {
                 return false;
             }
-            if (describesSameDefect(survivor, claims[index])) {
+            if (mergeable(survivor, claims[index])) {
                 return true;
             }
             if (clusterOf.get(index) === undefined) {
@@ -865,8 +883,22 @@ export const dedupeClaims = (
         // second reviewer was looking at a different line, which is exactly
         // the context an author needs to judge a same-defect-different-anchor
         // merge (and to spot a wrong one).
-        const sources: {source: string; line?: number}[] = [];
-        for (const claim of otherClaims) {
+        //
+        // A tier-2 copy also carries its own SUBJECT, and only a tier-2 copy
+        // does. What the note must not lose is an ask the survivor's prose
+        // does not already make: run 30587343777's `conventions` copy of the
+        // wrong-cap defect asked for the symbol-name prefix, not for the
+        // number, and one rewritten comment discharges both only if the author
+        // is told about both. Tier 1 needs no such quote by construction: a
+        // copy merged there cleared the text floor AGAINST the survivor, which
+        // is exactly the evidence that it restates the survivor's own words;
+        // repeating four near-identical subjects would move the duplicate
+        // noise into the surviving comment rather than remove it. Tier 2 is
+        // the case where that evidence is missing (the floor is what it could
+        // not clear), so there the quote is the only thing carrying the ask.
+        const sources: {source: string; line?: number; subject?: string}[] = [];
+        for (const index of others) {
+            const claim = claims[index];
             if (
                 claim.source === survivor.source ||
                 sources.some((seen) => seen.source === claim.source)
@@ -878,18 +910,30 @@ export const dedupeClaims = (
                 ...(claim.line !== undefined && claim.line !== survivor.line
                     ? {line: claim.line}
                     : {}),
+                ...(viaCluster.has(index)
+                    ? {subject: claim.subject.replace(/\s+/g, " ").trim()}
+                    : {}),
             });
         }
+        const flaggedBy = (entry: {source: string; line?: number}): string =>
+            entry.line === undefined
+                ? entry.source
+                : `${entry.source} (at line ${entry.line})`;
         const alsoFlagged =
             sources.length === 0
                 ? ""
-                : `\n\nAlso flagged by ${sources
-                      .map((entry) =>
-                          entry.line === undefined
-                              ? entry.source
-                              : `${entry.source} (at line ${entry.line})`,
+                : sources.every((entry) => entry.subject === undefined)
+                ? `\n\nAlso flagged by ${sources.map(flaggedBy).join(", ")}.`
+                : `\n\nAlso flagged by:\n${sources
+                      .map(
+                          (entry) =>
+                              `- ${flaggedBy(entry)}${
+                                  entry.subject === undefined
+                                      ? ""
+                                      : `: ${entry.subject}`
+                              }`,
                       )
-                      .join(", ")}.`;
+                      .join("\n")}`;
         const adoptedSuggestion =
             survivor.suggestion === undefined
                 ? otherClaims.find((claim) => claim.suggestion !== undefined)
@@ -922,14 +966,20 @@ export const dedupeClaims = (
                 : "both";
         merges.push({
             survivor: survivor.id,
-            merged: otherClaims.map((claim) => ({
-                id: claim.id,
-                source: claim.source,
-                label: claim.label,
-                ...(claim.line !== undefined && claim.line !== survivor.line
-                    ? {line: claim.line}
-                    : {}),
-            })),
+            merged: others.map((index) => {
+                const claim = claims[index];
+                return {
+                    id: claim.id,
+                    source: claim.source,
+                    label: claim.label,
+                    ...(claim.line !== undefined && claim.line !== survivor.line
+                        ? {line: claim.line}
+                        : {}),
+                    ...(viaCluster.has(index)
+                        ? {via: "clusterer" as const}
+                        : {}),
+                };
+            }),
             path: survivor.path as string,
             line: survivor.line as number,
             via,
