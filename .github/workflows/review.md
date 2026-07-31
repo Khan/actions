@@ -243,7 +243,78 @@ pre-agent-steps:
       path: gh-aw-review-lib
       persist-credentials: false
 
-# Cost guardrails (AI credits; 1 credit = $0.01). gh-aw >= v0.79 bakes in
+# Anthropic pricing overlay, so an AI credit means $0.01 of what Khan actually
+# pays.
+#
+# REQUIRES gh-aw >= v0.84.1 TO TAKE EFFECT. `apiProxy.providers` was added to
+# awf-config-schema.json in AWF v0.27.43, and gh-aw gates emitting it on that
+# floor (`AWFAPIProxyProvidersMinVersion`) because older AWF strict config
+# validation rejects unknown apiProxy properties. gh-aw v0.83.4 (the version
+# this lock was compiled with) defaults to AWF v0.27.42, one patch below, so it
+# SILENTLY DROPS this block: it compiles clean, the rates land only in the
+# informational `GH_AW_INFO_MODEL_COSTS` env var, and metering stays at list
+# price. gh-aw v0.84.1 raises `DefaultFirewallVersion` to v0.27.43, so
+# recompiling on it makes this overlay live with no other change.
+#
+# Deliberately NOT solved by pinning `sandbox.agent.version: v0.27.43`: the
+# sandbox block above documents that a version is re-pinned here only to hold a
+# firewall release BACK, never to move one forward, and a forward pin would
+# recreate the stale-floor failure that broke run 30290472047. Khan bills Anthropic list minus 50%, but the firewall api-proxy meters
+# credits against a list-price catalog baked into its image, so every dollar
+# figure downstream (the caps below, the router's `maxUsd` soft targets, the
+# cost counters) reads 2x high and a run is cut off at half the real spend its
+# cap implies.
+#
+# `models.providers` is gh-aw's operator overlay: it compiles to the firewall's
+# `apiProxy.providers` and is the highest-precedence pricing source, ahead of
+# runtime provider discovery, the curated table, and the bundled models.dev
+# catalog (awf-config-spec 10.7.1). It applies to the threat-detection proxy as
+# well as the agent's. Rates are per-token USD at 50% of Anthropic list.
+#
+# MAINTENANCE: entries are matched per model, and an unlisted model silently
+# falls through to full list price rather than erroring. Add an entry when the
+# engine model changes, and re-halve these when Anthropic list prices move.
+# Do NOT collapse these to a bare `claude-opus-4` prefix: prefix matching would
+# also capture opus-4-0/4-1, which list at 3x the 4-5+ rate.
+models:
+  providers:
+    anthropic:
+      models:
+        # Current engine model.
+        claude-opus-4-8:
+          cost:
+            input: "2.5e-06"
+            output: "1.25e-05"
+            cache_read: "2.5e-07"
+            cache_write: "3.125e-06"
+        # Engine models a consumer may select via an `engine:` override.
+        claude-opus-5:
+          cost:
+            input: "2.5e-06"
+            output: "1.25e-05"
+            cache_read: "2.5e-07"
+            cache_write: "3.125e-06"
+        claude-sonnet-5:
+          cost:
+            input: "1e-06"
+            output: "5e-06"
+            cache_read: "1e-07"
+            cache_write: "1.25e-06"
+        claude-haiku-4-5:
+          cost:
+            input: "5e-07"
+            output: "2.5e-06"
+            cache_read: "5e-08"
+            cache_write: "6.25e-07"
+        claude-fable-5:
+          cost:
+            input: "5e-06"
+            output: "2.5e-05"
+            cache_read: "5e-07"
+            cache_write: "6.25e-06"
+
+# Cost guardrails (AI credits; 1 credit = $0.01 of real spend, given the
+# pricing overlay above). gh-aw >= v0.79 bakes in
 # defaults of 1000/run ($10) and 5000/day ($50). Disable the daily ceiling
 # (-1) so reviews are never skipped on a busy PR day; the per-run cap below
 # still bounds the cost of any single review.
