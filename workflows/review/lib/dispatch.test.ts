@@ -409,12 +409,22 @@ describe("runDispatch", () => {
             "claude-fable-5",
             "claude-opus-4-8",
         ]);
-        const report = result.perAgent.find(
+        const entries = result.perAgent.filter(
             (a) => a.name === "correctness-reviewer",
         );
+        // Two entries: the refused attempt and the fallback that replaced it.
+        // The refused one is kept so its cost still reaches totalUsd and the
+        // refusal itself stays visible instead of being papered over.
+        expect(entries).toHaveLength(2);
+        expect(entries[0].failed).toBe("refused");
+        expect(entries[0].model).toBe("claude-fable-5");
+        expect(entries[0].usd).toBeGreaterThan(0);
         // Recorded, not silent: the drift corpus has to see how often it fires.
-        expect(report?.fellBackTo).toBe("claude-opus-4-8");
-        expect(report?.failed).toBeUndefined();
+        expect(entries[1].fellBackTo).toBe("claude-opus-4-8");
+        expect(entries[1].failed).toBeUndefined();
+        expect(result.totalUsd).toBeGreaterThanOrEqual(
+            entries[0].usd + entries[1].usd,
+        );
     });
 
     it("runs the full pipeline: triage narrows, finders stage out/, validator applies", async () => {

@@ -547,10 +547,14 @@ export const renderMarkdownReport = (report: AbReport): string => {
     ].flatMap(([arm, c]) =>
         (c.failedAgentOutputs ?? []).map(
             (f) =>
+                // Four backticks: a contract-parse failure is frequently a
+                // code-fenced reply, and a triple-backtick payload would close
+                // a triple-backtick fence early, breaking the <details>
+                // pairing for every section after it.
                 `<details><summary>${arm} / ${c.caseId} / ${f.agent}</summary>\n\n` +
-                "```\n" +
+                "````\n" +
                 f.output +
-                "\n```\n\n</details>",
+                "\n````\n\n</details>",
         ),
     );
     const failedAgents = [...baseline.perCase, ...candidate.perCase].flatMap(

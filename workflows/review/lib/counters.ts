@@ -330,7 +330,7 @@ export const computeRunCounters = (
             runsAffected += 1;
         }
         for (const entry of entries) {
-            const key = `${entry.agent}\u0000${entry.model}`;
+            const key = `${entry.agent}:${entry.model}`;
             fallbackCounts.set(key, (fallbackCounts.get(key) ?? 0) + 1);
         }
     }
@@ -339,7 +339,7 @@ export const computeRunCounters = (
         runsAffected,
         byAgent: [...fallbackCounts.entries()]
             .map(([key, count]) => {
-                const [agent, model] = key.split("\u0000");
+                const [agent, model] = key.split(":");
                 return {agent, model, count};
             })
             .sort((a, b) =>
@@ -689,6 +689,7 @@ export const readRunArtifactsFromDir = (
         validator: readJsonIfPresent(join(dir, layout.validator)),
         summary: readJsonIfPresent(join(dir, layout.summary)),
         rereviewPlan: readJsonIfPresent(join(dir, layout.rereviewPlan)),
+        dispatchResult: readJsonIfPresent(join(dir, layout.dispatchResult)),
     };
     return normalizeRunArtifacts(raw, dir);
 };

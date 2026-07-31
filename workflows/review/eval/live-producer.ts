@@ -666,17 +666,19 @@ const dispatchWithRetry = async <R>(
                 // one. Keep the ORIGINAL prompt: the
                 // rejection note is about output shape, and this failure was
                 // not the model's output.
-                const fallback = refusalFallbackFor(model, tried);
+                // Only on a non-final attempt: `continue` from the last
+                // iteration exits the loop, so recording a fallback there
+                // would claim a dispatch that never happens.
+                const fallback =
+                    attempt === 0
+                        ? refusalFallbackFor(model, tried)
+                        : undefined;
                 if (fallback !== undefined) {
                     model = fallback;
                     tried.push(fallback);
                     report.fellBackTo = fallback;
                     attemptPrompt = prompt;
-                    if (attempt === 0) {
-                        report.retried = true;
-                    } else {
-                        report.failed = failure;
-                    }
+                    report.retried = true;
                     continue;
                 }
             }

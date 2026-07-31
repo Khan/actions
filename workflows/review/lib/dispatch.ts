@@ -484,6 +484,20 @@ export const runDispatch = async (
                     ? refusalFallbackFor(model)
                     : undefined;
             if (fallback !== undefined) {
+                // Record the refused attempt before recursing. It really ran
+                // and really cost money, and `totalUsd` sums over `perAgent`,
+                // so dropping it undercounts the run. A separate entry also
+                // keeps the refusal itself visible rather than letting the
+                // fallback's success paper over it (the malformed-output
+                // retry pushes its own entry for the same reason).
+                perAgent.push({
+                    name,
+                    model,
+                    usd: result.usd,
+                    turns: result.turns,
+                    wallMs: result.wallMs,
+                    failed: "refused",
+                });
                 return dispatchAgent(name, malformedNote, fallback);
             }
             writeOut(name, result.output);

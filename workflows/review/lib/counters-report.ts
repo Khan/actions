@@ -267,8 +267,12 @@ export const loadRunDir = (
     }
 
     const hasVerdict = isRecord(summary) && summary["verdict"] !== undefined;
+    // The dispatcher's per-agent report, for the refusal-fallback counter.
+    // Without it that section reports zero on every window regardless of what
+    // production did — the counter reads `fellBackTo` from here.
+    const dispatchResult = parseIfFound(dir, "dispatch-result.json", readFile);
     const run = normalizeRunArtifacts(
-        {claims, validator, summary},
+        {claims, validator, summary, dispatchResult},
         basename(dir),
         UNATTRIBUTED_SOURCE,
     );
