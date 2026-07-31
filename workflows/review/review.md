@@ -207,8 +207,8 @@ sandbox:
     id: awf
 
 # claude-opus-5 is NOT in the firewall api-proxy's curated AI-credits pricing
-# table — verified against v0.27.42, the release gh-aw v0.83.4 defaults to now
-# that this workflow's `sandbox.agent.version` pin is retired (the table carries
+# table at v0.27.42, the release gh-aw v0.83.4 defaults to now that this
+# workflow's `sandbox.agent.version` pin is retired (that table carries
 # claude-opus-4-5 through 4-8 and claude-fable-5, and stops there). The proxy's
 # AI-credits guard rejects an un-priced model with a 400 BEFORE the request
 # reaches the model, so without the fallback below every dispatch fails — the
@@ -231,6 +231,16 @@ sandbox:
 # MINIMUM COMPILER: gh-aw >= v0.83.0 for `models.default-ai-credits-pricing`.
 # This repo compiles with v0.83.4, so the floor is already met; consumers on an
 # older gh-aw get a COMPILE-time failure rather than a runtime 400.
+#
+# REMOVE THIS BLOCK when a gh-aw release defaults the firewall to v0.27.43 or
+# later: that release DOES carry a curated claude-opus-5 entry, at the same
+# rates ($5/M in, $0.50/M cache read, $6.25/M cache write, $25/M out), and the
+# curated entry is strictly better because it bills cache writes — the one
+# component this fallback path silently under-counts. v0.27.43 is the newest
+# firewall release as of 2026-07-31 and no gh-aw release references it yet.
+# Do NOT reach for `sandbox.agent.version: v0.27.43` to get there early: the
+# note above is explicit that a version is pinned here only to hold a release
+# BACK, never to move one forward, and this fallback works under any firewall.
 models:
   # $/1M tokens. `input` and `output` are the only rates the schema accepts, so
   # the cache rates are the proxy's derivations, not ours.
