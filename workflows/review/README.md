@@ -24,7 +24,9 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
    stages the whole review context on disk: the PR metadata and changed files
    (fetched from the GitHub API), the rebuilt unified diff, the diff facts
    (fingerprint and hunk signature) and newly-changed-code scope, the prior bot
-   reviews, the router's first pass, the changed-line provenance map, a
+   reviews, the PR's unresolved review threads (split into this bot's own, with
+   their full reply chains, and the `{path, line}` of everyone else's, which the
+   review defers to), the router's first pass, the changed-line provenance map, a
    whole-change diff with `linguist-generated` files stripped (what every
    whole-change reviewer and specialist lens reads, so a lock-file-heavy PR
    cannot balloon their context), and the re-review depth plan. The
@@ -624,6 +626,20 @@ Two known interactions:
   export (observed on Khan/actions#241). A repo without these secrets must
   comment out the `observability:` block in its installed `review.md` as a
   local edit (which `gh aw update` preserves) and recompile.
+
+Optional:
+
+- `REVIEW_BOT_LOGIN` — the account this workflow posts reviews as, default
+  `github-actions[bot]`. Set it only in a repo that posts under its own GitHub
+  App, in the installed `review.md`'s workflow-level `env:` block (the one
+  carrying `REVIEW_MAX_AI_CREDITS`), which reaches both the staging step and
+  the dispatcher. It is read by one predicate (`lib/threads.ts`'s
+  `isReviewBotAuthor`), which both the thread staging and open-thread
+  suppression go through, so the two layers cannot disagree about the identity.
+  Getting it wrong is not cosmetic: threads the bot opened would be filed as
+  human ones, which puts their lines in `skipLines` and DROPS fresh findings
+  there. Either spelling works (`name` or `name[bot]`); the comparison strips
+  the suffix.
 
 ## Versioning
 

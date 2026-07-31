@@ -24,6 +24,13 @@
  *   prior-reviews.json  every github-actions[bot] review body, all states
  *                       (fetch failure degrades to [], which forces a full
  *                       review downstream, never a cheaper one)
+ *   threads.json        the unresolved review threads THIS bot opened, each
+ *                       with its full reply chain verbatim, `resolved: false`,
+ *                       and the opener's html_url
+ *   human-threads.json  the `{path, line}` of every unresolved thread someone
+ *                       ELSE opened, which the dispatcher defers to
+ *   disciplines.md      the marker-delimited shared-disciplines section, cut
+ *                       out of the rendered prompt (slice 3, #247)
  *   routing.json        the router's deterministic first pass (a non-empty
  *                       pendingRiskQuestions still gets the orchestrator's
  *                       one small-model call and second router pass mid-run;
@@ -39,17 +46,24 @@
  *                       are staged from scoped.diff, since no triage runs)
  *
  * Deliberately NOT staged here: pr.diff at full/scoped depth (it is derived
- * from pattern-triage's reviewFiles, which is model output), threads.json /
- * human-threads.json (Phase 2; a later slice), and the disciplines extraction
- * (slice 3's ledger). The router's second pass stays mid-run by design.
+ * from pattern-triage's reviewFiles, which is model output) and
+ * author-disputes.json (a judgment about what a reply chain concedes, which is
+ * the one thread-derived input that is genuinely model work). The router's
+ * second pass stays mid-run by design.
  *
  * Parity: the eval's live producer stages cases through the same lib
  * functions this module calls (eval/live-stage.ts: route, computeDiffProvenance,
  * decideReReviewDepth, buildScopedDiff, annotateDiffLineNumbers), so the A/B
  * keeps measuring the production pipeline.
  *
- * Failure stance: the PR metadata and file fetches are hard prerequisites
- * (no staging, no review; the step fails before any AI spend). Everything
+ * Failure stance: the PR metadata, file, and review-thread fetches are hard
+ * prerequisites (no staging, no review; the step fails before any AI spend).
+ * Threads join that list rather than degrading to `[]` because an empty
+ * staging is not the conservative direction: it silently drops the flip gate's
+ * `keptBlockingCount` to zero, and a reduced-depth re-review may then flip a
+ * prior REQUEST_CHANGES to APPROVE past still-open blocking threads nobody
+ * read (submission.ts's `keptBlockingFloor`). A failed fetch is also usually
+ * transient, and the review re-runs on the next push. Everything else
  * downstream degrades toward MORE review, never less, matching the CLIs it
  * wraps. The added-lines hunk hash is computed here exactly as Step 1
  * specified it for the orchestrator (leading `+` stripped, trailing
@@ -69,8 +83,15 @@ import {
     splitUnifiedDiff,
 } from "./diff";
 import {runProvenanceCli} from "./provenance";
+import type {StagedThread} from "./rereview";
 import {runRereviewPlanCli} from "./rereview-mode";
 import {runCli as runRouterCli} from "./router";
+import {
+    collectUnresolvedThreads,
+    isReviewBotAuthor,
+    withGraphqlRateLimitRetry,
+    type GhGraphql,
+} from "./threads";
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -91,6 +112,8 @@ const FULL_DIFF_OUT = `${REVIEW_DIR}/full.diff`;
 const DIFF_FACTS_OUT = `${REVIEW_DIR}/diff-facts.json`;
 const NEW_SCOPE_OUT = `${REVIEW_DIR}/new-scope.json`;
 const PRIOR_REVIEWS_OUT = `${REVIEW_DIR}/prior-reviews.json`;
+const THREADS_OUT = `${REVIEW_DIR}/threads.json`;
+const HUMAN_THREADS_OUT = `${REVIEW_DIR}/human-threads.json`;
 const ROUTING_OUT = `${REVIEW_DIR}/routing.json`;
 const PROVENANCE_OUT = `${REVIEW_DIR}/provenance.json`;
 const STRIPPED_DIFF_OUT = `${REVIEW_DIR}/full-stripped.diff`;
@@ -149,6 +172,15 @@ export type StagePrResult = {
     /** The re-review depth the plan staged (informational). */
     depth: string;
     changedFileCount: number;
+    /**
+     * How many unresolved threads landed in each file. Logged by the CLI, for
+     * the same reason #302 needed a tripwire: an empty `threads.json` on a PR
+     * that has open bot threads is invisible in every downstream report, so
+     * the count belongs in the step log where a human diagnosing a re-review
+     * can see it.
+     */
+    botThreadCount: number;
+    humanThreadCount: number;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -327,6 +359,7 @@ const fetchAllFiles = async (
 export const runStagePrCli = async (
     fs: StagePrFs,
     ghGet: GhGet,
+    ghGraphql: GhGraphql,
     options: StagePrOptions,
 ): Promise<StagePrResult> => {
     const {repo, prNumber, repoRoot} = options;
@@ -468,7 +501,11 @@ export const runStagePrCli = async (
             }
         }
         priorReviews = reviews
-            .filter((review) => review.user?.login === "github-actions[bot]")
+            // REST renders this account as `github-actions[bot]`; the shared
+            // predicate accepts GraphQL's bare spelling too, so the producer
+            // and the suppression guard cannot drift apart on the identity
+            // (threads.ts, and the #302 postmortem it carries).
+            .filter((review) => isReviewBotAuthor(review.user?.login ?? ""))
             .map((review) => ({
                 body: review.body ?? "",
                 ...(typeof review.submitted_at === "string"
@@ -484,7 +521,95 @@ export const runStagePrCli = async (
     }
     write(PRIOR_REVIEWS_OUT, JSON.stringify(priorReviews, null, 2));
 
-    // 5b. The shared disciplines (#247: extraction becomes a pre-step, its
+    // 5b. The unresolved review threads, split by who opened them. This was
+    // the last load-bearing staging left in the prompt: review.md Step 3 asked
+    // the ORCHESTRATOR to fetch the threads and write both files in a
+    // particular shape, and everything downstream then depended on a
+    // model-produced file: `hasThreads` (which decides whether the
+    // thread-reconciler is dispatched at all, so it changes the roster),
+    // open-thread suppression (dedup.ts), and the accountability recap
+    // (rereview.ts). Khan/actions#302 patched a symptom of that seam: a
+    // CONFORMING staging produced zero usable threads for a whole release
+    // because the prompt's selection rule and the code's guard spelled the
+    // bot's login differently. Code on both sides of one shared predicate
+    // (threads.ts's `isReviewBotAuthor`) is what removes the seam rather than
+    // re-patching it.
+    //
+    // The misfiling direction matters more than a duplicate comment: a BOT
+    // thread landing in human-threads.json becomes a `skipLines` entry, and
+    // the submission then DROPS a fresh finding on that line instead of merely
+    // duplicating one. Hence one fetch, one partition: a thread is in exactly
+    // one file, and neither list is assembled by hand.
+    const [owner = "", repoName = ""] = repo.split("/");
+    const allThreads = await collectUnresolvedThreads(
+        ghGraphql,
+        owner,
+        repoName,
+        prNumber,
+    );
+    // The OPENER decides which file a thread lands in (its opening comment is
+    // the finding), so a thread with no opener at all is staged in NEITHER. A
+    // real review thread always has one and a partial GraphQL response throws
+    // upstream, but an unattributable thread staged as human would put a
+    // `skipLines` entry on a line that may be the bot's own, and that drops a
+    // fresh finding; left out, the worst case is a comment landing where a
+    // human conversation is open, which is noise.
+    //
+    // "No opener" is two shapes, not one: no opening comment at all, and an
+    // opening comment whose `author` is null (a deleted account), which
+    // `threads.ts` maps to "". Only the first is absent; the empty string is a
+    // login that matches no bot, so testing for `undefined` alone would send a
+    // null-authored thread down the human path the comment above rules out.
+    const openerAuthor = (thread: StagedThread): string | undefined => {
+        const author = thread.comments[0]?.author;
+        return author === undefined || author === "" ? undefined : author;
+    };
+    const openedByBot = (thread: StagedThread): boolean => {
+        const author = openerAuthor(thread);
+        return author !== undefined && isReviewBotAuthor(author);
+    };
+    const openedByHuman = (thread: StagedThread): boolean => {
+        const author = openerAuthor(thread);
+        return author !== undefined && !isReviewBotAuthor(author);
+    };
+    const botThreads = allThreads.filter(openedByBot);
+    write(
+        THREADS_OUT,
+        JSON.stringify(
+            botThreads.map((thread) => ({
+                ...thread,
+                // Unresolved by construction (the fetch drops resolved
+                // threads), but written anyway: dedup.ts requires an explicit
+                // `resolved: false` and fails closed without one. That guard
+                // stays deliberately, rather than trusting this producer.
+                resolved: false,
+            })),
+            null,
+            2,
+        ),
+    );
+    // The reconciler echoes these into `skipLines`, so a thread with no
+    // RIGHT-side line (outdated, or file-level) has nothing to contribute and
+    // is dropped rather than staged as a line the submission cannot match.
+    // Deduplicated on `path:line`: several human threads routinely share one
+    // line, and the reconciler's echo would repeat each of them.
+    const humanLines = new Map<string, {path: string; line: number}>();
+    for (const thread of allThreads) {
+        if (
+            !openedByHuman(thread) ||
+            thread.path === "" ||
+            thread.line === null
+        ) {
+            continue;
+        }
+        humanLines.set(`${thread.path}:${thread.line}`, {
+            path: thread.path,
+            line: thread.line,
+        });
+    }
+    write(HUMAN_THREADS_OUT, JSON.stringify([...humanLines.values()], null, 2));
+
+    // 5c. The shared disciplines (#247: extraction becomes a pre-step, its
     // verify becomes code). The specialist-lens disciplines live once in the
     // rendered prompt; the marker-delimited section is extracted mechanically
     // and verified to carry the schema section every lens depends on. A
@@ -576,6 +701,8 @@ export const runStagePrCli = async (
         warnings,
         depth: plan.depth,
         changedFileCount: files.length,
+        botThreadCount: botThreads.length,
+        humanThreadCount: humanLines.size,
     };
 };
 
@@ -590,7 +717,22 @@ if (typeof require !== "undefined" && require.main === module) {
     const nodeFs = require("node:fs") as StagePrFs;
     const apiUrl = process.env.GITHUB_API_URL ?? "https://api.github.com";
     const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? "";
-    const ghGet: GhGet = async (path) => {
+    const sleep = (ms: number): Promise<void> =>
+        new Promise((resolve) => setTimeout(resolve, ms));
+    const authHeaders = {
+        accept: "application/vnd.github+json",
+        ...(token !== "" ? {authorization: `Bearer ${token}`} : {}),
+    };
+    /**
+     * One authenticated request with the shared retry policy (network failure,
+     * 5xx, and rate limiting retried; any other 4xx fails the staging at
+     * once). Shared by the REST reads and the GraphQL POST so both inherit the
+     * same behavior on a throttled runner.
+     */
+    const request = async (
+        path: string,
+        init?: {method: string; body: string; contentType: string},
+    ): Promise<unknown> => {
         const ATTEMPTS = 3;
         let lastError: unknown;
         for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
@@ -598,11 +740,14 @@ if (typeof require !== "undefined" && require.main === module) {
             try {
                 response = await fetch(`${apiUrl}${path}`, {
                     headers: {
-                        accept: "application/vnd.github+json",
-                        ...(token !== ""
-                            ? {authorization: `Bearer ${token}`}
-                            : {}),
+                        ...authHeaders,
+                        ...(init === undefined
+                            ? {}
+                            : {"content-type": init.contentType}),
                     },
+                    ...(init === undefined
+                        ? {}
+                        : {method: init.method, body: init.body}),
                 });
             } catch (error) {
                 // Network-level failure: retryable.
@@ -613,7 +758,9 @@ if (typeof require !== "undefined" && require.main === module) {
                     return await response.json();
                 }
                 const error = new Error(
-                    `GET ${path} -> ${response.status} ${response.statusText}`,
+                    `${init?.method ?? "GET"} ${path} -> ${response.status} ${
+                        response.statusText
+                    }`,
                 );
                 // GitHub's secondary rate limit surfaces as a 403 with a
                 // Retry-After header, not 429; that one 4xx heals on retry.
@@ -630,22 +777,28 @@ if (typeof require !== "undefined" && require.main === module) {
                 }
                 lastError = error;
                 if (rateLimited && retryAfterSeconds > 0) {
-                    await new Promise((resolve) =>
-                        setTimeout(
-                            resolve,
-                            Math.min(retryAfterSeconds, 60) * 1000,
-                        ),
-                    );
+                    await sleep(Math.min(retryAfterSeconds, 60) * 1000);
                 }
             }
             if (attempt < ATTEMPTS - 1) {
-                await new Promise((resolve) =>
-                    setTimeout(resolve, 1000 * (attempt + 1)),
-                );
+                await sleep(1000 * (attempt + 1));
             }
         }
         throw lastError;
     };
+    const ghGet: GhGet = (path) => request(path);
+    // The HTTP-200 `RATE_LIMITED` retry, and the transport-level
+    // `assertNoGraphqlErrors` that detects it, both live in `threads.ts` so
+    // autofix's port inherits them; the reader keeps its own copy of the guard.
+    const ghGraphql: GhGraphql = withGraphqlRateLimitRetry(
+        (query, variables) =>
+            request("/graphql", {
+                method: "POST",
+                contentType: "application/json",
+                body: JSON.stringify({query, variables}),
+            }),
+        sleep,
+    );
 
     const repo = process.env.GITHUB_REPOSITORY ?? "";
     const prNumber = Number(process.env.REVIEW_PR_NUMBER ?? "");
@@ -658,7 +811,7 @@ if (typeof require !== "undefined" && require.main === module) {
         );
         process.exit(2);
     }
-    void runStagePrCli(nodeFs, ghGet, {
+    void runStagePrCli(nodeFs, ghGet, ghGraphql, {
         repo,
         prNumber,
         repoRoot,

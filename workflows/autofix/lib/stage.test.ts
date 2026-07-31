@@ -188,7 +188,12 @@ describe("collectThreads", () => {
         expect(threads.map((t) => t.thread_id)).toEqual(["A", "B"]);
     });
 
-    it("stops rather than looping when a page omits its cursor", async () => {
+    // A successor page that cannot be followed leaves two options, a partial
+    // list or a refusal, and partial is the shape this module refuses
+    // everywhere else: threads that never arrived would be neither fixed nor
+    // accounted for, while the run clears its arming label and reports clean.
+    // Refusing still terminates, which is all the infinite-loop guard wanted.
+    it("refuses rather than looping when a page omits its cursor", async () => {
         const noCursor = {
             data: {
                 repository: {
@@ -201,14 +206,15 @@ describe("collectThreads", () => {
                 },
             },
         };
-        const threads = await collectThreads(
-            portFor({threadPages: [noCursor, noCursor, noCursor]}),
-            "o",
-            "r",
-            1,
-            BOT,
-        );
-        expect(threads).toHaveLength(1);
+        await expect(
+            collectThreads(
+                portFor({threadPages: [noCursor, noCursor, noCursor]}),
+                "o",
+                "r",
+                1,
+                BOT,
+            ),
+        ).rejects.toThrow(/without an endCursor/);
     });
 
     // These four pin the fail-CLOSED direction. Staging zero threads on a PR
