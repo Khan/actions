@@ -19,7 +19,14 @@ work and carries the judgment calls, it does not restate the format spec.
 Confirm all of these with the operator before writing config. Do not infer them
 from the repo and do not carry them over from another consumer:
 
-1. **The `add-reviewer` team allowlist**: which team owns this repo.
+1. **The `add-reviewer` team allowlist**: which team owns this repo — or whether any
+   does. "No reviewer requests" is a legitimate answer, and for a repo with no
+   single owning team it is usually the right one. Do not invent an inert team to
+   fill the field: leave `allowed-team-reviewers` empty, add no `.github/REVIEWERS`,
+   and the checker reports `reviewer-requests-inert` rather than an error. Ownership
+   comes from `.github/REVIEWERS` and nowhere else, so without it Step 8 requests
+   nobody whatever the allowlist says — the two are inert alone and only work
+   together.
 2. **The `enable` roster and `re-review` mode.** Policy is that an opt-in
    reviewer earns its line through the eval suite. The defensible default is to
    mirror an existing consumer's eval-justified set and say in the PR that that
@@ -95,17 +102,43 @@ This writes `.github/workflows/review.md` (verbatim from the tag, with a
 `.github/aw/actions-lock.json` and `agentics-maintenance.yml` (gh-aw scaffolding
 for `cache-memory`; keep it, and explain it in the PR body). Commit all of them.
 
-Two cleanups:
+If `gh aw add` fails with *failed to inspect repository initialization state*, look
+for a zero-byte non-directory sitting where it wants a directory (`.vscode`,
+`.idea`): some sandbox setups create read-only placeholder files to block those
+paths. Do the install in a clean `git worktree` rather than deleting them.
+
+Three cleanups:
 
 - **Remove the Copilot scaffolding** `gh aw` writes on first init in a repo
   (`.github/mcp.json`, `.github/agents/`, `.github/skills/`,
   `.github/workflows/copilot-setup-steps.yml`) unless the repo actually uses
   Copilot Agent. No Khan consumer carries it.
-- **`.gitattributes`**: add
-  `.github/workflows/*.lock.yml linguist-generated=true merge=ours`, or the
-  reviewer line-reviews its own compiled output.
+- **`.gitattributes`**: mark **both** generated workflows, or the reviewer
+  line-reviews its own compiler output:
+
+  ```
+  .github/workflows/*.lock.yml linguist-generated=true merge=ours
+  .github/workflows/agentics-maintenance.yml linguist-generated=true merge=ours
+  ```
+
+  The second is easy to miss because its name is not `*.lock.yml`, but it is
+  `gh aw compile` output all the same (~600 lines, regenerated unconditionally — 
+  deleting it does not stick). Do **not** mark `review.md`: that is the
+  hand-editable source your Step 2 local edits live in. The checker flags either
+  omission. If the repo's `.gitattributes` has a machine-managed block (a generator
+  that owns part of the file, as in `Khan/agent-settings`), put these lines
+  **outside** it and verify they round-trip before trusting them.
+- **Normalise `source:` to the tag.** `gh aw add ...@review-v1.11.0` records the
+  *resolved commit SHA*, not the tag you asked for. Rewrite it to
+  `@review-v<major>.<minor>.<patch>`; that is what webapp and `Khan/actions` carry,
+  it is what makes the pin legible in a diff, and the checker compares against it
+  (a SHA reads as `source-ref-mismatch`).
 
 Never hand-edit `review.lock.yml`; regenerate with `gh aw compile`.
+
+`gh aw compile` may also stop with *safe update mode detected unapproved changes*,
+listing the secrets the workflow references. Review each one before passing
+`--approve`, and put that review in the PR body — Step 7 has a section for it.
 
 ## Step 2: local edits to the installed `review.md`
 
@@ -141,7 +174,11 @@ how the next person knows what editing it changes.
   `github-token: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}` (the default
   `GITHUB_TOKEN` cannot request an org team). Note in the comment whether Gerald
   also requests reviewers here, and that GitHub silently drops a team reviewer
-  request when the team lacks repo access.
+  request when the team lacks repo access. Still required even when this repo
+  requests no reviewers (see *What stays human*): it is the compile-time
+  `imports:` target, so `gh aw compile` fails without it. In that case leave the
+  allowlist empty and say in the comment *why* requests are off and what would turn
+  them on, because nothing else on the PR makes that visible.
 - **`risk-classification.md`**: the model-facing prose about file *contents*.
   Assign High/Medium/Low/Trivial using real paths from this repo, then add a
   "what to verify that CI cannot" section. This is where the blast-radius
@@ -236,6 +273,9 @@ git clone --depth 1 --branch review-v<major>.<minor>.<patch> \
     https://github.com/Khan/actions.git /tmp/review-checker
 cd /tmp/review-checker
 
+# Stage the new config first: git ls-files lists TRACKED files, so an unstaged
+# .github/aw/review/ reads as absent and every rule pointing at it is reported as
+# matching nothing. `git add -A` in the consumer, or add the paths explicitly.
 git -C <consumer> ls-files | npx -y tsx workflows/review/lib/check-consumer-config.ts \
     --repo <consumer> --files-from -
 

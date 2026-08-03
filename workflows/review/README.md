@@ -174,11 +174,22 @@ what a review actually does, and it reports the whole class of mistakes that
 otherwise surface as a red run on someone's PR: a missing runtime import, a
 `${{ }}` expression inside one, `add-reviewer` defined in both `review.md` and
 `config.md` (the main workflow wins, discarding the allowlist), a dropped
-`imports:` line, an empty team allowlist, a missing or unmarked `.lock.yml`, a
-live `observability:` block, the shipped credit ceiling, `ROUTING` parse
-warnings, inert lens payloads, reviewer config that does not route to `high`, and
-the resolved tier of every tracked file. Errors exit 1; `--strict` also fails on
-warnings, and `--json` emits the report for tooling.
+`imports:` line, an empty team allowlist in a repo that *has* a `.github/REVIEWERS`
+ownership map, a missing or unmarked `.lock.yml`, an unmarked
+`agentics-maintenance.yml`, a live `observability:` block, the shipped credit
+ceiling, `ROUTING` parse warnings, inert lens payloads, reviewer config that does
+not route to `high`, and the resolved tier of every tracked file. Errors exit 1;
+`--strict` also fails on warnings, and `--json` emits the report for tooling.
+
+Two of those deserve a note, because both are "valid, but invisible" rather than
+broken. An empty `allowed-team-reviewers` is only an **error** when
+`.github/REVIEWERS` exists: that file is the router's only source of ownership, so
+without it Step 8 requests nobody regardless, and the empty allowlist is an accurate
+statement that the repo does not do reviewer requests (reported as
+`reviewer-requests-inert`). Requiring a team there would only get an inert one
+invented to satisfy the check. And `agentics-maintenance.yml` is `gh aw compile`
+output that is *not* named `*.lock.yml`, so the marker every consumer was told to add
+misses it, and ~600 generated lines get line-reviewed until it has its own.
 
 ## Consumer configuration
 

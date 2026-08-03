@@ -778,7 +778,14 @@ const ROUTING_OUT = `${REVIEW_DIR}/routing.json`;
 /** Optional second-pass input: {path: tier} answers for pending questions. */
 const RESOLVED_TIERS_PATH = `${REVIEW_DIR}/resolved-tiers.json`;
 const GITATTRIBUTES_PATH = ".gitattributes";
-const REVIEWERS_PATH = ".github/REVIEWERS";
+/**
+ * The consumer's team-ownership map, and the router's ONLY source of it: with no
+ * such file both `teams.owners` and the ranked `fallbackTeams` come out empty, so
+ * the prompt's Step 8 has nobody to request no matter what `add-reviewer` allows.
+ * Exported because the config checker needs that same fact to tell an empty
+ * reviewer allowlist that is accurate from one that is broken.
+ */
+export const REVIEWERS_PATH = ".github/REVIEWERS";
 
 type FsLike = {
     readFileSync: (p: string, enc: "utf8") => string;

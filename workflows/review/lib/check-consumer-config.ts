@@ -45,6 +45,7 @@ import {
     CORRECTNESS_ALIAS_PATH,
     LENS_PAYLOAD_DIR,
     DEFAULT_RE_REVIEW_MODE,
+    REVIEWERS_PATH,
 } from "./router";
 import type {ChangedFile, RoutingResult} from "./router";
 import {
@@ -93,6 +94,14 @@ export const INSTALLED_WORKFLOW_PATH = ".github/workflows/review.md";
 
 /** Compiled output of the installed workflow (`gh aw compile`). */
 export const INSTALLED_LOCK_PATH = ".github/workflows/review.lock.yml";
+
+/**
+ * gh-aw's scheduled housekeeping workflow (expiring safe outputs, cache-memory
+ * cleanup), emitted from gh-aw v0.83 on. Generated like a lock file but NOT named
+ * `*.lock.yml`, so the documented marker misses it and it needs its own.
+ */
+export const MAINTENANCE_WORKFLOW_PATH =
+    ".github/workflows/agentics-maintenance.yml";
 
 const GITATTRIBUTES_PATH = ".gitattributes";
 
@@ -527,6 +536,13 @@ export const checkConsumerConfig = (
 
     /* --- reviewer routing (config.md) -------------------------------------- */
 
+    // Whether reviewer requests can happen at all in this repo. The router reads
+    // ownership from `.github/REVIEWERS` and nowhere else, so without that file
+    // Step 8 has no owners to map and no ranked fallback to draw from: it requests
+    // nobody regardless of what the allowlist says. That distinction is what keeps
+    // the two checks below from forcing a repo with no owning team to invent one.
+    const ownershipMapPresent = fs.existsSync(at(REVIEWERS_PATH));
+
     const reviewerRouting = readReviewerRouting(fs, at(CONFIG_IMPORT_PATH));
     if (reviewerRouting.present) {
         if (!reviewerRouting.definesAddReviewer) {
@@ -535,14 +551,36 @@ export const checkConsumerConfig = (
                 `${CONFIG_IMPORT_PATH} defines no \`safe-outputs.add-reviewer\`, which is the one thing it exists to carry.`,
             );
         } else if (reviewerRouting.allowedTeamReviewers.length === 0) {
-            error(
-                "config-empty-team-allowlist",
-                `${CONFIG_IMPORT_PATH} names no \`allowed-team-reviewers\`, so every reviewer request is dropped by the safe output.`,
-            );
+            // An empty allowlist means one of two completely different things, and
+            // only `.github/REVIEWERS` tells them apart. With an ownership map, Step
+            // 8 computes teams to request and the safe output then silently drops
+            // every one: a real misconfiguration. Without one, nothing is ever
+            // computed to drop, so the empty list is an accurate statement that this
+            // repo does not do reviewer requests — and demanding a team here would
+            // only get an inert one invented to satisfy the check.
+            if (ownershipMapPresent) {
+                error(
+                    "config-empty-team-allowlist",
+                    `${CONFIG_IMPORT_PATH} names no \`allowed-team-reviewers\`, but ${REVIEWERS_PATH} gives the router team ownership, so Step 8 computes teams to request and the safe output drops every one.`,
+                    `Name the owning team(s), or delete ${REVIEWERS_PATH} if this repo should not request reviewers at all.`,
+                );
+            } else {
+                warn(
+                    "reviewer-requests-inert",
+                    `${CONFIG_IMPORT_PATH} names no \`allowed-team-reviewers\` and there is no ${REVIEWERS_PATH}, so this repo requests no reviewers. That is a valid configuration; it is reported because it is invisible on the PR.`,
+                    `If reviewer requests are wanted, add ${REVIEWERS_PATH} and name the owning team(s) here — either alone is inert.`,
+                );
+            }
         }
+        // A bot token only matters for a request that can actually be made; the
+        // default GITHUB_TOKEN cannot request an org team. Silent when nothing is
+        // requestable, so a deliberate no-requests install reports one finding
+        // rather than two.
         if (
             reviewerRouting.definesAddReviewer &&
-            !reviewerRouting.hasGithubToken
+            !reviewerRouting.hasGithubToken &&
+            (ownershipMapPresent ||
+                reviewerRouting.allowedTeamReviewers.length > 0)
         ) {
             warn(
                 "config-no-bot-token",
@@ -564,6 +602,22 @@ export const checkConsumerConfig = (
             "lock-not-marked-generated",
             `${lockPath} is not marked \`linguist-generated\` in ${GITATTRIBUTES_PATH}, so the reviewer line-reviews its own compiled output.`,
             `Add \`.github/workflows/*.lock.yml linguist-generated=true merge=ours\`.`,
+        );
+    }
+    // The other generated workflow, and the one the usual `*.lock.yml` marker
+    // misses: `gh aw compile` writes this housekeeping workflow unconditionally
+    // (deleting it does not stick), and its name does not end in `.lock.yml`, so a
+    // repo that followed the documented marker still gets ~600 lines of compiler
+    // output line-reviewed. Only checked when the file exists: gh-aw emits it from
+    // v0.83 on, and the installs that predate it have nothing to mark.
+    if (
+        fs.existsSync(at(MAINTENANCE_WORKFLOW_PATH)) &&
+        !isGenerated(MAINTENANCE_WORKFLOW_PATH, generatedPatterns)
+    ) {
+        warn(
+            "maintenance-workflow-not-marked-generated",
+            `${MAINTENANCE_WORKFLOW_PATH} is \`gh aw compile\` output but is not marked \`linguist-generated\` in ${GITATTRIBUTES_PATH}, so the reviewer line-reviews it. The \`*.lock.yml\` marker does not cover it.`,
+            `Add \`${MAINTENANCE_WORKFLOW_PATH} linguist-generated=true merge=ours\`.`,
         );
     }
 

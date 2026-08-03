@@ -20,13 +20,24 @@ a missing or empty required config, a `${{ }}` expression inside a runtime
 import or lens payload (gh-aw rejects those), `add-reviewer` defined in
 `review.md` as well as `config.md` (the main workflow wins, silently discarding
 the consumer's allowlist), a dropped `imports:` line, an empty
-`allowed-team-reviewers`, and a missing `.lock.yml`. And as warnings: an
-unpinned or stale `source:`, a live `observability:` block (both
-`GH_AW_OTEL_SENTRY_*` secrets are hard-required while it is present, and a
-missing one kills the agent job at startup), the shipped 1000-credit ceiling
-that `tier=high` runs have died at, `ROUTING` parse warnings, inert lens
-payloads, a lock not marked `linguist-generated`, leftover `gh aw` Copilot
-scaffolding, and reviewer config that does not itself route to `high`.
+`allowed-team-reviewers` **in a repo that has a `.github/REVIEWERS` ownership
+map**, and a missing `.lock.yml`. And as warnings: an unpinned or stale
+`source:`, a live `observability:` block (both `GH_AW_OTEL_SENTRY_*` secrets are
+hard-required while it is present, and a missing one kills the agent job at
+startup), the shipped 1000-credit ceiling that `tier=high` runs have died at,
+`ROUTING` parse warnings, inert lens payloads, a lock not marked
+`linguist-generated`, an unmarked `agentics-maintenance.yml`, leftover `gh aw`
+Copilot scaffolding, and reviewer config that does not itself route to `high`.
+
+Two of those checks are deliberately shaped by what the router can actually do.
+`.github/REVIEWERS` is its only source of team ownership, so in a repo without
+one, Step 8 requests nobody no matter what `add-reviewer` allows: an empty
+allowlist there is an accurate "this repo does not request reviewers" rather than
+a dropped request, and it reports `reviewer-requests-inert` instead of failing.
+Erroring would only get an inert team invented to satisfy the check. Separately,
+`agentics-maintenance.yml` is `gh aw compile` output whose name is *not*
+`*.lock.yml`, so the `.gitattributes` marker consumers were told to add misses it
+and ~600 generated lines get line-reviewed until it gets its own.
 
 Two views answer the question a tier map actually raises. `--files-from`
 (`git ls-files | …`) prints the resolved tier of every tracked file with
