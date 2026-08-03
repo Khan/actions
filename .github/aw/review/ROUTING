@@ -10,8 +10,21 @@
 # No specialist lenses are enabled: the eleven lens prompts target webapp's backend
 # domains (auth resolvers, migrations, federation, ...) and none maps to this repo's
 # supply-chain surface. Whole-change reviewers mirror webapp's eval-justified roster.
-
-enable holistic,completeness,test-adequacy,first-principles,conventions
+#
+# `documentation` is the newest of those and is the one worth justifying here, because
+# this repo is mostly prose that behaves like code. The reviewer prompts, this file, and
+# the config under .github/aw/review/ carry their rationale in comments because the code
+# cannot show it, and a comment that the diff falsified is a real defect class here rather
+# than a style nit -- the semver-as-behavior-contract discipline in workflows/review/
+# depends on the surrounding prose still being true. Nothing else checks that: the
+# reviewer's own tests cover lib/, not the prompts.
+#
+# Two supporting facts. Its policy is inline in the shared review.md, so enabling it adds
+# no consumer config and no required runtime import. And this repo already defines an
+# `autofix: docs` label scope (.github/workflows/autofix.md), which until now could never
+# match anything, because a docs-scoped autofix selects threads by the
+# `suggestion (non-blocking, documentation)` label that only this reviewer mints.
+enable holistic,completeness,test-adequacy,first-principles,conventions,documentation
 
 # Repeat reviews of the same PR run thread reconciliation plus the full
 # enabled roster over the new hunks (scoped staging); the first full review
