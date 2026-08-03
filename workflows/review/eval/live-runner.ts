@@ -1,11 +1,12 @@
 /**
  * The production {@link LiveAgentRunner}: dispatch one sub-agent as a bounded
- * agentic loop via the Claude Agent SDK, plus a CLI smoke entry point
+ * agentic loop via the Pi runner (`lib/dispatch-runner-pi.ts`, the same
+ * harness production dispatch uses), plus a CLI smoke entry point
  * (`live-ab-plan.md` Phase 2c).
  *
  * This is the ONLY module in the eval suite that talks to a real model
- * runtime. `live-producer.ts` stays SDK-free behind its runner seam, so unit
- * tests never load this file.
+ * runtime. `live-producer.ts` stays runner-free behind its seam, so unit
+ * tests never load Pi's libraries.
  *
  * Tool policy: read-only investigation (Read/Grep/Glob), cwd pinned to the
  * staged checkout, no network. The investigation-cap CLI the prompts mention
@@ -23,9 +24,10 @@
 import {mkdtempSync, readFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 
-import {query} from "@anthropic-ai/claude-agent-sdk";
-
-import {createPiRunner} from "../lib/dispatch-runner-pi";
+import {
+    createPiRunner,
+    rejectStaleRunnerSelection,
+} from "../lib/dispatch-runner-pi";
 import {extractAgents} from "./agent-extract";
 import {loadLiveCorpus} from "./corpus/loader";
 import {produceLive, type LiveAgentRunner} from "./live-producer";
@@ -34,130 +36,18 @@ import {produceLive, type LiveAgentRunner} from "./live-producer";
 const ALLOWED_TOOLS = ["Read", "Grep", "Glob"];
 
 /**
- * Build the SDK-backed runner. Each request becomes one `query()` run: the
- * agent's prompt, its pinned model, the staged checkout as cwd, hard turn and
- * wall-clock caps, and cost/turn accounting read off the result message.
- */
-export const sdkRunner = (): LiveAgentRunner => async (request) => {
-    const started = Date.now();
-    const abort = new AbortController();
-    const timer = setTimeout(() => {
-        abort.abort(
-            new Error(`sub-agent timed out after ${request.timeoutMs}ms`),
-        );
-    }, request.timeoutMs);
-    try {
-        const run = query({
-            prompt: request.prompt,
-            options: {
-                cwd: request.cwd,
-                model: request.model,
-                maxTurns: request.maxTurns,
-                allowedTools: ALLOWED_TOOLS,
-                permissionMode: "bypassPermissions",
-                abortController: abort,
-            },
-        });
-        let output = "";
-        let usd = 0;
-        let turns = 0;
-        let toolCalls = 0;
-        let stopReason: string | undefined;
-        let errorMessage: string | undefined;
-        let tokensAtFailure: {input: number; total: number} | undefined;
-        for await (const message of run) {
-            // Count the SDK arm's tool calls so the harness comparison has the
-            // same investigation-depth signal on both sides. A `tool_use`
-            // block in an assistant message is one call; the SDK's result
-            // record does not carry a count.
-            if (message.type === "assistant") {
-                const inner = (
-                    message as unknown as {
-                        message?: {
-                            content?: {type?: string}[];
-                            stop_reason?: string | null;
-                        };
-                    }
-                ).message;
-                // The stop reason of the LAST assistant message. An empty
-                // final plus a non-"end_turn" stop reason is how a refusal
-                // presents; without it an empty result is indistinguishable
-                // from a dropped one.
-                if (typeof inner?.stop_reason === "string") {
-                    stopReason = inner.stop_reason;
-                }
-                // Token counts on the last assistant message: the
-                // discriminator between an overloaded provider and a prompt
-                // that outgrew the context window.
-                const usage = (
-                    inner as unknown as {
-                        usage?: {input_tokens?: number; output_tokens?: number};
-                    }
-                )?.usage;
-                if (usage !== undefined) {
-                    const input = Number(usage.input_tokens ?? 0);
-                    tokensAtFailure = {
-                        input,
-                        total: input + Number(usage.output_tokens ?? 0),
-                    };
-                }
-                const blocks = inner?.content;
-                for (const block of blocks ?? []) {
-                    if (block.type === "tool_use") {
-                        toolCalls += 1;
-                    }
-                }
-            }
-            if (message.type !== "result") {
-                continue;
-            }
-            const result = message as unknown as {
-                subtype: string;
-                result?: string;
-                total_cost_usd?: number;
-                num_turns?: number;
-            };
-            if (result.subtype !== "success") {
-                throw new Error(
-                    `sub-agent run ended without success: ${result.subtype}`,
-                );
-            }
-            output = result.result ?? "";
-            usd = result.total_cost_usd ?? 0;
-            turns = result.num_turns ?? 0;
-            // The result subtype is the runner-level outcome; keep it when no
-            // assistant stop reason was seen at all.
-            stopReason = stopReason ?? result.subtype;
-            const err = (
-                result as unknown as {error?: unknown; result?: string}
-            ).error;
-            if (err !== undefined) {
-                errorMessage = JSON.stringify(err).slice(0, 500);
-            }
-        }
-        return {
-            output,
-            usd,
-            turns,
-            toolCalls,
-            stopReason,
-            errorMessage,
-            tokensAtFailure,
-            // Anthropic reports a usage-policy block as stop_reason "refusal".
-            refused: stopReason === "refusal",
-            wallMs: Date.now() - started,
-        };
-    } finally {
-        clearTimeout(timer);
-    }
-};
-
-/**
- * The Pi-backed runner for the harness A/B (`REVIEW_DISPATCH_RUNNER=pi`).
- * The tool surface is pinned to `ALLOWED_TOOLS` so both arms investigate
- * through the same tools: the arm under test is the loop, not the toolbox.
+ * The eval runner: the production Pi harness pinned to the eval's three-tool
+ * surface (the corpus was measured on Read/Grep/Glob). Lazily constructed so
+ * importing this module never requires Pi's libraries; both A/B arms share
+ * one instance, which also shares its lazy sandbox initialization.
+ *
+ * There is no runner selection anymore: the Claude Agent SDK harness was
+ * removed after the re-anchoring A/B (run 30666183461; see PR #305), and a
+ * leftover `REVIEW_DISPATCH_RUNNER` would select nothing — fail loudly
+ * rather than let an operator believe a harness switch happened.
  */
 export const piRunner = (): LiveAgentRunner => {
+    rejectStaleRunnerSelection(process.env);
     let runner: Awaited<ReturnType<typeof createPiRunner>> | undefined;
     return async (request) => {
         if (runner === undefined) {
@@ -165,24 +55,6 @@ export const piRunner = (): LiveAgentRunner => {
         }
         return runner(request);
     };
-};
-
-/**
- * The runner the eval should use, chosen by the same `REVIEW_DISPATCH_RUNNER`
- * switch the production dispatcher reads (`sdk` default, `pi` opt-in).
- */
-export const selectedRunner = (): LiveAgentRunner => {
-    // Throw on an unknown value rather than silently falling back to the SDK,
-    // matching dispatch.ts. A typo (`sdkk`, `claude`) would otherwise run the
-    // SDK arm while the operator believed they were measuring Pi — the arm
-    // under test silently swapped, which is the worst failure this seam has.
-    const which = process.env.REVIEW_DISPATCH_RUNNER ?? "sdk";
-    if (which !== "sdk" && which !== "pi") {
-        throw new Error(
-            `REVIEW_DISPATCH_RUNNER must be "sdk" or "pi", got "${which}"`,
-        );
-    }
-    return which === "pi" ? piRunner() : sdkRunner();
 };
 
 /* -------------------------------------------------------------------------- */
@@ -224,7 +96,7 @@ const main = async (): Promise<void> => {
     );
 
     const result = await produceLive(corpusCase, agents, {
-        runner: sdkRunner(),
+        runner: piRunner(),
         stageDir: `${stageRoot}/${caseId}`,
     });
 

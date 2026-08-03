@@ -173,7 +173,7 @@ export type AgentResult = {
     structured?: boolean;
 };
 
-/** The model seam; the SDK-backed production runner lives in the CLI entry. */
+/** The model seam; the Pi-backed production runner lives in the CLI entry. */
 export type AgentRunner = (request: AgentRequest) => Promise<AgentResult>;
 
 /* -------------------------------------------------------------------------- */
@@ -911,26 +911,23 @@ export const runDispatch = async (
 /* -------------------------------------------------------------------------- */
 
 // Run only when executed directly (review.md Step 3, scripted dispatch mode),
-// never on import (tests). The SDK-backed runner (dispatch-runner.ts) is
-// loaded lazily so unit tests and the task-mode path never require the SDK;
-// the staging pre-step installs it (workflows/review/package.json) before
-// the agent starts.
+// never on import (tests). The Pi-backed runner (dispatch-runner-pi.ts) is
+// loaded lazily so unit tests and the task-mode path never require Pi's
+// libraries; the staging pre-step installs them
+// (workflows/review/package.json) before the agent starts. The per-role
+// `model:` pins are unchanged by the harness; they resolve through Pi's
+// Anthropic catalog (resolveModelId).
 if (typeof require !== "undefined" && require.main === module) {
     const nodeFs = require("node:fs") as DispatchFs;
     void (async () => {
-        const which = process.env.REVIEW_DISPATCH_RUNNER ?? "sdk";
-        if (which !== "sdk" && which !== "pi") {
-            throw new Error(
-                `REVIEW_DISPATCH_RUNNER must be "sdk" or "pi", got "${which}"`,
-            );
-        }
-        // A harness switch, NOT a model switch: both runners honor the same
-        // per-role `model:` pins, which is what lets an A/B hold the pins
-        // fixed and read the harness as the single variable.
-        const runner =
-            which === "pi"
-                ? await (await import("./dispatch-runner-pi")).createPiRunner()
-                : await (await import("./dispatch-runner")).createSdkRunner();
+        const {createPiRunner, rejectStaleRunnerSelection} = await import(
+            "./dispatch-runner-pi"
+        );
+        // The runner-selection seam was removed with the Claude Agent SDK
+        // harness; a leftover REVIEW_DISPATCH_RUNNER=sdk must fail loudly
+        // rather than silently running the other harness.
+        rejectStaleRunnerSelection(process.env);
+        const runner = await createPiRunner();
         const repoRoot =
             process.env.REVIEW_REPO_ROOT ?? process.env.GITHUB_WORKSPACE ?? ".";
         const result = await runDispatch({fs: nodeFs, runner, repoRoot});

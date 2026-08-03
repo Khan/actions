@@ -11,6 +11,7 @@ import {
     createReviewTools,
     createSubmitTool,
     finalText,
+    rejectStaleRunnerSelection,
     resolveModelId,
 } from "./dispatch-runner-pi";
 
@@ -142,6 +143,23 @@ describe("resolveModelId", () => {
         expect(() =>
             resolveModelId("claude-opus-9", [{id: "claude-fable-5"}]),
         ).toThrow(/not in Pi's Anthropic catalog.*claude-fable-5/s);
+    });
+});
+
+describe("rejectStaleRunnerSelection", () => {
+    it("accepts an unset selection and the redundant-but-accurate value", () => {
+        expect(() => rejectStaleRunnerSelection({})).not.toThrow();
+        expect(() =>
+            rejectStaleRunnerSelection({REVIEW_DISPATCH_RUNNER: "pi"}),
+        ).not.toThrow();
+    });
+
+    it("throws on a stale SDK selection rather than silently running Pi", () => {
+        for (const stale of ["sdk", "sdkk", "claude", ""]) {
+            expect(() =>
+                rejectStaleRunnerSelection({REVIEW_DISPATCH_RUNNER: stale}),
+            ).toThrow(/selects nothing/);
+        }
     });
 });
 

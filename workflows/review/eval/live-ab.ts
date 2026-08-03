@@ -85,7 +85,7 @@ import {
     type MatchOptions,
 } from "./live-match";
 import {produceLive, type LiveAgentRunner} from "./live-producer";
-import {sdkRunner, selectedRunner} from "./live-runner";
+import {piRunner} from "./live-runner";
 import {haikuMatchArbiter} from "./match-arbiter";
 import {
     computeRereviewMetrics,
@@ -560,13 +560,13 @@ const main = async (): Promise<void> => {
         candidate: reviewMdHasAnchorSnap(candidateMd),
     };
 
-    // PER-ARM runners. Sharing one is right when the variable is `review.md`,
-    // but it made REVIEW_DISPATCH_RUNNER put BOTH arms on the same harness.
-    // The baseline is always the SDK harness (the reference the corpus was
-    // measured on); the candidate takes the selected one. With the env var
-    // unset both resolve to `sdkRunner`, so the default A/B is unchanged.
-    const baselineRunner = sdkRunner();
-    const candidateRunner = selectedRunner();
+    // ONE harness for both arms. Per-arm runners existed while the Claude
+    // Agent SDK loop was A/B'd against the Pi loop (the re-anchoring, run
+    // 30666183461); with the SDK harness removed, the A/B is back to
+    // measuring review.md deltas through the single Pi runner, and sharing
+    // the instance also shares its lazy Pi/sandbox initialization.
+    const baselineRunner = piRunner();
+    const candidateRunner = baselineRunner;
     const armProduce =
         (
             stage: string,

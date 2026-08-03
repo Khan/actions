@@ -1,29 +1,24 @@
 /**
- * The Pi-backed AgentRunner for the scripted dispatcher (`dispatch.ts`), a
- * sibling of the Claude-Agent-SDK runner in `dispatch-runner.ts` and
- * contract-identical to it: same `AgentResult` fields, same timeout and
- * abort semantics, same salvage of an already-accepted `submit_result`
- * payload, same tool surface. Selected at the CLI entry by
- * `REVIEW_DISPATCH_RUNNER=pi`; the SDK runner stays the default.
+ * The AgentRunner for the scripted dispatcher (`dispatch.ts`), built on Pi's
+ * libraries (`@earendil-works/pi-ai` + `@earendil-works/pi-agent-core`). It
+ * replaced the Claude-Agent-SDK runner after the re-anchoring harness A/B
+ * (run 30666183461: two full-corpus repeats, identical model pins, identical
+ * review.md) showed quality parity arm-to-arm with roughly half the cost and
+ * 60% of the wall clock; the numbers live on PR #305.
  *
- * Why a second runner at all: Pi's libraries (`@earendil-works/pi-ai` +
- * `@earendil-works/pi-agent-core`) are multi-provider, so once this harness
- * is anchored against the SDK harness on the SAME model pins, moving a role
- * to a non-Anthropic model becomes a pin change rather than a second bespoke
- * agent loop. Both arms then share one loop, which is what makes a
- * cross-provider A/B measure the model instead of measuring the harness.
- *
+ * Why Pi: its libraries are multi-provider, so moving a role to a
+ * non-Anthropic model is a pin change rather than a second bespoke agent
+ * loop, and a cross-provider A/B measures the model instead of the harness.
  * Pi also reports usage with a per-component `cost` breakdown (input,
- * output, cacheRead, cacheWrite), so `AgentResult.usd` stops inheriting the
+ * output, cacheRead, cacheWrite), so `AgentResult.usd` does not inherit the
  * api-proxy default-pricing path's known cache-write under-count.
  *
  * The tools are implemented here rather than taken from Pi's own harness
  * tool factories, for two reasons: the reviewers need exactly
  * Read/Grep/Glob/LS/Bash and must NEVER get edit or write, and the output
- * caps below are the harness-parity variable the re-anchoring A/B is reading
- * (a loop that truncates differently investigates differently). Keeping them
- * explicit and unit-testable here makes that variable visible instead of
- * inherited.
+ * caps below were held at parity with the Claude Code harness through the
+ * re-anchoring A/B (a loop that truncates differently investigates
+ * differently), so they stay explicit and unit-tested rather than inherited.
  */
 
 import {execFile} from "node:child_process";
@@ -32,14 +27,14 @@ import type {AgentRequest, AgentResult, AgentRunner} from "./dispatch";
 
 /**
  * Per-tool-result output cap, in characters. A reviewer that greps a wide
- * pattern must not spend its whole context on one result; the SDK arm's
- * tools truncate too, so an uncapped tool here would make the Pi arm look
- * better on investigation depth and worse on context exhaustion for reasons
- * that have nothing to do with the model.
+ * pattern must not spend its whole context on one result. This value was a
+ * measured variable of the re-anchoring A/B (it matches what the Claude Code
+ * harness allowed its tools), so treat it as calibrated, not free: changing
+ * it changes how the loop investigates.
  */
 const MAX_TOOL_OUTPUT_CHARS = 30_000;
 
-/** Per-Bash-call wall clock. The whole-agent cap is `request.timeoutMs`. */
+/** Per-tool-call wall clock. The whole-agent cap is `request.timeoutMs`. */
 const BASH_TIMEOUT_MS = 120_000;
 
 /**
@@ -56,14 +51,12 @@ const ANTHROPIC_PROVIDER_ID = "anthropic";
 const ANTHROPIC_BASE_URL_ENV = "ANTHROPIC_BASE_URL";
 
 /**
- * The sub-agent framing. The SDK arm inherits Claude Code's system prompt;
- * Pi supplies none, and an empty one left the reviewers unframed — run
- * 30592964392's candidate arm returned prose where the contract was required
- * on 2 of 9 cases. This is deliberately minimal: the role and the
- * output-contract obligation only, because everything else the reviewer needs
- * is in its own prompt (extracted from review.md). It is NOT a reproduction of
- * Claude Code's system prompt, so it stays a documented harness difference
- * between the arms rather than a claim of parity.
+ * The sub-agent framing. Pi supplies no system prompt of its own, and an
+ * empty one left the reviewers unframed — run 30592964392's candidate arm
+ * returned prose where the contract was required on 2 of 9 cases. This is
+ * deliberately minimal: the role and the output-contract obligation only,
+ * because everything else the reviewer needs is in its own prompt (extracted
+ * from review.md).
  */
 const SYSTEM_PROMPT = [
     "You are a code-review sub-agent investigating a pull request in the",
@@ -161,17 +154,16 @@ const str = (description: string): unknown => ({type: "string", description});
  * The reviewer tool surface: read-only investigation plus Bash (the
  * investigation-cap CLI the sub-agent prompts invoke runs through it). No
  * edit, no write — a reviewer that can mutate the checkout it is reviewing
- * is a correctness hazard, and the SDK arm does not grant them either.
+ * is a correctness hazard.
  */
 export const createReviewTools = (cwd: string): PiTool[] => [
     {
         name: "Read",
         label: "Read",
-        // PARITY GAP: the SDK Read takes offset/limit and allows more output;
-        // this one has no windowing and truncates at MAX_TOOL_OUTPUT_CHARS, so
-        // a sub-agent reading a large file gets a silently narrower view under
-        // the Pi harness. Relevant when a Pi arm "misses" something the SDK arm
-        // saw on a big file.
+        // KNOWN LIMIT: no offset/limit windowing; the whole file is read and
+        // truncated at MAX_TOOL_OUTPUT_CHARS, so a sub-agent reading a large
+        // file gets a silently narrower view than a windowing Read would
+        // give. Relevant when a reviewer "misses" something in a big file.
         description:
             "Read a file from the repository. Returns the file with 1-indexed line numbers.",
         parameters: schema(
@@ -211,12 +203,10 @@ export const createReviewTools = (cwd: string): PiTool[] => [
     {
         name: "Glob",
         label: "Glob",
-        // PARITY GAP: `find -path` matches `*` ACROSS `/`, so `src/*.ts` also
-        // matches nested files that a real glob library would exclude, and
-        // `**` differs too. A Pi arm can therefore see a wider file set than
-        // the SDK arm for the same pattern. Documented rather than normalized
-        // because it widens rather than narrows the view; narrow it before
-        // reading any A/B result that turns on file discovery.
+        // KNOWN LIMIT: `find -path` matches `*` ACROSS `/`, so `src/*.ts`
+        // also matches nested files that a real glob library would exclude,
+        // and `**` differs too. Documented rather than normalized because it
+        // widens rather than narrows the view.
         description: "Find files whose path matches a glob pattern.",
         parameters: schema(
             {pattern: str("Glob pattern, e.g. 'src/**/*.ts'.")},
@@ -263,10 +253,9 @@ export const createReviewTools = (cwd: string): PiTool[] => [
 ];
 
 /**
- * The structured-final tool, the same contract as the SDK runner's in-process
- * MCP tool: the payload is validated by `request.validate` BEFORE it is
- * accepted, and a drifted shape bounces back to the model with the exact
- * rejection message while the session is still alive.
+ * The structured-final tool: the payload is validated by `request.validate`
+ * BEFORE it is accepted, and a drifted shape bounces back to the model with
+ * the exact rejection message while the session is still alive.
  */
 export const createSubmitTool = (
     validate: (payload: Record<string, unknown>) => string | null,
@@ -316,15 +305,14 @@ export const createSubmitTool = (
 /**
  * The free-text final, for a request with no output contract (the eval path:
  * `LiveAgentRequest` carries no `validate`, so `submit_result` is never
- * registered and both arms fall back to free text).
+ * registered and the agent falls back to free text).
  *
- * The SDK arm's free-text final is Claude Code's assembled result message. Pi
- * emits one assistant message per turn, so the equivalent is not simply the
- * last one: a reviewer that emitted its JSON and then added a closing sentence
- * would lose the JSON, which is exactly how run 30592964392's candidate arm
- * failed. Prefer the last turn that actually carries a JSON object, and fall
- * back to the whole transcript's assistant text so a downstream extractor can
- * still find it.
+ * Pi emits one assistant message per turn, so the final is not simply the
+ * last one: a reviewer that emitted its JSON and then added a closing
+ * sentence would lose the JSON, which is exactly how run 30592964392's
+ * candidate arm failed. Prefer the last turn that actually carries a JSON
+ * object, and fall back to the whole transcript's assistant text so a
+ * downstream extractor can still find it.
  */
 export const finalText = (texts: string[]): string => {
     for (let i = texts.length - 1; i >= 0; i -= 1) {
@@ -363,16 +351,36 @@ export const resolveModelId = (
 };
 
 /**
- * Build the production Pi runner. The libraries are imported lazily, matching
- * the SDK runner: unit tests and the task-mode path never require them.
+ * The `REVIEW_DISPATCH_RUNNER` seam is gone: the Claude-Agent-SDK harness
+ * was removed after the re-anchoring A/B, and this runner is the only
+ * harness. A leftover selection must fail loudly — an operator exporting
+ * `sdk` would otherwise silently run Pi while believing they were measuring
+ * the SDK loop, which is the worst failure a harness seam can have.
+ */
+export const rejectStaleRunnerSelection = (env: {
+    [key: string]: string | undefined;
+}): void => {
+    const value = env["REVIEW_DISPATCH_RUNNER"];
+    if (value !== undefined && value !== "pi") {
+        throw new Error(
+            `REVIEW_DISPATCH_RUNNER=${value} selects nothing: the Claude ` +
+                `Agent SDK harness was removed after the re-anchoring A/B ` +
+                `(PR #305), and the Pi runner is the only dispatch harness. ` +
+                `Unset REVIEW_DISPATCH_RUNNER.`,
+        );
+    }
+};
+
+/**
+ * Build the production Pi runner. The libraries are imported lazily: unit
+ * tests and the task-mode path never require them.
  */
 export type PiRunnerOptions = {
     /**
      * Restrict the tool surface to these names. Used by the eval harness,
-     * whose SDK arm allows only Read/Grep/Glob; a Pi arm with a wider surface
-     * would out-investigate its own baseline and the A/B would read that as a
-     * harness win. Omitted in production, where the full surface (including
-     * Bash, which the investigation-cap CLI needs) is granted.
+     * which allows only Read/Grep/Glob (the corpus was measured on that
+     * three-tool surface). Omitted in production, where the full surface
+     * (including Bash, which the investigation-cap CLI needs) is granted.
      */
     allowedTools?: string[];
 };
@@ -473,10 +481,10 @@ export const createPiRunner = async (
                     // The transcript is already LLM-shaped; nothing to convert.
                     convertToLlm: (messages: unknown[]) => messages,
                     /**
-                     * The turn cap, `maxTurns` in the SDK arm. Pi's loop has
-                     * no turn limit of its own, so the cap is enforced here;
-                     * an agent that has already submitted its result also
-                     * stops, matching the SDK arm's "end the turn now".
+                     * The turn cap. Pi's loop has no turn limit of its own,
+                     * so the cap is enforced here; an agent that has already
+                     * submitted its result also stops, matching the tool's
+                     * "end the turn now".
                      */
                     shouldStopAfterTurn: () =>
                         captured !== undefined || turns >= request.maxTurns,
@@ -574,9 +582,9 @@ export const createPiRunner = async (
             };
         } catch (error) {
             // A payload the tool already accepted is complete and validated:
-            // salvage it even when the session then dies. Same reasoning as the
-            // SDK arm, and the cost accumulated so far is real here (Pi reports
-            // per-turn usage), so it is kept rather than zeroed.
+            // salvage it even when the session then dies. The cost
+            // accumulated so far is real (Pi reports per-turn usage), so it
+            // is kept rather than zeroed.
             if (captured !== undefined) {
                 return {
                     output: JSON.stringify(captured),

@@ -1,12 +1,12 @@
 import {describe, it, expect, afterEach} from "vitest";
 
-import {piRunner, sdkRunner, selectedRunner} from "./live-runner";
+import {piRunner} from "./live-runner";
 
 /**
- * The harness-selection seam. This is the whole point of the Pi runner
- * landing, and it was previously unexercised: a silent mis-selection would
- * run the SDK arm while the operator believed they were measuring Pi, which
- * is the worst failure this seam has (the arm under test swaps invisibly).
+ * The stale-seam tripwire. The `REVIEW_DISPATCH_RUNNER` selection went away
+ * with the Claude Agent SDK harness; an operator still exporting `sdk` must
+ * get an error, not a silent run of the other harness (the arm under test
+ * swapping invisibly is the worst failure a harness seam can have).
  */
 
 const original = process.env["REVIEW_DISPATCH_RUNNER"];
@@ -19,28 +19,21 @@ afterEach(() => {
     }
 });
 
-describe("selectedRunner", () => {
-    it("defaults to the SDK harness when unset", () => {
+describe("piRunner", () => {
+    it("constructs when no stale runner selection is present", () => {
         delete process.env["REVIEW_DISPATCH_RUNNER"];
-        expect(typeof selectedRunner()).toBe("function");
-    });
-
-    it("accepts the two known values", () => {
-        for (const value of ["sdk", "pi"]) {
-            process.env["REVIEW_DISPATCH_RUNNER"] = value;
-            expect(() => selectedRunner()).not.toThrow();
-        }
-    });
-
-    it("throws on an unknown value rather than silently running the SDK arm", () => {
-        for (const typo of ["sdkk", "claude", "PI", ""]) {
-            process.env["REVIEW_DISPATCH_RUNNER"] = typo;
-            expect(() => selectedRunner()).toThrow(/must be "sdk" or "pi"/);
-        }
-    });
-
-    it("exposes both runners as constructible", () => {
-        expect(typeof sdkRunner()).toBe("function");
         expect(typeof piRunner()).toBe("function");
+    });
+
+    it("tolerates the redundant-but-accurate value", () => {
+        process.env["REVIEW_DISPATCH_RUNNER"] = "pi";
+        expect(() => piRunner()).not.toThrow();
+    });
+
+    it("throws on a stale SDK selection rather than silently running Pi", () => {
+        for (const stale of ["sdk", "sdkk", "claude", ""]) {
+            process.env["REVIEW_DISPATCH_RUNNER"] = stale;
+            expect(() => piRunner()).toThrow(/selects nothing/);
+        }
     });
 });
