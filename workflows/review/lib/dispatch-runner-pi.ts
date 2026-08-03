@@ -460,9 +460,12 @@ export const finalText = (texts: string[]): string => {
 /**
  * Resolve a review.md model pin against Pi's Anthropic catalog. The pins are
  * tier aliases (`claude-opus-4-8`); Pi's catalog may carry dated ids, so an
- * exact miss falls back to a prefix match. An unresolvable pin throws with
- * the candidates listed rather than silently running a different model than
- * the arm claims to be testing.
+ * exact miss falls back to the pin's own dated releases — `pin-YYYYMMDD`
+ * exactly, latest date first. A bare `startsWith` fallback would let a
+ * family pin jump tiers (`claude-sonnet-4` longest-matching
+ * `claude-sonnet-4-5-<date>`), and the contract here is "never silently run
+ * a different model than the pin claims": an unresolvable pin throws with
+ * the candidates listed.
  */
 export const resolveModelId = (
     pin: string,
@@ -472,10 +475,14 @@ export const resolveModelId = (
     if (exact !== undefined) {
         return exact.id;
     }
-    const prefixed = available.filter((model) => model.id.startsWith(pin));
-    if (prefixed.length > 0) {
-        // Longest id wins: a dated release id is more specific than a bare alias.
-        return prefixed.sort((a, b) => b.id.length - a.id.length)[0].id;
+    const dated = available.filter(
+        (model) =>
+            model.id.startsWith(pin) &&
+            /^-\d{8}$/.test(model.id.slice(pin.length)),
+    );
+    if (dated.length > 0) {
+        // Dated suffixes are equal-length, so lexicographic IS chronological.
+        return dated.sort((a, b) => b.id.localeCompare(a.id))[0].id;
     }
     throw new Error(
         `model pin "${pin}" is not in Pi's Anthropic catalog (candidates: ${available

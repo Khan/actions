@@ -153,19 +153,35 @@ describe("resolveModelId", () => {
         ).toBe("claude-opus-4-8");
     });
 
-    it("falls back to the longest prefix match when the pin is not exact", () => {
+    it("falls back to the pin's latest dated release when not exact", () => {
         expect(
             resolveModelId("claude-opus-4-8", [
-                {id: "claude-opus-4-8-2026"},
+                {id: "claude-opus-4-8-20251201"},
                 {id: "claude-opus-4-8-20260101"},
             ]),
         ).toBe("claude-opus-4-8-20260101");
+    });
+
+    it("never jumps tiers on a family-prefix pin", () => {
+        // A bare startsWith fallback resolved claude-sonnet-4 to the LONGER
+        // claude-sonnet-4-5 id, silently running a different model tier than
+        // the pin claims.
+        expect(
+            resolveModelId("claude-sonnet-4", [
+                {id: "claude-sonnet-4-20250514"},
+                {id: "claude-sonnet-4-5-20250929"},
+            ]),
+        ).toBe("claude-sonnet-4-20250514");
     });
 
     it("throws with the candidates rather than silently running another model", () => {
         expect(() =>
             resolveModelId("claude-opus-9", [{id: "claude-fable-5"}]),
         ).toThrow(/not in Pi's Anthropic catalog.*claude-fable-5/s);
+        // A non-dated extension is not a release of the pin either.
+        expect(() =>
+            resolveModelId("claude-opus-4-8", [{id: "claude-opus-4-8-latest"}]),
+        ).toThrow(/not in Pi's Anthropic catalog/);
     });
 });
 
