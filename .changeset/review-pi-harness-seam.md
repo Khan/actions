@@ -30,3 +30,16 @@ cache-write under-count.
 The corpus recall figures, noise bands, and drift budget measured on the SDK
 loop era do not transfer numerically; the re-anchoring run above is the
 reference point for Pi-harness numbers going forward.
+
+Every reviewer tool subprocess now also runs inside an OS sandbox
+(`@anthropic-ai/sandbox-runtime`, the engine behind Claude Code's own
+sandbox: bubblewrap on Linux, Seatbelt on macOS): the checkout is mounted
+read-only (the one writable staging path is the investigation-cap journal,
+plus a scratch dir), and tool-level network is denied outright. In
+production this stacks inside the awf firewall; in the eval, which runs on a
+bare runner VM, it is the only boundary the tools have, and the A/B workflow
+now installs bubblewrap+socat for it. Sandbox initialization is fail-closed:
+if it cannot start (bubblewrap missing, user namespaces blocked in a nested
+container), dispatch refuses to run rather than silently degrading;
+`REVIEW_SANDBOX=off` is the explicit, logged escape hatch that restores the
+pre-sandbox posture.

@@ -11,19 +11,23 @@ import {
     createReviewTools,
     createSubmitTool,
     finalText,
+    makeSandboxedExec,
     rejectStaleRunnerSelection,
     resolveModelId,
+    shellQuote,
 } from "./dispatch-runner-pi";
 
 /**
  * The Pi seam's own decision logic, exercised against mocked Pi libraries:
  * the tool surface, the `submit_result` accept/reject handler, the structured
  * final taking precedence over the free-text final, cost accumulation from
- * per-turn usage, the turn cap, the api-proxy base-URL override, and the
- * salvage of an already-accepted payload when the loop then dies.
+ * per-turn usage, the turn cap, the api-proxy base-URL override, the OS
+ * sandbox contract (fail-closed init, the explicit off switch, the wrap of
+ * every tool subprocess), and the salvage of an already-accepted payload
+ * when the loop then dies.
  *
- * Only `pi-ai` and `pi-agent-core` are mocked; the runner, its tools, and the
- * real `execFile` run for real.
+ * `pi-ai`, `pi-agent-core`, and `sandbox-runtime` are mocked; the runner,
+ * its tools, and the real `execFile` run for real.
  */
 
 type LoopArgs = {
@@ -74,6 +78,22 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
     ) => loop({prompts, context, config, emit, signal}),
 }));
 
+/** The srt seam: init result and the wrap are both steerable per test. */
+let sandboxInit: (config: unknown) => Promise<void>;
+let sandboxWrapped: string[];
+
+vi.mock("@anthropic-ai/sandbox-runtime", () => ({
+    SandboxManager: {
+        initialize: (config: unknown) => sandboxInit(config),
+        wrapWithSandboxArgv: (command: string) => {
+            sandboxWrapped.push(command);
+            // Identity wrap: run the quoted command through a plain shell so
+            // the tool behavior itself stays observable.
+            return Promise.resolve({argv: ["bash", "-c", command]});
+        },
+    },
+}));
+
 const request = (overrides: Partial<AgentRequest> = {}): AgentRequest => ({
     name: "correctness-reviewer",
     model: "claude-opus-4-8",
@@ -117,7 +137,10 @@ beforeEach(() => {
     createProviderInput = undefined;
     catalog = [{id: "claude-opus-4-8"}, {id: "claude-fable-5"}];
     delete process.env["ANTHROPIC_BASE_URL"];
+    delete process.env["REVIEW_SANDBOX"];
     loop = () => Promise.resolve([]);
+    sandboxInit = () => Promise.resolve();
+    sandboxWrapped = [];
 });
 
 describe("resolveModelId", () => {
@@ -214,6 +237,57 @@ describe("createReviewTools", () => {
         const result = await grep?.execute("1", {pattern: "nothing-here"});
         expect(result?.content[0].text).toBe("(no output)");
         expect(result?.isError).toBeUndefined();
+    });
+});
+
+describe("shellQuote", () => {
+    it("single-quotes each argv part", () => {
+        expect(shellQuote(["grep", "-n", "a b"])).toBe("'grep' '-n' 'a b'");
+    });
+
+    it("escapes embedded single quotes", () => {
+        expect(shellQuote(["echo", "it's"])).toBe("'echo' 'it'\\''s'");
+    });
+
+    it("round-trips through a real shell", async () => {
+        const exec = makeSandboxedExec({
+            initialize: () => Promise.resolve(),
+            // Identity wrap: the command string srt would sandbox, run plain.
+            wrapWithSandboxArgv: (command) =>
+                Promise.resolve({argv: ["bash", "-c", command]}),
+        });
+        const out = await exec(["printf", "%s", "it's a 'quoted' $arg"], ".");
+        expect(out).toBe("it's a 'quoted' $arg");
+    });
+});
+
+describe("makeSandboxedExec", () => {
+    it("hands srt the quoted command and the cwd, and spawns srt's argv", async () => {
+        const seen: {command?: string; cwd?: string} = {};
+        const exec = makeSandboxedExec({
+            initialize: () => Promise.resolve(),
+            wrapWithSandboxArgv: (command, _shell, _config, _signal, cwd) => {
+                seen.command = command;
+                seen.cwd = cwd;
+                return Promise.resolve({argv: ["echo", "wrapped"]});
+            },
+        });
+        const out = await exec(["printf", "hi"], "/tmp");
+        expect(seen.command).toBe("'printf' 'hi'");
+        expect(seen.cwd).toBe("/tmp");
+        expect(out.trim()).toBe("wrapped");
+    });
+
+    it("spawns with the environment srt asks for", async () => {
+        const exec = makeSandboxedExec({
+            initialize: () => Promise.resolve(),
+            wrapWithSandboxArgv: () =>
+                Promise.resolve({
+                    argv: ["bash", "-c", 'printf %s "$SRT_MARKER"'],
+                    env: {...process.env, SRT_MARKER: "sandboxed"},
+                }),
+        });
+        expect(await exec(["ignored"], ".")).toBe("sandboxed");
     });
 });
 
@@ -480,6 +554,64 @@ describe("createPiRunner", () => {
         const runner = await createPiRunner();
         await runner(request({maxTurns: 2}));
         expect(stopped).toBe(true);
+    });
+
+    it("wraps every tool subprocess in the OS sandbox", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "pi-runner-"));
+        writeFileSync(join(dir, "a.ts"), "const a = 1;\n");
+        let text = "";
+        loop = async ({context}) => {
+            const read = findTool(context, "Read");
+            const result = await read.execute("1", {path: "a.ts"});
+            text = result.content[0].text;
+            return [];
+        };
+        const runner = await createPiRunner();
+        await runner(request({cwd: dir}));
+        // The command reached srt quoted, and its output still flowed back.
+        expect(sandboxWrapped).toEqual(["'cat' '-n' '--' 'a.ts'"]);
+        expect(text).toContain("const a = 1;");
+    });
+
+    it("fails closed when the sandbox cannot initialize", async () => {
+        sandboxInit = () => Promise.reject(new Error("bwrap missing"));
+        await expect(createPiRunner()).rejects.toThrow(
+            /sandbox failed to initialize.*REVIEW_SANDBOX=off.*bwrap missing/s,
+        );
+    });
+
+    it("runs unwrapped only on the explicit REVIEW_SANDBOX=off", async () => {
+        process.env["REVIEW_SANDBOX"] = "off";
+        const quiet = vi
+            .spyOn(console, "error")
+            .mockImplementation(() => undefined);
+        try {
+            let initialized = false;
+            sandboxInit = () => {
+                initialized = true;
+                return Promise.resolve();
+            };
+            const dir = mkdtempSync(join(tmpdir(), "pi-runner-"));
+            writeFileSync(join(dir, "a.ts"), "const a = 1;\n");
+            let text = "";
+            loop = async ({context}) => {
+                const read = findTool(context, "Read");
+                const result = await read.execute("1", {path: "a.ts"});
+                text = result.content[0].text;
+                return [];
+            };
+            const runner = await createPiRunner();
+            await runner(request({cwd: dir}));
+            expect(initialized).toBe(false);
+            expect(sandboxWrapped).toEqual([]);
+            expect(text).toContain("const a = 1;");
+            // The bypass is loud, never silent.
+            expect(quiet).toHaveBeenCalledWith(
+                expect.stringContaining("REVIEW_SANDBOX=off"),
+            );
+        } finally {
+            quiet.mockRestore();
+        }
     });
 
     it("keeps Pi's bundled provider when the sandbox sets no base URL", async () => {

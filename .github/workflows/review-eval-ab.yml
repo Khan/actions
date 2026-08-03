@@ -92,6 +92,12 @@ jobs:
           # `git show`, so the full history is needed.
           fetch-depth: 0
       - uses: ./actions/shared-node-cache
+      - name: Install sandbox dependencies
+        # The eval runs the review sub-agents through the same srt tool
+        # sandbox production dispatch uses (dispatch-runner-pi.ts,
+        # fail-closed); bubblewrap and socat are its Linux runtime
+        # dependencies and are not in the runner image.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
       - name: Run the live A/B
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

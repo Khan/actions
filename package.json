@@ -10,6 +10,7 @@
         "build": "tsc -p actions/tsconfig.json"
     },
     "devDependencies": {
+        "@anthropic-ai/sandbox-runtime": "0.0.67",
         "@changesets/cli": "^2.29.8",
         "@earendil-works/pi-agent-core": "0.83.0",
         "@earendil-works/pi-ai": "0.83.0",

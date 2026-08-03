@@ -19,9 +19,17 @@
  * caps below were held at parity with the Claude Code harness through the
  * re-anchoring A/B (a loop that truncates differently investigates
  * differently), so they stay explicit and unit-tested rather than inherited.
+ *
+ * Every tool subprocess additionally runs inside an OS sandbox
+ * (`@anthropic-ai/sandbox-runtime`, the engine behind Claude Code's own
+ * sandbox: bubblewrap on Linux, Seatbelt on macOS) with the checkout
+ * read-only and tool-level network denied. See {@link SANDBOX_CONFIG} for
+ * the policy and the fail-closed contract.
  */
 
 import {execFile} from "node:child_process";
+import {existsSync, mkdirSync, writeFileSync} from "node:fs";
+import {dirname} from "node:path";
 
 import type {AgentRequest, AgentResult, AgentRunner} from "./dispatch";
 
@@ -49,6 +57,57 @@ const BASH_TIMEOUT_MS = 120_000;
  */
 const ANTHROPIC_PROVIDER_ID = "anthropic";
 const ANTHROPIC_BASE_URL_ENV = "ANTHROPIC_BASE_URL";
+
+/**
+ * The OS sandbox around every tool subprocess. The runner process itself
+ * stays OUTSIDE it (the loop must reach the model provider); only the
+ * commands the model asks for are wrapped.
+ *
+ * The policy, line by line:
+ *
+ *  - Network deny-all. The tools investigate a checkout; none of them needs
+ *    the network, and model traffic leaves from the runner process, not from
+ *    a tool. In production this stacks INSIDE the awf firewall rather than
+ *    replacing it; in the eval (a bare runner VM with the real API key in
+ *    the environment) it is the only network boundary the tools have.
+ *
+ *  - Checkout read-only. "Reviewers never get edit or write" used to be a
+ *    tool-surface promise that Bash could bypass (`echo > file`); read-only
+ *    makes it a boundary. A prompt-injected reviewer cannot poison the
+ *    checkout its sibling reviewers are reading, nor the staged inputs and
+ *    outputs downstream phases trust (`routing.json`, `out/`).
+ *
+ *  - The investigation-cap journal is the ONE writable path in the review
+ *    staging dir: the cap CLI appends one line per authorised call
+ *    (investigation-cap.ts), and refusing that write would break the cap.
+ *    `routing.json` (the caps) stays read-only.
+ *
+ *  - A scratch directory for the model's own use; nothing downstream reads
+ *    from it.
+ *
+ * Fail-closed: when the sandbox cannot initialize (bubblewrap missing, user
+ * namespaces blocked in a nested container), {@link createPiRunner} THROWS
+ * rather than silently running unsandboxed. `REVIEW_SANDBOX=off` is the
+ * explicit, logged escape hatch; in production the awf firewall still stands
+ * around an unsandboxed runner, so "off" degrades to exactly the pre-srt
+ * posture rather than to nothing.
+ */
+const REVIEW_SANDBOX_ENV = "REVIEW_SANDBOX";
+
+/** The one writable file in the staging dir; see investigation-cap.ts. */
+const CAP_JOURNAL_PATH = "/tmp/gh-aw/review/investigation-journal.log";
+
+/** Model-usable scratch space; nothing downstream reads from it. */
+const SCRATCH_DIR = "/tmp/review-agent-scratch";
+
+const SANDBOX_CONFIG = {
+    network: {allowedDomains: [], deniedDomains: ["*"]},
+    filesystem: {
+        denyRead: ["~/.ssh"],
+        allowWrite: [CAP_JOURNAL_PATH, SCRATCH_DIR],
+        denyWrite: [],
+    },
+};
 
 /**
  * The sub-agent framing. Pi supplies no system prompt of its own, and an
@@ -86,6 +145,18 @@ type PiTool = {
     ) => Promise<PiToolResult>;
 };
 
+/**
+ * One tool subprocess: argv in, combined output out. This is the seam the OS
+ * sandbox wraps — every tool below runs its command through an injected
+ * executor, so the sandboxed and unsandboxed paths differ ONLY in how the
+ * argv is spawned, never in what the tools do.
+ */
+export type ToolExec = (
+    argv: string[],
+    cwd: string,
+    signal?: AbortSignal,
+) => Promise<string>;
+
 /** Truncate a tool result, saying so, so the model knows it was cut. */
 export const capOutput = (text: string): string =>
     text.length <= MAX_TOOL_OUTPUT_CHARS
@@ -100,23 +171,24 @@ const ok = (text: string): PiToolResult => ({
 });
 
 /**
- * Run one command, resolving with its combined output. A non-zero exit is
+ * Spawn one argv, resolving with its combined output. A non-zero exit is
  * NOT an error here: `grep` exits 1 on no-match, and the model needs to see
  * "no matches" as an ordinary result rather than a tool failure.
  */
-const run = (
-    file: string,
-    args: string[],
+const spawn = (
+    argv: string[],
     cwd: string,
+    env: Record<string, string | undefined> | undefined,
     signal?: AbortSignal,
 ): Promise<string> =>
     new Promise((resolve) => {
         execFile(
-            file,
-            args,
+            argv[0],
+            argv.slice(1),
             {
                 cwd,
                 signal,
+                ...(env !== undefined ? {env} : {}),
                 timeout: BASH_TIMEOUT_MS,
                 maxBuffer: 64 * 1024 * 1024,
             },
@@ -138,6 +210,51 @@ const run = (
         );
     });
 
+/** The unsandboxed executor: exactly the pre-srt behavior. */
+export const plainExec: ToolExec = (argv, cwd, signal) =>
+    spawn(argv, cwd, undefined, signal);
+
+/**
+ * POSIX single-quote each part so an argv survives the shell round-trip
+ * through the sandbox wrapper (srt takes a command STRING and returns the
+ * bwrap/seatbelt argv to spawn).
+ */
+export const shellQuote = (argv: string[]): string =>
+    argv.map((part) => `'${part.replaceAll("'", "'\\''")}'`).join(" ");
+
+/** What this runner needs from srt's `SandboxManager`. */
+type SandboxWrapper = {
+    initialize: (config: unknown) => Promise<void>;
+    wrapWithSandboxArgv: (
+        command: string,
+        binShell?: string,
+        customConfig?: unknown,
+        abortSignal?: AbortSignal,
+        cwd?: string,
+    ) => Promise<{
+        argv: string[];
+        env?: Record<string, string | undefined>;
+    }>;
+};
+
+/**
+ * The sandboxed executor: quote the argv back into a command string, have
+ * srt wrap it in the platform sandbox, and spawn the wrapped argv with the
+ * environment srt asks for.
+ */
+export const makeSandboxedExec =
+    (sandbox: SandboxWrapper): ToolExec =>
+    async (argv, cwd, signal) => {
+        const wrapped = await sandbox.wrapWithSandboxArgv(
+            shellQuote(argv),
+            undefined,
+            undefined,
+            signal,
+            cwd,
+        );
+        return spawn(wrapped.argv, cwd, wrapped.env, signal);
+    };
+
 const schema = (
     properties: Record<string, unknown>,
     required: string[],
@@ -153,10 +270,13 @@ const str = (description: string): unknown => ({type: "string", description});
 /**
  * The reviewer tool surface: read-only investigation plus Bash (the
  * investigation-cap CLI the sub-agent prompts invoke runs through it). No
- * edit, no write — a reviewer that can mutate the checkout it is reviewing
- * is a correctness hazard.
+ * edit, no write — and with the sandboxed executor that is a mount-level
+ * boundary on Bash too, not just a tool-surface promise.
  */
-export const createReviewTools = (cwd: string): PiTool[] => [
+export const createReviewTools = (
+    cwd: string,
+    exec: ToolExec = plainExec,
+): PiTool[] => [
     {
         name: "Read",
         label: "Read",
@@ -172,7 +292,7 @@ export const createReviewTools = (cwd: string): PiTool[] => [
         ),
         execute: async (_id, params, signal) => {
             const path = String(params["path"] ?? "");
-            return ok(await run("cat", ["-n", "--", path], cwd, signal));
+            return ok(await exec(["cat", "-n", "--", path], cwd, signal));
         },
     },
     {
@@ -191,9 +311,16 @@ export const createReviewTools = (cwd: string): PiTool[] => [
             const pattern = String(params["pattern"] ?? "");
             const path = String(params["path"] ?? ".");
             return ok(
-                await run(
-                    "grep",
-                    ["-rIn", "--exclude-dir=.git", "-E", "--", pattern, path],
+                await exec(
+                    [
+                        "grep",
+                        "-rIn",
+                        "--exclude-dir=.git",
+                        "-E",
+                        "--",
+                        pattern,
+                        path,
+                    ],
                     cwd,
                     signal,
                 ),
@@ -215,9 +342,16 @@ export const createReviewTools = (cwd: string): PiTool[] => [
         execute: async (_id, params, signal) => {
             const pattern = String(params["pattern"] ?? "");
             return ok(
-                await run(
-                    "find",
-                    [".", "-not", "-path", "./.git/*", "-path", `./${pattern}`],
+                await exec(
+                    [
+                        "find",
+                        ".",
+                        "-not",
+                        "-path",
+                        "./.git/*",
+                        "-path",
+                        `./${pattern}`,
+                    ],
                     cwd,
                     signal,
                 ),
@@ -234,20 +368,20 @@ export const createReviewTools = (cwd: string): PiTool[] => [
         ),
         execute: async (_id, params, signal) => {
             const path = String(params["path"] ?? ".");
-            return ok(await run("ls", ["-la", "--", path], cwd, signal));
+            return ok(await exec(["ls", "-la", "--", path], cwd, signal));
         },
     },
     {
         name: "Bash",
         label: "Bash",
         description:
-            "Run a shell command in the repository. Use for the investigation-cap CLI and other read-only checks.",
+            "Run a shell command in the repository. Use for the investigation-cap CLI and other read-only checks. Commands run inside an OS sandbox: the repository is read-only and there is no network access.",
         parameters: schema({command: str("The shell command to run.")}, [
             "command",
         ]),
         execute: async (_id, params, signal) => {
             const command = String(params["command"] ?? "");
-            return ok(await run("bash", ["-lc", command], cwd, signal));
+            return ok(await exec(["bash", "-lc", command], cwd, signal));
         },
     },
 ];
@@ -417,6 +551,42 @@ export const createPiRunner = async (
         ) => Promise<unknown[]>;
     };
 
+    // The OS sandbox around the tool subprocesses (see SANDBOX_CONFIG).
+    // Fail-closed: an initialization failure throws rather than degrading to
+    // unsandboxed tools; REVIEW_SANDBOX=off is the explicit escape hatch.
+    let exec: ToolExec;
+    if (process.env[REVIEW_SANDBOX_ENV] === "off") {
+        // eslint-disable-next-line no-console
+        console.error(
+            "review dispatch: tool sandbox OFF (REVIEW_SANDBOX=off); tool subprocesses run unwrapped.",
+        );
+        exec = plainExec;
+    } else {
+        const srt = (await import("@anthropic-ai/sandbox-runtime")) as {
+            SandboxManager: SandboxWrapper;
+        };
+        try {
+            // Pre-create the writable bind targets so the sandbox can mount
+            // them: the cap journal may not exist yet on a fresh run, and
+            // its first append must not be the thing that fails.
+            mkdirSync(SCRATCH_DIR, {recursive: true});
+            mkdirSync(dirname(CAP_JOURNAL_PATH), {recursive: true});
+            if (!existsSync(CAP_JOURNAL_PATH)) {
+                writeFileSync(CAP_JOURNAL_PATH, "");
+            }
+            await srt.SandboxManager.initialize(SANDBOX_CONFIG);
+        } catch (error) {
+            throw new Error(
+                `the review tool sandbox failed to initialize; refusing to ` +
+                    `run sub-agents with unsandboxed tools (set ` +
+                    `${REVIEW_SANDBOX_ENV}=off to explicitly accept that): ${
+                        error instanceof Error ? error.message : String(error)
+                    }`,
+            );
+        }
+        exec = makeSandboxedExec(srt.SandboxManager);
+    }
+
     const models = ai.createModels();
     const baseUrl = process.env[ANTHROPIC_BASE_URL_ENV];
     // Re-register Anthropic on the steered base URL when the sandbox provides
@@ -438,7 +608,7 @@ export const createPiRunner = async (
 
         let captured: Record<string, unknown> | undefined;
         const allowed = options.allowedTools;
-        const tools = createReviewTools(request.cwd).filter(
+        const tools = createReviewTools(request.cwd, exec).filter(
             (tool) => allowed === undefined || allowed.includes(tool.name),
         );
         if (request.validate !== undefined) {
