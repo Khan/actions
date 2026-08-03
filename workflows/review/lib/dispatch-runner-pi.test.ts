@@ -36,6 +36,12 @@ type LoopArgs = {
     config: Record<string, unknown>;
     emit: (event: Record<string, unknown>) => void;
     signal: AbortSignal | undefined;
+    /** The stream function the runner supplies; Pi calls it per turn. */
+    streamFn: (
+        model: unknown,
+        context: unknown,
+        options?: Record<string, unknown>,
+    ) => unknown;
 };
 
 /** What the fake loop does when the runner starts it. */
@@ -46,6 +52,9 @@ let registeredProviders: unknown[];
 let catalog: {id: string}[];
 let createProviderInput: Record<string, unknown> | undefined;
 
+/** Stream options per `streamSimple` call, for the retry-budget assertion. */
+let streamSimpleOptions: (Record<string, unknown> | undefined)[];
+
 vi.mock("@earendil-works/pi-ai", () => ({
     createModels: () => ({
         setProvider: (provider: unknown) => {
@@ -53,7 +62,14 @@ vi.mock("@earendil-works/pi-ai", () => ({
         },
         getModels: () => catalog,
         getModel: (_provider: string, id: string) => ({id}),
-        streamSimple: () => undefined,
+        streamSimple: (
+            _model: unknown,
+            _context: unknown,
+            options?: Record<string, unknown>,
+        ) => {
+            streamSimpleOptions.push(options);
+            return undefined;
+        },
     }),
     createProvider: (input: Record<string, unknown>) => {
         createProviderInput = input;
@@ -75,16 +91,22 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
         config: Record<string, unknown>,
         emit: (event: Record<string, unknown>) => void,
         signal: AbortSignal | undefined,
-    ) => loop({prompts, context, config, emit, signal}),
+        streamFn: LoopArgs["streamFn"],
+    ) => loop({prompts, context, config, emit, signal, streamFn}),
 }));
 
 /** The srt seam: init result and the wrap are both steerable per test. */
 let sandboxInit: (config: unknown) => Promise<void>;
 let sandboxWrapped: string[];
+/** Every config handed to `initialize`; the policy itself is under test. */
+let sandboxConfigs: unknown[];
 
 vi.mock("@anthropic-ai/sandbox-runtime", () => ({
     SandboxManager: {
-        initialize: (config: unknown) => sandboxInit(config),
+        initialize: (config: unknown) => {
+            sandboxConfigs.push(config);
+            return sandboxInit(config);
+        },
         wrapWithSandboxArgv: (command: string) => {
             sandboxWrapped.push(command);
             // Identity wrap: run the quoted command through a plain shell so
@@ -141,6 +163,8 @@ beforeEach(() => {
     loop = () => Promise.resolve([]);
     sandboxInit = () => Promise.resolve();
     sandboxWrapped = [];
+    sandboxConfigs = [];
+    streamSimpleOptions = [];
 });
 
 describe("resolveModelId", () => {
@@ -572,6 +596,109 @@ describe("createPiRunner", () => {
         expect(stopped).toBe(true);
     });
 
+    it("reports the turn cap as max_turns, not as a clean finish", async () => {
+        // Out of turns and finished-with-prose otherwise return the same
+        // shape, and `dispatch.ts` would spend its one re-dispatch correcting
+        // an output shape that was never the problem.
+        loop = ({emit}) => {
+            emit(turnEnd("partial investigation", 0));
+            emit(turnEnd("still working", 0));
+            return Promise.resolve([]);
+        };
+        const runner = await createPiRunner();
+        const result = await runner(request({maxTurns: 2}));
+        expect(result.stopReason).toBe("max_turns");
+        expect(result.structured).toBeUndefined();
+    });
+
+    it("keeps the provider's own stop reason for a finish under the cap", async () => {
+        loop = ({emit}) => {
+            emit({
+                type: "turn_end",
+                message: {
+                    role: "assistant",
+                    content: [{type: "text", text: "{}"}],
+                    usage: {cost: {total: 0}},
+                    stopReason: "end_turn",
+                },
+            });
+            return Promise.resolve([]);
+        };
+        const runner = await createPiRunner();
+        const result = await runner(request({maxTurns: 30}));
+        expect(result.stopReason).toBe("end_turn");
+    });
+
+    it("keeps the tool count and failure detail on a salvaged payload", async () => {
+        // The salvage path is a session that died mid-flight, which is exactly
+        // when "what killed it" is worth reporting: dropping the diagnostics
+        // made a salvaged result look like a clean one.
+        loop = async ({context, emit}) => {
+            emit({type: "tool_execution_end"});
+            emit({
+                type: "turn_end",
+                message: {
+                    role: "assistant",
+                    content: [],
+                    usage: {cost: {total: 0.25}},
+                    stopReason: "error",
+                    errorMessage: "provider overloaded",
+                },
+            });
+            const submit = findTool(context, "submit_result");
+            await submit.execute("1", {result: {findings: []}});
+            throw new Error("stream died after submission");
+        };
+        const runner = await createPiRunner();
+        const result = await runner(request({validate: () => null}));
+        expect(result.structured).toBe(true);
+        expect(result.toolCalls).toBe(1);
+        expect(result.stopReason).toBe("error");
+        expect(result.errorMessage).toContain("provider overloaded");
+        expect(result.usd).toBeCloseTo(0.25);
+    });
+
+    it("folds a diagnostics array into the error message", async () => {
+        // `stopReason=error` alone was the whole diagnosis for three runs;
+        // Pi carries the detail on the assistant message.
+        loop = ({emit}) => {
+            emit({
+                type: "turn_end",
+                message: {
+                    role: "assistant",
+                    content: [],
+                    usage: {cost: {total: 0}},
+                    stopReason: "error",
+                    errorMessage: "stream failed",
+                    diagnostics: [
+                        {code: "overloaded_error", detail: "retry later"},
+                    ],
+                },
+            });
+            return Promise.resolve([]);
+        };
+        const runner = await createPiRunner();
+        const result = await runner(request());
+        expect(result.errorMessage).toContain("stream failed");
+        expect(result.errorMessage).toContain("overloaded_error");
+    });
+
+    it("gives every sub-agent turn a bounded transient-failure retry budget", async () => {
+        // Nothing upstream supplies one: gh-aw pins ANTHROPIC_MAX_RETRIES=0
+        // and pi-ai does not read it, defaulting its own retry helper to 0. At
+        // 0 a single 429/529 on any turn sheds a whole review lens.
+        loop = ({streamFn}) => {
+            streamFn({id: "claude-opus-4-8"}, []);
+            streamFn({id: "claude-opus-4-8"}, [], {maxRetries: 5});
+            return Promise.resolve([]);
+        };
+        const runner = await createPiRunner();
+        await runner(request());
+        expect(streamSimpleOptions[0]?.["maxRetries"]).toBe(2);
+        // An explicit caller budget still wins.
+        expect(streamSimpleOptions[1]?.["maxRetries"]).toBe(5);
+    });
+
     it("wraps every tool subprocess in the OS sandbox", async () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-runner-"));
         writeFileSync(join(dir, "a.ts"), "const a = 1;\n");
@@ -587,6 +714,29 @@ describe("createPiRunner", () => {
         // The command reached srt quoted, and its output still flowed back.
         expect(sandboxWrapped).toEqual(["'cat' '-n' '--' 'a.ts'"]);
         expect(text).toContain("const a = 1;");
+    });
+
+    it("hands srt a deny-all network policy and a two-path write surface", async () => {
+        // The wrap tests prove the sandbox is USED; this one pins what it
+        // enforces, which is the actual boundary. Deliberately literal: a
+        // future edit that adds the checkout to `allowWrite` or drops the
+        // network denial must break a test, not just change a constant.
+        await createPiRunner();
+        expect(sandboxConfigs).toHaveLength(1);
+        expect(sandboxConfigs[0]).toEqual({
+            network: {allowedDomains: [], deniedDomains: ["*"]},
+            filesystem: {
+                denyRead: ["~/.ssh"],
+                // The cap journal (the CLI appends to it) and a scratch dir,
+                // and nothing else: not the checkout, not routing.json, not
+                // out/ (the staged inputs downstream phases trust).
+                allowWrite: [
+                    "/tmp/gh-aw/review/investigation-journal.log",
+                    "/tmp/review-agent-scratch",
+                ],
+                denyWrite: [],
+            },
+        });
     });
 
     it("fails closed when the sandbox cannot initialize", async () => {

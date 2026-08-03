@@ -918,6 +918,91 @@ describe("prose-wrapped outputs and the malformed-output retry", () => {
         );
     });
 
+    it("tells an out-of-turns agent to conclude rather than to fix its JSON shape", async () => {
+        // A transcript truncated at the turn cap is not a SHAPE error. The
+        // default corrective note ("deliver the complete corrected JSON
+        // object") is then the wrong instruction, and this is the run's only
+        // retry, so the note has to say what actually happened.
+        const prompts: string[] = [];
+        const remaining: Record<string, string[]> = {
+            "pattern-triage": [
+                JSON.stringify({patterns: [], reviewFiles: ["a.ts"]}),
+            ],
+            "correctness-reviewer": [
+                "I was still reading the diff when I ran out of turns.",
+                CORRECTNESS_OUT,
+            ],
+            "skill-auditor": [EMPTY_FINDINGS],
+            "claim-validator": [VALIDATOR_CONFIRM],
+        };
+        const runner: AgentRunner = async (request) => {
+            prompts.push(request.prompt);
+            const output = remaining[request.name]?.shift();
+            if (output === undefined) {
+                throw new Error(`no canned output for ${request.name}`);
+            }
+            return {
+                output,
+                usd: 0.5,
+                turns: 3,
+                wallMs: 100,
+                toolCalls: 7,
+                ...(request.name === "correctness-reviewer"
+                    ? {stopReason: "max_turns"}
+                    : {}),
+            };
+        };
+        const result = await runDispatch(
+            options(makeFakeFs(staging()), runner),
+        );
+
+        const corrective = prompts.filter((prompt) =>
+            prompt.includes("could not be used"),
+        );
+        expect(corrective).toHaveLength(1);
+        expect(corrective[0]).toContain("stopped at its turn cap");
+        // The runner's diagnostics also reach the report, where a
+        // harness-parity read can see them.
+        const entries = result.perAgent.filter(
+            (agent) => agent.name === "correctness-reviewer",
+        );
+        expect(entries[0].stopReason).toBe("max_turns");
+        expect(entries[0].toolCalls).toBe(7);
+        expect(result.claims).toHaveLength(1);
+    });
+
+    it("keeps the ordinary shape note when the agent finished under the cap", async () => {
+        const prompts: string[] = [];
+        const remaining: Record<string, string[]> = {
+            "pattern-triage": [
+                JSON.stringify({patterns: [], reviewFiles: ["a.ts"]}),
+            ],
+            "correctness-reviewer": ["prose only", CORRECTNESS_OUT],
+            "skill-auditor": [EMPTY_FINDINGS],
+            "claim-validator": [VALIDATOR_CONFIRM],
+        };
+        const runner: AgentRunner = async (request) => {
+            prompts.push(request.prompt);
+            const output = remaining[request.name]?.shift();
+            if (output === undefined) {
+                throw new Error(`no canned output for ${request.name}`);
+            }
+            return {
+                output,
+                usd: 0.5,
+                turns: 3,
+                wallMs: 100,
+                stopReason: "end_turn",
+            };
+        };
+        await runDispatch(options(makeFakeFs(staging()), runner));
+        const corrective = prompts.filter((prompt) =>
+            prompt.includes("could not be used"),
+        );
+        expect(corrective).toHaveLength(1);
+        expect(corrective[0]).not.toContain("turn cap");
+    });
+
     it("sheds the dimension with its note when the retry is malformed too", async () => {
         const runner = sequencedRunner({
             "pattern-triage": [
