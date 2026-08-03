@@ -46,6 +46,26 @@ const MAX_TOOL_OUTPUT_CHARS = 30_000;
 const BASH_TIMEOUT_MS = 120_000;
 
 /**
+ * Bounded client-side retries for transient provider failures (429, 529, the
+ * 5xx family), restored deliberately.
+ *
+ * Nothing upstream supplies one. gh-aw pins `ANTHROPIC_MAX_RETRIES=0` on the
+ * engine step, and pi-ai does not read that env var at all: its Anthropic
+ * provider calls the SDK with a hardcoded `maxRetries: 0` and delegates to its
+ * own `retryProviderRequest` helper, whose default is also 0 unless the caller
+ * passes one (pi-ai 0.83.0, `dist/api/anthropic-messages.js`). So without this
+ * option a single transient overload on ANY turn ends the sub-agent, and
+ * `dispatch.ts` records the thrown error as a failed dimension with no
+ * transient retry of its own: one 529 sheds a whole review lens.
+ *
+ * 2 matches what the deleted SDK harness restored for its sub-agent
+ * subprocesses, and what both provider SDKs default to. pi-ai caps a
+ * server-requested delay at 60s and fails fast beyond it, so a retry cannot
+ * silently park a reviewer past its `timeoutMs`.
+ */
+const SUB_AGENT_MAX_RETRIES = 2;
+
+/**
  * The provider id Pi registers Anthropic models under, and the env var the
  * sandbox uses to steer Anthropic traffic at the firewall api-proxy. The
  * agent container deliberately runs WITHOUT `ANTHROPIC_API_KEY` (the awf
@@ -725,8 +745,20 @@ export const createPiRunner = async (
                     }
                 },
                 abort.signal,
-                (model_: unknown, context: unknown, options?: unknown) =>
-                    models.streamSimple(model_, context, options),
+                // Pi hands the stream options down from the loop; the retry
+                // budget is added here because nothing upstream sets one (see
+                // SUB_AGENT_MAX_RETRIES). A caller-supplied value wins.
+                (
+                    model_: unknown,
+                    context: unknown,
+                    streamOptions?: Record<string, unknown>,
+                ) =>
+                    models.streamSimple(model_, context, {
+                        ...streamOptions,
+                        maxRetries:
+                            streamOptions?.["maxRetries"] ??
+                            SUB_AGENT_MAX_RETRIES,
+                    }),
             );
             if (captured !== undefined) {
                 return {
@@ -744,12 +776,27 @@ export const createPiRunner = async (
                     structured: true,
                 };
             }
+            // Out of turns and finished-with-prose return the same shape: a
+            // free-text final, `structured` unset. Left undistinguished,
+            // `dispatch.ts` reads the truncated transcript as malformed
+            // output and spends its ONE re-dispatch on a corrective note
+            // about output shape, which is the wrong diagnosis for an agent
+            // that simply ran out of turns. The deleted SDK harness surfaced
+            // this loudly (`error_max_turns`); this is the same signal
+            // through the `stopReason` channel.
+            //
+            // The override costs nothing: what it replaces is the last turn's
+            // own reason (`tool_use`, `end_turn`), which says only that the
+            // turn ended, never that the loop did. The provider's unnormalized
+            // reason still rides on `rawStopReason`, and `refused` is still
+            // computed from the pre-override values.
+            const hitTurnCap = turns >= request.maxTurns;
             return {
                 output: finalText(texts),
                 usd,
                 turns,
                 toolCalls,
-                stopReason,
+                stopReason: hitTurnCap ? "max_turns" : stopReason,
                 errorMessage,
                 rawStopReason,
                 tokensAtFailure,
@@ -761,12 +808,22 @@ export const createPiRunner = async (
             // A payload the tool already accepted is complete and validated:
             // salvage it even when the session then dies. The cost
             // accumulated so far is real (Pi reports per-turn usage), so it
-            // is kept rather than zeroed.
+            // is kept rather than zeroed, and so are the diagnostics: this is
+            // the path where a session died mid-flight, which is exactly when
+            // "what killed it" is worth reporting. Dropping them here made a
+            // salvaged result look like a clean one.
             if (captured !== undefined) {
                 return {
                     output: JSON.stringify(captured),
                     usd,
                     turns,
+                    toolCalls,
+                    stopReason,
+                    errorMessage,
+                    rawStopReason,
+                    tokensAtFailure,
+                    refused:
+                        stopReason === "refusal" || rawStopReason === "refusal",
                     wallMs: Date.now() - started,
                     structured: true,
                 };

@@ -214,6 +214,23 @@ export type PerAgentReport = {
     usd: number;
     turns: number;
     wallMs: number;
+    /**
+     * Tool calls the agent made, when the runner counts them. The
+     * harness-parity signal: a loop that investigates with fewer tool calls
+     * and scores lower has a toolbox problem, not a model problem. The runner
+     * has reported this since the Pi swap; not threading it here left the
+     * number unreadable outside a live transcript.
+     */
+    toolCalls?: number;
+    /**
+     * The runner's stop reason, recorded verbatim when it reports one. Two
+     * diagnoses ride on it and neither is visible any other way: `refusal`
+     * (an empty result that is a usage-policy block, not a dropped call) and
+     * `max_turns` (a truncated result that is out-of-turns, not malformed).
+     * Not interpreted here: the vocabulary is the runner's, and this report is
+     * runner-agnostic.
+     */
+    stopReason?: string;
     /** This entry is the one malformed-output retry of the same agent. */
     retried?: boolean;
     /**
@@ -384,6 +401,14 @@ export const runDispatch = async (
     };
 
     /**
+     * The stop reason of each agent's most recent dispatch. Read by exactly
+     * one decision: what the single contract-parse retry tells the agent it
+     * did wrong (see parseWithRetry). Keyed by name because the retry is
+     * always the same agent.
+     */
+    const lastStopReason = new Map<string, string>();
+
+    /**
      * Dispatch one agent; stage its raw output; report cost and failure.
      * `malformedNote` marks the one contract-parse retry: it appends the
      * corrective instruction to the prompt and flags the report entry.
@@ -447,17 +472,34 @@ export const runDispatch = async (
                     usd: result.usd,
                     turns: result.turns,
                     wallMs: result.wallMs,
+                    ...(result.toolCalls === undefined
+                        ? {}
+                        : {toolCalls: result.toolCalls}),
+                    ...(result.stopReason === undefined
+                        ? {}
+                        : {stopReason: result.stopReason}),
                     failed: "refused",
                 });
                 return dispatchAgent(name, malformedNote, fallback);
             }
             writeOut(name, result.output);
+            // The contract-parse retry reads this to tell "wrong shape" apart
+            // from "ran out of turns" (see parseWithRetry).
+            if (result.stopReason !== undefined) {
+                lastStopReason.set(name, result.stopReason);
+            }
             perAgent.push({
                 name,
                 model,
                 usd: result.usd,
                 turns: result.turns,
                 wallMs: result.wallMs,
+                ...(result.toolCalls === undefined
+                    ? {}
+                    : {toolCalls: result.toolCalls}),
+                ...(result.stopReason === undefined
+                    ? {}
+                    : {stopReason: result.stopReason}),
                 ...(malformedNote === undefined ? {} : {retried: true}),
                 ...(modelOverride === undefined ? {} : {fellBackTo: model}),
                 ...(result.structured === true ? {structuredFinal: true} : {}),
@@ -504,7 +546,18 @@ export const runDispatch = async (
         try {
             return parse(output);
         } catch (error) {
-            const note = error instanceof Error ? error.message : String(error);
+            const parseNote =
+                error instanceof Error ? error.message : String(error);
+            // An agent that hit the turn cap did not get the output SHAPE
+            // wrong; it stopped mid-investigation. Telling it to "deliver the
+            // complete corrected JSON object" is then the wrong instruction,
+            // and this is the run's only retry: say what actually happened so
+            // the second attempt spends its turns concluding rather than
+            // re-investigating.
+            const note =
+                lastStopReason.get(name) === "max_turns"
+                    ? `${parseNote}; the previous attempt also stopped at its turn cap before finishing, so conclude from what you have already found instead of investigating further`
+                    : parseNote;
             const second = await dispatchAgent(name, note);
             if (second === null) {
                 return null;

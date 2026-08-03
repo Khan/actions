@@ -48,12 +48,17 @@ const ALLOWED_TOOLS = ["Read", "Grep", "Glob"];
  */
 export const piRunner = (): LiveAgentRunner => {
     rejectStaleRunnerSelection(process.env);
-    let runner: Awaited<ReturnType<typeof createPiRunner>> | undefined;
+    // Memoize the PROMISE, not the resolved runner. `produceLive` fans the
+    // roster out at DEFAULT_CONCURRENCY, so memoizing the resolved value lets
+    // the whole first wave observe `undefined` and each construct its own
+    // runner, every one of them initializing the srt sandbox concurrently,
+    // which is both not what "shares its lazy sandbox initialization" claims
+    // and, if srt's global init is not concurrency-safe, a fail-closed abort
+    // of every finder but one on the first case.
+    let runner: ReturnType<typeof createPiRunner> | undefined;
     return async (request) => {
-        if (runner === undefined) {
-            runner = await createPiRunner({allowedTools: ALLOWED_TOOLS});
-        }
-        return runner(request);
+        runner ??= createPiRunner({allowedTools: ALLOWED_TOOLS});
+        return (await runner)(request);
     };
 };
 

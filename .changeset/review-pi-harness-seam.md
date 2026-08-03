@@ -11,8 +11,9 @@ Scripted dispatch now runs every sub-agent through the Pi-backed runner
 (`lib/dispatch-runner.ts`) is deleted, along with the
 `REVIEW_DISPATCH_RUNNER` selection seam; a leftover `REVIEW_DISPATCH_RUNNER`
 setting now fails the run loudly instead of silently selecting a harness that
-no longer exists. `@anthropic-ai/claude-agent-sdk` and `zod` leave the
-dependency tree.
+no longer exists. `@anthropic-ai/claude-agent-sdk` leaves the dependency tree
+entirely, and `zod` is no longer a direct dependency (it stays in the lockfiles
+transitively, via pi-ai / sandbox-runtime / mcp-sdk).
 
 The removal is grounded in the re-anchoring harness A/B (run 30666183461):
 two full-corpus repeats with identical model pins and byte-identical
@@ -30,6 +31,16 @@ cache-write under-count.
 The corpus recall figures, noise bands, and drift budget measured on the SDK
 loop era do not transfer numerically; the re-anchoring run above is the
 reference point for Pi-harness numbers going forward.
+
+Two posture details the SDK runner used to own and the Pi runner now owns
+explicitly. Sub-agent turns retry transient provider failures twice: pi-ai
+does not read `ANTHROPIC_MAX_RETRIES` (it calls the Anthropic SDK with
+`maxRetries: 0` and defaults its own retry helper to 0), so the runner passes
+the budget itself; without it one 429/529 on any turn sheds a whole review
+lens. And hitting the turn cap now reports `stopReason=max_turns` instead of
+looking like a clean free-text finish, so the single contract-parse retry
+tells an out-of-turns agent to conclude rather than correcting a JSON shape
+that was never the problem.
 
 Every reviewer tool subprocess now also runs inside an OS sandbox
 (`@anthropic-ai/sandbox-runtime`, the engine behind Claude Code's own
