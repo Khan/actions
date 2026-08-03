@@ -54,3 +54,31 @@ if it cannot start (bubblewrap missing, user namespaces blocked in a nested
 container), dispatch refuses to run rather than silently degrading;
 `REVIEW_SANDBOX=off` is the explicit, logged escape hatch that restores the
 pre-sandbox posture.
+
+One consequence of that network denial, caught by the new sandbox smoke job
+before it could reach a consumer: the sub-agent prompts used to run the
+investigation cap as `npx -y tsx workflows/review/lib/investigation-cap.ts`,
+and inside the sandbox npx cannot resolve tsx (the registry is denied; `npx
+--offline` fails with ENOTCACHED even after the cache is warmed, and tsx
+itself cannot start there at all because it opens a unix socket, which
+bubblewrap refuses with EPERM). Every cap request would have failed, and the
+prompt's own fallback for a denied budget is "stop investigating and report
+what you have" — bounded investigation would have gone quietly inert. The
+prompts now invoke it as `node
+--disable-warning=MODULE_TYPELESS_PACKAGE_JSON
+workflows/review/lib/investigation-cap.ts`, which works on the node 24 the
+agent job already pins (native type stripping). Because type stripping
+reparses the file as ESM, the CLI's entry guard is now argv-based rather than
+`require.main === module` (which never fires under ESM and would have turned
+every cap request into a silent no-op success), and `node:fs` is a static
+import. Two constraints on that file follow: its imports stay type-only or
+node: builtins, and it is invoked with `node`, never `tsx`.
+
+New in the A/B workflow: a `sandbox-smoke` job that exercises the PRODUCTION
+tool surface under srt, which the measured arms deliberately do not (they stay
+on Read/Grep/Glob so the corpus calibration holds). Its boundary probes run
+through the same `createToolExec()` the production runner calls and assert
+each of read-the-checkout, write-the-checkout, the cap journal via the real
+CLI, the scratch dir, and outbound TCP lands on the policy's side; they cost
+nothing and are the hard gate. A second phase dispatches one live case on the
+full tool surface to prove the loop reaches Bash at all.

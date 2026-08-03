@@ -16,8 +16,9 @@
  * single source of truth for budget and it scales with risk tier automatically.
  *
  * How it is invoked: each finding-producing sub-agent runs the CLI at the bottom
- * of this file (`investigation-cap.ts request <finding-id>`) before every
- * investigation tool call, per its prompt in `review.md`. The CLI reads the caps
+ * of this file (`node workflows/review/lib/investigation-cap.ts request
+ * <finding-id>`, from inside the srt tool sandbox) before every investigation
+ * tool call, per its prompt in `review.md`. The CLI reads the caps
  * from the router's `routing.json` and the calls already spent from an
  * append-only journal shared by all sub-agents of the run, so the accounting is
  * run-wide even though the sub-agents are separate processes.
@@ -27,6 +28,8 @@
  * fixed code (a {@link RefusalReason}), never a sentence about the code under
  * review. Prose stays with the lens sub-agents.
  */
+
+import {appendFileSync, existsSync, mkdirSync, readFileSync} from "node:fs";
 
 import type {RunBudget} from "./router";
 
@@ -332,10 +335,31 @@ export const runCapCli = (argv: string[], fs: CapCliFs): CapDecision => {
 };
 
 // Run only when executed directly (the sub-agent prompts in review.md), never
-// on import (tests).
-if (typeof require !== "undefined" && require.main === module) {
-    const fs = require("node:fs") as CapCliFs;
-    const decision = runCapCli(process.argv.slice(2), fs);
+// on import (tests). The guard is argv-based, and node:fs is a static import,
+// because this is the ONE script sub-agents run from inside the srt tool
+// sandbox, where `node file.ts` (node 24's native type stripping) is the only
+// runner that works: `npx -y tsx` cannot resolve tsx with the network denied,
+// and tsx itself cannot start there at all (it opens a unix socket, which
+// bubblewrap refuses with EPERM even in the writable scratch dir). Type
+// stripping reparses this file as ESM, where `require` does not exist and
+// `require.main === module` never fires, which would silently turn every cap
+// request into a no-op success.
+//
+// Two constraints follow, and both are load-bearing: keep every import in this
+// file TYPE-ONLY or from node: builtins (a value import of a relative `.ts`
+// module would need an explicit extension under ESM resolution and would break
+// the CLI inside the sandbox), and keep the invocation `node`, never `tsx`.
+if (process.argv[1]?.endsWith("investigation-cap.ts")) {
+    const decision = runCapCli(process.argv.slice(2), {
+        existsSync,
+        readFileSync: (p, enc) => readFileSync(p, enc),
+        appendFileSync: (p, data) => {
+            appendFileSync(p, data);
+        },
+        mkdirSync: (p, opts) => {
+            mkdirSync(p, opts);
+        },
+    });
     // eslint-disable-next-line no-console
     console.log(JSON.stringify(decision));
     process.exit(decision.allowed ? 0 : 1);

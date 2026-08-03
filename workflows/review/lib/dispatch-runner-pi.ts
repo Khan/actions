@@ -114,11 +114,15 @@ const ANTHROPIC_BASE_URL_ENV = "ANTHROPIC_BASE_URL";
  */
 const REVIEW_SANDBOX_ENV = "REVIEW_SANDBOX";
 
-/** The one writable file in the staging dir; see investigation-cap.ts. */
-const CAP_JOURNAL_PATH = "/tmp/gh-aw/review/investigation-journal.log";
+/**
+ * The one writable file in the staging dir; see investigation-cap.ts.
+ * Exported so the sandbox smoke job can assert the mount actually works
+ * rather than trusting that it does.
+ */
+export const CAP_JOURNAL_PATH = "/tmp/gh-aw/review/investigation-journal.log";
 
 /** Model-usable scratch space; nothing downstream reads from it. */
-const SCRATCH_DIR = "/tmp/review-agent-scratch";
+export const SCRATCH_DIR = "/tmp/review-agent-scratch";
 
 const SANDBOX_CONFIG = {
     network: {allowedDomains: [], deniedDomains: ["*"]},
@@ -533,6 +537,49 @@ export const rejectStaleRunnerSelection = (env: {
 };
 
 /**
+ * The tool executor production runs: srt-wrapped, or the explicit unwrapped
+ * escape hatch. Fail-closed — an initialization failure throws rather than
+ * degrading to unsandboxed tools; `REVIEW_SANDBOX=off` is the loud opt-out.
+ *
+ * Exported for the sandbox smoke job (review-eval-ab), which probes the
+ * boundary through this exact function. A probe that built its own sandbox
+ * would be testing a second policy, and the only interesting question is
+ * whether THIS one holds.
+ */
+export const createToolExec = async (): Promise<ToolExec> => {
+    if (process.env[REVIEW_SANDBOX_ENV] === "off") {
+        // eslint-disable-next-line no-console
+        console.error(
+            "review dispatch: tool sandbox OFF (REVIEW_SANDBOX=off); tool subprocesses run unwrapped.",
+        );
+        return plainExec;
+    }
+    const srt = (await import("@anthropic-ai/sandbox-runtime")) as {
+        SandboxManager: SandboxWrapper;
+    };
+    try {
+        // Pre-create the writable bind targets so the sandbox can mount
+        // them: the cap journal may not exist yet on a fresh run, and
+        // its first append must not be the thing that fails.
+        mkdirSync(SCRATCH_DIR, {recursive: true});
+        mkdirSync(dirname(CAP_JOURNAL_PATH), {recursive: true});
+        if (!existsSync(CAP_JOURNAL_PATH)) {
+            writeFileSync(CAP_JOURNAL_PATH, "");
+        }
+        await srt.SandboxManager.initialize(SANDBOX_CONFIG);
+    } catch (error) {
+        throw new Error(
+            `the review tool sandbox failed to initialize; refusing to ` +
+                `run sub-agents with unsandboxed tools (set ` +
+                `${REVIEW_SANDBOX_ENV}=off to explicitly accept that): ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+        );
+    }
+    return makeSandboxedExec(srt.SandboxManager);
+};
+
+/**
  * Build the production Pi runner. The libraries are imported lazily: unit
  * tests and the task-mode path never require them.
  */
@@ -544,6 +591,13 @@ export type PiRunnerOptions = {
      * (including Bash, which the investigation-cap CLI needs) is granted.
      */
     allowedTools?: string[];
+    /**
+     * Called with the name of each completed tool call. The sandbox smoke job
+     * uses it to assert that a live run on the production surface actually
+     * reached Bash: `toolCalls` alone cannot tell a Bash call from a Read, and
+     * "the production surface works" is precisely a claim about Bash.
+     */
+    onToolCall?: (toolName: string) => void;
 };
 
 export const createPiRunner = async (
@@ -578,41 +632,7 @@ export const createPiRunner = async (
         ) => Promise<unknown[]>;
     };
 
-    // The OS sandbox around the tool subprocesses (see SANDBOX_CONFIG).
-    // Fail-closed: an initialization failure throws rather than degrading to
-    // unsandboxed tools; REVIEW_SANDBOX=off is the explicit escape hatch.
-    let exec: ToolExec;
-    if (process.env[REVIEW_SANDBOX_ENV] === "off") {
-        // eslint-disable-next-line no-console
-        console.error(
-            "review dispatch: tool sandbox OFF (REVIEW_SANDBOX=off); tool subprocesses run unwrapped.",
-        );
-        exec = plainExec;
-    } else {
-        const srt = (await import("@anthropic-ai/sandbox-runtime")) as {
-            SandboxManager: SandboxWrapper;
-        };
-        try {
-            // Pre-create the writable bind targets so the sandbox can mount
-            // them: the cap journal may not exist yet on a fresh run, and
-            // its first append must not be the thing that fails.
-            mkdirSync(SCRATCH_DIR, {recursive: true});
-            mkdirSync(dirname(CAP_JOURNAL_PATH), {recursive: true});
-            if (!existsSync(CAP_JOURNAL_PATH)) {
-                writeFileSync(CAP_JOURNAL_PATH, "");
-            }
-            await srt.SandboxManager.initialize(SANDBOX_CONFIG);
-        } catch (error) {
-            throw new Error(
-                `the review tool sandbox failed to initialize; refusing to ` +
-                    `run sub-agents with unsandboxed tools (set ` +
-                    `${REVIEW_SANDBOX_ENV}=off to explicitly accept that): ${
-                        error instanceof Error ? error.message : String(error)
-                    }`,
-            );
-        }
-        exec = makeSandboxedExec(srt.SandboxManager);
-    }
+    const exec = await createToolExec();
 
     const models = ai.createModels();
     const baseUrl = process.env[ANTHROPIC_BASE_URL_ENV];
@@ -689,6 +709,10 @@ export const createPiRunner = async (
                 (event: Record<string, unknown>) => {
                     if (event["type"] === "tool_execution_end") {
                         toolCalls += 1;
+                        const toolName = event["toolName"];
+                        if (typeof toolName === "string") {
+                            options.onToolCall?.(toolName);
+                        }
                         return;
                     }
                     if (event["type"] !== "turn_end") {

@@ -22,6 +22,14 @@
 # cap. A new push cancels a superseded run (concurrency below). A
 # `skip-live-eval` label skips the job entirely.
 #
+# Two jobs: `live-ab` measures quality arm to arm on the eval's three-tool
+# surface, and `sandbox-smoke` proves the PRODUCTION tool surface (Bash plus the
+# investigation-cap CLI) actually works inside the srt sandbox. They are
+# separate because the corpus is calibrated on the three-tool surface: giving
+# the measured arms Bash would move every number, and leaving the production
+# surface unexercised is how a fail-closed sandbox gets discovered on a
+# consumer's PR.
+#
 # NOTE: this workflow's name must stay distinct from any gh-aw workflow a
 # consumer runs (same-named workflows share a gh-aw concurrency group per PR
 # and cancel each other; see the round-two doc's operational floor).
@@ -62,6 +70,14 @@ on:
         type: boolean
         required: false
         default: false
+      probes_only:
+        description: "Sandbox smoke: run the free boundary probes only, skipping the live production-surface case"
+        type: boolean
+        required: false
+        default: false
+      smoke_case:
+        description: "Sandbox smoke: live case id for the production-surface phase (default incident-cache-missing-key)"
+        required: false
 
 permissions:
   contents: read
@@ -72,6 +88,63 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The sandbox smoke, separate from the measured arms on purpose: the A/B runs
+  # the eval's three-tool surface (Read/Grep/Glob) because the corpus was
+  # calibrated on it, so nothing in this workflow exercised the surface
+  # PRODUCTION runs — Bash, and the investigation-cap CLI writing its journal
+  # from inside a sandbox built to deny writes. This job covers exactly that,
+  # and reports no quality metrics.
+  #
+  # Cost shape: Phase A (the boundary probes) is free and always runs, and it
+  # is the hard gate. Phase B dispatches one live case on the production tool
+  # surface, so drafts get probes only; a ready PR and workflow_dispatch run
+  # both. See workflows/review/eval/sandbox-smoke.ts.
+  sandbox-smoke:
+    name: Production tool surface under srt
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.head_ref != 'changeset-release/main' &&
+       !contains(github.event.pull_request.labels.*.name, 'skip-live-eval') &&
+       (github.event.action != 'labeled' ||
+        github.event.label.name == 'full-eval'))
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      # node 24 is load-bearing, not incidental: the cap CLI runs inside the
+      # sandbox as `node <file>.ts` on native type stripping, because npx
+      # cannot resolve tsx with the network denied and tsx cannot start there
+      # at all (it opens a unix socket, which bubblewrap refuses). The agent
+      # job pins node 24 for the same reason; this job proves the pairing.
+      - uses: ./actions/shared-node-cache
+        with:
+          node-version: "24.x"
+      - name: Install sandbox dependencies
+        # srt's Linux runtime dependencies; not in the runner image.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
+      - name: Run the sandbox smoke
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Drafts pay nothing: probes only. A ready PR or a dispatch runs the
+          # live phase too, which is the only check of the tool DEFINITIONS.
+          PROBES_ONLY: ${{ inputs.probes_only == true || (github.event_name == 'pull_request' && github.event.pull_request.draft == true) }}
+          SMOKE_CASE: ${{ inputs.smoke_case || '' }}
+        run: |
+          EXTRA=""
+          if [ "$PROBES_ONLY" = "true" ]; then
+            EXTRA="--probes-only"
+          fi
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            # A fork PR gets no secrets; the boundary probes still run and
+            # still gate. Said out loud so a green check is not read as
+            # "the production tool surface was exercised".
+            echo "ANTHROPIC_API_KEY not available; running the boundary probes only." >&2
+            EXTRA="--probes-only"
+          fi
+          if [ -n "$SMOKE_CASE" ]; then
+            EXTRA="$EXTRA --case $SMOKE_CASE"
+          fi
+          pnpm dlx tsx workflows/review/eval/sandbox-smoke.ts $EXTRA
+
   live-ab:
     name: Live A/B over the eval corpus
     runs-on: ubuntu-latest
