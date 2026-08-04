@@ -117,9 +117,14 @@ jobs:
     # then held the runner for 25 minutes). The script now exits explicitly;
     # this is the backstop for the next thing that holds the loop open.
     timeout-minutes: 20
+    # `inputs.harness_probe != true` matters: a dispatch asking only for the
+    # probe used to start this job too, because "any workflow_dispatch" is how
+    # the eval is run by hand. Two probe dispatches therefore ran two full A/Bs
+    # nobody asked for (~$18). A dispatch now means what it says.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.head_ref != 'changeset-release/main' &&
+      (github.event_name == 'workflow_dispatch' && inputs.harness_probe != true) ||
+      (github.event_name != 'workflow_dispatch' &&
+       github.head_ref != 'changeset-release/main' &&
        !contains(github.event.pull_request.labels.*.name, 'skip-live-eval') &&
        (github.event.action != 'labeled' ||
         github.event.label.name == 'full-eval'))
@@ -224,8 +229,9 @@ jobs:
     # filter (it bumps workflows/review/package.json) but changes no
     # behavior; skip-live-eval opts a PR out.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.pull_request.draft == false &&
+      (github.event_name == 'workflow_dispatch' && inputs.harness_probe != true) ||
+      (github.event_name != 'workflow_dispatch' &&
+       github.event.pull_request.draft == false &&
        github.head_ref != 'changeset-release/main' &&
        !contains(github.event.pull_request.labels.*.name, 'skip-live-eval') &&
        (github.event.action != 'labeled' ||

@@ -804,10 +804,33 @@ const main = async (): Promise<void> => {
     }
 };
 
+/**
+ * Exit explicitly, once stdout has drained.
+ *
+ * srt's initialize starts a proxy and nothing here shuts it down, so the event
+ * loop never empties and the process outlives its own output. That is why no
+ * A/B run has ever concluded green: runs 30872172052, 30872187609 and
+ * 30877187141 each scored all nine cases on both arms, wrote their report, and
+ * were then killed by the job timeout with the work already finished.
+ *
+ * Draining first, rather than a bare process.exit: Actions gives this process a
+ * pipe, pipe writes are asynchronous, and exiting over a buffered write
+ * truncates the tail of the very report the job exists to produce. The unref'd
+ * fallback covers a drain callback that never fires.
+ */
+const exitWhenFlushed = (code: number): void => {
+    const done = (): never => process.exit(code);
+    setTimeout(done, 2000).unref();
+    process.stdout.write("", done);
+};
+
 // CLI entry point (mirrors live-runner.ts): run when executed, not imported.
 if (process.argv[1]?.endsWith("live-ab.ts")) {
-    main().catch((error) => {
-        console.error(error);
-        process.exit(1);
-    });
+    main().then(
+        () => exitWhenFlushed(0),
+        (error: unknown) => {
+            console.error(error);
+            exitWhenFlushed(1);
+        },
+    );
 }

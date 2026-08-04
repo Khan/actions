@@ -208,10 +208,20 @@ const main = async (): Promise<void> => {
     );
 };
 
+/** See live-ab.ts: srt's proxy keeps the loop alive, so exit explicitly. */
+const exitWhenFlushed = (code: number): void => {
+    const done = (): never => process.exit(code);
+    setTimeout(done, 2000).unref();
+    process.stdout.write("", done);
+};
+
 // CLI entry point (mirrors live-runner.ts): run when executed, not imported.
 if (process.argv[1]?.endsWith("harness-probe.ts")) {
-    main().catch((error: unknown) => {
-        console.error(error);
-        process.exit(1);
-    });
+    main().then(
+        () => exitWhenFlushed(0),
+        (error: unknown) => {
+            console.error(error);
+            exitWhenFlushed(1);
+        },
+    );
 }
