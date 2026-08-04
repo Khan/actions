@@ -13,12 +13,25 @@
  * output, cacheRead, cacheWrite), so `AgentResult.usd` does not inherit the
  * api-proxy default-pricing path's known cache-write under-count.
  *
- * The tools are implemented here rather than taken from Pi's own harness
- * tool factories, for two reasons: the reviewers need exactly
- * Read/Grep/Glob/LS/Bash and must NEVER get edit or write, and the output
- * caps below were held at parity with the Claude Code harness through the
- * re-anchoring A/B (a loop that truncates differently investigates
- * differently), so they stay explicit and unit-tested rather than inherited.
+ * The tools are implemented here rather than taken from pi-coding-agent's
+ * factories (which do include a `createReadOnlyTools`) because the SDK's
+ * tool layer cannot be uniformly sandboxed. Verified against 0.83.0/dist:
+ * its `grep` spawns rg directly (`core/tools/grep.js`, via
+ * `ensureTool("rg", true)`, which downloads the binary if absent) with no
+ * interceptable exec seam, its `read` is in-process `fs.readFile`, and only
+ * its `bash` exposes a `spawnHook`. The runner process deliberately sits
+ * OUTSIDE the sandbox (the loop must reach the model provider), so adopting
+ * those factories would sandbox Bash while Read and Grep ran unwrapped in
+ * the credentialed process: a hole in the mount-level boundary, not a
+ * trade. The single {@link ToolExec} seam below is what makes the sandbox
+ * policy total. Two SDK defaults reinforce the decision: `createAgentSession`
+ * trusts project settings and `.pi/` extensions from cwd (`projectTrusted ??
+ * true`), and in CI the cwd is the PR under review; and compaction defaults
+ * on, whose silent mid-investigation summarization is the failure mode that
+ * ruled out Flue as a harness. Secondarily, the output caps below were held
+ * at parity with the Claude Code harness through the re-anchoring A/B (a
+ * loop that truncates differently investigates differently), so they stay
+ * explicit and unit-tested rather than inherited.
  *
  * Every tool subprocess additionally runs inside an OS sandbox
  * (`@anthropic-ai/sandbox-runtime`, the engine behind Claude Code's own
