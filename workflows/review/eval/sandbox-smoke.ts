@@ -177,6 +177,38 @@ const journalLines = (): number =>
 /* -------------------------------------------------------------------------- */
 
 /**
+ * Per-probe deadline. The runner's own 120s subprocess timeout kills the direct
+ * child, but a sandboxed command is a process TREE (bwrap, then a proxy, then
+ * the command), and a grandchild holding the pipes open leaves the executor's
+ * promise unresolved with nothing left to kill it. A probe that has not
+ * answered in this long is inconclusive, and inconclusive fails.
+ */
+const PROBE_DEADLINE_MS = 60_000;
+
+/** Run one probe command under the deadline; a timeout reads as a broken wrapper. */
+const probeExec = async (
+    exec: ToolExec,
+    argv: string[],
+    cwd: string,
+): Promise<string> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<string>((resolve) => {
+        timer = setTimeout(
+            () =>
+                resolve(
+                    `bwrap: probe did not answer in ${PROBE_DEADLINE_MS}ms`,
+                ),
+            PROBE_DEADLINE_MS,
+        );
+    });
+    try {
+        return await Promise.race([exec(argv, cwd), deadline]);
+    } finally {
+        clearTimeout(timer);
+    }
+};
+
+/**
  * Run the five probes that define the review sandbox's boundary. `probeDir`
  * stands in for production's checkout: it lives inside the workspace, not
  * under /tmp, because that is where production's read-only mount applies and a
@@ -190,7 +222,11 @@ const runProbes = async (
 
     // 1. The checkout is readable. If this fails, nothing else means anything:
     //    a sandbox that cannot read the code cannot review it.
-    const readOut = await exec(["cat", "--", "sentinel.txt"], probeDir);
+    const readOut = await probeExec(
+        exec,
+        ["cat", "--", "sentinel.txt"],
+        probeDir,
+    );
     results.push({
         name: "read the checkout",
         expected: "allowed",
@@ -201,7 +237,8 @@ const runProbes = async (
     // 2. The checkout is NOT writable. This is the promise Bash used to be
     //    able to break (`echo > file`), and the reason the mount exists.
     const poison = `${probeDir}/poison.txt`;
-    const writeOut = await exec(
+    const writeOut = await probeExec(
+        exec,
         ["sh", "-c", "echo poisoned > poison.txt"],
         probeDir,
     );
@@ -221,7 +258,8 @@ const runProbes = async (
     //    runner's npx cache is warmed outside the sandbox, as production warms
     //    it in its pre-agent steps).
     const before = journalLines();
-    const capOut = await exec(
+    const capOut = await probeExec(
+        exec,
         [
             "sh",
             "-c",
@@ -242,7 +280,8 @@ const runProbes = async (
     // 4. The scratch dir is writable: the model's own workspace, which nothing
     //    downstream reads.
     const scratchProbe = `${SCRATCH_DIR}/sandbox-smoke-probe`;
-    const scratchOut = await exec(
+    const scratchOut = await probeExec(
+        exec,
         ["sh", "-c", `echo ok > ${scratchProbe}`],
         probeDir,
     );
@@ -266,7 +305,7 @@ const runProbes = async (
         's.on("connect", () => done("CONNECTED"));',
         's.on("error", (e) => done("DENIED " + e.code));',
     ].join(" ");
-    const netOut = await exec(["node", "-e", dial], probeDir);
+    const netOut = await probeExec(exec, ["node", "-e", dial], probeDir);
     results.push({
         name: "open a TCP connection",
         expected: "denied",
@@ -427,10 +466,33 @@ const main = async (): Promise<void> => {
     summaryLine("**Sandbox smoke passed.**\n");
 };
 
+/**
+ * Exit explicitly, once stdout has drained.
+ *
+ * srt's initialize starts a proxy and nothing here shuts it down, so the event
+ * loop never empties and the process outlives its own verdict: run 30867526519
+ * printed "Sandbox smoke passed." at 01:03:43 and then held the runner until it
+ * was cancelled 25 minutes later. A PASSED smoke that presents as a hung job is
+ * worse than a failure, because the check never resolves either way.
+ *
+ * Draining first, rather than a bare process.exit: Actions gives this process a
+ * pipe, writes to a pipe are asynchronous, and exiting on top of a buffered
+ * write truncates the last lines of the very table the job exists to print. The
+ * unref'd fallback covers a drain callback that never fires.
+ */
+const exitWhenFlushed = (code: number): void => {
+    const done = (): never => process.exit(code);
+    setTimeout(done, 2000).unref();
+    process.stdout.write("", done);
+};
+
 // CLI entry point (mirrors live-runner.ts): run when executed, not imported.
 if (process.argv[1]?.endsWith("sandbox-smoke.ts")) {
-    main().catch((error: unknown) => {
-        console.error(error);
-        process.exit(1);
-    });
+    main().then(
+        () => exitWhenFlushed(0),
+        (error: unknown) => {
+            console.error(error);
+            exitWhenFlushed(1);
+        },
+    );
 }

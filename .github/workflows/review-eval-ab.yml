@@ -102,6 +102,12 @@ jobs:
   sandbox-smoke:
     name: Production tool surface under srt
     runs-on: ubuntu-latest
+    # A hung sandbox must fail the check, not squat a runner for six hours.
+    # srt starts a proxy it never shuts down, so a process that finishes its
+    # work can still outlive it (run 30867526519 printed a PASSED verdict and
+    # then held the runner for 25 minutes). The script now exits explicitly;
+    # this is the backstop for the next thing that holds the loop open.
+    timeout-minutes: 20
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.head_ref != 'changeset-release/main' &&
@@ -169,6 +175,9 @@ jobs:
   live-ab:
     name: Live A/B over the eval corpus
     runs-on: ubuntu-latest
+    # Generous: a full-eval run over the live corpus is ~75 minutes of real
+    # model work. This only catches a hang (see the sandbox-smoke note).
+    timeout-minutes: 180
     # Drafts wait until ready; the changeset release PR matches the path
     # filter (it bumps workflows/review/package.json) but changes no
     # behavior; skip-live-eval opts a PR out.
