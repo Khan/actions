@@ -1,0 +1,17 @@
+# Ownership for the files where a quiet edit changes what this repo SPENDS or
+# what it is allowed to do. Everything else in this repo is reviewed by whoever
+# is around; these are the paths where "whoever is around" is not enough.
+#
+# The spend ceiling especially. It is the only limit on a review run's cost once
+# the migration removes gh-aw's api-proxy credit cap, and unlike that cap it
+# lives in a repo whose pull requests this reviewer reviews. A provider-side
+# workspace limit would have restored the property of living somewhere no PR can
+# reach; it is not available, so this file is the mitigation. Two owners rather
+# than one, because a single-owner entry stalls the moment that owner is away
+# and an ownerless entry enforces nothing at all.
+#
+# Pin bumps and policy edits under these paths are behaviour changes: reviewed
+# as such, never batch-merged.
+
+/workflows/review/lib/spend-ledger.ts   @jwbron @jeresig
+/CODEOWNERS                             @jwbron @jeresig

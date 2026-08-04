@@ -607,16 +607,25 @@ export type PiRunnerOptions = {
      */
     systemPrompt?: string;
     /**
-     * Called with each turn's cost as it lands, and asked whether to continue.
-     * The spend ledger answers (lib/spend-ledger.ts); returning "abort" stops
-     * this agent's turn loop at the turn boundary.
+     * Asked at each turn boundary whether to keep going, given what THIS agent
+     * has spent so far. The spend ledger answers (lib/spend-ledger.ts), as a
+     * read-only probe: the ledger's accounting is written once per completed
+     * dispatch, and this only decides whether to stop early.
      *
      * Per turn rather than per dispatch because that is the only granularity
      * where the answer is still useful: cost is known when a turn ends, and one
      * heavy reviewer can outspend a whole wave of light ones, so a check that
      * runs between dispatches learns about the overshoot after paying it.
      */
-    onTurnCost?: (deltaUsd: number) => "continue" | "abort";
+    onTurnCost?: (agentSpentUsd: number) => "continue" | "abort";
+    /**
+     * Run-wide abort. The spend ledger fires this when a COMPLETED dispatch
+     * pushes the run past its budget, which is the case `onTurnCost` cannot
+     * cover: that probe only stops the agent doing the spending, while this
+     * stops the siblings already in flight beside it. Without it, "crossing
+     * aborts in-flight agents" would be true only of the agent that crossed.
+     */
+    abortSignal?: AbortSignal;
 };
 
 export const createPiRunner = async (
@@ -666,6 +675,18 @@ export const createPiRunner = async (
     return async (request: AgentRequest): Promise<AgentResult> => {
         const started = Date.now();
         const abort = new AbortController();
+        // Link the run-wide abort in both directions in time: already-aborted
+        // means never start, and aborting later means stop now.
+        const runAbort = options.abortSignal;
+        if (runAbort?.aborted === true) {
+            abort.abort(runAbort.reason);
+        } else {
+            runAbort?.addEventListener(
+                "abort",
+                () => abort.abort(runAbort.reason),
+                {once: true},
+            );
+        }
         let timedOut = false;
         const timer = setTimeout(() => {
             timedOut = true;
@@ -790,11 +811,11 @@ export const createPiRunner = async (
                     const usage = message?.["usage"] as
                         | {cost?: {total?: number}}
                         | undefined;
-                    const turnUsd = Number(usage?.cost?.total ?? 0);
-                    usd += turnUsd;
-                    // The ledger sees the delta, not the total: it is run-wide
-                    // and this runner only knows about one agent.
-                    if (options.onTurnCost?.(turnUsd) === "abort") {
+                    usd += Number(usage?.cost?.total ?? 0);
+                    // Cumulative for this agent, because the probe is a
+                    // question about the run's total and the caller adds this
+                    // agent's in-flight spend to what it has already settled.
+                    if (options.onTurnCost?.(usd) === "abort") {
                         budgetExhausted = true;
                     }
                     const content = (message?.["content"] ?? []) as TextBlock[];

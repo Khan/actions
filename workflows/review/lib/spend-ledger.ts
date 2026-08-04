@@ -142,11 +142,28 @@ export type SpendLedgerOptions = {
 
 export type SpendLedger = {
     /**
-     * Add one turn's cost and decide whether the agent may continue. Returns
-     * "abort" the first time the dispatch budget is crossed, and on every call
-     * after; the caller stops the turn loop and the ledger records the shed.
+     * Record one COMPLETED dispatch's cost. The single writer: the dispatcher
+     * calls this once per attempt (a retry and a refusal fallback are separate
+     * attempts and each pays), so the total is exact and cannot double count.
+     *
+     * Deliberately not fed by the runner as well. A ledger with two writers
+     * would either double count the same dollars or need per-attempt identity
+     * the runner does not have, and the failure mode of getting that wrong is
+     * a ceiling that is quietly off by a factor.
      */
-    recordTurn: (agent: string, deltaUsd: number) => "continue" | "abort";
+    recordSpend: (agent: string, usd: number) => void;
+    /**
+     * Mid-flight probe: would an agent that has spent `inFlightUsd` so far push
+     * the run past its budget? Read-only, so calling it cannot disturb the
+     * accounting, and the runner calls it every turn to decide whether to stop.
+     *
+     * Concurrency is approximated exactly as the investigation cap approximates
+     * it: each in-flight agent probes with its own spend and cannot see its
+     * siblings', so a wave can overshoot by at most the number of agents
+     * running at once. That is acceptable for a ceiling and is measured in the
+     * report's `overshootUsd` rather than assumed away.
+     */
+    wouldCross: (inFlightUsd: number) => boolean;
     /**
      * Whether a NEW agent may be dispatched. Distinct from recordTurn because
      * refusing to start is cheaper than aborting mid-flight, and the two are
@@ -212,20 +229,21 @@ export const createSpendLedger = (
     };
 
     return {
-        recordTurn: (agent, deltaUsd) => {
-            spentUsd += Math.max(0, deltaUsd);
-            const decision = decideSpend(
-                spentUsd,
+        recordSpend: (agent, usd) => {
+            spentUsd += Math.max(0, usd);
+            if (decideSpend(spentUsd, ceilingUsd, landingReserveUsd).crossed) {
+                cross(agent, "aborted");
+            }
+        },
+        wouldCross: (inFlightUsd) => {
+            if (enforcement !== "in-code") {
+                return false;
+            }
+            return decideSpend(
+                spentUsd + Math.max(0, inFlightUsd),
                 ceilingUsd,
                 landingReserveUsd,
-            );
-            if (!decision.crossed) {
-                return "continue";
-            }
-            cross(agent, "aborted");
-            // Proxy-only measures without enforcing, so the turn loop continues
-            // exactly as it did before this ledger existed.
-            return enforcement === "in-code" ? "abort" : "continue";
+            ).crossed;
         },
         mayDispatch: (agent) => {
             const decision = decideSpend(

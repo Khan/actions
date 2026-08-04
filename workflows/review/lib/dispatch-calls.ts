@@ -125,6 +125,12 @@ export type PerAgentReport = {
     fellBackTo?: string;
     /** The result arrived via the structured-final tool (pre-validated). */
     structuredFinal?: boolean;
+    /**
+     * This agent's turn loop ended on the run's spend ceiling. Kept per agent
+     * rather than only run-wide, because "which dimension got cut short" is the
+     * question a reader of the artifact actually has.
+     */
+    stoppedForBudget?: boolean;
     failed?: string;
 };
 
@@ -148,6 +154,19 @@ export type AgentDispatcherOptions = {
     validatorFor: (
         name: string,
     ) => (payload: Record<string, unknown>) => string | null;
+    /**
+     * Asked before each dispatch whether the run can still afford one. The
+     * spend ledger answers. Refusing here rather than aborting mid-flight is
+     * the cheaper of the two disclosures: nothing is spent, and the dimension
+     * is shed with a note instead of half-run.
+     */
+    mayDispatch?: (name: string) => boolean;
+    /**
+     * Called once per COMPLETED attempt with what it cost. The ledger's only
+     * writer; a retry and a refusal fallback are separate attempts and each
+     * one really was paid for, so each is recorded.
+     */
+    recordSpend?: (name: string, usd: number) => void;
 };
 
 export type AgentDispatcher = {
@@ -180,6 +199,8 @@ export const createAgentDispatcher = (
         maxTurns,
         timeoutMs,
         validatorFor,
+        mayDispatch,
+        recordSpend,
     } = options;
 
     /**
@@ -200,6 +221,26 @@ export const createAgentDispatcher = (
         malformedNote?: string,
         modelOverride?: string,
     ): Promise<string | null> => {
+        if (mayDispatch !== undefined && !mayDispatch(name)) {
+            // Refused before spending. Staged as an out-file like every other
+            // outcome so the dispatch gate reads one shape, and reported as a
+            // failure cause so the run's own artifact names the reason.
+            writeOut(
+                name,
+                JSON.stringify({
+                    error: "spend ceiling reached before dispatch",
+                }),
+            );
+            report({
+                name,
+                model: agents.get(name)?.model ?? "",
+                usd: 0,
+                turns: 0,
+                wallMs: 0,
+                failed: "budget",
+            });
+            return null;
+        }
         const definition = agents.get(name);
         if (definition === undefined) {
             writeOut(name, JSON.stringify({error: "agent definition missing"}));
@@ -262,6 +303,7 @@ export const createAgentDispatcher = (
                         : {stopReason: result.stopReason}),
                     failed: "refused",
                 });
+                recordSpend?.(name, result.usd);
                 return dispatchAgent(name, malformedNote, fallback);
             }
             writeOut(name, result.output);
@@ -285,7 +327,11 @@ export const createAgentDispatcher = (
                 ...(malformedNote === undefined ? {} : {retried: true}),
                 ...(modelOverride === undefined ? {} : {fellBackTo: model}),
                 ...(result.structured === true ? {structuredFinal: true} : {}),
+                ...(result.stoppedForBudget === true
+                    ? {stoppedForBudget: true}
+                    : {}),
             });
+            recordSpend?.(name, result.usd);
             return result.output;
         } catch (error) {
             writeOut(

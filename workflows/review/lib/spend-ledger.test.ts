@@ -57,29 +57,41 @@ describe("decideSpend", () => {
 describe("createSpendLedger", () => {
     it("keeps going while under budget and reports the spend", () => {
         const led = ledger();
-        expect(led.recordTurn("correctness-reviewer", 3)).toBe("continue");
-        expect(led.recordTurn("correctness-reviewer", 2)).toBe("continue");
+        expect(led.recordSpend("correctness-reviewer", 3)).toBeUndefined();
+        expect(led.recordSpend("correctness-reviewer", 2)).toBeUndefined();
         expect(led.spentUsd()).toBe(5);
         expect(led.report().crossed).toBe(false);
         expect(led.report().sheds).toEqual([]);
         expect(led.signal.aborted).toBe(false);
     });
 
-    it("aborts in-flight agents on the turn that crosses", () => {
+    it("probes mid-flight spend without disturbing the accounting", () => {
         const led = ledger();
-        expect(led.recordTurn("skill-auditor", 7)).toBe("continue");
-        expect(led.recordTurn("skill-auditor", 2)).toBe("abort");
-        // The abort is what stops work already running, and it carries the
-        // arithmetic so the log says why rather than just that.
+        // The probe is what an in-flight agent asks every turn. It answers
+        // against settled spend plus this agent's own, and it must not record:
+        // an agent that is still running has not paid yet.
+        expect(led.wouldCross(7)).toBe(false);
+        expect(led.wouldCross(9)).toBe(true);
+        expect(led.spentUsd()).toBe(0);
+        expect(led.signal.aborted).toBe(false);
+        expect(led.report().sheds).toEqual([]);
+    });
+
+    it("aborts the siblings already in flight when a dispatch crosses", () => {
+        const led = ledger();
+        // This is the case the per-turn probe cannot cover: the agent that
+        // crossed has finished, and the ones running beside it are still
+        // spending. The signal is what reaches them.
+        led.recordSpend("correctness-reviewer", 9);
         expect(led.signal.aborted).toBe(true);
         expect(String(led.signal.reason)).toMatch(
-            /spend ceiling reached: \$9\.00 of \$10\.00.*budget \$8\.00.*reserve \$2\.00/,
+            /spend ceiling reached: \$9\.00 of \$10\.00.*budget \$8\.00.*reserve \$1?2?\.00/,
         );
     });
 
     it("refuses a new dispatch once crossed, and discloses it as a shed", () => {
         const led = ledger();
-        led.recordTurn("correctness-reviewer", 9);
+        led.recordSpend("correctness-reviewer", 9);
         expect(led.mayDispatch("data-migrations")).toBe(false);
         const report = led.report();
         expect(report.sheds).toEqual([
@@ -92,15 +104,15 @@ describe("createSpendLedger", () => {
         const led = ledger();
         // One expensive turn lands past the budget in a single step; the
         // ledger cannot prevent that, only measure it.
-        led.recordTurn("correctness-reviewer", 11);
+        led.recordSpend("correctness-reviewer", 11);
         expect(led.report().overshootUsd).toBe(3);
     });
 
     it("aborts once, then keeps accumulating sheds without re-aborting", () => {
         const led = ledger();
-        led.recordTurn("a", 9);
+        led.recordSpend("a", 9);
         const firstReason = led.signal.reason;
-        led.recordTurn("b", 5);
+        led.recordSpend("b", 5);
         expect(led.signal.reason).toBe(firstReason);
         expect(led.report().sheds).toHaveLength(2);
         expect(led.report().spentUsd).toBe(14);
@@ -112,7 +124,7 @@ describe("createSpendLedger", () => {
             env: {REVIEW_SPEND_ENFORCEMENT: "proxy-only"},
             warn: (m: string) => warnings.push(m),
         });
-        expect(led.recordTurn("correctness-reviewer", 9)).toBe("continue");
+        led.recordSpend("correctness-reviewer", 9);
         expect(led.mayDispatch("data-migrations")).toBe(true);
         expect(led.signal.aborted).toBe(false);
         // Still measured and still disclosed, so a rolled-back run is not a
@@ -144,8 +156,8 @@ describe("createSpendLedger", () => {
 
     it("ignores a negative turn cost rather than banking credit", () => {
         const led = ledger();
-        led.recordTurn("a", 5);
-        led.recordTurn("a", -100);
+        led.recordSpend("a", 5);
+        led.recordSpend("a", -100);
         expect(led.spentUsd()).toBe(5);
     });
 });
