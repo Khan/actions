@@ -119,8 +119,13 @@ jobs:
         with:
           node-version: "24.x"
       - name: Install sandbox dependencies
-        # srt's Linux runtime dependencies; not in the runner image.
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
+        # srt's Linux runtime dependencies, none of them in the runner image.
+        # ripgrep is not optional and not obvious: srt calls it to expand
+        # deny-path globs into concrete paths for bwrap, so a missing rg fails
+        # initialization outright -- which is how this job first failed (run
+        # 30867013094, "Sandbox dependencies not available: ripgrep (rg) not
+        # found").
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat ripgrep
       - name: Run the sandbox smoke
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -168,9 +173,12 @@ jobs:
       - name: Install sandbox dependencies
         # The eval runs the review sub-agents through the same srt tool
         # sandbox production dispatch uses (dispatch-runner-pi.ts,
-        # fail-closed); bubblewrap and socat are its Linux runtime
-        # dependencies and are not in the runner image.
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
+        # fail-closed); bubblewrap, socat, and ripgrep are its Linux runtime
+        # dependencies and none is in the runner image. rg is the easy one to
+        # miss: srt shells out to it to expand deny-path globs for bwrap, and
+        # without it initialization throws before any case runs -- which is
+        # why this job has produced no green srt measurement yet.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat ripgrep
       - name: Run the live A/B
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
