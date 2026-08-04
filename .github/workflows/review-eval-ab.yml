@@ -125,7 +125,23 @@ jobs:
         # initialization outright -- which is how this job first failed (run
         # 30867013094, "Sandbox dependencies not available: ripgrep (rg) not
         # found").
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat ripgrep
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat ripgrep
+          # bwrap needs a usable user namespace, and Ubuntu 24.04 runners
+          # restrict unprivileged userns under AppArmor, at which point bwrap
+          # cannot bring up loopback in its netns ("bwrap: loopback: Failed
+          # RTM_NEWADDR: Operation not permitted", run 30867350588) and every
+          # sandboxed command dies before it executes. The runner is ephemeral
+          # and ours, so relax it here, with before/after probes so the log
+          # says whether that was actually the cause. Production runs in a
+          # different environment and has to answer this separately.
+          . /etc/os-release && echo "runner: ${PRETTY_NAME}"
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
+          bwrap --unshare-net --dev-bind / / true \
+            && echo "bwrap netns: OK before" || echo "bwrap netns: FAILS before"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --unshare-net --dev-bind / / true \
+            && echo "bwrap netns: OK after" || echo "bwrap netns: FAILS after"
       - name: Run the sandbox smoke
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -178,7 +194,23 @@ jobs:
         # miss: srt shells out to it to expand deny-path globs for bwrap, and
         # without it initialization throws before any case runs -- which is
         # why this job has produced no green srt measurement yet.
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat ripgrep
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat ripgrep
+          # bwrap needs a usable user namespace, and Ubuntu 24.04 runners
+          # restrict unprivileged userns under AppArmor, at which point bwrap
+          # cannot bring up loopback in its netns ("bwrap: loopback: Failed
+          # RTM_NEWADDR: Operation not permitted", run 30867350588) and every
+          # sandboxed command dies before it executes. The runner is ephemeral
+          # and ours, so relax it here, with before/after probes so the log
+          # says whether that was actually the cause. Production runs in a
+          # different environment and has to answer this separately.
+          . /etc/os-release && echo "runner: ${PRETTY_NAME}"
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
+          bwrap --unshare-net --dev-bind / / true \
+            && echo "bwrap netns: OK before" || echo "bwrap netns: FAILS before"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --unshare-net --dev-bind / / true \
+            && echo "bwrap netns: OK after" || echo "bwrap netns: FAILS after"
       - name: Run the live A/B
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

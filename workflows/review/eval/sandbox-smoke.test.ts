@@ -38,6 +38,22 @@ describe("summarizeProbes", () => {
         ]);
     });
 
+    it("fails a denied probe that only 'passed' because the wrapper broke", () => {
+        // Run 30867350588: bwrap could not bring up loopback, every command
+        // died before executing, and the checkout-write probe scored "as
+        // expected" on the strength of a sandbox that was not running. A
+        // denial by breakage is not a denial by policy.
+        const verdict = summarizeProbes([
+            probe({
+                name: "write to the checkout",
+                expected: "denied",
+                satisfied: true,
+                detail: "refused: bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted",
+            }),
+        ]);
+        expect(verdict).toEqual({ok: false, failed: ["write to the checkout"]});
+    });
+
     it("fails an empty probe set: nothing ran, so nothing is proven", () => {
         // The whole job exists to answer a question. "No probes" answers it
         // with silence, and a green wall on silence is how an untested

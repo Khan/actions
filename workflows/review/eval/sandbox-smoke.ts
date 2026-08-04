@@ -113,12 +113,36 @@ export type SmokeVerdict = {
 };
 
 /**
- * The gate decision over a probe set. Pure, and unit-tested: an empty probe
- * set fails, because "no probes ran" must never read as "the sandbox holds".
+ * Signatures of the sandbox WRAPPER failing, as opposed to the policy denying
+ * something. The distinction is the whole game for a `denied` probe: a wrapper
+ * that never started denies everything, so "the write did not land" is
+ * evidence of nothing. Run 30867350588 is the worked example — bwrap could not
+ * bring up loopback in its netns, every command died before executing, and the
+ * checkout-write probe scored "as expected" on the strength of a sandbox that
+ * was not running.
+ */
+const WRAPPER_FAILURES = [
+    "bwrap:",
+    "Failed RTM_",
+    "sandbox-exec:",
+    "seatbelt",
+    "Operation not permitted",
+];
+
+/** Whether a probe's output shows the wrapper itself failing to run. */
+export const wrapperFailed = (output: string): boolean =>
+    WRAPPER_FAILURES.some((signature) => output.includes(signature));
+
+/**
+ * The gate decision over a probe set. Pure, and unit-tested. Two rules that
+ * are easy to get wrong and both fail closed: an empty probe set fails,
+ * because "no probes ran" must never read as "the sandbox holds"; and a probe
+ * whose evidence shows the WRAPPER failed fails whatever it expected, because
+ * a denial by breakage is not a denial by policy.
  */
 export const summarizeProbes = (results: ProbeResult[]): SmokeVerdict => {
     const failed = results
-        .filter((probe) => !probe.satisfied)
+        .filter((probe) => !probe.satisfied || wrapperFailed(probe.detail))
         .map((probe) => probe.name);
     return {ok: results.length > 0 && failed.length === 0, failed};
 };
@@ -131,7 +155,11 @@ export const renderProbes = (results: ProbeResult[]): string =>
         ...results.map(
             (probe) =>
                 `| ${probe.name} | ${probe.expected} | ${
-                    probe.satisfied ? "as expected" : "**CONTRADICTED**"
+                    wrapperFailed(probe.detail)
+                        ? "**SANDBOX BROKEN**"
+                        : probe.satisfied
+                        ? "as expected"
+                        : "**CONTRADICTED**"
                 } | ${probe.detail.replaceAll("|", "\\|").slice(0, 160)} |`,
         ),
     ].join("\n");
