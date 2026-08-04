@@ -59,8 +59,14 @@ import {matchCase} from "./live-match";
 import {produceLive, type LiveAgentRunner} from "./live-producer";
 import {runCase} from "./runner";
 
-/** The eval's measured tool surface; held fixed so the probe varies one thing. */
-const ALLOWED_TOOLS = ["Read", "Grep", "Glob"];
+/**
+ * The tool surface the lost-finding A/B ran on, held fixed so the probe
+ * varies one thing. Glob has since been removed from `createReviewTools`
+ * (its `find -path` emulation was wrong), so the closest reproduction the
+ * current lib can offer is Read/Grep; the probe's question (system prompt
+ * vs structured final) does not turn on Glob.
+ */
+const ALLOWED_TOOLS = ["Read", "Grep"];
 
 const CASE_ID = "incident-sql-missing-index";
 

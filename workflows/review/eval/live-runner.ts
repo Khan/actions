@@ -8,10 +8,14 @@
  * runtime. `live-producer.ts` stays runner-free behind its seam, so unit
  * tests never load Pi's libraries.
  *
- * Tool policy: read-only investigation (Read/Grep/Glob), cwd pinned to the
- * staged checkout, no network. The investigation-cap CLI the prompts mention
- * is not runnable under this policy; the prompts' own fallback applies (a
- * denied budget request stops investigation, findings still report).
+ * Tool policy: the production surface, unrestricted (Read/Grep/Bash from
+ * `createReviewTools`), cwd pinned to the staged checkout, no network. The
+ * eval measures the surface production runs, by construction; the old
+ * three-tool restriction (Read/Grep/Glob) measured a surface production
+ * never used. The investigation-cap CLI the prompts mention has no staged
+ * routing in the corpus checkouts, so a reviewer that tries it gets the
+ * prompts' own fallback (a denied budget request stops investigation,
+ * findings still report).
  *
  * Run one case end to end (requires ANTHROPIC_API_KEY):
  *
@@ -32,12 +36,9 @@ import {extractAgents} from "./agent-extract";
 import {loadLiveCorpus} from "./corpus/loader";
 import {produceLive, type LiveAgentRunner} from "./live-producer";
 
-/** Read-only investigation tools; see the module doc for the rationale. */
-const ALLOWED_TOOLS = ["Read", "Grep", "Glob"];
-
 /**
- * The eval runner: the production Pi harness pinned to the eval's three-tool
- * surface (the corpus was measured on Read/Grep/Glob). Lazily constructed so
+ * The eval runner: the production Pi harness on the production tool surface
+ * (no `allowedTools` restriction; see the module doc). Lazily constructed so
  * importing this module never requires Pi's libraries; both A/B arms share
  * one instance, which also shares its lazy sandbox initialization.
  *
@@ -57,7 +58,7 @@ export const piRunner = (): LiveAgentRunner => {
     // of every finder but one on the first case.
     let runner: ReturnType<typeof createPiRunner> | undefined;
     return async (request) => {
-        runner ??= createPiRunner({allowedTools: ALLOWED_TOOLS});
+        runner ??= createPiRunner();
         return (await runner)(request);
     };
 };

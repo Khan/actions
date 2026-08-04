@@ -2,15 +2,15 @@
  * The sandbox smoke: does the PRODUCTION tool surface actually work inside the
  * srt sandbox?
  *
- * Why this is separate from the A/B arms. The measured arms run on
- * Read/Grep/Glob (`live-runner.ts`), because the corpus was calibrated on that
- * three-tool surface and changing it would move every quality number. But
- * production grants the full surface — Read/Grep/Glob/LS/Bash, with Bash
- * running the investigation-cap CLI, which is the one thing in the review that
- * must WRITE inside a sandbox whose whole point is that writes are denied. So
- * the A/B measures quality on a surface production does not run, and nothing
- * measured the surface production DOES run. This job closes that gap: it
- * proves the sandbox, never quality, and reports no metrics.
+ * Why this is separate from the A/B arms. The measured arms now run the
+ * production surface too (`live-runner.ts` grants `createReviewTools`
+ * unrestricted), so the A/B owns quality-on-the-production-surface. This job
+ * keeps a different franchise: it exercises the sandbox BOUNDARY itself
+ * (deny-side probes, the cap journal's one allowed write, Bash reached
+ * live), proves the sandbox rather than quality, and reports no metrics.
+ * Bash matters most: it runs the investigation-cap CLI, the one thing in the
+ * review that must WRITE inside a sandbox whose whole point is that writes
+ * are denied.
  *
  * Two phases, deliberately split by determinism:
  *

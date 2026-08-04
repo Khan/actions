@@ -208,6 +208,43 @@ const ok = (text: string): PiToolResult => ({
 });
 
 /**
+ * Window a `cat -n` capture to `limit` lines starting at the 1-indexed
+ * `offset`, saying what was left out. The subprocess always reads the whole
+ * file (the sandbox boundary lives on the subprocess, so the window is about
+ * the model's view, not about I/O). Without this, a large file was silently
+ * truncated at MAX_TOOL_OUTPUT_CHARS and its tail was unreachable — a recall
+ * defect in a reviewer, not a nicety.
+ */
+export const windowLines = (
+    text: string,
+    offset?: unknown,
+    limit?: unknown,
+): string => {
+    const start =
+        typeof offset === "number" && offset > 0 ? Math.floor(offset) : 1;
+    const max =
+        typeof limit === "number" && limit > 0 ? Math.floor(limit) : undefined;
+    if (start === 1 && max === undefined) {
+        return text;
+    }
+    const lines = text.replace(/\n$/, "").split("\n");
+    const total = lines.length;
+    const window = lines.slice(
+        start - 1,
+        max === undefined ? undefined : start - 1 + max,
+    );
+    if (window.length === 0) {
+        return `(no lines in window: the file has ${total} lines, offset was ${start})`;
+    }
+    const end = start + window.length - 1;
+    const note =
+        start > 1 || end < total
+            ? `\n[showing lines ${start}-${end} of ${total}]`
+            : "";
+    return window.join("\n") + note;
+};
+
+/**
  * Spawn one argv, resolving with its combined output. A non-zero exit is
  * NOT an error here: `grep` exits 1 on no-match, and the model needs to see
  * "no matches" as an ordinary result rather than a tool failure.
@@ -305,10 +342,20 @@ const schema = (
 const str = (description: string): unknown => ({type: "string", description});
 
 /**
- * The reviewer tool surface: read-only investigation plus Bash (the
+ * The reviewer tool surface: Read and Grep for investigation, plus Bash (the
  * investigation-cap CLI the sub-agent prompts invoke runs through it). No
  * edit, no write — and with the sandboxed executor that is a mount-level
  * boundary on Bash too, not just a tool-surface promise.
+ *
+ * Deliberately small. Every tool here runs through the same sandboxed
+ * executor as Bash, so a named tool earns its place on model ergonomics, not
+ * on containment: Read gives windowed, line-numbered file views, and Grep's
+ * structured params avoid the shell-quoting failure class (a model quoting a
+ * regex into `bash -lc` botches it often enough to add noise). Two former
+ * tools were removed as adding nothing over Bash: LS (`ls -la` verbatim) and
+ * Glob, whose `find -path` emulation was wrong, not just limited (`*`
+ * matched across `/`, so reviewers got a wider file list than they asked
+ * for). Raised by mojadem on #305.
  */
 export const createReviewTools = (
     cwd: string,
@@ -317,19 +364,26 @@ export const createReviewTools = (
     {
         name: "Read",
         label: "Read",
-        // KNOWN LIMIT: no offset/limit windowing; the whole file is read and
-        // truncated at MAX_TOOL_OUTPUT_CHARS, so a sub-agent reading a large
-        // file gets a silently narrower view than a windowing Read would
-        // give. Relevant when a reviewer "misses" something in a big file.
         description:
-            "Read a file from the repository. Returns the file with 1-indexed line numbers.",
+            "Read a file from the repository. Returns the file with 1-indexed line numbers. Use offset and limit to window large files.",
         parameters: schema(
-            {path: str("Path to the file, relative to the repository root.")},
+            {
+                path: str("Path to the file, relative to the repository root."),
+                offset: {
+                    type: "number",
+                    description: "1-indexed line number to start reading from.",
+                },
+                limit: {
+                    type: "number",
+                    description: "Maximum number of lines to return.",
+                },
+            },
             ["path"],
         ),
         execute: async (_id, params, signal) => {
             const path = String(params["path"] ?? "");
-            return ok(await exec(["cat", "-n", "--", path], cwd, signal));
+            const out = await exec(["cat", "-n", "--", path], cwd, signal);
+            return ok(windowLines(out, params["offset"], params["limit"]));
         },
     },
     {
@@ -365,54 +419,10 @@ export const createReviewTools = (
         },
     },
     {
-        name: "Glob",
-        label: "Glob",
-        // KNOWN LIMIT: `find -path` matches `*` ACROSS `/`, so `src/*.ts`
-        // also matches nested files that a real glob library would exclude,
-        // and `**` differs too. Documented rather than normalized because it
-        // widens rather than narrows the view.
-        description: "Find files whose path matches a glob pattern.",
-        parameters: schema(
-            {pattern: str("Glob pattern, e.g. 'src/**/*.ts'.")},
-            ["pattern"],
-        ),
-        execute: async (_id, params, signal) => {
-            const pattern = String(params["pattern"] ?? "");
-            return ok(
-                await exec(
-                    [
-                        "find",
-                        ".",
-                        "-not",
-                        "-path",
-                        "./.git/*",
-                        "-path",
-                        `./${pattern}`,
-                    ],
-                    cwd,
-                    signal,
-                ),
-            );
-        },
-    },
-    {
-        name: "LS",
-        label: "LS",
-        description: "List the entries of a directory.",
-        parameters: schema(
-            {path: str("Directory to list, relative to the repository root.")},
-            ["path"],
-        ),
-        execute: async (_id, params, signal) => {
-            const path = String(params["path"] ?? ".");
-            return ok(await exec(["ls", "-la", "--", path], cwd, signal));
-        },
-    },
-    {
         name: "Bash",
         label: "Bash",
         description:
-            "Run a shell command in the repository. Use for the investigation-cap CLI and other read-only checks. Commands run inside an OS sandbox: the repository is read-only and there is no network access.",
+            "Run a shell command in the repository. Use for the investigation-cap CLI, listing or finding files, and other read-only checks. Commands run inside an OS sandbox: the repository is read-only and there is no network access.",
         parameters: schema({command: str("The shell command to run.")}, [
             "command",
         ]),
@@ -598,10 +608,10 @@ export const createToolExec = async (): Promise<ToolExec> => {
  */
 export type PiRunnerOptions = {
     /**
-     * Restrict the tool surface to these names. Used by the eval harness,
-     * which allows only Read/Grep/Glob (the corpus was measured on that
-     * three-tool surface). Omitted in production, where the full surface
-     * (including Bash, which the investigation-cap CLI needs) is granted.
+     * Restrict the tool surface to these names. Production and the eval's
+     * measured arms both omit it (the eval measures the surface production
+     * runs, by construction); the harness probe uses it to reproduce a
+     * historical configuration.
      */
     allowedTools?: string[];
     /**
