@@ -178,6 +178,31 @@ export function stepIgnoresSetup(step: YAMLMap): boolean {
 // File discovery
 // ---------------------------------------------------------------------------
 
+/**
+ * Workflow files this action must not touch because a generator owns them: the
+ * fix would be overwritten on the next `gh aw compile`, and worse, a maintainer
+ * who follows our own "this file needs updating" hint desyncs the committed file
+ * from its compiler.
+ *
+ * `*.lock.yml` is the compiled agentic workflow; `agentics-maintenance.yml` is
+ * gh-aw's scheduled housekeeping workflow, which is regenerated unconditionally
+ * and (unhelpfully) is not named `*.lock.yml`.
+ *
+ * The general rule would be "skip anything `.gitattributes` marks
+ * `linguist-generated`", which would need no updating as generators change.
+ * That is a larger change than this list and is left for when a third generated
+ * workflow shows up.
+ */
+export const GENERATED_WORKFLOWS = {
+    suffixes: [".lock.yml"],
+    names: ["agentics-maintenance.yml"],
+};
+
+/** Whether a `.github/workflows` entry is generator-owned (see above). */
+export const isGeneratedWorkflow = (name: string): boolean =>
+    GENERATED_WORKFLOWS.suffixes.some((suffix) => name.endsWith(suffix)) ||
+    GENERATED_WORKFLOWS.names.includes(name);
+
 function getFilesToCheck(): string[] {
     const files: string[] = [];
 
@@ -186,7 +211,7 @@ function getFilesToCheck(): string[] {
         if (
             entry.isFile() &&
             (entry.name.endsWith(".yml") || entry.name.endsWith(".yaml")) &&
-            !entry.name.endsWith(".lock.yml")
+            !isGeneratedWorkflow(entry.name)
         ) {
             files.push(path.join(".github", "workflows", entry.name));
         }
