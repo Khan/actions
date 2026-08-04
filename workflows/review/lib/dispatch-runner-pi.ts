@@ -141,7 +141,7 @@ const SANDBOX_CONFIG = {
  * because everything else the reviewer needs is in its own prompt (extracted
  * from review.md).
  */
-const SYSTEM_PROMPT = [
+export const SYSTEM_PROMPT = [
     "You are a code-review sub-agent investigating a pull request in the",
     "working directory. Investigate with the read-only tools before you",
     "conclude. Your final message must be your output contract and nothing",
@@ -598,6 +598,14 @@ export type PiRunnerOptions = {
      * "the production surface works" is precisely a claim about Bash.
      */
     onToolCall?: (toolName: string) => void;
+    /**
+     * Replace the sub-agent framing ({@link SYSTEM_PROMPT}). Production never
+     * sets this; the harness probe (eval/harness-probe.ts) does, because the
+     * system prompt is one of the two asymmetries between this runner and the
+     * deleted SDK harness and the probe has to vary exactly one thing at a
+     * time to tell which one sheds findings.
+     */
+    systemPrompt?: string;
 };
 
 export const createPiRunner = async (
@@ -692,7 +700,11 @@ export const createPiRunner = async (
                         timestamp: started,
                     },
                 ],
-                {systemPrompt: SYSTEM_PROMPT, messages: [], tools},
+                {
+                    systemPrompt: options.systemPrompt ?? SYSTEM_PROMPT,
+                    messages: [],
+                    tools,
+                },
                 {
                     model,
                     // The transcript is already LLM-shaped; nothing to convert.
