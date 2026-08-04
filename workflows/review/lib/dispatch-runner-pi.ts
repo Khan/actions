@@ -606,6 +606,17 @@ export type PiRunnerOptions = {
      * time to tell which one sheds findings.
      */
     systemPrompt?: string;
+    /**
+     * Called with each turn's cost as it lands, and asked whether to continue.
+     * The spend ledger answers (lib/spend-ledger.ts); returning "abort" stops
+     * this agent's turn loop at the turn boundary.
+     *
+     * Per turn rather than per dispatch because that is the only granularity
+     * where the answer is still useful: cost is known when a turn ends, and one
+     * heavy reviewer can outspend a whole wave of light ones, so a check that
+     * runs between dispatches learns about the overshoot after paying it.
+     */
+    onTurnCost?: (deltaUsd: number) => "continue" | "abort";
 };
 
 export const createPiRunner = async (
@@ -678,6 +689,13 @@ export const createPiRunner = async (
         let usd = 0;
         let turns = 0;
         let toolCalls = 0;
+        /**
+         * Set when the spend ledger says stop. Read by shouldStopAfterTurn, so
+         * the loop ends at a TURN boundary rather than by throwing: an agent
+         * stopped for budget has usually already found something, and killing
+         * it mid-turn would throw that away along with the turn's cost.
+         */
+        let budgetExhausted = false;
         let stopReason: string | undefined;
         let errorMessage: string | undefined;
         let rawStopReason: string | undefined;
@@ -716,7 +734,9 @@ export const createPiRunner = async (
                      * "end the turn now".
                      */
                     shouldStopAfterTurn: () =>
-                        captured !== undefined || turns >= request.maxTurns,
+                        captured !== undefined ||
+                        turns >= request.maxTurns ||
+                        budgetExhausted,
                 },
                 (event: Record<string, unknown>) => {
                     if (event["type"] === "tool_execution_end") {
@@ -770,7 +790,13 @@ export const createPiRunner = async (
                     const usage = message?.["usage"] as
                         | {cost?: {total?: number}}
                         | undefined;
-                    usd += Number(usage?.cost?.total ?? 0);
+                    const turnUsd = Number(usage?.cost?.total ?? 0);
+                    usd += turnUsd;
+                    // The ledger sees the delta, not the total: it is run-wide
+                    // and this runner only knows about one agent.
+                    if (options.onTurnCost?.(turnUsd) === "abort") {
+                        budgetExhausted = true;
+                    }
                     const content = (message?.["content"] ?? []) as TextBlock[];
                     const text = content
                         .filter((block) => block.type === "text")
@@ -810,6 +836,7 @@ export const createPiRunner = async (
                         stopReason === "refusal" || rawStopReason === "refusal",
                     wallMs: Date.now() - started,
                     structured: true,
+                    ...(budgetExhausted ? {stoppedForBudget: true} : {}),
                 };
             }
             // Out of turns and finished-with-prose return the same shape: a
@@ -839,6 +866,7 @@ export const createPiRunner = async (
                 refused:
                     stopReason === "refusal" || rawStopReason === "refusal",
                 wallMs: Date.now() - started,
+                ...(budgetExhausted ? {stoppedForBudget: true} : {}),
             };
         } catch (error) {
             // A payload the tool already accepted is complete and validated:
@@ -862,6 +890,7 @@ export const createPiRunner = async (
                         stopReason === "refusal" || rawStopReason === "refusal",
                     wallMs: Date.now() - started,
                     structured: true,
+                    ...(budgetExhausted ? {stoppedForBudget: true} : {}),
                 };
             }
             if (timedOut) {

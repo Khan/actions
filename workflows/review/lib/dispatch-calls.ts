@@ -79,6 +79,14 @@ export type AgentResult = {
     refused?: boolean;
     /** The output came through the structured-final tool, pre-validated. */
     structured?: boolean;
+    /**
+     * The turn loop ended because the run's spend ceiling was reached, not
+     * because the agent finished. Load-bearing for disclosure: an agent stopped
+     * for budget has usually found SOMETHING, so its output is still used, and
+     * the run has to say that this dimension was cut short rather than
+     * completed. Silence here would be indistinguishable from "nothing found".
+     */
+    stoppedForBudget?: boolean;
 };
 
 /** The model seam; the Pi-backed production runner lives in the CLI entry. */
