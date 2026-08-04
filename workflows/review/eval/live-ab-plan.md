@@ -120,10 +120,13 @@ playbook's standing rule); gating thresholds are a later human ratification (doc
    and is out of scope here.
 3. **Live sub-agents run as bounded agentic loops, not single completions.**
    Production reviewers investigate (read files, grep) before finding; a
-   one-shot completion would measure a different reviewer. Use the Claude Agent SDK
-   (TypeScript, `@anthropic-ai/claude-agent-sdk`) with tools restricted to
-   Read/Grep/Glob, cwd pinned to the case's staged tree, no network, per-agent model
-   pinned from the `review.md` frontmatter, and a hard `maxTurns` cap.
+   one-shot completion would measure a different reviewer. Use the same Pi-backed
+   runner production dispatch uses (`lib/dispatch-runner-pi.ts`, on
+   `@earendil-works/pi-ai` + `@earendil-works/pi-agent-core`) with tools restricted
+   to Read/Grep/Glob, cwd pinned to the case's staged tree, no network, per-agent
+   model pinned from the `review.md` frontmatter, and a hard `maxTurns` cap. (This
+   was the Claude Agent SDK through the re-anchoring A/B, run 30666183461; that
+   harness is deleted, so do not write new eval code against it.)
 4. **Live findings are matched to labeled defects by anchor and mechanism, not by
    id.** Recorded cases correlate `expected.mustCatch` with finding ids, but a live
    model chooses its own ids. Live-enabled cases therefore carry labeled defect
@@ -237,10 +240,11 @@ verdicts, and per-agent cost/wall-clock. New files under `workflows/review/eval/
 - Roster per case: `route({files: changedFiles}, routerConfig)` picks the lenses;
   always include `correctness-reviewer` and `skill-auditor`; include `pattern-triage`
   only if routing asks for it; never `thread-reconciler` (no threads exist in eval).
-- Run each sub-agent via the Agent SDK: `allowedTools: ["Read", "Grep", "Glob"]`,
-  `cwd: <staged>/checkout`, model from frontmatter, `maxTurns` cap (start at 30),
-  a wall-clock timeout per agent (start at 5 min), no network. Capture token usage
-  and computed USD per agent from the SDK result.
+- Run each sub-agent via the Pi runner (`eval/live-runner.ts`'s `piRunner`):
+  `allowedTools: ["Read", "Grep", "Glob"]`, `cwd: <staged>/checkout`, model from
+  frontmatter, `maxTurns` cap (start at 30), a wall-clock timeout per agent (start
+  at 5 min), no network. Capture token usage and computed USD per agent from the
+  runner's `AgentResult`.
 - Parse the agent's final JSON output; validate every finding with
   `validateFinding`. On malformed output, retry once with the validation errors
   appended; a second failure records the agent as failed for that case (partial

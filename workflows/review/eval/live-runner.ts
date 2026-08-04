@@ -1,16 +1,21 @@
 /**
  * The production {@link LiveAgentRunner}: dispatch one sub-agent as a bounded
- * agentic loop via the Claude Agent SDK, plus a CLI smoke entry point
+ * agentic loop via the Pi runner (`lib/dispatch-runner-pi.ts`, the same
+ * harness production dispatch uses), plus a CLI smoke entry point
  * (`live-ab-plan.md` Phase 2c).
  *
  * This is the ONLY module in the eval suite that talks to a real model
- * runtime. `live-producer.ts` stays SDK-free behind its runner seam, so unit
- * tests never load this file.
+ * runtime. `live-producer.ts` stays runner-free behind its seam, so unit
+ * tests never load Pi's libraries.
  *
- * Tool policy: read-only investigation (Read/Grep/Glob), cwd pinned to the
- * staged checkout, no network. The investigation-cap CLI the prompts mention
- * is not runnable under this policy; the prompts' own fallback applies (a
- * denied budget request stops investigation, findings still report).
+ * Tool policy: the production surface, unrestricted (Read/Grep/Bash from
+ * `createReviewTools`), cwd pinned to the staged checkout, no network. The
+ * eval measures the surface production runs, by construction; the old
+ * three-tool restriction (Read/Grep/Glob) measured a surface production
+ * never used. The investigation-cap CLI the prompts mention has no staged
+ * routing in the corpus checkouts, so a reviewer that tries it gets the
+ * prompts' own fallback (a denied budget request stops investigation,
+ * findings still report).
  *
  * Run one case end to end (requires ANTHROPIC_API_KEY):
  *
@@ -23,132 +28,39 @@
 import {mkdtempSync, readFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 
-import {query} from "@anthropic-ai/claude-agent-sdk";
-
+import {
+    createPiRunner,
+    rejectStaleRunnerSelection,
+} from "../lib/dispatch-runner-pi";
 import {extractAgents} from "./agent-extract";
 import {loadLiveCorpus} from "./corpus/loader";
 import {produceLive, type LiveAgentRunner} from "./live-producer";
 
-/** Read-only investigation tools; see the module doc for the rationale. */
-const ALLOWED_TOOLS = ["Read", "Grep", "Glob"];
-
 /**
- * Build the SDK-backed runner. Each request becomes one `query()` run: the
- * agent's prompt, its pinned model, the staged checkout as cwd, hard turn and
- * wall-clock caps, and cost/turn accounting read off the result message.
+ * The eval runner: the production Pi harness on the production tool surface
+ * (no `allowedTools` restriction; see the module doc). Lazily constructed so
+ * importing this module never requires Pi's libraries; both A/B arms share
+ * one instance, which also shares its lazy sandbox initialization.
+ *
+ * There is no runner selection anymore: the Claude Agent SDK harness was
+ * removed after the re-anchoring A/B (run 30666183461; see PR #305), and a
+ * leftover `REVIEW_DISPATCH_RUNNER` would select nothing — fail loudly
+ * rather than let an operator believe a harness switch happened.
  */
-export const sdkRunner = (): LiveAgentRunner => async (request) => {
-    const started = Date.now();
-    const abort = new AbortController();
-    const timer = setTimeout(() => {
-        abort.abort(
-            new Error(`sub-agent timed out after ${request.timeoutMs}ms`),
-        );
-    }, request.timeoutMs);
-    try {
-        const run = query({
-            prompt: request.prompt,
-            options: {
-                cwd: request.cwd,
-                model: request.model,
-                maxTurns: request.maxTurns,
-                allowedTools: ALLOWED_TOOLS,
-                permissionMode: "bypassPermissions",
-                abortController: abort,
-            },
-        });
-        let output = "";
-        let usd = 0;
-        let turns = 0;
-        let toolCalls = 0;
-        let stopReason: string | undefined;
-        let errorMessage: string | undefined;
-        let tokensAtFailure: {input: number; total: number} | undefined;
-        for await (const message of run) {
-            // Count the SDK arm's tool calls so the harness comparison has the
-            // same investigation-depth signal on both sides. A `tool_use`
-            // block in an assistant message is one call; the SDK's result
-            // record does not carry a count.
-            if (message.type === "assistant") {
-                const inner = (
-                    message as unknown as {
-                        message?: {
-                            content?: {type?: string}[];
-                            stop_reason?: string | null;
-                        };
-                    }
-                ).message;
-                // The stop reason of the LAST assistant message. An empty
-                // final plus a non-"end_turn" stop reason is how a refusal
-                // presents; without it an empty result is indistinguishable
-                // from a dropped one.
-                if (typeof inner?.stop_reason === "string") {
-                    stopReason = inner.stop_reason;
-                }
-                // Token counts on the last assistant message: the
-                // discriminator between an overloaded provider and a prompt
-                // that outgrew the context window.
-                const usage = (
-                    inner as unknown as {
-                        usage?: {input_tokens?: number; output_tokens?: number};
-                    }
-                )?.usage;
-                if (usage !== undefined) {
-                    const input = Number(usage.input_tokens ?? 0);
-                    tokensAtFailure = {
-                        input,
-                        total: input + Number(usage.output_tokens ?? 0),
-                    };
-                }
-                const blocks = inner?.content;
-                for (const block of blocks ?? []) {
-                    if (block.type === "tool_use") {
-                        toolCalls += 1;
-                    }
-                }
-            }
-            if (message.type !== "result") {
-                continue;
-            }
-            const result = message as unknown as {
-                subtype: string;
-                result?: string;
-                total_cost_usd?: number;
-                num_turns?: number;
-            };
-            if (result.subtype !== "success") {
-                throw new Error(
-                    `sub-agent run ended without success: ${result.subtype}`,
-                );
-            }
-            output = result.result ?? "";
-            usd = result.total_cost_usd ?? 0;
-            turns = result.num_turns ?? 0;
-            // The result subtype is the runner-level outcome; keep it when no
-            // assistant stop reason was seen at all.
-            stopReason = stopReason ?? result.subtype;
-            const err = (
-                result as unknown as {error?: unknown; result?: string}
-            ).error;
-            if (err !== undefined) {
-                errorMessage = JSON.stringify(err).slice(0, 500);
-            }
-        }
-        return {
-            output,
-            usd,
-            turns,
-            toolCalls,
-            stopReason,
-            errorMessage,
-            tokensAtFailure,
-            // Anthropic reports a usage-policy block as stop_reason "refusal".
-            refused: stopReason === "refusal",
-            wallMs: Date.now() - started,
-        };
-    } finally {
-        clearTimeout(timer);
-    }
+export const piRunner = (): LiveAgentRunner => {
+    rejectStaleRunnerSelection(process.env);
+    // Memoize the PROMISE, not the resolved runner. `produceLive` fans the
+    // roster out at DEFAULT_CONCURRENCY, so memoizing the resolved value lets
+    // the whole first wave observe `undefined` and each construct its own
+    // runner, every one of them initializing the srt sandbox concurrently,
+    // which is both not what "shares its lazy sandbox initialization" claims
+    // and, if srt's global init is not concurrency-safe, a fail-closed abort
+    // of every finder but one on the first case.
+    let runner: ReturnType<typeof createPiRunner> | undefined;
+    return async (request) => {
+        runner ??= createPiRunner();
+        return (await runner)(request);
+    };
 };
 
 /* -------------------------------------------------------------------------- */
@@ -190,7 +102,7 @@ const main = async (): Promise<void> => {
     );
 
     const result = await produceLive(corpusCase, agents, {
-        runner: sdkRunner(),
+        runner: piRunner(),
         stageDir: `${stageRoot}/${caseId}`,
     });
 

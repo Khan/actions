@@ -39,7 +39,7 @@ import {extractAgents} from "./agent-extract";
 import {loadLiveCorpus, type CorpusCase} from "./corpus/loader";
 import {matchCase} from "./live-match";
 import {produceLive} from "./live-producer";
-import {sdkRunner} from "./live-runner";
+import {piRunner} from "./live-runner";
 import {scoreRereview, type RereviewCaseScore} from "./rereview-match";
 import {runCase} from "./runner";
 import {RE_REVIEW_MODES, type ReReviewMode} from "../lib/routing-config";
@@ -191,7 +191,7 @@ const main = async (): Promise<void> => {
     const agents = extractAgents(
         readFileSync("workflows/review/review.md", "utf8"),
     );
-    const runner = sdkRunner();
+    const runner = piRunner();
 
     const rows: SweepRow[] = [];
     let usd = 0;

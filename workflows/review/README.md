@@ -107,10 +107,14 @@ provenance gate, the scope filter, cross-source dedup, open-thread suppression
 duplicate; a suppressed blocking candidate still floors the verdict), and
 claim validation, inside the same firewall sandbox (the api-proxy meters and
 caps script-spawned sub-agents exactly like Task-spawned ones). Each sub-agent
-delivers its result through an in-process `submit_result` MCP tool whose input
+delivers its result through an in-session `submit_result` tool whose input
 is validated against the agent's exact output contract at the tool boundary
-(`lib/dispatch-runner.ts`), so a drifted shape is corrected in-session instead
-of voiding the dimension; free-text finals remain the fallback. Steps 4-6 are
+(`lib/dispatch-runner-pi.ts`), so a drifted shape is corrected in-session
+instead of voiding the dimension; free-text finals remain the fallback. The
+sub-agents' tool subprocesses additionally run inside an OS sandbox
+(`@anthropic-ai/sandbox-runtime`: checkout read-only, tool-level network
+denied, fail-closed initialization with `REVIEW_SANDBOX=off` as the logged
+escape hatch), stacked inside the same firewall sandbox. Steps 4-6 are
 code too: the submission CLI (`lib/submission.ts`) computes the verdict,
 renders the comments and the full review body, and stages
 `submission-plan.json`; the orchestrator emits safe outputs that must match the
