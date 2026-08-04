@@ -737,7 +737,7 @@ export const produceLive = async (
     // diff the staging already wrote); `flip-gated` keeps only the correctness
     // pass; `fast` keeps none.
     const routerConfig: RouterConfig = {
-        generatedPatterns: [],
+        generatedRules: [],
         ...(corpusCase.routerConfig as Partial<RouterConfig>),
     };
     const routing = route({files: corpusCase.changedFiles}, routerConfig);

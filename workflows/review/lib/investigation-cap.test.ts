@@ -156,7 +156,7 @@ describe("DEFAULT_TOOL_CALL_CAPS", () => {
 
 describe("capsFromRunBudget", () => {
     // Build a real RunBudget via the production path rather than a hand literal.
-    const config: RouterConfig = {generatedPatterns: []};
+    const config: RouterConfig = {generatedRules: []};
 
     it("projects exactly the two cap fields out of a full RunBudget", () => {
         const budget = computeRunBudget("medium", false, config);
@@ -305,7 +305,7 @@ describe("InvestigationCap", () => {
     });
 
     it("builds a guard from a RunBudget whose caps match that budget", () => {
-        const budget = computeRunBudget("high", false, {generatedPatterns: []});
+        const budget = computeRunBudget("high", false, {generatedRules: []});
         const guard = InvestigationCap.fromRunBudget(budget);
         expect(guard.getCaps()).toEqual(capsFromRunBudget(budget));
     });
