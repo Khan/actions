@@ -36,7 +36,6 @@ import {
     isGenerated,
     parseGitattributesGenerated,
     parseRoutingConfig,
-    RISK_TIERS,
     ROUTING_CONFIG_PATH,
     route,
     matchesGlob,
@@ -64,6 +63,7 @@ import type {
     RiskTier,
 } from "./routing-config";
 import type {Lens} from "./finding-schema";
+import {renderReport} from "./check-consumer-config-report";
 
 /* -------------------------------------------------------------------------- */
 /* Paths the install contract fixes                                          */
@@ -96,9 +96,8 @@ export const INSTALLED_WORKFLOW_PATH = ".github/workflows/review.md";
 export const INSTALLED_LOCK_PATH = ".github/workflows/review.lock.yml";
 
 /**
- * gh-aw's scheduled housekeeping workflow (expiring safe outputs, cache-memory
- * cleanup), emitted from gh-aw v0.83 on. Generated like a lock file but NOT named
- * `*.lock.yml`, so the documented marker misses it and it needs its own.
+ * gh-aw's scheduled housekeeping workflow (gh-aw v0.83+). Generated like a lock
+ * file but NOT named `*.lock.yml`, so the documented marker misses it.
  */
 export const MAINTENANCE_WORKFLOW_PATH =
     ".github/workflows/agentics-maintenance.yml";
@@ -536,11 +535,9 @@ export const checkConsumerConfig = (
 
     /* --- reviewer routing (config.md) -------------------------------------- */
 
-    // Whether reviewer requests can happen at all in this repo. The router reads
-    // ownership from `.github/REVIEWERS` and nowhere else, so without that file
-    // Step 8 has no owners to map and no ranked fallback to draw from: it requests
-    // nobody regardless of what the allowlist says. That distinction is what keeps
-    // the two checks below from forcing a repo with no owning team to invent one.
+    // Whether a reviewer request can happen here at all. The router reads ownership
+    // from `.github/REVIEWERS` and nowhere else, so without it Step 8 has no owners
+    // and no ranked fallback and requests nobody, whatever the allowlist says.
     const ownershipMapPresent = fs.existsSync(at(REVIEWERS_PATH));
 
     const reviewerRouting = readReviewerRouting(fs, at(CONFIG_IMPORT_PATH));
@@ -551,13 +548,11 @@ export const checkConsumerConfig = (
                 `${CONFIG_IMPORT_PATH} defines no \`safe-outputs.add-reviewer\`, which is the one thing it exists to carry.`,
             );
         } else if (reviewerRouting.allowedTeamReviewers.length === 0) {
-            // An empty allowlist means one of two completely different things, and
-            // only `.github/REVIEWERS` tells them apart. With an ownership map, Step
-            // 8 computes teams to request and the safe output then silently drops
-            // every one: a real misconfiguration. Without one, nothing is ever
-            // computed to drop, so the empty list is an accurate statement that this
-            // repo does not do reviewer requests — and demanding a team here would
-            // only get an inert one invented to satisfy the check.
+            // An empty allowlist means two different things, and only REVIEWERS
+            // tells them apart: with an ownership map the request is computed and
+            // then dropped (broken); without one nothing is computed to drop, so
+            // the empty list accurately says this repo makes no requests. Erroring
+            // there would only get an inert team invented to satisfy the check.
             if (ownershipMapPresent) {
                 error(
                     "config-empty-team-allowlist",
@@ -572,10 +567,8 @@ export const checkConsumerConfig = (
                 );
             }
         }
-        // A bot token only matters for a request that can actually be made; the
-        // default GITHUB_TOKEN cannot request an org team. Silent when nothing is
-        // requestable, so a deliberate no-requests install reports one finding
-        // rather than two.
+        // Only matters for a request that can actually be made, so a deliberate
+        // no-requests install reports one finding rather than two.
         if (
             reviewerRouting.definesAddReviewer &&
             !reviewerRouting.hasGithubToken &&
@@ -604,12 +597,10 @@ export const checkConsumerConfig = (
             `Add \`.github/workflows/*.lock.yml linguist-generated=true merge=ours\`.`,
         );
     }
-    // The other generated workflow, and the one the usual `*.lock.yml` marker
-    // misses: `gh aw compile` writes this housekeeping workflow unconditionally
-    // (deleting it does not stick), and its name does not end in `.lock.yml`, so a
-    // repo that followed the documented marker still gets ~600 lines of compiler
-    // output line-reviewed. Only checked when the file exists: gh-aw emits it from
-    // v0.83 on, and the installs that predate it have nothing to mark.
+    // The generated workflow the usual `*.lock.yml` marker misses: `gh aw compile`
+    // writes it unconditionally (deleting it does not stick) under a name that does
+    // not match, so a repo that followed the documented marker still gets ~600 lines
+    // of compiler output line-reviewed. Installs predating gh-aw v0.83 lack the file.
     if (
         fs.existsSync(at(MAINTENANCE_WORKFLOW_PATH)) &&
         !isGenerated(MAINTENANCE_WORKFLOW_PATH, generatedPatterns)
@@ -795,126 +786,10 @@ export const checkConsumerConfig = (
 /* Rendering                                                                 */
 /* -------------------------------------------------------------------------- */
 
-/** Human-readable report. Errors first, then warnings, then the summary. */
-export const renderReport = (report: ConsumerConfigReport): string => {
-    const lines: string[] = [];
-    const errors = report.issues.filter((issue) => issue.severity === "error");
-    const warnings = report.issues.filter(
-        (issue) => issue.severity === "warning",
-    );
-
-    lines.push(`Reviewer config check: ${report.repoRoot}`);
-    lines.push("");
-
-    const section = (title: string, issues: ConfigIssue[]): void => {
-        if (issues.length === 0) {
-            return;
-        }
-        lines.push(`${title} (${issues.length})`);
-        for (const issue of issues) {
-            lines.push(`  [${issue.code}] ${issue.message}`);
-            if (issue.fix !== undefined) {
-                lines.push(`      fix: ${issue.fix}`);
-            }
-        }
-        lines.push("");
-    };
-    section("ERRORS", errors);
-    section("WARNINGS", warnings);
-
-    const {routing, installedWorkflow: wf} = report;
-    lines.push("Install");
-    lines.push(
-        `  source            ${wf.source ?? "(none)"}${
-            wf.present ? "" : "  [workflow not installed]"
-        }`,
-    );
-    lines.push(`  lock              ${wf.lockPresent ? "present" : "MISSING"}`);
-    lines.push(`  max-ai-credits    ${wf.maxAiCredits ?? "(shipped default)"}`);
-    lines.push(
-        `  observability     ${wf.observabilityActive ? "active" : "disabled"}`,
-    );
-    lines.push(
-        `  reviewer teams    ${
-            report.reviewerRouting.allowedTeamReviewers.join(", ") || "(none)"
-        }`,
-    );
-    lines.push("");
-    lines.push("ROUTING");
-    lines.push(`  present           ${routing.present ? "yes" : "NO"}`);
-    lines.push(
-        `  tier rules        ${routing.tierRules}    lens rules ${routing.lensRules}`,
-    );
-    lines.push(
-        `  enabled reviewers ${
-            routing.enabledReviewers.join(", ") || "(none)"
-        }`,
-    );
-    lines.push(`  re-review         ${routing.reReviewMode}`);
-
-    if (report.tierPreview !== undefined) {
-        const preview = report.tierPreview;
-        lines.push("");
-        lines.push(
-            `Tier preview over ${preview.fileCount} tracked files (${preview.generated} generated)`,
-        );
-        for (const tier of RISK_TIERS) {
-            const count = preview.counts[tier];
-            const sample = preview.samples[tier].join(", ");
-            lines.push(
-                `  ${tier.padEnd(8)} ${String(count).padStart(5)}${
-                    sample === "" ? "" : `   e.g. ${sample}`
-                }`,
-            );
-        }
-        if (preview.deadPatterns.length > 0) {
-            lines.push(
-                `  dead patterns (match nothing): ${preview.deadPatterns.join(
-                    ", ",
-                )}`,
-            );
-        }
-        lines.push(
-            `  lenses on a whole-repo change: ${
-                preview.lensesToSpawn.join(", ") || "(none)"
-            }`,
-        );
-    }
-
-    if (report.explanation !== undefined) {
-        const explanation = report.explanation;
-        lines.push("");
-        lines.push(`Explanation: ${explanation.path}`);
-        lines.push(
-            `  tier    ${explanation.tier}${
-                explanation.tierPending ? " (pending: direction-dependent)" : ""
-            }${explanation.generated ? " (generated)" : ""}`,
-        );
-        lines.push(`  lenses  ${explanation.lenses.join(", ") || "(none)"}`);
-        if (explanation.matchingTierRules.length === 0) {
-            lines.push("  rules   (none matched; router default tier)");
-        } else {
-            lines.push("  rules   (last one wins)");
-            for (const rule of explanation.matchingTierRules) {
-                lines.push(
-                    `            ${rule.pattern}  tier=${rule.tier}${
-                        rule.diffDirectionDependent
-                            ? " direction-dependent"
-                            : ""
-                    }`,
-                );
-            }
-        }
-    }
-
-    lines.push("");
-    lines.push(
-        errors.length === 0
-            ? `PASS with ${warnings.length} warning(s).`
-            : `FAIL: ${errors.length} error(s), ${warnings.length} warning(s).`,
-    );
-    return `${lines.join("\n")}\n`;
-};
+// The text rendering lives in its own module (split by concern, and to keep this
+// file inside its max-lines budget). Imported for the CLI below and re-exported so
+// existing importers still treat this module as the checker's single entry point.
+export {renderReport};
 
 /* -------------------------------------------------------------------------- */
 /* CLI                                                                       */
