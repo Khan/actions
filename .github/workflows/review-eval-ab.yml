@@ -78,6 +78,15 @@ on:
       smoke_case:
         description: "Sandbox smoke: live case id for the production-surface phase (default incident-cache-missing-key)"
         required: false
+      harness_probe:
+        description: "Run the harness probe for the lost finding instead of the eval (dispatch only)"
+        type: boolean
+        required: false
+        default: false
+      harness_probe_config:
+        description: "Harness probe config: all | as-is | fortified | no-submit"
+        required: false
+        default: "all"
 
 permissions:
   contents: read
@@ -171,6 +180,39 @@ jobs:
             EXTRA="$EXTRA --case $SMOKE_CASE"
           fi
           pnpm dlx tsx workflows/review/eval/sandbox-smoke.ts $EXTRA
+
+  # One question, one dispatch: why does the Pi arm lose
+  # incident-sql-missing-index:dm-default-backfill? Never runs on a PR -- it is a
+  # diagnosis, not a check, and it costs real model dollars (~$0.50 per config).
+  # Runs here rather than on a dev box because the Anthropic key lives in CI,
+  # which is also where every other eval dollar is already spent.
+  harness-probe:
+    name: Harness probe (lost finding)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: github.event_name == 'workflow_dispatch' && inputs.harness_probe == true
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: ./actions/shared-node-cache
+        with:
+          node-version: "24.x"
+      - name: Install sandbox dependencies
+        # The probe dispatches real sub-agents through the production runner, so
+        # it initializes srt and needs the same three dependencies and the same
+        # userns relaxation the other jobs do (see their notes).
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat ripgrep
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Run the harness probe
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROBE_CONFIG: ${{ inputs.harness_probe_config || 'all' }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY is required for the harness probe." >&2
+            exit 1
+          fi
+          pnpm dlx tsx workflows/review/eval/harness-probe.ts --config "$PROBE_CONFIG"
 
   live-ab:
     name: Live A/B over the eval corpus
