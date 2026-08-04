@@ -322,8 +322,17 @@ export type GeneratedRule = {
  * order. A line assigns attributes to a pattern: `<pattern> attr1 attr2 ...`; a
  * line that mentions the attribute either way becomes a rule, set by
  * `linguist-generated` / `linguist-generated=true` and cleared by
- * `-linguist-generated` / `linguist-generated=false`. Lines that never mention it
- * are not rules at all and are skipped, so they cannot shadow a real one.
+ * `-linguist-generated` / `linguist-generated=false` / `!linguist-generated`.
+ * Lines that never mention it are not rules at all and are skipped, so they
+ * cannot shadow a real one.
+ *
+ * Git has four attribute states, and all three of the non-set forms have to
+ * become rules so they can shadow an earlier broad `=true` glob by last match:
+ * `-attr` resolves to Unset, `attr=false` to the value `false`, and `!attr` to
+ * Unspecified. Unspecified is not the same as false in general (it is where
+ * Linguist falls back to its content heuristic), but this router has no content
+ * heuristic and treats an unmatched path as source, so Unspecified and false
+ * reach the same verdict here and share the branch below.
  */
 export const parseGitattributesGenerated = (
     content: string,
@@ -348,7 +357,9 @@ export const parseGitattributesGenerated = (
                 generated = true;
             } else if (
                 attr === "-linguist-generated" ||
-                attr === "linguist-generated=false"
+                attr === "linguist-generated=false" ||
+                // Unspecified; source as far as this router is concerned.
+                attr === "!linguist-generated"
             ) {
                 generated = false;
             }

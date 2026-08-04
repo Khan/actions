@@ -23,6 +23,7 @@ describe("parseGitattributesGenerated", () => {
             "generated/keep.ts -linguist-generated",
             "src/*.ts text",
             "other/*.js linguist-generated=false",
+            "third/*.js !linguist-generated",
         ].join("\n");
         // Negations are retained rather than dropped: isGenerated resolves per
         // path by last match, so a later `=false` has to be able to win. A line
@@ -32,6 +33,7 @@ describe("parseGitattributesGenerated", () => {
             {pattern: "vendor/**", generated: true},
             {pattern: "generated/keep.ts", generated: false},
             {pattern: "other/*.js", generated: false},
+            {pattern: "third/*.js", generated: false},
         ]);
     });
 });
@@ -66,5 +68,31 @@ describe("isGenerated", () => {
 
     it("treats a path no rule matches as source", () => {
         expect(isGenerated("src/index.ts", rules)).toBe(false);
+    });
+
+    // Git has three ways to spell "stop being generated", and each one shadows an
+    // earlier `=true` by last match; verified against `git check-attr`, which
+    // reports `.claude/skills/foo/SKILL.md` as unset / false / unspecified for
+    // these three respectively, and `.claude/**` as true in all three. A form the
+    // parser fails to recognise is not treated as a negation at all: its line is
+    // dropped, the broad glob still wins, and the path is silently skipped. That
+    // is the same failure this file exists to pin, so all three are covered.
+    it.each([
+        ["-linguist-generated", "unset"],
+        ["linguist-generated=false", "false"],
+        ["!linguist-generated", "unspecified"],
+    ])("lets `%s` (git: %s) shadow an earlier =true glob", (negation) => {
+        const withNegation = parseGitattributesGenerated(
+            [
+                ".claude/** linguist-generated=true",
+                `.claude/skills/** ${negation}`,
+            ].join("\n"),
+        );
+        expect(isGenerated(".claude/skills/foo/SKILL.md", withNegation)).toBe(
+            false,
+        );
+        expect(isGenerated(".claude/hooks/git-filter.mjs", withNegation)).toBe(
+            true,
+        );
     });
 });

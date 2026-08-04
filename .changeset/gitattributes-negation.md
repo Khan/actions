@@ -2,7 +2,7 @@
 "review": minor
 ---
 
-review: honour `linguist-generated=false` the way git does, so deliberately un-marked files get reviewed
+review: honour `linguist-generated` negations the way git does, so deliberately un-marked files get reviewed
 
 The router read `.gitattributes` as a set of "generated globs" and asked whether a
 path matched *any* of them. Git resolves an attribute per path by the **last**
@@ -17,6 +17,16 @@ than dropping them, and `isGenerated` scans in reverse and returns the first
 matching rule's verdict. A line that never mentions the attribute is not a rule at
 all, so it cannot shadow one. `RouterConfig.generatedPatterns` is renamed to
 `generatedRules` to match what it now carries.
+
+All three of git's negation forms count as rules, since each one shadows an
+earlier `=true` by last match: `-linguist-generated` (Unset),
+`linguist-generated=false` (the value `false`), and `!linguist-generated`
+(Unspecified). Unspecified is not generally the same as false (it is where
+Linguist falls back to its content heuristic), but this router has no content
+heuristic and treats an unmatched path as source, so the two reach the same
+verdict here. A negation form the parser did not recognise was dropped as
+not-a-rule, letting the broad glob win and skipping the path: the same silent
+skip, by a different spelling.
 
 Found while onboarding `Khan/agent-settings` (Khan/agent-settings#48), whose
 `.gitattributes` marks the installer-written `.claude/**`, `.codex/**`, `.cursor/**`
