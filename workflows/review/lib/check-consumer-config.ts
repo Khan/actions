@@ -51,6 +51,7 @@ import {
     frontmatterBlock,
     hasKey,
     items,
+    list,
     nested,
     nestedPath,
     scalar,
@@ -159,6 +160,12 @@ export type InstalledWorkflow = {
 export type ReviewerRouting = {
     present: boolean;
     definesAddReviewer: boolean;
+    /**
+     * Whether `allowed-team-reviewers` appears at all, as distinct from
+     * appearing and yielding no teams. Absent is a deliberate no-requests
+     * install; present-but-empty is a defect.
+     */
+    allowlistKeyPresent: boolean;
     allowedTeamReviewers: string[];
     /** True when `add-reviewer` names a `github-token:` (org teams need one). */
     hasGithubToken: boolean;
@@ -277,7 +284,9 @@ const readInstalledWorkflow = (fs: FsLike, path: string): InstalledWorkflow => {
         lockPresent: false, // filled by the caller (path may be renamed)
         source,
         pinnedRef,
-        importsConfig: imports.some((line) => line.item === CONFIG_IMPORT_PATH),
+        // Compared through `items()` so a quoted entry (`- ".github/…"`, valid
+        // YAML) is not read as a missing import, which would be a false error.
+        importsConfig: items(imports).includes(CONFIG_IMPORT_PATH),
         definesAddReviewer:
             nestedPath(lines, ["safe-outputs", "add-reviewer"]) !== undefined,
         maxAiCredits: credits === undefined ? undefined : Number(credits),
@@ -297,15 +306,20 @@ const readReviewerRouting = (fs: FsLike, path: string): ReviewerRouting => {
     const block = frontmatterBlock(fs.readFileSync(path, "utf8"));
     const lines = block === undefined ? [] : yamlLines(block);
     const addReviewer = nestedPath(lines, ["safe-outputs", "add-reviewer"]);
-    const teams = nestedPath(lines, [
-        "safe-outputs",
-        "add-reviewer",
-        "allowed-team-reviewers",
-    ]);
+    // `list()` reads both block and flow style, and returns undefined only when
+    // the key is absent. That distinction is the whole point here: an absent key
+    // is a deliberate "this repo requests no reviewers", while a key that yields
+    // nothing is a mistake or a spelling this reader cannot read. Collapsing the
+    // two would let a broken allowlist report as a deliberate choice.
+    const teams =
+        addReviewer === undefined
+            ? undefined
+            : list(addReviewer, "allowed-team-reviewers");
     return {
         present: true,
         definesAddReviewer: addReviewer !== undefined,
-        allowedTeamReviewers: items(teams ?? []),
+        allowlistKeyPresent: teams !== undefined,
+        allowedTeamReviewers: teams ?? [],
         hasGithubToken:
             addReviewer !== undefined && hasKey(addReviewer, "github-token"),
     };
@@ -548,12 +562,28 @@ export const checkConsumerConfig = (
                 `${CONFIG_IMPORT_PATH} defines no \`safe-outputs.add-reviewer\`, which is the one thing it exists to carry.`,
             );
         } else if (reviewerRouting.allowedTeamReviewers.length === 0) {
-            // An empty allowlist means two different things, and only REVIEWERS
-            // tells them apart: with an ownership map the request is computed and
-            // then dropped (broken); without one nothing is computed to drop, so
-            // the empty list accurately says this repo makes no requests. Erroring
-            // there would only get an inert team invented to satisfy the check.
-            if (ownershipMapPresent) {
+            // Three cases, and conflating any two of them either fails a working
+            // install or blesses a broken one.
+            //
+            // The key is PRESENT but yields no teams: always an error, whatever
+            // `.github/REVIEWERS` says. Someone wrote the field and got nothing
+            // out of it — an empty list, or a spelling this reader cannot read.
+            // Reporting that as a deliberate choice would be the worst outcome,
+            // because it reads as an all-clear over a dropped allowlist.
+            //
+            // The key is ABSENT: now `.github/REVIEWERS` decides. It is the
+            // router's only source of ownership, so without it Step 8 computes
+            // nobody to request and the omission is an accurate statement that
+            // this repo makes no reviewer requests. With it, ownership exists and
+            // nothing is allowed through, so the requests are computed and then
+            // silently dropped.
+            if (reviewerRouting.allowlistKeyPresent) {
+                error(
+                    "config-empty-team-allowlist",
+                    `${CONFIG_IMPORT_PATH} has an \`allowed-team-reviewers\` key that yields no teams, so every reviewer request is dropped by the safe output.`,
+                    "Name the owning team(s) as `- team` lines or `[team]`, or delete the key entirely if this repo should request no reviewers.",
+                );
+            } else if (ownershipMapPresent) {
                 error(
                     "config-empty-team-allowlist",
                     `${CONFIG_IMPORT_PATH} names no \`allowed-team-reviewers\`, but ${REVIEWERS_PATH} gives the router team ownership, so Step 8 computes teams to request and the safe output drops every one.`,

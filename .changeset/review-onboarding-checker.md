@@ -51,6 +51,35 @@ needs (indentation, `key:`, `- item`; no YAML dependency in `lib/`). One
 behaviour is load-bearing: comment lines are dropped, so a commented-out block
 reads as absent, which is exactly what disabling `observability:` means.
 
+It also **normalises values**, because for a tool whose contract is "errors must
+be zero" a false error is the worst failure mode, and each of these is valid YAML
+a consumer can legitimately write:
+
+- **Inline comments are stripped** from values and list items (respecting quotes
+  and `url#frag`). This one fired on the skill's own prescribed flow, which tells
+  authors to label every local edit with a comment: `max-ai-credits: 2500 # LOCAL
+  OVERRIDE` made `Number()` return `NaN`, silently suppressing the credit-ceiling
+  check; a labelled `source:` reported a spurious `source-ref-mismatch`; and a
+  labelled `imports` item produced a false `workflow-missing-config-import`
+  error.
+- **Surrounding quotes are stripped** by `scalar()`, so `max-ai-credits: "1000"`
+  no longer reads as `NaN` (and a quoted `imports` item no longer reads as a
+  missing import).
+- **Flow-style lists are read**: `allowed-team-reviewers: [kore]` is the spelling
+  the shipped `review.md` itself uses for `toolsets: [pull_requests, repos]`, and
+  it previously reported a false `config-empty-team-allowlist` error on a working
+  allowlist.
+
+The new `list()` returns undefined only when a key is **absent**, which is what
+lets the empty-allowlist check tell a deliberate omission from a key that yielded
+nothing. Those are now separate outcomes: a present-but-empty key is always an
+error (someone wrote the field and got nothing, and calling that deliberate would
+read as an all-clear over a dropped allowlist), while an absent key defers to
+`.github/REVIEWERS` as described above.
+
+Still unsupported, and documented as such: multi-line flow sequences,
+anchors/aliases, and block scalars.
+
 The judgment half is `.claude/skills/review-onboarding/SKILL.md`: what stays the
 operator's call (the team allowlist, the `enable` roster and `re-review` mode,
 every admin blocker), the preflight inventory that becomes `ci-tooling.md` and

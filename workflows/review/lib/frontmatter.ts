@@ -13,6 +13,15 @@
  * intended meaning, because commenting a block out is how a consumer disables
  * one (the `observability:` local edit the reviewer's README prescribes for a
  * repo without the `GH_AW_OTEL_SENTRY_*` secrets).
+ *
+ * Values are normalised on the way out — inline comments stripped, surrounding
+ * quotes removed, flow-style lists (`[a, b]`) read as lists — because the
+ * checker's contract is "errors must be zero", which makes a FALSE error its
+ * worst failure mode. Every one of those spellings is valid YAML that a consumer
+ * can legitimately write (and the shipped `review.md` itself uses flow style for
+ * `toolsets: [pull_requests, repos]`), so treating any of them as absent would
+ * fail a working install. What is still not supported: multi-line flow
+ * sequences, anchors/aliases, and block scalars (`|`, `>`).
  */
 
 /** One frontmatter line, reduced to what the callers ask about. */
@@ -38,6 +47,50 @@ export const frontmatterBlock = (content: string): string | undefined => {
     return end === -1 ? undefined : lines.slice(1, end).join("\n");
 };
 
+/**
+ * Drop a YAML inline comment from a value or list item. A `#` opens a comment
+ * only at the start of the value or after whitespace, and never inside a quoted
+ * scalar — so `1000 # LOCAL OVERRIDE` loses the comment while `"a # b"` and
+ * `https://x/y#frag` keep every character.
+ *
+ * Not cosmetic: the onboarding skill tells authors to label each local edit with
+ * a comment, so without this `Number("2500 # LOCAL OVERRIDE")` is `NaN` and the
+ * credit-ceiling check silently never fires, a commented `source:` reports a
+ * spurious ref mismatch, and a commented `imports` item reads as a missing
+ * import — a false error on a valid install.
+ */
+export const stripInlineComment = (raw: string): string => {
+    let quote: string | undefined;
+    for (let i = 0; i < raw.length; i++) {
+        const ch = raw[i];
+        if (quote !== undefined) {
+            if (ch === quote) {
+                quote = undefined;
+            }
+            continue;
+        }
+        if (ch === '"' || ch === "'") {
+            quote = ch;
+            continue;
+        }
+        if (ch === "#" && (i === 0 || /\s/.test(raw[i - 1]))) {
+            return raw.slice(0, i).trimEnd();
+        }
+    }
+    return raw.trimEnd();
+};
+
+/** Strip one layer of matching surrounding quotes. */
+export const unquote = (raw: string): string => {
+    const trimmed = raw.trim();
+    const first = trimmed[0];
+    return (first === '"' || first === "'") &&
+        trimmed.length > 1 &&
+        trimmed.endsWith(first)
+        ? trimmed.slice(1, -1)
+        : trimmed;
+};
+
 /** Reduce a block to {@link YamlLine}s, dropping blanks and comments. */
 export const yamlLines = (block: string): YamlLine[] =>
     block
@@ -47,11 +100,18 @@ export const yamlLines = (block: string): YamlLine[] =>
             const indent = line.length - line.trimStart().length;
             const trimmed = line.trim();
             if (trimmed.startsWith("- ")) {
-                return {indent, item: trimmed.slice(2).trim()};
+                return {
+                    indent,
+                    item: stripInlineComment(trimmed.slice(2)).trim(),
+                };
             }
             const match = /^([A-Za-z0-9_.-]+):\s*(.*)$/.exec(trimmed);
             return match
-                ? {indent, key: match[1], value: match[2].trim()}
+                ? {
+                      indent,
+                      key: match[1],
+                      value: stripInlineComment(match[2]).trim(),
+                  }
                 : {indent};
         });
 
@@ -100,8 +160,13 @@ export const nestedPath = (
 };
 
 /**
- * The scalar `key` holds at this block's own indent level. A key with no inline
- * value (a nested block, or an empty value) reads as undefined.
+ * The scalar `key` holds at this block's own indent level, with surrounding
+ * quotes stripped. A key with no inline value (a nested block, or an empty
+ * value) reads as undefined.
+ *
+ * Unquoting matters for the numeric reads: `max-ai-credits: "1000"` is valid
+ * YAML, and passing the raw `"1000"` to `Number()` yields `NaN`, which compares
+ * false against every threshold and silently suppresses the check.
  */
 export const scalar = (
     lines: readonly YamlLine[],
@@ -112,7 +177,9 @@ export const scalar = (
     }
     const base = baseIndent(lines);
     const hit = lines.find((line) => line.indent === base && line.key === key);
-    return hit?.value === "" ? undefined : hit?.value;
+    return hit?.value === undefined || hit.value === ""
+        ? undefined
+        : unquote(hit.value);
 };
 
 /** True when `key` exists at this block's own indent level. */
@@ -129,4 +196,38 @@ export const items = (lines: readonly YamlLine[]): string[] =>
     lines
         .map((line) => line.item)
         .filter((item): item is string => item !== undefined)
-        .map((item) => item.replace(/^["']|["']$/g, ""));
+        .map(unquote);
+
+/**
+ * The list `key` holds, in either spelling: block style (`- item` lines nested
+ * under the key) or flow style (`key: [a, b]`). Undefined only when the key is
+ * absent, which is what lets a caller tell "no list here" from "a list that came
+ * out empty" — the difference between a deliberate omission and a spelling this
+ * reader could not read.
+ *
+ * Flow style is not an exotic case to skip: the shipped `review.md` writes
+ * `toolsets: [pull_requests, repos]`, so a consumer copying that style into an
+ * allowlist is writing perfectly ordinary frontmatter.
+ */
+export const list = (
+    lines: readonly YamlLine[],
+    key: string,
+): string[] | undefined => {
+    if (!hasKey(lines, key)) {
+        return undefined;
+    }
+    const inline = scalar(lines, key);
+    if (inline !== undefined) {
+        if (!inline.startsWith("[") || !inline.endsWith("]")) {
+            // A scalar where a list belongs: report it as unreadable rather than
+            // as an empty list, so the caller does not mistake it for absence.
+            return [];
+        }
+        return inline
+            .slice(1, -1)
+            .split(",")
+            .map((entry) => unquote(entry))
+            .filter((entry) => entry !== "");
+    }
+    return items(nested(lines, key) ?? []);
+};

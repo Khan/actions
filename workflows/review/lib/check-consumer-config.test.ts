@@ -236,6 +236,35 @@ describe("the add-reviewer contract", () => {
         expect(codes(report, "warning")).toEqual(["reviewer-requests-inert"]);
     });
 
+    // Present-but-empty is a different animal from absent, and the checker must
+    // not report it as the deliberate no-requests configuration: that would read
+    // as an all-clear over an allowlist the safe output is dropping.
+    it("errors on an allowlist key that yields no teams, with no ownership map", () => {
+        const inputs = validInstall();
+        inputs[CONFIG_IMPORT_PATH] = CONFIG_MD.replace("      - kore\n", "");
+        const report = check(inputs);
+        expect(codes(report, "error")).toEqual(["config-empty-team-allowlist"]);
+        expect(codes(report, "warning")).not.toContain(
+            "reviewer-requests-inert",
+        );
+    });
+
+    // Flow style is valid YAML and the shipped review.md uses it for `toolsets`,
+    // so reading it as an empty allowlist was a false error on a working install.
+    it("reads a flow-style allowlist", () => {
+        const inputs = validInstall();
+        inputs[CONFIG_IMPORT_PATH] = CONFIG_MD.replace(
+            "    allowed-team-reviewers:\n      - kore\n",
+            "    allowed-team-reviewers: [kore, web]\n",
+        );
+        const report = check(inputs);
+        expect(codes(report, "error")).toEqual([]);
+        expect(report.reviewerRouting.allowedTeamReviewers).toEqual([
+            "kore",
+            "web",
+        ]);
+    });
+
     it("stays quiet about the bot token when no request can be made", () => {
         const inputs = validInstall();
         inputs[CONFIG_IMPORT_PATH] = CONFIG_MD.replace(
@@ -268,6 +297,52 @@ describe("the add-reviewer contract", () => {
         expect(codes(check(inputs), "warning")).toEqual([
             "config-no-bot-token",
         ]);
+    });
+});
+
+// Every local edit the skill prescribes carries a `<REPO> LOCAL OVERRIDE:`
+// comment, so an inline one on the very lines the checker reads is the expected
+// shape rather than an exotic case.
+describe("labelled local edits", () => {
+    it("still reads max-ai-credits, source and imports through inline comments", () => {
+        const inputs = validInstall();
+        inputs[INSTALLED_WORKFLOW_PATH] = WORKFLOW_MD.replace(
+            "max-ai-credits: 2500",
+            "max-ai-credits: 2500 # KHAN/REPO LOCAL OVERRIDE: raised",
+        )
+            .replace(
+                "source: Khan/actions/workflows/review/review.md@review-v1.11.0",
+                "source: Khan/actions/workflows/review/review.md@review-v1.11.0 # pinned",
+            )
+            .replace(
+                `  - ${CONFIG_IMPORT_PATH}`,
+                `  - ${CONFIG_IMPORT_PATH} # consumer config`,
+            );
+        const report = check(inputs, {checkerVersion: "1.11.0"});
+        expect(codes(report, "error")).toEqual([]);
+        expect(codes(report, "warning")).toEqual([]);
+        expect(report.installedWorkflow.maxAiCredits).toBe(2500);
+        expect(report.installedWorkflow.pinnedRef).toBe("review-v1.11.0");
+    });
+
+    it("does not let a quoted credit ceiling suppress the default warning", () => {
+        const inputs = validInstall();
+        inputs[INSTALLED_WORKFLOW_PATH] = WORKFLOW_MD.replace(
+            "max-ai-credits: 2500",
+            'max-ai-credits: "1000"',
+        );
+        expect(codes(check(inputs), "warning")).toEqual([
+            "max-ai-credits-default",
+        ]);
+    });
+
+    it("accepts a quoted config import", () => {
+        const inputs = validInstall();
+        inputs[INSTALLED_WORKFLOW_PATH] = WORKFLOW_MD.replace(
+            `  - ${CONFIG_IMPORT_PATH}`,
+            `  - "${CONFIG_IMPORT_PATH}"`,
+        );
+        expect(codes(check(inputs), "error")).toEqual([]);
     });
 });
 

@@ -8,6 +8,9 @@ import {
     nestedPath,
     scalar,
     yamlLines,
+    list,
+    stripInlineComment,
+    unquote,
 } from "./frontmatter.ts";
 
 /**
@@ -127,5 +130,101 @@ describe("items", () => {
                 yamlLines(`- "kore"\n- 'github-actions'\nkey: value\n- bare`),
             ),
         ).toEqual(["kore", "github-actions", "bare"]);
+    });
+});
+
+/**
+ * Value normalisation. Each case below is a valid YAML spelling that previously
+ * read as absent or unparseable, which for a checker whose contract is "errors
+ * must be zero" meant a false error or a silently-suppressed check on a working
+ * install.
+ */
+describe("stripInlineComment", () => {
+    it("drops a trailing comment", () => {
+        expect(stripInlineComment("2500 # LOCAL OVERRIDE")).toBe("2500");
+        expect(stripInlineComment("2500\t# note")).toBe("2500");
+    });
+
+    it("keeps a # that is inside quotes or has no leading space", () => {
+        expect(stripInlineComment('"a # b"')).toBe('"a # b"');
+        expect(stripInlineComment("https://x/y#frag")).toBe("https://x/y#frag");
+    });
+
+    it("treats a value that is only a comment as empty", () => {
+        expect(stripInlineComment("# just a note")).toBe("");
+    });
+});
+
+describe("unquote", () => {
+    it("strips one layer of matching quotes and nothing else", () => {
+        expect(unquote('"1000"')).toBe("1000");
+        expect(unquote("'kore'")).toBe("kore");
+        expect(unquote("plain")).toBe("plain");
+        expect(unquote('"mismatched')).toBe('"mismatched');
+    });
+});
+
+describe("inline comments through yamlLines", () => {
+    // The onboarding skill tells authors to label every local edit with a
+    // comment, so this is the checker's own prescribed flow.
+    const block = [
+        "max-ai-credits: 2500 # KHAN/REPO LOCAL OVERRIDE",
+        "source: Khan/actions/x.md@review-v1.11.0 # pinned",
+        "imports:",
+        "  - .github/aw/review/config.md # the consumer import",
+    ].join("\n");
+    const lines = yamlLines(block);
+
+    it("leaves a labelled numeric value parseable", () => {
+        expect(Number(scalar(lines, "max-ai-credits"))).toBe(2500);
+    });
+
+    it("leaves a labelled source ref intact", () => {
+        expect(scalar(lines, "source")).toBe(
+            "Khan/actions/x.md@review-v1.11.0",
+        );
+    });
+
+    it("leaves a labelled list item matchable", () => {
+        expect(items(nested(lines, "imports") ?? [])).toEqual([
+            ".github/aw/review/config.md",
+        ]);
+    });
+});
+
+describe("scalar unquoting", () => {
+    it("makes a quoted number parse rather than yield NaN", () => {
+        const lines = yamlLines('max-ai-credits: "1000"');
+        expect(Number(scalar(lines, "max-ai-credits"))).toBe(1000);
+    });
+});
+
+describe("list", () => {
+    const blockStyle = yamlLines(
+        ["teams:", "  - kore", '  - "web"'].join("\n"),
+    );
+    const flowStyle = yamlLines('teams: [kore, "web"]');
+
+    it("reads block style", () => {
+        expect(list(blockStyle, "teams")).toEqual(["kore", "web"]);
+    });
+
+    it("reads flow style, which the shipped review.md itself uses", () => {
+        expect(list(flowStyle, "teams")).toEqual(["kore", "web"]);
+    });
+
+    it("reads an empty flow list as empty", () => {
+        expect(list(yamlLines("teams: []"), "teams")).toEqual([]);
+    });
+
+    // The distinction the caller needs: absent means "deliberately none",
+    // present-but-empty means "someone wrote this and got nothing".
+    it("returns undefined only when the key is absent", () => {
+        expect(list(yamlLines("other: 1"), "teams")).toBeUndefined();
+        expect(list(yamlLines("teams:"), "teams")).toEqual([]);
+    });
+
+    it("reports a scalar where a list belongs as empty, not absent", () => {
+        expect(list(yamlLines("teams: kore"), "teams")).toEqual([]);
     });
 });
