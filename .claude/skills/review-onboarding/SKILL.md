@@ -48,6 +48,29 @@ from the repo and do not carry them over from another consumer:
 
    Afterwards confirm by name only (`gh secret list -R <repo>`), never by value.
 
+   **You cannot copy the key from a repo that already has it, so do not try.**
+   Actions secrets are write-only: values are encrypted against the repo's public
+   key on write and decrypted only into a runner at job time. `GET
+   /repos/{owner}/{repo}/actions/secrets/{name}` returns the name and timestamps
+   with no value field, there is no `gh secret get`, and `gh secret list` is names
+   only. "Pull it from webapp" is not a step that exists.
+
+   **Prefer an org secret over a per-repo paste.** A repo-level
+   `ANTHROPIC_API_KEY` makes every onboarding wait on someone handling key
+   material. An organisation secret with *selected repositories* visibility turns
+   that into an admin adding one repo to a list, with no value moving and nothing
+   for this skill to touch. Check what the target repo can already see:
+
+   ```sh
+   gh api /repos/<owner>/<repo>/actions/organization-secrets --jq '.secrets[].name'
+   ```
+
+   If `ANTHROPIC_API_KEY` is there, it is already provisioned and there is no
+   blocker. If an org secret exists but this repo is not in its selected list,
+   the blocker is "add this repo to it" (org-admin, no key material) rather than
+   `gh secret set`, and the PR body should say so. Raise the org-secret route with
+   the operator when a repo-level paste is the only option left.
+
 You *do* own the risk prose, the tiers, and the CI-tooling list, but derive them
 from **this** repo (its CI workflows, its test setup, its docs, its actual blast
 radius), never from another repo's file. A `ci-tooling.md` that names a lint rule
