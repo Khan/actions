@@ -12,7 +12,10 @@
 import {execSync} from "node:child_process";
 import * as path from "node:path";
 
-import fixWorkflows, {DEFAULT_SETUP_ACTION} from "./index";
+import fixWorkflows, {
+    DEFAULT_SETUP_ACTION,
+    generatedWorkflowSkipGlobs,
+} from "./index";
 
 function parseArgs(argv: string[]): {
     fixRunsOn: boolean;
@@ -46,15 +49,12 @@ fixWorkflows({core, fixRunsOn, setupAction})
     .then(() => {
         // Format workflow files with oxfmt after fixing lint violations, skipping
         // the generator-owned ones for the same reason the fixer does (see
-        // isGeneratedWorkflow in index.ts, and keep these globs in step with it and
-        // with action.yml). Negated globs rather than .oxfmtrc.json ignorePatterns:
-        // the config lives beside this script, not in the repo being formatted, and
-        // its patterns do not resolve against the working directory.
+        // GENERATED_WORKFLOWS in index.ts). Negated globs rather than
+        // .oxfmtrc.json ignorePatterns: the config lives beside this script, not in
+        // the repo being formatted, and its patterns do not resolve against the
+        // working directory.
         const configPath = path.join(__dirname, ".oxfmtrc.json");
-        const skip = [
-            "!.github/workflows/*.lock.yml",
-            "!.github/workflows/agentics-maintenance.yml",
-        ]
+        const skip = generatedWorkflowSkipGlobs()
             .map((glob) => JSON.stringify(glob))
             .join(" ");
         console.log("Formatting workflow files with oxfmt..."); // eslint-disable-line no-console

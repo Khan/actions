@@ -36,21 +36,24 @@ runs:
                       core.setFailed(err.message)
                   }
 
-        # The negations must match `isGeneratedWorkflow` in index.ts. Without them
-        # this step reformats compiler output that the YAML fixer above correctly
-        # skips, which desyncs a committed lock from `gh aw compile` and makes the
-        # next step annotate a generated file with a fix nobody should apply.
-        # `ignorePatterns` in .oxfmtrc.json cannot do this: the config lives in the
-        # action's directory, not the repo being formatted, and its patterns do not
-        # resolve against the working directory.
+        # Without the negations this step reformats compiler output that the YAML
+        # fixer above correctly skips, which desyncs a committed lock from `gh aw
+        # compile` and makes the next step annotate a generated file with a fix
+        # nobody should apply. `ignorePatterns` in .oxfmtrc.json cannot do this: the
+        # config lives in the action's directory, not the repo being formatted, and
+        # its patterns do not resolve against the working directory.
+        #
+        # A bash step cannot import the TypeScript, so these literals are a copy of
+        # `generatedWorkflowSkipGlobs()` in index.ts; generated-workflows.test.ts
+        # fails if they drift from it.
         - name: Format YAML files with oxfmt
           shell: bash
           run: |
               npx --yes oxfmt@0.44.0 --write \
                 --config "${{ github.action_path }}/.oxfmtrc.json" \
                 ".github/workflows/**/*.yml" \
-                '!.github/workflows/*.lock.yml' \
-                '!.github/workflows/agentics-maintenance.yml'
+                '!.github/workflows/**/*.lock.yml' \
+                '!.github/workflows/**/agentics-maintenance.yml'
 
         - name: Show fix instructions
           shell: bash
