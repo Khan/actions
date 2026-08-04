@@ -79,6 +79,13 @@ export type ArmRunReport = {
             rejected: number;
             clustererAbsent: boolean;
             /**
+             * The clusterer was dispatched on this case and returned nothing
+             * usable. Reported separately because the failure and a clusterer
+             * that ran and proposed nothing are the same zero in every other
+             * column, and only one of them is a measurement.
+             */
+            clustererFailed?: true;
+            /**
              * The clusterer's own spend and wall-clock on this case, absent
              * when it never ran. Tier 2 is a serial dispatch on nearly every
              * multi-finding review and absorbs a fraction of a group per run,
@@ -324,6 +331,10 @@ const snappedTotal = (arm: ArmRunReport): number =>
  * every run, and "4 merges" is a graduation argument only next to what those
  * four merges cost. Tier 1 is free by comparison (pure text arithmetic), so no
  * price is shown for it.
+ *
+ * A dispatched clusterer that returned nothing usable is called out rather than
+ * folded into the zero: the arm paid for it and measured nothing, which is not
+ * the same claim as "tier 2 found no duplicates here".
  */
 const mergedTotal = (arm: ArmRunReport): string => {
     const dedup = arm.perCase.flatMap((c) => (c.dedup ? [c.dedup] : []));
@@ -335,6 +346,7 @@ const mergedTotal = (arm: ArmRunReport): string => {
     const absent = dedup.every((d) => d.clustererAbsent);
     const clustererUsd = sum((d) => d.clustererUsd ?? 0);
     const clustererWallMs = sum((d) => d.clustererWallMs ?? 0);
+    const clustererFailures = sum((d) => (d.clustererFailed === true ? 1 : 0));
     const notes = [
         absent
             ? "tier 1 only"
@@ -345,6 +357,13 @@ const mergedTotal = (arm: ArmRunReport): string => {
               )}s`,
         ...(sum((d) => d.rejected) > 0
             ? [`${sum((d) => d.rejected)} proposed member(s) rejected`]
+            : []),
+        // A dispatched clusterer that returned nothing usable. Without this
+        // the row reads "0 by clusterer at $0.32" — the arm paid, produced no
+        // measurement, and the number that graduates the tier records it as a
+        // negative result.
+        ...(clustererFailures > 0
+            ? [`${clustererFailures} clusterer failure(s)`]
             : []),
     ];
     return `${sum((d) => d.merged)} / ${sum((d) => d.candidates)} (${notes.join(

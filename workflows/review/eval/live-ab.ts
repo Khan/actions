@@ -264,6 +264,13 @@ export const runArm = async (
                           ),
                           rejected: produced.dedup.rejected.length,
                           clustererAbsent: produced.dedup.clustererAbsent,
+                          // A dispatched clusterer that returned nothing
+                          // usable, kept apart from one that ran and proposed
+                          // nothing: both are zero merges, and only one of
+                          // them is a result.
+                          ...(produced.dedup.clustererFailed
+                              ? {clustererFailed: true as const}
+                              : {}),
                           // What tier 2 COST, beside what it merged. The
                           // clusterer is a serial step on nearly every
                           // multi-finding run while absorbing a fraction of a

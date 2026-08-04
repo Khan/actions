@@ -34,6 +34,16 @@ export type LiveDedupReport = {
     rejected: ClusterRejection[];
     /** The arm's review.md defines no clusterer: tier 1 only, by construction. */
     clustererAbsent: boolean;
+    /**
+     * The clusterer was dispatched and returned nothing usable (no output, or
+     * an output that would not parse as the contract). Distinct from a
+     * clusterer that ran and proposed nothing, which is the same `proposed: 0`
+     * and the same zero merges: production keeps the two apart for the same
+     * reason (`DispatchClustering.unavailable`), because a paid-for parse
+     * failure rendered as "0 by clusterer at $X" reads as a negative result
+     * from the one row the graduation decision turns on.
+     */
+    clustererFailed: boolean;
 };
 
 /**
@@ -86,11 +96,13 @@ export const dedupeLiveFindings = async (
     const clusterable = hasClusterableCandidatePair(claims);
     let proposals: ProposedCluster[] = [];
     let report: PerAgentReport | undefined;
+    let clustererFailed = false;
     if (clusterable && clusterer !== undefined) {
         io.write("candidates.json", JSON.stringify(claims, null, 2));
         const dispatched = await io.dispatch(clusterer, parseClustererOutput);
         report = dispatched.report;
         proposals = dispatched.parsed ?? [];
+        clustererFailed = dispatched.parsed === undefined;
     }
     const merged = dedupeClaims(claims, proposals);
     const dropped = new Set(
@@ -135,6 +147,7 @@ export const dedupeLiveFindings = async (
                 proposed: proposals.length,
                 rejected: merged.clusterRejections,
                 clustererAbsent: clusterer === undefined,
+                clustererFailed,
             },
         },
     };

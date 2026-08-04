@@ -362,6 +362,49 @@ describe("runDispatch defect clustering (dedup tier 2)", () => {
         expect(result.claims).toHaveLength(2);
     });
 
+    it("never spends on clustering when both sides of every pair are blocking", async () => {
+        // The third conjunct of the precondition, and the only one no test
+        // pinned. These two sit on one path from two sources, so the count,
+        // the anchor, the path and the source rules all pass; both are
+        // BLOCKING, and tier 2 only ever absorbs a non-blocking copy, so the
+        // clusterer has nothing it could legally propose. A future edit that
+        // loosens the severity conjunct would otherwise start paying for a
+        // serial dispatch on every all-blocking review with no test noticing.
+        const blocking = (source: string): string =>
+            JSON.stringify({
+                findings: [
+                    {
+                        ...JSON.parse(source).findings[0],
+                        label: "issue (blocking)",
+                    },
+                ],
+            });
+        const fs = makeFakeFs({
+            ...baseStaging(),
+            ...agentFiles(
+                "pattern-triage",
+                "correctness-reviewer",
+                "skill-auditor",
+                "claim-clusterer",
+                "claim-validator",
+            ),
+        });
+        const runner = stubRunner({
+            "pattern-triage": TRIAGE_OK,
+            "correctness-reviewer": blocking(CAP_NOTE),
+            "skill-auditor": blocking(CAP_NITPICK),
+            "claim-validator": JSON.stringify({claims: []}),
+        });
+        const result = await runDispatch(options(fs, runner));
+        expect(runner.calls).not.toContain("claim-clusterer");
+        expect(result.clustering).toBeUndefined();
+        expect(fs.files[`${REVIEW}/candidates.json`]).toBeUndefined();
+        // And nothing merged them on the text floor either, so the skip is
+        // what left two comments rather than a merge this test can't see.
+        expect(result.claims).toHaveLength(2);
+        expect(result.merges).toEqual([]);
+    });
+
     it("records the ids a clusterer invents rather than merging on them", async () => {
         const fs = makeFakeFs({
             ...baseStaging(),

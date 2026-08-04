@@ -2,6 +2,7 @@ import {describe, it, expect} from "vitest";
 
 import {aggregateSamples, extractSamples} from "./aggregate";
 import {parseCase, type CorpusCase} from "./corpus/loader";
+import type {LiveDedupReport} from "./live-dedup";
 import {
     adversarialGateFailures,
     diffRegressions,
@@ -181,7 +182,10 @@ describe("runArm dedup accounting", () => {
      * and the evidence the clusterer grounded them in.
      */
     const produceMerged =
-        (clustererAbsent: boolean): ArmProduce =>
+        (
+            clustererAbsent: boolean,
+            over: Partial<LiveDedupReport> = {},
+        ): ArmProduce =>
         async () => {
             const base = await produceHit(1)(liveCase("case-1"));
             return {
@@ -250,6 +254,8 @@ describe("runArm dedup accounting", () => {
                     proposed: 1,
                     rejected: [],
                     clustererAbsent,
+                    clustererFailed: false,
+                    ...over,
                 },
             };
         };
@@ -324,6 +330,38 @@ describe("runArm dedup accounting", () => {
         // it cannot answer whether a serial dispatch on nearly every run is
         // worth its place, which is the question graduation turns on.
         expect(markdown).toContain("3 / 4 (2 by clusterer at $0.25 / 21s)");
+    });
+
+    it("renders rejected members, and a paid dispatch that measured nothing", async () => {
+        // Both notes hang off the same row and neither was rendered by a test:
+        // `rejected` is how a clusterer proposing junk shows up at all, and
+        // `clustererFailed` is what keeps a parse failure from reading as
+        // "tier 2 ran and found no duplicates" in the row that graduates it.
+        const report = await runArm(
+            "candidate",
+            [liveCase("case-1")],
+            produceMerged(false, {
+                clustererFailed: true,
+                rejected: [
+                    {id: "live-x-1", reason: "ungrounded"},
+                    {id: "live-x-2", reason: "other-path"},
+                ],
+            }),
+            {maxUsd: 10},
+        );
+        expect(report.perCase[0].dedup?.clustererFailed).toBe(true);
+        const markdown = renderMarkdownReport({
+            baseRef: "origin/main",
+            reviewMdSha: {baseline: "a".repeat(12), candidate: "b".repeat(12)},
+            arms: {baseline: report, candidate: report},
+            regressions: {lost: [], gained: []},
+            adversarialFailures: [],
+            gateRetries: [],
+        });
+        expect(markdown).toContain(
+            "3 / 4 (2 by clusterer at $0.25 / 21s, " +
+                "2 proposed member(s) rejected, 1 clusterer failure(s))",
+        );
     });
 
     it("omits the block for a producer that runs no dedup at all", async () => {

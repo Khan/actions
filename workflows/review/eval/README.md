@@ -176,7 +176,28 @@ claiming a band.
   MEMBERS the merge rules refused, so one bad
   proposal naming three ids counts three (`unknown-id` there means the clusterer
   named claims that do not exist, which is a prompt or staging failure rather
-  than a quiet zero).
+  than a quiet zero). A dispatch that returned nothing usable is reported as
+  `N clusterer failure(s)` rather than folded into the zero: the arm paid and
+  measured nothing, which is not the claim that tier 2 found no duplicates.
+- **Tier 2's keep-or-cut bar,** written down before the next powered run so the
+  decision is auditable after it. The tier ships enabled in the default
+  template, so this is the bar it must keep clearing, not one it must clear to
+  arrive. Read on the candidate arm of a `--repeats` run:
+  - **Any recall loss cuts it.** One `lost` spec traceable to a tier-2 merge
+    ends the tier; no merge rate buys back a dropped finding. Same for a failed
+    adversarial gate. This one is not traded off against the others.
+  - **Rate floor: 0.15 absorbed copies per dispatched case** (`by clusterer`
+    over the cases where the clusterer actually ran). Run 30651373253 measured
+    0.20 (4 over 20 case-runs). Below the floor the steady state is a serial
+    Sonnet call on nearly every review that mostly does nothing, and the
+    dispatch precondition should be tightened or the tier cut.
+  - **Price ceiling: $0.50 per absorbed copy, and 8% of the arm's cost.** That
+    run measured $0.34 and +6% ($22.93 -> $24.30). The two are both needed: a
+    cheap tier that never fires and an expensive tier that fires often fail in
+    different ways.
+  - **Failures are not no-ops.** If `clusterer failure(s)` exceeds 10% of
+    dispatches the run measured plumbing, not a rate; fix it and re-measure
+    rather than reading the rate as a negative result.
 - **Anchor-snap and the arms:** the deterministic pipeline is shared by
   both arms, but the provenance gate emulates each arm's OWN review.md gate
   version, keyed on the literal `anchor-snap` marker in the gate step. A

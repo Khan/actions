@@ -787,7 +787,60 @@ describe("produceLive cross-source dedup", () => {
             proposed: 0,
             rejected: [],
             clustererAbsent: true,
+            clustererFailed: false,
         });
+    });
+
+    it("records a clusterer that was paid for and returned nothing usable", async () => {
+        // Production keeps a failed dispatch apart from a clusterer that ran
+        // and proposed nothing (`DispatchClustering.unavailable`); the A/B has
+        // to as well, because the two are the same zero in the merge row that
+        // decides whether tier 2 keeps its place.
+        const {runner} = scriptedRunner({
+            ...scripts(),
+            "claim-clusterer": ["not a contract", "still not a contract"],
+        });
+        const result = await produceLive(CASE, withClusterer, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        expect(result.dedup.clustererFailed).toBe(true);
+        expect(result.dedup.proposed).toBe(0);
+        expect(result.findings).toHaveLength(2);
+    });
+
+    it("carries a merged copy's suggested patch onto the survivor", async () => {
+        // The survivor posts the comment, so it has to post the fix too: an
+        // absorbed copy's patch is the one committable thing a merge can
+        // silently throw away, and dedup adopts it only when the survivor has
+        // none of its own. Nothing downstream of the merge re-reads the
+        // absorbed finding, so this is the only place it can be checked.
+        const {runner} = scriptedRunner({
+            ...scripts(),
+            "skill-auditor": [
+                JSON.stringify({
+                    findings: [
+                        {
+                            ...CAP_NITPICK,
+                            suggestion: "// Keeps at most 25 samples per key.",
+                        },
+                    ],
+                }),
+            ],
+        });
+        const result = await produceLive(CASE, withClusterer, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        expect(result.findings).toHaveLength(1);
+        expect(result.findings[0].finding.id).toContain(
+            "live-correctness-reviewer-1",
+        );
+        expect(result.findings[0].finding.suggested_patch).toBe(
+            "// Keeps at most 25 samples per key.",
+        );
     });
 
     it("never dispatches the clusterer when one source produced everything", async () => {
