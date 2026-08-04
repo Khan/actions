@@ -59,6 +59,12 @@ workflows/*/*.md             tier=high
 workflows/*/README.md        tier=trivial
 workflows/*/CHANGELOG.md     tier=trivial
 .github/workflows/*.md       tier=high
+# Same re-raise for the staging pen. A staged agentic workflow IS a .md (the
+# .lock.yml is compiled from it), so `.github-staging/** tier=high` above is
+# defeated for exactly the file that carries the frontmatter -- permissions,
+# secrets, network -- and the prompt. Nothing in the pen is docs; it holds files
+# awaiting a `git mv` into .github/workflows/.
+.github-staging/**/*.md      tier=high
 
 # More executable-not-docs prose the broad docs rule would drop to trivial:
 # skills steer the Claude agents that operate on this repo, and eval plan docs

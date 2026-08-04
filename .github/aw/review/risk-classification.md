@@ -47,22 +47,43 @@ published to them:
   layer: finding schema, change-provenance gate, verdict computation,
   investigation cap, routing parser; a bug here silently changes what gets
   blocked or posted on every consumer PR).
+- **The autofix workflow's enforcement layer**: `workflows/autofix/lib/**`. It
+  decides what autofix does, and autofix PUSHES COMMITS to consumer PRs, so it
+  carries at least the blast radius of the reviewer lib beside it.
+- **Staged workflows**: `.github-staging/**`. Not yet active, but promoted
+  verbatim by a `git mv` into `.github/workflows/`, so it is CI the moment it
+  moves and is reviewed here or nowhere. A staged agentic workflow is a `.md`,
+  so it is high despite the docs rule.
+- **What these shared workflows install inside a consumer's CI**:
+  `workflows/*/package.json`, `workflows/*/package-lock.json`. `review.md`'s
+  pre-agent step is `npm ci` against the released lockfile, so a dependency
+  added here executes in every consuming repo.
+- **gh-aw's action SHA lockfile**: `.github/aw/actions-lock.json` pins every
+  third-party action the compiled workflows here run, so a diff changes which
+  third-party code executes in our CI.
 
 ### Medium Risk
 
 - **The eval suite**: `workflows/review/eval/*.ts` (judge, gates, metrics,
   runner). Dev-only, but it decides which reviewers/lenses "earn their line" in
   consumer ROUTING files; a wrong judge or gate corrupts those decisions.
-- **Build/lint/type configuration**: `config/`, `types/`, `tsconfig.json`,
-  `.eslintrc.js`, `pnpm-workspace.yaml`: shapes the compiled output of shipped
-  actions.
-- **Staged workflows**: `.github-staging/**` (not yet active, but will be
-  promoted verbatim).
+- **`tsconfig.json`**: decides what `pnpm typecheck` covers, and therefore which
+  shipped code is checked at all (today it excludes `workflows/**` entirely).
+- **Config that shapes releases or review routing without being executable**:
+  `.changeset/config.json` (what gets versioned and tagged), `.github/REVIEWERS`
+  (the router's ONLY source of team ownership, so a wrong line silently routes
+  reviews to the wrong team or to nobody), `.gitattributes` (which files the
+  reviewer treats as generated and therefore skips entirely).
+- **Prose that steers an agent working in this repo**: `.claude/skills/**`,
+  `.cursor/rules/**`. Executable instructions, not docs.
 
 ### Low Risk
 
 - Test files (`**/*.test.ts`) and eval corpus fixtures
   (`workflows/review/eval/corpus/**`).
+- **Repo-local dev wiring**: `config/` (vitest setup), `types/` (ambient `.d.ts`
+  shims), `.eslintrc.js`, `.prettierrc.js`, `pnpm-workspace.yaml`,
+  `vitest.config.ts`. None of it ships and none of it runs in another repo.
 - Internal refactors with test coverage; logging/output-formatting tweaks in
   utils.
 
