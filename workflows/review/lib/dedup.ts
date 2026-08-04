@@ -23,6 +23,12 @@
  *    share. This module verifies that assertion and owns every merge rule; the
  *    model contributes identity only.
  *
+ * They run in that ORDER, and {@link dedupeClaims} explains why at length: tier
+ * 1 settles completely, and tier 2 only ever merges the comments it left
+ * standing. That is the whole of what makes tier 2 additive — no per-member
+ * check can promise it — and it is why a run with the clusterer can never post
+ * more comments than the same run without it.
+ *
  * Why a second tier at all — the limit of tier 1, measured. Run 30587343777
  * (webapp#41204, a FIRST review at `depth: full`, so no re-review artifact)
  * had four sources flag one wrong doc comment (`// Keeps at most 10 samples
@@ -652,11 +658,32 @@ const survivorFirst = (
 
 /**
  * Merge cross-source duplicates, preserving claim order: the similarity tier
- * plus, when the clusterer ran, the defect clusters it proposed (verified
- * here, never trusted). Non-anchored claims and everything neither tier
- * identifies pass through untouched; when in doubt, don't merge (a false merge
- * silently drops a reviewer's distinct finding, a missed merge only costs a
- * duplicate comment).
+ * FIRST and on its own, then the defect clusters the clusterer proposed
+ * (verified here, never trusted) over whatever tier 1 left standing.
+ * Non-anchored claims and everything neither tier identifies pass through
+ * untouched; when in doubt, don't merge (a false merge silently drops a
+ * reviewer's distinct finding, a missed merge only costs a duplicate comment).
+ *
+ * The pass ORDER is the guarantee, not an implementation detail. Tier 2 may add
+ * merges and must never subtract them, and that only holds by construction if
+ * tier 1's groups are settled before a model-proposed cluster can touch them.
+ * A single union-find over both tiers cannot promise it however carefully each
+ * member is screened: unioning even a perfectly legal cluster member changes
+ * who wins the group's survivor election, and the star guard below then orphans
+ * the tier-1 duplicates that were mergeable against the OLD survivor and not
+ * against the new one. Concretely, with `b`, `c` and `d` all tier-1 mergeable
+ * against `a` and a higher-confidence `x` clustered with `b` alone, the merged
+ * group elects `x`, absorbs `b`, and leaves `a`, `c` and `d` posting three
+ * comments where tier 1 alone posted one.
+ *
+ * So: tier 1 runs to completion, and what it leaves standing — each surviving
+ * comment, plus every claim it declined to fold in — is the only thing tier 2
+ * gets to see. A cluster member tier 1 already absorbed is read at the comment
+ * it now posts under (its head), and a head absorbed by tier 2 carries its own
+ * tier-1 copies along, because this pass merges COMMENTS and that comment
+ * already speaks for them. A cluster whose members tier 1 has already collapsed
+ * into one head therefore merges nothing and rejects nothing: it asserted an
+ * identity the text floors had reached first.
  *
  * `clusterRejections` is the tier-2 audit trail (see {@link ClusterRejection});
  * it is empty both when the clusterer proposed nothing and when everything it
@@ -676,9 +703,14 @@ export const dedupeClaims = (
     );
     const clusterRejections = [...rejections];
 
-    // Union-find over pairwise-mergeable claims, then over each proposed
-    // cluster's members. Union is membership only: what actually collapses is
-    // decided per member against the group's survivor, below.
+    /** Claim index -> the claim whose comment it posts under after tier 1. */
+    const head = claims.map((_, index) => index);
+    /** Survivor index -> the copies folded into it, with the tier that did it. */
+    const absorbed = new Map<number, {index: number; via?: "clusterer"}[]>();
+    /** Survivor index -> the clusterer's grounding evidence, when tier 2 fired. */
+    const groundedIn = new Map<number, string>();
+
+    // ---- Tier 1: union-find over pairwise-mergeable claims.
     const parent = claims.map((_, index) => index);
     const find = (index: number): number => {
         while (parent[index] !== index) {
@@ -694,24 +726,11 @@ export const dedupeClaims = (
             }
         }
     }
-    const clusterAnchor = new Map<number, number>();
-    for (const [index, ordinal] of clusterOf) {
-        const anchor = clusterAnchor.get(ordinal);
-        if (anchor === undefined) {
-            clusterAnchor.set(ordinal, index);
-        } else {
-            parent[find(index)] = find(anchor);
-        }
-    }
     const groups = new Map<number, number[]>();
     claims.forEach((_, index) => {
         const root = find(index);
         groups.set(root, [...(groups.get(root) ?? []), index]);
     });
-
-    const drop = new Set<number>();
-    const replacement = new Map<number, Claim>();
-    const merges: ClaimMerge[] = [];
     for (const group of groups.values()) {
         if (group.length < 2) {
             continue;
@@ -719,88 +738,134 @@ export const dedupeClaims = (
         const survivorIndex = group.reduce((best, index) =>
             survivorFirst(best, index, claims),
         );
-        const survivor = claims[survivorIndex];
-        // The group's cluster evidence (lowest ordinal present, so the choice
-        // is deterministic when tier 1 has bridged two clusters). Tokenized
-        // once: an evidence string naming no code element grounds nothing, and
-        // that check is what makes an unverifiable identity claim inert rather
-        // than authoritative.
-        const ordinals = group
-            .map((index) => clusterOf.get(index))
-            .filter((ordinal): ordinal is number => ordinal !== undefined);
-        const groupEvidence =
-            ordinals.length === 0 ? undefined : evidence[Math.min(...ordinals)];
-        const evidenceTokens =
-            groupEvidence === undefined
-                ? undefined
-                : salientTokens(groupEvidence);
-        const clusterUsable =
-            evidenceTokens !== undefined &&
-            evidenceTokens.size > 0 &&
-            sharesSalientToken(evidenceTokens, survivor);
         // Star guard: only a member {@link mergeable} against the survivor
-        // DIRECTLY merges on tier 1. Union-find alone chains A~B~C through a
-        // bridging claim that bundles two defects (a test-adequacy finding
-        // naming both a missing test and an unbounded read links the two
-        // distinct correctness findings), and collapsing the chain would
-        // silently drop a distinct finding; with no line window bounding
-        // groups, a bridge can span a whole file. Chain-only members stay
-        // their own claims. Both recorded trial merges are unaffected: run
-        // 29897276810's four-way group is pairwise-complete and run
-        // 29943085279's is a direct pair.
-        //
-        // The full pairwise predicate, not the text floor alone: a group can
-        // now contain a member tier 1 never proposed (a cluster unions on the
-        // model's word, which {@link verifiableClusters} does not screen for
-        // path or source), and a cross-path or same-source member whose prose
-        // happens to clear the floor must not slip in through this branch and
-        // be recorded as `via: "similarity"`. It falls through to the tier-2
-        // rules below, which reject it by name.
-        //
-        // A cluster member takes the tier-2 path instead: it did not clear the
-        // floor (that is why the clusterer exists), so it merges on the
-        // verified rules alone. The evidence check runs against THIS survivor,
-        // so a group tier 1 has since reshaped is re-verified, not grandfathered.
-        const viaCluster = new Set<number>();
-        const others = group.filter((index) => {
-            if (index === survivorIndex) {
-                return false;
-            }
-            if (mergeable(survivor, claims[index])) {
-                return true;
-            }
-            if (clusterOf.get(index) === undefined) {
-                return false;
-            }
-            if (!clusterUsable) {
-                clusterRejections.push({
-                    id: claims[index].id,
-                    reason: "ungrounded",
-                });
-                return false;
-            }
-            const rejection = clusterMemberRejection(
-                survivor,
-                claims[index],
-                evidenceTokens as ReadonlySet<string>,
-            );
-            if (rejection !== undefined) {
-                clusterRejections.push({
-                    id: claims[index].id,
-                    reason: rejection,
-                });
-                return false;
-            }
-            viaCluster.add(index);
-            return true;
-        });
-        if (others.length === 0) {
+        // merges. Union-find alone chains A~B~C through a bridging claim that
+        // bundles two defects (a test-adequacy finding naming both a missing
+        // test and an unbounded read links the two distinct correctness
+        // findings), and collapsing the chain would silently drop a distinct
+        // finding; with no line window bounding groups, a bridge can span a
+        // whole file. Chain-only members stay their own claims. Both recorded
+        // trial merges are unaffected: run 29897276810's four-way group is
+        // pairwise-complete and run 29943085279's is a direct pair.
+        const merged = group.filter(
+            (index) =>
+                index !== survivorIndex &&
+                mergeable(claims[survivorIndex], claims[index]),
+        );
+        if (merged.length === 0) {
             continue;
         }
-        for (const index of others) {
+        for (const index of merged) {
+            head[index] = survivorIndex;
+        }
+        absorbed.set(
+            survivorIndex,
+            merged.map((index) => ({index})),
+        );
+    }
+
+    // ---- Tier 2: the verified clusters, over tier 1's heads.
+    //
+    // Each named member is read at its head, and a head takes the LOWEST
+    // ordinal that reaches it, so a head is a candidate in exactly one cluster
+    // however tier 1 has reshaped things and nothing can be absorbed twice.
+    // Rejections stay keyed to the ids the clusterer actually named.
+    const clusterHead = new Map<number, number>();
+    const namedByHead = new Map<number, string[]>();
+    for (const [index, ordinal] of clusterOf) {
+        const owner = head[index];
+        const seen = clusterHead.get(owner);
+        clusterHead.set(
+            owner,
+            seen === undefined ? ordinal : Math.min(seen, ordinal),
+        );
+        namedByHead.set(owner, [
+            ...(namedByHead.get(owner) ?? []),
+            claims[index].id,
+        ]);
+    }
+    const headsByOrdinal = new Map<number, number[]>();
+    for (const [owner, ordinal] of clusterHead) {
+        headsByOrdinal.set(ordinal, [
+            ...(headsByOrdinal.get(ordinal) ?? []),
+            owner,
+        ]);
+    }
+    for (const ordinal of [...headsByOrdinal.keys()].sort((a, b) => a - b)) {
+        const heads = (headsByOrdinal.get(ordinal) as number[]).sort(
+            (a, b) => a - b,
+        );
+        if (heads.length < 2) {
+            continue;
+        }
+        const survivorIndex = heads.reduce((best, index) =>
+            survivorFirst(best, index, claims),
+        );
+        const survivor = claims[survivorIndex];
+        // An evidence string naming no code element grounds nothing, and the
+        // survivor must name the element too: tier 1 can have elected a comment
+        // the proposal never saw, and absorbing a member into an unrelated
+        // comment is the failure mode this check exists to catch.
+        const groupEvidence = evidence[ordinal];
+        const evidenceTokens = salientTokens(groupEvidence);
+        const usable =
+            evidenceTokens.size > 0 &&
+            sharesSalientToken(evidenceTokens, survivor);
+        const into = absorbed.get(survivorIndex) ?? [];
+        for (const index of heads) {
+            if (index === survivorIndex) {
+                continue;
+            }
+            // The structural rules re-run here, not only in the parse-time
+            // screen: they were checked against the proposal's own anchor, and
+            // the head that survived tier 1 need not be the claim the model
+            // named.
+            const reason = !usable
+                ? ("ungrounded" as const)
+                : clusterMemberRejection(
+                      survivor,
+                      claims[index],
+                      evidenceTokens,
+                  );
+            if (reason !== undefined) {
+                for (const id of namedByHead.get(index) ?? []) {
+                    clusterRejections.push({id, reason});
+                }
+                continue;
+            }
+            // The head comes over with everything tier 1 folded into it: this
+            // pass merges COMMENTS, and that comment already speaks for its own
+            // absorbed copies. Dropping them here instead would leave them
+            // posting on their own — tier 2 subtracting a tier-1 merge.
+            into.push({index, via: "clusterer"});
+            into.push(...(absorbed.get(index) ?? []));
+            absorbed.delete(index);
+            groundedIn.set(survivorIndex, groupEvidence);
+        }
+        if (into.length > 0) {
+            absorbed.set(survivorIndex, into);
+        }
+    }
+
+    // ---- Render one merge per surviving comment, in claim order.
+    const drop = new Set<number>();
+    const replacement = new Map<number, Claim>();
+    const merges: ClaimMerge[] = [];
+    const entries = [...absorbed.entries()].filter(
+        ([, list]) => list.length > 0,
+    );
+    entries.sort(
+        ([a, listA], [b, listB]) =>
+            Math.min(a, ...listA.map((copy) => copy.index)) -
+            Math.min(b, ...listB.map((copy) => copy.index)),
+    );
+    for (const [survivorIndex, list] of entries) {
+        const survivor = claims[survivorIndex];
+        const others = [...list].sort((a, b) => a.index - b.index);
+        for (const {index} of others) {
             drop.add(index);
         }
-        const otherClaims = others.map((index) => claims[index]);
+        const otherClaims = others.map(({index}) => claims[index]);
         // One entry per other source, first copy wins, naming that copy's
         // anchor when it is not the survivor's. With tier 2 merging across
         // anchors, "also flagged by test-adequacy" alone would hide that the
@@ -821,7 +886,7 @@ export const dedupeClaims = (
         // the case where that evidence is missing (the floor is what it could
         // not clear), so there the quote is the only thing carrying the ask.
         const sources: {source: string; line?: number; subject?: string}[] = [];
-        for (const index of others) {
+        for (const {index, via} of others) {
             const claim = claims[index];
             if (
                 claim.source === survivor.source ||
@@ -834,7 +899,7 @@ export const dedupeClaims = (
                 ...(claim.line !== undefined && claim.line !== survivor.line
                     ? {line: claim.line}
                     : {}),
-                ...(viaCluster.has(index)
+                ...(via === "clusterer"
                     ? {subject: claim.subject.replace(/\s+/g, " ").trim()}
                     : {}),
             });
@@ -879,8 +944,8 @@ export const dedupeClaims = (
                 ? {author_dispute: adoptedDispute}
                 : {}),
         });
-        const clusterCount = others.filter((index) =>
-            viaCluster.has(index),
+        const clusterCount = others.filter(
+            (copy) => copy.via === "clusterer",
         ).length;
         const via: MergeVia =
             clusterCount === 0
@@ -888,9 +953,10 @@ export const dedupeClaims = (
                 : clusterCount === others.length
                 ? "clusterer"
                 : "both";
+        const groupEvidence = groundedIn.get(survivorIndex);
         merges.push({
             survivor: survivor.id,
-            merged: others.map((index) => {
+            merged: others.map(({index, via: copyVia}) => {
                 const claim = claims[index];
                 return {
                     id: claim.id,
@@ -899,17 +965,13 @@ export const dedupeClaims = (
                     ...(claim.line !== undefined && claim.line !== survivor.line
                         ? {line: claim.line}
                         : {}),
-                    ...(viaCluster.has(index)
-                        ? {via: "clusterer" as const}
-                        : {}),
+                    ...(copyVia === "clusterer" ? {via: copyVia} : {}),
                 };
             }),
             path: survivor.path as string,
             line: survivor.line as number,
             via,
-            ...(via === "similarity" || groupEvidence === undefined
-                ? {}
-                : {evidence: groupEvidence}),
+            ...(groupEvidence === undefined ? {} : {evidence: groupEvidence}),
         });
     }
     return {

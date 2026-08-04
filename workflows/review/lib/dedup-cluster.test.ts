@@ -526,6 +526,125 @@ describe("dedupeClaims with model-proposed clusters", () => {
         ]);
     });
 
+    it("never lets an UNGROUNDED proposal cost a merge tier 1 would have made", () => {
+        // The same floor, reached by a member the structural screen cannot
+        // catch: same path, distinct source, non-blocking — legal in every
+        // respect except that the evidence grounds nothing. Screening structure
+        // before the union was not enough, because grounding is only knowable
+        // against the survivor and the survivor is only known after the union;
+        // the guarantee comes from tier 1 being settled FIRST instead.
+        const [note] = wrongCapClaims();
+        const copy = (over: Partial<Claim> & {id: string; source: string}) =>
+            claim({...note, line: 8, ...over});
+        const {claims, merges, clusterRejections} = dedupeClaims(
+            [
+                // Out-ranks both on confidence, and worded too thinly for the
+                // text floor, so it is a cluster member and nothing else.
+                claim({
+                    ...note,
+                    id: "holistic-1",
+                    source: "holistic",
+                    line: 8,
+                    confidence: 0.9,
+                    subject: "the per-key cap disagrees with `maxSamples`",
+                    discussion: "the per-key cap disagrees with `maxSamples`",
+                    failure_scenario: "the cap disagrees with `maxSamples`",
+                }),
+                copy({id: "documentation-1", source: "documentation"}),
+                copy({id: "conventions-1", source: "conventions"}),
+            ],
+            [
+                // Names no code element, so it can ground nothing.
+                {
+                    evidence: "these are all about comments",
+                    ids: ["holistic-1", "documentation-1"],
+                },
+            ],
+        );
+        expect(claims.map((c) => c.id)).toEqual([
+            "holistic-1",
+            "documentation-1",
+        ]);
+        expect(merges).toEqual([
+            {
+                survivor: "documentation-1",
+                merged: [
+                    {
+                        id: "conventions-1",
+                        source: "conventions",
+                        label: "note (non-blocking)",
+                    },
+                ],
+                path: "dev/af19_trial/window.go",
+                line: 8,
+                via: "similarity",
+            },
+        ]);
+        expect(clusterRejections).toEqual([
+            {id: "documentation-1", reason: "ungrounded"},
+        ]);
+    });
+
+    it("carries a tier-1 group whole when tier 2 absorbs its survivor", () => {
+        // The subtraction shape no per-member screen can reach: every member
+        // here is legal and grounded. Tier 1 folds three copies into one
+        // comment; the clusterer then names ONE of them beside a
+        // higher-ranked claim of its own. Unioning first would elect that
+        // claim, absorb the single member named, and orphan the other two into
+        // separate comments — three where tier 1 alone posted one. Reading the
+        // named member at the comment it now posts under is what makes tier 2
+        // additive: the head comes over with everything folded into it.
+        const [note] = wrongCapClaims();
+        const copy = (over: Partial<Claim> & {id: string; source: string}) =>
+            claim({...note, line: 8, ...over});
+        const {claims, merges} = dedupeClaims(
+            [
+                copy({id: "documentation-1", source: "documentation"}),
+                copy({id: "conventions-1", source: "conventions"}),
+                copy({id: "completeness-1", source: "completeness"}),
+                claim({
+                    ...note,
+                    id: "holistic-1",
+                    source: "holistic",
+                    line: 8,
+                    confidence: 0.9,
+                    subject: "the per-key cap disagrees with `maxSamples`",
+                    discussion: "the per-key cap disagrees with `maxSamples`",
+                    failure_scenario: "the cap disagrees with `maxSamples`",
+                }),
+            ],
+            [
+                {
+                    evidence: "`maxSamples`",
+                    ids: ["holistic-1", "conventions-1"],
+                },
+            ],
+        );
+        expect(claims.map((c) => c.id)).toEqual(["holistic-1"]);
+        expect(merges).toHaveLength(1);
+        expect(merges[0].via).toBe("both");
+        // The tier-1 survivor is the copy tier 2 absorbed; the two it had
+        // already folded in come along, still credited to the text floor.
+        expect(merges[0].merged).toEqual([
+            {
+                id: "documentation-1",
+                source: "documentation",
+                label: "note (non-blocking)",
+                via: "clusterer",
+            },
+            {
+                id: "conventions-1",
+                source: "conventions",
+                label: "note (non-blocking)",
+            },
+            {
+                id: "completeness-1",
+                source: "completeness",
+                label: "note (non-blocking)",
+            },
+        ]);
+    });
+
     it("refuses a cluster whose SURVIVOR does not name the shared evidence", () => {
         // The grounding check runs against both ends, and the survivor end has
         // no other fixture: everywhere else the survivor is a cluster member

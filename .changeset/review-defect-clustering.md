@@ -82,13 +82,19 @@ arm delta prices the clusterer alone and a false merge shows up as recall loss.
 The report gains a "Cross-source claims merged (of candidates)" row with tier 2's
 share, its dollars and wall-clock, and per-case dedup counts.
 
-Tier 2 can add merges and never subtract them, which the structural rules now
-enforce before any membership is unioned rather than only afterward: an
-unverifiable proposal that names a cross-path claim used to pull it into the
-group, where it could out-rank the real survivor and collapse a merge tier 1
-would have made on its own, recorded in neither `merges` nor the rejection list.
-The per-member re-check against the elected survivor stays, since tier-1 bridging
-can still elect a claim the proposal never named.
+Tier 2 can add merges and never subtract them, and that comes from the ORDER the
+tiers run in rather than from any check on a proposal. Tier 1 settles completely,
+and tier 2 then merges only the comments it left standing; a cluster member tier
+1 has already absorbed is read at the comment it now posts under, and a comment
+tier 2 absorbs carries its own tier-1 copies along. Screening each proposed
+member before it was unioned was not enough, because a member can be legal in
+every respect and still displace the survivor of a tier-1 group it was clustered
+into, orphaning that group's other copies: with three copies folded into one
+comment and a higher-confidence claim clustered with just one of them, the old
+single-pass merge posted three comments where tier 1 alone posted one. The
+structural pre-screen stays for what it does do (an illegal member cannot
+out-rank the legal ones and take a good proposal down with it), as does the
+per-member re-check against the elected survivor.
 
 `dispatch.ts` was at its 1000-line cap again, so the clustering step lands in
 `dispatch-cluster.ts` (dispatch, contract parse, telemetry) rather than raising

@@ -15,16 +15,23 @@
  *
  * Verification runs in TWO passes, and the split matters:
  *
- * 1. {@link verifiableClusters}, before any union: id resolution, anchors, and
- *    the STRUCTURAL rules (shared path, distinct sources, at most one blocking
- *    member). A proposal that reaches the union with members tier 2 could never
- *    absorb does not merely fail to merge — it can change which claim becomes
- *    the group's survivor and thereby suppress a merge tier 1 would have made
- *    on its own, which is the one thing this tier must never do.
+ * 1. {@link verifiableClusters}, at parse time: id resolution, anchors, one
+ *    cluster per claim, and the STRUCTURAL rules (shared path, distinct
+ *    sources, at most one blocking member) against the proposal's own anchor.
+ *    This is what keeps an illegal member from out-ranking a legal one inside
+ *    the proposal and taking the merge down with it.
  * 2. {@link clusterMemberRejection}, per member against the group's ACTUAL
- *    survivor, which tier-1 bridging can change after the proposal was made.
- *    Re-checking there is what keeps the guarantee honest; the pre-screen
- *    narrows what can be unioned, it does not replace the final check.
+ *    survivor, which is a claim tier 1 may have elected after the proposal was
+ *    made. Re-checking there is what keeps the guarantee honest; the parse-time
+ *    screen narrows what may be proposed, it does not replace the final check.
+ *
+ * Neither pass is what keeps tier 2 from SUBTRACTING a merge — from leaving a
+ * run with more comments than tier 1 alone would have posted. No per-member
+ * screen can: a member can be legal in every respect and still displace the
+ * survivor of a tier-1 group it was clustered into, orphaning that group's
+ * other copies. That guarantee lives in `dedup.ts`, in the order the tiers run
+ * (tier 1 settles first, tier 2 sees only what it left standing), and its
+ * reasoning is written down there.
  */
 
 import {type Claim, type ProposedCluster} from "./dispatch-contracts";
@@ -34,7 +41,7 @@ import {isBlockingLabel} from "./render-comment";
  * One member a proposed cluster named that did NOT merge, with the rule that
  * rejected it. Recorded per run because an empty rejection list and an empty
  * proposal list mean opposite things, and the module has already been burned
- * by that ambiguity once (see `dedup-threads.ts`'s `stagedThreadShapeFailure`):
+ * by that ambiguity once (see `dedup.ts`'s `stagedThreadShapeFailure`):
  * a clusterer naming ids that do not exist is a prompt or staging failure, and
  * it must not read as "no duplicates found".
  */
@@ -161,17 +168,15 @@ export const clusterMemberRejection = (
     (sharesSalientToken(evidenceTokens, member) ? undefined : "ungrounded");
 
 /**
- * Hold one proposal's members to the structural rules BEFORE they are unioned.
+ * Hold one proposal's members to the structural rules at parse time.
  *
  * This is not the survivor election — that happens after tier 1 has had its
  * say, and {@link clusterMemberRejection} re-runs against whatever claim wins
- * it. It is the narrower guarantee that an unverifiable proposal cannot RESHAPE
- * a group tier 1 owns: unioning a cross-path or same-source member pulls it
- * into the group, where it can out-rank the real survivor, and the merge tier 1
- * would have made on its own then collapses to nothing — invisible in both
- * `merges` and `clusterRejections`. Concretely, with `Y+Z` a genuine tier-1
- * pair on one path and a cross-path `X` out-ranking them, an unscreened
- * `{ids: ["x", "y"]}` used to drop the `Y+Z` merge entirely.
+ * it. It is the narrower guarantee that a member tier 2 could never absorb
+ * cannot cost the merge the proposal was RIGHT about: a cross-path or
+ * same-source member left in the proposal can out-rank the legal members and
+ * become the group's survivor, at which point they are rejected against it and
+ * the whole proposal comes to nothing.
  *
  * The anchor is the proposal's own blocking member if it has one, else the
  * first member the id screen kept (the model's output order, the tiebreak the
@@ -188,7 +193,7 @@ export const clusterMemberRejection = (
  *
  * The rules are checked against the anchor only, exactly as
  * {@link clusterMemberRejection} checks them against the survivor — this is a
- * filter on what may be unioned, not a stricter tier. Two copies from ONE
+ * filter on what may be proposed, not a stricter tier. Two copies from ONE
  * source can therefore still ride into a cluster anchored on a third; that is
  * the pre-existing shape of the source rule in both tiers, unchanged here.
  */
