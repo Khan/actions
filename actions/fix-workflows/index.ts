@@ -178,6 +178,67 @@ export function stepIgnoresSetup(step: YAMLMap): boolean {
 // File discovery
 // ---------------------------------------------------------------------------
 
+/**
+ * Workflow files this action must not touch because a generator owns them: the
+ * fix would be overwritten on the next `gh aw compile`, and worse, a maintainer
+ * who follows our own "this file needs updating" hint desyncs the committed file
+ * from its compiler.
+ *
+ * `*.lock.yml` is the compiled agentic workflow; `agentics-maintenance.yml` is
+ * gh-aw's scheduled housekeeping workflow, which is regenerated unconditionally
+ * and (unhelpfully) is not named `*.lock.yml`.
+ *
+ * Matching by name rather than by content is deliberate, and the cheap
+ * content check is not the upgrade it looks like. Both files gh-aw emits do
+ * carry a `DO NOT EDIT.` marker in their first line, so the *fixer* could
+ * sniff for it and stop needing this list. The oxfmt step cannot: it selects
+ * files by glob, and a glob cannot read a header. Teaching only the fixer to
+ * sniff would put the two back out of step -- a marked-but-unlisted file would
+ * be skipped by the fixer and still reformatted by the formatter, which is
+ * exactly the bug this list exists to close. A content rule has to arrive at
+ * both sites at once (the formatter taking an explicit file list computed here
+ * instead of a glob), so it is left for when a third generated workflow makes
+ * that refactor worth it.
+ */
+export const GENERATED_WORKFLOWS = {
+    suffixes: [".lock.yml"],
+    names: ["agentics-maintenance.yml"],
+};
+
+/** Whether a `.github/workflows` entry is generator-owned (see above). */
+export function isGeneratedWorkflow(name: string): boolean {
+    return (
+        GENERATED_WORKFLOWS.suffixes.some((suffix) => name.endsWith(suffix)) ||
+        GENERATED_WORKFLOWS.names.includes(name)
+    );
+}
+
+/**
+ * `GENERATED_WORKFLOWS` as negated oxfmt globs, for the formatting step that
+ * runs after the fixer.
+ *
+ * The formatter selects files by glob rather than by `isGeneratedWorkflow`, so
+ * the skip set has to be expressible as globs too; deriving them here keeps
+ * cli.ts from carrying a second copy of the set. action.yml still spells them
+ * out (a composite action's bash step cannot import this module), and
+ * generated-workflows.test.ts asserts its literals against this function so
+ * that copy cannot drift.
+ *
+ * The `**` mirrors the recursive positive glob both call sites pass. It also
+ * matches files directly in `.github/workflows`, so one pattern covers both
+ * depths (verified against the pinned oxfmt@0.44.0).
+ */
+export function generatedWorkflowSkipGlobs(): string[] {
+    return [
+        ...GENERATED_WORKFLOWS.suffixes.map(
+            (suffix) => `!.github/workflows/**/*${suffix}`,
+        ),
+        ...GENERATED_WORKFLOWS.names.map(
+            (name) => `!.github/workflows/**/${name}`,
+        ),
+    ];
+}
+
 function getFilesToCheck(): string[] {
     const files: string[] = [];
 
@@ -186,7 +247,7 @@ function getFilesToCheck(): string[] {
         if (
             entry.isFile() &&
             (entry.name.endsWith(".yml") || entry.name.endsWith(".yaml")) &&
-            !entry.name.endsWith(".lock.yml")
+            !isGeneratedWorkflow(entry.name)
         ) {
             files.push(path.join(".github", "workflows", entry.name));
         }
