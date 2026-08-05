@@ -214,8 +214,12 @@ export type RunBudget = {
 };
 
 export type RouterConfig = {
-    /** linguist-generated globs (from `.gitattributes`). */
-    generatedPatterns: string[];
+    /**
+     * `linguist-generated` rules from `.gitattributes`, in file order. Order is
+     * load-bearing: {@link isGenerated} resolves per path by last match, so a
+     * later negation un-marks an earlier glob.
+     */
+    generatedRules: GeneratedRule[];
     /**
      * path->lens rules, from the consumer's `ROUTING` file
      * ({@link parseRoutingConfig}). No default: absent config means no
@@ -303,13 +307,37 @@ export type RouteInput = {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Extract the linguist-generated globs from `.gitattributes` content. A line
- * assigns attributes to a pattern: `<pattern> attr1 attr2 ...`. We collect the
- * pattern when it sets `linguist-generated` truthy, and honour explicit
- * negation (`-linguist-generated` or `linguist-generated=false`).
+ * One `.gitattributes` line's verdict on `linguist-generated` for the paths its
+ * glob matches. Negations are kept rather than dropped, because git resolves the
+ * attribute per path by LAST matching line, so a later `=false` has to be able to
+ * override an earlier `=true` — see {@link isGenerated}.
  */
-export const parseGitattributesGenerated = (content: string): string[] => {
-    const patterns: string[] = [];
+export type GeneratedRule = {
+    pattern: string;
+    generated: boolean;
+};
+
+/**
+ * Extract the `linguist-generated` rules from `.gitattributes` content, in file
+ * order. A line assigns attributes to a pattern: `<pattern> attr1 attr2 ...`; a
+ * line that mentions the attribute either way becomes a rule, set by
+ * `linguist-generated` / `linguist-generated=true` and cleared by
+ * `-linguist-generated` / `linguist-generated=false` / `!linguist-generated`.
+ * Lines that never mention it are not rules at all and are skipped, so they
+ * cannot shadow a real one.
+ *
+ * Git has four attribute states, and all three of the non-set forms have to
+ * become rules so they can shadow an earlier broad `=true` glob by last match:
+ * `-attr` resolves to Unset, `attr=false` to the value `false`, and `!attr` to
+ * Unspecified. Unspecified is not the same as false in general (it is where
+ * Linguist falls back to its content heuristic), but this router has no content
+ * heuristic and treats an unmatched path as source, so Unspecified and false
+ * reach the same verdict here and share the branch below.
+ */
+export const parseGitattributesGenerated = (
+    content: string,
+): GeneratedRule[] => {
+    const rules: GeneratedRule[] = [];
     for (const rawLine of content.split(/\r?\n/)) {
         const line = rawLine.trim();
         if (line === "" || line.startsWith("#")) {
@@ -320,9 +348,8 @@ export const parseGitattributesGenerated = (content: string): string[] => {
         if (pattern === undefined) {
             continue;
         }
-        const attrs = tokens.slice(1);
-        let generated = false;
-        for (const attr of attrs) {
+        let generated: boolean | undefined;
+        for (const attr of tokens.slice(1)) {
             if (
                 attr === "linguist-generated" ||
                 attr === "linguist-generated=true"
@@ -330,16 +357,18 @@ export const parseGitattributesGenerated = (content: string): string[] => {
                 generated = true;
             } else if (
                 attr === "-linguist-generated" ||
-                attr === "linguist-generated=false"
+                attr === "linguist-generated=false" ||
+                // Unspecified; source as far as this router is concerned.
+                attr === "!linguist-generated"
             ) {
                 generated = false;
             }
         }
-        if (generated) {
-            patterns.push(pattern);
+        if (generated !== undefined) {
+            rules.push({pattern, generated});
         }
     }
-    return patterns;
+    return rules;
 };
 
 /**
@@ -392,11 +421,29 @@ export const parseReviewers = (content: string): ReviewerRule[] => {
 /* Per-file decisions                                                        */
 /* -------------------------------------------------------------------------- */
 
-/** Whether `path` matches any linguist-generated glob. */
+/**
+ * Whether `path` is linguist-generated, resolved the way git resolves an
+ * attribute: the LAST matching rule wins, so a `linguist-generated=false` line
+ * placed after a broad `=true` glob un-marks the paths it covers. A path no rule
+ * matches is source.
+ *
+ * Scanning in reverse rather than collecting only the `=true` patterns is the
+ * whole point: a repo that marks `.claude/**` generated and then un-marks
+ * `.claude/skills/**` means its skills to be reviewed, and the earlier
+ * any-match-wins reading silently skipped them.
+ */
 export const isGenerated = (
     path: string,
-    generatedPatterns: string[],
-): boolean => generatedPatterns.some((pattern) => matchesGlob(path, pattern));
+    generatedRules: readonly GeneratedRule[],
+): boolean => {
+    for (let i = generatedRules.length - 1; i >= 0; i--) {
+        const rule = generatedRules[i];
+        if (matchesGlob(path, rule.pattern)) {
+            return rule.generated;
+        }
+    }
+    return false;
+};
 
 /** Specialist lenses for one path (union of all matching rules, deduped). */
 const lensesForFile = (path: string, lensRules: LensRule[]): Lens[] => {
@@ -539,7 +586,7 @@ export const route = (
     let hasSource = false;
 
     for (const file of input.files) {
-        const generated = isGenerated(file.path, config.generatedPatterns);
+        const generated = isGenerated(file.path, config.generatedRules);
 
         if (generated) {
             // Generated files: contents are not analysed, so no lenses, no team
@@ -778,7 +825,14 @@ const ROUTING_OUT = `${REVIEW_DIR}/routing.json`;
 /** Optional second-pass input: {path: tier} answers for pending questions. */
 const RESOLVED_TIERS_PATH = `${REVIEW_DIR}/resolved-tiers.json`;
 const GITATTRIBUTES_PATH = ".gitattributes";
-const REVIEWERS_PATH = ".github/REVIEWERS";
+/**
+ * The consumer's team-ownership map, and the router's ONLY source of it: with no
+ * such file both `teams.owners` and the ranked `fallbackTeams` come out empty, so
+ * the prompt's Step 8 has nobody to request no matter what `add-reviewer` allows.
+ * Exported because the config checker needs that same fact to tell an empty
+ * reviewer allowlist that is accurate from one that is broken.
+ */
+export const REVIEWERS_PATH = ".github/REVIEWERS";
 
 type FsLike = {
     readFileSync: (p: string, enc: "utf8") => string;
@@ -822,7 +876,7 @@ export const runCli = (
         };
     });
 
-    const generatedPatterns = fs.existsSync(repoPath(GITATTRIBUTES_PATH))
+    const generatedRules = fs.existsSync(repoPath(GITATTRIBUTES_PATH))
         ? parseGitattributesGenerated(readText(repoPath(GITATTRIBUTES_PATH)))
         : [];
     const reviewerRules = fs.existsSync(repoPath(REVIEWERS_PATH))
@@ -889,7 +943,7 @@ export const runCli = (
     }
 
     const result = route(input, {
-        generatedPatterns,
+        generatedRules,
         reviewerRules,
         lensRules: routingFileConfig.lensRules,
         riskRules: routingFileConfig.riskRules,
