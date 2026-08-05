@@ -18,7 +18,7 @@ import {
  */
 
 /** The smallest router config the clamp path needs; the tier is explicit. */
-const minimalConfig: RouterConfig = {generatedPatterns: []};
+const minimalConfig: RouterConfig = {generatedRules: []};
 
 /** In-memory fs seam, mirroring router.test.ts's helper. */
 const fakeFs = (inputs: Record<string, string>) => {

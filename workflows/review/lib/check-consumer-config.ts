@@ -615,12 +615,12 @@ export const checkConsumerConfig = (
 
     /* --- .gitattributes ---------------------------------------------------- */
 
-    const generatedPatterns = fs.existsSync(at(GITATTRIBUTES_PATH))
+    const generatedRules = fs.existsSync(at(GITATTRIBUTES_PATH))
         ? parseGitattributesGenerated(
               fs.readFileSync(at(GITATTRIBUTES_PATH), "utf8"),
           )
         : [];
-    if (!isGenerated(lockPath, generatedPatterns)) {
+    if (!isGenerated(lockPath, generatedRules)) {
         warn(
             "lock-not-marked-generated",
             `${lockPath} is not marked \`linguist-generated\` in ${GITATTRIBUTES_PATH}, so the reviewer line-reviews its own compiled output.`,
@@ -633,7 +633,7 @@ export const checkConsumerConfig = (
     // of compiler output line-reviewed. Installs predating gh-aw v0.83 lack the file.
     if (
         fs.existsSync(at(MAINTENANCE_WORKFLOW_PATH)) &&
-        !isGenerated(MAINTENANCE_WORKFLOW_PATH, generatedPatterns)
+        !isGenerated(MAINTENANCE_WORKFLOW_PATH, generatedRules)
     ) {
         warn(
             "maintenance-workflow-not-marked-generated",
@@ -667,7 +667,7 @@ export const checkConsumerConfig = (
     ];
     const selfRouting = route(
         {files: selfPaths.map((path) => ({path, status: "modified" as const}))},
-        {generatedPatterns, lensRules, riskRules},
+        {generatedRules, lensRules, riskRules},
     );
     const configFileTiers: Record<string, RiskTier> = {};
     for (const path of selfPaths) {
@@ -698,7 +698,7 @@ export const checkConsumerConfig = (
         }));
         const result: RoutingResult = route(
             {files},
-            {generatedPatterns, lensRules, riskRules},
+            {generatedRules, lensRules, riskRules},
         );
         const counts = emptyTierRecord(() => 0);
         const samples = emptyTierRecord<string[]>(() => []);
@@ -779,7 +779,7 @@ export const checkConsumerConfig = (
         const path = options.explainPath;
         const result = route(
             {files: [{path, status: "modified"}]},
-            {generatedPatterns, lensRules, riskRules},
+            {generatedRules, lensRules, riskRules},
         );
         const decision = result.perFile[0];
         explanation = {

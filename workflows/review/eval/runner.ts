@@ -350,7 +350,7 @@ export const runCase = (
 ): RunResult => {
     // 1. Deterministic routing over the changed files.
     const routerConfig: RouterConfig = {
-        generatedPatterns: [],
+        generatedRules: [],
         ...(corpusCase.routerConfig as Partial<RouterConfig>),
     };
     const routing = route({files: corpusCase.changedFiles}, routerConfig);
