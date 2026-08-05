@@ -47,11 +47,18 @@ import {
     type ClaimMerge,
     type ThreadSuppression,
 } from "./dedup";
+import {
+    clusteringRecord,
+    runClusterStep,
+    CLUSTERER,
+    type DispatchClustering,
+} from "./dispatch-cluster";
 import {annotateDiffLineNumbers, splitUnifiedDiff} from "./diff";
 import {
     applyScopeFilter,
     buildClaims,
     contractValidator,
+    parseClustererOutput,
     parseFinderOutput,
     parseJsonObject,
     parseValidatorOutput,
@@ -78,11 +85,13 @@ export {
     applyVerifications,
     buildClaims,
     contractValidator,
+    parseClustererOutput,
     parseFinderOutput,
     parseValidatorOutput,
     type Candidate,
     type Claim,
     type ContractKind,
+    type ProposedCluster,
     type Verification,
 } from "./dispatch-contracts";
 export {
@@ -92,6 +101,13 @@ export {
     type Roster,
     type RosterShed,
 } from "./dispatch-roster";
+export {
+    clusteringRecord,
+    runClusterStep,
+    CLUSTERER,
+    type ClusterStep,
+    type DispatchClustering,
+} from "./dispatch-cluster";
 export {
     loadAgents,
     parseAgentFile,
@@ -104,6 +120,7 @@ export {
     type ClaimMerge,
     type ThreadSuppression,
 } from "./dedup";
+export {type ClusterRejection} from "./dedup-cluster";
 
 /* -------------------------------------------------------------------------- */
 /* Seams                                                                      */
@@ -201,10 +218,6 @@ const RECONCILER = "thread-reconciler";
 const VALIDATOR = "claim-validator";
 
 /* -------------------------------------------------------------------------- */
-/* Agent definitions (.claude/agents/<name>.md)                               */
-/* -------------------------------------------------------------------------- */
-
-/* -------------------------------------------------------------------------- */
 /* The dispatch run                                                           */
 /* -------------------------------------------------------------------------- */
 
@@ -245,6 +258,15 @@ export type DispatchResult = {
     claims: Claim[];
     /** Cross-source duplicates merged before validation (#245). */
     merges: ClaimMerge[];
+    /**
+     * Dedup tier 2's audit block, present when the clusterer was dispatched
+     * (absent when there was nothing to cluster: fewer than two claims, or one
+     * source). `candidates` is the pre-merge claim count, so the run's merge
+     * rate reads off the artifact — the number to trust, since autofix later
+     * satisfies duplicate comments with one edit and hides the symptom on the
+     * PR itself.
+     */
+    clustering?: DispatchClustering;
     /**
      * Candidates dropped because an open bot thread already tracks the
      * defect (trial suggestion g). Blocking entries still floor the verdict
@@ -366,6 +388,8 @@ export const runDispatch = async (
             name,
             name === VALIDATOR
                 ? "validator"
+                : name === CLUSTERER
+                ? "clusterer"
                 : name === TRIAGE || name === RECONCILER
                 ? "json"
                 : lensNames.includes(name)
@@ -780,7 +804,30 @@ export const runDispatch = async (
     // Cross-source duplicate merge (#245), BEFORE validation so duplicate
     // claims are neither separately validated (the largest sub-agent cost
     // line) nor separately posted.
-    const deduped = dedupeClaims(buildClaims(scoped.kept));
+    //
+    // Tier 2 (the claim-clusterer) runs here, between the fan-out and
+    // validation, for the same reason: run 30587343777 paid to validate four
+    // copies of one wrong doc comment and posted all four. Its input is the
+    // pre-merge candidate set — the model sees what tier 1 would collapse
+    // anyway, which costs a few hundred tokens and keeps the merge decision in
+    // ONE place (dedup.ts folds both tiers into one group, so a survivor gains
+    // one "also flagged by" note rather than a stack of them).
+    const candidateClaims = buildClaims(scoped.kept);
+    const clusterStep = await runClusterStep(candidateClaims, {
+        dispatch: dispatchAgent,
+        parse: (name, output) =>
+            parseWithRetry(name, output, parseClustererOutput),
+        write: (content) =>
+            fs.writeFileSync(`${REVIEW_DIR}/candidates.json`, content),
+        // eslint-disable-next-line no-console
+        warn: (message) => console.error(message),
+    });
+    const deduped = dedupeClaims(candidateClaims, clusterStep.proposals);
+    const clustering = clusteringRecord(
+        clusterStep,
+        candidateClaims.length,
+        deduped,
+    );
     let claims = deduped.claims;
 
     // Open-thread suppression (trial suggestion g), also before validation:
@@ -882,6 +929,7 @@ export const runDispatch = async (
         noteLines,
         claims,
         merges: deduped.merges,
+        ...(clustering !== undefined ? {clustering} : {}),
         threadSuppressions: suppression.suppressed,
         ...(threadSuppressionUnavailable !== undefined
             ? {threadSuppressionUnavailable}

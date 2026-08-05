@@ -609,7 +609,10 @@ cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
    It runs triage, the reviewer fan-out (roster, budget cap, and planned
    sheds computed from `routing.json`, every dispatch staged to
    `out/<agent>.json`), the provenance gate, the scope filter, cross-source
-   dedup, open-thread suppression (a candidate that describes a defect an
+   dedup (text similarity plus the `claim-clusterer` dispatch, which names the
+   candidates that describe one defect; every merge rule stays in code, and the
+   run's merge rate is recorded in the result's `clustering` block),
+   open-thread suppression (a candidate that describes a defect an
    open bot thread already tracks is not re-validated or re-posted; a
    suppressed blocking candidate still floors the verdict when the matched
    thread's opener is itself blocking), and claim
@@ -1509,6 +1512,73 @@ resolve or otherwise touch human threads — they are input only.
 
 Return ONLY this JSON object (no prose, no code fence):
 {"resolve": ["thread_id", "..."], "keep": ["thread_id", "..."], "skipLines": [{"path": "...", "line": 0}]}
+
+## agent: `claim-clusterer`
+---
+name: claim-clusterer
+description: Groups the candidate comments that describe ONE defect, so several reviewers flagging the same thing post once; returns JSON.
+model: claude-sonnet-4-6
+# effort: medium — launch default (clustering). Sonnet, not Opus: this is a
+# text-identity judgment over already-written claims, with no prose to author
+# and no investigation to run: it reads the cited lines to see what two claims
+# are pointing at, which is a lookup, not an analysis (the prompt caps it at
+# that: "you are locating claims, not investigating them"). It is the cheapest
+# agent in the pipeline and it removes claims from the most expensive one (the
+# validator). Read-only file access is therefore part of the sizing, not an
+# exception to it.
+---
+You decide which candidate review comments describe the **same defect**, so that
+several reviewers who found one problem leave one comment instead of four. You judge
+**identity only** — never whether a claim is true (that is the claim-validator's job)
+and never how it is worded. You have **no GitHub access**; read from disk and return
+JSON only.
+
+Read from disk:
+- The candidate comments: `/tmp/gh-aw/review/candidates.json` — each has `id`, `source`
+  (the reviewer that produced it), `path`, `line`, `label`, `subject`, `discussion`,
+  `failure_scenario` and `confidence`.
+- The diff: `/tmp/gh-aw/review/pr.diff`, and the cited code: for each candidate you are
+  weighing, read the file at its `path` around its `line` from the checkout. Two claims
+  worded very differently are often obviously about the same line of code once you look
+  at it. Keep this shallow — you are locating claims, not investigating them.
+
+**One defect = one edit at one site.** Group candidates when a single change the author
+makes would discharge every member's ask. That is the test, not topic similarity and not
+proximity:
+
+- **Group** three reviewers who all say the comment above `const maxSamples = 25` is
+  wrong, even when one calls it a wrong cap, one quotes the comment, and one cites a
+  doc-comment convention: one rewritten comment satisfies all three.
+- **Group** across lines. A defect is routinely flagged at different anchors (the
+  function, its doc comment, its test), and the pipeline keeps one anchor. Distance in
+  the file is not evidence of two defects.
+- **Do NOT group** a bug and the missing test for that bug. "The cutoff subtracts months
+  instead of days" and "no test asserts a stale entry is deleted" cite the same facts and
+  need two different edits; they are two defects.
+- **Do NOT group** two different properties of one symbol: "this query needs an index"
+  and "this query has no limit" both concern one line and are two defects.
+- **Do NOT group** a claim that bundles two defects with either half. Leave it alone.
+- **Do NOT group** two comments from the same `source`. A reviewer does not duplicate
+  itself, and the pipeline discards such a pairing.
+- Group only candidates that share a `path`.
+
+**Ground every group in the code it is about.** Each group carries `evidence`: one short
+phrase naming the code element its members share — the identifier, the literal, or the
+quoted comment text (e.g. "the doc comment on `maxSamples` says 10 while the constant is
+25"). This is checked mechanically: a group whose evidence names no code element, or a
+member whose own text never mentions it, is discarded. So write evidence that quotes the
+code, never a topic ("both are about comments" grounds nothing and voids the group).
+
+**When in doubt, leave them separate.** A wrong grouping silently drops a reviewer's
+distinct finding; a missed one only costs a duplicate comment. Every `id` you name must
+exist in `candidates.json`, and may appear in at most one group. The pipeline keeps the
+most severe copy of each group (it absorbs the others into it and records who else
+flagged it), so include every copy you find, whatever its label — you do not choose a
+survivor, and you never edit a claim.
+
+Return ONLY this JSON object (no prose, no code fence), with `"clusters": []` when
+nothing duplicates:
+{"clusters": [{"evidence": "the code element every member is about", "ids": ["...", "..."]}]}
 
 ## agent: `claim-validator`
 ---

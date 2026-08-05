@@ -191,6 +191,7 @@ describe("dedupeClaims", () => {
                 ],
                 path: "services/ai-guide/memory/expiration.go",
                 line: 38,
+                via: "similarity",
             },
         ]);
     });
@@ -295,10 +296,12 @@ describe("dedupeClaims", () => {
                         id: "test-adequacy-1",
                         source: "test-adequacy",
                         label: "todo (blocking)",
+                        line: 40,
                     },
                 ],
                 path: "services/ai-guide/memory/expiration.go",
                 line: 15,
+                via: "similarity",
             },
         ]);
     });
@@ -352,8 +355,11 @@ describe("dedupeClaims", () => {
         expect(claims).toHaveLength(1);
         expect(claims[0].id).toBe("correctness-reviewer-3");
         expect(claims[0].label).toBe("todo (blocking)");
+        // The note names the other copy's anchor, since it is not the
+        // survivor's: an author reading a merge across 43 lines needs to know
+        // the second reviewer was looking somewhere else.
         expect(claims[0].discussion).toContain(
-            "Also flagged by skill-auditor (out-of-lane).",
+            "Also flagged by skill-auditor (out-of-lane) (at line 58).",
         );
         expect(merges).toEqual([
             {
@@ -363,10 +369,12 @@ describe("dedupeClaims", () => {
                         id: "skill-auditor-ool-2",
                         source: "skill-auditor (out-of-lane)",
                         label: "question (non-blocking)",
+                        line: 58,
                     },
                 ],
                 path: "services/ai-guide/memory/expiration_test.go",
                 line: 15,
+                via: "similarity",
             },
         ]);
     });
@@ -463,6 +471,7 @@ describe("dedupeClaims", () => {
                 ],
                 path: "services/ai-guide/memory/expiration.go",
                 line: 38,
+                via: "similarity",
             },
         ]);
     });

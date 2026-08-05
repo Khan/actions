@@ -27,6 +27,13 @@
  *    run with read-only tools and treat the unavailable cap as a denied
  *    budget (the prompt's own fallback: stop investigating, report what you
  *    have).
+ *
+ * Cross-source dedup is NOT on that list any more, and its absence used to be
+ * the load-bearing one: production has merged duplicate claims before validation
+ * since #245, this module never did, so every duplicate production suppressed
+ * still posted here and no report column could see a change to the merge rules.
+ * `live-dedup.ts`'s `dedupeLiveFindings` closes that, arm-keyed on the
+ * clusterer agent.
  */
 
 import {refusalFallbackFor} from "../lib/refusal-fallback";
@@ -41,6 +48,8 @@ import {
 import {isBlockingLabel, labelForFinding} from "../lib/render-comment";
 import {route, type RouterConfig} from "../lib/router";
 import {validateFinding, type Finding, type Lens} from "../lib/finding-schema";
+import {CLUSTERER} from "../lib/dispatch-cluster";
+import {dedupeLiveFindings, type LiveDedupReport} from "./live-dedup";
 import {
     VERIFICATION_STATES,
     type CaseVerification,
@@ -181,6 +190,15 @@ export type ProduceLiveResult = {
      * absent — the scorer then counts every prior thread unaccounted).
      */
     reconciliation?: LiveReconciliation;
+    /**
+     * What the cross-source merge did this run: the pre-merge candidate count,
+     * the merged groups, and the clusterer's proposal/rejection counts. The
+     * report reads its duplicate numbers from HERE rather than from the posted
+     * set, for the same reason production reads them from
+     * `dispatch-result.json`: downstream stages (and, in production, autofix)
+     * hide duplicate comments after the fact.
+     */
+    dedup: LiveDedupReport;
 };
 
 export type ProduceLiveOptions = {
@@ -327,8 +345,11 @@ export const resolveRuntimeImports = (
 /* Output parsing: the three sub-agent contracts -> RecordedFinding           */
 /* -------------------------------------------------------------------------- */
 
-/** A produced finding plus the claims-path extras the validator reads. */
-type LiveFinding = RecordedFinding & {skill?: string};
+/**
+ * A produced finding plus the claims-path extras the validator reads. Exported
+ * for `live-dedup.ts`, which rewrites a merge survivor's prose in this shape.
+ */
+export type LiveFinding = RecordedFinding & {skill?: string};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
@@ -827,6 +848,40 @@ export const produceLive = async (
         }
     }
 
+    // Cross-source dedup, before validation, exactly where production runs it.
+    // The merged set REPLACES the produced one from here on (the claims path,
+    // the validator's `knownIds`, and the returned findings all act on what
+    // production would post), so the collected array is rewritten in place
+    // rather than shadowed: a stray reference to the pre-merge set downstream
+    // would silently re-post the duplicates this stage just merged.
+    const {kept: dedupedFindings, dedup} = await dedupeLiveFindings(
+        findings,
+        agents.get(CLUSTERER),
+        {
+            dispatch: (agent, parse) =>
+                dispatchWithRetry(
+                    agent,
+                    resolvePrompt(agent),
+                    {
+                        name: agent.name,
+                        model: agent.model,
+                        cwd: staged.checkoutDir,
+                        maxTurns,
+                        timeoutMs,
+                    },
+                    runner,
+                    parse,
+                ),
+            write: (name, content) =>
+                fs.writeFileSync(`${staged.contextDir}/${name}`, content),
+        },
+    );
+    if (dedup.report !== undefined) {
+        perAgent.push(dedup.report);
+    }
+    findings.length = 0;
+    findings.push(...dedupedFindings);
+
     // The claims path: skip entirely when nothing was found (production
     // skips Phase 3 on an empty candidate set).
     let validation: CaseVerification[] = [];
@@ -895,9 +950,12 @@ export const produceLive = async (
         perAgent,
         staged,
         ...(reconciliation !== undefined ? {reconciliation} : {}),
+        dedup: dedup.result,
     };
 };
 
 /** Re-exported so the A/B runner types its recorded outputs without reaching
  * into internals. */
 export type {Finding};
+/** Re-exported so the dedup stage keeps one import surface with the producer. */
+export type {LiveDedupReport};
