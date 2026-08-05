@@ -11,7 +11,7 @@
 # domains (auth resolvers, migrations, federation, ...) and none maps to this repo's
 # supply-chain surface. Whole-change reviewers mirror webapp's eval-justified roster.
 
-enable holistic,completeness,test-adequacy,first-principles,conventions
+enable holistic,completeness,test-adequacy,first-principles,conventions,documentation
 
 # Repeat reviews of the same PR run thread reconciliation plus the full
 # enabled roster over the new hunks (scoped staging); the first full review
