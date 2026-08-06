@@ -161,6 +161,36 @@ export const MAX_INLINE_COMMENTS = 20;
 /** The medium-confidence inline floor (the Step 5 posting bar). */
 const MIN_INLINE_CONFIDENCE = 0.5;
 
+/**
+ * A pr-level claim's discussion folds into the body verbatim only up to
+ * this length; past it, the body carries the claim's subject line and the
+ * full discussion moves into a <details> block. webapp#41290 review
+ * 4867627688 folded a ~2,600-char single-paragraph finding directly into
+ * the body, burying the accountability section and the note lines around
+ * it; a short paragraph is the most a fold can carry without doing that.
+ */
+export const MAX_VERBATIM_FOLD_CHARS = 400;
+
+/**
+ * Render a pr-level claim for the review body: verbatim while it reads as
+ * a short paragraph, subject line plus a collapsed full finding once it
+ * does not.
+ */
+export const renderPrLevelFold = (claim: Claim): string => {
+    if (claim.discussion.length <= MAX_VERBATIM_FOLD_CHARS) {
+        return `**${claim.label}:** ${claim.discussion}`;
+    }
+    return [
+        `**${claim.label}:** ${claim.subject}`,
+        "<details>",
+        "<summary>Full finding</summary>",
+        "",
+        claim.discussion,
+        "",
+        "</details>",
+    ].join("\n");
+};
+
 const lineHasCodeSignal = (line: string): boolean =>
     /\w\(/.test(line) || // a call
     /[{};]/.test(line) || // block/statement punctuation
@@ -386,7 +416,7 @@ export const runSubmissionCli = (
         if (claim.path !== undefined && claim.line !== undefined) {
             anchored.push(claim);
         } else {
-            prLevelLines.push(`**${claim.label}:** ${claim.discussion}`);
+            prLevelLines.push(renderPrLevelFold(claim));
             notes.push(
                 `pr-level claim ${claim.id} folded into the review body`,
             );
