@@ -629,6 +629,26 @@ export type PiRunnerOptions = {
      * time to tell which one sheds findings.
      */
     systemPrompt?: string;
+    /**
+     * Asked at each turn boundary whether to keep going, given what THIS agent
+     * has spent so far. The spend ledger answers (lib/spend-ledger.ts), as a
+     * read-only probe: the ledger's accounting is written once per completed
+     * dispatch, and this only decides whether to stop early.
+     *
+     * Per turn rather than per dispatch because that is the only granularity
+     * where the answer is still useful: cost is known when a turn ends, and one
+     * heavy reviewer can outspend a whole wave of light ones, so a check that
+     * runs between dispatches learns about the overshoot after paying it.
+     */
+    onTurnCost?: (agentSpentUsd: number) => "continue" | "abort";
+    /**
+     * Run-wide abort. The spend ledger fires this when a COMPLETED dispatch
+     * pushes the run past its budget, which is the case `onTurnCost` cannot
+     * cover: that probe only stops the agent doing the spending, while this
+     * stops the siblings already in flight beside it. Without it, "crossing
+     * aborts in-flight agents" would be true only of the agent that crossed.
+     */
+    abortSignal?: AbortSignal;
 };
 
 export const createPiRunner = async (
@@ -678,6 +698,18 @@ export const createPiRunner = async (
     return async (request: AgentRequest): Promise<AgentResult> => {
         const started = Date.now();
         const abort = new AbortController();
+        // Link the run-wide abort in both directions in time: already-aborted
+        // means never start, and aborting later means stop now.
+        const runAbort = options.abortSignal;
+        if (runAbort?.aborted === true) {
+            abort.abort(runAbort.reason);
+        } else {
+            runAbort?.addEventListener(
+                "abort",
+                () => abort.abort(runAbort.reason),
+                {once: true},
+            );
+        }
         let timedOut = false;
         const timer = setTimeout(() => {
             timedOut = true;
@@ -701,6 +733,13 @@ export const createPiRunner = async (
         let usd = 0;
         let turns = 0;
         let toolCalls = 0;
+        /**
+         * Set when the spend ledger says stop. Read by shouldStopAfterTurn, so
+         * the loop ends at a TURN boundary rather than by throwing: an agent
+         * stopped for budget has usually already found something, and killing
+         * it mid-turn would throw that away along with the turn's cost.
+         */
+        let budgetExhausted = false;
         let stopReason: string | undefined;
         let errorMessage: string | undefined;
         let rawStopReason: string | undefined;
@@ -739,7 +778,9 @@ export const createPiRunner = async (
                      * "end the turn now".
                      */
                     shouldStopAfterTurn: () =>
-                        captured !== undefined || turns >= request.maxTurns,
+                        captured !== undefined ||
+                        turns >= request.maxTurns ||
+                        budgetExhausted,
                 },
                 (event: Record<string, unknown>) => {
                     if (event["type"] === "tool_execution_end") {
@@ -794,6 +835,12 @@ export const createPiRunner = async (
                         | {cost?: {total?: number}}
                         | undefined;
                     usd += Number(usage?.cost?.total ?? 0);
+                    // Cumulative for this agent, because the probe is a
+                    // question about the run's total and the caller adds this
+                    // agent's in-flight spend to what it has already settled.
+                    if (options.onTurnCost?.(usd) === "abort") {
+                        budgetExhausted = true;
+                    }
                     const content = (message?.["content"] ?? []) as TextBlock[];
                     const text = content
                         .filter((block) => block.type === "text")
@@ -833,6 +880,7 @@ export const createPiRunner = async (
                         stopReason === "refusal" || rawStopReason === "refusal",
                     wallMs: Date.now() - started,
                     structured: true,
+                    ...(budgetExhausted ? {stoppedForBudget: true} : {}),
                 };
             }
             // Out of turns and finished-with-prose return the same shape: a
@@ -862,6 +910,7 @@ export const createPiRunner = async (
                 refused:
                     stopReason === "refusal" || rawStopReason === "refusal",
                 wallMs: Date.now() - started,
+                ...(budgetExhausted ? {stoppedForBudget: true} : {}),
             };
         } catch (error) {
             // A payload the tool already accepted is complete and validated:
@@ -885,6 +934,7 @@ export const createPiRunner = async (
                         stopReason === "refusal" || rawStopReason === "refusal",
                     wallMs: Date.now() - started,
                     structured: true,
+                    ...(budgetExhausted ? {stoppedForBudget: true} : {}),
                 };
             }
             if (timedOut) {

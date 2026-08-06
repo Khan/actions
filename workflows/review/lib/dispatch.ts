@@ -67,6 +67,11 @@ import {
     type AgentRunner,
     type PerAgentReport,
 } from "./dispatch-calls";
+import {
+    createSpendLedger,
+    type SpendLedger,
+    type SpendReport,
+} from "./spend-ledger";
 
 import {computeRoster, type RosterShed} from "./dispatch-roster";
 import {
@@ -183,6 +188,13 @@ export type DispatchResult = {
     excludedFiles?: string[];
     perAgent: PerAgentReport[];
     totalUsd: number;
+    /**
+     * The run's cost record: ceiling, reserve, spend, sheds, and which
+     * enforcement was in force. Rides the run artifact rather than a file of
+     * its own so the gate and the post-hoc read one document, and so the
+     * substrate's second consumer inherits a shape that is already staged.
+     */
+    spend: SpendReport;
 };
 
 export type DispatchOptions = {
@@ -195,6 +207,14 @@ export type DispatchOptions = {
     maxTurns?: number;
     timeoutMs?: number;
     concurrency?: number;
+    /**
+     * The run's spend ledger. Defaulted rather than optional in effect: a run
+     * without one would be a run with no ceiling, and the point of the ceiling
+     * is that it is not something a caller can forget. Callers pass their own
+     * to set the numbers (or to test the shed path); the CLI passes the same
+     * instance it gave the runner, since one run means one budget.
+     */
+    ledger?: SpendLedger;
 };
 
 const readJson = (fs: DispatchFs, path: string): unknown => {
@@ -237,6 +257,16 @@ const noteLine = {
         `Note: ${dimension} not assessed this run (shed under the ${tier}-tier run budget).`,
     unavailable: (dimension: string, agent: string): string =>
         `Note: ${dimension} not assessed this run (${agent} output unavailable).`,
+    /**
+     * The spend ceiling cut this dimension. Deliberately distinct from the
+     * tier-budget shed above: that one is planned before the run starts and
+     * this one means the run ran out of money partway, which a reader should be
+     * able to tell apart at a glance.
+     */
+    budget: (dimension: string, kind: "refused" | "aborted"): string =>
+        kind === "aborted"
+            ? `Note: ${dimension} cut short this run (the run's spend ceiling was reached mid-investigation).`
+            : `Note: ${dimension} not assessed this run (the run's spend ceiling was reached before it started).`,
 };
 
 /**
@@ -304,6 +334,7 @@ export const runDispatch = async (
         fs.writeFileSync(`${OUT_DIR}/${name}.json`, content);
     };
 
+    const ledger = options.ledger ?? createSpendLedger();
     const {dispatchAgent, parseWithRetry} = createAgentDispatcher({
         runner,
         agents,
@@ -313,6 +344,8 @@ export const runDispatch = async (
         maxTurns,
         timeoutMs,
         validatorFor,
+        mayDispatch: (name) => ledger.mayDispatch(name),
+        recordSpend: (name, usd) => ledger.recordSpend(name, usd),
     });
 
     // Phase 1: triage (full/scoped), staging pr.diff and review-files.json.
@@ -636,6 +669,19 @@ export const runDispatch = async (
         }
     }
 
+    // The spend ceiling's sheds, disclosed the same way every other shed is.
+    // Read from the ledger rather than tracked alongside it, so the record and
+    // the disclosure cannot disagree about what happened.
+    const spend = ledger.report();
+    for (const shed of spend.sheds) {
+        if (!skippedDimensions.some((skip) => skip.dimension === shed.agent)) {
+            skippedDimensions.push({
+                dimension: shed.agent,
+                cause: "budget",
+            });
+        }
+    }
+
     const dispatched = [
         ...new Set(
             perAgent
@@ -669,6 +715,7 @@ export const runDispatch = async (
                   `Note: ${suppression.suppressed.length} finding(s) not re-posted (already tracked in open review threads).`,
               ]
             : []),
+        ...spend.sheds.map((shed) => noteLine.budget(shed.agent, shed.kind)),
     ];
 
     const result: DispatchResult = {
@@ -690,6 +737,7 @@ export const runDispatch = async (
         ...(excludedFiles !== undefined ? {excludedFiles} : {}),
         perAgent,
         totalUsd: perAgent.reduce((sum, agent) => sum + agent.usd, 0),
+        spend,
     };
     const serialized = JSON.stringify(result, null, 2);
     fs.writeFileSync(`${REVIEW_DIR}/dispatch-result.json`, serialized);
@@ -725,10 +773,24 @@ if (typeof require !== "undefined" && require.main === module) {
         // harness; a leftover REVIEW_DISPATCH_RUNNER=sdk must fail loudly
         // rather than silently running the other harness.
         rejectStaleRunnerSelection(process.env);
-        const runner = await createPiRunner();
+        // ONE ledger for the run, shared by the runner (which reports each
+        // turn's cost as it lands) and the dispatcher (which refuses new work
+        // once the budget is gone). Two ledgers would be two budgets, and the
+        // per-turn abort would never reach the agents actually spending.
+        const ledger = createSpendLedger();
+        const runner = await createPiRunner({
+            onTurnCost: (agentSpentUsd) =>
+                ledger.wouldCross(agentSpentUsd) ? "abort" : "continue",
+            abortSignal: ledger.signal,
+        });
         const repoRoot =
             process.env.REVIEW_REPO_ROOT ?? process.env.GITHUB_WORKSPACE ?? ".";
-        const result = await runDispatch({fs: nodeFs, runner, repoRoot});
+        const result = await runDispatch({
+            fs: nodeFs,
+            runner,
+            repoRoot,
+            ledger,
+        });
         // eslint-disable-next-line no-console
         console.log(
             JSON.stringify(
@@ -739,6 +801,7 @@ if (typeof require !== "undefined" && require.main === module) {
                     skippedDimensions: result.skippedDimensions,
                     claims: result.claims.length,
                     totalUsd: result.totalUsd,
+                    spend: result.spend,
                 },
                 null,
                 2,
