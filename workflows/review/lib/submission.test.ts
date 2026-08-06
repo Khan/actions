@@ -643,6 +643,9 @@ describe("re-review hardening (slice 4 feedback)", () => {
         expect(dropped.conformant).toBe(false);
     });
 
+    // The blocking-only posting-surface cases live in
+    // submission-blocking-only.test.ts (this file's max-lines budget).
+
     it("refuses the skip without a prior APPROVE (a first approval must post)", () => {
         const plan = runSubmissionCli(
             makeFakeFs(staged({depth: "full", claims: []})),

@@ -302,6 +302,17 @@ export const runSubmissionCli = (
           )
         : [];
     const depth = typeof dispatch.depth === "string" ? dispatch.depth : "full";
+    const routing = readJson(fs, `${REVIEW_DIR}/routing.json`) as
+        | {teams?: {owners?: unknown}; reReviewBlockingOnly?: unknown}
+        | undefined;
+    // The ROUTING `re-review <mode> blocking-only` modifier: a repeat review
+    // at a reduced depth posts only blocking findings inline; validated
+    // non-blocking findings collapse into the review body below. Keyed on
+    // the EXECUTED depth, not the configured mode, so the first full review,
+    // a tripwire re-arm, and every guard that resolves to full depth still
+    // post everything. The verdict counts every claim either way.
+    const blockingOnly =
+        depth !== "full" && routing?.reReviewBlockingOnly === true;
 
     // Stage the code-computed risks/patterns signature (trial suggestion b):
     // Step 7 compares THIS string against cache memory's `risksPatternsKey`
@@ -315,9 +326,6 @@ export const runSubmissionCli = (
     // narrower signature could collapse the standing full-run guidance the
     // next time any comment queues.
     if (depth === "full") {
-        const routing = readJson(fs, `${REVIEW_DIR}/routing.json`) as
-            | {teams?: {owners?: unknown}}
-            | undefined;
         // The NOTIFIED match set rides the same key: Step 7 posts one Review
         // Guidance comment for risks, patterns, AND notifications, so a run
         // that changed only the notified set must still re-post.
@@ -379,12 +387,16 @@ export const runSubmissionCli = (
     }
 
     // Inline comments need a path and a line; a PR-level claim folds into
-    // the body instead (rare: a pr-anchored finding).
+    // the body instead (rare: a pr-anchored finding). Under blocking-only a
+    // non-blocking pr-level claim joins the collapsed section instead.
     const anchored: Claim[] = [];
     const prLevelLines: string[] = [];
+    const prLevelCollapsed: Claim[] = [];
     for (const claim of claims) {
         if (claim.path !== undefined && claim.line !== undefined) {
             anchored.push(claim);
+        } else if (blockingOnly && !isBlockingLabel(claim.label)) {
+            prLevelCollapsed.push(claim);
         } else {
             prLevelLines.push(`**${claim.label}:** ${claim.discussion}`);
             notes.push(
@@ -415,34 +427,45 @@ export const runSubmissionCli = (
     const inlineWorthy = ranked.filter(
         (claim) =>
             isBlockingLabel(claim.label) ||
-            claim.confidence >= MIN_INLINE_CONFIDENCE,
+            (!blockingOnly && claim.confidence >= MIN_INLINE_CONFIDENCE),
     );
     const inlineClaims = new Set(inlineWorthy.slice(0, MAX_INLINE_COMMENTS));
-    const collapsed = ranked.filter((claim) => !inlineClaims.has(claim));
+    const collapsed = [
+        ...ranked.filter((claim) => !inlineClaims.has(claim)),
+        ...prLevelCollapsed,
+    ];
     const inline: PlannedComment[] = [...inlineClaims].map((claim) => ({
         path: claim.path as string,
         line: claim.line as number,
         body: renderClaimComment(claim),
     }));
     if (collapsed.length > 0) {
+        const summary = blockingOnly
+            ? `Non-blocking observations (${collapsed.length})`
+            : `Lower-confidence observations (${collapsed.length})`;
         const section = [
             "<details>",
-            `<summary>Lower-confidence observations (${collapsed.length})</summary>`,
+            `<summary>${summary}</summary>`,
             "",
-            ...collapsed.map(
-                (claim) =>
-                    `- \`${claim.path}:${claim.line}\` ${claim.label}: ${claim.subject}`,
+            ...collapsed.map((claim) =>
+                claim.path !== undefined && claim.line !== undefined
+                    ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${claim.subject}`
+                    : `- ${claim.label}: ${claim.subject}`,
             ),
             "",
             "</details>",
         ].join("\n");
-        if (inline.length > 0) {
+        // Under blocking-only the section always rides the review body: the
+        // point of the dial is no non-blocking noise on inline threads.
+        if (!blockingOnly && inline.length > 0) {
             inline[0] = {...inline[0], body: `${inline[0].body}\n\n${section}`};
         } else {
             prLevelLines.push(section);
         }
         notes.push(
-            `${collapsed.length} claim(s) collapsed below the inline bar (cap ${MAX_INLINE_COMMENTS}, medium-confidence floor)`,
+            blockingOnly
+                ? `${collapsed.length} non-blocking claim(s) collapsed into the body (re-review blocking-only)`
+                : `${collapsed.length} claim(s) collapsed below the inline bar (cap ${MAX_INLINE_COMMENTS}, medium-confidence floor)`,
         );
     }
 
@@ -500,7 +523,9 @@ export const runSubmissionCli = (
     if (plan !== undefined && depth !== "full") {
         const mode = typeof plan.mode === "string" ? plan.mode : "full";
         depthNotes.push(
-            `Note: re-review ran at ${depth} depth (re-review mode ${mode}).`,
+            `Note: re-review ran at ${depth} depth (re-review mode ${mode}${
+                blockingOnly ? ", blocking-only" : ""
+            }).`,
         );
     }
     if (plan?.tripwireRearmed === true) {

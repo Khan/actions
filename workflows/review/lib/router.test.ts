@@ -875,9 +875,13 @@ describe("parseRoutingConfig: re-review directive", () => {
         for (const mode of ["full", "scoped", "flip-gated", "fast"] as const) {
             const config = parseRoutingConfig(`re-review ${mode}`);
             expect(config.reReviewMode).toBe(mode);
+            expect(config.reReviewBlockingOnly).toBe(false);
             expect(config.warnings).toEqual([]);
         }
     });
+
+    // The blocking-only modifier's parse and CLI cases live in
+    // router-rereview-blocking-only.test.ts (max-lines budget).
 
     it("degrades an unknown mode to full with a warning; toward more review", () => {
         const config = parseRoutingConfig("re-review turbo");
@@ -888,9 +892,13 @@ describe("parseRoutingConfig: re-review directive", () => {
     });
 
     it("skips a re-review line with the wrong arity", () => {
-        const config = parseRoutingConfig("re-review scoped fast");
+        const config = parseRoutingConfig(
+            "re-review scoped blocking-only extra",
+        );
         expect(config.reReviewMode).toBe("full");
-        expect(config.warnings.join("\n")).toContain("exactly one mode");
+        expect(config.warnings.join("\n")).toContain(
+            "one mode and optionally blocking-only",
+        );
     });
 
     it("lets the last of duplicate lines win, with a warning", () => {
@@ -908,7 +916,9 @@ describe("runCli: re-review mode", () => {
             ]),
             [ROUTING_CONFIG_PATH]: "re-review scoped",
         });
-        expect(runCli(fs).reReviewMode).toBe("scoped");
+        const json = runCli(fs);
+        expect(json.reReviewMode).toBe("scoped");
+        expect(json.reReviewBlockingOnly).toBe(false);
     });
 
     it("defaults to full without a ROUTING config", () => {
@@ -917,7 +927,9 @@ describe("runCli: re-review mode", () => {
                 {path: "a.ts", status: "modified"},
             ]),
         });
-        expect(runCli(fs).reReviewMode).toBe("full");
+        const json = runCli(fs);
+        expect(json.reReviewMode).toBe("full");
+        expect(json.reReviewBlockingOnly).toBe(false);
     });
 });
 

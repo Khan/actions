@@ -700,6 +700,12 @@ export type RoutingJson = {
      */
     reReviewMode: ReReviewMode;
     /**
+     * `re-review <mode> blocking-only`: a repeat review at a reduced depth
+     * posts only blocking findings inline; validated non-blocking findings
+     * collapse into the review body (`submission.ts` reads this).
+     */
+    reReviewBlockingOnly: boolean;
+    /**
      * The repo's dispatch mode (`dispatch` line in `ROUTING`; `task` when
      * absent). `scripted` opts the repo into the deterministic dispatcher
      * (`dispatch.ts`, orchestrator slice 2).
@@ -728,6 +734,7 @@ export const toRoutingJson = (
     enabledReviewers: EnableableReviewer[] = [],
     reReviewMode: ReReviewMode = DEFAULT_RE_REVIEW_MODE,
     dispatchMode: DispatchMode = DEFAULT_DISPATCH_MODE,
+    reReviewBlockingOnly = false,
 ): RoutingJson => {
     const owners: Record<string, string[]> = {};
     const generatedFiles: string[] = [];
@@ -753,6 +760,7 @@ export const toRoutingJson = (
         pendingRiskQuestions: result.pendingRiskQuestions,
         enabledReviewers,
         reReviewMode,
+        reReviewBlockingOnly,
         dispatchMode,
         routingConfig,
     };
@@ -840,6 +848,7 @@ export const runCli = (
               riskRules: [],
               enabledReviewers: [],
               reReviewMode: DEFAULT_RE_REVIEW_MODE,
+              reReviewBlockingOnly: false,
               dispatchMode: DEFAULT_DISPATCH_MODE,
               warnings: [
                   `routing config missing (${ROUTING_CONFIG_PATH}): no ` +
@@ -904,6 +913,7 @@ export const runCli = (
         routingFileConfig.enabledReviewers,
         routingFileConfig.reReviewMode,
         routingFileConfig.dispatchMode,
+        routingFileConfig.reReviewBlockingOnly,
     );
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});
