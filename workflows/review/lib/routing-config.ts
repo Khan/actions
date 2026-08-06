@@ -96,6 +96,18 @@ export type ReReviewMode = typeof RE_REVIEW_MODES[number];
 export const DEFAULT_RE_REVIEW_MODE: ReReviewMode = "full";
 
 /**
+ * The one modifier the `re-review` line accepts. `blocking-only` keeps the
+ * configured depth's roster and staging but changes the REPEAT review's
+ * posting surface: only blocking findings post inline; validated
+ * non-blocking findings collapse into a <details> block in the review body
+ * (the verdict still counts every claim, so nothing it suppresses can flip
+ * an outcome). It applies exactly when a run executes at a reduced depth,
+ * so the first full review of a ready PR, a divergence-tripwire re-arm, and
+ * every guard that resolves to full depth still post everything.
+ */
+export const RE_REVIEW_MODIFIERS = ["blocking-only"] as const;
+
+/**
  * How Step 3 runs: the orchestrator invokes the deterministic dispatcher
  * (`lib/dispatch.ts`) once, which runs Step 3's phases as code. `scripted`
  * is the only mode; the constant survives as the type routing.json's
@@ -115,6 +127,9 @@ export type RoutingFileConfig = {
     enabledReviewers: EnableableReviewer[];
     /** The repo's re-review mode (`re-review` line; default `full`). */
     reReviewMode: ReReviewMode;
+    /** `re-review <mode> blocking-only`: repeat reviews post only blocking
+     * findings inline (see {@link RE_REVIEW_MODIFIERS}). */
+    reReviewBlockingOnly: boolean;
     /** The dispatch mode: always `scripted`. */
     dispatchMode: DispatchMode;
     /** Fixed-format parse warnings (unknown lens/tier, no-op rule). */
@@ -129,7 +144,7 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  *
  *     <pattern> [lens=<lens>[,<lens>…]] [tier=trivial|low|medium|high] [direction-dependent]
  *     enable <reviewer>[,<reviewer>…]
- *     re-review full|scoped|flip-gated|fast
+ *     re-review full|scoped|flip-gated|fast [blocking-only]
  *
  * `lens=` names specialist lenses to spawn when the pattern is touched (multiple
  * matching rules union their lenses). `tier=` assigns a risk tier; when several
@@ -143,7 +158,11 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  * ({@link ENABLEABLE_REVIEWERS}) for every review in this repo.
  * `re-review` sets the repo's re-review mode ({@link RE_REVIEW_MODES}); when
  * several lines set it the LAST one wins (with a warning), matching the
- * file's last-rule-wins convention. A leftover `dispatch` line from the
+ * file's last-rule-wins convention. An optional `blocking-only` modifier
+ * ({@link RE_REVIEW_MODIFIERS}) makes repeat reviews post only blocking
+ * findings inline; an unknown modifier warns and is ignored (the mode still
+ * applies), and `full blocking-only` warns that the modifier never applies
+ * at full depth. A leftover `dispatch` line from the
  * retired dial warns and is ignored (scripted is the only mode).
  *
  * Malformed fields and unknown lens/reviewer names produce a warning and skip
@@ -156,6 +175,7 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
     const riskRules: RiskRule[] = [];
     const enabled = new Set<EnableableReviewer>();
     let reReviewMode: ReReviewMode = DEFAULT_RE_REVIEW_MODE;
+    let reReviewBlockingOnly = false;
     let reReviewLineSeen = false;
     let dispatchLineSeen = false;
     const warnings: string[] = [];
@@ -195,10 +215,10 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
         }
 
         if (pattern === "re-review") {
-            if (fields.length !== 1) {
+            if (fields.length < 1 || fields.length > 2) {
                 warnings.push(
-                    `ROUTING line ${lineNo}: re-review takes exactly one ` +
-                        `mode (line skipped)`,
+                    `ROUTING line ${lineNo}: re-review takes one mode and ` +
+                        `optionally blocking-only (line skipped)`,
                 );
                 continue;
             }
@@ -210,6 +230,26 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
                 );
                 continue;
             }
+            let blockingOnly = false;
+            if (fields.length === 2) {
+                if (fields[1] === "blocking-only") {
+                    blockingOnly = true;
+                    if (mode === "full") {
+                        // full never executes at a reduced depth, so the
+                        // modifier never applies; the mode still does.
+                        warnings.push(
+                            `ROUTING line ${lineNo}: blocking-only never ` +
+                                `applies at full re-review depth (repeat ` +
+                                `reviews post everything)`,
+                        );
+                    }
+                } else {
+                    warnings.push(
+                        `ROUTING line ${lineNo}: unknown re-review ` +
+                            `modifier "${fields[1]}" (ignored)`,
+                    );
+                }
+            }
             if (reReviewLineSeen) {
                 warnings.push(
                     `ROUTING line ${lineNo}: duplicate re-review line ` +
@@ -217,6 +257,7 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
                 );
             }
             reReviewMode = mode as ReReviewMode;
+            reReviewBlockingOnly = blockingOnly;
             reReviewLineSeen = true;
             continue;
         }
@@ -315,6 +356,7 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
             enabled.has(reviewer),
         ),
         reReviewMode,
+        reReviewBlockingOnly,
         dispatchMode: DEFAULT_DISPATCH_MODE,
         warnings,
     };
