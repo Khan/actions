@@ -188,6 +188,36 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         expect(runSubmissionCli(fs).comments).toHaveLength(1);
     });
 
+    it("never labels cap-overflow blocking claims as non-blocking", () => {
+        // 21 blocking claims: the 21st falls past MAX_INLINE_COMMENTS into
+        // the collapse, so the section must use the neutral title, not
+        // "Non-blocking observations".
+        const fs = makeFakeFs(
+            staged(
+                {
+                    depth: "scoped",
+                    claims: Array.from({length: 21}, (_, i) =>
+                        claim({
+                            id: `blocking-${i}`,
+                            line: i + 1,
+                            label: "issue (blocking)",
+                        }),
+                    ),
+                },
+                true,
+            ),
+        );
+        const plan = runSubmissionCli(fs);
+        expect(plan.comments).toHaveLength(20);
+        expect(plan.body).not.toContain("Non-blocking observations");
+        expect(plan.body).toContain("Lower-confidence observations (1)");
+        expect(plan.body).toContain("issue (blocking)");
+        expect(plan.notes.join(" ")).toContain(
+            "1 claim(s) collapsed below the inline bar",
+        );
+        expect(plan.event).toBe("REQUEST_CHANGES");
+    });
+
     it("an all-clear blocking-only re-review still approves with the note", () => {
         const fs = makeFakeFs(
             staged(

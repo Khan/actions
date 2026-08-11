@@ -232,7 +232,11 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
             }
             let blockingOnly = false;
             if (fields.length === 2) {
-                if (fields[1] === "blocking-only") {
+                if (
+                    (RE_REVIEW_MODIFIERS as readonly string[]).includes(
+                        fields[1],
+                    )
+                ) {
                     blockingOnly = true;
                     if (mode === "full") {
                         // full never executes at a reduced depth, so the

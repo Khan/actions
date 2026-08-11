@@ -440,9 +440,18 @@ export const runSubmissionCli = (
         body: renderClaimComment(claim),
     }));
     if (collapsed.length > 0) {
-        const summary = blockingOnly
-            ? `Non-blocking observations (${collapsed.length})`
-            : `Lower-confidence observations (${collapsed.length})`;
+        // The cap can push a 21st+ blocking claim into the collapse; a
+        // "Non-blocking" heading would mislabel it, so the blocking-only
+        // wording applies only when every collapsed claim is non-blocking
+        // (each line still carries its own label either way, and the
+        // verdict already counted every claim above).
+        const collapsedNonBlockingOnly = !collapsed.some((entry) =>
+            isBlockingLabel(entry.label),
+        );
+        const summary =
+            blockingOnly && collapsedNonBlockingOnly
+                ? `Non-blocking observations (${collapsed.length})`
+                : `Lower-confidence observations (${collapsed.length})`;
         const section = [
             "<details>",
             `<summary>${summary}</summary>`,
@@ -463,7 +472,7 @@ export const runSubmissionCli = (
             prLevelLines.push(section);
         }
         notes.push(
-            blockingOnly
+            blockingOnly && collapsedNonBlockingOnly
                 ? `${collapsed.length} non-blocking claim(s) collapsed into the body (re-review blocking-only)`
                 : `${collapsed.length} claim(s) collapsed below the inline bar (cap ${MAX_INLINE_COMMENTS}, medium-confidence floor)`,
         );
