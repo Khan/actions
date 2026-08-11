@@ -231,8 +231,12 @@ const parseDefectSpecs = (
         }
         const path = entry["path"];
         if (prLevel === true) {
-            const located = ["path", "lineStart", "lineEnd", "altLocations"]
-                .filter((field) => entry[field] !== undefined);
+            const located = [
+                "path",
+                "lineStart",
+                "lineEnd",
+                "altLocations",
+            ].filter((field) => entry[field] !== undefined);
             if (located.length > 0) {
                 errors.push(
                     `${at}: ${located.join(", ")} must be omitted on a ` +
