@@ -191,6 +191,40 @@ const renderKeptLine = (entry: KeptEntry): string => {
     return `- **${entry.label}** ${linked}: ${entry.excerpt}`;
 };
 
+/**
+ * The damped form for a non-blocking thread a prior recap already quoted:
+ * label and link, no excerpt. The full excerpt was already posted (twice: the
+ * original comment, then the first recap), so re-quoting it on every
+ * subsequent push is what built the recap walls the collapse block only
+ * partially fixed — the drumbeat reads as the bot re-arguing threads the
+ * author is already looking at. The link keeps the accountability contract:
+ * every kept thread is still enumerated, just not re-quoted.
+ */
+const renderKeptLineCompact = (entry: KeptEntry): string => {
+    const anchorToken = `\`${entry.anchor}\``;
+    const linked =
+        entry.url !== undefined
+            ? `[${anchorToken}](${entry.url})`
+            : anchorToken;
+    return `- **${entry.label}** ${linked}`;
+};
+
+/**
+ * Whether a prior review body already recapped this thread, decided by its
+ * opener URL appearing in any staged prior-review body (the recap line links
+ * exactly that URL, so the first recap plants the marker every later run
+ * finds). A thread with no staged URL reads as never recapped and renders
+ * full: fail toward MORE information, since the cost of a wrong "repeat" is
+ * an excerpt the reader has to click for, on a thread the bot is actively
+ * accounting for.
+ */
+const previouslyRecapped = (
+    entry: KeptEntry,
+    priorReviewBodies: readonly string[],
+): boolean =>
+    entry.url !== undefined &&
+    priorReviewBodies.some((body) => body.includes(entry.url as string));
+
 export type RenderRereviewInput = {
     /** The staged unresolved bot threads this run started from. */
     threads: readonly StagedThread[];
@@ -198,6 +232,13 @@ export type RenderRereviewInput = {
     reconciler: ReconcilerResult;
     /** Head commit of this review; stamped on the still-open header. */
     headSha?: string;
+    /**
+     * The bodies of this bot's prior reviews on the PR (staged
+     * prior-reviews.json), read only to decide which kept non-blocking
+     * threads a recap has already quoted. Absent or empty renders every
+     * entry full, which is exactly the pre-damping behavior.
+     */
+    priorReviewBodies?: readonly string[];
 };
 
 /**
@@ -257,16 +298,32 @@ export const renderRereviewSection = (
     // the motivating pathology.
     const parts: string[] = [header, ...blocking.map(renderKeptLine)];
     if (nonBlocking.length > 0) {
+        // First mention full, thereafter label + link: a non-blocking thread
+        // some prior recap already quoted renders without its excerpt
+        // (blocking threads are never damped — they are the reason the
+        // verdict is what it is, and their lines must stand on their own).
+        // Fresh entries render first so new information leads the block.
+        const priorBodies = input.priorReviewBodies ?? [];
+        const fresh = nonBlocking.filter(
+            (entry) => !previouslyRecapped(entry, priorBodies),
+        );
+        const repeats = nonBlocking.filter((entry) =>
+            previouslyRecapped(entry, priorBodies),
+        );
         const summary =
-            nonBlocking.length === 1
+            (nonBlocking.length === 1
                 ? "1 non-blocking thread still open"
-                : `${nonBlocking.length} non-blocking threads still open`;
+                : `${nonBlocking.length} non-blocking threads still open`) +
+            (repeats.length > 0
+                ? ` (${repeats.length} previously reported)`
+                : "");
         parts.push(
             "",
             "<details>",
             `<summary>${summary}</summary>`,
             "",
-            ...nonBlocking.map(renderKeptLine),
+            ...fresh.map(renderKeptLine),
+            ...repeats.map(renderKeptLineCompact),
             "",
             "</details>",
         );
@@ -286,6 +343,7 @@ export const renderRereviewSection = (
 
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const THREADS_PATH = `${REVIEW_DIR}/threads.json`;
+const PRIOR_REVIEWS_PATH = `${REVIEW_DIR}/prior-reviews.json`;
 const RECONCILER_PATH = `${REVIEW_DIR}/out/thread-reconciler.json`;
 const PR_CONTEXT_PATH = `${REVIEW_DIR}/pr-context.json`;
 const RESULT_PATH = `${REVIEW_DIR}/rereview.json`;
@@ -381,7 +439,20 @@ export const runRereviewCli = (fs: RereviewCliFs): RereviewSection => {
             isRecord(prContext) && typeof prContext["headSha"] === "string"
                 ? prContext["headSha"]
                 : undefined;
-        result = renderRereviewSection({threads, reconciler, headSha});
+        // Prior review bodies feed the recap damping only; a missing or
+        // malformed staging reads as no prior reviews, and every kept thread
+        // then renders full (fail toward more information).
+        const rawPrior = readJson(fs, PRIOR_REVIEWS_PATH);
+        const priorReviewBodies = (Array.isArray(rawPrior) ? rawPrior : [])
+            .filter(isRecord)
+            .map((review) => review["body"])
+            .filter((body): body is string => typeof body === "string");
+        result = renderRereviewSection({
+            threads,
+            reconciler,
+            headSha,
+            priorReviewBodies,
+        });
     }
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});
