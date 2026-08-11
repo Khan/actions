@@ -1,5 +1,91 @@
 # review
 
+## 1.13.0
+
+### Minor Changes
+
+-   e70aaa6: review: a `blocking-only` modifier on the ROUTING `re-review` line, so repeat reviews can surface only blockers
+
+    `re-review scoped blocking-only` keeps the configured depth's roster and
+    staging (the whole enabled roster over the new hunks, for `scoped`) but
+    changes the REPEAT review's posting surface: only blocking findings post
+    inline; validated non-blocking findings collapse to one line each in a
+    `Non-blocking observations` `<details>` block in the review body, with a
+    note line naming the count and the dial, and the depth note names the
+    modifier. The section always rides the body, never an inline comment: the
+    point of the dial is no non-blocking noise on inline threads.
+
+    This is the quadrant the existing modes could not reach. webapp ran
+    `flip-gated` (#40940) to quiet re-review chatter, then reverted to `scoped`
+    (#40968) because flip-gated silences the noise by not running the
+    whole-change reviewers at all, leaving post-review pushes seen only by the
+    correctness pass. `scoped blocking-only` keeps their blocking recall and
+    their observations (collapsed) while taking the non-blocking chatter off the
+    inline surface.
+
+    Semantics are deliberately narrow:
+
+    -   It applies exactly when the run EXECUTES at a reduced depth. The first
+        full review of a ready PR, a divergence-tripwire re-arm, and every guard
+        that degrades to `full` still post everything; `re-review full blocking-only` warns at parse time that the modifier can never apply.
+    -   The verdict is computed from every validated claim either way, so the
+        modifier can never flip an outcome. A pr-level blocking claim still folds
+        into the body; only non-blocking claims move. An all-clear blocking-only
+        approval carrying the collapsed section is never the bare approve line,
+        so the redundant-approval skip cannot swallow it.
+    -   The modifier belongs to its line: with duplicate `re-review` lines the
+        last line wins whole, modifier included. An unknown modifier warns and is
+        ignored while the mode still applies (toward more review, never less).
+
+    Plumbing: `parseRoutingConfig` grows `reReviewBlockingOnly`, `routing.json`
+    carries it, and `submission.ts` applies it at the posting bar. Nothing
+    changes for any consumer until its ROUTING file adds the modifier, and the
+    line should be earned the way `re-review` modes are, through the live A/B.
+
+### Patch Changes
+
+-   9e1d33d: review: pr-level claims respect open-thread suppression, and a long pr-level fold collapses instead of walling the body
+
+    Measured on webapp#41290 review 4867627688: a reviewer re-found the data race
+    that two open blocking threads (r3721196429, r3721196434) already tracked,
+    anchored it `pr`-level (the race spans three files), and the review body
+    carried the full ~2,600-char finding as one unformatted paragraph, directly
+    under the accountability section listing those same two threads as "still
+    unaddressed". Two independent defects compounded there:
+
+    1. **Open-thread suppression had a pr-level hole.** `suppressOpenThreadDuplicates`
+       matched on `path`, and a pathless claim was passed through unconditionally,
+       so a pr-anchored duplicate of an open thread could never be suppressed (and
+       cross-source dedup requires path equality too, so its anchored siblings could
+       not absorb it either). A pathless claim now compares against every open
+       thread and pays for the missing anchor with a stricter floor, one tier above
+       the same-path rate (`PR_LEVEL_FLOOR`: 0.2 jaccard / 0.35 overlap / 8 shared
+       bigrams). Calibrated on that run's real texts: the two true counterparts
+       score 0.342/0.558/40 and 0.329/0.643/23 while the six unrelated open threads
+       top out at 0.051/0.180/1, so the floor clears both real duplicates with wide
+       margin and sits far above every non-duplicate. `dedup-pr-level.test.ts`
+       carries the run's texts as fixtures, including a tier-boundary case proving
+       the same text suppresses with an anchor and posts without one at 7 shared
+       bigrams. `ThreadSuppression.path` becomes optional to carry the pathless
+       record; a suppressed pr-level blocking candidate floors the verdict exactly
+       as an anchored one does.
+
+    2. **The body fold rendered the discussion verbatim, whatever its length.**
+       A pr-level claim that survives suppression still folds into the review body
+       (the inline-comment safe output needs a path and line), but past a
+       short-paragraph cap (`MAX_VERBATIM_FOLD_CHARS`, 400) the fold now carries
+       the claim's subject line with the full discussion in a `<details>` block,
+       so a genuinely new cross-file finding stays readable without burying the
+       accountability section and note lines around it. Short folds are unchanged
+       byte for byte, and the dispatch-conformance gate's plan-match rule is
+       unaffected because the plan and the queued body change together.
+
+    Both changes degrade safely: a missed suppression posts a duplicate comment
+    (the pre-existing behavior), never drops a finding, and the fold never loses
+    content, only collapses it.
+
+-   426094c: The claim-clusterer prompt's cross-anchor example no longer promises a grouping its own path rule forbids: "its test" (a separate `_test.go`, so a different `path`) is replaced by a same-file anchor, and the cross-file limit is stated explicitly beside the example. Found by the reviewer itself on the webapp v1.12.0 bump PR.
+
 ## 1.12.0
 
 ### Minor Changes
