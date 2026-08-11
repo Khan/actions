@@ -346,6 +346,8 @@ max-ai-credits: 2500
 # nothing. 25 clears the worst-case burst (~15 first requests plus margin)
 # while still tripping quickly on the guard's real target, a genuinely broken
 # cache, which misses on EVERY response of a several-hundred-request run.
+# cache-miss-guard.test.ts derives the worst-case burst from lib/budgets.ts
+# and fails any PR that raises the roster cap past this guard's margin.
 max-turn-cache-misses: 25
 env:
   REVIEW_MAX_AI_CREDITS: "2500"
