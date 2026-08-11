@@ -134,6 +134,52 @@ describe("parseCase: the live block", () => {
         expect(parsed.live?.mustCatchSpecs?.[0]?.blockingOnly).toBeUndefined();
     });
 
+    it("parses a prLevel spec (no path) and rejects a located one", () => {
+        const withSpec = (specEntry: Record<string, unknown>) =>
+            liveCase({
+                live: {
+                    prContext: {
+                        title: "t",
+                        description: "d",
+                        author: "a",
+                        baseBranch: "main",
+                    },
+                    mustCatchSpecs: [specEntry],
+                },
+            });
+        const parsed = parseCase(
+            withSpec({
+                key: "pr-doc-1",
+                prLevel: true,
+                mechanism: ["metaphor"],
+                lens: "documentation",
+            }),
+            "test://case",
+        );
+        expect(parsed.live?.mustCatchSpecs?.[0]?.prLevel).toBe(true);
+        expect(parsed.live?.mustCatchSpecs?.[0]?.path).toBeUndefined();
+        expect(
+            parseErrors(
+                withSpec({
+                    key: "pr-doc-2",
+                    prLevel: true,
+                    path: "src/a.ts",
+                    mechanism: ["metaphor"],
+                }),
+            ),
+        ).toMatch(/must be omitted on a prLevel spec/);
+        expect(
+            parseErrors(
+                withSpec({
+                    key: "pr-doc-3",
+                    prLevel: false,
+                    path: "src/a.ts",
+                    mechanism: ["metaphor"],
+                }),
+            ),
+        ).toMatch(/prLevel: must be true when present/);
+    });
+
     it("parses and validates altLocations like the primary location", () => {
         const withAlt = (altLocations: unknown) =>
             liveCase({

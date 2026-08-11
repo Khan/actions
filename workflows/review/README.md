@@ -299,7 +299,8 @@ stays the model-facing prose about file *contents*; team ownership stays in
 ### The `documentation` reviewer (opt-in)
 
 `enable documentation` turns on a reviewer that checks the **comments and prose docs
-the diff adds or changes** against a documentation policy. It is advisory-only and
+the diff adds or changes**, plus the **PR title and description**, against a
+documentation policy. It is advisory-only and
 opt-in like `conventions`, and it exists because comment quality is an enforcement
 problem rather than a prompt problem: every author, human or agent, is told what a
 good comment looks like, and nothing checks.
@@ -314,13 +315,23 @@ that had not yet written the file. Repo-specific calibration rides the per-direc
 frontend want different things here": they can, per directory, without a global
 decision.
 
+The policy has two halves. The **content half** is the original test: a comment
+earns its line by carrying information the code does not. The **readability half**
+applies to prose docs and the PR title/description, and is about translation cost,
+not taste: metaphor in place of the mechanism (a sentence the reader cannot decode
+into concrete operations without already knowing them), a paragraph that restates
+an earlier one, and shorthand the document coins but never defines. A
+title/description finding carries no path/line and posts PR-level, folded into the
+review body; whether the description *matches the diff* stays with `completeness`.
+
 Two things it deliberately does not do:
 
 - **It never reasons about who wrote the text.** It cannot tell whether a human or a
   model wrote a comment, and the policy is the same either way. A finding that reads
   as an accusation of AI authorship is out of bounds even when the comment is bad.
-- **It does not review the PR title or description.** Those carry no line anchor and
-  no fix path today; `completeness` and `first-principles` already read them.
+- **It does not police tone or style.** Vivid prose that names its mechanism passes,
+  domain terms of art pass, and quoted text (error messages, cited titles) is never
+  flaggable. The readability clauses fire only when the reader has to translate.
 
 **The label is load-bearing.** Its findings render as
 `suggestion (non-blocking, documentation)` rather than a plain `suggestion
@@ -334,8 +345,11 @@ carrying this label before a documentation-scoped autofix finds anything.
 
 **Volume is part of its policy.** The definition caps this reviewer at one finding per
 comment, two per file, and five per review, and ranks the policy's clauses so the tail
-is dropped from the bottom (restatement cleanups go first; a comment the diff falsified
-never does). The cap is there because the failure mode is not precision, it is
+is dropped from the bottom (readability findings go first, then restatement cleanups; a
+comment the diff falsified never does). Readability carries its own sub-cap: at most one
+line-anchored readability finding per review (batched: worst instance anchored, up to
+three more quoted in its discussion) and at most one PR-level finding on the
+title/description. The cap is there because the failure mode is not precision, it is
 attention: on a 70-line fixture the reviewer returned seven findings, several of them the
 docstring half of a blocking finding whose code fix resolved the observation anyway, and
 one the *fourth* thread on a single comment. Two other rules do the same work from
