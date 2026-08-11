@@ -293,7 +293,7 @@ rule per line:
 ```
 # <pattern> [lens=<lens>,…] [tier=trivial|low|medium|high] [direction-dependent]
 # enable <reviewer>[,<reviewer>…]
-# re-review full|scoped|flip-gated|fast
+# re-review full|scoped|flip-gated|fast [blocking-only]
 services/**/migrations/**  tier=high lens=data-migrations
 **/*.graphql               lens=api-federation-compat
 pkg/auth/**                tier=high direction-dependent lens=security-auth
@@ -320,7 +320,10 @@ re-review scoped
   winning tier rule for the path.
 - `re-review` sets the repo's re-review mode (see the next section). Default
   `full`; when several lines set it, the last one wins with a warning. An
-  unknown mode degrades to `full`: toward more review, never less.
+  unknown mode degrades to `full`: toward more review, never less. The
+  optional `blocking-only` modifier changes the repeat review's posting
+  surface (see [Re-review modes](#re-review-modes-the-runs-per-pr-cost-lever));
+  an unknown modifier warns and is ignored, and the mode still applies.
 
 Glob semantics are a practical subset of gitignore/CODEOWNERS: `**` crosses
 directories, `*` and `?` stay within a segment, a trailing `/` matches everything
@@ -485,6 +488,21 @@ Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministi
   divergent push gets the whole roster. This is what defeats
   rewrite-after-approval and sparse-PR-then-payload
   (`eval/lifecycle/`, replayed in `eval/lifecycle.test.ts`).
+
+**The `blocking-only` modifier** (`re-review scoped blocking-only`) composes
+with any mode: the depth's roster and staging are unchanged, but a repeat
+review posts only blocking findings inline; validated non-blocking findings
+collapse to one line each in a `<details>` block in the review body, and the
+depth note names the modifier. It applies exactly when the run executes at a
+reduced depth, so the first full review of a ready PR, a divergence-tripwire
+re-arm, and every guard that resolves to `full` still post everything (which
+is also why `full blocking-only` warns: it can never apply). The verdict is
+computed from every validated claim either way, so the modifier can never
+flip an outcome; it only moves non-blocking feedback off the inline surface.
+Use it when re-review chatter is the complaint but whole-change coverage
+(`scoped`) is still wanted: `flip-gated` silences the noise by not running
+the whole-change reviewers at all, while `scoped blocking-only` keeps their
+blocking recall and their body-collapsed observations.
 
 The dial is a measured change, not a default change: it ships `full`
 everywhere, so no consumer's behavior moves until its repo adds a `re-review`
