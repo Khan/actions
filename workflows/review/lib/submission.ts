@@ -62,6 +62,7 @@
 
 import {computeRisksPatternsKey, RISKS_PATTERNS_KEY_PATH} from "./cache-record";
 import type {Claim} from "./dispatch-contracts";
+import {DEFAULT_FINDERS, TRIAGE_DIMENSION} from "./dispatch-roster";
 import {runCli as runNotifiedCli} from "./notified";
 import {
     HOLD_HEAD,
@@ -511,10 +512,12 @@ export const runSubmissionCli = (
     // recorded in the dispatcher's `skippedDimensions` (either cause)
     // produced no usable output this run and must not be reported
     // "assessed", or a crashed run auto-approves. The dimension names are
-    // the dispatcher's: sub-agent names for the finders, "pattern triage"
-    // for the triage pass. A dispatch-result staged by an older dispatcher
-    // carries no `skippedDimensions` and reads as all-assessed, the
-    // pre-hold behavior.
+    // imported from the modules that write them (`DEFAULT_FINDERS`,
+    // `TRIAGE_DIMENSION`), so a rename cannot silently decouple the hold
+    // from the dispatcher. The production dispatcher always writes
+    // `skippedDimensions` (an empty array on a clean run); an absent field
+    // (hand-staged eval fixtures) reads as all-assessed rather than
+    // guessing at a hold.
     const skippedDimensionNames = new Set(
         (Array.isArray(dispatch.skippedDimensions)
             ? dispatch.skippedDimensions
@@ -529,9 +532,9 @@ export const runSubmissionCli = (
     const verdict = computeVerdict({
         postedLabels: claims.map((claim) => claim.label),
         dimensions: {
-            correctness: dimensionStatus("correctness-reviewer"),
-            skillSeverity: dimensionStatus("skill-auditor"),
-            patternTriage: dimensionStatus("pattern triage"),
+            correctness: dimensionStatus(DEFAULT_FINDERS[0]),
+            skillSeverity: dimensionStatus(DEFAULT_FINDERS[1]),
+            patternTriage: dimensionStatus(TRIAGE_DIMENSION),
         },
         keptBlockingCount: keptBlockingFloor + suppressedBlocking,
     });
@@ -572,12 +575,20 @@ export const runSubmissionCli = (
     // threads standing), and no fingerprint stamp is written, so the cache
     // writer refuses the record and the next run reviews in full.
     if (verdict.event === "HOLD_FOR_HUMAN") {
-        const heldClaimLines = anchored.map((claim) => {
-            notes.push(
-                `claim ${claim.id} folded into the hold comment (a hold posts no inline comments)`,
-            );
-            return `- \`${claim.path}:${claim.line}\` ${claim.label}: ${claim.subject}`;
-        });
+        // Both post-fold buckets ride the hold comment: anchored claims (no
+        // inline comments post on a hold) and the blocking-only collapsed
+        // pr-level claims (their collapsed section renders only on the
+        // normal path).
+        const heldClaimLines = [...anchored, ...prLevelCollapsed].map(
+            (claim) => {
+                notes.push(
+                    `claim ${claim.id} folded into the hold comment (a hold posts no inline comments)`,
+                );
+                return claim.path !== undefined && claim.line !== undefined
+                    ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${claim.subject}`
+                    : `- ${claim.label}: ${claim.subject}`;
+            },
+        );
         return stagePlan(fs, {
             event: "HOLD_FOR_HUMAN",
             body: [

@@ -21,8 +21,10 @@
  *     produced no output on a would-be approval) is the inverse shape: no
  *     review submission, no inline comments, no thread resolutions, and
  *     exactly the plan's body queued as one standalone PR comment. A
- *     queued review event, a withheld hold comment, or any other posting
- *     item blocks — the production failure the hold exists for
+ *     queued review submission, inline comment, or thread resolution, or
+ *     a withheld hold comment, blocks (other safe-output kinds are outside
+ *     this rule; their own frontmatter caps and rules govern them) — the
+ *     production failure the hold exists for
  *     (Khan/actions#328's re-run) was precisely an APPROVE submitted over
  *     dead core lenses, so the gate must make "hold plan but approval
  *     posted anyway" a red run.

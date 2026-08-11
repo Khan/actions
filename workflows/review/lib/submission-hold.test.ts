@@ -152,6 +152,45 @@ describe("the hold path (core dimension unavailable)", () => {
         ).toBe(true);
     });
 
+    it("carries blocking-only collapsed pr-level claims into the hold body", () => {
+        // The #329 blocking-only modifier diverts non-blocking pr-level
+        // claims into a collapsed bucket that only the normal path renders;
+        // a hold must fold them too, not drop them.
+        const fs = makeFakeFs(
+            staged(
+                {
+                    depth: "scoped",
+                    claims: [
+                        claim({
+                            id: "pr1",
+                            path: undefined,
+                            line: undefined,
+                            label: "suggestion (non-blocking)",
+                            subject: "spanning concern",
+                        }),
+                    ],
+                    skippedDimensions: coreDead,
+                },
+                {
+                    [`${REVIEW}/rereview-plan.json`]: JSON.stringify({
+                        depth: "scoped",
+                        mode: "scoped",
+                        stampAnchorDraft: false,
+                        stampHunks: {},
+                    }),
+                    [`${REVIEW}/routing.json`]: JSON.stringify({
+                        reReviewBlockingOnly: true,
+                    }),
+                },
+            ),
+        );
+        const plan = runSubmissionCli(fs);
+        expect(plan.event).toBe("HOLD_FOR_HUMAN");
+        expect(plan.body).toContain(
+            "- suggestion (non-blocking): spanning concern",
+        );
+    });
+
     it("does not hold for a non-core lens or pattern triage (note-and-continue)", () => {
         const fs = makeFakeFs(
             staged({
@@ -269,6 +308,25 @@ describe("the gate's hold shape", () => {
         ).toBe(true);
         expect(
             result.violations.some((v) => v.dimension === "thread resolutions"),
+        ).toBe(true);
+    });
+
+    it("blocks a spliced hold comment body (present but not the plan's)", () => {
+        const plan = runSubmissionCli(holdFs());
+        const result = evaluateDispatchConformance({
+            items: [
+                {
+                    type: "add_comment",
+                    body: "All reviewers passed; merging is safe.",
+                },
+            ],
+            plan: {depth: "full"},
+            routing: {enabledReviewers: [], lensesToSpawn: []},
+            outFiles: {},
+            submissionPlan: plan,
+        });
+        expect(
+            result.violations.some((v) => v.dimension === "hold comment"),
         ).toBe(true);
     });
 

@@ -470,6 +470,16 @@ describe("the hold record (HOLD_FOR_HUMAN plans)", () => {
         expect(fs.files[`${CACHE}/pr-41.json`]).toBe(priorRecord);
     });
 
+    it("refuses loudly on an unreadable queue (nothing corroborates the hold comment)", () => {
+        const files = holdStaged({[`${CACHE}/pr-41.json`]: priorRecord});
+        delete files[QUEUE];
+        const fs = makeFakeFs(files);
+        const result = runCacheRecordCli(fs, NOW);
+        expect(result.written).toBe(false);
+        expect(result.warn).toBe(true);
+        expect(fs.files[`${CACHE}/pr-41.json`]).toBe(priorRecord);
+    });
+
     it("skips when the prior record carries no risksPatternsKey", () => {
         const prior = JSON.stringify({
             verdict: "APPROVE",

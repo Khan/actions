@@ -70,7 +70,8 @@ import {
 } from "./dispatch-contracts";
 import {loadAgents, type DispatchFs} from "./dispatch-agents";
 
-import {computeRoster, type RosterShed} from "./dispatch-roster";
+import {computeRoster, TRIAGE_DIMENSION} from "./dispatch-roster";
+import type {RosterShed} from "./dispatch-roster";
 import {refusalFallbackFor} from "./refusal-fallback";
 import {
     applyProvenanceGate,
@@ -581,7 +582,7 @@ export const runDispatch = async (
             // Triage unavailable: review everything (fail toward more
             // review), and say so.
             skippedDimensions.push({
-                dimension: "pattern triage",
+                dimension: TRIAGE_DIMENSION,
                 cause: "unavailable",
             });
             fs.writeFileSync(`${REVIEW_DIR}/pr.diff`, diffText);
@@ -903,7 +904,7 @@ export const runDispatch = async (
                         ? VALIDATOR
                         : skip.dimension === "thread reconciliation"
                         ? RECONCILER
-                        : skip.dimension === "pattern triage"
+                        : skip.dimension === TRIAGE_DIMENSION
                         ? TRIAGE
                         : skip.dimension,
                 ),

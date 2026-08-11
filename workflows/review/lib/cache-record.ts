@@ -286,9 +286,18 @@ export const runCacheRecordCli = (
             fs,
             queuePath,
         );
-        const holdCommentQueued =
-            holdReadable &&
-            holdItems.some((item) => item["type"] === "add_comment");
+        if (!holdReadable) {
+            // Mirror the review-event path's corroboration refusal: an
+            // unreadable queue means nothing proves the hold comment
+            // posted, and a silent skip here would leave a stale
+            // risksPatternsKey failure invisible.
+            return refuse(
+                "hold plan but no readable safe-output queue, so nothing corroborates the hold comment: the prior record stands",
+            );
+        }
+        const holdCommentQueued = holdItems.some(
+            (item) => item["type"] === "add_comment",
+        );
         if (!holdCommentQueued) {
             return skip(
                 "hold plan with no queued hold comment: the prior record stands untouched",
