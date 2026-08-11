@@ -311,6 +311,20 @@ export const runSubmissionCli = (
     // the EXECUTED depth, not the configured mode, so the first full review,
     // a tripwire re-arm, and every guard that resolves to full depth still
     // post everything. The verdict counts every claim either way.
+    //
+    // Executed depth is a DELIBERATE key, not a proxy for "is a repeat
+    // review" (rereview-plan.json is staged and could key that directly): a
+    // guard degrades to full exactly when the pipeline could not trust the
+    // reduced-depth state — a divergence re-arm, an unparseable plan, a
+    // missing staging — and a run whose premise is "start over, trust
+    // nothing" should not inherit a posting filter from the state it just
+    // declined to trust. Guard-degraded repeats therefore stay loud BY
+    // DESIGN, priced as: guards are rare, and when one fires the review is
+    // effectively a first review of the current tree. If the live A/B shows
+    // degrade-to-full repeats still generating the chatter complaint, the
+    // revisit is to key on plan presence, not to widen this condition
+    // quietly — that trade (filtering a run built on distrusted state)
+    // deserves its own change and its own eval.
     const blockingOnly =
         depth !== "full" && routing?.reReviewBlockingOnly === true;
 
@@ -440,6 +454,21 @@ export const runSubmissionCli = (
         body: renderClaimComment(claim),
     }));
     if (collapsed.length > 0) {
+        // Why collapsed one-liners still cost full validation: the modifier
+        // filters at the POSTING surface, deliberately after validation.
+        // The validator's product for a non-blocking claim is not the line
+        // it posts but the lines that never post — false positives dropped
+        // and wrong labels corrected — and a collapsed list of unvalidated
+        // claims would re-import exactly the wrong-claim noise the pipeline
+        // exists to keep off the PR (a one-liner in the body still asserts
+        // the claim, links nothing to check it against, and is skimmed as
+        // the bot's word). Validation spend on the non-blocking tail is
+        // bounded by the investigation cap and the run budget; skipping it
+        // per-label would fork the validation policy for a saving the A/B
+        // has not shown to matter. If it ever does, the dial belongs at the
+        // validation-dispatch gate as its own evaluated change, with the
+        // unvalidated lines marked as such — not as a silent widening here.
+        //
         // The cap can push a 21st+ blocking claim into the collapse; a
         // "Non-blocking" heading would mislabel it, so the blocking-only
         // wording applies only when every collapsed claim is non-blocking
