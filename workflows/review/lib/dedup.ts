@@ -90,6 +90,7 @@
  * can cost is bounded by code even where its judgment cannot be checked.
  */
 
+import {bigrams, contentTokens, intersectionSize} from "./dedup-text";
 import {isRecord, type Claim, type ProposedCluster} from "./dispatch-contracts";
 import {isBlockingLabel} from "./render-comment";
 import {
@@ -165,40 +166,6 @@ const OTHER_LINE_FLOOR = {jaccard: 0.2, overlap: 0.35, sharedBigrams: 6};
  * `dedup-pr-level.test.ts` carries the run's real texts; re-derive, don't nudge.
  */
 const PR_LEVEL_FLOOR = {jaccard: 0.2, overlap: 0.35, sharedBigrams: 8};
-
-const STOPWORDS = new Set(
-    "the a an and or of to in is are was be for on with that this it as not no by at from so its their they".split(
-        " ",
-    ),
-);
-
-const contentTokens = (text: string): string[] => {
-    const tokens: string[] = [];
-    for (const word of text.toLowerCase().match(/[a-z0-9]+/g) ?? []) {
-        if (word.length >= 3 && !STOPWORDS.has(word)) {
-            tokens.push(word);
-        }
-    }
-    return tokens;
-};
-
-const bigrams = (tokens: string[]): Set<string> => {
-    const set = new Set<string>();
-    for (let i = 0; i + 1 < tokens.length; i += 1) {
-        set.add(`${tokens[i]} ${tokens[i + 1]}`);
-    }
-    return set;
-};
-
-const intersectionSize = <T>(a: Set<T>, b: Set<T>): number => {
-    let count = 0;
-    for (const item of a) {
-        if (b.has(item)) {
-            count += 1;
-        }
-    }
-    return count;
-};
 
 const comparisonKey = (text: string): string =>
     text
