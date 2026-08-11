@@ -464,7 +464,10 @@ describe("runRereviewCli", () => {
                 skipLines: [],
             }),
             [PRIOR_REVIEWS]: JSON.stringify([
-                {state: "APPROVED", body: `- [\`x.go:3\`](${url}): Old concern.`},
+                {
+                    state: "APPROVED",
+                    body: `- [\`x.go:3\`](${url}): Old concern.`,
+                },
             ]),
         });
         const result = runRereviewCli(fs);
@@ -520,7 +523,10 @@ describe("runRereviewCli", () => {
             }),
             [PRIOR_REVIEWS]: JSON.stringify([
                 {state: "APPROVED", body: `see ${url} for the discussion`},
-                {state: "APPROVED", body: `linked: [\`x.go:9\`](${url}9): other`},
+                {
+                    state: "APPROVED",
+                    body: `linked: [\`x.go:9\`](${url}9): other`,
+                },
             ]),
         });
         const prose = runRereviewCli(fsProse);
