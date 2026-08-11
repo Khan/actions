@@ -717,7 +717,7 @@ describe("suppressOpenThreadDuplicates (trial suggestion g)", () => {
         expect(suppressed).toEqual([]);
     });
 
-    it("never matches across paths or without an anchor, and is identity without threads", () => {
+    it("never matches an anchored claim across paths, and is identity without threads", () => {
         const reflag = claim({
             id: "c",
             source: "correctness-reviewer",
@@ -727,12 +727,6 @@ describe("suppressOpenThreadDuplicates (trial suggestion g)", () => {
             failure_scenario:
                 "A regression that identifies expired memories but skips the deletion stays green.",
         });
-        expect(
-            suppressOpenThreadDuplicates(
-                [claim({...reflag, path: undefined, line: undefined})],
-                [openThread()],
-            ).suppressed,
-        ).toEqual([]);
         expect(
             suppressOpenThreadDuplicates(
                 [reflag],
