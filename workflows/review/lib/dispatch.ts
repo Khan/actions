@@ -39,14 +39,8 @@
  * note lines) is pure code. No prose about the code under review.
  */
 
-import {
-    dedupeClaims,
-    openThreadsFromStaged,
-    stagedThreadShapeFailure,
-    suppressOpenThreadDuplicates,
-    type ClaimMerge,
-    type ThreadSuppression,
-} from "./dedup";
+import {dedupeClaims, type ClaimMerge, type ThreadSuppression} from "./dedup";
+import {suppressTrackedDuplicates} from "./dedup-adjudicated";
 import {
     clusteringRecord,
     runClusterStep,
@@ -830,25 +824,25 @@ export const runDispatch = async (
     );
     let claims = deduped.claims;
 
-    // Open-thread suppression (trial suggestion g), also before validation:
-    // a defect an open bot thread already tracks is not re-validated or
-    // re-posted at a new anchor. Threads the reconciler resolves this run
-    // are exempt; when the reconciler was unavailable, nothing resolves, so
-    // every staged bot thread suppresses (fail toward fewer duplicate
-    // threads). The bot-opener filter, and the check for a staging whose shape
-    // defeats it and so suppresses nothing, both live in dedup.ts beside the
-    // rules they enforce; the staging is code now (stage-pr.ts), and the guards
-    // stay so a producer bug degrades to a duplicate, never to a dropped
-    // finding.
-    const resolvedIds = new Set(reconciliation?.resolve ?? []);
-    const openThreads = openThreadsFromStaged(threads, resolvedIds);
-    const suppression = suppressOpenThreadDuplicates(claims, openThreads);
-    claims = suppression.kept;
-    const threadSuppressionUnavailable = stagedThreadShapeFailure(
+    // Thread suppression (trial suggestion g), also before validation: a
+    // defect an OPEN bot thread already tracks, or one a human ADJUDICATED by
+    // resolving its thread (webapp#41290: six resolved variants of one
+    // concern, then a seventh posted anyway), is not re-validated or
+    // re-posted at a new anchor. Threads the reconciler resolves this run are
+    // exempt from the open corpus; blocking candidates are exempt from the
+    // adjudicated one (a closed thread floors nothing, so a regression
+    // re-flag at blocking severity must stay visible). Every filter and guard
+    // lives in dedup.ts / dedup-adjudicated.ts beside the rules it enforces;
+    // a producer bug or an older staging without adjudicated-threads.json
+    // degrades to a duplicate comment, never to a dropped finding.
+    const suppression = suppressTrackedDuplicates(
+        claims,
         threads,
-        openThreads,
-        resolvedIds,
+        readJson(fs, `${REVIEW_DIR}/adjudicated-threads.json`),
+        new Set(reconciliation?.resolve ?? []),
     );
+    claims = suppression.kept;
+    const threadSuppressionUnavailable = suppression.shapeFailure;
     if (threadSuppressionUnavailable !== undefined) {
         // eslint-disable-next-line no-console
         console.error(threadSuppressionUnavailable.warning);

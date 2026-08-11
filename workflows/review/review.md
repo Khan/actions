@@ -365,6 +365,10 @@ budget on content you never act on.
   threads, split by who opened them; the ones this bot opened (with their full
   reply chains) and the `{path, line}` of everyone else's. Step 3 says what each
   one feeds and the one judgment it still wants from you.
+- `adjudicated-threads.json`: this bot's threads a HUMAN resolved. Entirely
+  the dispatcher's input (its suppression drops a non-blocking candidate that
+  re-derives a defect a human already settled); nothing in it is yours to act
+  on.
 - `routing.json`, `provenance.json`, `full-stripped.diff`,
   `full-stripped-annotated.diff`, `rereview-plan.json` (also copied to
   `out/rereview-plan.json` for the run artifact), and, on a reduced-depth
@@ -590,6 +594,13 @@ misfiling one bot thread as human costs a dropped finding, per
   unresolved thread somebody ELSE opened. These mark lines where a human review
   conversation is already open, so the dispatcher defers there and posts no bot
   comment on them.
+
+The same fetch also staged `/tmp/gh-aw/review/adjudicated-threads.json`: this
+bot's threads a HUMAN resolved (same shape as `threads.json`, plus
+`resolved: true` and `resolvedBy`). It is entirely the dispatcher's input; its
+suppression drops a non-blocking candidate that re-derives a defect a human
+already settled, so do not read it, re-litigate it, or treat a resolved thread
+as open.
 
 **The pipeline.** Step 3 runs as ONE deterministic program; your part is
 exactly this sequence:

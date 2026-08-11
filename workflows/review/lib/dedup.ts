@@ -272,6 +272,15 @@ export type ThreadSuppression = {
      * threads that clear the floor their labels can differ.
      */
     threadBlocking: boolean;
+    /**
+     * Present (and true) when the matched thread is from the ADJUDICATED
+     * corpus (a bot thread a human resolved) rather than an open one; see
+     * dedup-adjudicated.ts. Audit-trail only: an adjudicated suppression can
+     * never floor the verdict, because that pass never suppresses a blocking
+     * candidate and submission.ts's floor requires the CANDIDATE's label to
+     * be blocking too.
+     */
+    adjudicated?: true;
 };
 
 /**
@@ -285,7 +294,7 @@ export type ThreadSuppression = {
  * recognizable label reads as non-blocking, since an unvalidated floor is the
  * failure mode this guards.
  */
-const threadOpenerIsBlocking = (body: string): boolean => {
+export const threadOpenerIsBlocking = (body: string): boolean => {
     const label = /^\s*\*{0,2}([a-z]+ \([^)]*\))\*{0,2}:?/i.exec(body)?.[1];
     return (
         label !== undefined &&
@@ -322,7 +331,7 @@ const threadProse = (body: string): string =>
  * hand-built staging used to reproduce a run) inherits its shape. Absent
  * reads as unknown, not as open.
  */
-const stagedResolvedState = (thread: Record<string, unknown>): unknown =>
+export const stagedResolvedState = (thread: Record<string, unknown>): unknown =>
     thread["resolved"] ?? thread["is_resolved"] ?? thread["isResolved"];
 
 /**
@@ -463,7 +472,7 @@ export const describesOpenThreadDefect = (
  * comparisons keep staging order as the final tiebreak, so an exact scoring
  * tie behaves as it did before.
  */
-const bestOpenThreadMatch = (
+export const bestOpenThreadMatch = (
     claim: Claim,
     threads: readonly OpenThread[],
 ): OpenThread | undefined => {
