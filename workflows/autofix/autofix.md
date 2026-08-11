@@ -494,6 +494,21 @@ Edit the files directly in the workspace. Rules, all hard:
   a rationale.** A plausible-sounding reason you cannot source is worse than no
   comment, because the next reader will trust it and the reviewer cannot tell
   the difference.
+- **A readability item is fixed with the reviewer's own words.** A documentation
+  finding may flag prose readability (a metaphor that hides the mechanism, a
+  paragraph restating an earlier one, shorthand the document never defines)
+  rather than comment content, and it carries the plain rewrite, quoted in its
+  body or as a suggestion block. Apply that rewrite verbatim: it survived claim
+  validation, which checked that it preserves the original sentence's meaning,
+  and a paraphrase you improvise did not. If the file has drifted and the quoted
+  rewrite no longer fits the text, leave the item unfixed and say so in Step 7
+  rather than composing your own.
+- **On a says-the-same-thing-twice item, delete; never mint a third phrasing.**
+  The rewrite-before-delete bias above is calibrated for a restated comment
+  sitting on unexplained code. A duplicated paragraph is the opposite case: the
+  content already exists in the copy that stays, so the fix is deleting the copy
+  the finding names, and rewording the duplicate into different words is the
+  failure mode the finding exists to stop, not a fix for it.
 - **Say when a deletion left a hole.** If you delete a comment off a constant,
   magic value, or workaround without being able to state why the value is what
   it is, the thread is fixed and the code is still unexplained. Report both in
@@ -501,9 +516,14 @@ Edit the files directly in the workspace. Rules, all hard:
   can write (`staleAfter`'s restating comment is gone; nothing records why the
   window is that long). Reporting it as plainly fixed hides the one thing a
   human still needs to do.
-- **Do not touch files no item points at.** The one exception is a change that
-  is mechanically forced by a fix (a caller that must be updated for a changed
-  signature); note any such file in Step 7.
+- **Do not touch files no item points at.** Two exceptions. First, a change
+  mechanically forced by a fix (a caller that must be updated for a changed
+  signature). Second, the instances a batched documentation item quotes: the
+  documentation reviewer caps readability at one thread per review and
+  enumerates up to three further instances, verbatim, in that thread's body, so
+  each **quoted** instance is part of the finding wherever it lives; fix those
+  too. An instance the body merely alludes to without quoting is not part of
+  the finding. Note any file either exception led you into in Step 7.
 - **Do not amend, rebase, or force-push.** You produce working-tree changes;
   the push is a safe output.
 - If a fix would require a design decision the reviewer did not make for you,

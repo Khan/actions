@@ -136,6 +136,14 @@ arming `nits` to clear three stale comments also invites the fixer into every
 other cosmetic thread on the PR. A flat namespace cannot show that, so it is
 written down here and in `scope.ts`.
 
+One class of documentation finding never reaches this workflow at all: a PR
+title/description readability finding posts PR-level, folded into the review
+body rather than opened as a thread, so the worklist (which reads threads and
+parses their labels) never sees it. That is deliberate, not a gap: the
+description is the author's voice, the review body already carries the plain
+rewrite for the author to take or leave, and a bot editing PR metadata is a
+different trust decision than a bot editing comment text on a branch.
+
 Read this before adding a token to the vocabulary. `nits` and `loop` look like
 peers and are not, and the day both are requested the rule that resolves them
 has to already exist.
