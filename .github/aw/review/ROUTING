@@ -22,7 +22,12 @@ enable holistic,completeness,test-adequacy,first-principles,conventions,document
 # whole-change reviewers, not only the correctness pass. Graduate to
 # flip-gated once re-reviews here show scoped is overpaying (see
 # workflows/review/README.md for the dial).
-re-review scoped
+#
+# blocking-only: repeat reviews keep the full scoped roster (blocking recall
+# unchanged) but post only blocking findings inline; validated non-blocking
+# findings collapse to one line each in the review body. First full reviews,
+# tripwire re-arms, and guard-degraded full runs still post everything.
+re-review scoped blocking-only
 
 # Shipped composite actions run inside consuming repos' CI with their credentials.
 actions/**                   tier=high
