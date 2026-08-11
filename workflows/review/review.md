@@ -639,7 +639,15 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    `skipSubmission` is `true` (the plan CLI sets it for an APPROVE with zero
    `comments` whose body is the bare approve line, on a PR whose last stamped
    verdict was already APPROVE; the gate reads the same field, so the two can
-   never disagree). When it is `false`, always submit. The dispatch-conformance gate
+   never disagree). When it is `false`, always submit. One exception outranks
+   both: when the plan's `event` is `HOLD_FOR_HUMAN` (a core review pass
+   produced no output on a run that would otherwise auto-approve), emit **no**
+   review submission, **no** inline comments, and **no** thread resolutions
+   (a hold plan stages none of them) — instead post the plan's `body` verbatim
+   as one standalone PR comment with the `add-comment` safe output, then skip
+   Steps 7 and 8 (they are APPROVE-only) and continue at Step 9, where the
+   cache CLI handles the hold on its own (it leaves the prior fingerprints
+   standing so the next run reviews in full). The dispatch-conformance gate
    compares what you queued against the staged plan and blocks the
    submission on any deviation, so a mis-typed or "improved" body is a red
    run, never a posted one. `dispatch-result.json`'s `riskFiles`,
@@ -658,7 +666,13 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
 The verdict is computed by the plan CLI (Step 3), never by you: REQUEST_CHANGES
 iff a validated posted claim carries a blocking label, plus the reduced-depth
 flip floor over kept blocking threads and the open-thread suppression floor —
-all `lib/verdict.ts` / `lib/submission.ts` rules. The plan's `event` IS the
+all `lib/verdict.ts` / `lib/submission.ts` rules. A third outcome exists:
+HOLD_FOR_HUMAN, when a core review pass (`correctness-reviewer` or
+`skill-auditor`) produced no usable output this run and the run would
+otherwise have auto-approved — the automation never approves a change its
+core passes did not look at (a blocking finding still wins: it is actionable
+on its own, so the verdict stays REQUEST_CHANGES and the gap is disclosed in
+a note line). The plan's `event` IS the
 verdict; never recompute, second-guess, or override it. (The blocking-label
 vocabulary and the concrete-failing-scenario bar live in the sub-agent
 definitions and the shared lib.)
@@ -686,6 +700,13 @@ with **one** `submit-pull-request-review` call carrying the plan's `event` and
 `body` verbatim — except under the redundant-approval skip (Step 3), where you
 submit nothing. The dispatch-conformance gate blocks any deviation from the
 plan, so a mis-typed or "improved" body is a red run, never a posted one.
+
+When the plan's `event` is `HOLD_FOR_HUMAN`, there is no review to submit:
+post the plan's `body` verbatim as one standalone PR comment with the
+`add-comment` safe output, and queue nothing else (no review submission, no
+inline comments, no thread resolutions). The body already explains the hold
+and how the author gets unstuck; the gate blocks a hold run that submits a
+review, posts inline comments, resolves threads, or drops the comment.
 
 ## Step 7: On Approval — Post Risk and Patterns as a PR Comment
 
