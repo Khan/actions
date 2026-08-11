@@ -153,6 +153,19 @@ export type ClaimMerge = {
 const EXACT_ANCHOR_FLOOR = {jaccard: 0.14, overlap: 0.34, sharedBigrams: 4};
 const OTHER_LINE_FLOOR = {jaccard: 0.2, overlap: 0.35, sharedBigrams: 6};
 
+/**
+ * The floor for a claim with NO anchor at all (a pr-level finding) against
+ * an open thread: the least anchor evidence this module scores, so it pays
+ * with the highest bigram floor, one tier above {@link OTHER_LINE_FLOOR}.
+ * Calibrated on webapp#41290 review 4867627688 (a pr-anchored re-find of a
+ * data race two open blocking threads tracked re-posted in full, because
+ * the path gate made pr-level claims unsuppressable): the true counterparts
+ * score 0.342/0.558/40 and 0.329/0.643/23 (jaccard/overlap/bigrams), the
+ * six unrelated open threads top out at 0.051/0.180/1.
+ * `dedup-pr-level.test.ts` carries the run's real texts; re-derive, don't nudge.
+ */
+const PR_LEVEL_FLOOR = {jaccard: 0.2, overlap: 0.35, sharedBigrams: 8};
+
 const STOPWORDS = new Set(
     "the a an and or of to in is are was be for on with that this it as not no by at from so its their they".split(
         " ",
@@ -260,7 +273,7 @@ export type ThreadSuppression = {
     id: string;
     source: string;
     label: string;
-    path: string;
+    path?: string; // absent for a pr-level claim (no anchor)
     line?: number;
     thread_id: string;
     /**
@@ -422,15 +435,17 @@ export const describesOpenThreadDefect = (
     thread: OpenThread,
 ): boolean => {
     const {jaccard, overlap, sharedBigrams} = openThreadScore(claim, thread);
-    // The different-line tier: this match has no line window at all (see
+    // This match has no line window at all (see
     // `suppressOpenThreadDuplicates`), so it pays for the loose anchor with
     // the higher bigram floor, exactly as a cross-source pair on mismatched
-    // lines does. Erring strict is the safe direction: a missed suppression
-    // posts a duplicate comment, a false one silently drops a finding.
+    // lines does; a pathless (pr-level) claim has no anchor evidence at all
+    // and pays one tier more. Erring strict is the safe direction: a
+    // missed suppression posts a duplicate, a false one drops a finding.
+    const floor = claim.path === undefined ? PR_LEVEL_FLOOR : OTHER_LINE_FLOOR;
     return (
-        jaccard >= OTHER_LINE_FLOOR.jaccard &&
-        overlap >= OTHER_LINE_FLOOR.overlap &&
-        sharedBigrams >= OTHER_LINE_FLOOR.sharedBigrams
+        jaccard >= floor.jaccard &&
+        overlap >= floor.overlap &&
+        sharedBigrams >= floor.sharedBigrams
     );
 };
 
@@ -468,9 +483,10 @@ const bestOpenThreadMatch = (
     threads: readonly OpenThread[],
 ): OpenThread | undefined => {
     let best: {thread: OpenThread; score: OpenThreadScore} | undefined;
+    // A pathless (pr-level) claim compares against EVERY open thread.
     for (const thread of threads) {
         if (
-            thread.path !== claim.path ||
+            (claim.path !== undefined && thread.path !== claim.path) ||
             !describesOpenThreadDefect(claim, thread)
         ) {
             continue;
@@ -568,8 +584,10 @@ export const threadSuppressionUnavailableWarning = (
  * Drop candidate claims that describe a defect an open bot thread already
  * tracks (trial run S4 r2: the missing-test defect re-flagged at
  * expiration.go:42 while its round-1 thread at :62 was still open, so the
- * same defect briefly had two open threads). The match is same-path plus the
- * calibrated #245 text-similarity floor, deliberately with NO line window:
+ * same defect briefly had two open threads). The match is same-path plus
+ * the calibrated #245 text-similarity floor (a pathless pr-level claim
+ * skips the path gate and pays the stricter {@link PR_LEVEL_FLOOR}),
+ * deliberately with NO line window:
  * a persisting defect's re-flag routinely lands on a different line
  * of the same file (the observed pair sat 20 lines apart); the similarity
  * floor carries the precision. The caller excludes threads the reconciler
@@ -593,10 +611,7 @@ export const suppressOpenThreadDuplicates = (
     const kept: Claim[] = [];
     const suppressed: ThreadSuppression[] = [];
     for (const claim of claims) {
-        const match =
-            claim.path === undefined
-                ? undefined
-                : bestOpenThreadMatch(claim, threads);
+        const match = bestOpenThreadMatch(claim, threads);
         if (match === undefined) {
             kept.push(claim);
             continue;
@@ -605,7 +620,7 @@ export const suppressOpenThreadDuplicates = (
             id: claim.id,
             source: claim.source,
             label: claim.label,
-            path: claim.path as string,
+            ...(claim.path !== undefined ? {path: claim.path} : {}),
             ...(claim.line !== undefined ? {line: claim.line} : {}),
             thread_id: match.thread_id,
             threadBlocking: threadOpenerIsBlocking(match.body),

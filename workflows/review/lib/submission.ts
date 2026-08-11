@@ -161,6 +161,36 @@ export const MAX_INLINE_COMMENTS = 20;
 /** The medium-confidence inline floor (the Step 5 posting bar). */
 const MIN_INLINE_CONFIDENCE = 0.5;
 
+/**
+ * A pr-level claim's discussion folds into the body verbatim only up to
+ * this length; past it, the body carries the claim's subject line and the
+ * full discussion moves into a <details> block. webapp#41290 review
+ * 4867627688 folded a ~2,600-char single-paragraph finding directly into
+ * the body, burying the accountability section and the note lines around
+ * it; a short paragraph is the most a fold can carry without doing that.
+ */
+export const MAX_VERBATIM_FOLD_CHARS = 400;
+
+/**
+ * Render a pr-level claim for the review body: verbatim while it reads as
+ * a short paragraph, subject line plus a collapsed full finding once it
+ * does not.
+ */
+export const renderPrLevelFold = (claim: Claim): string => {
+    if (claim.discussion.length <= MAX_VERBATIM_FOLD_CHARS) {
+        return `**${claim.label}:** ${claim.discussion}`;
+    }
+    return [
+        `**${claim.label}:** ${claim.subject}`,
+        "<details>",
+        "<summary>Full finding</summary>",
+        "",
+        claim.discussion,
+        "",
+        "</details>",
+    ].join("\n");
+};
+
 const lineHasCodeSignal = (line: string): boolean =>
     /\w\(/.test(line) || // a call
     /[{};]/.test(line) || // block/statement punctuation
@@ -302,6 +332,31 @@ export const runSubmissionCli = (
           )
         : [];
     const depth = typeof dispatch.depth === "string" ? dispatch.depth : "full";
+    const routing = readJson(fs, `${REVIEW_DIR}/routing.json`) as
+        | {teams?: {owners?: unknown}; reReviewBlockingOnly?: unknown}
+        | undefined;
+    // The ROUTING `re-review <mode> blocking-only` modifier: a repeat review
+    // at a reduced depth posts only blocking findings inline; validated
+    // non-blocking findings collapse into the review body below. Keyed on
+    // the EXECUTED depth, not the configured mode, so the first full review,
+    // a tripwire re-arm, and every guard that resolves to full depth still
+    // post everything. The verdict counts every claim either way.
+    //
+    // Executed depth is a DELIBERATE key, not a proxy for "is a repeat
+    // review" (rereview-plan.json is staged and could key that directly): a
+    // guard degrades to full exactly when the pipeline could not trust the
+    // reduced-depth state — a divergence re-arm, an unparseable plan, a
+    // missing staging — and a run whose premise is "start over, trust
+    // nothing" should not inherit a posting filter from the state it just
+    // declined to trust. Guard-degraded repeats therefore stay loud BY
+    // DESIGN, priced as: guards are rare, and when one fires the review is
+    // effectively a first review of the current tree. If the live A/B shows
+    // degrade-to-full repeats still generating the chatter complaint, the
+    // revisit is to key on plan presence, not to widen this condition
+    // quietly — that trade (filtering a run built on distrusted state)
+    // deserves its own change and its own eval.
+    const blockingOnly =
+        depth !== "full" && routing?.reReviewBlockingOnly === true;
 
     // Stage the code-computed risks/patterns signature (trial suggestion b):
     // Step 7 compares THIS string against cache memory's `risksPatternsKey`
@@ -315,9 +370,6 @@ export const runSubmissionCli = (
     // narrower signature could collapse the standing full-run guidance the
     // next time any comment queues.
     if (depth === "full") {
-        const routing = readJson(fs, `${REVIEW_DIR}/routing.json`) as
-            | {teams?: {owners?: unknown}}
-            | undefined;
         // The NOTIFIED match set rides the same key: Step 7 posts one Review
         // Guidance comment for risks, patterns, AND notifications, so a run
         // that changed only the notified set must still re-post.
@@ -379,14 +431,18 @@ export const runSubmissionCli = (
     }
 
     // Inline comments need a path and a line; a PR-level claim folds into
-    // the body instead (rare: a pr-anchored finding).
+    // the body instead (rare: a pr-anchored finding). Under blocking-only a
+    // non-blocking pr-level claim joins the collapsed section instead.
     const anchored: Claim[] = [];
     const prLevelLines: string[] = [];
+    const prLevelCollapsed: Claim[] = [];
     for (const claim of claims) {
         if (claim.path !== undefined && claim.line !== undefined) {
             anchored.push(claim);
+        } else if (blockingOnly && !isBlockingLabel(claim.label)) {
+            prLevelCollapsed.push(claim);
         } else {
-            prLevelLines.push(`**${claim.label}:** ${claim.discussion}`);
+            prLevelLines.push(renderPrLevelFold(claim));
             notes.push(
                 `pr-level claim ${claim.id} folded into the review body`,
             );
@@ -415,34 +471,69 @@ export const runSubmissionCli = (
     const inlineWorthy = ranked.filter(
         (claim) =>
             isBlockingLabel(claim.label) ||
-            claim.confidence >= MIN_INLINE_CONFIDENCE,
+            (!blockingOnly && claim.confidence >= MIN_INLINE_CONFIDENCE),
     );
     const inlineClaims = new Set(inlineWorthy.slice(0, MAX_INLINE_COMMENTS));
-    const collapsed = ranked.filter((claim) => !inlineClaims.has(claim));
+    const collapsed = [
+        ...ranked.filter((claim) => !inlineClaims.has(claim)),
+        ...prLevelCollapsed,
+    ];
     const inline: PlannedComment[] = [...inlineClaims].map((claim) => ({
         path: claim.path as string,
         line: claim.line as number,
         body: renderClaimComment(claim),
     }));
     if (collapsed.length > 0) {
+        // Why collapsed one-liners still cost full validation: the modifier
+        // filters at the POSTING surface, deliberately after validation.
+        // The validator's product for a non-blocking claim is not the line
+        // it posts but the lines that never post — false positives dropped
+        // and wrong labels corrected — and a collapsed list of unvalidated
+        // claims would re-import exactly the wrong-claim noise the pipeline
+        // exists to keep off the PR (a one-liner in the body still asserts
+        // the claim, links nothing to check it against, and is skimmed as
+        // the bot's word). Validation spend on the non-blocking tail is
+        // bounded by the investigation cap and the run budget; skipping it
+        // per-label would fork the validation policy for a saving the A/B
+        // has not shown to matter. If it ever does, the dial belongs at the
+        // validation-dispatch gate as its own evaluated change, with the
+        // unvalidated lines marked as such — not as a silent widening here.
+        //
+        // The cap can push a 21st+ blocking claim into the collapse; a
+        // "Non-blocking" heading would mislabel it, so the blocking-only
+        // wording applies only when every collapsed claim is non-blocking
+        // (each line still carries its own label either way, and the
+        // verdict already counted every claim above).
+        const collapsedNonBlockingOnly = !collapsed.some((entry) =>
+            isBlockingLabel(entry.label),
+        );
+        const summary =
+            blockingOnly && collapsedNonBlockingOnly
+                ? `Non-blocking observations (${collapsed.length})`
+                : `Lower-confidence observations (${collapsed.length})`;
         const section = [
             "<details>",
-            `<summary>Lower-confidence observations (${collapsed.length})</summary>`,
+            `<summary>${summary}</summary>`,
             "",
-            ...collapsed.map(
-                (claim) =>
-                    `- \`${claim.path}:${claim.line}\` ${claim.label}: ${claim.subject}`,
+            ...collapsed.map((claim) =>
+                claim.path !== undefined && claim.line !== undefined
+                    ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${claim.subject}`
+                    : `- ${claim.label}: ${claim.subject}`,
             ),
             "",
             "</details>",
         ].join("\n");
-        if (inline.length > 0) {
+        // Under blocking-only the section always rides the review body: the
+        // point of the dial is no non-blocking noise on inline threads.
+        if (!blockingOnly && inline.length > 0) {
             inline[0] = {...inline[0], body: `${inline[0].body}\n\n${section}`};
         } else {
             prLevelLines.push(section);
         }
         notes.push(
-            `${collapsed.length} claim(s) collapsed below the inline bar (cap ${MAX_INLINE_COMMENTS}, medium-confidence floor)`,
+            blockingOnly && collapsedNonBlockingOnly
+                ? `${collapsed.length} non-blocking claim(s) collapsed into the body (re-review blocking-only)`
+                : `${collapsed.length} claim(s) collapsed below the inline bar (cap ${MAX_INLINE_COMMENTS}, medium-confidence floor)`,
         );
     }
 
@@ -500,7 +591,9 @@ export const runSubmissionCli = (
     if (plan !== undefined && depth !== "full") {
         const mode = typeof plan.mode === "string" ? plan.mode : "full";
         depthNotes.push(
-            `Note: re-review ran at ${depth} depth (re-review mode ${mode}).`,
+            `Note: re-review ran at ${depth} depth (re-review mode ${mode}${
+                blockingOnly ? ", blocking-only" : ""
+            }).`,
         );
     }
     if (plan?.tripwireRearmed === true) {

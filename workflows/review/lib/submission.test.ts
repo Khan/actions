@@ -5,6 +5,7 @@ import {labelForFinding, renderComment} from "./render-comment";
 import {renderRereviewStamp, STAMP_SCHEMA_VERSION} from "./rereview-mode";
 import {
     isDropInSuggestion,
+    MAX_VERBATIM_FOLD_CHARS,
     renderClaimComment,
     runSubmissionCli,
     type SubmissionFs,
@@ -337,7 +338,46 @@ describe("runSubmissionCli", () => {
         expect(plan.body).toContain(
             "**note (non-blocking):** The guard was removed.",
         );
+        expect(plan.body).not.toContain("<summary>Full finding</summary>");
         expect(plan.notes.join(" ")).toContain("folded into the review body");
+    });
+
+    it("folds a long pr-level claim as its subject plus a collapsed full finding", () => {
+        // webapp#41290 review 4867627688 folded a ~2,600-char pr-anchored
+        // finding verbatim into the body, burying the accountability
+        // section around it; past the verbatim cap the body carries the
+        // subject line and the discussion collapses.
+        const discussion = `The moderation goroutine races the completion goroutine. ${"Every detail of the trace is repeated at length here. ".repeat(
+            Math.ceil(MAX_VERBATIM_FOLD_CHARS / 50),
+        )}`;
+        const fs = makeFakeFs(
+            staged({
+                depth: "full",
+                claims: [
+                    claim({
+                        path: undefined,
+                        line: undefined,
+                        label: "issue (blocking)",
+                        subject:
+                            "The moderation goroutine races the completion goroutine.",
+                        discussion,
+                    }),
+                ],
+            }),
+        );
+        const plan = runSubmissionCli(fs);
+        expect(plan.comments).toEqual([]);
+        expect(plan.body).toContain(
+            "**issue (blocking):** The moderation goroutine races the completion goroutine.",
+        );
+        expect(plan.body).toContain("<summary>Full finding</summary>");
+        expect(plan.body).toContain(discussion);
+        // The verbatim wall is gone: the discussion appears only inside the
+        // details block, after the subject-line fold.
+        expect(plan.body.indexOf(discussion)).toBeGreaterThan(
+            plan.body.indexOf("<summary>Full finding</summary>"),
+        );
+        expect(plan.event).toBe("REQUEST_CHANGES");
     });
 
     it("throws when the dispatcher has not run", () => {
@@ -642,6 +682,9 @@ describe("re-review hardening (slice 4 feedback)", () => {
         });
         expect(dropped.conformant).toBe(false);
     });
+
+    // The blocking-only posting-surface cases live in
+    // submission-blocking-only.test.ts (this file's max-lines budget).
 
     it("refuses the skip without a prior APPROVE (a first approval must post)", () => {
         const plan = runSubmissionCli(
