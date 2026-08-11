@@ -125,7 +125,9 @@ query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
                             author { login }
                             body
                             url
-                            reactions(content: THUMBS_DOWN) { totalCount }
+                            reactions(first: 100, content: THUMBS_DOWN) {
+                                nodes { user { login } }
+                            }
                         }
                     }
                 }
@@ -252,11 +254,28 @@ export type FetchedThread = StagedThread & {
      */
     resolvedBy: string;
     /**
-     * How many 👎 reactions the thread's OPENING comment carries. The opener
-     * is the finding, so a downvote on it is a reviewer's judgment on the
-     * finding itself (the thumbs sweep reacts to exactly this signal); later
-     * comments' reactions are conversation, not adjudication, and are not
-     * counted. 0 when there is no opener or the API returned no connection.
+     * How many 👎 reactions from ATTRIBUTABLE NON-BOT reactors the thread's
+     * OPENING comment carries. The opener is the finding, so a downvote on it
+     * is a reviewer's judgment on the finding itself (the thumbs sweep reacts
+     * to exactly this signal); later comments' reactions are conversation,
+     * not adjudication, and are not counted. 0 when there is no opener or the
+     * API returned no connection.
+     *
+     * Reactor identity is filtered, not merely counted, for the same reason
+     * the sweep's `countDownvotes` filters `r.user !== botLogin`: the review
+     * workflow plans to seed the 👍/👎 nudge pair on its own comments at post
+     * time (README, "Nudge seeding"), and a seeded 👎 is the presence of the
+     * feedback widget, not a judgment on the finding. A raw `totalCount`
+     * cannot exclude the bot, so it would put every nudge-seeded finding in
+     * the adjudicated corpus the moment seeding ships.
+     *
+     * An unattributable reactor (a deleted account, GraphQL `user: null`) is
+     * excluded too, matching {@link FetchedThread.resolvedBy}'s rule that an
+     * empty identity never reads as human adjudication. This is deliberately
+     * STRICTER than the sweep, whose `Reaction` doc treats a login-less
+     * reaction as a real user's: the sweep's worst case is one wasted "why?"
+     * question, while this count suppresses re-derivation of the defect, and
+     * suppression on unverifiable authority is the expensive direction.
      */
     openerDownvotes: number;
 };
@@ -329,11 +348,18 @@ export const collectReviewThreads = async (
             const openerReactions = isRecord(rawComments[0])
                 ? rawComments[0]["reactions"]
                 : undefined;
-            const openerDownvotes =
+            const reactionNodes =
                 isRecord(openerReactions) &&
-                typeof openerReactions["totalCount"] === "number"
-                    ? openerReactions["totalCount"]
-                    : 0;
+                Array.isArray(openerReactions["nodes"])
+                    ? openerReactions["nodes"]
+                    : [];
+            const openerDownvotes = reactionNodes.filter((reaction) => {
+                if (!isRecord(reaction) || !isRecord(reaction["user"])) {
+                    return false;
+                }
+                const login = str(reaction["user"]["login"]);
+                return login !== "" && !isReviewBotAuthor(login);
+            }).length;
             out.push({
                 thread_id: str(node["id"]),
                 path: str(node["path"]),

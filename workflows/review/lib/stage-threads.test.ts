@@ -323,7 +323,12 @@ describe("review-thread staging (slice 1)", () => {
                                 author: {login: "github-actions"},
                                 body: "**note (non-blocking):** opener",
                                 url: "https://github.com/o/r/pull/7#discussion_r9",
-                                reactions: {totalCount: 2},
+                                reactions: {
+                                    nodes: [
+                                        {user: {login: "octo"}},
+                                        {user: {login: "hubot"}},
+                                    ],
+                                },
                             },
                         ],
                     },
@@ -353,6 +358,76 @@ describe("review-thread staging (slice 1)", () => {
             },
         ]);
         expect(adjudicatedThreadsFromStaged(adjudicated)).toHaveLength(1);
+    });
+
+    it("counts only the opener's 👎, never a reply's", async () => {
+        // The opener is the finding; a reply's reactions are conversation.
+        // Structurally guaranteed today by the `rawComments[0]` indexing, and
+        // pinned here so a refactor that sums the chain cannot land quietly:
+        // a 👎 on a bot reply would otherwise adjudicate a finding its
+        // opener never received judgment on.
+        const {adjudicated} = await stage([
+            threadPage([
+                threadNode({
+                    id: "PRRT_reply_down",
+                    comments: {
+                        nodes: [
+                            {
+                                author: {login: "github-actions"},
+                                body: "**note (non-blocking):** opener",
+                            },
+                            {
+                                author: {login: "octo"},
+                                body: "disagree",
+                                reactions: {
+                                    nodes: [{user: {login: "octo"}}],
+                                },
+                            },
+                        ],
+                    },
+                }),
+            ]),
+        ]);
+        expect(adjudicated).toEqual([]);
+    });
+
+    it("ignores the bot's own seeded 👎 and an unattributable reactor", async () => {
+        // The workflow plans to seed the 👍/👎 nudge pair on its own comments
+        // at post time (README, "Nudge seeding"); a seeded 👎 is the feedback
+        // widget, not a judgment, so it must not put the finding in the
+        // adjudicated corpus. The sweep's countDownvotes filters the same
+        // identity. GraphQL reports the bot bare, REST bracketed, so both
+        // spellings are pinned; a `user: null` reactor (deleted account)
+        // never reads as human adjudication, matching resolvedBy's rule.
+        const {adjudicated} = await stage([
+            threadPage([
+                threadNode({
+                    id: "PRRT_seeded",
+                    comments: {
+                        nodes: [
+                            {
+                                author: {login: "github-actions"},
+                                body: "**note (non-blocking):** opener",
+                                reactions: {
+                                    nodes: [
+                                        {user: {login: "github-actions"}},
+                                        {
+                                            user: {
+                                                login: "github-actions[bot]",
+                                            },
+                                        },
+                                        {user: null},
+                                        {},
+                                    ],
+                                },
+                            },
+                        ],
+                    },
+                }),
+            ]),
+        ]);
+        // Only bot and unattributable reactors: no adjudication at all.
+        expect(adjudicated).toEqual([]);
     });
 
     it("keeps bot-resolved and human-opened resolved threads out of the adjudicated corpus", async () => {

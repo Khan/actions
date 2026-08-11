@@ -152,7 +152,11 @@ you can pick the one that says what you mean:
   adjudicated corpus whether or not you also resolve. The feedback sweep may
   additionally ask one follow-up ("why?"), which calibrates the eval suite;
   answering it is welcome but the 👎 alone is what suppresses. Reactions on
-  replies are conversation, not adjudication.
+  replies are conversation, not adjudication. 👎 is the ONLY adjudicating
+  reaction: a 😕 triggers the sweep's follow-up question like a 👎 does, but
+  it does not suppress (😕 reads as "unclear", not "wrong", and ambiguity is
+  worth a question, not a standing suppression). The bot's own seeded nudge
+  reactions never count as adjudication either.
 - **Hide the comment.** Reads as nothing. The reviewer does not see hidden
   state; resolve or 👎 instead.
 
