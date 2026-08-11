@@ -211,19 +211,24 @@ const renderKeptLineCompact = (entry: KeptEntry): string => {
 
 /**
  * Whether a prior review body already recapped this thread, decided by its
- * opener URL appearing in any staged prior-review body (the recap line links
- * exactly that URL, so the first recap plants the marker every later run
- * finds). A thread with no staged URL reads as never recapped and renders
- * full: fail toward MORE information, since the cost of a wrong "repeat" is
- * an excerpt the reader has to click for, on a thread the bot is actively
- * accounting for.
+ * opener URL appearing in any staged prior-review body in the RENDERED link
+ * form `](url)` (both kept-line renderers emit exactly that, so the first
+ * recap plants the marker every later run finds). The closing delimiter is
+ * part of the match: a bare substring would false-positive when one
+ * discussion id is a prefix of another (r123 vs r1234) or when a prior
+ * body's finding PROSE merely mentions the URL, and either way a
+ * never-recapped thread would lose its excerpt — the one direction the
+ * damping must not fail. A thread with no staged URL reads as never recapped
+ * and renders full: fail toward MORE information, since the cost of a wrong
+ * "repeat" is an excerpt the reader has to click for, on a thread the bot is
+ * actively accounting for.
  */
 const previouslyRecapped = (
     entry: KeptEntry,
     priorReviewBodies: readonly string[],
 ): boolean =>
     entry.url !== undefined &&
-    priorReviewBodies.some((body) => body.includes(entry.url as string));
+    priorReviewBodies.some((body) => body.includes(`](${entry.url})`));
 
 export type RenderRereviewInput = {
     /** The staged unresolved bot threads this run started from. */
@@ -369,6 +374,18 @@ const readJson = (fs: RereviewCliFs, path: string): unknown => {
     }
 };
 
+/**
+ * Defensive parse of the staged prior-review bodies (untrusted-shape JSON on
+ * disk, like every staged input this CLI reads). Anything but an array of
+ * records with string bodies contributes nothing, and no prior bodies means
+ * no damping: every kept thread renders full.
+ */
+const parsePriorReviewBodies = (raw: unknown): string[] =>
+    (Array.isArray(raw) ? raw : [])
+        .filter(isRecord)
+        .map((review) => review["body"])
+        .filter((body): body is string => typeof body === "string");
+
 /** Defensive parse of the staged threads (untrusted-shape JSON on disk). */
 const parseThreads = (raw: unknown): StagedThread[] => {
     if (!Array.isArray(raw)) {
@@ -442,11 +459,9 @@ export const runRereviewCli = (fs: RereviewCliFs): RereviewSection => {
         // Prior review bodies feed the recap damping only; a missing or
         // malformed staging reads as no prior reviews, and every kept thread
         // then renders full (fail toward more information).
-        const rawPrior = readJson(fs, PRIOR_REVIEWS_PATH);
-        const priorReviewBodies = (Array.isArray(rawPrior) ? rawPrior : [])
-            .filter(isRecord)
-            .map((review) => review["body"])
-            .filter((body): body is string => typeof body === "string");
+        const priorReviewBodies = parsePriorReviewBodies(
+            readJson(fs, PRIOR_REVIEWS_PATH),
+        );
         result = renderRereviewSection({
             threads,
             reconciler,

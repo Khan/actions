@@ -464,7 +464,7 @@ describe("runRereviewCli", () => {
                 skipLines: [],
             }),
             [PRIOR_REVIEWS]: JSON.stringify([
-                {state: "APPROVED", body: `recapped before: ${url}`},
+                {state: "APPROVED", body: `- [\`x.go:3\`](${url}): Old concern.`},
             ]),
         });
         const result = runRereviewCli(fs);
@@ -494,6 +494,38 @@ describe("runRereviewCli", () => {
             [PRIOR_REVIEWS]: "not json[",
         });
         expect(runRereviewCli(fsBad).section).toContain(": Old concern.");
+        // A prior body that merely MENTIONS the URL in prose (no rendered
+        // `](url)` link) is not a recap: the thread renders full. Bare
+        // substring matching would also let a prefix id (r1 vs r12) damp a
+        // never-recapped thread.
+        const {fs: fsProse} = makeFs({
+            [THREADS]: JSON.stringify([
+                {
+                    thread_id: "a",
+                    path: "x.go",
+                    line: 3,
+                    url,
+                    comments: [
+                        {
+                            author: "github-actions",
+                            body: "**note (non-blocking):** Old concern.",
+                        },
+                    ],
+                },
+            ]),
+            [RECONCILER]: JSON.stringify({
+                resolve: [],
+                keep: ["a"],
+                skipLines: [],
+            }),
+            [PRIOR_REVIEWS]: JSON.stringify([
+                {state: "APPROVED", body: `see ${url} for the discussion`},
+                {state: "APPROVED", body: `linked: [\`x.go:9\`](${url}9): other`},
+            ]),
+        });
+        const prose = runRereviewCli(fsProse);
+        expect(prose.section).toContain(": Old concern.");
+        expect(prose.section).not.toContain("previously reported");
     });
 
     it("renders and writes the section from the staged inputs", () => {
