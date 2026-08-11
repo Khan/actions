@@ -1550,8 +1550,11 @@ proximity:
   wrong, even when one calls it a wrong cap, one quotes the comment, and one cites a
   doc-comment convention: one rewritten comment satisfies all three.
 - **Group** across lines. A defect is routinely flagged at different anchors (the
-  function, its doc comment, its test), and the pipeline keeps one anchor. Distance in
-  the file is not evidence of two defects.
+  function, its doc comment, the call site below it), and the pipeline keeps one anchor.
+  Distance in the file is not evidence of two defects. (A twin anchored in another FILE
+  — e.g. the test in `_test.go` — stays ungrouped under the same-`path` rule below,
+  however clearly it describes the same defect; the pipeline prices that as a duplicate
+  comment, not a wrong merge.)
 - **Do NOT group** a bug and the missing test for that bug. "The cutoff subtracts months
   instead of days" and "no test asserts a stale entry is deleted" cite the same facts and
   need two different edits; they are two defects.
