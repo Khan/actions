@@ -106,9 +106,9 @@ provenance gate, the scope filter, cross-source dedup, open-thread suppression
 (a candidate describing a defect an open bot thread already tracks posts no
 duplicate; a suppressed blocking candidate still floors the verdict),
 adjudicated-thread suppression (a non-blocking candidate re-deriving a defect
-a human settled by resolving the bot's thread posts no new thread; a blocking
-candidate is never suppressed this way, so a regression re-flag stays
-visible), and
+a human settled by resolving the bot's thread or downvoting its opener posts
+no new thread; a blocking candidate is never suppressed this way, so a
+regression re-flag stays visible), and
 claim validation, inside the same firewall sandbox (the api-proxy meters and
 caps script-spawned sub-agents exactly like Task-spawned ones). Each sub-agent
 delivers its result through an in-process `submit_result` MCP tool whose input
@@ -128,6 +128,38 @@ run-local JSONL append that needs no credentials, but the agent sandbox mounts
 `${RUNNER_TEMP}/gh-aw` read-only, so only the safeoutputs MCP container can
 write it. Removing the seam wants a writable path into the queue (an upstream
 mount change, or a post-agent step on the host); neither is tested yet.
+
+## What your feedback does
+
+The reviewer reads four signals off its own threads. What each one means, so
+you can pick the one that says what you mean:
+
+- **Reply to the thread.** Read in full: the reconciler sees every reply
+  chain verbatim, and the orchestrator surfaces replies that factually
+  dispute a finding to claim validation. But a reply alone does not close
+  anything: the reconciler resolves a thread when the CODE changes to address
+  it, so arguing a finding down in prose and pushing nothing leaves it open
+  (and blocking, if it was blocking).
+- **Resolve the thread.** "This is settled." The thread leaves the
+  accountability recap, and the defect joins the adjudicated corpus: a later
+  run that re-derives the same defect (any wording, any nearby line) posts
+  nothing, unless it comes back at BLOCKING severity, which always posts (a
+  regression worth stopping the PR for must never be silenced by an old
+  resolution). Threads the bot resolved itself (because a push fixed them)
+  do not join the corpus; a fixed defect that reappears is a fresh finding.
+- **👎 the finding's comment.** Same adjudication as resolving, through the
+  reaction channel: a 👎 on a thread's OPENING comment puts its defect in the
+  adjudicated corpus whether or not you also resolve. The feedback sweep may
+  additionally ask one follow-up ("why?"), which calibrates the eval suite;
+  answering it is welcome but the 👎 alone is what suppresses. Reactions on
+  replies are conversation, not adjudication.
+- **Hide the comment.** Reads as nothing. The reviewer does not see hidden
+  state; resolve or 👎 instead.
+
+Per-PR opt-out and re-runs are consumer-trigger concerns: repos using the
+stock push trigger skip any PR carrying the `skip-ai-review` label, and
+consumers with comment triggers or shims should honor the same label (see
+Khan/webapp's kore shim).
 
 ## Install
 

@@ -296,6 +296,7 @@ describe("review-thread staging (slice 1)", () => {
                 ],
                 resolved: true,
                 resolvedBy: "octo",
+                openerDownvotes: 0,
             },
         ]);
         expect(adjudicatedThreadsFromStaged(adjudicated)).toEqual([
@@ -305,6 +306,53 @@ describe("review-thread staging (slice 1)", () => {
                 body: "**issue (blocking):** opener",
             },
         ]);
+    });
+
+    it("stages a downvoted OPEN bot thread in BOTH files: open for the verdict floor, adjudicated for re-derivation", async () => {
+        // The 👎 arrives over the opener's reactions connection; the thread is
+        // still open, so it stays in threads.json (the open corpus carries
+        // the verdict-floor bookkeeping) AND joins the adjudicated corpus
+        // (so the settled defect cannot re-post under fresh wording later).
+        const {threads, adjudicated} = await stage([
+            threadPage([
+                threadNode({
+                    id: "PRRT_downvoted",
+                    comments: {
+                        nodes: [
+                            {
+                                author: {login: "github-actions"},
+                                body: "**note (non-blocking):** opener",
+                                url: "https://github.com/o/r/pull/7#discussion_r9",
+                                reactions: {totalCount: 2},
+                            },
+                        ],
+                    },
+                }),
+            ]),
+        ]);
+        expect(threads.map((t: {thread_id: string}) => t.thread_id)).toEqual([
+            "PRRT_downvoted",
+        ]);
+        // No reaction leak into the open staging's exact shape.
+        expect("openerDownvotes" in threads[0]).toBe(false);
+        expect(adjudicated).toEqual([
+            {
+                thread_id: "PRRT_downvoted",
+                path: "a.ts",
+                line: 2,
+                url: "https://github.com/o/r/pull/7#discussion_r9",
+                comments: [
+                    {
+                        author: "github-actions",
+                        body: "**note (non-blocking):** opener",
+                    },
+                ],
+                resolved: false,
+                resolvedBy: "",
+                openerDownvotes: 2,
+            },
+        ]);
+        expect(adjudicatedThreadsFromStaged(adjudicated)).toHaveLength(1);
     });
 
     it("keeps bot-resolved and human-opened resolved threads out of the adjudicated corpus", async () => {

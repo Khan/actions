@@ -18,9 +18,13 @@
  *
  * The corpus this module consumes is staged by stage-pr.ts (step 5b',
  * adjudicated-threads.json): bot-opened threads whose `resolvedBy` is a
- * human. The resolver identity is the membership rule, not resolution alone;
- * a thread the BOT resolved is the reconciler marking a defect FIXED, and a
- * fixed defect that reappears is a fresh finding that must post.
+ * human, plus bot-opened threads whose OPENING comment carries a 👎 (the
+ * same judgment through the other feedback channel the bot advertises; the
+ * thumbs sweep asks "why?" on exactly that signal, and until this module the
+ * answer dead-ended in counters). The resolver identity is the resolution
+ * membership rule, not resolution alone; a thread the BOT resolved is the
+ * reconciler marking a defect FIXED, and a fixed defect that reappears is a
+ * fresh finding that must post.
  */
 
 import {
@@ -44,13 +48,14 @@ import {isReviewBotAuthor} from "./threads";
  *
  * The guards mirror `openThreadsFromStaged`'s, with the resolution checks
  * INVERTED and strengthened: membership requires an explicit `resolved: true`
- * AND a non-empty human `resolvedBy`, because this corpus grants the
- * strongest suppression in the pipeline (a defect a human marked settled
- * stays settled across rephrasings) and must never be manufacturable from a
- * malformed staging. Each guard fails closed toward NOT suppressing: a thread
- * without a bot opener, without `resolved: true`, or whose resolver is
- * absent, unattributable (""), or the bot itself contributes nothing, and the
- * worst case is a duplicate comment.
+ * AND a non-empty human `resolvedBy`, OR an explicit positive
+ * `openerDownvotes` count, because this corpus grants the strongest
+ * suppression in the pipeline (a defect a human marked settled stays settled
+ * across rephrasings) and must never be manufacturable from a malformed
+ * staging. Each guard fails closed toward NOT suppressing: a thread without
+ * a bot opener, without either signal, or whose resolver is absent,
+ * unattributable (""), or the bot itself contributes nothing, and the worst
+ * case is a duplicate comment.
  */
 export const adjudicatedThreadsFromStaged = (threads: unknown): OpenThread[] =>
     (Array.isArray(threads) ? threads : [])
@@ -63,12 +68,16 @@ export const adjudicatedThreadsFromStaged = (threads: unknown): OpenThread[] =>
                     : undefined;
             const author = opener?.["author"];
             const resolvedBy = thread["resolvedBy"];
+            const humanResolved =
+                stagedResolvedState(thread) === true &&
+                typeof resolvedBy === "string" &&
+                resolvedBy !== "" &&
+                !isReviewBotAuthor(resolvedBy);
+            const downvotes = thread["openerDownvotes"];
+            const downvoted = typeof downvotes === "number" && downvotes > 0;
             if (
                 typeof thread["thread_id"] !== "string" ||
-                stagedResolvedState(thread) !== true ||
-                typeof resolvedBy !== "string" ||
-                resolvedBy === "" ||
-                isReviewBotAuthor(resolvedBy) ||
+                (!humanResolved && !downvoted) ||
                 typeof author !== "string" ||
                 !isReviewBotAuthor(author)
             ) {

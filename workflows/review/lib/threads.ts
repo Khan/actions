@@ -121,7 +121,12 @@ query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
                     path
                     line
                     comments(first: 100) {
-                        nodes { author { login } body url }
+                        nodes {
+                            author { login }
+                            body
+                            url
+                            reactions(content: THUMBS_DOWN) { totalCount }
+                        }
                     }
                 }
             }
@@ -246,6 +251,14 @@ export type FetchedThread = StagedThread & {
      * an empty resolver never reads as human adjudication downstream.
      */
     resolvedBy: string;
+    /**
+     * How many 👎 reactions the thread's OPENING comment carries. The opener
+     * is the finding, so a downvote on it is a reviewer's judgment on the
+     * finding itself (the thumbs sweep reacts to exactly this signal); later
+     * comments' reactions are conversation, not adjudication, and are not
+     * counted. 0 when there is no opener or the API returned no connection.
+     */
+    openerDownvotes: number;
 };
 
 /**
@@ -313,6 +326,14 @@ export const collectReviewThreads = async (
             // `isResolved` must not manufacture an adjudicated thread, and
             // reading it as unresolved only risks a duplicate comment.
             const resolved = node["isResolved"] === true;
+            const openerReactions = isRecord(rawComments[0])
+                ? rawComments[0]["reactions"]
+                : undefined;
+            const openerDownvotes =
+                isRecord(openerReactions) &&
+                typeof openerReactions["totalCount"] === "number"
+                    ? openerReactions["totalCount"]
+                    : 0;
             out.push({
                 thread_id: str(node["id"]),
                 path: str(node["path"]),
@@ -320,6 +341,7 @@ export const collectReviewThreads = async (
                 ...(firstUrl === "" ? {} : {url: firstUrl}),
                 comments,
                 resolved,
+                openerDownvotes,
                 resolvedBy:
                     resolved && isRecord(node["resolvedBy"])
                         ? str(node["resolvedBy"]["login"])
@@ -368,6 +390,10 @@ export const collectUnresolvedThreads = async (
     (await collectReviewThreads(graphql, owner, repo, number))
         .filter((thread) => !thread.resolved)
         .map(
-            ({resolved: _resolved, resolvedBy: _resolvedBy, ...thread}) =>
-                thread,
+            ({
+                resolved: _resolved,
+                resolvedBy: _resolvedBy,
+                openerDownvotes: _openerDownvotes,
+                ...thread
+            }) => thread,
         );
