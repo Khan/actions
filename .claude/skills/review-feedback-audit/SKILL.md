@@ -11,10 +11,11 @@ set the cutoff to the deploy time and audit everything since. The output is
 a report plus a list of improvement candidates, each mapped to an existing
 Khan/actions PR or flagged as new work.
 
-This skill is read-only against GitHub (GET requests only) and
-dependency-free: `bash`, `jq`, `gh`. It was first executed by hand against
-Khan/webapp for the 2026-08-11/12 window; the commands below encode that
-procedure.
+Collection and analysis (Steps 1-4) are read-only against GitHub (GET
+requests only) and dependency-free: `bash`, `jq`, `gh`. Step 5 is a
+separate write phase (posting PR comments) that needs access beyond a
+GET-only broker. The skill was first executed by hand against Khan/webapp
+for the 2026-08-11/12 window; the commands below encode that procedure.
 
 ## Required inputs
 
@@ -69,6 +70,11 @@ PRs updated in the window via search, then list each PR's reviews and filter.
 gh api --paginate \
   "search/issues?q=repo:$REPO+is:pr+updated:%3E%3D$CUTOFF&per_page=100" \
   --jq '.items[].number' > "$WORK/prs.txt"
+# Search caps at 1,000 results regardless of pagination; detect truncation.
+total=$(gh api "search/issues?q=repo:$REPO+is:pr+updated:%3E%3D$CUTOFF&per_page=1" \
+  --jq .total_count)
+[ "$total" -le 1000 ] ||
+  echo "WARNING: $total PRs match but Search caps at 1000; split the window" >&2
 > "$WORK/reviews.tsv"
 while read -r pr; do
   gh api --paginate "repos/$REPO/pulls/$pr/reviews?per_page=100" \
@@ -94,6 +100,19 @@ jq -r '.[] | select(.reactions.total_count > 0) | .id' \
     --jq "[.[] | select(.user.login != \"$BOT\")
       | [$id, .user.login, .content] | @tsv] | .[]" < /dev/null
 done > "$WORK/reactions.tsv"
+```
+
+Guidance comments are issue comments, so their reactions live on a
+different endpoint; collect them too or the reaction tally silently covers
+inline findings only:
+
+```sh
+jq -r '.[] | select(.reactions.total_count > 0) | .id' \
+  "$WORK/guidance.json" | while read -r id; do
+  gh api "repos/$REPO/issues/comments/$id/reactions" \
+    --jq "[.[] | select(.user.login != \"$BOT\")
+      | [$id, .user.login, .content] | @tsv] | .[]" < /dev/null
+done >> "$WORK/reactions.tsv"
 ```
 
 **Human replies.** A reply's `in_reply_to_id` points at the thread opener.
@@ -205,6 +224,20 @@ jq '[.[] | select(.body
 - **`since` is an `updated_at` filter.** Always re-filter on
   `created_at`/`submitted_at`; an old comment edited inside the window
   otherwise pollutes the sample.
+- **Search caps at 1,000 results.** `search/issues` returns at most 1,000
+  items even with `--paginate`, silently. The `prs.txt` collection block
+  compares `total_count` against the cap; when it warns, split the window
+  into `updated:A..B` sub-ranges or report every reviews-derived count as
+  a lower bound.
+- **Sentinel strings live in lib code.** The markers this audit greps for
+  are defined in Khan/actions source, and a zero count is indistinguishable
+  from a renamed marker: `review-thumbs-followup` and the reason vocabulary
+  in `workflows/review/lib/thumbs-sweep.ts`, "A sketch, not a committable
+  replacement" in `workflows/review/lib/submission.ts`, the suppression
+  note phrasing in `workflows/review/lib/dispatch.ts`, and the
+  `gh-aw-agentic-workflow` marker appended by the gh-aw engine. Before
+  trusting any zero measurement, re-derive the string from the checkout
+  being audited.
 
 ## Step 4: report
 
