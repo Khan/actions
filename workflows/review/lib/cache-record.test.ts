@@ -116,7 +116,7 @@ describe("computeRisksPatternsKey", () => {
     });
 
     it("folds notified.json's signature in, so a NOTIFIED-only change reposts", () => {
-        // Step 7 posts ONE Review Guidance comment covering risks, patterns,
+        // Step 7 posts ONE Guidance for reviewers comment covering risks, patterns,
         // AND notifications, so the notified set is an independent repost
         // trigger: a key that omitted it would read as unchanged and the
         // newly-subscribed @team would never be mentioned.
