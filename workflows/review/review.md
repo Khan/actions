@@ -759,7 +759,7 @@ should only ever be one current risks/patterns comment:
 ### Comment body
 
 Begin the comment with the exact marker line below (so the comment is identifiable
-on later runs), then include the Review Guidance team sections and/or the
+on later runs), then include the Guidance for reviewers team sections and/or the
 common-patterns section. Omit whichever is empty. End the comment with the
 attribution footer: paste the one-line `<sub>...</sub>` footer from
 `/tmp/gh-aw/review/version-footer.txt` **verbatim** as the final line (the plan
@@ -771,7 +771,9 @@ version marker silently never posted.
 
 ````
 <!-- pr-reviewer:risks-and-patterns -->
-## Review Guidance
+## Guidance for reviewers
+
+*Triage notes for reviewers: risky files by owning team, repeated changes, and files excluded from review.*
 
 <details>
 <summary><strong>platform</strong> (2 files)</summary>
@@ -823,8 +825,9 @@ fully explained by a common pattern above:
 <sub>review-v1.13.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
 ````
 
-- Title the comment `## Review Guidance`, then go straight to the team sections —
-  no top-level description paragraph. Wrap each owning team in its own collapsed
+- Title the comment `## Guidance for reviewers`, follow it with the one-line
+  italic byline from the template above (copy it verbatim), then go straight to
+  the team sections; add no other top-level prose. Wrap each owning team in its own collapsed
   `<details>` block. The `<summary>` must use literal HTML — Markdown is not
   processed inside `<summary>` — and contains the team's bare slug wrapped in
   `<strong>…</strong>` followed by a plain file count, e.g.
@@ -877,7 +880,7 @@ fully explained by a common pattern above:
   eval suite's false-exclusion-rate metric reads. Omit the block entirely when
   `pattern-triage` excluded nothing. It rides on the guidance comment only — it never
   triggers a post on its own (see the post trigger above).
-- Include the Review Guidance team sections only when there is at least one
+- Include the Guidance for reviewers team sections only when there is at least one
   moderate- or high-risk file, include the "Common patterns" section only when
   Step 3 found patterns, and include the "Notified" section only when
   `notified.json` `matched` is `true`. The "Excluded from review" block appears
