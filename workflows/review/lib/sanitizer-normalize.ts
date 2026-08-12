@@ -12,23 +12,115 @@
  * anything the sanitizer would not have done is still a mismatch (#244).
  *
  * Documented-not-absorbed residuals, each of which needs a pathological body
- * and fails red rather than silently: HTML entity decoding, XML tag
- * conversion, the percent-decode side effect, homoglyph folds, the 65k
- * truncation, markdown link titles, and tilde fences.
+ * and fails red rather than silently: HTML entity decoding, the
+ * percent-decode side effect, homoglyph folds, the 65k truncation, markdown
+ * link titles, and tilde fences. XML tag conversion is absorbed by
+ * {@link foldXmlTags} below; its remaining sub-residuals (dangerous-attribute
+ * stripping inside a preserved allowed tag, CDATA marker rewriting) still
+ * need a pathological body.
  */
+
+/**
+ * The HTML tags gh-aw's convertXmlTags preserves (sanitize_content_core.cjs,
+ * v0.83.4): GFM-safe tags plus its inline additions. Every other `<tag>` is
+ * rewritten to `(tag)` on the queued side, so the same fold has to apply to
+ * both sides of the rule-7 comparison.
+ */
+const SANITIZER_ALLOWED_TAGS = new Set([
+    "abbr",
+    "b",
+    "blockquote",
+    "br",
+    "code",
+    "del",
+    "details",
+    "em",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr",
+    "i",
+    "img",
+    "ins",
+    "kbd",
+    "li",
+    "mark",
+    "ol",
+    "p",
+    "pre",
+    "s",
+    "span",
+    "strong",
+    "sub",
+    "summary",
+    "sup",
+    "table",
+    "tbody",
+    "td",
+    "th",
+    "thead",
+    "tr",
+    "ul",
+]);
+
+/**
+ * Mirror the sanitizer's convertXmlTags on both comparison sides. The
+ * transform is NOT a pathological-body case: a reviewer writing a path
+ * template like `plugins/<p>/skills/<skill>/SKILL.md` in prose is the most
+ * natural way to name a placeholder, and the sanitizer rewrites `<skill>` to
+ * `(skill)` (unknown tag) while preserving `<p>` (allowed tag), so a fully
+ * conforming run false-blocked on exactly this
+ * (kore-marketplace run 31609578203: staged `<skill>`, queued `(skill)`,
+ * rule 7 red, review withheld).
+ *
+ * Same shape as the sanitizer (regex, https-autolink preservation, allowed
+ * list, paren rewrite), applied to plan and queued text alike, so a
+ * cross-form splice is still caught: a queued `(p)` where the plan staged the
+ * preserved `<p>` stays a mismatch. Differences from the original are the
+ * absorbed tolerances: no code-region awareness (normalizeBody has already
+ * stripped backticks, and the same fold lands on both sides either way) and
+ * no dangerous-attribute stripping inside preserved tags (still a documented
+ * residual). The queued side is idempotent under the fold: parenthesised
+ * text contains no angle brackets to match.
+ */
+const foldXmlTags = (text: string): string =>
+    text.replace(/<(\/?[A-Za-z!][^>]*?)>/g, (match, tagContent: string) => {
+        // The sanitizer preserves https angle-bracket autolinks
+        // (isHttpsAngleBracketAutolink) so its URL filter can inspect them;
+        // preserve them here so the URL folds below see the same shape on
+        // both sides.
+        if (
+            /^https:\/\/[\w.-]+(?::\d+)?(\/[^\s<>|]*)?(?:\|[^<>]*)?$/.test(
+                tagContent,
+            )
+        ) {
+            return match;
+        }
+        const tagName = /^\/?\s*([A-Za-z][A-Za-z0-9]*)/
+            .exec(tagContent)?.[1]
+            ?.toLowerCase();
+        if (tagName !== undefined && SANITIZER_ALLOWED_TAGS.has(tagName)) {
+            return match;
+        }
+        return `(${tagContent})`;
+    });
 
 /**
  * Fold one body to its sanitizer-tolerant comparison form. Applied to the
  * plan and the queued text alike; never to text that gets posted.
  */
 export const normalizeBody = (text: string): string =>
-    text
-        // The ingest sanitizer deletes ALL XML/HTML comments
-        // (removeXmlComments), so the queued body can never carry the
-        // plan's fingerprint stamp; comparing modulo comments is what
-        // "sanitizer-tolerant" requires (trial run 29893634730 blocked
-        // a byte-faithful transcription on exactly this).
-        .replace(/<!--[\s\S]*?-->/g, "")
+    // The ingest sanitizer deletes ALL XML/HTML comments (removeXmlComments),
+    // so the queued body can never carry the plan's fingerprint stamp;
+    // comparing modulo comments is what "sanitizer-tolerant" requires (trial
+    // run 29893634730 blocked a byte-faithful transcription on exactly this).
+    // Then the sanitizer's convertXmlTags rewrite, applied to both sides (see
+    // foldXmlTags). It runs before the URL folds below, which introduce their
+    // own `<url:host>` placeholders that its regex must never touch.
+    foldXmlTags(text.replace(/<!--[\s\S]*?-->/g, ""))
         // The sanitizer's hardenUnicodeText applies NFKC and strips
         // zero-width characters (gh-aw sanitize_content_core.cjs), which
         // rewrites compatibility characters: trial run 29903306596
