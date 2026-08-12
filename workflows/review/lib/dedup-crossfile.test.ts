@@ -1,6 +1,9 @@
 import {describe, it, expect} from "vitest";
 
-import {mergeCrossFileDuplicates} from "./dedup-crossfile";
+import {
+    mergeCrossFileDuplicates,
+    suppressThenMergeCrossFile,
+} from "./dedup-crossfile";
 import {type Claim} from "./dispatch-contracts";
 
 /**
@@ -247,13 +250,9 @@ describe("mergeCrossFileDuplicates", () => {
     });
 
     it("does not chain distinct findings through a bridging claim", () => {
-        // A and C are each near-identical to bridge B but not to each other
-        // is hard to fabricate with exact texts, so pin the star guard with
-        // the exact-equality path: A == B on one axis, B == C impossible
-        // there. Instead verify the guard directly: a group member not
-        // mergeable against the survivor stays its own claim. Construct it
-        // by making B identical to A, and C identical to B except for the
-        // label, which keeps C out of the group entirely.
+        // The label mismatch keeps C out of the group before the star
+        // guard runs; the bigram-chain case below is the one that reaches
+        // the guard's filtering branch.
         const claims = [
             claim({id: "documentation-1", path: EXERCISE, line: 12}),
             claim({id: "documentation-2", path: TUTOR_ME, line: 139}),
@@ -270,5 +269,85 @@ describe("mergeCrossFileDuplicates", () => {
             "documentation-1",
             "documentation-3",
         ]);
+    });
+
+    it("keeps a bridged member as its own claim (the star guard as a filter)", () => {
+        // A genuine similarity chain: bridge B clears the near-identical
+        // floor against A (shared subject) and against C (B's failure
+        // scenario is C's subject), while A and C share no content tokens.
+        // Union-find chains all three into one group; the star guard must
+        // merge only B into A's survivor and leave C standing, not drop or
+        // wrongly merge it.
+        const shared =
+            "Retry loop rereads deletion cursor after every batch completes.";
+        const bridgeText =
+            "Pagination token resets whenever filters change between successive requests.";
+        const third =
+            "services/ai-guide/eval/tut/DiagramTriggeringT1Video.eval.yaml";
+        const claims = [
+            claim({
+                id: "documentation-1",
+                path: EXERCISE,
+                line: 12,
+                subject: shared,
+                failure_scenario:
+                    "Logging sink swallows write errors during shutdown flush window.",
+            }),
+            claim({
+                id: "documentation-2",
+                path: TUTOR_ME,
+                line: 139,
+                subject: shared,
+                failure_scenario: bridgeText,
+            }),
+            claim({
+                id: "documentation-3",
+                path: third,
+                line: 77,
+                subject: bridgeText,
+                failure_scenario:
+                    "Metrics counter increments twice inside recovered panic handler path.",
+            }),
+        ];
+        const result = mergeCrossFileDuplicates(claims, [
+            EXERCISE,
+            TUTOR_ME,
+            third,
+        ]);
+        expect(result.claims.map((kept) => kept.id)).toEqual([
+            "documentation-1",
+            "documentation-3",
+        ]);
+        expect(result.claims[0].discussion).toContain(
+            `Also applies to \`${TUTOR_ME}\` (line 139).`,
+        );
+        expect(result.claims[0].discussion).not.toContain(third);
+        expect(result.merges).toHaveLength(1);
+        expect(result.merges[0].merged.map((copy) => copy.id)).toEqual([
+            "documentation-2",
+        ]);
+    });
+});
+
+describe("suppressThenMergeCrossFile", () => {
+    it("degrades to claim order when the staging is malformed", () => {
+        // The docstring promises a malformed files.json degrades to claim
+        // order, never to a skipped merge.
+        const result = suppressThenMergeCrossFile(pair(), [], {
+            not: "an array",
+        });
+        expect(result.claims).toHaveLength(1);
+        expect(result.claims[0].id).toBe("documentation-1");
+        expect(result.crossFileMerges).toHaveLength(1);
+    });
+
+    it("degrades to claim order when entries lack string paths", () => {
+        const result = suppressThenMergeCrossFile(
+            pair(),
+            [],
+            [{path: 42}, "not-a-record", {}],
+        );
+        expect(result.claims).toHaveLength(1);
+        expect(result.crossFileMerges).toHaveLength(1);
     });
 });
