@@ -1,0 +1,56 @@
+{
+    "id": "false-block-consistency-guidance",
+    "tags": [
+        "smoke",
+        "clean",
+        "validation",
+        "false-block"
+    ],
+    "category": "clean",
+    "description": "Live-validator variant of clean-consistency-ctx-param: a new Go client method takes ctx as a parameter next to sibling methods that store ctx on the struct. The only candidate proposes matching the stored-field pattern; that pattern contradicts the Go context package's documented guidance (do not store Contexts inside a struct type), so the live claim-validator must refute the consistency claim for the clean PR to approve. The deterministic sibling pins the plumbing with a recorded refutation; this case makes a model run actually produce it.",
+    "changedFiles": [
+        {
+            "path": "pkg/langtool/client.go",
+            "status": "modified"
+        }
+    ],
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "consistency-ctx-param",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "pkg/langtool/client.go",
+                    "line": 23,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.55,
+                "evidence_trace": [
+                    "pkg/langtool/client.go:23 new ListObservations takes ctx as its first parameter",
+                    "sibling methods ListTraces and ListScores reach context via the ctx field stored on the struct in client.go"
+                ],
+                "failure_scenario": "No runtime misbehavior; the client mixes two context-plumbing patterns, so a future reader must check per method which one applies.",
+                "producing_hunt": "correctness:line-scan",
+                "model_authored_prose": "New ListObservations takes ctx as a parameter instead of using the stored c.ctx like every sibling method. Drop the parameter and use the struct field for consistency."
+            }
+        }
+    ],
+    "validation": [
+        {
+            "id": "consistency-ctx-param",
+            "verification": "refuted"
+        }
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 0,
+        "mustNotPost": [
+            "consistency-ctx-param"
+        ]
+    },
+    "diff": "diff --git a/pkg/langtool/client.go b/pkg/langtool/client.go\n--- a/pkg/langtool/client.go\n+++ b/pkg/langtool/client.go\n@@ -18,5 +18,15 @@ func (c *Client) ListTraces(projectID string) ([]Trace, error) {\n \treturn traces, nil\n }\n \n+// ListObservations fetches every observation for a trace, following the\n+// cursor until the API reports no next page.\n+func (c *Client) ListObservations(ctx context.Context, traceID string) ([]Observation, error) {\n+\treq, err := c.newRequest(ctx, \"GET\", \"/api/v2/observations?traceId=\"+traceID)\n+\tif err != nil {\n+\t\treturn nil, err\n+\t}\n+\treturn decodeObservations(c.http.Do(req))\n+}\n+\n // ListScores returns the scores recorded for a trace.\n func (c *Client) ListScores(traceID string) ([]Score, error) {\n"
+}

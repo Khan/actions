@@ -1742,7 +1742,11 @@ contradicts the language's or standard library's documented guidance for the con
 (e.g. Go's `context` package: do not store Contexts inside a struct type; pass ctx
 explicitly as a parameter). When it does, **refute the claim**: consistency alone never
 outranks documented language guidance, and new code that follows the guidance is not a
-defect. Invert the claim (flag the existing pattern instead of the new code) only when
+defect. This refutation carries the same citation duty as every other definitive
+state: the `reason` must name the source and quote the specific guidance sentence
+(e.g. the `context` package doc line), exactly as a skill refutation quotes its rule
+text. Guidance you cannot quote is taste; when you cannot quote it, return
+`plausible` instead. Invert the claim (flag the existing pattern instead of the new code) only when
 the inversion meets the same evidence bar as any other claim; the pattern usually
 predates the diff, so the pre-existing-mechanism rule above applies and caps an
 unamplified inversion at `plausible`. (Measured: a reviewer proposed moving a new
