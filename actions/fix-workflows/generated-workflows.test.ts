@@ -61,6 +61,19 @@ describe("isGeneratedWorkflow", () => {
     });
 });
 
+describe("generatedWorkflowSkipGlobs", () => {
+    // The action.yml comparison below proves the two sites agree, not that
+    // either is right; a bug in the derivation (a dropped `!`, a lost `**`)
+    // would update both sides in lockstep. Pin the exact strings here so a
+    // derivation change has to show up in a diff as the globs it ships.
+    it("returns the exact negated oxfmt globs", () => {
+        expect(generatedWorkflowSkipGlobs()).toEqual([
+            "!.github/workflows/**/*.lock.yml",
+            "!.github/workflows/**/agentics-maintenance.yml",
+        ]);
+    });
+});
+
 describe("action.yml's copy of the skip globs", () => {
     // The only site that cannot derive its skip set from GENERATED_WORKFLOWS, so
     // it is the only one that can silently fall behind a fourth entry. This test
