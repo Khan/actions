@@ -230,10 +230,40 @@ export const isDropInSuggestion = (suggestion: string): boolean => {
 };
 
 /**
+ * The base label tokens whose comments propose a fix, and so may carry a
+ * sketch block. `issue` and `suggestion` are the fix-proposing labels;
+ * `todo (blocking)` is verdict-equivalent to `issue (blocking)` (see
+ * render-comment.ts), so stripping its fix would remove the sketch from a
+ * blocking finding. `question`, `thought`, `note`, and `nitpick` raise a
+ * point rather than propose a fix: measured on Khan/webapp (2026-08-11/12),
+ * 31 of 57 posted comments carried a sketch, including questions and
+ * thoughts whose sketch restated the prose without adding information.
+ */
+const SKETCH_LABEL_TOKENS: ReadonlySet<string> = new Set([
+    "issue",
+    "todo",
+    "suggestion",
+]);
+
+/**
+ * Whether a claim's label admits a sketch block. Matches on the base label
+ * token so every variant counts (`suggestion (non-blocking, documentation)`
+ * is a suggestion). An unparseable label is sketch-eligible: fail toward
+ * more information, never toward silently dropping an authored fix.
+ */
+export const labelAdmitsSketch = (label: string): boolean => {
+    const token = label.trim().split(/[\s(:]/, 1)[0] ?? "";
+    return token === "" || SKETCH_LABEL_TOKENS.has(token.toLowerCase());
+};
+
+/**
  * Render one claim as its Conventional Comment (the renderComment layout,
  * driven by the claim's post-validation label rather than a recomputed one).
  * A suggestion only becomes a committable `suggestion` fence when it is
- * plausibly drop-in; otherwise it renders as a plain fenced sketch.
+ * plausibly drop-in; otherwise it renders as a plain fenced sketch, and only
+ * under a fix-proposing label ({@link labelAdmitsSketch}): a question or
+ * thought proposes no fix, so a sketch under it adds length, not
+ * information.
  */
 export const renderClaimComment = (claim: Claim): string => {
     const lines: string[] = [`**${claim.label}:** ${claim.discussion}`];
@@ -248,7 +278,7 @@ export const renderClaimComment = (claim: Claim): string => {
     if (claim.suggestion !== undefined) {
         if (isDropInSuggestion(claim.suggestion)) {
             lines.push("", "```suggestion", claim.suggestion, "```");
-        } else {
+        } else if (labelAdmitsSketch(claim.label)) {
             lines.push(
                 "",
                 "A sketch, not a committable replacement:",
