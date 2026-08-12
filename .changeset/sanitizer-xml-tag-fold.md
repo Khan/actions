@@ -30,3 +30,26 @@ tag, and CDATA marker rewriting.
 
 Verified against the incident artifacts: the staged `comment-2.json` and the
 sanitized queued item from `agent_output.pre-gate.json` now fold equal.
+
+Hardened further against this PR's own review run (Khan/actions run
+31616001094), which false-blocked on three URL-fold divergences from the
+sanitizer:
+
+- Angle-bracket https autolinks now fold as a unit on both sides, mirroring
+  the sanitizer's autolink pass (which consumes the brackets and keeps a
+  `|label`); previously a redacted autolink left an orphaned `<` on the plan
+  side only.
+- Protocol-relative `//host` URLs now fold like the sanitizer's
+  protocol-relative pass. The incident body staged `.replace(/\u034f/g, "")`;
+  the sanitizer's zero-width strip turned it into `//g`, then redacted it to
+  `(g/redacted)`.
+- The https and scheme folds now match the sanitizer's URI shapes exactly:
+  paths stop at commas, hosts may carry ports, non-https schemes keep their
+  sanitized host, and redacted host names get the sanitizer's per-label
+  alphanumeric fold (`my-host.com` -> `myhost.com`).
+
+The unicode folds also moved ahead of the comment/tag folds to match
+`sanitizeContentCore` order (hardenUnicodeText runs first), so a
+compatibility-form tag folds identically on both sides. Verified against the
+run's artifacts: all four staged `comment-*.json` bodies now fold equal to
+their sanitized queued forms.
