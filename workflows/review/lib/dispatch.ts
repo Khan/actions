@@ -40,13 +40,16 @@
  */
 
 import {
-    dedupeClaims,
     openThreadsFromStaged,
     stagedThreadShapeFailure,
     suppressOpenThreadDuplicates,
     type ClaimMerge,
     type ThreadSuppression,
 } from "./dedup";
+import {
+    dedupeClaimsWithCrossFile,
+    type CrossFileMerge,
+} from "./dedup-crossfile";
 import {
     clusteringRecord,
     runClusterStep,
@@ -258,6 +261,8 @@ export type DispatchResult = {
     claims: Claim[];
     /** Cross-source duplicates merged before validation (#245). */
     merges: ClaimMerge[];
+    /** One source's same finding on several files, collapsed (dedup-crossfile.ts). */
+    crossFileMerges: CrossFileMerge[];
     /**
      * Dedup tier 2's audit block, present when the clusterer was dispatched
      * (absent when there was nothing to cluster: fewer than two claims, or one
@@ -801,17 +806,8 @@ export const runDispatch = async (
         }
     }
 
-    // Cross-source duplicate merge (#245), BEFORE validation so duplicate
-    // claims are neither separately validated (the largest sub-agent cost
-    // line) nor separately posted.
-    //
-    // Tier 2 (the claim-clusterer) runs here, between the fan-out and
-    // validation, for the same reason: run 30587343777 paid to validate four
-    // copies of one wrong doc comment and posted all four. Its input is the
-    // pre-merge candidate set — the model sees what tier 1 would collapse
-    // anyway, which costs a few hundred tokens and keeps the merge decision in
-    // ONE place (dedup.ts folds both tiers into one group, so a survivor gains
-    // one "also flagged by" note rather than a stack of them).
+    // Duplicate merge, BEFORE validation so duplicates are neither validated
+    // nor posted; dedup.ts's header carries the rationale and measured runs.
     const candidateClaims = buildClaims(scoped.kept);
     const clusterStep = await runClusterStep(candidateClaims, {
         dispatch: dispatchAgent,
@@ -822,7 +818,12 @@ export const runDispatch = async (
         // eslint-disable-next-line no-console
         warn: (message) => console.error(message),
     });
-    const deduped = dedupeClaims(candidateClaims, clusterStep.proposals);
+    // Tiers 1-2, then the cross-file pass (dedup-crossfile.ts).
+    const deduped = dedupeClaimsWithCrossFile(
+        candidateClaims,
+        clusterStep.proposals,
+        readJson(fs, `${REVIEW_DIR}/files.json`),
+    );
     const clustering = clusteringRecord(
         clusterStep,
         candidateClaims.length,
@@ -929,6 +930,7 @@ export const runDispatch = async (
         noteLines,
         claims,
         merges: deduped.merges,
+        crossFileMerges: deduped.crossFileMerges,
         ...(clustering !== undefined ? {clustering} : {}),
         threadSuppressions: suppression.suppressed,
         ...(threadSuppressionUnavailable !== undefined
