@@ -1194,7 +1194,11 @@ Do two things in one pass over the files in the list:
 
    Whatever the procedure, do **not** flag anything in the "what CI already
    catches" list below, and do not comment on Trivial or Low files unless they
-   have a real defect.
+   have a real defect. Do not propose aligning new code to a neighboring
+   pattern when that pattern contradicts the language's or standard library's
+   documented guidance for the construct (e.g. Go's rule against storing a
+   Context in a struct): consistency alone never outranks documented language
+   guidance.
 
    **Pre-existing bugs on touched lines.** A real bug is fair to flag even if it
    predates this change — but **only when it sits on a line this PR touches** (added or
@@ -1730,6 +1734,21 @@ nearest definition — and your `reason` speaks to the author's stated grounds. 
 return `plausible` so it posts as a question rather than a re-block. (A production
 false block survived two checks that each traced one parent short of where the disputed
 element actually lived; the depth requirement is the lesson.)
+
+**Consistency claims must survive language guidance.** When a claim's proposed fix is
+"match the existing pattern in this file or package" (store the field the siblings
+store, mirror the neighboring signature), check whether that existing pattern itself
+contradicts the language's or standard library's documented guidance for the construct
+(e.g. Go's `context` package: do not store Contexts inside a struct type; pass ctx
+explicitly as a parameter). When it does, **refute the claim**: consistency alone never
+outranks documented language guidance, and new code that follows the guidance is not a
+defect. Invert the claim (flag the existing pattern instead of the new code) only when
+the inversion meets the same evidence bar as any other claim; the pattern usually
+predates the diff, so the pre-existing-mechanism rule above applies and caps an
+unamplified inversion at `plausible`. (Measured: a reviewer proposed moving a new
+method's ctx parameter onto the struct because every sibling method used a stored ctx
+field; the author correctly cited the Go context guidance, and the claim should never
+have posted.)
 
 Do not invent new claims — validate only the ones given. Never "upgrade" a non-blocking
 claim to blocking or otherwise raise its severity; you may only confirm, downgrade to
