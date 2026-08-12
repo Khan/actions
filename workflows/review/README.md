@@ -721,16 +721,28 @@ v1.4.0 shipped still pointing at v1.2.2, before the sync existed).
 
 Semver is the behavior contract: a release that changes the reviewer's behavior bumps
 the major version, so a consumer pinned to `review-v<major>` can assume the fundamental
-behavior holds within a major. For attribution and rollback, the risks/patterns
-guidance comment (Step 7) carries the release the run executed, in one HTML marker
-reusing the `pr-reviewer:` marker namespace `#194` established:
+behavior holds within a major. For attribution and rollback, every submitted review
+body and the risks/patterns guidance comment (Step 7) end with a visible one-line
+footer, rendered in code by `lib/version-footer.ts` from the pinned checkout's
+`package.json` and the staged run files (never composed by the model):
 
 ```
-<!-- pr-reviewer:version v=review-v<major>.<minor>.<patch> schema=<n> -->
+<sub>review-v<major>.<minor>.<patch> | schema <n> | depth <depth> | re-review <mode> [blocking-only] | enable <reviewer,...></sub>
 ```
 
 `schema` is the finding-schema version (`FINDING_SCHEMA_VERSION` in
-`lib/finding-schema.ts`) the run was on. A bad reviewer release rolls back by
-re-pinning the previous tag; the marker on each posted review makes attribution
-immediate. There is no separate config-hash or drift-stamp mechanism — the release
-tag is the single version surface.
+`lib/finding-schema.ts`) the run was on; `depth` is the EXECUTED re-review depth;
+the `re-review` and `enable` segments echo the repo's ROUTING configuration, so a
+posted review attributes both the release and the config it ran under. A segment
+the staging cannot state is omitted rather than guessed. A bad reviewer release
+rolls back by re-pinning the previous tag; the footer on each posted review makes
+attribution immediate.
+
+The footer is visible by necessity, not preference: attribution originally rode a
+hidden HTML marker (`<!-- pr-reviewer:version ... -->`), but gh-aw's safe-output
+ingest sanitizer deletes ALL XML/HTML comments (`removeXmlComments` in
+`sanitize_content_core.cjs`, the same strip documented for the fingerprint stamp
+in `lib/rereview-mode.ts`), so the marker never reached a posted comment; `<sub>`
+is on the sanitizer's allowed-tag list and survives ingest. There is no separate
+config-hash or drift-stamp mechanism; the release tag plus the footer's config
+segments are the version surface.

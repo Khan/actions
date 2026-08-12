@@ -562,6 +562,25 @@ describe("the gate's plan-match rule (slice 4)", () => {
         );
     });
 
+    it("appends the attribution footer as the last visible line, before the stamp", () => {
+        const fs = makeFakeFs(
+            staged({
+                depth: "full",
+                claims: [claim()],
+            }),
+        );
+        const plan = runSubmissionCli(fs);
+        const lines = plan.body.split("\n");
+        // Stamp last (hidden), footer directly above it (visible).
+        expect(lines.at(-1)).toMatch(/^<!--.*-->$/);
+        expect(lines.at(-2)).toMatch(/^<sub>.*schema \d+.*<\/sub>$/);
+        expect(lines.at(-2)).not.toContain("<!--");
+        // The CLI also staged the footer file Step 7 pastes.
+        expect(fs.files["/tmp/gh-aw/review/version-footer.txt"]).toBe(
+            lines.at(-2),
+        );
+    });
+
     it("the redundant-approval skip queues nothing only for an APPROVE plan with no comments", () => {
         const approvePlan = runSubmissionCli(
             makeFakeFs(staged({depth: "full", claims: []}, priorApprove())),
