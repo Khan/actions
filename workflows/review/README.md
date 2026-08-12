@@ -388,7 +388,7 @@ matching deterministically (review.md Step 7 runs the CLI and pastes its rendere
 block); no file means no section, so it costs nothing where it is absent.
 
 **Delivery is approval-time, not on-touch.** The pings ride in the (approval-only)
-Review Guidance comment, so — unlike Gerald, which notifies on every push — a
+Guidance for reviewers comment, so — unlike Gerald, which notifies on every push — a
 watcher is pinged when the reviewer approves, and a PR held at REQUEST_CHANGES or
 merged before the AI verdict lands never pings them. This is intentional: the
 notification piggybacks on the one comment the reviewer already posts, and firing
@@ -411,7 +411,7 @@ relies on those may match a slightly different set than Gerald. An unsupported g
 construct matches nothing rather than crashing the review; a malformed rule (bad
 regex body, unterminated quote) is dropped and adds a `Note:` to the PR review.
 
-Because the notified `@mentions` ride in the Review Guidance comment (an
+Because the notified `@mentions` ride in the Guidance for reviewers comment (an
 `add-comment` safe output), gh-aw's mention sanitizer governs whether they
 actually ping: repository collaborators are allow-listed by default
 (`mentions.allow-team-members`), and to let arbitrary teams/users through, widen
