@@ -40,14 +40,14 @@
  */
 
 import {
+    dedupeClaims,
     openThreadsFromStaged,
     stagedThreadShapeFailure,
-    suppressOpenThreadDuplicates,
     type ClaimMerge,
     type ThreadSuppression,
 } from "./dedup";
 import {
-    dedupeClaimsWithCrossFile,
+    suppressThenMergeCrossFile,
     type CrossFileMerge,
 } from "./dedup-crossfile";
 import {
@@ -818,12 +818,8 @@ export const runDispatch = async (
         // eslint-disable-next-line no-console
         warn: (message) => console.error(message),
     });
-    // Tiers 1-2, then the cross-file pass (dedup-crossfile.ts).
-    const deduped = dedupeClaimsWithCrossFile(
-        candidateClaims,
-        clusterStep.proposals,
-        readJson(fs, `${REVIEW_DIR}/files.json`),
-    );
+    // Tiers 1-2; the cross-file pass runs after suppression (see dedup-crossfile.ts).
+    const deduped = dedupeClaims(candidateClaims, clusterStep.proposals);
     const clustering = clusteringRecord(
         clusterStep,
         candidateClaims.length,
@@ -843,8 +839,12 @@ export const runDispatch = async (
     // finding.
     const resolvedIds = new Set(reconciliation?.resolve ?? []);
     const openThreads = openThreadsFromStaged(threads, resolvedIds);
-    const suppression = suppressOpenThreadDuplicates(claims, openThreads);
-    claims = suppression.kept;
+    const dedupStep = suppressThenMergeCrossFile(
+        claims,
+        openThreads,
+        readJson(fs, `${REVIEW_DIR}/files.json`),
+    );
+    claims = dedupStep.claims;
     const threadSuppressionUnavailable = stagedThreadShapeFailure(
         threads,
         openThreads,
@@ -914,9 +914,9 @@ export const runDispatch = async (
                   "Note: change-provenance gate skipped this run (diff staging unparseable).",
               ]
             : []),
-        ...(suppression.suppressed.length > 0
+        ...(dedupStep.suppressed.length > 0
             ? [
-                  `Note: ${suppression.suppressed.length} finding(s) not re-posted (already tracked in open review threads).`,
+                  `Note: ${dedupStep.suppressed.length} finding(s) not re-posted (already tracked in open review threads).`,
               ]
             : []),
     ];
@@ -930,9 +930,9 @@ export const runDispatch = async (
         noteLines,
         claims,
         merges: deduped.merges,
-        crossFileMerges: deduped.crossFileMerges,
+        crossFileMerges: dedupStep.crossFileMerges,
         ...(clustering !== undefined ? {clustering} : {}),
-        threadSuppressions: suppression.suppressed,
+        threadSuppressions: dedupStep.suppressed,
         ...(threadSuppressionUnavailable !== undefined
             ? {threadSuppressionUnavailable}
             : {}),

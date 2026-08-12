@@ -172,6 +172,76 @@ describe("runDispatch cross-file duplicate merge", () => {
         expect(artifact.crossFileMerges).toHaveLength(1);
     });
 
+    it("posts the new file's copy when an open thread suppresses the survivor's file", async () => {
+        // Regression for the merge-before-suppression loss case: an open bot
+        // thread tracks the finding on a.ts (the author copied flawed a.ts
+        // into sibling b.ts); the source re-finds it on both files. Thread
+        // suppression only matches a claim on the thread's own path, so a
+        // cross-file merge running FIRST would collapse b.ts into a.ts's
+        // survivor and suppression would then drop b.ts's occurrence with
+        // it, on this run and every later one. Order is
+        // suppression-then-merge: a.ts exits through the thread, b.ts posts
+        // alone.
+        const fs = makeFakeFs({
+            ...baseStaging(),
+            [`${REVIEW}/threads.json`]: JSON.stringify([
+                {
+                    thread_id: "T1",
+                    path: "a.ts",
+                    resolved: false,
+                    comments: [
+                        {
+                            author: "github-actions",
+                            body: `**suggestion (non-blocking):** ${
+                                finding("a.ts").subject
+                            }\n\n${finding("a.ts").discussion}`,
+                        },
+                    ],
+                },
+            ]),
+            ...agentFiles(
+                "pattern-triage",
+                "correctness-reviewer",
+                "skill-auditor",
+                "claim-validator",
+            ),
+        });
+        const runner = stubRunner({
+            "pattern-triage": JSON.stringify({
+                patterns: [],
+                reviewFiles: ["a.ts", "b.ts"],
+            }),
+            "correctness-reviewer": JSON.stringify({
+                findings: [finding("a.ts"), finding("b.ts")],
+            }),
+            "skill-auditor": JSON.stringify({findings: []}),
+            "claim-validator": JSON.stringify({
+                claims: [
+                    {
+                        id: "correctness-reviewer-2",
+                        verification: "confirmed",
+                        confidence: 0.9,
+                    },
+                ],
+            }),
+        });
+        const result = await runDispatch({fs, runner, repoRoot: "/work"});
+
+        // b.ts's occurrence posts on its own anchor, unmerged and without
+        // the prose occurrence list.
+        expect(result.claims).toHaveLength(1);
+        expect(result.claims[0].path).toBe("b.ts");
+        expect(result.claims[0].discussion).not.toContain("Also applies to");
+        expect(result.crossFileMerges).toEqual([]);
+
+        // a.ts's copy exited through the open thread, recorded as such.
+        expect(result.threadSuppressions).toHaveLength(1);
+        expect(result.threadSuppressions[0]).toMatchObject({
+            path: "a.ts",
+            thread_id: "T1",
+        });
+    });
+
     it("posts both when the same source's findings differ", async () => {
         const fs = makeFakeFs({
             ...baseStaging(),

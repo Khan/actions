@@ -33,6 +33,19 @@
  *   the dedup philosophy (a missed merge costs a duplicate comment; a wrong
  *   one drops a finding).
  *
+ * Validation asymmetry, accepted deliberately: the validator sees only the
+ * survivor, and its verdict speaks for copies anchored on OTHER files whose
+ * contents it never re-checked. The cross-source tiers have the same
+ * one-validation-per-group shape without the cross-file exposure (their
+ * copies share a path). What bounds the cost here: every copy passed the
+ * change-provenance gate on its own anchor before dedup ran, the merge
+ * floors above demand identical-or-near-identical text from ONE source, and
+ * the occurrence list is prose ("Also applies to..."), not an anchored
+ * claim, so a wrong merge publishes a weaker statement about the other file
+ * than a separate comment would have. A refuted survivor drops its whole
+ * group; that is the same failure direction as tier 1 and costs a missed
+ * comment only when the SAME text was somehow valid on the sibling file.
+ *
  * The survivor is the first occurrence in diff order (the staged files.json
  * order, when provided; claim order otherwise), so the comment lands where a
  * reader meets the pattern first. Its discussion gains one trailing line
@@ -43,9 +56,13 @@
  * dispatch-result.json like the other tiers' merges.
  */
 
-import {dedupeClaims, describesSameDefect, type ClaimMerge} from "./dedup";
-import {isRecord, type Claim, type ProposedCluster} from "./dispatch-contracts";
-import {type ClusterRejection} from "./dedup-cluster";
+import {
+    describesSameDefect,
+    suppressOpenThreadDuplicates,
+    type OpenThread,
+    type ThreadSuppression,
+} from "./dedup";
+import {isRecord, type Claim} from "./dispatch-contracts";
 
 /** One cross-file merge, for the run artifact (`crossFileMerges`). */
 export type CrossFileMerge = {
@@ -88,9 +105,21 @@ const mergeableAcrossFiles = (a: Claim, b: Claim): boolean =>
 /**
  * Merge one source's cross-file duplicates. Runs AFTER `dedupeClaims` (the
  * cross-source tiers settle first, so a survivor here already speaks for
- * whatever they folded into it) and before open-thread suppression and
- * validation, so merged copies are neither separately validated nor
- * separately posted.
+ * whatever they folded into it) and AFTER open-thread suppression, but
+ * before validation, so merged copies are still neither separately
+ * validated nor separately posted (suppression also precedes validation, so
+ * the cost saving is identical).
+ *
+ * The position after suppression is load-bearing, not stylistic.
+ * `bestOpenThreadMatch` only matches a thread to a claim on the thread's own
+ * path, so if this merge ran first, an open thread on the survivor's file
+ * would suppress the survivor and silently drop every other file's
+ * occurrence with it: an author who copies a flawed file A into a new
+ * sibling B, with A's finding already tracked in an open thread, would never
+ * hear about B, on this run or any later one. Running after suppression, A's
+ * copy exits through the thread and B posts alone. The inverse cost, an open
+ * thread that was itself a merged comment already naming B, is one duplicate
+ * comment on B: the failure direction this module's rules already prefer.
  *
  * `pathOrder` is the diff's file order (staged files.json); the survivor is
  * the group's first occurrence in that order, with claim order breaking ties
@@ -209,32 +238,31 @@ export const mergeCrossFileDuplicates = (
 };
 
 /**
- * The composed dedup entry point dispatch calls: the cross-source tiers
- * (`dedupeClaims`) settle first, then the cross-file pass runs over their
- * survivors, so this pass can only ever remove comments the tiers left
- * standing, never a merge they made. `stagedFiles` is the raw parsed
+ * The composed suppression-then-merge step dispatch calls, in this order
+ * because the ordering is load-bearing (see {@link mergeCrossFileDuplicates}):
+ * open-thread suppression first, so a suppressed file's copy exits through
+ * its thread and the other files' occurrences still post; the cross-file
+ * merge second, over the survivors. `stagedFiles` is the raw parsed
  * files.json (diff order); a missing or malformed staging degrades to claim
  * order, never to a skipped merge.
  */
-export const dedupeClaimsWithCrossFile = (
+export const suppressThenMergeCrossFile = (
     claims: Claim[],
-    proposals: readonly ProposedCluster[],
+    openThreads: readonly OpenThread[],
     stagedFiles: unknown,
 ): {
     claims: Claim[];
-    merges: ClaimMerge[];
-    clusterRejections: ClusterRejection[];
+    suppressed: ThreadSuppression[];
     crossFileMerges: CrossFileMerge[];
 } => {
-    const deduped = dedupeClaims(claims, proposals);
+    const suppression = suppressOpenThreadDuplicates(claims, openThreads);
     const pathOrder = (Array.isArray(stagedFiles) ? stagedFiles : [])
         .map((entry) => (isRecord(entry) ? entry["path"] : undefined))
         .filter((path): path is string => typeof path === "string");
-    const crossFile = mergeCrossFileDuplicates(deduped.claims, pathOrder);
+    const crossFile = mergeCrossFileDuplicates(suppression.kept, pathOrder);
     return {
         claims: crossFile.claims,
-        merges: deduped.merges,
-        clusterRejections: deduped.clusterRejections,
+        suppressed: suppression.suppressed,
         crossFileMerges: crossFile.merges,
     };
 };
