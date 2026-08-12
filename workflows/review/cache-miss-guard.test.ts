@@ -44,9 +44,18 @@ const guardValue = (source: string, name: string): number => {
 
 /**
  * Pipeline agents dispatched beyond the finder roster, each its own cold
- * session: thread-reconciler, claim-validator, claim-clusterer.
+ * session: pattern-triage, thread-reconciler, claim-validator,
+ * claim-clusterer (dispatch-roster.ts: "Pipeline steps ... never consume a
+ * slot", so none of them are inside maxReviewerInvocations).
+ *
+ * Known undercount, absorbed by the 1.5x margin below rather than modeled:
+ * lens agents carry the Agent tool, so a nested Explore/general-purpose
+ * spawn is another cold session. Those spawns start after their parent lens
+ * has already produced cache-hitting turns, so they are not aligned into
+ * the single parallel burst this formula sizes; modeling them would mean
+ * inventing a fudge factor with no source of truth to couple to.
  */
-const PIPELINE_AGENTS = 3;
+const PIPELINE_AGENTS = 4;
 
 describe("the AWF cache-miss guard vs the sub-agent fan-out", () => {
     const worstCaseColdSessions =
