@@ -146,6 +146,20 @@ describe("renderClaimComment", () => {
         expect(body).toContain(`**${label}:**`);
     });
 
+    it("renders a drop-in suggestion as a committable fence even under a non-fix label", () => {
+        // The label gate covers the sketch form only. A drop-in fence is the
+        // fix itself, not restated prose, so it posts under any label (the
+        // dispute-cap relabel to `question (non-blocking)` keeps it too).
+        const body = renderClaimComment(
+            claim({
+                label: "question (non-blocking)",
+                suggestion: "fixed()",
+            }) as never,
+        );
+        expect(body).toContain("```suggestion\nfixed()\n```");
+        expect(body).not.toContain("A sketch");
+    });
+
     it("renders a sketchless claim identically whatever the label", () => {
         const body = renderClaimComment(
             claim({label: "question (non-blocking)"}) as never,

@@ -238,6 +238,13 @@ export const isDropInSuggestion = (suggestion: string): boolean => {
  * point rather than propose a fix: measured on Khan/webapp (2026-08-11/12),
  * 31 of 57 posted comments carried a sketch, including questions and
  * thoughts whose sketch restated the prose without adding information.
+ *
+ * Deliberate consequence: a dispute-capped claim relabeled to
+ * `question (non-blocking)` by applyVerifications keeps its `suggestion`
+ * field but posts as a bare question. The author contested the claim, so
+ * posting its fix as if uncontested is the wrong emphasis; the sketch drop
+ * is intended there, not collateral. Drop-in fences are unaffected (they
+ * post under any label, see renderClaimComment).
  */
 const SKETCH_LABEL_TOKENS: ReadonlySet<string> = new Set([
     "issue",
