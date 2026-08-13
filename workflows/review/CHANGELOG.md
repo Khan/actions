@@ -1,5 +1,179 @@
 # review
 
+## 1.14.0
+
+### Minor Changes
+
+-   512a2a7: review: merge one source's identical finding across files into a single pattern-level comment
+
+    Both dedup tiers require the same path and different sources by design: they
+    merge agreement between reviewers, not repetition by one reviewer. Measured on
+    Khan/webapp#41440, one source posted byte-identical documentation suggestions
+    on two sibling eval files as two comments (inline comments 3764122555 and
+    3764122558), and no existing rule could reach the pair.
+
+    A new pass (`dedup-crossfile.ts`) runs after the cross-source tiers settle:
+    findings from the same source with the same label on different files merge
+    when their text is identical, or near-identical above the strict
+    different-line similarity floor (equal line numbers in different files never
+    buy the laxer exact-anchor tier). The survivor is the first occurrence in
+    diff order; its discussion gains one trailing line naming the other
+    occurrences (path, and line where known); merged copies skip validation and
+    posting and are recorded in the run artifact under `crossFileMerges`. Label
+    equality keeps the verdict arithmetic unchanged: a merged blocking group
+    keeps one blocking claim and floors the verdict exactly once. Any doubt in
+    similarity posts separately; a missed merge costs a duplicate comment, a
+    wrong one drops a finding.
+
+-   0666eeb: A run whose core review pass (`correctness-reviewer` or `skill-auditor`)
+    produced no output no longer auto-approves: the plan CLI now feeds the
+    dispatcher's real `skippedDimensions` into `computeVerdict`, whose
+    HOLD_FOR_HUMAN gate was previously unreachable (the dimensions were hardcoded
+    "assessed"). A hold submits no review event; the plan's body posts as one
+    standalone PR comment explaining the hold and how to get unstuck, the
+    conformance gate blocks any other shape (a queued review event, inline
+    comments, thread resolutions, or a withheld hold comment), and the cache
+    writer leaves the prior fingerprints standing so the next run reviews in
+    full (it drops only `risksPatternsKey`, because posting the hold comment
+    collapses the standing guidance comment). Blocking findings still win: with
+    a validated blocking claim the verdict stays REQUEST_CHANGES and the dead
+    lens is disclosed in a note line. The production shape this closes:
+    Khan/actions#328's re-run, where every core lens died on an API auth error
+    and the bot still submitted "Approved" over seven "not assessed" notes.
+-   fb2cfe2: Resolving a bot thread now means "settled", not "open season for a rephrase". The staging collects the bot's threads a HUMAN resolved into a new adjudicated corpus (`adjudicated-threads.json`), and the dispatcher suppresses any non-blocking candidate that re-derives a defect that corpus already settled (same defect-identity match as open-thread suppression). Previously, resolution removed the thread from the only suppression corpus, so the next run could re-post the same concern with fresh wording as a brand-new thread, which every later accountability recap then reported as "still unaddressed" (webapp#41290: six resolved variants of one concern, then a seventh). Two safety asymmetries: a thread the BOT resolved (the reconciler, after a fix) never joins the corpus, and a BLOCKING candidate is never suppressed by it, so a fixed-then-regressed defect worth stopping the PR for always posts.
+-   8bb69d1: The accountability recap stops re-quoting non-blocking threads it already recapped: a kept non-blocking thread whose opener URL appears in any prior review body renders as label + link (no excerpt), fresh threads render full and lead the collapsed block, and the block's summary counts the repeats ("N non-blocking threads still open (M previously reported)"). Blocking threads are never damped; a thread with no staged URL renders full (fail toward more information). Measured on webapp#41290, where the same four threads were re-quoted in full across 25 re-reviews and the drumbeat read as the bot re-arguing threads the author was already looking at.
+-   62cb78d: review: replace the stripped hidden version marker with a visible code-rendered attribution footer
+
+    The `<!-- pr-reviewer:version -->` marker Step 7 instructed never posted:
+    gh-aw's safe-output ingest sanitizer deletes ALL XML/HTML comments
+    (`removeXmlComments`, the same strip that killed the fingerprint stamp),
+    verified on all 9 guidance comments and 13 review bodies posted to
+    Khan/webapp on 2026-08-11/12. Version and config attribution from the PR
+    surface was impossible.
+
+    Every submitted review body and the risks/patterns guidance comment now end
+    with a one-line `<sub>` footer (`<sub>` is on the sanitizer's allowed-tag
+    list) rendered in code by the new `lib/version-footer.ts`: release version
+    from the pinned checkout's package.json, finding-schema version, executed
+    re-review depth, the repo's re-review mode (blocking-only modifier included),
+    and the ROUTING enable list. A segment the staging cannot state is omitted,
+    never guessed. The submission CLI appends it to the body and stages
+    `version-footer.txt` for Step 7 to paste verbatim; the redundant-approval
+    skip compares the body minus the footer, so a bare approve still skips. The
+    hidden fingerprint stamp emission is unchanged (rereview-mode.ts documents
+    why it stays), and the README's Version attribution section now describes
+    the footer and the sanitizer constraint that forced it.
+
+### Patch Changes
+
+-   2c91d42: Size the AWF api-proxy cache-miss guard for the parallel sub-agent fan-out:
+    `max-turn-cache-misses: 25` (the compiled default of 5 was smaller than the
+    fan-out's worst-case burst of cold-session first requests, which are all
+    guaranteed prompt-cache misses; the PR #328 re-run lost that ordering race,
+    the proxy 403'd every remaining lens, and the run reviewed nothing). A
+    genuinely broken cache, the guard's real target, still trips quickly: it
+    misses on every response of a several-hundred-request run.
+-   1aec0ac: review: consistency findings must survive language guidance
+
+    A "match the existing pattern" claim now has to check the pattern itself: the
+    claim-validator refutes a consistency claim when the pattern the fix would
+    restore contradicts the language's or standard library's documented guidance
+    (the measured case: a reviewer proposed moving a new method's ctx parameter
+    onto the struct because sibling methods stored one, against the Go context
+    package's explicit rule). Consistency alone never outranks documented language
+    guidance; inverting the claim to flag the pattern instead needs the ordinary
+    evidence bar, and the pre-existing-mechanism cap applies. The
+    correctness-reviewer carries one mirroring sentence so fewer such claims are
+    generated, and a deterministic clean corpus case
+    (clean-consistency-ctx-param) pins the drop.
+
+-   0be565c: review: retitle the risks/patterns comment "Guidance for reviewers" and add a one-line byline naming its audience
+
+    "Review Guidance" parsed two ways on the PR timeline: guidance for reviewers,
+    or guidance from the bot's review. Sitting directly above the author-directed
+    finding threads, it read like the latter. The new title parses one way, and a
+    single italic byline under it ("Triage notes for reviewers: risky files by
+    owning team, repeated changes, and files excluded from review.") states the
+    audience and contents in the comment itself.
+
+    Nothing keys off the heading text: comment identity is the
+    `<!-- pr-reviewer:risks-and-patterns -->` marker, and the repost-dedup key is
+    content-based (risk files, owning teams, pattern file sets, excluded set,
+    NOTIFIED signature). The rename posts nothing and pings no one; existing
+    comments keep the old title until the next substantive change posts a new one.
+
+-   61f835b: Skill-doc only: add a `review-feedback-audit` skill that codifies the post-deploy audit of the reviewer's output and human feedback in a consumer repo, first executed by hand against Khan/webapp for the 2026-08-11/12 window. Inputs are the consumer repo, a cutoff timestamp (typically the deploy time), and the bot login (default `github-actions[bot]`). Collection is GET-only and dependency-free (`bash`, `jq`, `gh`): inline comments and issue comments via the repo-wide `since` listings (re-filtered on `created_at`, since `since` filters on `updated_at`), reviews via a PR search plus per-PR listing (no repo-wide reviews endpoint exists), reaction detail fetched only where the listing shows a nonzero count and always excluding the bot's own reactions, and human replies resolved through `in_reply_to_id` including parents older than the window. The metrics section covers verdict mix (with sweep follow-ups posted as COMMENTED reviews excluded from the run count), label mix off the Conventional-Comment prefixes, verbosity (mean/median/p90/max plus sketch-block share), duplication at three grains (byte-identical in-run bodies, same-run same-root-cause clusters, cross-run families that defect-identity suppression misses when variants span files), suppression notes parsed from review bodies, and the feedback loop (reactions, thumbs-sweep follow-up and reason-reply latencies, replies classified accepted/declined/answered). Two constraints are documented so the audit does not misread them: agent-written HTML comments are sanitizer-stripped, so `pr-reviewer:` marker absence is expected until a visible footer ships, and a GET-only gh broker blocks GraphQL, in which case thread-resolution counts are reported as unavailable rather than approximated. The report template ends by mapping every finding to an open Khan/actions PR or a new-PR candidate. No change to the shipped review workflow.
+-   5f11540: review: absorb the sanitizer's XML tag conversion in rule 7, which false-blocked a conforming run
+
+    The dispatch gate's rule 7 compares the staged submission plan against the
+    queued safe outputs under `normalizeBody`, which mirrors every ingest-sanitizer
+    transform it has chosen to absorb. XML tag conversion was on the
+    documented-not-absorbed list, justified as needing "a pathological body". It
+    does not: a reviewer writing a path template like
+    `plugins/<p>/skills/<skill>/SKILL.md` in prose is the most natural way to name
+    a placeholder, and gh-aw's `convertXmlTags` (sanitize_content_core.cjs)
+    rewrites the unknown `<skill>` to `(skill)` while preserving the allowed
+    `<p>`. The plan is staged before that pass, so the two sides differed by one
+    token on a fully conforming run, rule 7 reported `submission-plan-mismatch`,
+    and the whole REQUEST_CHANGES review was withheld
+    (Khan/kore-marketplace run 31609578203; the misleading `(4) do not match (4)`
+    detail is the count printing on a content mismatch).
+
+    `normalizeBody` now applies a `foldXmlTags` mirror of the sanitizer's
+    transform to BOTH sides: same tag regex, same https angle-bracket autolink
+    preservation, same allowed-tag list, same parenthesis rewrite. Splice
+    detection is preserved where it can be: a queued `(p)` against a staged `<p>`
+    (an allowed tag the sanitizer would have kept) still mismatches. The fold runs
+    before the URL folds so it never touches their `<url:host>` placeholders.
+    Remaining sub-residuals, still documented and still requiring a genuinely
+    pathological body: dangerous-attribute stripping inside a preserved allowed
+    tag, and CDATA marker rewriting.
+
+    Verified against the incident artifacts: the staged `comment-2.json` and the
+    sanitized queued item from `agent_output.pre-gate.json` now fold equal.
+
+    Hardened further against this PR's own review run (Khan/actions run
+    31616001094), which false-blocked on three URL-fold divergences from the
+    sanitizer:
+
+    -   Angle-bracket https autolinks now fold as a unit on both sides, mirroring
+        the sanitizer's autolink pass (which consumes the brackets and keeps a
+        `|label`); previously a redacted autolink left an orphaned `<` on the plan
+        side only.
+    -   Protocol-relative `//host` URLs now fold like the sanitizer's
+        protocol-relative pass. The incident body staged `.replace(/\u034f/g, "")`;
+        the sanitizer's zero-width strip turned it into `//g`, then redacted it to
+        `(g/redacted)`.
+    -   The https and scheme folds now match the sanitizer's URI shapes exactly:
+        paths stop at commas, hosts may carry ports, non-https schemes keep their
+        sanitized host, and redacted host names get the sanitizer's per-label
+        alphanumeric fold (`my-host.com` -> `myhost.com`).
+
+    The unicode folds also moved ahead of the comment/tag folds to match
+    `sanitizeContentCore` order (hardenUnicodeText runs first), so a
+    compatibility-form tag folds identically on both sides. Verified against the
+    run's artifacts: all four staged `comment-*.json` bodies now fold equal to
+    their sanitized queued forms.
+
+-   89fbb5b: review: emit fix sketches only under fix-proposing labels
+
+    Measured on Khan/webapp (2026-08-11/12): 31 of 57 posted inline comments
+    carried an "A sketch, not a committable replacement" block, including
+    question and thought comments that propose no fix; there the sketch restates
+    the prose and adds length (mean body 874 chars) without information.
+
+    Two layers. The renderer now appends a sketch only when the claim's base
+    label token is `issue`, `todo`, or `suggestion` (every variant counts:
+    `suggestion (non-blocking, documentation)` is a suggestion); a sketch under
+    `question`/`thought`/`note`/`nitpick` is dropped at render time. And the
+    finder prompts (correctness-reviewer, holistic, completeness, test-adequacy,
+    first-principles, conventions) now ask for `suggestion` only on
+    fix-proposing findings, so the payload is not authored in the first place.
+
+    Committable drop-in `suggestion` fences are unchanged, as are rule quotes
+    and the prose itself; an empty or unparseable label stays sketch-eligible
+    (fail toward more information).
+
 ## 1.13.0
 
 ### Minor Changes
