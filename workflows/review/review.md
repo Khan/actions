@@ -650,7 +650,8 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    It reads `dispatch-result.json`, renders the accountability section
    (`rereview.json`), computes the verdict (Step 4's mechanical rule plus the
    reduced-depth flip floor), renders every inline comment and the full
-   review body (note lines and fingerprint stamp included), and writes
+   review body (note lines, the visible attribution footer, and the
+   fingerprint stamp included), and writes
    `/tmp/gh-aw/review/submission-plan.json`. At full depth it also
    stages `/tmp/gh-aw/review/risks-patterns-key.txt`, the code-computed
    canonical signature Step 7 compares (never compose your own signature in
@@ -721,7 +722,8 @@ never add, drop, reword, or re-anchor one.
 
 The review body and event are composed by the plan CLI (Step 3): the verdict
 head, the code-rendered re-review accountability section, every `Note:` line,
-and the hidden fingerprint stamp are all already in the plan's `body`. Submit
+the visible attribution footer, and the hidden fingerprint stamp are all
+already in the plan's `body`. Submit
 with **one** `submit-pull-request-review` call carrying the plan's `event` and
 `body` verbatim — except under the redundant-approval skip (Step 3), where you
 submit nothing. The dispatch-conformance gate blocks any deviation from the
@@ -805,12 +807,14 @@ should only ever be one current risks/patterns comment:
 
 Begin the comment with the exact marker line below (so the comment is identifiable
 on later runs), then include the Guidance for reviewers team sections and/or the
-common-patterns section. Omit whichever is empty. End the comment with the version
-marker, for attribution and rollback:
-`<!-- pr-reviewer:version v=review-v<version> schema=<n> -->`, where `<version>` is
-the `version` field of `gh-aw-review-lib/workflows/review/package.json` (the pinned
-release this run executed) and `<n>` is the `FINDING_SCHEMA_VERSION` constant in
-`gh-aw-review-lib/workflows/review/lib/finding-schema.ts`.
+common-patterns section. Omit whichever is empty. End the comment with the
+attribution footer: paste the one-line `<sub>...</sub>` footer from
+`/tmp/gh-aw/review/version-footer.txt` **verbatim** as the final line (the plan
+CLI staged it in Step 3; if the file is missing, re-stage it with
+`cd gh-aw-review-lib && npx -y tsx workflows/review/lib/version-footer.ts`).
+Never compose the footer yourself, and never use an HTML comment for it: the
+safe-output ingest sanitizer deletes HTML comments, which is how the old hidden
+version marker silently never posted.
 
 ````
 <!-- pr-reviewer:risks-and-patterns -->
@@ -864,6 +868,8 @@ fully explained by a common pattern above:
 - `src/widgets/card.tsx` — pattern-only (Common patterns)
 
 </details>
+
+<sub>review-v1.13.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
 ````
 
 - Title the comment `## Guidance for reviewers`, follow it with the one-line

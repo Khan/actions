@@ -80,6 +80,7 @@ import {
 } from "./rereview-mode";
 import {computeVerdict} from "./verdict";
 import type {DimensionStatus, VerdictReason} from "./verdict";
+import {runVersionFooterCli} from "./version-footer";
 
 /* -------------------------------------------------------------------------- */
 /* Types and paths                                                            */
@@ -746,7 +747,25 @@ export const runSubmissionCli = (
         rereviewSection: rereview.section,
     });
     const stamp = runRereviewStampCli(fs, event);
-    const body = [head, ...prLevelLines, ...noteLines, ...depthNotes]
+    // The body minus the attribution footer: the redundant-approval skip
+    // below compares THIS against the bare approve line, because the footer
+    // rides every submitted body (a bare approve differs from the bare
+    // render by exactly the footer, and that difference is not a reason to
+    // post).
+    const coreBody = [head, ...prLevelLines, ...noteLines, ...depthNotes]
+        .filter((line) => line !== "")
+        .join("\n");
+    // The visible attribution footer (version-footer.ts): code-rendered,
+    // sanitizer-surviving (<sub> is on the allowed-tag list; the old hidden
+    // HTML marker never posted). The CLI also stages version-footer.txt for
+    // Step 7's guidance comment. The depth override hands the footer this
+    // run's executed depth from the SAME read that keys the depth Note and
+    // blocking-only gating, so the two surfaces cannot contradict; null
+    // (unreadable dispatch result) drops the segment rather than guessing.
+    const footer = runVersionFooterCli(fs, undefined, {
+        depth: typeof dispatch.depth === "string" ? dispatch.depth : null,
+    });
+    const body = [coreBody, footer]
         .filter((line) => line !== "")
         .join("\n")
         .concat(stamp === null ? "" : `\n${stamp}`)
@@ -765,7 +784,7 @@ export const runSubmissionCli = (
     const skipSubmission =
         event === "APPROVE" &&
         inline.length === 0 &&
-        normalizeBody(body) ===
+        normalizeBody(coreBody) ===
             normalizeBody(
                 renderReviewBody({event: "APPROVE", hasInlineComments: false}),
             ) &&
