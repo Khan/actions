@@ -51,12 +51,24 @@ export const renderCollapsedFooter = (content: string): string =>
         "</details>",
     ].join("\n");
 
+/**
+ * A merged copy's `subject` is model-authored text interpolated into the
+ * footer's HTML. Unescaped, a subject containing a literal `</details>`
+ * closes the collapsed block early and truncates {@link stripFooters}'s
+ * non-greedy match. Escape the HTML-significant characters; GitHub renders
+ * the entities back as the literal characters.
+ */
+const escapeHtml = (text: string): string =>
+    text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 const flaggedBy = (entry: AlsoFlagged): string => {
     const anchor =
         entry.line === undefined
             ? entry.source
             : `${entry.source} (at line ${entry.line})`;
-    return entry.subject === undefined ? anchor : `${anchor}: ${entry.subject}`;
+    return entry.subject === undefined
+        ? anchor
+        : `${anchor}: ${escapeHtml(entry.subject)}`;
 };
 
 /**
@@ -97,8 +109,16 @@ const FOOTER_BLOCK_RE = new RegExp(
  * version segments; tokens shared by ALL bot comments would inflate
  * similarity between unrelated findings, exactly like the label template
  * and rule-quote lines `threadProse` already strips. Removes the collapsed
- * block and any residual bare `<sub>…</sub>` span (the pre-collapse
- * version-footer line, and the source tag on collapsed one-liners).
+ * block and the two residual bare `<sub>…</sub>` shapes this codebase has
+ * posted: a whole-line span (the pre-collapse version-footer line) and a
+ * parenthesized span at end of line (the source tag on collapsed
+ * one-liners). Deliberately NOT a blanket `<sub>…</sub>` strip: a posted
+ * comment whose own discussion quotes a `<sub>` span mid-prose (even in
+ * backticks) is review content, and deleting it would distort the
+ * similarity text.
  */
 export const stripFooters = (body: string): string =>
-    body.replace(FOOTER_BLOCK_RE, "").replace(/<sub>[^<]*<\/sub>/g, "");
+    body
+        .replace(FOOTER_BLOCK_RE, "")
+        .replace(/^[ \t]*<sub>[^<]*<\/sub>[ \t]*$/gm, "")
+        .replace(/<sub>\([^<]*\)<\/sub>[ \t]*$/gm, "");

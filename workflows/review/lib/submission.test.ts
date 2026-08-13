@@ -242,6 +242,7 @@ describe("runSubmissionCli", () => {
                         path: undefined,
                         line: undefined,
                         label: "note (non-blocking)",
+                        also_flagged_by: [{source: "completeness", line: 7}],
                     }),
                 ],
             }),
@@ -250,6 +251,14 @@ describe("runSubmissionCli", () => {
         expect(plan.comments).toEqual([]);
         expect(plan.body).toContain(
             "**note (non-blocking):** The guard was removed.",
+        );
+        // The fold carries the same collapsed attribution footer an inline
+        // comment gets (submission.ts's pr-level branch).
+        expect(plan.body).toContain(
+            "<details><summary><sub>review details</sub></summary>\n" +
+                "<sub>found by correctness-reviewer | also flagged by " +
+                "completeness (at line 7)</sub>\n" +
+                "</details>",
         );
         expect(plan.body).not.toContain("<summary>Full finding</summary>");
         expect(plan.notes.join(" ")).toContain("folded into the review body");

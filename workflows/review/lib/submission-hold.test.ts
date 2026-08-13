@@ -144,7 +144,12 @@ describe("the hold path (core dimension unavailable)", () => {
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("HOLD_FOR_HUMAN");
         expect(plan.comments).toEqual([]);
-        expect(plan.body).toContain("- `a.ts:2` suggestion (non-blocking): s");
+        // Each folded line carries its one-line source tag (the hold-path
+        // parallel of the collapsed-observations tag).
+        expect(plan.body).toContain(
+            "- `a.ts:2` suggestion (non-blocking): s " +
+                "<sub>(correctness-reviewer)</sub>",
+        );
         expect(
             plan.notes.some((note) =>
                 note.includes("folded into the hold comment"),
@@ -187,7 +192,8 @@ describe("the hold path (core dimension unavailable)", () => {
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("HOLD_FOR_HUMAN");
         expect(plan.body).toContain(
-            "- suggestion (non-blocking): spanning concern",
+            "- suggestion (non-blocking): spanning concern " +
+                "<sub>(correctness-reviewer)</sub>",
         );
     });
 

@@ -56,6 +56,21 @@ describe("renderAttributionFooter", () => {
             ),
         );
     });
+
+    it("escapes HTML in a merged copy's model-authored subject", () => {
+        const footer = renderAttributionFooter("correctness-reviewer", [
+            {
+                source: "conventions",
+                subject: "Unbalanced </details> & a <sub> tag.",
+            },
+        ]);
+        expect(footer).not.toContain("Unbalanced </details>");
+        expect(footer).toContain(
+            "Unbalanced &lt;/details&gt; &amp; a &lt;sub&gt; tag.",
+        );
+        // The block still strips cleanly: the subject cannot close it early.
+        expect(stripFooters(`prose\n${footer}`)).toBe("prose\n");
+    });
 });
 
 describe("stripFooters", () => {
@@ -83,6 +98,15 @@ describe("stripFooters", () => {
             ),
         ).toBe("- `a.ts:2` issue (blocking): s ");
         expect(stripFooters("<sub>review-v1.13.0 | schema 2</sub>")).toBe("");
+    });
+
+    it("keeps a quoted <sub> span mid-prose (review content, not a footer)", () => {
+        const body =
+            "The strip targets <sub>spans</sub> quoted inside a sentence.";
+        expect(stripFooters(body)).toBe(body);
+        const backticked =
+            "the footer renders `<sub>content</sub>` inside the block, then prose";
+        expect(stripFooters(backticked)).toBe(backticked);
     });
 
     it("leaves other <details> blocks alone", () => {
