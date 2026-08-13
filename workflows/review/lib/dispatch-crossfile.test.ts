@@ -172,6 +172,50 @@ describe("runDispatch cross-file duplicate merge", () => {
         expect(artifact.crossFileMerges).toHaveLength(1);
     });
 
+    it("keeps the occurrence list when the validator corrects the survivor's discussion", async () => {
+        // applyVerifications replaces discussion wholesale on a corrected
+        // verdict, which erased the merge's "Also applies to" line and lost
+        // the sibling file's finding from every posted surface.
+        const fs = makeFakeFs({
+            ...baseStaging(),
+            ...agentFiles(
+                "pattern-triage",
+                "correctness-reviewer",
+                "skill-auditor",
+                "claim-validator",
+            ),
+        });
+        const runner = stubRunner({
+            "pattern-triage": JSON.stringify({
+                patterns: [],
+                reviewFiles: ["a.ts", "b.ts"],
+            }),
+            "correctness-reviewer": JSON.stringify({
+                findings: [finding("a.ts"), finding("b.ts")],
+            }),
+            "skill-auditor": JSON.stringify({findings: []}),
+            "claim-validator": JSON.stringify({
+                claims: [
+                    {
+                        id: "correctness-reviewer-1",
+                        verification: "confirmed",
+                        confidence: 0.9,
+                        corrected: {
+                            discussion:
+                                "Corrected: the versions block defines only v0 and v2.",
+                        },
+                    },
+                ],
+            }),
+        });
+        const result = await runDispatch({fs, runner, repoRoot: "/work"});
+        expect(result.claims).toHaveLength(1);
+        expect(result.claims[0].discussion).toBe(
+            "Corrected: the versions block defines only v0 and v2." +
+                "\n\nAlso applies to `b.ts` (line 2).",
+        );
+    });
+
     it("posts the new file's copy when an open thread suppresses the survivor's file", async () => {
         // Regression for the merge-before-suppression loss case: an open bot
         // thread tracks the finding on a.ts (the author copied flawed a.ts

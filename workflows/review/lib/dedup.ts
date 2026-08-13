@@ -90,6 +90,7 @@
  * can cost is bounded by code even where its judgment cannot be checked.
  */
 
+import {bigrams, contentTokens, intersectionSize} from "./dedup-text";
 import {isRecord, type Claim, type ProposedCluster} from "./dispatch-contracts";
 import {isBlockingLabel} from "./render-comment";
 import {
@@ -165,40 +166,6 @@ const OTHER_LINE_FLOOR = {jaccard: 0.2, overlap: 0.35, sharedBigrams: 6};
  * `dedup-pr-level.test.ts` carries the run's real texts; re-derive, don't nudge.
  */
 const PR_LEVEL_FLOOR = {jaccard: 0.2, overlap: 0.35, sharedBigrams: 8};
-
-const STOPWORDS = new Set(
-    "the a an and or of to in is are was be for on with that this it as not no by at from so its their they".split(
-        " ",
-    ),
-);
-
-const contentTokens = (text: string): string[] => {
-    const tokens: string[] = [];
-    for (const word of text.toLowerCase().match(/[a-z0-9]+/g) ?? []) {
-        if (word.length >= 3 && !STOPWORDS.has(word)) {
-            tokens.push(word);
-        }
-    }
-    return tokens;
-};
-
-const bigrams = (tokens: string[]): Set<string> => {
-    const set = new Set<string>();
-    for (let i = 0; i + 1 < tokens.length; i += 1) {
-        set.add(`${tokens[i]} ${tokens[i + 1]}`);
-    }
-    return set;
-};
-
-const intersectionSize = <T>(a: Set<T>, b: Set<T>): number => {
-    let count = 0;
-    for (const item of a) {
-        if (b.has(item)) {
-            count += 1;
-        }
-    }
-    return count;
-};
 
 const comparisonKey = (text: string): string =>
     text
@@ -285,6 +252,15 @@ export type ThreadSuppression = {
      * threads that clear the floor their labels can differ.
      */
     threadBlocking: boolean;
+    /**
+     * Present (and true) when the matched thread is from the ADJUDICATED
+     * corpus (a bot thread a human resolved) rather than an open one; see
+     * dedup-adjudicated.ts. Audit-trail only: an adjudicated suppression can
+     * never floor the verdict, because that pass never suppresses a blocking
+     * candidate and submission.ts's floor requires the CANDIDATE's label to
+     * be blocking too.
+     */
+    adjudicated?: true;
 };
 
 /**
@@ -298,7 +274,7 @@ export type ThreadSuppression = {
  * recognizable label reads as non-blocking, since an unvalidated floor is the
  * failure mode this guards.
  */
-const threadOpenerIsBlocking = (body: string): boolean => {
+export const threadOpenerIsBlocking = (body: string): boolean => {
     const label = /^\s*\*{0,2}([a-z]+ \([^)]*\))\*{0,2}:?/i.exec(body)?.[1];
     return (
         label !== undefined &&
@@ -335,7 +311,7 @@ const threadProse = (body: string): string =>
  * hand-built staging used to reproduce a run) inherits its shape. Absent
  * reads as unknown, not as open.
  */
-const stagedResolvedState = (thread: Record<string, unknown>): unknown =>
+export const stagedResolvedState = (thread: Record<string, unknown>): unknown =>
     thread["resolved"] ?? thread["is_resolved"] ?? thread["isResolved"];
 
 /**
@@ -478,7 +454,7 @@ export const describesOpenThreadDefect = (
  * comparisons keep staging order as the final tiebreak, so an exact scoring
  * tie behaves as it did before.
  */
-const bestOpenThreadMatch = (
+export const bestOpenThreadMatch = (
     claim: Claim,
     threads: readonly OpenThread[],
 ): OpenThread | undefined => {

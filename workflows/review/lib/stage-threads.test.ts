@@ -1,6 +1,7 @@
 import {describe, it, expect} from "vitest";
 
 import {openThreadsFromStaged, stagedThreadShapeFailure} from "./dedup";
+import {adjudicatedThreadsFromStaged} from "./dedup-adjudicated";
 import {computeRoster} from "./dispatch-roster";
 import {runStagePrCli, type GhGet, type StagePrFs} from "./stage-pr";
 import {withGraphqlRateLimitRetry, type GhGraphql} from "./threads";
@@ -124,6 +125,9 @@ describe("review-thread staging (slice 1)", () => {
             result,
             threads: JSON.parse(fs.files[`${REVIEW}/threads.json`]),
             humanThreads: JSON.parse(fs.files[`${REVIEW}/human-threads.json`]),
+            adjudicated: JSON.parse(
+                fs.files[`${REVIEW}/adjudicated-threads.json`],
+            ),
         };
     };
 
@@ -232,7 +236,7 @@ describe("review-thread staging (slice 1)", () => {
         expect(humanThreads).toEqual([]);
     });
 
-    it("drops resolved threads and omits an absent opener url", async () => {
+    it("drops resolved threads from the unresolved partition and omits an absent opener url", async () => {
         const {threads, humanThreads} = await stage([
             threadPage([
                 threadNode({id: "PRRT_done", isResolved: true}),
@@ -251,7 +255,87 @@ describe("review-thread staging (slice 1)", () => {
         ]);
         expect(threads).toHaveLength(1);
         expect("url" in threads[0]).toBe(false);
+        // The resolution fields serve the adjudicated partition only; leaking
+        // them into threads.json would be a shape change to every exact-match
+        // reader of the unresolved staging.
+        expect("resolvedBy" in threads[0]).toBe(false);
         expect(humanThreads).toEqual([]);
+    });
+
+    it("stages a human-resolved bot thread as adjudicated, and the corpus filter accepts the staged bytes", async () => {
+        // The webapp#41290 shape: the author resolved the bot's thread, and
+        // before this file existed that resolution REMOVED the defect from
+        // the suppression corpus, so the next run could re-derive it with
+        // fresh wording. Same producer-to-consumer bind as the open-corpus
+        // case above: the staged bytes go straight into
+        // `adjudicatedThreadsFromStaged`, so a shape drift fails HERE.
+        const {threads, adjudicated} = await stage([
+            threadPage([
+                threadNode({
+                    id: "PRRT_adjudicated",
+                    isResolved: true,
+                    resolvedBy: {login: "octo"},
+                }),
+                threadNode({id: "PRRT_open2"}),
+            ]),
+        ]);
+        expect(threads.map((t: {thread_id: string}) => t.thread_id)).toEqual([
+            "PRRT_open2",
+        ]);
+        expect(adjudicated).toEqual([
+            {
+                thread_id: "PRRT_adjudicated",
+                path: "a.ts",
+                line: 2,
+                url: "https://github.com/o/r/pull/7#discussion_r1",
+                comments: [
+                    {
+                        author: "github-actions",
+                        body: "**issue (blocking):** opener",
+                    },
+                ],
+                resolved: true,
+                resolvedBy: "octo",
+            },
+        ]);
+        expect(adjudicatedThreadsFromStaged(adjudicated)).toEqual([
+            {
+                thread_id: "PRRT_adjudicated",
+                path: "a.ts",
+                body: "**issue (blocking):** opener",
+            },
+        ]);
+    });
+
+    it("keeps bot-resolved and human-opened resolved threads out of the adjudicated corpus", async () => {
+        // Bot-resolved = the reconciler marking a defect FIXED (its regression
+        // must re-post); a resolved HUMAN thread is not the bot's finding and
+        // adjudicates nothing. An unattributable resolver (deleted account,
+        // GraphQL null) fails toward posting a duplicate, never toward
+        // suppression on unverifiable authority.
+        const {adjudicated} = await stage([
+            threadPage([
+                threadNode({
+                    id: "PRRT_fixed",
+                    isResolved: true,
+                    resolvedBy: {login: "github-actions"},
+                }),
+                threadNode({
+                    id: "PRRT_human_resolved",
+                    isResolved: true,
+                    resolvedBy: {login: "octo"},
+                    comments: {
+                        nodes: [{author: {login: "octo"}, body: "human"}],
+                    },
+                }),
+                threadNode({
+                    id: "PRRT_ghost",
+                    isResolved: true,
+                    resolvedBy: null,
+                }),
+            ]),
+        ]);
+        expect(adjudicated).toEqual([]);
     });
 
     it("skips human threads with no RIGHT-side line and collapses duplicates", async () => {

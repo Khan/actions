@@ -2,6 +2,7 @@ import {describe, it, expect} from "vitest";
 
 import {
     mergeCrossFileDuplicates,
+    reapplyCrossFileOccurrences,
     suppressThenMergeCrossFile,
 } from "./dedup-crossfile";
 import {type Claim} from "./dispatch-contracts";
@@ -332,8 +333,9 @@ describe("mergeCrossFileDuplicates", () => {
 describe("suppressThenMergeCrossFile", () => {
     it("degrades to claim order when the staging is malformed", () => {
         // The docstring promises a malformed files.json degrades to claim
-        // order, never to a skipped merge.
-        const result = suppressThenMergeCrossFile(pair(), [], {
+        // order, never to a skipped merge. Thread stagings are equally raw
+        // (absent here), and absent corpora suppress nothing.
+        const result = suppressThenMergeCrossFile(pair(), [], [], new Set(), {
             not: "an array",
         });
         expect(result.claims).toHaveLength(1);
@@ -342,12 +344,31 @@ describe("suppressThenMergeCrossFile", () => {
     });
 
     it("degrades to claim order when entries lack string paths", () => {
-        const result = suppressThenMergeCrossFile(
-            pair(),
-            [],
-            [{path: 42}, "not-a-record", {}],
-        );
+        const result = suppressThenMergeCrossFile(pair(), [], [], new Set(), [
+            {path: 42},
+            "not-a-record",
+            {},
+        ]);
         expect(result.claims).toHaveLength(1);
         expect(result.crossFileMerges).toHaveLength(1);
+    });
+
+    it("re-applies the occurrence list a corrected discussion erased", () => {
+        const merged = mergeCrossFileDuplicates(pair(), [EXERCISE, TUTOR_ME]);
+        const corrected = merged.claims.map((kept) => ({
+            ...kept,
+            discussion: "Validator-corrected prose without the list.",
+        }));
+        const repaired = reapplyCrossFileOccurrences(corrected, merged.merges);
+        expect(repaired[0].discussion).toBe(
+            "Validator-corrected prose without the list." +
+                `\n\nAlso applies to \`${TUTOR_ME}\` (line 139).`,
+        );
+        // A survivor whose discussion kept the line is left alone.
+        expect(
+            reapplyCrossFileOccurrences(merged.claims, merged.merges),
+        ).toEqual(merged.claims);
+        // A dropped survivor stays dropped.
+        expect(reapplyCrossFileOccurrences([], merged.merges)).toEqual([]);
     });
 });

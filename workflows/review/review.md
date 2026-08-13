@@ -311,6 +311,21 @@ max-daily-ai-credits: -1
 # more work than the hard cap can pay for. KEEP THE TWO VALUES IN SYNC — here
 # and in any consumer override that changes `max-ai-credits`.
 max-ai-credits: 1000
+# The AWF api-proxy cache-miss guard defaults to 5 consecutive zero-cache-hit
+# responses, which is mis-sized for this workflow's parallel sub-agent fan-out:
+# the dispatcher launches up to ~15 cold Claude Agent SDK sessions (finders,
+# reconciler, validator, clusterer), and each session's FIRST request is a
+# guaranteed prompt-cache miss. Whether those misses interleave with
+# cache-hitting responses (resetting the "consecutive" counter) is response-
+# ordering luck: the PR #328 re-run (31124365377 attempt 2) lost that race, the
+# counter hit 5 mid-wave, and the proxy 403'd every remaining lens
+# ("Maximum consecutive cache misses exceeded"), leaving the run to review
+# nothing. 25 clears the worst-case burst (~15 first requests plus margin)
+# while still tripping quickly on the guard's real target, a genuinely broken
+# cache, which misses on EVERY response of a several-hundred-request run.
+# cache-miss-guard.test.ts derives the worst-case burst from lib/budgets.ts
+# and fails any PR that raises the roster cap past this guard's margin.
+max-turn-cache-misses: 25
 env:
   REVIEW_MAX_AI_CREDITS: "1000"
 ---
@@ -365,6 +380,10 @@ budget on content you never act on.
   threads, split by who opened them; the ones this bot opened (with their full
   reply chains) and the `{path, line}` of everyone else's. Step 3 says what each
   one feeds and the one judgment it still wants from you.
+- `adjudicated-threads.json`: this bot's threads a HUMAN resolved. Entirely
+  the dispatcher's input (its suppression drops a non-blocking candidate that
+  re-derives a defect a human already settled); nothing in it is yours to act
+  on.
 - `routing.json`, `provenance.json`, `full-stripped.diff`,
   `full-stripped-annotated.diff`, `rereview-plan.json` (also copied to
   `out/rereview-plan.json` for the run artifact), and, on a reduced-depth
@@ -591,6 +610,13 @@ misfiling one bot thread as human costs a dropped finding, per
   conversation is already open, so the dispatcher defers there and posts no bot
   comment on them.
 
+The same fetch also staged `/tmp/gh-aw/review/adjudicated-threads.json`: this
+bot's threads a HUMAN resolved (same shape as `threads.json`, plus
+`resolved: true` and `resolvedBy`). It is entirely the dispatcher's input; its
+suppression drops a non-blocking candidate that re-derives a defect a human
+already settled, so do not read it, re-litigate it, or treat a resolved thread
+as open.
+
 **The pipeline.** Step 3 runs as ONE deterministic program; your part is
 exactly this sequence:
 1. Read `threads.json`. If any staged bot thread's reply chain shows the author
@@ -639,7 +665,15 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    `skipSubmission` is `true` (the plan CLI sets it for an APPROVE with zero
    `comments` whose body is the bare approve line, on a PR whose last stamped
    verdict was already APPROVE; the gate reads the same field, so the two can
-   never disagree). When it is `false`, always submit. The dispatch-conformance gate
+   never disagree). When it is `false`, always submit. One exception outranks
+   both: when the plan's `event` is `HOLD_FOR_HUMAN` (a core review pass
+   produced no output on a run that would otherwise auto-approve), emit **no**
+   review submission, **no** inline comments, and **no** thread resolutions
+   (a hold plan stages none of them) — instead post the plan's `body` verbatim
+   as one standalone PR comment with the `add-comment` safe output, then skip
+   Steps 7 and 8 (they are APPROVE-only) and continue at Step 9, where the
+   cache CLI handles the hold on its own (it leaves the prior fingerprints
+   standing so the next run reviews in full). The dispatch-conformance gate
    compares what you queued against the staged plan and blocks the
    submission on any deviation, so a mis-typed or "improved" body is a red
    run, never a posted one. `dispatch-result.json`'s `riskFiles`,
@@ -658,7 +692,13 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
 The verdict is computed by the plan CLI (Step 3), never by you: REQUEST_CHANGES
 iff a validated posted claim carries a blocking label, plus the reduced-depth
 flip floor over kept blocking threads and the open-thread suppression floor —
-all `lib/verdict.ts` / `lib/submission.ts` rules. The plan's `event` IS the
+all `lib/verdict.ts` / `lib/submission.ts` rules. A third outcome exists:
+HOLD_FOR_HUMAN, when a core review pass (`correctness-reviewer` or
+`skill-auditor`) produced no usable output this run and the run would
+otherwise have auto-approved — the automation never approves a change its
+core passes did not look at (a blocking finding still wins: it is actionable
+on its own, so the verdict stays REQUEST_CHANGES and the gap is disclosed in
+a note line). The plan's `event` IS the
 verdict; never recompute, second-guess, or override it. (The blocking-label
 vocabulary and the concrete-failing-scenario bar live in the sub-agent
 definitions and the shared lib.)
@@ -686,6 +726,13 @@ with **one** `submit-pull-request-review` call carrying the plan's `event` and
 `body` verbatim — except under the redundant-approval skip (Step 3), where you
 submit nothing. The dispatch-conformance gate blocks any deviation from the
 plan, so a mis-typed or "improved" body is a red run, never a posted one.
+
+When the plan's `event` is `HOLD_FOR_HUMAN`, there is no review to submit:
+post the plan's `body` verbatim as one standalone PR comment with the
+`add-comment` safe output, and queue nothing else (no review submission, no
+inline comments, no thread resolutions). The body already explains the hold
+and how the author gets unstuck; the gate blocks a hold run that submits a
+review, posts inline comments, resolves threads, or drops the comment.
 
 ## Step 7: On Approval — Post Risk and Patterns as a PR Comment
 
@@ -757,7 +804,7 @@ should only ever be one current risks/patterns comment:
 ### Comment body
 
 Begin the comment with the exact marker line below (so the comment is identifiable
-on later runs), then include the Review Guidance team sections and/or the
+on later runs), then include the Guidance for reviewers team sections and/or the
 common-patterns section. Omit whichever is empty. End the comment with the version
 marker, for attribution and rollback:
 `<!-- pr-reviewer:version v=review-v<version> schema=<n> -->`, where `<version>` is
@@ -767,7 +814,9 @@ release this run executed) and `<n>` is the `FINDING_SCHEMA_VERSION` constant in
 
 ````
 <!-- pr-reviewer:risks-and-patterns -->
-## Review Guidance
+## Guidance for reviewers
+
+*Triage notes for reviewers: risky files by owning team, repeated changes, and files excluded from review.*
 
 <details>
 <summary><strong>platform</strong> (2 files)</summary>
@@ -817,8 +866,9 @@ fully explained by a common pattern above:
 </details>
 ````
 
-- Title the comment `## Review Guidance`, then go straight to the team sections —
-  no top-level description paragraph. Wrap each owning team in its own collapsed
+- Title the comment `## Guidance for reviewers`, follow it with the one-line
+  italic byline from the template above (copy it verbatim), then go straight to
+  the team sections; add no other top-level prose. Wrap each owning team in its own collapsed
   `<details>` block. The `<summary>` must use literal HTML — Markdown is not
   processed inside `<summary>` — and contains the team's bare slug wrapped in
   `<strong>…</strong>` followed by a plain file count, e.g.
@@ -871,7 +921,7 @@ fully explained by a common pattern above:
   eval suite's false-exclusion-rate metric reads. Omit the block entirely when
   `pattern-triage` excluded nothing. It rides on the guidance comment only — it never
   triggers a post on its own (see the post trigger above).
-- Include the Review Guidance team sections only when there is at least one
+- Include the Guidance for reviewers team sections only when there is at least one
   moderate- or high-risk file, include the "Common patterns" section only when
   Step 3 found patterns, and include the "Notified" section only when
   `notified.json` `matched` is `true`. The "Excluded from review" block appears
@@ -1194,7 +1244,11 @@ Do two things in one pass over the files in the list:
 
    Whatever the procedure, do **not** flag anything in the "what CI already
    catches" list below, and do not comment on Trivial or Low files unless they
-   have a real defect.
+   have a real defect. Do not propose aligning new code to a neighboring
+   pattern when that pattern contradicts the language's or standard library's
+   documented guidance for the construct (e.g. Go's rule against storing a
+   Context in a struct): consistency alone never outranks documented language
+   guidance.
 
    **Pre-existing bugs on touched lines.** A real bug is fair to flag even if it
    predates this change — but **only when it sits on a line this PR touches** (added or
@@ -1275,7 +1329,11 @@ and high-signal; use a blocking label only for a defect CI would not catch.
 sentence naming the concrete inputs, state, or conditions and the wrong outcome they
 produce. The claim-validator attacks exactly this scenario, so make it specific
 enough to check; a finding whose scenario you cannot state concretely is not ready
-to report.
+to report. Include `suggestion` only on `issue`, `todo`, and `suggestion` findings:
+those labels propose a fix. Never attach one to a `question`, `thought`, `note`, or
+`nitpick` finding; those raise a point, and a fix sketch under them adds length
+without information (the renderer drops the sketch form there; a committable
+drop-in fence still posts under any label).
 
 One complete example finding, in exactly this shape. These key names are the
 contract: do not substitute the ReportFindings-style keys (`summary`, `severity`,
@@ -1731,6 +1789,25 @@ return `plausible` so it posts as a question rather than a re-block. (A producti
 false block survived two checks that each traced one parent short of where the disputed
 element actually lived; the depth requirement is the lesson.)
 
+**Consistency claims must survive language guidance.** When a claim's proposed fix is
+"match the existing pattern in this file or package" (store the field the siblings
+store, mirror the neighboring signature), check whether that existing pattern itself
+contradicts the language's or standard library's documented guidance for the construct
+(e.g. Go's `context` package: do not store Contexts inside a struct type; pass ctx
+explicitly as a parameter). When it does, **refute the claim**: consistency alone never
+outranks documented language guidance, and new code that follows the guidance is not a
+defect. This refutation carries the same citation duty as every other definitive
+state: the `reason` must name the source and quote the specific guidance sentence
+(e.g. the `context` package doc line), exactly as a skill refutation quotes its rule
+text. Guidance you cannot quote is taste; when you cannot quote it, return
+`plausible` instead. Invert the claim (flag the existing pattern instead of the new code) only when
+the inversion meets the same evidence bar as any other claim; the pattern usually
+predates the diff, so the pre-existing-mechanism rule above applies and caps an
+unamplified inversion at `plausible`. (Measured: a reviewer proposed moving a new
+method's ctx parameter onto the struct because every sibling method used a stored ctx
+field; the author correctly cited the Go context guidance, and the claim should never
+have posted.)
+
 Do not invent new claims — validate only the ones given. Never "upgrade" a non-blocking
 claim to blocking or otherwise raise its severity; you may only confirm, downgrade to
 plausible, or (when you can cite the disproof) refute.
@@ -1844,7 +1921,9 @@ Return ONLY this JSON object (no prose, no code fence):
 Use a blocking label only for a whole-change defect that genuinely must be fixed before
 approval. `failure_scenario` is required on every finding: the concrete inputs/state
 and the wrong outcome they produce (the claim-validator attacks exactly this
-scenario). If the change hangs together, return {"findings": []}.
+scenario). Include `suggestion` only on `issue`, `todo`, and `suggestion` findings,
+never on `question`/`thought`/`note`/`nitpick` (the renderer drops the sketch form there).
+If the change hangs together, return {"findings": []}.
 
 ## agent: `completeness`
 ---
@@ -1915,6 +1994,8 @@ Return ONLY this JSON object (no prose, no code fence):
 Use a blocking label only when the change genuinely fails to deliver required, stated work.
 `failure_scenario` is required on every finding: the concrete gap and what a user or
 caller hits because of it (the claim-validator attacks exactly this scenario).
+Include `suggestion` only on `issue`, `todo`, and `suggestion` findings, never on
+`question`/`thought`/`note`/`nitpick` (the renderer drops the sketch form there).
 If the change matches its intent, return {"findings": []}.
 
 ## agent: `test-adequacy`
@@ -1975,7 +2056,9 @@ Return ONLY this JSON object (no prose, no code fence):
 }
 `failure_scenario` is required on every finding: name the untested path and the
 concrete regression that would slip through it unnoticed (the claim-validator
-attacks exactly this scenario).
+attacks exactly this scenario). Include `suggestion` only on `issue`, `todo`, and
+`suggestion` findings, never on `question`/`thought`/`note`/`nitpick` (the renderer
+drops it there).
 If the changed behavior is adequately tested, return {"findings": []}.
 
 ## agent: `first-principles`
@@ -2049,6 +2132,8 @@ Return ONLY this JSON object (no prose, no code fence):
 }
 Never emit a blocking label. `failure_scenario` is required on every finding: since
 you are advisory, state the concrete cost of leaving the observation unaddressed.
+Include `suggestion` only on `suggestion`-labeled findings, never on
+`question`/`thought`/`note` (the renderer drops the sketch form there).
 If you have nothing worth raising, return {"findings": []}.
 
 ## agent: `conventions`
@@ -2114,7 +2199,9 @@ Return ONLY this JSON object (no prose, no code fence):
 }
 Never emit a blocking label. `failure_scenario` is required on every finding: the
 concrete cost of the deviation if it stays (a convention with no statable cost is
-not worth flagging). If nothing deviates from repo conventions, return
+not worth flagging). Include `suggestion` only on `suggestion`-labeled findings,
+never on `question`/`nitpick`/`note` (the renderer drops the sketch form there).
+If nothing deviates from repo conventions, return
 {"findings": []}.
 
 ## agent: `documentation`

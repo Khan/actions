@@ -29,6 +29,9 @@
  *                       and the opener's html_url
  *   human-threads.json  the `{path, line}` of every unresolved thread someone
  *                       ELSE opened, which the dispatcher defers to
+ *   adjudicated-threads.json  the bot's threads a HUMAN resolved, which the
+ *                       dispatcher's adjudicated suppression reads so a
+ *                       settled defect is not re-derived under fresh wording
  *   disciplines.md      the marker-delimited shared-disciplines section, cut
  *                       out of the rendered prompt (slice 3, #247)
  *   routing.json        the router's deterministic first pass (a non-empty
@@ -87,7 +90,7 @@ import type {StagedThread} from "./rereview";
 import {runRereviewPlanCli} from "./rereview-mode";
 import {runCli as runRouterCli} from "./router";
 import {
-    collectUnresolvedThreads,
+    collectReviewThreads,
     isReviewBotAuthor,
     withGraphqlRateLimitRetry,
     type GhGraphql,
@@ -114,6 +117,7 @@ const NEW_SCOPE_OUT = `${REVIEW_DIR}/new-scope.json`;
 const PRIOR_REVIEWS_OUT = `${REVIEW_DIR}/prior-reviews.json`;
 const THREADS_OUT = `${REVIEW_DIR}/threads.json`;
 const HUMAN_THREADS_OUT = `${REVIEW_DIR}/human-threads.json`;
+const ADJUDICATED_THREADS_OUT = `${REVIEW_DIR}/adjudicated-threads.json`;
 const ROUTING_OUT = `${REVIEW_DIR}/routing.json`;
 const PROVENANCE_OUT = `${REVIEW_DIR}/provenance.json`;
 const STRIPPED_DIFF_OUT = `${REVIEW_DIR}/full-stripped.diff`;
@@ -541,12 +545,22 @@ export const runStagePrCli = async (
     // duplicating one. Hence one fetch, one partition: a thread is in exactly
     // one file, and neither list is assembled by hand.
     const [owner = "", repoName = ""] = repo.split("/");
-    const allThreads = await collectUnresolvedThreads(
+    const fetchedThreads = await collectReviewThreads(
         ghGraphql,
         owner,
         repoName,
         prNumber,
     );
+    // The unresolved partition, in the exact `StagedThread` shape every
+    // downstream reader of threads.json / human-threads.json already parses:
+    // the resolution fields are stripped, not carried, because both files
+    // serialize these objects verbatim.
+    const allThreads = fetchedThreads
+        .filter((thread) => !thread.resolved)
+        .map(
+            ({resolved: _resolved, resolvedBy: _resolvedBy, ...thread}) =>
+                thread,
+        );
     // The OPENER decides which file a thread lands in (its opening comment is
     // the finding), so a thread with no opener at all is staged in NEITHER. A
     // real review thread always has one and a partial GraphQL response throws
@@ -578,16 +592,42 @@ export const runStagePrCli = async (
         JSON.stringify(
             botThreads.map((thread) => ({
                 ...thread,
-                // Unresolved by construction (the fetch drops resolved
-                // threads), but written anyway: dedup.ts requires an explicit
-                // `resolved: false` and fails closed without one. That guard
-                // stays deliberately, rather than trusting this producer.
+                // Unresolved by construction (the partition above drops
+                // resolved threads), but written anyway: dedup.ts requires an
+                // explicit `resolved: false` and fails closed without one.
+                // That guard stays deliberately, rather than trusting this
+                // producer.
                 resolved: false,
             })),
             null,
             2,
         ),
     );
+    // 5b'. The adjudicated corpus: bot-opened threads a HUMAN resolved. A
+    // human resolving a bot thread is the strongest "this is settled" signal
+    // the PR surface carries, and before this file existed it was also an
+    // anti-signal: resolution removed the thread from threads.json, so the
+    // suppression corpus, so the next run was free to re-derive the same
+    // defect with fresh wording as a brand-new thread (webapp#41290: six
+    // resolved variants of one concern at moderation_helpers.go:135, then a
+    // seventh posted anyway). dedup.ts's adjudicated suppression reads this
+    // file; only non-blocking candidates are suppressed by it, so a genuine
+    // regression re-flag at blocking severity always posts.
+    //
+    // The resolver identity decides membership, not resolution alone: a
+    // thread the BOT resolved (the reconciler, after a code change addressed
+    // it) is a fixed defect, and a fixed defect that reappears is a fresh
+    // finding that must post. `resolvedBy` is "" for an unattributable
+    // resolver (a deleted account), which fails toward posting a duplicate,
+    // never toward suppression on unverifiable authority.
+    const adjudicatedThreads = fetchedThreads.filter(
+        (thread) =>
+            thread.resolved &&
+            thread.resolvedBy !== "" &&
+            !isReviewBotAuthor(thread.resolvedBy) &&
+            openedByBot(thread),
+    );
+    write(ADJUDICATED_THREADS_OUT, JSON.stringify(adjudicatedThreads, null, 2));
     // The reconciler echoes these into `skipLines`, so a thread with no
     // RIGHT-side line (outdated, or file-level) has nothing to contribute and
     // is dropped rather than staged as a line the submission cannot match.

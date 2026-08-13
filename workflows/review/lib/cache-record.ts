@@ -273,6 +273,58 @@ export const runCacheRecordCli = (
             "the dispatch-conformance gate blocked this run: nothing posted, the prior record stands",
         );
     }
+    if (plan.event === "HOLD_FOR_HUMAN") {
+        // A hold reviewed nothing (its core lenses produced no output), so
+        // the fingerprints/verdict of the prior record stand untouched and
+        // the next run reviews in full. ONE field does change: posting the
+        // hold comment made the engine's hide-older-comments collapse the
+        // standing risks/patterns guidance comment, and the next approving
+        // run would read the unchanged `risksPatternsKey` as "guidance
+        // already posted" and never restore it. Dropping the key here makes
+        // that run repost the guidance. Everything else carries verbatim.
+        const {items: holdItems, readable: holdReadable} = readQueue(
+            fs,
+            queuePath,
+        );
+        if (!holdReadable) {
+            // Mirror the review-event path's corroboration refusal: an
+            // unreadable queue means nothing proves the hold comment
+            // posted, and a silent skip here would leave a stale
+            // risksPatternsKey failure invisible.
+            return refuse(
+                "hold plan but no readable safe-output queue, so nothing corroborates the hold comment: the prior record stands",
+            );
+        }
+        const holdCommentQueued = holdItems.some(
+            (item) => item["type"] === "add_comment",
+        );
+        if (!holdCommentQueued) {
+            return skip(
+                "hold plan with no queued hold comment: the prior record stands untouched",
+            );
+        }
+        const holdPr = readJson(fs, `${REVIEW_DIR}/pr-context.json`) as
+            | {number?: unknown}
+            | undefined;
+        if (typeof holdPr?.number !== "number") {
+            return skip("hold plan and no pr-context: nothing to update");
+        }
+        const holdRecordPath = `${CACHE_MEMORY_DIR}/pr-${holdPr.number}.json`;
+        const holdPrior = readJson(fs, holdRecordPath);
+        if (!isRecord(holdPrior) || !("risksPatternsKey" in holdPrior)) {
+            return skip(
+                "hold plan: no prior record or no risksPatternsKey to drop; the prior record stands",
+            );
+        }
+        const {risksPatternsKey: _, ...holdKept} = holdPrior;
+        fs.mkdirSync(CACHE_MEMORY_DIR, {recursive: true});
+        fs.writeFileSync(holdRecordPath, JSON.stringify(holdKept, null, 2));
+        return {
+            written: true,
+            reason: `hold: dropped risksPatternsKey from ${holdRecordPath} (the hold comment collapsed the standing guidance comment); fingerprints untouched`,
+            record: holdKept,
+        };
+    }
     if (plan.event !== "APPROVE" && plan.event !== "REQUEST_CHANGES") {
         return refuse("the staged plan carries no submittable event");
     }

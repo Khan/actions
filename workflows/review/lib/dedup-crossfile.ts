@@ -58,11 +58,27 @@
 
 import {
     describesSameDefect,
-    suppressOpenThreadDuplicates,
-    type OpenThread,
+    type stagedThreadShapeFailure,
     type ThreadSuppression,
 } from "./dedup";
+import {suppressTrackedDuplicates} from "./dedup-adjudicated";
 import {isRecord, type Claim} from "./dispatch-contracts";
+
+/**
+ * The occurrence list a merge appends to its survivor's discussion. One
+ * renderer for the merge site and {@link reapplyCrossFileOccurrences}, so
+ * the re-apply check can never miss the line over a formatting drift.
+ */
+const alsoAppliesLine = (
+    occurrences: readonly {path?: string; line?: number}[],
+): string =>
+    `\n\nAlso applies to ${occurrences
+        .map((occurrence) =>
+            occurrence.line === undefined
+                ? `\`${occurrence.path}\``
+                : `\`${occurrence.path}\` (line ${occurrence.line})`,
+        )
+        .join(", ")}.`;
 
 /** One cross-file merge, for the run artifact (`crossFileMerges`). */
 export type CrossFileMerge = {
@@ -201,16 +217,11 @@ export const mergeCrossFileDuplicates = (
         for (const index of merged) {
             drop.add(index);
         }
-        const occurrence = (claim: Claim): string =>
-            claim.line === undefined
-                ? `\`${claim.path}\``
-                : `\`${claim.path}\` (line ${claim.line})`;
-        const alsoApplies = `\n\nAlso applies to ${merged
-            .map((index) => occurrence(claims[index]))
-            .join(", ")}.`;
         replacement.set(survivorIndex, {
             ...survivor,
-            discussion: `${survivor.discussion}${alsoApplies}`,
+            discussion: `${survivor.discussion}${alsoAppliesLine(
+                merged.map((index) => claims[index]),
+            )}`,
         });
         merges.push({
             survivor: survivor.id,
@@ -240,22 +251,32 @@ export const mergeCrossFileDuplicates = (
 /**
  * The composed suppression-then-merge step dispatch calls, in this order
  * because the ordering is load-bearing (see {@link mergeCrossFileDuplicates}):
- * open-thread suppression first, so a suppressed file's copy exits through
- * its thread and the other files' occurrences still post; the cross-file
- * merge second, over the survivors. `stagedFiles` is the raw parsed
- * files.json (diff order); a missing or malformed staging degrades to claim
- * order, never to a skipped merge.
+ * both thread-suppression passes first ({@link suppressTrackedDuplicates}:
+ * the open corpus, then the adjudicated one), so a suppressed file's copy
+ * exits through its thread and the other files' occurrences still post; the
+ * cross-file merge second, over the survivors. `stagedOpen`,
+ * `stagedAdjudicated`, and `stagedFiles` are the raw staged values; a
+ * missing or malformed files.json degrades to claim order, never to a
+ * skipped merge.
  */
 export const suppressThenMergeCrossFile = (
     claims: Claim[],
-    openThreads: readonly OpenThread[],
+    stagedOpen: unknown,
+    stagedAdjudicated: unknown,
+    resolvedIds: ReadonlySet<string>,
     stagedFiles: unknown,
 ): {
     claims: Claim[];
     suppressed: ThreadSuppression[];
+    shapeFailure: ReturnType<typeof stagedThreadShapeFailure>;
     crossFileMerges: CrossFileMerge[];
 } => {
-    const suppression = suppressOpenThreadDuplicates(claims, openThreads);
+    const suppression = suppressTrackedDuplicates(
+        claims,
+        stagedOpen,
+        stagedAdjudicated,
+        resolvedIds,
+    );
     const pathOrder = (Array.isArray(stagedFiles) ? stagedFiles : [])
         .map((entry) => (isRecord(entry) ? entry["path"] : undefined))
         .filter((path): path is string => typeof path === "string");
@@ -263,6 +284,33 @@ export const suppressThenMergeCrossFile = (
     return {
         claims: crossFile.claims,
         suppressed: suppression.suppressed,
+        shapeFailure: suppression.shapeFailure,
         crossFileMerges: crossFile.merges,
     };
+};
+
+/**
+ * Re-append each merged survivor's occurrence list after validation. A
+ * validator `corrected.discussion` replaces the survivor's free text
+ * wholesale (applyVerifications), which silently erased the "Also applies
+ * to" line and with it every merged-away file's finding from the posted
+ * output. The merge record carries the occurrences, so the line is re-built
+ * from data rather than preserved by hope; a survivor whose discussion
+ * still carries the exact line (validator confirmed without correcting) is
+ * left alone, and a survivor validation dropped stays dropped (the
+ * documented group-drop failure direction).
+ */
+export const reapplyCrossFileOccurrences = (
+    claims: Claim[],
+    merges: readonly CrossFileMerge[],
+): Claim[] => {
+    const lineFor = new Map<string, string>(
+        merges.map((merge) => [merge.survivor, alsoAppliesLine(merge.merged)]),
+    );
+    return claims.map((claim) => {
+        const line = lineFor.get(claim.id);
+        return line === undefined || claim.discussion.includes(line)
+            ? claim
+            : {...claim, discussion: `${claim.discussion}${line}`};
+    });
 };

@@ -7,7 +7,7 @@
  * parses to assign *reviewer* ownership. This module ports the NOTIFIED half:
  * it parses the file, matches its rules against the PR under review, and
  * renders the matched notifications as a Markdown block the orchestrator drops
- * into the Review Guidance comment (review.md Step 7). No GitHub calls happen
+ * into the Guidance for reviewers comment (review.md Step 7). No GitHub calls happen
  * here; it is a pure function of the NOTIFIED text plus the staged diff, so the
  * notification set is deterministic and unit-testable.
  *
@@ -57,7 +57,7 @@
  * allow-listed by default (`mentions.allow-team-members`), and the workflow can
  * widen that with `mentions.allowed` / `mentions.allowed-teams`. Re-posting the
  * guidance comment re-pings, and review.md gates re-posts on a substance
- * signature (Step 7) — but that gate is the *combined* Review Guidance key
+ * signature (Step 7) — but that gate is the *combined* Guidance for reviewers key
  * (risk files, patterns, exclusions, and this notification set, via
  * {@link NotifiedResult.signature}), so a change to any one component re-posts
  * and re-pings the watchers, not the notification set alone.
@@ -622,7 +622,7 @@ export const notifiedSignature = (notifications: Notification[]): string =>
         .join("|");
 
 /**
- * Render the `### Notified` block for the Review Guidance comment, or `""`
+ * Render the `### Notified` block for the Guidance for reviewers comment, or `""`
  * when nothing matched (review.md then adds no section). The mentions are raw
  * `@` tokens so GitHub pings them (see the module doc's delivery note).
  */

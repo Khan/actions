@@ -117,6 +117,7 @@ query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
                 nodes {
                     id
                     isResolved
+                    resolvedBy { login }
                     path
                     line
                     comments(first: 100) {
@@ -227,23 +228,45 @@ const threadsConnectionOf = (
 };
 
 /**
- * Every UNRESOLVED review thread on the PR, in API order, whoever opened it.
- * Callers partition by opener ({@link isReviewBotAuthor}); nothing here is
- * filtered by author, so the reviewer can stage the human threads it defers to
- * from the same fetch.
+ * A review thread as fetched, resolution state included. The `StagedThread`
+ * fields carry the shape every downstream reader already consumes;
+ * `resolved`/`resolvedBy` exist so ONE fetch can serve both the unresolved
+ * partition (threads.json / human-threads.json) and the adjudicated corpus
+ * (adjudicated-threads.json: bot threads a HUMAN resolved, which suppress
+ * re-derivation of the defect they adjudicated — see dedup.ts's
+ * `adjudicatedThreadsFromStaged`).
+ */
+export type FetchedThread = StagedThread & {
+    resolved: boolean;
+    /**
+     * Who resolved the thread, suffix-stripped like every login comparison in
+     * this module (`resolvedBy` arrives over GraphQL, so the bot appears as
+     * bare `github-actions`; see {@link sameLogin}). Empty when the thread is
+     * unresolved or the resolver is unattributable (a deleted account), and
+     * an empty resolver never reads as human adjudication downstream.
+     */
+    resolvedBy: string;
+};
+
+/**
+ * Every review thread on the PR, in API order, whoever opened it and whatever
+ * its resolution state. Callers partition by opener
+ * ({@link isReviewBotAuthor}) and by `resolved`; nothing here is filtered, so
+ * the reviewer can stage the human threads it defers to, its own open
+ * threads, and the human-adjudicated corpus from the same fetch.
  *
  * Fails closed on both shapes a failed query takes (an `errors` array, and a
  * body with no `reviewThreads` connection), because neither means "this PR has
  * no threads", and reading them that way is the one mistake this module cannot
  * afford (see {@link assertNoGraphqlErrors}).
  */
-export const collectUnresolvedThreads = async (
+export const collectReviewThreads = async (
     graphql: GhGraphql,
     owner: string,
     repo: string,
     number: number,
-): Promise<StagedThread[]> => {
-    const out: StagedThread[] = [];
+): Promise<FetchedThread[]> => {
+    const out: FetchedThread[] = [];
     let cursor: string | null = null;
 
     for (;;) {
@@ -264,7 +287,7 @@ export const collectUnresolvedThreads = async (
 
         const nodes = Array.isArray(conn["nodes"]) ? conn["nodes"] : [];
         for (const node of nodes) {
-            if (!isRecord(node) || node["isResolved"] === true) {
+            if (!isRecord(node)) {
                 continue;
             }
             const commentsConn = isRecord(node["comments"])
@@ -286,12 +309,21 @@ export const collectUnresolvedThreads = async (
             const firstUrl = isRecord(rawComments[0])
                 ? str(rawComments[0]["url"])
                 : "";
+            // `resolved` is strict on `=== true`: an absent or malformed
+            // `isResolved` must not manufacture an adjudicated thread, and
+            // reading it as unresolved only risks a duplicate comment.
+            const resolved = node["isResolved"] === true;
             out.push({
                 thread_id: str(node["id"]),
                 path: str(node["path"]),
                 line: typeof node["line"] === "number" ? node["line"] : null,
                 ...(firstUrl === "" ? {} : {url: firstUrl}),
                 comments,
+                resolved,
+                resolvedBy:
+                    resolved && isRecord(node["resolvedBy"])
+                        ? str(node["resolvedBy"]["login"])
+                        : "",
             });
         }
 
@@ -317,3 +349,25 @@ export const collectUnresolvedThreads = async (
         cursor = next;
     }
 };
+
+/**
+ * Every UNRESOLVED review thread on the PR, in the exact `StagedThread` shape
+ * the pre-`resolvedBy` collector returned. Kept as the narrow surface for the
+ * consumers that only ever want open threads (autofix's staging), so adding
+ * the adjudicated corpus could not silently change what they stage: the
+ * resolution fields are STRIPPED here, not merely defaulted, because both
+ * stagings serialize these objects verbatim and an extra field is a shape
+ * change to every exact-match reader downstream.
+ */
+export const collectUnresolvedThreads = async (
+    graphql: GhGraphql,
+    owner: string,
+    repo: string,
+    number: number,
+): Promise<StagedThread[]> =>
+    (await collectReviewThreads(graphql, owner, repo, number))
+        .filter((thread) => !thread.resolved)
+        .map(
+            ({resolved: _resolved, resolvedBy: _resolvedBy, ...thread}) =>
+                thread,
+        );
