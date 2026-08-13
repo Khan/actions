@@ -1,26 +1,31 @@
 /**
- * The visible attribution footer: release version, finding-schema version,
+ * The version/config footer: release version, finding-schema version,
  * executed re-review depth, the repo's re-review mode line, and the ROUTING
- * enable list, rendered as one `<sub>` line appended to every submitted
- * review body and to the risks/patterns guidance comment.
+ * enable list, rendered as one `<sub>` line inside the shared collapsed
+ * `<details>` block (attribution.ts) appended to every submitted review
+ * body and to the risks/patterns guidance comment. Collapsed by default:
+ * the footer is run metadata, not review content, so it renders as one
+ * small summary chip until expanded.
  *
- * Why visible and why code-rendered: the original attribution surface was a
- * hidden HTML marker (`<!-- pr-reviewer:version ... -->`) the orchestrator
- * was prompted to compose, but gh-aw's safe-output ingest sanitizer deletes
- * ALL XML/HTML comments (`removeXmlComments` in `sanitize_content_core.cjs`;
- * the same strip that already killed the fingerprint stamp, see
- * rereview-mode.ts), so the marker never reached a single posted comment:
- * verified on all 9 guidance comments and 13 review bodies posted to
- * Khan/webapp on 2026-08-11/12. `<sub>` is on the sanitizer's allowed-tag
- * list (GFM-safe tags, sanitize_content_core.cjs v0.83.4), so this footer
- * survives ingest byte-for-byte; rendering it in code (from package.json and
- * the staged run files, never from the model's memory) keeps the attribution
- * trustworthy for rollback decisions.
+ * Why posted-and-visible-on-expand, and why code-rendered: the original
+ * attribution surface was a hidden HTML marker
+ * (`<!-- pr-reviewer:version ... -->`) the orchestrator was prompted to
+ * compose, but gh-aw's safe-output ingest sanitizer deletes ALL XML/HTML
+ * comments (`removeXmlComments` in `sanitize_content_core.cjs`; the same
+ * strip that already killed the fingerprint stamp, see rereview-mode.ts),
+ * so the marker never reached a single posted comment: verified on all 9
+ * guidance comments and 13 review bodies posted to Khan/webapp on
+ * 2026-08-11/12. `sub`, `details`, and `summary` are all on the sanitizer's
+ * allowed-tag list (GFM-safe tags, sanitize_content_core.cjs v0.83.4), so
+ * this footer survives ingest byte-for-byte; rendering it in code (from
+ * package.json and the staged run files, never from the model's memory)
+ * keeps the attribution trustworthy for rollback decisions.
  *
  * The hidden version marker instruction is retired from review.md Step 7;
  * the fingerprint stamp emission stays (rereview-mode.ts explains why).
  */
 
+import {renderCollapsedFooter} from "./attribution";
 import {FINDING_SCHEMA_VERSION} from "./finding-schema";
 
 const REVIEW_DIR = "/tmp/gh-aw/review";
@@ -51,10 +56,10 @@ export type VersionFooterInputs = {
 };
 
 /**
- * Render the footer line. Pure; every segment that cannot be stated is
- * omitted rather than guessed, so a degraded staging yields a shorter
- * footer, never a wrong one. Contains no HTML comment by construction (the
- * sanitizer would delete one).
+ * Render the collapsed footer block. Pure; every segment that cannot be
+ * stated is omitted rather than guessed, so a degraded staging yields a
+ * shorter footer, never a wrong one. Contains no HTML comment by
+ * construction (the sanitizer would delete one).
  */
 export const renderVersionFooter = (inputs: VersionFooterInputs): string => {
     const segments: string[] = [];
@@ -75,7 +80,7 @@ export const renderVersionFooter = (inputs: VersionFooterInputs): string => {
     if (inputs.enabledReviewers.length > 0) {
         segments.push(`enable ${inputs.enabledReviewers.join(",")}`);
     }
-    return `<sub>${segments.join(" | ")}</sub>`;
+    return renderCollapsedFooter(segments.join(" | "));
 };
 
 const readJson = (fs: VersionFooterFs, path: string): unknown => {
@@ -91,7 +96,7 @@ const readJson = (fs: VersionFooterFs, path: string): unknown => {
 
 /**
  * Compose the footer from the staged run files and stage it at
- * {@link FOOTER_OUT} (review.md Step 7 pastes the staged line verbatim into
+ * {@link FOOTER_OUT} (review.md Step 7 pastes the staged block verbatim into
  * the guidance comment; the submission CLI appends the returned string to
  * the review body). Reads:
  *

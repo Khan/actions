@@ -746,12 +746,13 @@ describe("produceLive cross-source dedup", () => {
                 ) as string,
             ),
         ).toHaveLength(2);
-        // One finding survives, carrying the attribution note, and the
-        // validator is dispatched over the merged set only.
+        // One finding survives (the merge itself is recorded in the dedup
+        // report; the structured `also_flagged_by` record renders only at
+        // production's posting surface), and the validator is dispatched
+        // over the merged set only.
         expect(result.findings).toHaveLength(1);
-        expect(result.findings[0].finding.model_authored_prose).toContain(
-            "Also flagged by:\n- skill: Declaration doc comment doesn't begin " +
-                "with the symbol name.",
+        expect(result.findings[0].finding.model_authored_prose).not.toContain(
+            "Also flagged by",
         );
         expect(
             JSON.parse(

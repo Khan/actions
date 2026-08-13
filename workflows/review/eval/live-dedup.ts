@@ -123,14 +123,17 @@ export const dedupeLiveFindings = async (
             ) {
                 return live;
             }
-            // The survivor's claim carries the "also flagged by" note (the lib
-            // projection puts the prose in `discussion`) and may have adopted a
-            // merged copy's suggestion; both must reach the rendered comment.
+            // The survivor's claim may have adopted a merged copy's
+            // suggestion, which must reach the rendered comment. The "also
+            // flagged by" record is structured (`also_flagged_by`) and is
+            // rendered by production's posting surface (submission.ts's
+            // collapsed attribution footer), which the eval's `renderComment`
+            // does not emulate; the merge itself is measured through
+            // `merges`, so the record adds no report column here.
             return {
                 ...live,
                 finding: {
                     ...live.finding,
-                    model_authored_prose: survivor.discussion,
                     ...(survivor.suggestion !== undefined
                         ? {suggested_patch: survivor.suggestion}
                         : {}),

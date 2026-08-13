@@ -165,22 +165,31 @@ describe("dedupeClaims with model-proposed clusters", () => {
         );
         expect(claims.map((c) => c.id)).toEqual(["correctness-reviewer-3"]);
         // Anchors differ inside the cluster (:8 and :9), which tier 2 does not
-        // care about and the note does report. Each absorbed copy also brings
+        // care about and the record does report. Each absorbed copy also brings
         // its own subject, because tier 2 merged claims whose words the
         // survivor's prose does NOT restate: `conventions` asked for the
         // symbol-name prefix, not for the wrong number, and one rewritten
         // comment discharges both asks only if the author is told about both.
-        expect(claims[0].discussion).toContain(
-            [
-                "Also flagged by:",
-                "- skill-auditor (out-of-lane) (at line 9): The comment on line 8 " +
+        expect(claims[0].also_flagged_by).toEqual([
+            {
+                source: "skill-auditor (out-of-lane)",
+                line: 9,
+                subject:
+                    "The comment on line 8 " +
                     'says "Keeps at most 10 samples per key." but `const maxSamples ' +
                     "= 25`, so the doc and the enforced cap disagree.",
-                "- conventions: Declaration doc comment doesn't begin with the " +
+            },
+            {
+                source: "conventions",
+                subject:
+                    "Declaration doc comment doesn't begin with the " +
                     "symbol name.",
-                "- documentation: Comment states the wrong cap (10 vs 25).",
-            ].join("\n"),
-        );
+            },
+            {
+                source: "documentation",
+                subject: "Comment states the wrong cap (10 vs 25).",
+            },
+        ]);
         expect(merges).toEqual([
             {
                 survivor: "correctness-reviewer-3",
@@ -837,10 +846,13 @@ describe("dedupeClaims with model-proposed clusters", () => {
         );
         expect(claims.map((c) => c.id)).toEqual(["test-adequacy-1"]);
         expect(claims[0].label).toBe("todo (blocking)");
-        expect(claims[0].discussion).toContain(
-            "Also flagged by:\n- first-principles (at line 58): " +
-                "The suite never reaches the delete.",
-        );
+        expect(claims[0].also_flagged_by).toEqual([
+            {
+                source: "first-principles",
+                line: 58,
+                subject: "The suite never reaches the delete.",
+            },
+        ]);
         expect(merges[0].via).toBe("clusterer");
         expect(merges[0].line).toBe(15);
     });
@@ -914,15 +926,16 @@ describe("dedupeClaims with model-proposed clusters", () => {
                 via: "clusterer",
             },
         ]);
-        // The note quotes only the copy tier 2 brought: the survivor's own
+        // The record quotes only the copy tier 2 brought: the survivor's own
         // prose does not restate it, while the tier-1 copy's clearing of the
         // floor is the evidence that it does.
-        expect(claims[0].discussion).toContain(
-            [
-                "Also flagged by:",
-                "- skill-auditor (out-of-lane) (at line 58)",
-                "- first-principles (at line 58): The suite never reaches the delete.",
-            ].join("\n"),
-        );
+        expect(claims[0].also_flagged_by).toEqual([
+            {source: "skill-auditor (out-of-lane)", line: 58},
+            {
+                source: "first-principles",
+                line: 58,
+                subject: "The suite never reaches the delete.",
+            },
+        ]);
     });
 });

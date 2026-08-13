@@ -1,5 +1,6 @@
 import {describe, it, expect} from "vitest";
 
+import {renderCollapsedFooter} from "./attribution";
 import {FINDING_SCHEMA_VERSION} from "./finding-schema";
 import {
     FOOTER_OUT,
@@ -9,11 +10,14 @@ import {
 } from "./version-footer";
 
 /**
- * The visible attribution footer: the sanitizer-surviving replacement for
+ * The version/config footer: the sanitizer-surviving replacement for
  * the hidden `pr-reviewer:version` HTML marker, which gh-aw's ingest
- * sanitizer stripped from every posted body. Rendering is pure and every
+ * sanitizer stripped from every posted body; wrapped in the shared
+ * collapsed `<details>` block (attribution.ts). Rendering is pure and every
  * unstateable segment is omitted, never guessed.
  */
+
+const wrapped = (content: string): string => renderCollapsedFooter(content);
 
 const makeFakeFs = (
     files: Record<string, string> = {},
@@ -38,7 +42,7 @@ const REVIEW = "/tmp/gh-aw/review";
 const LIB = "/lib";
 
 describe("renderVersionFooter", () => {
-    it("renders every segment in order inside one <sub> line", () => {
+    it("renders every segment in order inside one collapsed <sub> line", () => {
         expect(
             renderVersionFooter({
                 version: "1.13.0",
@@ -49,7 +53,9 @@ describe("renderVersionFooter", () => {
                 enabledReviewers: ["holistic", "completeness"],
             }),
         ).toBe(
-            "<sub>review-v1.13.0 | schema 2 | depth scoped | re-review scoped blocking-only | enable holistic,completeness</sub>",
+            wrapped(
+                "review-v1.13.0 | schema 2 | depth scoped | re-review scoped blocking-only | enable holistic,completeness",
+            ),
         );
     });
 
@@ -64,7 +70,7 @@ describe("renderVersionFooter", () => {
                 enabledReviewers: [],
             }),
         ).toBe(
-            "<sub>review-v1.13.0 | schema 2 | depth full | re-review full</sub>",
+            wrapped("review-v1.13.0 | schema 2 | depth full | re-review full"),
         );
     });
 
@@ -78,7 +84,7 @@ describe("renderVersionFooter", () => {
                 blockingOnly: true,
                 enabledReviewers: [],
             }),
-        ).toBe("<sub>schema 2</sub>");
+        ).toBe(wrapped("schema 2"));
     });
 
     it("never emits an HTML comment (the sanitizer would delete it)", () => {
@@ -91,8 +97,8 @@ describe("renderVersionFooter", () => {
             enabledReviewers: ["holistic"],
         });
         expect(footer).not.toContain("<!--");
-        expect(footer.startsWith("<sub>")).toBe(true);
-        expect(footer.endsWith("</sub>")).toBe(true);
+        expect(footer.startsWith("<details>")).toBe(true);
+        expect(footer.endsWith("</details>")).toBe(true);
     });
 });
 
@@ -112,7 +118,9 @@ describe("runVersionFooterCli", () => {
         const fs = makeFakeFs(fullStaging());
         const footer = runVersionFooterCli(fs, LIB);
         expect(footer).toBe(
-            `<sub>review-v1.13.0 | schema ${FINDING_SCHEMA_VERSION} | depth scoped | re-review scoped blocking-only | enable holistic,documentation</sub>`,
+            wrapped(
+                `review-v1.13.0 | schema ${FINDING_SCHEMA_VERSION} | depth scoped | re-review scoped blocking-only | enable holistic,documentation`,
+            ),
         );
         expect(fs.files[FOOTER_OUT]).toBe(footer);
     });
@@ -150,7 +158,7 @@ describe("runVersionFooterCli", () => {
             [`${REVIEW}/routing.json`]: "not json",
         });
         expect(runVersionFooterCli(fs, LIB)).toBe(
-            `<sub>schema ${FINDING_SCHEMA_VERSION}</sub>`,
+            wrapped(`schema ${FINDING_SCHEMA_VERSION}`),
         );
     });
 

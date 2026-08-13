@@ -102,7 +102,11 @@ describe("runSubmissionCli", () => {
             {
                 path: "a.ts",
                 line: 2,
-                body: "**issue (blocking):** The guard was removed.",
+                body:
+                    "**issue (blocking):** The guard was removed.\n\n" +
+                    "<details><summary><sub>review details</sub></summary>\n" +
+                    "<sub>found by correctness-reviewer</sub>\n" +
+                    "</details>",
             },
         ]);
         expect(plan.resolve).toEqual(["t1"]);
@@ -480,13 +484,16 @@ describe("the gate's plan-match rule (slice 4)", () => {
         );
         const plan = runSubmissionCli(fs);
         const lines = plan.body.split("\n");
-        // Stamp last (hidden), footer directly above it (visible).
+        // Stamp last (hidden), the collapsed footer block directly above it.
         expect(lines.at(-1)).toMatch(/^<!--.*-->$/);
-        expect(lines.at(-2)).toMatch(/^<sub>.*schema \d+.*<\/sub>$/);
-        expect(lines.at(-2)).not.toContain("<!--");
+        expect(lines.at(-2)).toBe("</details>");
+        expect(lines.at(-3)).toMatch(/^<sub>.*schema \d+.*<\/sub>$/);
+        expect(lines.at(-4)).toBe(
+            "<details><summary><sub>review details</sub></summary>",
+        );
         // The CLI also staged the footer file Step 7 pastes.
         expect(fs.files["/tmp/gh-aw/review/version-footer.txt"]).toBe(
-            lines.at(-2),
+            lines.slice(-4, -1).join("\n"),
         );
     });
 
