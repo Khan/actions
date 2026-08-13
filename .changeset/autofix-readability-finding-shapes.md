@@ -2,7 +2,7 @@
 "autofix": minor
 ---
 
-The fixer learns the documentation reviewer's two new readability finding
+The fixer learns the documentation reviewer's three new readability finding
 shapes (review's prose-readability release: metaphor in place of the
 mechanism, says-the-same-thing-twice, undefined coinage).
 
@@ -16,7 +16,12 @@ Three rule changes in `autofix.md` Step 4, no code changes:
   Without this, the fixer could only ever fix the anchored instance, the
   thread could never fully resolve, and the batching (which exists to spare
   the author five separate threads) would trade author attention for fixer
-  blindness.
+  blindness. The verbatim-rewrite rule below still governs each quoted
+  instance: the reviewer quotes it but need not rewrite it, so the fixer
+  touches it only when the fix needs none of its own words (deleting a
+  duplicated paragraph) or the thread body carries a rewrite for that
+  instance; a quoted metaphor or coinage without one is left unfixed and
+  reported.
 - **Readability rewrites are applied verbatim.** A readability finding carries
   its plain rewrite, and that rewrite passed claim validation, which checked
   it preserves the original sentence's meaning. The fixer's improvised

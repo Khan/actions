@@ -523,7 +523,13 @@ Edit the files directly in the workspace. Rules, all hard:
   enumerates up to three further instances, verbatim, in that thread's body, so
   each **quoted** instance is part of the finding wherever it lives; fix those
   too. An instance the body merely alludes to without quoting is not part of
-  the finding. Note any file either exception led you into in Step 7.
+  the finding. The verbatim-rewrite rule above still governs each quoted
+  instance: the reviewer is only required to quote it, not to rewrite it, so
+  fix a quoted instance when its fix needs no words of yours (a duplicated
+  paragraph: delete the quoted copy) or when the thread body carries a rewrite
+  for that instance; a quoted metaphor or coinage with no rewrite of its own is
+  left unfixed and reported in Step 7, exactly like a drifted quote. Note any
+  file either exception led you into in Step 7.
 - **Do not amend, rebase, or force-push.** You produce working-tree changes;
   the push is a safe output.
 - If a fix would require a design decision the reviewer did not make for you,
