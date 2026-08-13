@@ -78,6 +78,7 @@ import {
     type GateRetryAttempt,
     type MultiAbReport,
 } from "./live-ab-report";
+import {runCli} from "./exit-when-flushed";
 import {
     computeLiveMetrics,
     matchCase,
@@ -804,10 +805,20 @@ const main = async (): Promise<void> => {
     }
 };
 
+/**
+ * Exit explicitly, once stdout has drained.
+ *
+ * srt's initialize starts a proxy and nothing here shuts it down, so the event
+ * loop never empties and the process outlives its own output. That is why no
+ * A/B run has ever concluded green: runs 30872172052, 30872187609 and
+ * 30877187141 each scored all nine cases on both arms, wrote their report, and
+ * were then killed by the job timeout with the work already finished.
+ *
+ * The drain-then-exit mechanics live in exit-when-flushed.ts (shared with
+ * sandbox-smoke and harness-probe).
+ */
+
 // CLI entry point (mirrors live-runner.ts): run when executed, not imported.
 if (process.argv[1]?.endsWith("live-ab.ts")) {
-    main().catch((error) => {
-        console.error(error);
-        process.exit(1);
-    });
+    runCli(main);
 }

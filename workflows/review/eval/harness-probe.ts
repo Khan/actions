@@ -55,11 +55,19 @@ import {
 } from "../lib/dispatch-runner-pi";
 import {extractAgents} from "./agent-extract";
 import {loadLiveCorpus} from "./corpus/loader";
+import {runCli} from "./exit-when-flushed";
 import {matchCase} from "./live-match";
 import {produceLive, type LiveAgentRunner} from "./live-producer";
+import {runCase} from "./runner";
 
-/** The eval's measured tool surface; held fixed so the probe varies one thing. */
-const ALLOWED_TOOLS = ["Read", "Grep", "Glob"];
+/**
+ * The tool surface the lost-finding A/B ran on, held fixed so the probe
+ * varies one thing. Glob has since been removed from `createReviewTools`
+ * (its `find -path` emulation was wrong), so the closest reproduction the
+ * current lib can offer is Read/Grep; the probe's question (system prompt
+ * vs structured final) does not turn on Glob.
+ */
+const ALLOWED_TOOLS = ["Read", "Grep"];
 
 const CASE_ID = "incident-sql-missing-index";
 
@@ -133,30 +141,25 @@ const runConfig = async (
     const agents = extractAgents(readFileSync(reviewMdPath, "utf8"));
     const stageRoot = mkdtempSync(`${tmpdir()}/harness-probe-`);
 
-    const result = await produceLive(corpusCase, agents, {
+    const produced = await produceLive(corpusCase, agents, {
         runner: runnerFor(config),
         stageDir: `${stageRoot}/${CASE_ID}`,
     });
-    // Deterministic matching only (no fallback calls): the question is whether
-    // the finding is THERE, and a judge fallback would blur that into a
-    // judgement call about near-misses.
-    const match = await matchCase(corpusCase, result, {maxFallbackCalls: 0});
-    const usd = result.perAgent.reduce((sum, agent) => sum + agent.usd, 0);
+    const usd = produced.perAgent.reduce((sum, agent) => sum + agent.usd, 0);
 
+    // Print what the models produced BEFORE scoring it. The first version of
+    // this probe matched first and died on a shape error, throwing away $1.50 of
+    // completed model work because of a bug in the cheap step that followed it.
+    // Expensive output gets printed the moment it exists.
     console.log(`\n=== ${config}: ${describeConfig(config)}`);
     console.log(
-        `    caught: ${match.caught
-            .map((entry) => entry.specKey)
-            .join(", ")} | missed: ${match.missed.join(", ") || "(none)"}`,
-    );
-    console.log(
-        `    candidates: ${result.findings.length} | $${usd.toFixed(
+        `    candidates: ${produced.findings.length} | $${usd.toFixed(
             2,
-        )} | tools: ${result.perAgent
+        )} | tools: ${produced.perAgent
             .map((agent) => `${agent.name}=${agent.toolCalls ?? "?"}`)
             .join(" ")}`,
     );
-    for (const finding of result.findings) {
+    for (const finding of produced.findings) {
         console.log(
             `    - ${finding.id}: ${String(
                 (finding as unknown as {model_authored_prose?: string})
@@ -164,6 +167,25 @@ const runConfig = async (
             ).slice(0, 220)}`,
         );
     }
+
+    // Matching scores POSTED candidates, so it needs the deterministic runner's
+    // RunResult rather than the producer's output: runCase puts the produced
+    // findings through the same provenance gate, scope filter, and verdict logic
+    // production uses. This is how live-ab.ts wires it, and passing the
+    // producer's result straight to matchCase is what broke run 30872172052.
+    const result = runCase(corpusCase, {
+        produceFindings: () => produced.findings,
+        validation: produced.validation,
+    });
+    // Deterministic matching only (no fallback calls): the question is whether
+    // the finding is THERE, and a judge fallback would blur that into a
+    // judgement call about near-misses.
+    const match = await matchCase(corpusCase, result, {maxFallbackCalls: 0});
+    console.log(
+        `    caught: ${match.caught
+            .map((entry) => entry.specKey)
+            .join(", ")} | missed: ${match.missed.join(", ") || "(none)"}`,
+    );
 };
 
 const main = async (): Promise<void> => {
@@ -193,10 +215,9 @@ const main = async (): Promise<void> => {
     );
 };
 
-// CLI entry point (mirrors live-runner.ts): run when executed, not imported.
+// srt's proxy keeps the loop alive, so exit explicitly through the shared
+// drain path. CLI entry point (mirrors live-runner.ts): run when executed,
+// not imported.
 if (process.argv[1]?.endsWith("harness-probe.ts")) {
-    main().catch((error: unknown) => {
-        console.error(error);
-        process.exit(1);
-    });
+    runCli(main);
 }
