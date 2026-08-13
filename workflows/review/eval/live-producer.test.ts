@@ -256,6 +256,18 @@ describe("produceLive", () => {
                             discussion:
                                 '"// a is always 1" no longer holds: line 1 sets it to 2.',
                         },
+                        // The PR-level shape: no path, no line. Production
+                        // maps this to a {type: "pr"} anchor; the producer
+                        // must too, or a real title/description finding
+                        // scores as a true miss (run 31738849545, 0/3).
+                        {
+                            label: "suggestion (non-blocking, documentation)",
+                            failure_scenario:
+                                "every reader translates the description's metaphors before they can act.",
+                            subject: "Description is built from metaphors",
+                            discussion:
+                                '"teaches the loop to breathe" names no operation; plainer: "bounds each drain pass".',
+                        },
                     ],
                 }),
             ],
@@ -263,6 +275,10 @@ describe("produceLive", () => {
                 validatorOutput([
                     {
                         id: "produce-enabled:live-documentation-1",
+                        verification: "confirmed",
+                    },
+                    {
+                        id: "produce-enabled:live-documentation-2",
                         verification: "confirmed",
                     },
                 ]),
@@ -299,6 +315,11 @@ describe("produceLive", () => {
         const docs = result.findings.find((f) => f.source === "documentation");
         expect(docs?.finding.lens).toBe("documentation");
         expect(docs?.finding.severity).toBe("advisory");
+        // The path-less finding maps to a pr anchor, mirroring production.
+        const prLevel = result.findings.find(
+            (f) => f.finding.id === "produce-enabled:live-documentation-2",
+        );
+        expect(prLevel?.finding.anchor).toEqual({type: "pr"});
         expect(
             result.perAgent.find((a) => a.name === "documentation")?.failed,
         ).toBeFalsy();
