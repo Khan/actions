@@ -29,9 +29,10 @@
  *                       and the opener's html_url
  *   human-threads.json  the `{path, line}` of every unresolved thread someone
  *                       ELSE opened, which the dispatcher defers to
- *   adjudicated-threads.json  the bot's threads a HUMAN resolved, which the
- *                       dispatcher's adjudicated suppression reads so a
- *                       settled defect is not re-derived under fresh wording
+ *   adjudicated-threads.json  the bot's threads a HUMAN resolved or
+ *                       downvoted, which the dispatcher's adjudicated
+ *                       suppression reads so a settled defect is not
+ *                       re-derived under fresh wording
  *   disciplines.md      the marker-delimited shared-disciplines section, cut
  *                       out of the rendered prompt (slice 3, #247)
  *   routing.json        the router's deterministic first pass (a non-empty
@@ -553,13 +554,17 @@ export const runStagePrCli = async (
     );
     // The unresolved partition, in the exact `StagedThread` shape every
     // downstream reader of threads.json / human-threads.json already parses:
-    // the resolution fields are stripped, not carried, because both files
-    // serialize these objects verbatim.
+    // the resolution and reaction fields are stripped, not carried, because
+    // both files serialize these objects verbatim.
     const allThreads = fetchedThreads
         .filter((thread) => !thread.resolved)
         .map(
-            ({resolved: _resolved, resolvedBy: _resolvedBy, ...thread}) =>
-                thread,
+            ({
+                resolved: _resolved,
+                resolvedBy: _resolvedBy,
+                openerDownvotes: _openerDownvotes,
+                ...thread
+            }) => thread,
         );
     // The OPENER decides which file a thread lands in (its opening comment is
     // the finding), so a thread with no opener at all is staged in NEITHER. A
@@ -603,29 +608,38 @@ export const runStagePrCli = async (
             2,
         ),
     );
-    // 5b'. The adjudicated corpus: bot-opened threads a HUMAN resolved. A
-    // human resolving a bot thread is the strongest "this is settled" signal
-    // the PR surface carries, and before this file existed it was also an
-    // anti-signal: resolution removed the thread from threads.json, so the
-    // suppression corpus, so the next run was free to re-derive the same
-    // defect with fresh wording as a brand-new thread (webapp#41290: six
-    // resolved variants of one concern at moderation_helpers.go:135, then a
-    // seventh posted anyway). dedup.ts's adjudicated suppression reads this
+    // 5b'. The adjudicated corpus: bot-opened threads a HUMAN resolved, or
+    // whose opening comment a reviewer downvoted. A human resolving a bot
+    // thread is the strongest "this is settled" signal the PR surface
+    // carries, and before this file existed it was also an anti-signal:
+    // resolution removed the thread from threads.json, so the suppression
+    // corpus, so the next run was free to re-derive the same defect with
+    // fresh wording as a brand-new thread (webapp#41290: six resolved
+    // variants of one concern at moderation_helpers.go:135, then a seventh
+    // posted anyway). A 👎 on the opener is the same judgment delivered
+    // through the OTHER feedback channel the bot advertises (the thumbs
+    // sweep asks "why?" on exactly this signal), and before this it
+    // dead-ended in counters. dedup-adjudicated.ts's suppression reads this
     // file; only non-blocking candidates are suppressed by it, so a genuine
     // regression re-flag at blocking severity always posts.
     //
-    // The resolver identity decides membership, not resolution alone: a
-    // thread the BOT resolved (the reconciler, after a code change addressed
-    // it) is a fixed defect, and a fixed defect that reappears is a fresh
-    // finding that must post. `resolvedBy` is "" for an unattributable
-    // resolver (a deleted account), which fails toward posting a duplicate,
-    // never toward suppression on unverifiable authority.
+    // The resolver identity decides resolution membership, not resolution
+    // alone: a thread the BOT resolved (the reconciler, after a code change
+    // addressed it) is a fixed defect, and a fixed defect that reappears is
+    // a fresh finding that must post. `resolvedBy` is "" for an
+    // unattributable resolver (a deleted account), which fails toward
+    // posting a duplicate, never toward suppression on unverifiable
+    // authority. A downvoted thread joins whatever its resolution state:
+    // still-open downvoted threads are also in threads.json, and the
+    // composed suppression attributes a candidate matching both corpora to
+    // the OPEN thread, whose blocking state floors the verdict.
     const adjudicatedThreads = fetchedThreads.filter(
         (thread) =>
-            thread.resolved &&
-            thread.resolvedBy !== "" &&
-            !isReviewBotAuthor(thread.resolvedBy) &&
-            openedByBot(thread),
+            openedByBot(thread) &&
+            ((thread.resolved &&
+                thread.resolvedBy !== "" &&
+                !isReviewBotAuthor(thread.resolvedBy)) ||
+                thread.openerDownvotes > 0),
     );
     write(ADJUDICATED_THREADS_OUT, JSON.stringify(adjudicatedThreads, null, 2));
     // The reconciler echoes these into `skipLines`, so a thread with no
