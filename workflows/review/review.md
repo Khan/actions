@@ -311,6 +311,21 @@ max-daily-ai-credits: -1
 # more work than the hard cap can pay for. KEEP THE TWO VALUES IN SYNC — here
 # and in any consumer override that changes `max-ai-credits`.
 max-ai-credits: 1000
+# The AWF api-proxy cache-miss guard defaults to 5 consecutive zero-cache-hit
+# responses, which is mis-sized for this workflow's parallel sub-agent fan-out:
+# the dispatcher launches up to ~15 cold Claude Agent SDK sessions (finders,
+# reconciler, validator, clusterer), and each session's FIRST request is a
+# guaranteed prompt-cache miss. Whether those misses interleave with
+# cache-hitting responses (resetting the "consecutive" counter) is response-
+# ordering luck: the PR #328 re-run (31124365377 attempt 2) lost that race, the
+# counter hit 5 mid-wave, and the proxy 403'd every remaining lens
+# ("Maximum consecutive cache misses exceeded"), leaving the run to review
+# nothing. 25 clears the worst-case burst (~15 first requests plus margin)
+# while still tripping quickly on the guard's real target, a genuinely broken
+# cache, which misses on EVERY response of a several-hundred-request run.
+# cache-miss-guard.test.ts derives the worst-case burst from lib/budgets.ts
+# and fails any PR that raises the roster cap past this guard's margin.
+max-turn-cache-misses: 25
 env:
   REVIEW_MAX_AI_CREDITS: "1000"
 ---
