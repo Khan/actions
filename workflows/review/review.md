@@ -1329,7 +1329,11 @@ and high-signal; use a blocking label only for a defect CI would not catch.
 sentence naming the concrete inputs, state, or conditions and the wrong outcome they
 produce. The claim-validator attacks exactly this scenario, so make it specific
 enough to check; a finding whose scenario you cannot state concretely is not ready
-to report.
+to report. Include `suggestion` only on `issue`, `todo`, and `suggestion` findings:
+those labels propose a fix. Never attach one to a `question`, `thought`, `note`, or
+`nitpick` finding; those raise a point, and a fix sketch under them adds length
+without information (the renderer drops the sketch form there; a committable
+drop-in fence still posts under any label).
 
 One complete example finding, in exactly this shape. These key names are the
 contract: do not substitute the ReportFindings-style keys (`summary`, `severity`,
@@ -1917,7 +1921,9 @@ Return ONLY this JSON object (no prose, no code fence):
 Use a blocking label only for a whole-change defect that genuinely must be fixed before
 approval. `failure_scenario` is required on every finding: the concrete inputs/state
 and the wrong outcome they produce (the claim-validator attacks exactly this
-scenario). If the change hangs together, return {"findings": []}.
+scenario). Include `suggestion` only on `issue`, `todo`, and `suggestion` findings,
+never on `question`/`thought`/`note`/`nitpick` (the renderer drops the sketch form there).
+If the change hangs together, return {"findings": []}.
 
 ## agent: `completeness`
 ---
@@ -1988,6 +1994,8 @@ Return ONLY this JSON object (no prose, no code fence):
 Use a blocking label only when the change genuinely fails to deliver required, stated work.
 `failure_scenario` is required on every finding: the concrete gap and what a user or
 caller hits because of it (the claim-validator attacks exactly this scenario).
+Include `suggestion` only on `issue`, `todo`, and `suggestion` findings, never on
+`question`/`thought`/`note`/`nitpick` (the renderer drops the sketch form there).
 If the change matches its intent, return {"findings": []}.
 
 ## agent: `test-adequacy`
@@ -2048,7 +2056,9 @@ Return ONLY this JSON object (no prose, no code fence):
 }
 `failure_scenario` is required on every finding: name the untested path and the
 concrete regression that would slip through it unnoticed (the claim-validator
-attacks exactly this scenario).
+attacks exactly this scenario). Include `suggestion` only on `issue`, `todo`, and
+`suggestion` findings, never on `question`/`thought`/`note`/`nitpick` (the renderer
+drops it there).
 If the changed behavior is adequately tested, return {"findings": []}.
 
 ## agent: `first-principles`
@@ -2122,6 +2132,8 @@ Return ONLY this JSON object (no prose, no code fence):
 }
 Never emit a blocking label. `failure_scenario` is required on every finding: since
 you are advisory, state the concrete cost of leaving the observation unaddressed.
+Include `suggestion` only on `suggestion`-labeled findings, never on
+`question`/`thought`/`note` (the renderer drops the sketch form there).
 If you have nothing worth raising, return {"findings": []}.
 
 ## agent: `conventions`
@@ -2187,7 +2199,9 @@ Return ONLY this JSON object (no prose, no code fence):
 }
 Never emit a blocking label. `failure_scenario` is required on every finding: the
 concrete cost of the deviation if it stays (a convention with no statable cost is
-not worth flagging). If nothing deviates from repo conventions, return
+not worth flagging). Include `suggestion` only on `suggestion`-labeled findings,
+never on `question`/`nitpick`/`note` (the renderer drops the sketch form there).
+If nothing deviates from repo conventions, return
 {"findings": []}.
 
 ## agent: `documentation`
