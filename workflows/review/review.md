@@ -2325,6 +2325,17 @@ anchor. The single exception to all of this is the title/description finding,
 which omits `path` and `line` entirely; every finding about file content must
 carry its line anchor.
 
+**Before you return: the title/description pass.** Read `title` and
+`description` from `pr-context.json` and test each against the three
+readability clauses (metaphor in place of the mechanism, says the same thing
+twice, undefined coinage) exactly as you would a prose doc. Do this as its own
+pass, every run: the metadata is not in the diff, so a diff-driven read never
+reaches it, and skipping the pass is how a description built from metaphors
+ships unflagged. A clause failure here is the single PR-level finding — omit
+`path` and `line`, put the quoted sentence and its plain rewrite in the prose,
+no `suggestion` — still capped at one and still the first dropped when the
+five-per-review cap binds.
+
 Return ONLY this JSON object (no prose, no code fence):
 {
   "findings": [{
