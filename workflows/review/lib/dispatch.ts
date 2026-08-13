@@ -40,7 +40,11 @@
  */
 
 import {dedupeClaims, type ClaimMerge, type ThreadSuppression} from "./dedup";
-import {suppressTrackedDuplicates} from "./dedup-adjudicated";
+import {
+    reapplyCrossFileOccurrences,
+    suppressThenMergeCrossFile,
+    type CrossFileMerge,
+} from "./dedup-crossfile";
 import {
     clusteringRecord,
     runClusterStep,
@@ -253,6 +257,8 @@ export type DispatchResult = {
     claims: Claim[];
     /** Cross-source duplicates merged before validation (#245). */
     merges: ClaimMerge[];
+    /** One source's same finding on several files, collapsed (dedup-crossfile.ts). */
+    crossFileMerges: CrossFileMerge[];
     /**
      * Dedup tier 2's audit block, present when the clusterer was dispatched
      * (absent when there was nothing to cluster: fewer than two claims, or one
@@ -796,17 +802,8 @@ export const runDispatch = async (
         }
     }
 
-    // Cross-source duplicate merge (#245), BEFORE validation so duplicate
-    // claims are neither separately validated (the largest sub-agent cost
-    // line) nor separately posted.
-    //
-    // Tier 2 (the claim-clusterer) runs here, between the fan-out and
-    // validation, for the same reason: run 30587343777 paid to validate four
-    // copies of one wrong doc comment and posted all four. Its input is the
-    // pre-merge candidate set — the model sees what tier 1 would collapse
-    // anyway, which costs a few hundred tokens and keeps the merge decision in
-    // ONE place (dedup.ts folds both tiers into one group, so a survivor gains
-    // one "also flagged by" note rather than a stack of them).
+    // Duplicate merge, BEFORE validation so duplicates are neither validated
+    // nor posted; dedup.ts's header carries the rationale and measured runs.
     const candidateClaims = buildClaims(scoped.kept);
     const clusterStep = await runClusterStep(candidateClaims, {
         dispatch: dispatchAgent,
@@ -817,6 +814,7 @@ export const runDispatch = async (
         // eslint-disable-next-line no-console
         warn: (message) => console.error(message),
     });
+    // Tiers 1-2; the cross-file pass runs after suppression (see dedup-crossfile.ts).
     const deduped = dedupeClaims(candidateClaims, clusterStep.proposals);
     const clustering = clusteringRecord(
         clusterStep,
@@ -835,15 +833,18 @@ export const runDispatch = async (
     // re-flag at blocking severity must stay visible). Every filter and guard
     // lives in dedup.ts / dedup-adjudicated.ts beside the rules it enforces;
     // a producer bug or an older staging without adjudicated-threads.json
-    // degrades to a duplicate comment, never to a dropped finding.
-    const suppression = suppressTrackedDuplicates(
+    // degrades to a duplicate comment, never to a dropped finding. The
+    // cross-file merge runs AFTER both passes, inside the composed step
+    // (dedup-crossfile.ts carries the ordering rationale).
+    const dedupStep = suppressThenMergeCrossFile(
         claims,
         threads,
         readJson(fs, `${REVIEW_DIR}/adjudicated-threads.json`),
         new Set(reconciliation?.resolve ?? []),
+        readJson(fs, `${REVIEW_DIR}/files.json`),
     );
-    claims = suppression.kept;
-    const threadSuppressionUnavailable = suppression.shapeFailure;
+    claims = dedupStep.claims;
+    const threadSuppressionUnavailable = dedupStep.shapeFailure;
     if (threadSuppressionUnavailable !== undefined) {
         // eslint-disable-next-line no-console
         console.error(threadSuppressionUnavailable.warning);
@@ -878,6 +879,10 @@ export const runDispatch = async (
                 cause: "unavailable",
             });
         }
+        // A validator corrected.discussion replaces a survivor's free text
+        // wholesale, erasing the merge's "Also applies to" line; re-build
+        // it from the merge records so no correction loses an occurrence.
+        claims = reapplyCrossFileOccurrences(claims, dedupStep.crossFileMerges);
     }
 
     const dispatched = [
@@ -908,9 +913,9 @@ export const runDispatch = async (
                   "Note: change-provenance gate skipped this run (diff staging unparseable).",
               ]
             : []),
-        ...(suppression.suppressed.length > 0
+        ...(dedupStep.suppressed.length > 0
             ? [
-                  `Note: ${suppression.suppressed.length} finding(s) not re-posted (already tracked in open review threads).`,
+                  `Note: ${dedupStep.suppressed.length} finding(s) not re-posted (already tracked in open review threads).`,
               ]
             : []),
     ];
@@ -924,8 +929,9 @@ export const runDispatch = async (
         noteLines,
         claims,
         merges: deduped.merges,
+        crossFileMerges: dedupStep.crossFileMerges,
         ...(clustering !== undefined ? {clustering} : {}),
-        threadSuppressions: suppression.suppressed,
+        threadSuppressions: dedupStep.suppressed,
         ...(threadSuppressionUnavailable !== undefined
             ? {threadSuppressionUnavailable}
             : {}),
