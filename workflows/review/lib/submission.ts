@@ -241,10 +241,12 @@ export const isDropInSuggestion = (suggestion: string): boolean => {
  *
  * Deliberate consequence: a dispute-capped claim relabeled to
  * `question (non-blocking)` by applyVerifications keeps its `suggestion`
- * field but posts as a bare question. The author contested the claim, so
- * posting its fix as if uncontested is the wrong emphasis; the sketch drop
- * is intended there, not collateral. Drop-in fences are unaffected (they
- * post under any label, see renderClaimComment).
+ * field but posts without the sketch block. The gate is about information
+ * loss, not the label's tone: a sketch restates prose (the measured
+ * sample), so dropping it under a non-fix label costs length, not content,
+ * whereas a drop-in fence IS the fix in committable form and renders under
+ * any label (see renderClaimComment). So a disputed claim keeps its
+ * one-click fix and loses only the restatement.
  */
 const SKETCH_LABEL_TOKENS: ReadonlySet<string> = new Set([
     "issue",
