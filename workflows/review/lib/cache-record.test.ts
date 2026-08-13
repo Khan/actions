@@ -404,3 +404,90 @@ describe("the in-run safe-output queue (GH_AW_SAFE_OUTPUTS)", () => {
         expect(record.risksPatternsKey).toBe("prior-key");
     });
 });
+
+describe("the hold record (HOLD_FOR_HUMAN plans)", () => {
+    const holdStaged = (
+        over: Record<string, string> = {},
+    ): Record<string, string> => ({
+        ...staged(),
+        [`${REVIEW}/submission-plan.json`]: JSON.stringify({
+            event: "HOLD_FOR_HUMAN",
+            comments: [],
+        }),
+        [QUEUE]: JSON.stringify({
+            items: [{type: "add_comment", body: "Holding for human review."}],
+        }),
+        ...over,
+    });
+
+    const priorRecord = JSON.stringify({
+        timestamp: "2026-07-01T00:00:00.000Z",
+        verdict: "APPROVE",
+        diffFingerprint: {"a.ts": "prior-sha"},
+        reviewedHunks: {"a.ts": ["prior-hunk"]},
+        risksPatternsKey: "risk:a.ts:t1",
+        requestedTeams: ["t1"],
+    });
+
+    it("never records fingerprints for a hold (the next run reviews in full)", () => {
+        const fs = makeFakeFs(holdStaged());
+        const result = runCacheRecordCli(fs, NOW);
+        // No prior record: nothing to update, nothing written \u2014 the staged
+        // (current) fingerprints must NOT land, or the next run would scope
+        // its re-review against hunks nobody reviewed.
+        expect(result.written).toBe(false);
+        expect(fs.files[`${CACHE}/pr-41.json`]).toBeUndefined();
+    });
+
+    it("drops risksPatternsKey from the prior record when the hold comment queued", () => {
+        const fs = makeFakeFs(
+            holdStaged({[`${CACHE}/pr-41.json`]: priorRecord}),
+        );
+        const result = runCacheRecordCli(fs, NOW);
+        expect(result.written).toBe(true);
+        const record = JSON.parse(fs.files[`${CACHE}/pr-41.json`] as string);
+        // The key is gone (the hold comment collapsed the standing guidance
+        // comment, so the next approving run must repost it) \u2026
+        expect(record.risksPatternsKey).toBeUndefined();
+        // \u2026 and everything else carries verbatim: fingerprints, verdict,
+        // and supplements stay the prior run's, never this run's staged
+        // facts.
+        expect(record.verdict).toBe("APPROVE");
+        expect(record.diffFingerprint).toEqual({"a.ts": "prior-sha"});
+        expect(record.reviewedHunks).toEqual({"a.ts": ["prior-hunk"]});
+        expect(record.requestedTeams).toEqual(["t1"]);
+    });
+
+    it("leaves the prior record untouched when no hold comment queued", () => {
+        const fs = makeFakeFs(
+            holdStaged({
+                [`${CACHE}/pr-41.json`]: priorRecord,
+                [QUEUE]: JSON.stringify({items: []}),
+            }),
+        );
+        const result = runCacheRecordCli(fs, NOW);
+        expect(result.written).toBe(false);
+        expect(fs.files[`${CACHE}/pr-41.json`]).toBe(priorRecord);
+    });
+
+    it("refuses loudly on an unreadable queue (nothing corroborates the hold comment)", () => {
+        const files = holdStaged({[`${CACHE}/pr-41.json`]: priorRecord});
+        delete files[QUEUE];
+        const fs = makeFakeFs(files);
+        const result = runCacheRecordCli(fs, NOW);
+        expect(result.written).toBe(false);
+        expect(result.warn).toBe(true);
+        expect(fs.files[`${CACHE}/pr-41.json`]).toBe(priorRecord);
+    });
+
+    it("skips when the prior record carries no risksPatternsKey", () => {
+        const prior = JSON.stringify({
+            verdict: "APPROVE",
+            diffFingerprint: {"a.ts": "prior-sha"},
+        });
+        const fs = makeFakeFs(holdStaged({[`${CACHE}/pr-41.json`]: prior}));
+        const result = runCacheRecordCli(fs, NOW);
+        expect(result.written).toBe(false);
+        expect(fs.files[`${CACHE}/pr-41.json`]).toBe(prior);
+    });
+});

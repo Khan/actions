@@ -244,11 +244,21 @@ export type ReviewBodyInput = {
 };
 
 /**
+ * The HOLD_FOR_HUMAN verdict head. Exported (with {@link HOLD_UNSTUCK_LINES})
+ * for the submission-plan CLI, which composes the hold's standalone PR comment
+ * from the same fixed template text this renderer uses, so the two surfaces
+ * cannot drift.
+ */
+export const HOLD_HEAD =
+    "Holding for human review — the automated review could not " +
+    "complete safely this run.";
+
+/**
  * How the author of a held PR gets unstuck. Fixed template text (code-owned,
  * like the skipped-dimension note): a hold must never strand the author with a
  * verdict and no next action.
  */
-const HOLD_UNSTUCK_LINES = [
+export const HOLD_UNSTUCK_LINES = [
     "To get unstuck: push a new commit (or re-run the review workflow from the " +
         "Actions tab) to retry the failed pass, or ask a human to review this " +
         "PR manually. A hold means the automated review declined to approve on " +
@@ -301,9 +311,7 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             head = "Changes requested — see inline comments.";
             break;
         case "HOLD_FOR_HUMAN":
-            head =
-                "Holding for human review — the automated review could not " +
-                "complete safely this run.";
+            head = HOLD_HEAD;
             break;
         default: {
             // Exhaustiveness guard: a new VerdictEvent must add a body branch.
