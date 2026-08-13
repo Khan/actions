@@ -122,13 +122,27 @@ describe("runVersionFooterCli", () => {
         expect(runVersionFooterCli(fs, LIB)).toContain("depth scoped");
     });
 
-    it("falls back to the planned depth when dispatch has not run", () => {
+    it("omits the depth segment when dispatch has not run", () => {
+        // No fallback to the planned depth: a plan is a guess about what
+        // executed, and every unstateable segment drops rather than guesses.
         const files = fullStaging();
         delete (files as Record<string, string>)[
             `${REVIEW}/dispatch-result.json`
         ];
         const fs = makeFakeFs(files);
-        expect(runVersionFooterCli(fs, LIB)).toContain("depth full");
+        expect(runVersionFooterCli(fs, LIB)).not.toContain("depth");
+    });
+
+    it("prefers the submission CLI's depth override over its own read", () => {
+        // The override carries the same read that keys the depth Note and
+        // blocking-only gating, so footer and Note cannot contradict.
+        const fs = makeFakeFs(fullStaging());
+        expect(runVersionFooterCli(fs, LIB, {depth: "scoped"})).toContain(
+            "depth scoped",
+        );
+        expect(runVersionFooterCli(fs, LIB, {depth: null})).not.toContain(
+            "depth",
+        );
     });
 
     it("omits segments for missing or malformed staging", () => {

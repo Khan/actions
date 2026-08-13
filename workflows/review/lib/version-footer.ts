@@ -30,7 +30,7 @@ export const FOOTER_OUT = `${REVIEW_DIR}/version-footer.txt`;
 
 export type VersionFooterFs = {
     existsSync: (p: string) => boolean;
-    readFileSync: (p: string, encoding: "utf8") => string;
+    readFileSync: (p: string, enc: "utf8") => string;
     writeFileSync: (p: string, data: string) => void;
 };
 
@@ -97,9 +97,11 @@ const readJson = (fs: VersionFooterFs, path: string): unknown => {
  *
  *   - `libDir/../package.json` for the release version (in the pinned
  *     checkout that is `gh-aw-review-lib/workflows/review/package.json`);
- *   - `dispatch-result.json` for the executed depth, falling back to
- *     `rereview-plan.json`'s planned depth (a footer rendered before
- *     dispatch), then to no depth segment;
+ *   - `dispatch-result.json` for the executed depth (no fallback: a
+ *     planned depth is a guess about what executed, so an unusable
+ *     dispatch result drops the segment like every other unstateable
+ *     field). The submission CLI passes its canonical executed depth in
+ *     `overrides` so the footer and the depth Note cannot contradict;
  *   - `routing.json` for the re-review mode, the blocking-only modifier,
  *     and the enable list.
  *
@@ -110,14 +112,12 @@ const readJson = (fs: VersionFooterFs, path: string): unknown => {
 export const runVersionFooterCli = (
     fs: VersionFooterFs,
     libDir: string = __dirname,
+    overrides: {depth?: string | null} = {},
 ): string => {
     const pkg = readJson(fs, `${libDir}/../package.json`) as
         | {version?: unknown}
         | undefined;
     const dispatch = readJson(fs, `${REVIEW_DIR}/dispatch-result.json`) as
-        | {depth?: unknown}
-        | undefined;
-    const plan = readJson(fs, `${REVIEW_DIR}/rereview-plan.json`) as
         | {depth?: unknown}
         | undefined;
     const routing = readJson(fs, `${REVIEW_DIR}/routing.json`) as
@@ -131,10 +131,10 @@ export const runVersionFooterCli = (
         version: typeof pkg?.version === "string" ? pkg.version : null,
         schemaVersion: FINDING_SCHEMA_VERSION,
         depth:
-            typeof dispatch?.depth === "string"
+            overrides.depth !== undefined
+                ? overrides.depth
+                : typeof dispatch?.depth === "string"
                 ? dispatch.depth
-                : typeof plan?.depth === "string"
-                ? plan.depth
                 : null,
         reReviewMode:
             typeof routing?.reReviewMode === "string"

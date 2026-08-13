@@ -625,8 +625,13 @@ export const runSubmissionCli = (
     // The visible attribution footer (version-footer.ts): code-rendered,
     // sanitizer-surviving (<sub> is on the allowed-tag list; the old hidden
     // HTML marker never posted). The CLI also stages version-footer.txt for
-    // Step 7's guidance comment.
-    const footer = runVersionFooterCli(fs);
+    // Step 7's guidance comment. The depth override hands the footer this
+    // run's executed depth from the SAME read that keys the depth Note and
+    // blocking-only gating, so the two surfaces cannot contradict; null
+    // (unreadable dispatch result) drops the segment rather than guessing.
+    const footer = runVersionFooterCli(fs, undefined, {
+        depth: typeof dispatch.depth === "string" ? dispatch.depth : null,
+    });
     const body = [coreBody, footer]
         .filter((line) => line !== "")
         .join("\n")
