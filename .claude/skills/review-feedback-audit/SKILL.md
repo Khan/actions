@@ -90,8 +90,9 @@ the loop's stdin and truncate the PR list.
 
 **Reactions.** The listing's `reactions` object gives counts; fetch the
 detail endpoint only for comments with `total_count > 0`, and exclude the
-bot's own reactions (once nudge seeding ships, the bot reacts to its own
-comments and those must not count as signal):
+bot's own reactions. Nudge seeding (the bot reacting to its own comments)
+is a planned feature; do not assume its status, and keep the filter either
+way (it is correct before and after):
 
 ```sh
 jq -r '.[] | select(.reactions.total_count > 0) | .id' \
@@ -134,7 +135,15 @@ comm -23 <(cut -f1 "$WORK/replies.tsv" | sort -u) \
     --jq '[.id, .user.login] | @tsv' < /dev/null
 done | awk -F'\t' -v bot="$BOT" '$2==bot {print $1}' \
   > "$WORK/old_bot_parents.txt"
+# replies.tsv still holds every non-bot reply repo-wide, including replies
+# in human-opened threads; keep only rows whose parent is bot-authored.
+cat <(jq -r '.[].id' "$WORK/bot_inline_raw.json") \
+  "$WORK/old_bot_parents.txt" | sort -u > "$WORK/bot_parent_ids.txt"
+awk -F'\t' 'NR==FNR {ok[$1]=1; next} ok[$1]' \
+  "$WORK/bot_parent_ids.txt" "$WORK/replies.tsv" > "$WORK/bot_replies.tsv"
 ```
+
+Every later step reads `bot_replies.tsv`; `replies.tsv` is an intermediate.
 
 ## Step 2: classify
 
@@ -211,10 +220,11 @@ jq '[.[] | select(.body
 - **Hidden HTML comments are sanitizer-stripped.** gh-aw's safe-output
   ingest sanitizer (`removeXmlComments`) deletes every agent-written HTML
   comment, so the absence of `<!-- pr-reviewer:... -->` markers in posted
-  bodies is expected until a visible (non-HTML-comment) footer ships. Do
-  not read marker absence alone as a version-attribution regression; the
-  engine-appended `gh-aw-agentic-workflow` marker is what identifies the
-  guidance comment.
+  bodies is expected unless the checkout being audited ships a visible
+  (non-HTML-comment) footer; check for `version-footer.ts` in the lib
+  rather than assuming either state. Do not read marker absence alone as a
+  version-attribution regression; the engine-appended
+  `gh-aw-agentic-workflow` marker is what identifies the guidance comment.
 - **GraphQL may be unavailable.** Under a GET-only gh broker, the GraphQL
   endpoint (needed for `reviewThreads` resolution state) is blocked. Thread
   resolution is a positive signal column the thumbs sweep normally reports;
