@@ -191,6 +191,84 @@ describe("renderRereviewSection", () => {
         expect(result.resolvedCount).toBe(1);
     });
 
+    it("damps a non-blocking thread a prior recap already quoted to label + link", () => {
+        // First mention full, thereafter compact: re-quoting every open nit's
+        // excerpt on every push is the recap-wall drumbeat (webapp#41290: the
+        // same four threads re-quoted across 25 runs). The opener URL in a
+        // prior review body is the marker the first recap plants.
+        const nb = (id: string, url: string): StagedThread =>
+            thread({
+                thread_id: id,
+                path: "a/a.go",
+                line: id === "old" ? 1 : 2,
+                url,
+                comments: [
+                    {
+                        author: "github-actions",
+                        body: `**note (non-blocking):** Concern ${id}.`,
+                    },
+                ],
+            });
+        const result = renderRereviewSection({
+            threads: [
+                nb("old", "https://github.com/o/r/pull/1#discussion_r1"),
+                nb("new", "https://github.com/o/r/pull/1#discussion_r2"),
+            ],
+            reconciler: {resolve: [], keep: ["old", "new"]},
+            priorReviewBodies: [
+                "2 still unaddressed:\n- **note (non-blocking)** " +
+                    "[`a/a.go:1`](https://github.com/o/r/pull/1#discussion_r1): Concern old.",
+            ],
+        });
+        expect(result.section).toContain(
+            "<summary>2 non-blocking threads still open (1 previously reported)</summary>",
+        );
+        // The fresh thread keeps its excerpt and leads the block; the repeat
+        // renders label + link only.
+        const freshIndex = result.section.indexOf(
+            "- **note (non-blocking)** [`a/a.go:2`](https://github.com/o/r/pull/1#discussion_r2): Concern new.",
+        );
+        const repeatIndex = result.section.indexOf(
+            "- **note (non-blocking)** [`a/a.go:1`](https://github.com/o/r/pull/1#discussion_r1)\n",
+        );
+        expect(freshIndex).toBeGreaterThan(-1);
+        expect(repeatIndex).toBeGreaterThan(freshIndex);
+        expect(result.section).not.toContain("r1): Concern old.");
+    });
+
+    it("never damps a blocking thread, and a thread with no URL renders full", () => {
+        // Blocking lines are the reason the verdict is what it is; they must
+        // stand on their own however many times they have been recapped. And
+        // a staged thread without a URL cannot be matched against prior
+        // bodies, so it fails toward the full render.
+        const noUrl = thread({
+            thread_id: "nb",
+            url: undefined,
+            comments: [
+                {
+                    author: "github-actions",
+                    body: "**note (non-blocking):** No url.",
+                },
+            ],
+        });
+        const blocking = thread({
+            thread_id: "blk",
+            url: "https://github.com/o/r/pull/1#discussion_r2",
+        });
+        const result = renderRereviewSection({
+            threads: [noUrl, blocking],
+            reconciler: {resolve: [], keep: ["nb", "blk"]},
+            priorReviewBodies: [
+                "- [`a/b.go:7`](https://github.com/o/r/pull/1#discussion_r2): The guard was removed.",
+            ],
+        });
+        expect(result.section).toContain(
+            "](https://github.com/o/r/pull/1#discussion_r2): The guard was removed.",
+        );
+        expect(result.section).toContain(": No url.");
+        expect(result.section).not.toContain("previously reported");
+    });
+
     it("renders no collapsed block when every kept thread blocks", () => {
         const result = renderRereviewSection({
             threads: [thread({thread_id: "a"})],
@@ -360,7 +438,101 @@ describe("runRereviewCli", () => {
     const THREADS = "/tmp/gh-aw/review/threads.json";
     const RECONCILER = "/tmp/gh-aw/review/out/thread-reconciler.json";
     const PR_CONTEXT = "/tmp/gh-aw/review/pr-context.json";
+    const PRIOR_REVIEWS = "/tmp/gh-aw/review/prior-reviews.json";
     const RESULT = "/tmp/gh-aw/review/rereview.json";
+
+    it("feeds staged prior-review bodies into the recap damping", () => {
+        const url = "https://github.com/o/r/pull/1#discussion_r1";
+        const {fs} = makeFs({
+            [THREADS]: JSON.stringify([
+                {
+                    thread_id: "a",
+                    path: "x.go",
+                    line: 3,
+                    url,
+                    comments: [
+                        {
+                            author: "github-actions",
+                            body: "**note (non-blocking):** Old concern.",
+                        },
+                    ],
+                },
+            ]),
+            [RECONCILER]: JSON.stringify({
+                resolve: [],
+                keep: ["a"],
+                skipLines: [],
+            }),
+            [PRIOR_REVIEWS]: JSON.stringify([
+                {
+                    state: "APPROVED",
+                    body: `- [\`x.go:3\`](${url}): Old concern.`,
+                },
+            ]),
+        });
+        const result = runRereviewCli(fs);
+        expect(result.section).toContain("(1 previously reported)");
+        expect(result.section).not.toContain(": Old concern.");
+        // Malformed staging reads as no prior reviews: full render.
+        const {fs: fsBad} = makeFs({
+            [THREADS]: JSON.stringify([
+                {
+                    thread_id: "a",
+                    path: "x.go",
+                    line: 3,
+                    url,
+                    comments: [
+                        {
+                            author: "github-actions",
+                            body: "**note (non-blocking):** Old concern.",
+                        },
+                    ],
+                },
+            ]),
+            [RECONCILER]: JSON.stringify({
+                resolve: [],
+                keep: ["a"],
+                skipLines: [],
+            }),
+            [PRIOR_REVIEWS]: "not json[",
+        });
+        expect(runRereviewCli(fsBad).section).toContain(": Old concern.");
+        // A prior body that merely MENTIONS the URL in prose (no rendered
+        // `](url)` link) is not a recap: the thread renders full. Bare
+        // substring matching would also let a prefix id (r1 vs r12) damp a
+        // never-recapped thread.
+        const {fs: fsProse} = makeFs({
+            [THREADS]: JSON.stringify([
+                {
+                    thread_id: "a",
+                    path: "x.go",
+                    line: 3,
+                    url,
+                    comments: [
+                        {
+                            author: "github-actions",
+                            body: "**note (non-blocking):** Old concern.",
+                        },
+                    ],
+                },
+            ]),
+            [RECONCILER]: JSON.stringify({
+                resolve: [],
+                keep: ["a"],
+                skipLines: [],
+            }),
+            [PRIOR_REVIEWS]: JSON.stringify([
+                {state: "APPROVED", body: `see ${url} for the discussion`},
+                {
+                    state: "APPROVED",
+                    body: `linked: [\`x.go:9\`](${url}9): other`,
+                },
+            ]),
+        });
+        const prose = runRereviewCli(fsProse);
+        expect(prose.section).toContain(": Old concern.");
+        expect(prose.section).not.toContain("previously reported");
+    });
 
     it("renders and writes the section from the staged inputs", () => {
         const {fs, written} = makeFs({

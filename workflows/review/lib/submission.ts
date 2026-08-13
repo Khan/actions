@@ -33,6 +33,17 @@
  *     post nor count toward the verdict.
  *   - REQUEST_CHANGES iff at least one posted claim carries a blocking label
  *     (via computeVerdict, threshold 1).
+ *   - HOLD_FOR_HUMAN when a core review pass (`correctness-reviewer` or
+ *     `skill-auditor`) produced no output this run and the run would
+ *     otherwise have auto-approved (computeVerdict's core-dimension gate,
+ *     fed from the dispatcher's `skippedDimensions`). A hold is not a
+ *     review event: the plan's body posts as one standalone PR comment,
+ *     nothing else queues, and no fingerprint stamp is written, so the
+ *     next run reviews in full. The production shape this closes:
+ *     Khan/actions#328's re-run (31124365377 attempt 2), where every core
+ *     lens died on an API auth error and the run still submitted
+ *     "Approved — no blocking issues found" over seven "not assessed"
+ *     note lines.
  *   - The reduced-depth flip rule: at flip-gated/fast depth over a prior
  *     REQUEST_CHANGES stamp, `rereview.json`'s keptBlockingCount floors the
  *     verdict at REQUEST_CHANGES.
@@ -51,8 +62,14 @@
 
 import {computeRisksPatternsKey, RISKS_PATTERNS_KEY_PATH} from "./cache-record";
 import type {Claim} from "./dispatch-contracts";
+import {DEFAULT_FINDERS, TRIAGE_DIMENSION} from "./dispatch-roster";
 import {runCli as runNotifiedCli} from "./notified";
-import {isBlockingLabel, renderReviewBody} from "./render-comment";
+import {
+    HOLD_HEAD,
+    HOLD_UNSTUCK_LINES,
+    isBlockingLabel,
+    renderReviewBody,
+} from "./render-comment";
 import {runRereviewCli, type RereviewCliFs} from "./rereview";
 import {normalizeBody} from "./sanitizer-normalize";
 import {
@@ -62,6 +79,7 @@ import {
     type PriorReview,
 } from "./rereview-mode";
 import {computeVerdict} from "./verdict";
+import type {DimensionStatus, VerdictReason} from "./verdict";
 import {runVersionFooterCli} from "./version-footer";
 
 /* -------------------------------------------------------------------------- */
@@ -74,9 +92,16 @@ const CACHE_MEMORY_DIR = "/tmp/gh-aw/cache-memory";
 export type PlannedComment = {path: string; line: number; body: string};
 
 export type SubmissionPlan = {
-    /** The event to submit (Step 4's two-state rule; never HOLD here). */
-    event: "APPROVE" | "REQUEST_CHANGES";
-    /** The full review body, stamp included; submit verbatim. */
+    /**
+     * The outcome: a review event to submit (Step 4's mechanical rule), or
+     * HOLD_FOR_HUMAN, which submits NO review — the orchestrator posts
+     * `body` as one standalone PR comment instead (Step 6's hold branch).
+     */
+    event: "APPROVE" | "REQUEST_CHANGES" | "HOLD_FOR_HUMAN";
+    /**
+     * The full text to post verbatim: the review body (stamp included) for
+     * a review event, or the hold comment (never stamped) for a hold.
+     */
     body: string;
     /**
      * Whether the orchestrator may emit NO submission at all (the
@@ -92,7 +117,7 @@ export type SubmissionPlan = {
     /** Thread ids to resolve (the reconciler's decision, passed through). */
     resolve: string[];
     /** Why the event is what it is (fixed-format, for the artifact). */
-    reasons: string[];
+    reasons: VerdictReason[];
     /** Non-blocking composition observations. */
     notes: string[];
 };
@@ -116,6 +141,15 @@ const parseSkipLines = (raw: unknown): Set<string> => {
         }
     }
     return keys;
+};
+
+/** Write the staged plan (`submission-plan.json`) and hand it back. */
+const stagePlan = (fs: SubmissionFs, plan: SubmissionPlan): SubmissionPlan => {
+    fs.writeFileSync(
+        `${REVIEW_DIR}/submission-plan.json`,
+        JSON.stringify(plan, null, 2),
+    );
+    return plan;
 };
 
 const readJson = (fs: SubmissionFs, path: string): unknown => {
@@ -231,10 +265,49 @@ export const isDropInSuggestion = (suggestion: string): boolean => {
 };
 
 /**
+ * The base label tokens whose comments propose a fix, and so may carry a
+ * sketch block. `issue` and `suggestion` are the fix-proposing labels;
+ * `todo (blocking)` is verdict-equivalent to `issue (blocking)` (see
+ * render-comment.ts), so stripping its fix would remove the sketch from a
+ * blocking finding. `question`, `thought`, `note`, and `nitpick` raise a
+ * point rather than propose a fix: measured on Khan/webapp (2026-08-11/12),
+ * 31 of 57 posted comments carried a sketch, including questions and
+ * thoughts whose sketch restated the prose without adding information.
+ *
+ * Deliberate consequence: a dispute-capped claim relabeled to
+ * `question (non-blocking)` by applyVerifications keeps its `suggestion`
+ * field but posts without the sketch block. The gate is about information
+ * loss, not the label's tone: a sketch restates prose (the measured
+ * sample), so dropping it under a non-fix label costs length, not content,
+ * whereas a drop-in fence IS the fix in committable form and renders under
+ * any label (see renderClaimComment). So a disputed claim keeps its
+ * one-click fix and loses only the restatement.
+ */
+const SKETCH_LABEL_TOKENS: ReadonlySet<string> = new Set([
+    "issue",
+    "todo",
+    "suggestion",
+]);
+
+/**
+ * Whether a claim's label admits a sketch block. Matches on the base label
+ * token so every variant counts (`suggestion (non-blocking, documentation)`
+ * is a suggestion). An unparseable label is sketch-eligible: fail toward
+ * more information, never toward silently dropping an authored fix.
+ */
+export const labelAdmitsSketch = (label: string): boolean => {
+    const token = label.trim().split(/[\s(:]/, 1)[0] ?? "";
+    return token === "" || SKETCH_LABEL_TOKENS.has(token.toLowerCase());
+};
+
+/**
  * Render one claim as its Conventional Comment (the renderComment layout,
  * driven by the claim's post-validation label rather than a recomputed one).
  * A suggestion only becomes a committable `suggestion` fence when it is
- * plausibly drop-in; otherwise it renders as a plain fenced sketch.
+ * plausibly drop-in; otherwise it renders as a plain fenced sketch, and only
+ * under a fix-proposing label ({@link labelAdmitsSketch}): a question or
+ * thought proposes no fix, so a sketch under it adds length, not
+ * information.
  */
 export const renderClaimComment = (claim: Claim): string => {
     const lines: string[] = [`**${claim.label}:** ${claim.discussion}`];
@@ -249,7 +322,7 @@ export const renderClaimComment = (claim: Claim): string => {
     if (claim.suggestion !== undefined) {
         if (isDropInSuggestion(claim.suggestion)) {
             lines.push("", "```suggestion", claim.suggestion, "```");
-        } else {
+        } else if (labelAdmitsSketch(claim.label)) {
             lines.push(
                 "",
                 "A sketch, not a committable replacement:",
@@ -298,6 +371,7 @@ export const runSubmissionCli = (
               riskFiles?: unknown;
               patterns?: unknown;
               excludedFiles?: unknown;
+              skippedDimensions?: unknown;
           }
         | undefined;
     if (dispatch === undefined) {
@@ -450,6 +524,132 @@ export const runSubmissionCli = (
         }
     }
 
+    // A blocking candidate the dispatcher suppressed as a duplicate of a
+    // still-open BLOCKING bot thread (trial suggestion g) blocks like a
+    // fresh one: the reviewer re-confirmed the defect, and the open thread
+    // is the actionable feedback. Without this floor, suppression could
+    // flip the verdict to APPROVE over an unfixed blocking objection. Both
+    // sides must be blocking: suppression happens before validation, so the
+    // candidate's own label is unvalidated; the matched thread's opener
+    // label is the severity that DID survive a prior run's validation. A
+    // blocking candidate matching a non-blocking open thread therefore
+    // never floors (it would force REQUEST_CHANGES with no validation and
+    // no visible blocking comment). (A thread the reduced-depth floor above
+    // already counted may add one more here; the verdict is the same either
+    // way, only the reason count differs.)
+    const suppressedBlocking = (
+        Array.isArray(dispatch.threadSuppressions)
+            ? dispatch.threadSuppressions
+            : []
+    ).filter(
+        (entry) =>
+            typeof (entry as {label?: unknown}).label === "string" &&
+            isBlockingLabel((entry as {label: string}).label) &&
+            (entry as {threadBlocking?: unknown}).threadBlocking === true,
+    ).length;
+
+    // Real dimension availability (the hold rule's input): a core lens
+    // recorded in the dispatcher's `skippedDimensions` (either cause)
+    // produced no usable output this run and must not be reported
+    // "assessed", or a crashed run auto-approves. The dimension names are
+    // imported from the modules that write them (`DEFAULT_FINDERS`,
+    // `TRIAGE_DIMENSION`), so a rename cannot silently decouple the hold
+    // from the dispatcher. The production dispatcher always writes
+    // `skippedDimensions` (an empty array on a clean run); an absent field
+    // (hand-staged eval fixtures) reads as all-assessed rather than
+    // guessing at a hold.
+    const skippedDimensionNames = new Set(
+        (Array.isArray(dispatch.skippedDimensions)
+            ? dispatch.skippedDimensions
+            : []
+        )
+            .map((entry) => (entry as {dimension?: unknown}).dimension)
+            .filter((name): name is string => typeof name === "string"),
+    );
+    const dimensionStatus = (name: string): DimensionStatus =>
+        skippedDimensionNames.has(name) ? "unavailable" : "assessed";
+
+    const verdict = computeVerdict({
+        postedLabels: claims.map((claim) => claim.label),
+        dimensions: {
+            correctness: dimensionStatus(DEFAULT_FINDERS[0]),
+            skillSeverity: dimensionStatus(DEFAULT_FINDERS[1]),
+            patternTriage: dimensionStatus(TRIAGE_DIMENSION),
+        },
+        keptBlockingCount: keptBlockingFloor + suppressedBlocking,
+    });
+
+    // The depth note (Step 3), when the run reduced.
+    const plan = readJson(fs, `${REVIEW_DIR}/rereview-plan.json`) as
+        | {mode?: unknown; tripwireRearmed?: unknown; divergence?: unknown}
+        | undefined;
+    const depthNotes: string[] = [];
+    if (plan !== undefined && depth !== "full") {
+        const mode = typeof plan.mode === "string" ? plan.mode : "full";
+        depthNotes.push(
+            `Note: re-review ran at ${depth} depth (re-review mode ${mode}${
+                blockingOnly ? ", blocking-only" : ""
+            }).`,
+        );
+    }
+    if (plan?.tripwireRearmed === true) {
+        const share = (
+            plan.divergence as {unreviewedShare?: unknown} | undefined
+        )?.unreviewedShare;
+        depthNotes.push(
+            `Note: divergence tripwire re-armed a full review (unreviewed share ${
+                typeof share === "number" ? share.toFixed(2) : "unknown"
+            }).`,
+        );
+    }
+
+    // The hold path (computeVerdict's core-dimension gate): a run whose
+    // correctness or skill/severity pass produced no output must not resolve
+    // to an approval the automation cannot stand behind. A hold is not a
+    // review event: the orchestrator posts this body as ONE standalone PR
+    // comment (the add-comment safe output) and submits no review, so the
+    // PR shows neither an approval nor a block. Claims that survived
+    // validation fold into the comment as one line each (blocking claims
+    // cannot exist here: they force REQUEST_CHANGES over the hold), the
+    // reconciler's resolutions are withheld (a partial run leaves existing
+    // threads standing), and no fingerprint stamp is written, so the cache
+    // writer refuses the record and the next run reviews in full.
+    if (verdict.event === "HOLD_FOR_HUMAN") {
+        // Both post-fold buckets ride the hold comment: anchored claims (no
+        // inline comments post on a hold) and the blocking-only collapsed
+        // pr-level claims (their collapsed section renders only on the
+        // normal path).
+        const heldClaimLines = [...anchored, ...prLevelCollapsed].map(
+            (claim) => {
+                notes.push(
+                    `claim ${claim.id} folded into the hold comment (a hold posts no inline comments)`,
+                );
+                return claim.path !== undefined && claim.line !== undefined
+                    ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${claim.subject}`
+                    : `- ${claim.label}: ${claim.subject}`;
+            },
+        );
+        return stagePlan(fs, {
+            event: "HOLD_FOR_HUMAN",
+            body: [
+                HOLD_HEAD,
+                rereview.section,
+                ...prLevelLines,
+                ...heldClaimLines,
+                ...noteLines,
+                ...depthNotes,
+                ...HOLD_UNSTUCK_LINES,
+            ]
+                .filter((line) => line !== "")
+                .join("\n"),
+            skipSubmission: false,
+            comments: [],
+            resolve: [],
+            reasons: verdict.reasons,
+            notes,
+        });
+    }
+
     // The posting bar (the Step 5 ranked bar, as code): rank
     // blocking before non-blocking, then confidence descending (the sort is
     // stable, so dispatch order breaks ties). A claim below medium
@@ -538,75 +738,8 @@ export const runSubmissionCli = (
         );
     }
 
-    // A blocking candidate the dispatcher suppressed as a duplicate of a
-    // still-open BLOCKING bot thread (trial suggestion g) blocks like a
-    // fresh one: the reviewer re-confirmed the defect, and the open thread
-    // is the actionable feedback. Without this floor, suppression could
-    // flip the verdict to APPROVE over an unfixed blocking objection. Both
-    // sides must be blocking: suppression happens before validation, so the
-    // candidate's own label is unvalidated; the matched thread's opener
-    // label is the severity that DID survive a prior run's validation. A
-    // blocking candidate matching a non-blocking open thread therefore
-    // never floors (it would force REQUEST_CHANGES with no validation and
-    // no visible blocking comment). (A thread the reduced-depth floor above
-    // already counted may add one more here; the verdict is the same either
-    // way, only the reason count differs.)
-    const suppressedBlocking = (
-        Array.isArray(dispatch.threadSuppressions)
-            ? dispatch.threadSuppressions
-            : []
-    ).filter(
-        (entry) =>
-            typeof (entry as {label?: unknown}).label === "string" &&
-            isBlockingLabel((entry as {label: string}).label) &&
-            (entry as {threadBlocking?: unknown}).threadBlocking === true,
-    ).length;
-
-    const verdict = computeVerdict({
-        postedLabels: claims.map((claim) => claim.label),
-        dimensions: {
-            correctness: "assessed",
-            skillSeverity: "assessed",
-            patternTriage: "assessed",
-        },
-        keptBlockingCount: keptBlockingFloor + suppressedBlocking,
-    });
-    // With every dimension reported assessed (the dispatcher's unavailable
-    // dimensions surface as note lines instead), the two-state Step 4 rule
-    // is what remains: HOLD_FOR_HUMAN is unreachable here, and the guard
-    // makes a future edit that feeds real dimension availability into
-    // computeVerdict fail loudly instead of auto-approving a crashed run.
-    if (verdict.event === "HOLD_FOR_HUMAN") {
-        throw new Error(
-            "HOLD_FOR_HUMAN reached the submission plan: dimension availability must not feed this CLI without a hold path",
-        );
-    }
     const event =
         verdict.event === "REQUEST_CHANGES" ? "REQUEST_CHANGES" : "APPROVE";
-
-    // The depth note (Step 3), when the run reduced.
-    const plan = readJson(fs, `${REVIEW_DIR}/rereview-plan.json`) as
-        | {mode?: unknown; tripwireRearmed?: unknown; divergence?: unknown}
-        | undefined;
-    const depthNotes: string[] = [];
-    if (plan !== undefined && depth !== "full") {
-        const mode = typeof plan.mode === "string" ? plan.mode : "full";
-        depthNotes.push(
-            `Note: re-review ran at ${depth} depth (re-review mode ${mode}${
-                blockingOnly ? ", blocking-only" : ""
-            }).`,
-        );
-    }
-    if (plan?.tripwireRearmed === true) {
-        const share = (
-            plan.divergence as {unreviewedShare?: unknown} | undefined
-        )?.unreviewedShare;
-        depthNotes.push(
-            `Note: divergence tripwire re-armed a full review (unreviewed share ${
-                typeof share === "number" ? share.toFixed(2) : "unknown"
-            }).`,
-        );
-    }
 
     const head = renderReviewBody({
         event,
@@ -658,7 +791,7 @@ export const runSubmissionCli = (
         priorStamp !== null &&
         priorStamp.verdict === "APPROVE";
 
-    const submission: SubmissionPlan = {
+    return stagePlan(fs, {
         event,
         body,
         skipSubmission,
@@ -670,12 +803,7 @@ export const runSubmissionCli = (
             : [],
         reasons: verdict.reasons,
         notes,
-    };
-    fs.writeFileSync(
-        `${REVIEW_DIR}/submission-plan.json`,
-        JSON.stringify(submission, null, 2),
-    );
-    return submission;
+    });
 };
 
 // Run only when executed directly (review.md Steps 4-6, scripted dispatch
