@@ -167,6 +167,14 @@ export type AgentDispatcherOptions = {
      * one really was paid for, so each is recorded.
      */
     recordSpend?: (name: string, usd: number) => void;
+    /**
+     * Disclose an attempt the spend ceiling cut. `budget-stop` is a dispatch
+     * that completed early because the per-turn probe said stop (its partial
+     * findings are kept, and the cut is disclosed); `run-failed` is a thrown
+     * attempt, which the caller attributes to the budget only when the
+     * ledger's abort signal is what killed it.
+     */
+    recordAborted?: (name: string, why: "budget-stop" | "run-failed") => void;
 };
 
 export type AgentDispatcher = {
@@ -201,6 +209,7 @@ export const createAgentDispatcher = (
         validatorFor,
         mayDispatch,
         recordSpend,
+        recordAborted,
     } = options;
 
     /**
@@ -332,6 +341,9 @@ export const createAgentDispatcher = (
                     : {}),
             });
             recordSpend?.(name, result.usd);
+            if (result.stoppedForBudget === true) {
+                recordAborted?.(name, "budget-stop");
+            }
             return result.output;
         } catch (error) {
             writeOut(
@@ -352,6 +364,7 @@ export const createAgentDispatcher = (
                     : {fellBackTo: modelOverride}),
                 failed: "run-failed",
             });
+            recordAborted?.(name, "run-failed");
             return null;
         }
     };

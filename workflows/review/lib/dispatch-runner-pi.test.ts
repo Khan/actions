@@ -596,6 +596,78 @@ describe("createPiRunner", () => {
         expect(stopped).toBe(true);
     });
 
+    it("stops at the turn boundary when onTurnCost says abort, and flags it", async () => {
+        // The per-turn budget probe: cost lands per turn_end, the probe sees
+        // the agent's cumulative spend, and an abort answer ends the loop at
+        // the turn boundary (shouldStopAfterTurn), flagged stoppedForBudget.
+        const probes: number[] = [];
+        let stopped = false;
+        loop = ({config, emit}) => {
+            const shouldStop = config["shouldStopAfterTurn"] as () => boolean;
+            emit(turnEnd('{"findings": []}', 5));
+            stopped = shouldStop();
+            if (!stopped) {
+                emit(turnEnd("second turn", 5));
+            }
+            return Promise.resolve([]);
+        };
+        const runner = await createPiRunner({
+            onTurnCost: (spent) => {
+                probes.push(spent);
+                return spent >= 5 ? "abort" : "continue";
+            },
+        });
+        const result = await runner(request());
+        expect(stopped).toBe(true);
+        expect(probes).toEqual([5]);
+        expect(result.stoppedForBudget).toBe(true);
+        expect(result.turns).toBe(1);
+        expect(result.usd).toBe(5);
+    });
+
+    it("never flags stoppedForBudget while the probe says continue", async () => {
+        loop = async ({emit}) => {
+            emit(turnEnd('{"findings": []}', 0.1));
+            return [];
+        };
+        const runner = await createPiRunner({onTurnCost: () => "continue"});
+        const result = await runner(request());
+        expect(result.stoppedForBudget).toBeUndefined();
+    });
+
+    it("aborts an in-flight request when the run-wide signal fires", async () => {
+        // The case onTurnCost cannot cover: the ledger's signal stops the
+        // siblings running beside the agent that crossed.
+        const controller = new AbortController();
+        loop = ({signal}) =>
+            new Promise((_resolve, reject) => {
+                signal?.addEventListener("abort", () => reject(signal.reason), {
+                    once: true,
+                });
+            });
+        const runner = await createPiRunner({
+            abortSignal: controller.signal,
+        });
+        const pending = runner(request());
+        controller.abort(new Error("review spend ceiling reached"));
+        await expect(pending).rejects.toThrow(/spend ceiling/);
+    });
+
+    it("hands a pre-aborted run signal to the loop already aborted", async () => {
+        const controller = new AbortController();
+        controller.abort(new Error("review spend ceiling reached"));
+        let sawAborted: boolean | undefined;
+        loop = async ({signal}) => {
+            sawAborted = signal?.aborted;
+            return [];
+        };
+        const runner = await createPiRunner({
+            abortSignal: () => controller.signal,
+        });
+        await runner(request());
+        expect(sawAborted).toBe(true);
+    });
+
     it("reports the turn cap as max_turns, not as a clean finish", async () => {
         // Out of turns and finished-with-prose otherwise return the same
         // shape, and `dispatch.ts` would spend its one re-dispatch correcting

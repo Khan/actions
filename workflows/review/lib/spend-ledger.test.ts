@@ -94,9 +94,23 @@ describe("createSpendLedger", () => {
         led.recordSpend("correctness-reviewer", 9);
         expect(led.mayDispatch("data-migrations")).toBe(false);
         const report = led.report();
+        // The completer is NOT shed: it ran to completion and its findings
+        // are kept, so listing it as cut would contradict the record. Only
+        // the refused dispatch appears.
         expect(report.sheds).toEqual([
-            {agent: "correctness-reviewer", atUsd: 9, kind: "aborted"},
             {agent: "data-migrations", atUsd: 9, kind: "refused"},
+        ]);
+    });
+
+    it("discloses the in-flight agents the crossing actually cut", () => {
+        const led = ledger();
+        led.recordSpend("correctness-reviewer", 9);
+        // The dispatcher reports each sibling the abort killed or the
+        // per-turn probe stopped; the ledger records them as the aborted
+        // sheds the disclosure names.
+        led.recordAborted("security-auth");
+        expect(led.report().sheds).toEqual([
+            {agent: "security-auth", atUsd: 9, kind: "aborted"},
         ]);
     });
 
@@ -108,14 +122,33 @@ describe("createSpendLedger", () => {
         expect(led.report().overshootUsd).toBe(3);
     });
 
-    it("aborts once, then keeps accumulating sheds without re-aborting", () => {
+    it("aborts once, then keeps accumulating spend without re-aborting", () => {
         const led = ledger();
         led.recordSpend("a", 9);
         const firstReason = led.signal.reason;
         led.recordSpend("b", 5);
         expect(led.signal.reason).toBe(firstReason);
-        expect(led.report().sheds).toHaveLength(2);
         expect(led.report().spentUsd).toBe(14);
+    });
+
+    it("lets the landing phase spend the reserve, gated by the full ceiling", () => {
+        const led = ledger(); // ceiling 10, reserve 2 (dispatch budget 8)
+        led.recordSpend("correctness-reviewer", 9);
+        // Crossed: the dispatch-phase signal fired and new fan-out work is
+        // refused.
+        expect(led.signal.aborted).toBe(true);
+        expect(led.mayDispatch("data-migrations")).toBe(false);
+        // Landing: the reserve funds validation. Fresh signal, gate moves to
+        // the full ceiling.
+        led.enterLanding();
+        expect(led.signal.aborted).toBe(false);
+        expect(led.mayDispatch("claim-validator")).toBe(true);
+        expect(led.wouldCross(0.5)).toBe(false);
+        // The full ceiling still binds: crossing it aborts the landing
+        // signal and refuses further work.
+        led.recordSpend("claim-validator", 1.5);
+        expect(led.signal.aborted).toBe(true);
+        expect(led.mayDispatch("thread-reconciler")).toBe(false);
     });
 
     it("measures without enforcing under the proxy-only rollback, loudly", () => {
@@ -132,7 +165,9 @@ describe("createSpendLedger", () => {
         const report = led.report();
         expect(report.enforcement).toBe("proxy-only");
         expect(report.crossed).toBe(true);
-        expect(report.sheds).toHaveLength(2);
+        // No sheds: every dispatch actually ran under the rollback, so a
+        // shed entry would disclose a cut that never happened.
+        expect(report.sheds).toHaveLength(0);
         // The bypass is never silent.
         expect(warnings.join(" ")).toContain("proxy-only");
     });

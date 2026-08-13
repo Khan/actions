@@ -346,6 +346,15 @@ export const runDispatch = async (
         validatorFor,
         mayDispatch: (name) => ledger.mayDispatch(name),
         recordSpend: (name, usd) => ledger.recordSpend(name, usd),
+        // The sheds disclosure names the agents the crossing actually cut: a
+        // budget-stop is always a cut (the per-turn probe ended it early); a
+        // failed attempt is one only when the ledger's signal is what killed
+        // it (any other failure has its own cause and its own disclosure).
+        recordAborted: (name, why) => {
+            if (why === "budget-stop" || ledger.signal.aborted) {
+                ledger.recordAborted(name);
+            }
+        },
     });
 
     // Phase 1: triage (full/scoped), staging pr.diff and review-files.json.
@@ -638,7 +647,12 @@ export const runDispatch = async (
         console.error(threadSuppressionUnavailable.warning);
     }
 
-    // Phase 3: claim validation.
+    // Phase 3: claim validation. The landing phase starts here: from this
+    // point the ledger gates against the FULL ceiling, so the landing reserve
+    // can fund the validation and posting it was held back for (gating the
+    // validator by the dispatch budget would leave the reserve as dead
+    // headroom and silently disable validation exactly on expensive runs).
+    ledger.enterLanding();
     let validatorRan = false;
     if (claims.length > 0) {
         fs.writeFileSync(
@@ -674,11 +688,20 @@ export const runDispatch = async (
     // the disclosure cannot disagree about what happened.
     const spend = ledger.report();
     for (const shed of spend.sheds) {
-        if (!skippedDimensions.some((skip) => skip.dimension === shed.agent)) {
+        const existing = skippedDimensions.find(
+            (skip) => skip.dimension === shed.agent,
+        );
+        if (existing === undefined) {
             skippedDimensions.push({
                 dimension: shed.agent,
                 cause: "budget",
             });
+        } else if (existing.cause === "unavailable") {
+            // The fan-out records a refused or aborted dispatch as a generic
+            // unavailable (a null output looks the same either way from
+            // there); the ledger knows the real cause, and "unavailable"
+            // on a budget cut is the wrong-agents disclosure defect.
+            existing.cause = "budget";
         }
     }
 
@@ -716,6 +739,19 @@ export const runDispatch = async (
               ]
             : []),
         ...spend.sheds.map((shed) => noteLine.budget(shed.agent, shed.kind)),
+        // The rollback posture is disclosed on the run itself: crossing with
+        // enforcement off cuts nothing (so there are no sheds to say so), but
+        // a reader must still be able to tell this run overspent its in-code
+        // ceiling and was allowed to.
+        ...(spend.crossed && spend.enforcement === "proxy-only"
+            ? [
+                  `Note: this run crossed the in-code spend ceiling ($${spend.spentUsd.toFixed(
+                      2,
+                  )} of $${spend.ceilingUsd.toFixed(
+                      2,
+                  )}) with enforcement rolled back to proxy-only; nothing was cut.`,
+              ]
+            : []),
     ];
 
     const result: DispatchResult = {
@@ -781,7 +817,10 @@ if (typeof require !== "undefined" && require.main === module) {
         const runner = await createPiRunner({
             onTurnCost: (agentSpentUsd) =>
                 ledger.wouldCross(agentSpentUsd) ? "abort" : "continue",
-            abortSignal: ledger.signal,
+            // A thunk, not a captured value: the ledger swaps signals when
+            // the landing phase starts, and a landing dispatch wired to the
+            // already-fired dispatch-phase signal would be born aborted.
+            abortSignal: () => ledger.signal,
         });
         const repoRoot =
             process.env.REVIEW_REPO_ROOT ?? process.env.GITHUB_WORKSPACE ?? ".";

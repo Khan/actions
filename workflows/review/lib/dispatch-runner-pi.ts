@@ -624,8 +624,12 @@ export type PiRunnerOptions = {
      * cover: that probe only stops the agent doing the spending, while this
      * stops the siblings already in flight beside it. Without it, "crossing
      * aborts in-flight agents" would be true only of the agent that crossed.
+     *
+     * A thunk is accepted because the ledger's signal is phase-dependent (the
+     * landing phase swaps in a fresh signal so reserve-funded dispatches are
+     * not born aborted); it is resolved once per request.
      */
-    abortSignal?: AbortSignal;
+    abortSignal?: AbortSignal | (() => AbortSignal | undefined);
 };
 
 export const createPiRunner = async (
@@ -677,7 +681,10 @@ export const createPiRunner = async (
         const abort = new AbortController();
         // Link the run-wide abort in both directions in time: already-aborted
         // means never start, and aborting later means stop now.
-        const runAbort = options.abortSignal;
+        const runAbort =
+            typeof options.abortSignal === "function"
+                ? options.abortSignal()
+                : options.abortSignal;
         if (runAbort?.aborted === true) {
             abort.abort(runAbort.reason);
         } else {

@@ -135,7 +135,7 @@ export type SpendLedgerOptions = {
      * flag is read ONCE at construction: an enforcement posture that could
      * change mid-run is not a posture.
      */
-    env?: {[key: string]: string | undefined};
+    env?: Record<string, string | undefined>;
     /** Where the loud rollback notice goes. Defaults to stderr. */
     warn?: (message: string) => void;
 };
@@ -150,8 +150,26 @@ export type SpendLedger = {
      * would either double count the same dollars or need per-attempt identity
      * the runner does not have, and the failure mode of getting that wrong is
      * a ceiling that is quietly off by a factor.
+     *
+     * Crossing here records NO shed for the recording agent: it ran to
+     * completion and its findings are kept, so listing it as cut would make
+     * the record contradict itself. The agents the crossing actually cuts are
+     * disclosed through {@link SpendLedger.recordAborted}.
      */
     recordSpend: (agent: string, usd: number) => void;
+    /**
+     * Disclose one agent the crossing actually cut: stopped at a turn
+     * boundary by the per-turn probe, or killed in flight by the abort
+     * signal. Called by the dispatcher, which is the only party that knows
+     * which attempt died and why.
+     */
+    recordAborted: (agent: string) => void;
+    /**
+     * Enter the landing phase: the reviewer fan-out is over, and from here on
+     * the gates compare against the FULL ceiling, so the landing reserve can
+     * fund the validation it was held back for. One-way, once per run.
+     */
+    enterLanding: () => void;
     /**
      * Mid-flight probe: would an agent that has spent `inFlightUsd` so far push
      * the run past its budget? Read-only, so calling it cannot disturb the
@@ -170,8 +188,15 @@ export type SpendLedger = {
      * disclosed differently.
      */
     mayDispatch: (agent: string) => boolean;
-    /** Aborted when the budget is crossed; wired into in-flight requests. */
-    signal: AbortSignal;
+    /**
+     * Aborted when the CURRENT phase's budget is crossed; wired into
+     * in-flight requests. A property getter on purpose: the dispatch-phase
+     * signal fires at `ceiling - reserve` and must not kill the landing
+     * dispatches the reserve exists to fund, so entering the landing phase
+     * swaps in a fresh signal that fires only at the full ceiling. Consumers
+     * that need the live value must read it per request, not capture it once.
+     */
+    readonly signal: AbortSignal;
     spentUsd: () => number;
     report: () => SpendReport;
 };
@@ -199,22 +224,34 @@ export const createSpendLedger = (
         );
     }
 
-    const controller = new AbortController();
+    const dispatchController = new AbortController();
+    const landingController = new AbortController();
     const sheds: SpendShed[] = [];
     let spentUsd = 0;
     let overshootUsd = 0;
     let crossed = false;
+    let phase: "dispatch" | "landing" = "dispatch";
 
-    /** Cross once: the first crossing aborts, later ones just accumulate. */
-    const cross = (agent: string, kind: SpendShed["kind"]): void => {
+    /** The reserve the CURRENT phase still holds back (landing spends it). */
+    const reserveNow = (): number =>
+        phase === "landing" ? 0 : landingReserveUsd;
+
+    /**
+     * Note a crossing of the current phase's budget: track overshoot (always
+     * against the dispatch budget, the report's denominator), and abort the
+     * phase's controller. No shed is recorded here; who was actually cut is
+     * the dispatcher's knowledge ({@link SpendLedger.recordAborted}).
+     */
+    const noteCrossing = (): void => {
         const budget = Math.max(0, ceilingUsd - landingReserveUsd);
         overshootUsd = Math.max(overshootUsd, spentUsd - budget);
-        sheds.push({agent, atUsd: spentUsd, kind});
-        if (crossed) {
+        crossed = true;
+        if (enforcement !== "in-code") {
             return;
         }
-        crossed = true;
-        if (enforcement === "in-code") {
+        const controller =
+            phase === "landing" ? landingController : dispatchController;
+        if (!controller.signal.aborted) {
             controller.abort(
                 new Error(
                     `review spend ceiling reached: $${spentUsd.toFixed(
@@ -222,7 +259,7 @@ export const createSpendLedger = (
                     )} of ` +
                         `$${ceilingUsd.toFixed(2)} (dispatch budget ` +
                         `$${budget.toFixed(2)}, landing reserve ` +
-                        `$${landingReserveUsd.toFixed(2)})`,
+                        `$${landingReserveUsd.toFixed(2)}, phase ${phase})`,
                 ),
             );
         }
@@ -230,10 +267,17 @@ export const createSpendLedger = (
 
     return {
         recordSpend: (agent, usd) => {
+            void agent; // The completer is not shed; see the type's doc.
             spentUsd += Math.max(0, usd);
-            if (decideSpend(spentUsd, ceilingUsd, landingReserveUsd).crossed) {
-                cross(agent, "aborted");
+            if (decideSpend(spentUsd, ceilingUsd, reserveNow()).crossed) {
+                noteCrossing();
             }
+        },
+        recordAborted: (agent) => {
+            sheds.push({agent, atUsd: spentUsd, kind: "aborted"});
+        },
+        enterLanding: () => {
+            phase = "landing";
         },
         wouldCross: (inFlightUsd) => {
             if (enforcement !== "in-code") {
@@ -242,22 +286,29 @@ export const createSpendLedger = (
             return decideSpend(
                 spentUsd + Math.max(0, inFlightUsd),
                 ceilingUsd,
-                landingReserveUsd,
+                reserveNow(),
             ).crossed;
         },
         mayDispatch: (agent) => {
-            const decision = decideSpend(
-                spentUsd,
-                ceilingUsd,
-                landingReserveUsd,
-            );
+            const decision = decideSpend(spentUsd, ceilingUsd, reserveNow());
             if (decision.allowed) {
                 return true;
             }
-            cross(agent, "refused");
-            return enforcement !== "in-code";
+            noteCrossing();
+            if (enforcement !== "in-code") {
+                // Rollback mode: the dispatch proceeds, so recording it as a
+                // shed would disclose a cut that never happened. The report
+                // still says crossed, which is the honest record.
+                return true;
+            }
+            sheds.push({agent, atUsd: spentUsd, kind: "refused"});
+            return false;
         },
-        signal: controller.signal,
+        get signal() {
+            return (
+                phase === "landing" ? landingController : dispatchController
+            ).signal;
+        },
         spentUsd: () => spentUsd,
         report: () => ({
             schemaVersion: 1,
