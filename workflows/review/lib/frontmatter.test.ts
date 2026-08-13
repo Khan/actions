@@ -91,6 +91,21 @@ describe("reading a gh-aw workflow's frontmatter", () => {
         ]);
     });
 
+    // YAML allows a block sequence at the parent key's own indentation; a
+    // hand-restyled but valid install must not read as import-less (a false
+    // error, the checker's worst failure mode).
+    it("reads same-indent list items directly after the key", () => {
+        const restyled = block(
+            "---\nimports:\n- .github/aw/review/config.md\n- other.md\nsource: x@y\n---\n",
+        );
+        expect(items(nested(restyled, "imports") ?? [])).toEqual([
+            ".github/aw/review/config.md",
+            "other.md",
+        ]);
+        // The same-indent `source:` key still ends the block.
+        expect(scalar(restyled, "source")).toBe("x@y");
+    });
+
     it("treats a commented-out block as absent", () => {
         expect(hasKey(lines, "observability")).toBe(false);
     });

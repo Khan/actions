@@ -191,6 +191,13 @@ invented to satisfy the check. And `agentics-maintenance.yml` is `gh aw compile`
 output that is *not* named `*.lock.yml`, so the marker every consumer was told to add
 misses it, and ~600 generated lines get line-reviewed until it has its own.
 
+Follow-up, not yet built: the failure class the checker targets (config failing
+late and quietly) recurs on every later edit to ROUTING or `config.md`, not just
+at onboarding. `checkConsumerConfig` is pure with an injected filesystem and
+already ships `--json` and `--strict`, so a consumer CI job gating PRs that
+touch the config paths is the natural next layer; nothing in the checker
+blocks it.
+
 ## Consumer configuration
 
 The workflow imports the following files **from the consuming repo** (they resolve

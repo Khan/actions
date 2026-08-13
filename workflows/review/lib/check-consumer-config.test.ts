@@ -10,7 +10,7 @@ import {
     REQUIRED_RUNTIME_IMPORTS,
     renderReport,
 } from "./check-consumer-config.ts";
-import type {FsLike} from "./check-consumer-config.ts";
+import type {ConsumerConfigFs} from "./check-consumer-config.ts";
 import {ROUTING_CONFIG_PATH} from "./routing-config.ts";
 import {REVIEWERS_PATH} from "./router.ts";
 
@@ -26,7 +26,7 @@ import {REVIEWERS_PATH} from "./router.ts";
  */
 
 /** In-memory fs. A directory "exists" when some key sits beneath it. */
-const fakeFs = (inputs: Record<string, string>): FsLike => ({
+const fakeFs = (inputs: Record<string, string>): ConsumerConfigFs => ({
     readFileSync: (p: string): string => {
         const content = inputs[p];
         if (content === undefined) {
@@ -56,6 +56,8 @@ safe-outputs:
   submit-pull-request-review:
     max: 1
 max-ai-credits: 2500
+env:
+  REVIEW_MAX_AI_CREDITS: "2500"
 source: Khan/actions/workflows/review/review.md@review-v1.11.0
 ---
 
@@ -330,6 +332,9 @@ describe("labelled local edits", () => {
         inputs[INSTALLED_WORKFLOW_PATH] = WORKFLOW_MD.replace(
             "max-ai-credits: 2500",
             'max-ai-credits: "1000"',
+        ).replace(
+            'REVIEW_MAX_AI_CREDITS: "2500"',
+            'REVIEW_MAX_AI_CREDITS: "1000"',
         );
         expect(codes(check(inputs), "warning")).toEqual([
             "max-ai-credits-default",
@@ -351,6 +356,38 @@ describe("the compiled lock", () => {
         const inputs = validInstall();
         delete inputs[INSTALLED_LOCK_PATH];
         expect(codes(check(inputs), "error")).toEqual(["lock-missing"]);
+    });
+
+    // Cause-then-effect: a missing lock is the error above, not additionally
+    // a nag to mark the nonexistent file as generated (which would also flip
+    // the --strict exit code).
+    it("does not ask a lock-less repo to mark the lock generated", () => {
+        const inputs = validInstall();
+        delete inputs[INSTALLED_LOCK_PATH];
+        delete inputs[".gitattributes"];
+        expect(codes(check(inputs), "warning")).not.toContain(
+            "lock-not-marked-generated",
+        );
+    });
+
+    it("derives the lock path from a renamed --workflow and checks it", () => {
+        const renamed = ".github/workflows/pr-review.md";
+        const inputs = validInstall();
+        inputs[renamed] = inputs[INSTALLED_WORKFLOW_PATH];
+        delete inputs[INSTALLED_WORKFLOW_PATH];
+        delete inputs[INSTALLED_LOCK_PATH];
+        // Lock absent under the derived name: the error names it.
+        const missing = check(inputs, {workflowPath: renamed});
+        expect(codes(missing, "error")).toEqual(["lock-missing"]);
+        expect(
+            missing.issues.find((issue) => issue.code === "lock-missing")
+                ?.message,
+        ).toContain(".github/workflows/pr-review.lock.yml");
+        // Lock present under the derived name (and marked generated): quiet.
+        inputs[".github/workflows/pr-review.lock.yml"] = "# compiled\n";
+        expect(codes(check(inputs, {workflowPath: renamed}), "error")).toEqual(
+            [],
+        );
     });
 
     it("warns when the lock is not marked linguist-generated", () => {
@@ -406,6 +443,77 @@ describe("the pinned source", () => {
     });
 });
 
+describe("the source field", () => {
+    it("warns when review.md carries no source: field at all", () => {
+        const inputs = validInstall();
+        inputs[INSTALLED_WORKFLOW_PATH] = WORKFLOW_MD.replace(
+            /^source: .*$\n/m,
+            "",
+        );
+        expect(codes(check(inputs), "warning")).toEqual(["source-missing"]);
+    });
+});
+
+describe("the credit-cap mirror", () => {
+    it("warns when the env mirror is missing while the cap is raised", () => {
+        const inputs = validInstall();
+        inputs[INSTALLED_WORKFLOW_PATH] = WORKFLOW_MD.replace(
+            /^env:\n {2}REVIEW_MAX_AI_CREDITS: "2500"\n/m,
+            "",
+        );
+        const report = check(inputs);
+        expect(codes(report, "warning")).toEqual([
+            "max-ai-credits-mirror-stale",
+        ]);
+        expect(
+            report.issues.find(
+                (issue) => issue.code === "max-ai-credits-mirror-stale",
+            )?.message,
+        ).toContain("no REVIEW_MAX_AI_CREDITS env mirror");
+    });
+
+    it("warns when the mirror disagrees with the frontmatter cap", () => {
+        const inputs = validInstall();
+        inputs[INSTALLED_WORKFLOW_PATH] = WORKFLOW_MD.replace(
+            'REVIEW_MAX_AI_CREDITS: "2500"',
+            'REVIEW_MAX_AI_CREDITS: "1000"',
+        );
+        const report = check(inputs);
+        expect(codes(report, "warning")).toEqual([
+            "max-ai-credits-mirror-stale",
+        ]);
+        expect(
+            report.issues.find(
+                (issue) => issue.code === "max-ai-credits-mirror-stale",
+            )?.message,
+        ).toContain("says 1000");
+    });
+});
+
+describe("the shipped credit ceiling", () => {
+    it("compares against the live shipped value when the CLI provides one", () => {
+        // The shipped ceiling rose to meet the consumer's: the default warning
+        // fires again, instead of comparing against the stale constant.
+        const report = check(validInstall(), {shippedMaxAiCredits: 2500});
+        expect(codes(report, "warning")).toContain("max-ai-credits-default");
+    });
+});
+
+describe("lens payloads", () => {
+    it("forwards the real lens-payload warnings", () => {
+        const inputs = validInstall();
+        // A specialist-lens payload no ROUTING rule routes: inert.
+        inputs[".github/aw/review/lenses/security-auth.md"] =
+            "### security-auth - extra rules\n";
+        const report = check(inputs);
+        expect(codes(report, "warning")).toContain("lens-payload-warning");
+        expect(
+            report.issues.find((issue) => issue.code === "lens-payload-warning")
+                ?.message,
+        ).toContain("inert");
+    });
+});
+
 describe("local edits the README prescribes", () => {
     it("warns when the observability block is live", () => {
         const inputs = validInstall();
@@ -423,6 +531,9 @@ describe("local edits the README prescribes", () => {
         inputs[INSTALLED_WORKFLOW_PATH] = WORKFLOW_MD.replace(
             "max-ai-credits: 2500",
             "max-ai-credits: 1000",
+        ).replace(
+            'REVIEW_MAX_AI_CREDITS: "2500"',
+            'REVIEW_MAX_AI_CREDITS: "1000"',
         );
         expect(codes(check(inputs), "warning")).toEqual([
             "max-ai-credits-default",

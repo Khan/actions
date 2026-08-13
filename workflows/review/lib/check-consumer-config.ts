@@ -120,6 +120,11 @@ export const COPILOT_SCAFFOLDING = [
  * The `max-ai-credits` the shared workflow ships. Both known consumers raise it:
  * `tier=high` runs have died at ~1001-1024 metered credits *after* computing a
  * verdict but before posting it.
+ *
+ * FALLBACK ONLY: the CLI reads the live value from this checkout's own
+ * `review.md` and passes it as `options.shippedMaxAiCredits`; this constant is
+ * used when that read fails, so a release that raises the shipped ceiling does
+ * not silently strand the check on a stale number.
  */
 export const SHIPPED_MAX_AI_CREDITS = 1000;
 
@@ -152,6 +157,8 @@ export type InstalledWorkflow = {
     /** True when the main workflow also defines `add-reviewer` (overrides the import). */
     definesAddReviewer: boolean;
     maxAiCredits?: number;
+    /** The `env.REVIEW_MAX_AI_CREDITS` mirror `resolveCreditCap` reads. */
+    creditMirror?: number;
     /** True when the `observability:` block is live (not commented out). */
     observabilityActive: boolean;
 };
@@ -225,7 +232,7 @@ const SAMPLE_LIMIT = 5;
 /* -------------------------------------------------------------------------- */
 
 /** The filesystem surface this module needs (injected, so tests stay in memory). */
-export type FsLike = {
+export type ConsumerConfigFs = {
     readFileSync: (p: string, enc: "utf8") => string;
     existsSync: (p: string) => boolean;
     readdirSync: (p: string) => string[];
@@ -246,6 +253,14 @@ export type CheckOptions = {
      * validated here are this version's, not the one their PRs will run.
      */
     checkerVersion?: string;
+    /**
+     * The `max-ai-credits` the shared workflow ships, read from the checker's
+     * own checkout of `workflows/review/review.md` (the CLI does this). Falls
+     * back to {@link SHIPPED_MAX_AI_CREDITS} so a release that raises the
+     * shipped ceiling cannot leave the check comparing against a stale
+     * constant.
+     */
+    shippedMaxAiCredits?: number;
 };
 
 const emptyTierRecord = <T>(make: () => T): Record<RiskTier, T> => ({
@@ -255,7 +270,10 @@ const emptyTierRecord = <T>(make: () => T): Record<RiskTier, T> => ({
     high: make(),
 });
 
-const readInstalledWorkflow = (fs: FsLike, path: string): InstalledWorkflow => {
+const readInstalledWorkflow = (
+    fs: ConsumerConfigFs,
+    path: string,
+): InstalledWorkflow => {
     if (!fs.existsSync(path)) {
         return {
             present: false,
@@ -278,6 +296,11 @@ const readInstalledWorkflow = (fs: FsLike, path: string): InstalledWorkflow => {
 
     const imports = nested(lines, "imports") ?? [];
     const credits = scalar(lines, "max-ai-credits");
+    // The env mirror the run budget actually reads (resolveCreditCap in
+    // credit-cap.ts): the frontmatter cap is enforced proxy-side and invisible
+    // to the agent process, so the two must agree or the router plans at the
+    // stale ceiling.
+    const mirror = scalar(nested(lines, "env") ?? [], "REVIEW_MAX_AI_CREDITS");
 
     return {
         present: true,
@@ -290,11 +313,15 @@ const readInstalledWorkflow = (fs: FsLike, path: string): InstalledWorkflow => {
         definesAddReviewer:
             nestedPath(lines, ["safe-outputs", "add-reviewer"]) !== undefined,
         maxAiCredits: credits === undefined ? undefined : Number(credits),
+        creditMirror: mirror === undefined ? undefined : Number(mirror),
         observabilityActive: hasKey(lines, "observability"),
     };
 };
 
-const readReviewerRouting = (fs: FsLike, path: string): ReviewerRouting => {
+const readReviewerRouting = (
+    fs: ConsumerConfigFs,
+    path: string,
+): ReviewerRouting => {
     if (!fs.existsSync(path)) {
         return {
             present: false,
@@ -331,7 +358,7 @@ const readReviewerRouting = (fs: FsLike, path: string): ReviewerRouting => {
  * rendered separately.
  */
 export const checkConsumerConfig = (
-    fs: FsLike,
+    fs: ConsumerConfigFs,
     options: CheckOptions = {},
 ): ConsumerConfigReport => {
     const repoRoot = options.repoRoot ?? ".";
@@ -426,7 +453,7 @@ export const checkConsumerConfig = (
     ) {
         warn(
             "re-review-full",
-            "ROUTING sets no `re-review` mode, so every push re-runs the whole roster over the whole diff (the most expensive setting).",
+            "Re-review mode is `full` (the default, and the most expensive setting; the parser cannot tell an explicit `re-review full` from an absent line): every push re-runs the whole roster over the whole diff.",
             "`re-review scoped` is the recommended first step down; see the README's re-review table.",
         );
     }
@@ -535,14 +562,32 @@ export const checkConsumerConfig = (
                 "Confirm both secrets exist, or comment the block out as a local edit and recompile.",
             );
         }
+        const shippedCredits =
+            options.shippedMaxAiCredits ?? SHIPPED_MAX_AI_CREDITS;
         if (
             installed.maxAiCredits !== undefined &&
-            installed.maxAiCredits <= SHIPPED_MAX_AI_CREDITS
+            installed.maxAiCredits <= shippedCredits
         ) {
             warn(
                 "max-ai-credits-default",
                 `max-ai-credits is ${installed.maxAiCredits}: runs that route to tier=high have died at ~1001-1024 metered credits after computing a verdict but before posting it.`,
                 "Both known consumers raise it to 2500 (a ceiling, not a spend) in review.md and its REVIEW_MAX_AI_CREDITS mirror.",
+            );
+        }
+        // The frontmatter cap is enforced by the firewall api-proxy; the run
+        // budget reads only the env mirror (resolveCreditCap). A raised cap
+        // with a stale or missing mirror still PLANS at the old ceiling: the
+        // exact late-and-quiet failure this checker exists to catch.
+        if (
+            installed.maxAiCredits !== undefined &&
+            installed.creditMirror !== installed.maxAiCredits
+        ) {
+            warn(
+                "max-ai-credits-mirror-stale",
+                installed.creditMirror === undefined
+                    ? `max-ai-credits is ${installed.maxAiCredits} but the frontmatter sets no REVIEW_MAX_AI_CREDITS env mirror; the router reads only the mirror, so runs plan against the shipped default instead of the raised cap.`
+                    : `max-ai-credits is ${installed.maxAiCredits} but its REVIEW_MAX_AI_CREDITS env mirror says ${installed.creditMirror}; the router reads only the mirror, so the two must agree.`,
+                `Set env.REVIEW_MAX_AI_CREDITS to "${installed.maxAiCredits}" in the same frontmatter (KEEP THE TWO VALUES IN SYNC, per the shipped review.md).`,
             );
         }
     }
@@ -620,7 +665,12 @@ export const checkConsumerConfig = (
               fs.readFileSync(at(GITATTRIBUTES_PATH), "utf8"),
           )
         : [];
-    if (!isGenerated(lockPath, generatedRules)) {
+    // Guarded on the lock actually existing: a repo with no reviewer installed
+    // (or one the errors above just told has no lock) should not additionally
+    // be told to mark a nonexistent file as generated — the report reads
+    // cause-then-effect, and under --strict the extra warning would flip the
+    // exit code.
+    if (installed.lockPresent && !isGenerated(lockPath, generatedRules)) {
         warn(
             "lock-not-marked-generated",
             `${lockPath} is not marked \`linguist-generated\` in ${GITATTRIBUTES_PATH}, so the reviewer line-reviews its own compiled output.`,
@@ -874,7 +924,7 @@ export const parseArgs = (
 
 const main = (): void => {
     /* eslint-disable-next-line no-undef */
-    const nodeFs = require("node:fs") as FsLike & {
+    const nodeFs = require("node:fs") as ConsumerConfigFs & {
         readFileSync: (p: string | number, enc: "utf8") => string;
     };
     const args = parseArgs(process.argv.slice(2));
@@ -902,12 +952,31 @@ const main = (): void => {
         checkerVersion = undefined;
     }
 
+    // The ceiling the shared workflow ships, read from this checkout's own
+    // review.md so a release that raises it cannot strand the hardcoded
+    // fallback constant.
+    let shippedMaxAiCredits: number | undefined;
+    try {
+        const shipped = frontmatterBlock(
+            nodeFs.readFileSync(`${__dirname}/../review.md`, "utf8"),
+        );
+        const raw =
+            shipped === undefined
+                ? undefined
+                : scalar(yamlLines(shipped), "max-ai-credits");
+        const parsed = raw === undefined ? NaN : Number(raw);
+        shippedMaxAiCredits = Number.isFinite(parsed) ? parsed : undefined;
+    } catch {
+        shippedMaxAiCredits = undefined;
+    }
+
     const report = checkConsumerConfig(nodeFs, {
         repoRoot: args.repoRoot,
         files,
         explainPath: args.explainPath,
         workflowPath: args.workflowPath,
         checkerVersion,
+        shippedMaxAiCredits,
     });
 
     process.stdout.write(

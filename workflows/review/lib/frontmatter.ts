@@ -119,7 +119,14 @@ export const yamlLines = (block: string): YamlLine[] =>
 const baseIndent = (lines: readonly YamlLine[]): number =>
     Math.min(...lines.map((line) => line.indent));
 
-/** The lines nested under `key` at this block's own indent level. */
+/**
+ * The lines nested under `key` at this block's own indent level. A `- item`
+ * line at the SAME indent as the key, directly after it, also belongs to the
+ * key: YAML allows a block sequence at the parent key's indentation, so
+ * `imports:` followed by an unindented `- …` is a valid spelling of a working
+ * install, and reading it as absent would raise a false error (this checker's
+ * worst failure mode). A same-indent `key:` line still ends the block.
+ */
 export const nested = (
     lines: readonly YamlLine[],
     key: string,
@@ -131,12 +138,14 @@ export const nested = (
     for (let i = 0; i < lines.length; i++) {
         if (lines[i].indent === base && lines[i].key === key) {
             const out: YamlLine[] = [];
-            for (
-                let j = i + 1;
-                j < lines.length && lines[j].indent > base;
-                j++
-            ) {
-                out.push(lines[j]);
+            for (let j = i + 1; j < lines.length; j++) {
+                const line = lines[j];
+                const sameIndentItem =
+                    line.indent === base && line.item !== undefined;
+                if (line.indent <= base && !sameIndentItem) {
+                    break;
+                }
+                out.push(line);
             }
             return out;
         }
