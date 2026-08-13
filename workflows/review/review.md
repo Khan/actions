@@ -323,7 +323,9 @@ post-steps:
 # Deliberately NOT solved by pinning `sandbox.agent.version: v0.27.43`: the
 # sandbox block above documents that a version is re-pinned here only to hold a
 # firewall release BACK, never to move one forward, and a forward pin would
-# recreate the stale-floor failure that broke run 30290472047. Khan bills Anthropic list minus 50%, but the firewall api-proxy meters
+# recreate the stale-floor failure that broke run 30290472047.
+#
+# WHY THE OVERLAY: Khan bills Anthropic list minus 50%, but the firewall api-proxy meters
 # credits against a list-price catalog baked into its image, so every dollar
 # figure downstream (the caps below, the router's `maxUsd` soft targets, the
 # cost counters) reads 2x high and a run is cut off at half the real spend its
@@ -376,6 +378,15 @@ models:
             output: "2.5e-05"
             cache_read: "5e-07"
             cache_write: "6.25e-06"
+        # The pattern-triage sub-agent's pin (the cheap first pass; see its
+        # `model:` line below). Not an engine model, but dispatched inside
+        # the sandboxed agent step and metered by the same api-proxy.
+        claude-sonnet-4-6:
+          cost:
+            input: "1.5e-06"
+            output: "7.5e-06"
+            cache_read: "1.5e-07"
+            cache_write: "1.875e-06"
 
 # Cost guardrails (AI credits; 1 credit = $0.01 of real spend, given the
 # pricing overlay above). gh-aw >= v0.79 bakes in
