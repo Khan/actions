@@ -55,6 +55,7 @@ import {
 } from "../lib/dispatch-runner-pi";
 import {extractAgents} from "./agent-extract";
 import {loadLiveCorpus} from "./corpus/loader";
+import {runCli} from "./exit-when-flushed";
 import {matchCase} from "./live-match";
 import {produceLive, type LiveAgentRunner} from "./live-producer";
 import {runCase} from "./runner";
@@ -214,20 +215,9 @@ const main = async (): Promise<void> => {
     );
 };
 
-/** See live-ab.ts: srt's proxy keeps the loop alive, so exit explicitly. */
-const exitWhenFlushed = (code: number): void => {
-    const done = (): never => process.exit(code);
-    setTimeout(done, 2000).unref();
-    process.stdout.write("", done);
-};
-
-// CLI entry point (mirrors live-runner.ts): run when executed, not imported.
+// srt's proxy keeps the loop alive, so exit explicitly through the shared
+// drain path. CLI entry point (mirrors live-runner.ts): run when executed,
+// not imported.
 if (process.argv[1]?.endsWith("harness-probe.ts")) {
-    main().then(
-        () => exitWhenFlushed(0),
-        (error: unknown) => {
-            console.error(error);
-            exitWhenFlushed(1);
-        },
-    );
+    runCli(main);
 }

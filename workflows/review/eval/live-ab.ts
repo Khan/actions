@@ -78,6 +78,7 @@ import {
     type GateRetryAttempt,
     type MultiAbReport,
 } from "./live-ab-report";
+import {runCli} from "./exit-when-flushed";
 import {
     computeLiveMetrics,
     matchCase,
@@ -813,24 +814,11 @@ const main = async (): Promise<void> => {
  * 30877187141 each scored all nine cases on both arms, wrote their report, and
  * were then killed by the job timeout with the work already finished.
  *
- * Draining first, rather than a bare process.exit: Actions gives this process a
- * pipe, pipe writes are asynchronous, and exiting over a buffered write
- * truncates the tail of the very report the job exists to produce. The unref'd
- * fallback covers a drain callback that never fires.
+ * The drain-then-exit mechanics live in exit-when-flushed.ts (shared with
+ * sandbox-smoke and harness-probe).
  */
-const exitWhenFlushed = (code: number): void => {
-    const done = (): never => process.exit(code);
-    setTimeout(done, 2000).unref();
-    process.stdout.write("", done);
-};
 
 // CLI entry point (mirrors live-runner.ts): run when executed, not imported.
 if (process.argv[1]?.endsWith("live-ab.ts")) {
-    main().then(
-        () => exitWhenFlushed(0),
-        (error: unknown) => {
-            console.error(error);
-            exitWhenFlushed(1);
-        },
-    );
+    runCli(main);
 }

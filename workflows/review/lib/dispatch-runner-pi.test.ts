@@ -12,6 +12,7 @@ import {
     createSubmitTool,
     finalText,
     makeSandboxedExec,
+    plainExec,
     rejectStaleRunnerSelection,
     resolveModelId,
     shellQuote,
@@ -301,6 +302,33 @@ describe("createReviewTools", () => {
         expect(result?.content[0].text).toBe("(no output)");
         expect(result?.isError).toBeUndefined();
     });
+
+    it("reports a spawn failure as a failure, unlike a plain non-zero exit", async () => {
+        // The classification boundary: grep's exit 1 (numeric code) is an
+        // ordinary miss above; a binary that cannot start has no exit code
+        // and IS a failure the model needs to see.
+        const out = await plainExec(["definitely-not-a-real-binary-5f3a"], ".");
+        expect(out).toMatch(/^command failed: /);
+        expect(out).toContain("ENOENT");
+    });
+
+    it("never windows a failed Read: the error survives verbatim", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "pi-runner-"));
+        const read = createReviewTools(dir).find(
+            (tool) => tool.name === "Read",
+        );
+        const result = await read?.execute("1", {
+            path: "missing.ts",
+            offset: 40,
+            limit: 5,
+        });
+        const text = result?.content[0].text ?? "";
+        // Windowing cat's stderr to line 40 would bury the error behind
+        // "(no lines in window…)".
+        expect(text).toContain("missing.ts");
+        expect(text).toMatch(/No such file/);
+        expect(text).not.toContain("no lines in window");
+    });
 });
 
 describe("windowLines", () => {
@@ -383,6 +411,29 @@ describe("makeSandboxedExec", () => {
                 }),
         });
         expect(await exec(["ignored"], ".")).toBe("sandboxed");
+    });
+
+    it("scrubs credentials from the subprocess environment", async () => {
+        // The sandbox is a mount/network boundary, not an env boundary: srt's
+        // env extends process.env, so without the scrub a prompt-injected
+        // `env` through Bash reads every secret the runner holds.
+        const exec = makeSandboxedExec({
+            initialize: () => Promise.resolve(),
+            wrapWithSandboxArgv: () =>
+                Promise.resolve({
+                    argv: [
+                        "bash",
+                        "-c",
+                        'printf %s "${ANTHROPIC_API_KEY:-scrubbed}:${KEEP_ME:-lost}"',
+                    ],
+                    env: {
+                        ...process.env,
+                        ANTHROPIC_API_KEY: "sk-secret",
+                        KEEP_ME: "kept",
+                    },
+                }),
+        });
+        expect(await exec(["ignored"], ".")).toBe("scrubbed:kept");
     });
 });
 

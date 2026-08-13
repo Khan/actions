@@ -316,6 +316,32 @@ type SandboxWrapper = {
  * srt wrap it in the platform sandbox, and spawn the wrapped argv with the
  * environment srt asks for.
  */
+/**
+ * Credentials scrubbed from every sandboxed tool subprocess. The sandbox is a
+ * mount/network boundary, not an environment boundary: spawn defaults to
+ * process.env and srt's returned env extends it, so without this a
+ * prompt-injected `env` through Bash reads every secret the runner holds.
+ * Model traffic leaves from the runner process, so no tool needs a
+ * credential.
+ */
+export const SCRUBBED_ENV_KEYS = [
+    "ANTHROPIC_API_KEY",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "GITHUB_MCP_SERVER_TOKEN",
+    "MCP_GATEWAY_API_KEY",
+] as const;
+
+const scrubSecrets = (
+    env: Record<string, string | undefined>,
+): Record<string, string | undefined> => {
+    const out = {...env};
+    for (const key of SCRUBBED_ENV_KEYS) {
+        delete out[key];
+    }
+    return out;
+};
+
 export const makeSandboxedExec =
     (sandbox: SandboxWrapper): ToolExec =>
     async (argv, cwd, signal) => {
@@ -326,7 +352,12 @@ export const makeSandboxedExec =
             signal,
             cwd,
         );
-        return spawn(wrapped.argv, cwd, wrapped.env, signal);
+        return spawn(
+            wrapped.argv,
+            cwd,
+            scrubSecrets(wrapped.env ?? process.env),
+            signal,
+        );
     };
 
 const schema = (
@@ -383,7 +414,17 @@ export const createReviewTools = (
         execute: async (_id, params, signal) => {
             const path = String(params["path"] ?? "");
             const out = await exec(["cat", "-n", "--", path], cwd, signal);
-            return ok(windowLines(out, params["offset"], params["limit"]));
+            // The exec seam resolves failures as ordinary text ("command
+            // failed: …", or cat's own stderr). Never window those: slicing
+            // an error message to an offset deep in a file the read never
+            // opened masks the actual error behind "(no lines in window…)".
+            const failed =
+                out.startsWith("command failed: ") || /^\s*cat: /.test(out);
+            return ok(
+                failed
+                    ? out
+                    : windowLines(out, params["offset"], params["limit"]),
+            );
         },
     },
     {

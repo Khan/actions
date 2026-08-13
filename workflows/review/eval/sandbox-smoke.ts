@@ -64,6 +64,7 @@ import {
     type ToolExec,
 } from "../lib/dispatch-runner-pi";
 import {extractAgents} from "./agent-extract";
+import {runCli} from "./exit-when-flushed";
 import {loadLiveCorpus} from "./corpus/loader";
 import {produceLive, type LiveAgentRunner} from "./live-producer";
 
@@ -126,7 +127,11 @@ const WRAPPER_FAILURES = [
     "Failed RTM_",
     "sandbox-exec:",
     "seatbelt",
-    "Operation not permitted",
+    // Deliberately NOT "Operation not permitted": EPERM text is exactly what
+    // a WORKING Seatbelt (and some bwrap denials) emit when the policy denies
+    // an operation, so matching it would fail a probe whose denial is the
+    // sandbox doing its job. The signatures above are wrapper STARTUP
+    // breakage, which a policy denial never produces.
 ];
 
 /** Whether a probe's output shows the wrapper itself failing to run. */
@@ -252,11 +257,12 @@ const runProbes = async (
     });
 
     // 3. The cap journal is writable THROUGH THE REAL CLI, invoked exactly as
-    //    the sub-agent prompts invoke it. Two things are under test at once
-    //    and both are load-bearing: the one writable mount in the staging dir,
-    //    and whether `npx -y tsx` can even start with the network denied (the
-    //    runner's npx cache is warmed outside the sandbox, as production warms
-    //    it in its pre-agent steps).
+    //    the sub-agent prompts invoke it: `node`, never `tsx`
+    //    (CAP_CLI_COMMAND's contract; investigation-cap.ts's entry guard is
+    //    why nothing else runs inside the sandbox). Two things are under test
+    //    at once and both are load-bearing: the one writable mount in the
+    //    staging dir, and whether that node invocation starts at all with the
+    //    network denied.
     const before = journalLines();
     const capOut = await probeExec(
         exec,
@@ -278,8 +284,13 @@ const runProbes = async (
     });
 
     // 4. The scratch dir is writable: the model's own workspace, which nothing
-    //    downstream reads.
-    const scratchProbe = `${SCRATCH_DIR}/sandbox-smoke-probe`;
+    //    downstream reads. The probe filename is unique per run: SCRATCH_DIR
+    //    is a fixed /tmp path that createToolExec pre-creates and nothing
+    //    cleans, so a fixed name would let a stale file from an earlier run
+    //    score a denied write as allowed.
+    const scratchProbe = `${SCRATCH_DIR}/sandbox-smoke-probe-${
+        process.pid
+    }-${Date.now()}`;
     const scratchOut = await probeExec(
         exec,
         ["sh", "-c", `echo ok > ${scratchProbe}`],
@@ -467,32 +478,14 @@ const main = async (): Promise<void> => {
 };
 
 /**
- * Exit explicitly, once stdout has drained.
- *
- * srt's initialize starts a proxy and nothing here shuts it down, so the event
- * loop never empties and the process outlives its own verdict: run 30867526519
- * printed "Sandbox smoke passed." at 01:03:43 and then held the runner until it
- * was cancelled 25 minutes later. A PASSED smoke that presents as a hung job is
- * worse than a failure, because the check never resolves either way.
- *
- * Draining first, rather than a bare process.exit: Actions gives this process a
- * pipe, writes to a pipe are asynchronous, and exiting on top of a buffered
- * write truncates the last lines of the very table the job exists to print. The
- * unref'd fallback covers a drain callback that never fires.
+ * Exit explicitly, once stdout has drained (the shared srt-drain path):
+ * srt's initialize starts a proxy and nothing here shuts it down, so the
+ * event loop never empties and the process outlives its own verdict. Run
+ * 30867526519 printed "Sandbox smoke passed." at 01:03:43 and then held the
+ * runner until it was cancelled 25 minutes later.
  */
-const exitWhenFlushed = (code: number): void => {
-    const done = (): never => process.exit(code);
-    setTimeout(done, 2000).unref();
-    process.stdout.write("", done);
-};
 
 // CLI entry point (mirrors live-runner.ts): run when executed, not imported.
 if (process.argv[1]?.endsWith("sandbox-smoke.ts")) {
-    main().then(
-        () => exitWhenFlushed(0),
-        (error: unknown) => {
-            console.error(error);
-            exitWhenFlushed(1);
-        },
-    );
+    runCli(main);
 }
