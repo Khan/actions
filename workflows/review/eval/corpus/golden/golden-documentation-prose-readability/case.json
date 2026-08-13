@@ -6,7 +6,7 @@
         "live"
     ],
     "category": "golden",
-    "description": "The prose-readability clauses, set up so each defect is a translation cost rather than a taste call. The added runbook has one sentence built from metaphors (lines 8-9: the warm pass 'has to land', readers 'wake up', entries 'survive') that never names the concrete ordering constraint, and one paragraph (lines 19-21, 'Put differently') that restates the retention paragraph directly above it. Both must be caught. The traps are the two vivid-but-precise passages: 'folds' at line 11 is the reducer's actual operation (a term of art), and lines 23-24 quote an error message verbatim, which is never flaggable however it reads.",
+    "description": "The prose-readability clauses, set up so each defect is a translation cost rather than a taste call. The added runbook has one sentence built from metaphors (lines 8-9: the warm pass 'has to land', readers 'wake up', entries 'survive') that never names the concrete ordering constraint, and one paragraph (lines 19-21, 'Put differently') that restates the retention paragraph directly above it. The readability sub-cap allows ONE line-anchored readability finding per review, so both defects ride one batched finding: anchored at the worst instance (the metaphor sentence) with the restated paragraph quoted in the discussion. The single live spec accepts either window as the anchor site (altLocations), mirroring the anchor-the-worst-instance choice the prompt leaves to the reviewer. The traps are the two vivid-but-precise passages: 'folds' at line 11 is the reducer's actual operation (a term of art), and lines 23-24 quote an error message verbatim, which is never flaggable however it reads.",
     "changedFiles": [
         {
             "path": "docs/cache-rebuild.md",
@@ -23,7 +23,7 @@
             "source": "documentation",
             "finding": {
                 "schema_version": 2,
-                "id": "doc-readability-metaphor",
+                "id": "doc-readability-batched",
                 "lens": "documentation",
                 "anchor": {
                     "type": "line",
@@ -36,36 +36,14 @@
                 "confidence": 0.8,
                 "evidence_trace": [
                     "docs/cache-rebuild.md:8-9 adds \"The warm pass has to land before the reader wakes up, and the stale entries have to survive long enough for the audit trail to see them.\"",
-                    "nothing in the sentence names the operations: which step must complete, before what event, and what must stay readable until when"
-                ],
-                "failure_scenario": "An operator paging through a failed rebuild cannot tell from this sentence which step must finish first or what must stay readable, so they have to read the scheduler code before they can act on the runbook.",
-                "producing_hunt": "documentation:prose-readability",
-                "model_authored_prose": "\"The warm pass has to land before the reader wakes up, and the stale entries have to survive long enough for the audit trail to see them\" requires translating three metaphors to recover the mechanism. Plainer: \"The warm pass must complete before the readers' next poll, and stale entries must remain readable until the audit job has recorded them.\"",
-                "suggested_patch": "The warm pass must complete before the readers' next poll, and stale\nentries must remain readable until the audit job has recorded them."
-            }
-        },
-        {
-            "source": "documentation",
-            "finding": {
-                "schema_version": 2,
-                "id": "doc-readability-restated-paragraph",
-                "lens": "documentation",
-                "anchor": {
-                    "type": "line",
-                    "path": "docs/cache-rebuild.md",
-                    "line": 21,
-                    "side": "RIGHT",
-                    "start_line": 19
-                },
-                "severity": "advisory",
-                "confidence": 0.8,
-                "evidence_trace": [
+                    "nothing in the sentence names the operations: which step must complete, before what event, and what must stay readable until when",
                     "docs/cache-rebuild.md:19-21 adds \"Put differently, the rebuild begins by deleting entries past the 30-day mark, because reads never reach entries older than the index's history window.\"",
                     "docs/cache-rebuild.md:16-17 already states the same fact: entries older than 30 days are dropped because the index only serves 30 days of history"
                 ],
-                "failure_scenario": "The next editor updates the 30-day window in one paragraph and not its restatement, and the runbook then asserts two different retention windows.",
+                "failure_scenario": "An operator paging through a failed rebuild cannot tell from the ordering sentence which step must finish first or what must stay readable, so they have to read the scheduler code before they can act on the runbook; and the next editor updates the 30-day window in one retention paragraph and not its restatement, so the runbook asserts two different retention windows.",
                 "producing_hunt": "documentation:prose-readability",
-                "model_authored_prose": "The \"Put differently\" paragraph (lines 19-21) restates the retention paragraph directly above it in different words: both say entries past 30 days are deleted because reads never reach them. The second copy adds nothing and the two will drift; delete one."
+                "model_authored_prose": "\"The warm pass has to land before the reader wakes up, and the stale entries have to survive long enough for the audit trail to see them\" requires translating three metaphors to recover the mechanism. Plainer: \"The warm pass must complete before the readers' next poll, and stale entries must remain readable until the audit job has recorded them.\" One further instance, batched under the readability cap: the \"Put differently\" paragraph (lines 19-21) restates the retention paragraph directly above it in different words; both say entries past 30 days are deleted because reads never reach them. The second copy adds nothing and the two will drift; delete it.",
+                "suggested_patch": "The warm pass must complete before the readers' next poll, and stale\nentries must remain readable until the audit job has recorded them."
             }
         }
     ],
@@ -73,10 +51,9 @@
     "expected": {
         "verdict": "APPROVE",
         "mustCatch": [
-            "doc-readability-metaphor",
-            "doc-readability-restated-paragraph"
+            "doc-readability-batched"
         ],
-        "postedCommentCount": 2
+        "postedCommentCount": 1
     },
     "diff": "diff --git a/docs/cache-rebuild.md b/docs/cache-rebuild.md\nnew file mode 100644\n--- /dev/null\n+++ b/docs/cache-rebuild.md\n@@ -0,0 +1,24 @@\n+# Rebuilding the search cache\n+\n+The rebuild job repopulates the search cache from the primary store. Run it\n+after a schema migration or a bulk import.\n+\n+## Ordering\n+\n+The warm pass has to land before the reader wakes up, and the stale entries\n+have to survive long enough for the audit trail to see them.\n+\n+The reducer folds the per-shard counts into one map before the swap, so the\n+counts page never mixes shards from two generations.\n+\n+## Retention\n+\n+Entries older than 30 days are dropped at the start of each rebuild: the\n+index only serves 30 days of history, so anything older can never be read.\n+\n+Put differently, the rebuild begins by deleting entries past the 30-day\n+mark, because reads never reach entries older than the index's history\n+window.\n+\n+If the swap fails, the job exits with `cache generation mismatch: refusing\n+to promote a stale build` and leaves the previous generation serving.\n",
     "live": {
@@ -88,26 +65,24 @@
         },
         "mustCatchSpecs": [
             {
-                "key": "doc-readability-metaphor",
+                "key": "doc-readability-batched",
                 "path": "docs/cache-rebuild.md",
                 "lineStart": 6,
                 "lineEnd": 9,
+                "altLocations": [
+                    {
+                        "path": "docs/cache-rebuild.md",
+                        "lineStart": 14,
+                        "lineEnd": 21
+                    }
+                ],
                 "lens": "documentation",
                 "mechanism": [
                     "metaphor",
                     "has to land|land before the reader",
                     "surviv.*audit|audit trail to see",
                     "concrete operation",
-                    "plain(er)?"
-                ]
-            },
-            {
-                "key": "doc-readability-restated-paragraph",
-                "path": "docs/cache-rebuild.md",
-                "lineStart": 14,
-                "lineEnd": 21,
-                "lens": "documentation",
-                "mechanism": [
+                    "plain(er)?",
                     "put differently",
                     "restat",
                     "says the same",

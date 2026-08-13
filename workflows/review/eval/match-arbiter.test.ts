@@ -69,6 +69,22 @@ describe("buildArbiterPrompt", () => {
         expect(prompt).not.toContain("lines");
         expect(prompt).toContain("anchored at the PR");
     });
+
+    it("names the PR title/description for a prLevel spec (no file, no window)", () => {
+        const prompt = buildArbiterPrompt(
+            {
+                ...candidate,
+                anchor: {type: "pr"},
+                path: undefined,
+                line: undefined,
+            },
+            {key: "k", prLevel: true, mechanism: ["metaphor"]},
+        );
+        expect(prompt).toContain("in the PR title/description");
+        expect(prompt).not.toContain("in file");
+        expect(prompt).not.toContain("lines");
+        expect(prompt).toContain("metaphor");
+    });
 });
 
 describe("parseArbiterAnswer", () => {
