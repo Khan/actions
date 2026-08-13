@@ -365,7 +365,8 @@ budget on content you never act on.
   threads, split by who opened them; the ones this bot opened (with their full
   reply chains) and the `{path, line}` of everyone else's. Step 3 says what each
   one feeds and the one judgment it still wants from you.
-- `adjudicated-threads.json`: this bot's threads a HUMAN resolved. Entirely
+- `adjudicated-threads.json`: this bot's threads a HUMAN resolved or
+  downvoted. Entirely
   the dispatcher's input (its suppression drops a non-blocking candidate that
   re-derives a defect a human already settled); nothing in it is yours to act
   on.
@@ -596,8 +597,9 @@ misfiling one bot thread as human costs a dropped finding, per
   comment on them.
 
 The same fetch also staged `/tmp/gh-aw/review/adjudicated-threads.json`: this
-bot's threads a HUMAN resolved (same shape as `threads.json`, plus
-`resolved: true` and `resolvedBy`). It is entirely the dispatcher's input; its
+bot's threads a HUMAN resolved or whose opener a reviewer downvoted (same
+shape as `threads.json`, plus `resolved`, `resolvedBy`, and
+`openerDownvotes`). It is entirely the dispatcher's input; its
 suppression drops a non-blocking candidate that re-derives a defect a human
 already settled, so do not read it, re-litigate it, or treat a resolved thread
 as open.
