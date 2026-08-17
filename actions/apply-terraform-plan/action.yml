@@ -228,34 +228,52 @@ runs:
           ${{ inputs.terraform_path }}/${{ inputs.plan_text_path }}
 
     - name: Merge plan-file cleanup PR
+      id: merge_cleanup
       if: steps.cleanup_pr.outputs.pull-request-number != ''
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
         PR_NUMBER: ${{ steps.cleanup_pr.outputs.pull-request-number }}
+        PR_URL: ${{ steps.cleanup_pr.outputs.pull-request-url }}
       run: |
         # GitHub needs a moment to compute mergeability after a PR is created,
-        # so retry a few times before giving up. Auto-merge is disabled on the
-        # repo, so we merge directly rather than with --auto.
+        # so retry a few times before giving up. We merge directly rather than
+        # with --auto because auto-merge is disabled on most consumer repos.
         for attempt in 1 2 3 4 5; do
           if gh pr merge "$PR_NUMBER" --squash --delete-branch; then
             echo "Merged cleanup PR #$PR_NUMBER"
+            echo "merged=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "Merge attempt $attempt failed; retrying in 5s..."
           sleep 5
         done
-        echo "Failed to merge cleanup PR #$PR_NUMBER after several attempts" >&2
-        exit 1
+        echo "merged=false" >> "$GITHUB_OUTPUT"
+        # If the base branch requires an approving review, this merge can never
+        # succeed: the GITHUB_TOKEN acts as the actions bot, and a bot cannot
+        # approve its own PR. The apply has already succeeded by this point, so
+        # failing here reports a completed deploy as a failed one and buries the
+        # real signal. Leave the PR for a human instead of exiting non-zero —
+        # the only cost of an unmerged cleanup PR is a stale plan pointer on the
+        # base branch, which the next run's staleness check catches anyway.
+        #
+        # Try auto-merge first so the PR lands by itself once its requirements
+        # are met; it's a no-op on repos where auto-merge is disabled.
+        if gh pr merge "$PR_NUMBER" --squash --delete-branch --auto; then
+          echo "Enabled auto-merge on cleanup PR #$PR_NUMBER; it will land once its requirements are met."
+        fi
+        echo "::warning::Terraform apply succeeded, but the plan-file cleanup PR could not be merged automatically: $PR_URL. Merge it to complete the apply cycle. If the base branch requires an approving review, the GITHUB_TOKEN cannot merge it unattended — enable auto-merge on the repo, or allow the actions bot to bypass the review requirement."
 
     # Delete the uploaded binary plan only after the cleanup PR has merged.
     # If the object were deleted first and the cleanup PR then failed to
     # create or merge, the base branch would keep a pointer to a missing
     # object and every re-run of this workflow would hard-fail at download
-    # until a new plan regenerates. (This step is skipped automatically if
-    # any earlier step failed.)
+    # until a new plan regenerates. That's why this is gated on the merge
+    # step's `merged` output and not merely on reaching this step: an
+    # unmergeable cleanup PR no longer fails the job, so "we got here" no
+    # longer implies "the pointer is gone from the base branch".
     - name: Delete uploaded plan from GCS
-      if: steps.apply.outcome == 'success' && inputs.cleanup_plan_files == 'true' && inputs.auto_approve != 'true' && steps.download.outputs.object != ''
+      if: steps.apply.outcome == 'success' && inputs.cleanup_plan_files == 'true' && inputs.auto_approve != 'true' && steps.download.outputs.object != '' && steps.merge_cleanup.outputs.merged == 'true'
       shell: bash
       run: |
         # Best-effort: a failure (e.g. a service account without delete
