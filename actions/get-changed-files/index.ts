@@ -41,6 +41,7 @@ type ContextLike = {
         repository: {
             owner: {name: string};
             name: string;
+            default_branch?: string;
         };
         merge_group?: {
             base_sha: string;
@@ -100,11 +101,24 @@ const getBaseAndHead = async (
 
             const pullRequests = response.data;
             if (pullRequests.length === 0) {
-                throw new Error(
-                    `Could not determine base ref for '${context.eventName}' event. ` +
-                        `No pull requests found associated with commit: ${afterSha}. ` +
-                        `context.payload.base_ref is null.`,
+                // A brand-new branch's first push can race ahead of its PR
+                // being created, so no PR is associated with the commit yet.
+                // Rather than fail the whole job, fall back to comparing
+                // against the repository's default branch (the base the PR
+                // would compare against anyway).
+                const defaultBranch = context.payload.repository.default_branch;
+                if (!defaultBranch) {
+                    throw new Error(
+                        `Could not determine base ref for '${context.eventName}' event. ` +
+                            `No pull requests found associated with commit: ${afterSha}. ` +
+                            `context.payload.base_ref is null.`,
+                    );
+                }
+                core.warning(
+                    `No PR is associated with the pushed commit (${afterSha}) yet. ` +
+                        `Falling back to the default branch ('${defaultBranch}') as the base ref.`,
                 );
+                return [defaultBranch, afterSha];
             }
             if (pullRequests.length > 1) {
                 const first = pullRequests[0];

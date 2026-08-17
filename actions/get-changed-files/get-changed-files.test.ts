@@ -179,7 +179,54 @@ describe("getChangedFiles", () => {
         });
     });
 
-    it("throws for new-branch push when no associated PRs are found", async () => {
+    it("falls back to the default branch for new-branch push when no associated PRs are found", async () => {
+        // Arrange
+        const core = makeCore();
+        const github = makeGithub({
+            pullRequests: [],
+            compareFiles: [
+                {filename: "actions/a/index.ts", status: "modified"},
+            ],
+        });
+
+        // Act
+        await getChangedFiles({
+            github,
+            core,
+            directoriesRaw: "",
+            context: {
+                eventName: "push",
+                payload: {
+                    before: "0000000000000000000000000000000000000000",
+                    after: "newheadsha",
+                    repository: {
+                        owner: {name: "Khan"},
+                        name: "actions",
+                        default_branch: "main",
+                    },
+                },
+                repo: {owner: "Khan", repo: "actions"},
+            },
+        });
+
+        // Assert
+        expect({
+            warnCalls: core.warning.mock.calls.length,
+            compareArgs: github.rest.repos.compareCommits.mock.calls[0]?.[0],
+            outputArgs: core.setOutput.mock.calls[0],
+        }).toEqual({
+            warnCalls: 1,
+            compareArgs: {
+                base: "main",
+                head: "newheadsha",
+                owner: "Khan",
+                repo: "actions",
+            },
+            outputArgs: ["files", JSON.stringify(["actions/a/index.ts"])],
+        });
+    });
+
+    it("throws for new-branch push when no PRs are found and no default branch is available", async () => {
         // Arrange
         const core = makeCore();
         const github = makeGithub({pullRequests: []});
