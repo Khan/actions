@@ -72,10 +72,13 @@
  * pairs that also clear its looser text floor). The line survives as evidence
  * inside tier 1 and as the survivor's posting anchor, and nothing more.
  *
- * The survivor is the highest-severity copy, its discussion gains an "also
- * flagged by" note (naming each other source's anchor when it differs, and
- * quoting the subject of any copy tier 2 absorbed, whose ask the survivor's own
- * prose is not known to restate), and every merge is recorded for
+ * The survivor is the highest-severity copy, it gains a structured
+ * `also_flagged_by` record (naming each other source, its anchor when it
+ * differs, and the subject of any copy tier 2 absorbed, whose ask the
+ * survivor's own prose is not known to restate; the posting surface
+ * renders the record into the comment's collapsed attribution footer,
+ * attribution.ts, so a validator discussion rewrite cannot drop it), and
+ * every merge is recorded for
  * dispatch-result.json with the tier that found it (per group and per absorbed
  * copy), so the merge rate is readable from the artifact rather than from what
  * survives on the PR.
@@ -90,6 +93,7 @@
  * can cost is bounded by code even where its judgment cannot be checked.
  */
 
+import {stripFooters, type AlsoFlagged} from "./attribution";
 import {bigrams, contentTokens, intersectionSize} from "./dedup-text";
 import {isRecord, type Claim, type ProposedCluster} from "./dispatch-contracts";
 import {isBlockingLabel} from "./render-comment";
@@ -289,14 +293,15 @@ export const threadOpenerIsBlocking = (body: string): boolean => {
 
 /**
  * The prose of a previously-posted bot comment, for similarity comparison:
- * the leading `**label:**` template (tolerating the markdown-stripped form
+ * the collapsed attribution/version footers (attribution.ts's strip), the
+ * leading `**label:**` template (tolerating the markdown-stripped form
  * the staged bodies sometimes carry) and everything from the first code
  * fence on (a suggestion block) are dropped, as are rule-quote lines:
  * boilerplate shared by ALL bot comments would inflate similarity between
  * unrelated findings.
  */
 const threadProse = (body: string): string =>
-    body
+    stripFooters(body)
         .split("```")[0]
         .split("\n")
         .filter((line) => !line.trimStart().startsWith(">"))
@@ -865,7 +870,7 @@ export const dedupeClaims = (
         // merge (and to spot a wrong one).
         //
         // A tier-2 copy also carries its own SUBJECT, and only a tier-2 copy
-        // does. What the note must not lose is an ask the survivor's prose
+        // does. What the record must not lose is an ask the survivor's prose
         // does not already make: run 30587343777's `conventions` copy of the
         // wrong-cap defect asked for the symbol-name prefix, not for the
         // number, and one rewritten comment discharges both only if the author
@@ -876,7 +881,14 @@ export const dedupeClaims = (
         // noise into the surviving comment rather than remove it. Tier 2 is
         // the case where that evidence is missing (the floor is what it could
         // not clear), so there the quote is the only thing carrying the ask.
-        const sources: {source: string; line?: number; subject?: string}[] = [];
+        //
+        // Recorded as the structured `also_flagged_by` field, NOT appended to
+        // `discussion`: dedup runs before the claim-validator, whose
+        // `corrected.discussion` rewrite replaces the prose wholesale, so a
+        // note riding the discussion could silently vanish. The posting
+        // surface (submission.ts) renders the field into the comment's
+        // collapsed attribution footer.
+        const sources: AlsoFlagged[] = [];
         for (const {index, via} of others) {
             const claim = claims[index];
             if (
@@ -895,25 +907,6 @@ export const dedupeClaims = (
                     : {}),
             });
         }
-        const flaggedBy = (entry: {source: string; line?: number}): string =>
-            entry.line === undefined
-                ? entry.source
-                : `${entry.source} (at line ${entry.line})`;
-        const alsoFlagged =
-            sources.length === 0
-                ? ""
-                : sources.every((entry) => entry.subject === undefined)
-                ? `\n\nAlso flagged by ${sources.map(flaggedBy).join(", ")}.`
-                : `\n\nAlso flagged by:\n${sources
-                      .map(
-                          (entry) =>
-                              `- ${flaggedBy(entry)}${
-                                  entry.subject === undefined
-                                      ? ""
-                                      : `: ${entry.subject}`
-                              }`,
-                      )
-                      .join("\n")}`;
         const adoptedSuggestion =
             survivor.suggestion === undefined
                 ? otherClaims.find((claim) => claim.suggestion !== undefined)
@@ -927,7 +920,7 @@ export const dedupeClaims = (
                 : undefined;
         replacement.set(survivorIndex, {
             ...survivor,
-            discussion: `${survivor.discussion}${alsoFlagged}`,
+            ...(sources.length > 0 ? {also_flagged_by: sources} : {}),
             ...(adoptedSuggestion !== undefined
                 ? {suggestion: adoptedSuggestion}
                 : {}),

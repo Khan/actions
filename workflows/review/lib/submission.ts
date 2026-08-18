@@ -60,6 +60,7 @@
  * under review.
  */
 
+import {renderAttributionFooter} from "./attribution";
 import {computeRisksPatternsKey, RISKS_PATTERNS_KEY_PATH} from "./cache-record";
 import type {Claim} from "./dispatch-contracts";
 import {DEFAULT_FINDERS, TRIAGE_DIMENSION} from "./dispatch-roster";
@@ -225,6 +226,15 @@ export const renderPrLevelFold = (claim: Claim): string => {
         "</details>",
     ].join("\n");
 };
+
+/**
+ * The one-line source tag for collapsed/hold list entries: the same
+ * attribution the full comments carry, in the smallest form that fits a
+ * one-liner (a whole collapsed footer per list entry would bury the list).
+ * `<sub>` is sanitizer-allowed, and attribution.ts's stripFooters removes
+ * the span before any text-similarity comparison against posted bodies.
+ */
+const sourceTag = (claim: Claim): string => `<sub>(${claim.source})</sub>`;
 
 const lineHasCodeSignal = (line: string): boolean =>
     /\w\(/.test(line) || // a call
@@ -517,7 +527,14 @@ export const runSubmissionCli = (
         } else if (blockingOnly && !isBlockingLabel(claim.label)) {
             prLevelCollapsed.push(claim);
         } else {
-            prLevelLines.push(renderPrLevelFold(claim));
+            // The fold carries the same collapsed attribution footer an
+            // inline comment gets: a pr-level finding names its reviewer too.
+            prLevelLines.push(
+                `${renderPrLevelFold(claim)}\n${renderAttributionFooter(
+                    claim.source,
+                    claim.also_flagged_by,
+                )}`,
+            );
             notes.push(
                 `pr-level claim ${claim.id} folded into the review body`,
             );
@@ -625,8 +642,10 @@ export const runSubmissionCli = (
                     `claim ${claim.id} folded into the hold comment (a hold posts no inline comments)`,
                 );
                 return claim.path !== undefined && claim.line !== undefined
-                    ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${claim.subject}`
-                    : `- ${claim.label}: ${claim.subject}`;
+                    ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${
+                          claim.subject
+                      } ${sourceTag(claim)}`
+                    : `- ${claim.label}: ${claim.subject} ${sourceTag(claim)}`;
             },
         );
         return stagePlan(fs, {
@@ -679,7 +698,8 @@ export const runSubmissionCli = (
         ...ranked.filter((claim) => !inlineClaims.has(claim)),
         ...prLevelCollapsed,
     ];
-    const inline: PlannedComment[] = [...inlineClaims].map((claim) => ({
+    const inlineList = [...inlineClaims];
+    const inline: PlannedComment[] = inlineList.map((claim) => ({
         path: claim.path as string,
         line: claim.line as number,
         body: renderClaimComment(claim),
@@ -718,8 +738,10 @@ export const runSubmissionCli = (
             "",
             ...collapsed.map((claim) =>
                 claim.path !== undefined && claim.line !== undefined
-                    ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${claim.subject}`
-                    : `- ${claim.label}: ${claim.subject}`,
+                    ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${
+                          claim.subject
+                      } ${sourceTag(claim)}`
+                    : `- ${claim.label}: ${claim.subject} ${sourceTag(claim)}`,
             ),
             "",
             "</details>",
@@ -738,6 +760,23 @@ export const runSubmissionCli = (
         );
     }
 
+    // The per-comment attribution footer (attribution.ts): which reviewer
+    // produced the finding, plus dedup's `also_flagged_by` record of every
+    // other reviewer that flagged the same defect. Appended here, after the
+    // collapsed-observations section ride, so the footer is each comment's
+    // final block; appended at the plan surface rather than inside
+    // renderClaimComment so the claim renderer stays byte-identical to
+    // renderComment on the same finding (the layout parity the tests pin).
+    inlineList.forEach((claim, index) => {
+        inline[index] = {
+            ...inline[index],
+            body: `${inline[index].body}\n\n${renderAttributionFooter(
+                claim.source,
+                claim.also_flagged_by,
+            )}`,
+        };
+    });
+
     const event =
         verdict.event === "REQUEST_CHANGES" ? "REQUEST_CHANGES" : "APPROVE";
 
@@ -755,9 +794,10 @@ export const runSubmissionCli = (
     const coreBody = [head, ...prLevelLines, ...noteLines, ...depthNotes]
         .filter((line) => line !== "")
         .join("\n");
-    // The visible attribution footer (version-footer.ts): code-rendered,
-    // sanitizer-surviving (<sub> is on the allowed-tag list; the old hidden
-    // HTML marker never posted). The CLI also stages version-footer.txt for
+    // The version/config footer (version-footer.ts): code-rendered,
+    // collapsed by default (attribution.ts's shared <details> wrapper), and
+    // sanitizer-surviving (details/summary/sub are all allowed tags; the old
+    // hidden HTML marker never posted). The CLI also stages version-footer.txt for
     // Step 7's guidance comment. The depth override hands the footer this
     // run's executed depth from the SAME read that keys the depth Note and
     // blocking-only gating, so the two surfaces cannot contradict; null

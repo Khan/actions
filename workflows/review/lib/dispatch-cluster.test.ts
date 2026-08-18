@@ -224,10 +224,13 @@ describe("runDispatch defect clustering (dedup tier 2)", () => {
         );
         expect(JSON.parse(fs.files[`${REVIEW}/claims.json`])).toHaveLength(1);
         expect(result.claims).toMatchObject([{id: "correctness-reviewer-1"}]);
-        expect(result.claims[0].discussion).toContain(
-            "Also flagged by:\n- skill-auditor: Declaration doc comment " +
-                "doesn't begin with the symbol name.",
-        );
+        expect(result.claims[0].also_flagged_by).toEqual([
+            {
+                source: "skill-auditor",
+                subject:
+                    "Declaration doc comment doesn't begin with the symbol name.",
+            },
+        ]);
         expect(result.merges[0].via).toBe("clusterer");
         // The audit block: candidate count and merge count come from here, not
         // from what survives on the PR.

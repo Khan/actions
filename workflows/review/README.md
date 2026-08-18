@@ -726,12 +726,15 @@ v1.4.0 shipped still pointing at v1.2.2, before the sync existed).
 Semver is the behavior contract: a release that changes the reviewer's behavior bumps
 the major version, so a consumer pinned to `review-v<major>` can assume the fundamental
 behavior holds within a major. For attribution and rollback, every submitted review
-body and the risks/patterns guidance comment (Step 7) end with a visible one-line
-footer, rendered in code by `lib/version-footer.ts` from the pinned checkout's
-`package.json` and the staged run files (never composed by the model):
+body and the risks/patterns guidance comment (Step 7) end with a footer collapsed
+inside a `<details>` block (summary chip `review details`), rendered in code by
+`lib/version-footer.ts` from the pinned checkout's `package.json` and the staged
+run files (never composed by the model):
 
 ```
+<details><summary><sub>review details</sub></summary>
 <sub>review-v<major>.<minor>.<patch> | schema <n> | depth <depth> | re-review <mode> [blocking-only] | enable <reviewer,...></sub>
+</details>
 ```
 
 `schema` is the finding-schema version (`FINDING_SCHEMA_VERSION` in
@@ -742,11 +745,25 @@ the staging cannot state is omitted rather than guessed. A bad reviewer release
 rolls back by re-pinning the previous tag; the footer on each posted review makes
 attribution immediate.
 
-The footer is visible by necessity, not preference: attribution originally rode a
-hidden HTML marker (`<!-- pr-reviewer:version ... -->`), but gh-aw's safe-output
+The footer posts (collapsed, expandable) by necessity, not preference:
+attribution originally rode a hidden HTML marker
+(`<!-- pr-reviewer:version ... -->`), but gh-aw's safe-output
 ingest sanitizer deletes ALL XML/HTML comments (`removeXmlComments` in
 `sanitize_content_core.cjs`, the same strip documented for the fingerprint stamp
-in `lib/rereview-mode.ts`), so the marker never reached a posted comment; `<sub>`
-is on the sanitizer's allowed-tag list and survives ingest. There is no separate
-config-hash or drift-stamp mechanism; the release tag plus the footer's config
-segments are the version surface.
+in `lib/rereview-mode.ts`), so the marker never reached a posted comment; `sub`,
+`details`, and `summary` are on the sanitizer's allowed-tag list and survive
+ingest. There is no separate config-hash or drift-stamp mechanism; the release
+tag plus the footer's config segments are the version surface.
+
+Every inline review comment (and each pr-level finding folded into the review
+body) additionally ends with a per-comment attribution footer in the same
+collapsed block, naming the reviewer that produced the finding and, when
+cross-source dedup merged duplicates into it, each other reviewer that flagged
+the same defect (`lib/attribution.ts`; the merge record is the structured
+`also_flagged_by` field on the claim, so a validator discussion rewrite cannot
+drop it). Collapsed one-liners (the low-confidence `<details>` section and a
+hold comment's claim list) carry the short form, a trailing
+`<sub>(<source>)</sub>` tag. Text-similarity comparisons against
+previously-posted bodies (open-thread suppression, the adjudicated corpus)
+strip these footers first, so the shared boilerplate cannot inflate similarity
+between unrelated findings.

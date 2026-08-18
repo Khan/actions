@@ -649,9 +649,11 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
 ```
    It reads `dispatch-result.json`, renders the accountability section
    (`rereview.json`), computes the verdict (Step 4's mechanical rule plus the
-   reduced-depth flip floor), renders every inline comment and the full
-   review body (note lines, the visible attribution footer, and the
-   fingerprint stamp included), and writes
+   reduced-depth flip floor), renders every inline comment (each with its
+   collapsed per-comment attribution footer naming the producing reviewer
+   and any merged duplicates) and the full review body (note lines, the
+   collapsed version/config footer, and the fingerprint stamp included),
+   and writes
    `/tmp/gh-aw/review/submission-plan.json`. At full depth it also
    stages `/tmp/gh-aw/review/risks-patterns-key.txt`, the code-computed
    canonical signature Step 7 compares (never compose your own signature in
@@ -722,7 +724,7 @@ never add, drop, reword, or re-anchor one.
 
 The review body and event are composed by the plan CLI (Step 3): the verdict
 head, the code-rendered re-review accountability section, every `Note:` line,
-the visible attribution footer, and the hidden fingerprint stamp are all
+the collapsed version/config footer, and the hidden fingerprint stamp are all
 already in the plan's `body`. Submit
 with **one** `submit-pull-request-review` call carrying the plan's `event` and
 `body` verbatim — except under the redundant-approval skip (Step 3), where you
@@ -808,8 +810,8 @@ should only ever be one current risks/patterns comment:
 Begin the comment with the exact marker line below (so the comment is identifiable
 on later runs), then include the Guidance for reviewers team sections and/or the
 common-patterns section. Omit whichever is empty. End the comment with the
-attribution footer: paste the one-line `<sub>...</sub>` footer from
-`/tmp/gh-aw/review/version-footer.txt` **verbatim** as the final line (the plan
+version/config footer: paste the collapsed `<details>` footer block from
+`/tmp/gh-aw/review/version-footer.txt` **verbatim** as the final lines (the plan
 CLI staged it in Step 3; if the file is missing, re-stage it with
 `cd gh-aw-review-lib && npx -y tsx workflows/review/lib/version-footer.ts`).
 Never compose the footer yourself, and never use an HTML comment for it: the
@@ -869,7 +871,9 @@ fully explained by a common pattern above:
 
 </details>
 
+<details><summary><sub>review details</sub></summary>
 <sub>review-v1.14.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
+</details>
 ````
 
 - Title the comment `## Guidance for reviewers`, follow it with the one-line
@@ -1675,6 +1679,10 @@ Read from disk:
   producer's concrete failing scenario: specific inputs/state, then the wrong
   outcome), `confidence`, an optional
   `suggestion`, when the claim asserts a best-practice skill breach its `skill` name,
+  when cross-source dedup merged duplicate copies into it an `also_flagged_by`
+  list naming each other reviewer (with its anchor line where it differed, and
+  a clusterer-merged copy's own subject; treat those as corroboration to weigh,
+  never as extra claims to validate),
   and — when the claim re-raises a point the PR author has factually disputed in an
   existing review thread — an `author_dispute` quote of the author's grounds.
 - The diff: `/tmp/gh-aw/review/pr.diff`.

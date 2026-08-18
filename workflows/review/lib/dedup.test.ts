@@ -166,9 +166,11 @@ describe("dedupeClaims", () => {
         expect(claims).toHaveLength(1);
         expect(claims[0].id).toBe("correctness-reviewer-1");
         expect(claims[0].label).toBe("issue (blocking)");
-        expect(claims[0].discussion).toContain(
-            "Also flagged by completeness, first-principles, skill-auditor (out-of-lane).",
-        );
+        expect(claims[0].also_flagged_by).toEqual([
+            {source: "completeness"},
+            {source: "first-principles"},
+            {source: "skill-auditor (out-of-lane)"},
+        ]);
         expect(merges).toEqual([
             {
                 survivor: "correctness-reviewer-1",
@@ -355,12 +357,12 @@ describe("dedupeClaims", () => {
         expect(claims).toHaveLength(1);
         expect(claims[0].id).toBe("correctness-reviewer-3");
         expect(claims[0].label).toBe("todo (blocking)");
-        // The note names the other copy's anchor, since it is not the
+        // The record names the other copy's anchor, since it is not the
         // survivor's: an author reading a merge across 43 lines needs to know
         // the second reviewer was looking somewhere else.
-        expect(claims[0].discussion).toContain(
-            "Also flagged by skill-auditor (out-of-lane) (at line 58).",
-        );
+        expect(claims[0].also_flagged_by).toEqual([
+            {source: "skill-auditor (out-of-lane)", line: 58},
+        ]);
         expect(merges).toEqual([
             {
                 survivor: "correctness-reviewer-3",
@@ -440,10 +442,12 @@ describe("dedupeClaims", () => {
         const {claims, merges} = dedupeClaims(ttlUnitClaims());
         expect(claims).toHaveLength(1);
         expect(claims[0].id).toBe("correctness-reviewer-1");
-        expect(claims[0].discussion).toContain(
-            "Also flagged by skill-auditor (out-of-lane), completeness, " +
-                "holistic, first-principles.",
-        );
+        expect(claims[0].also_flagged_by).toEqual([
+            {source: "skill-auditor (out-of-lane)"},
+            {source: "completeness"},
+            {source: "holistic"},
+            {source: "first-principles"},
+        ]);
         expect(merges).toEqual([
             {
                 survivor: "correctness-reviewer-1",

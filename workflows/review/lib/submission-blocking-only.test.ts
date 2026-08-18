@@ -102,16 +102,21 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         );
         const plan = runSubmissionCli(fs);
         // Only the blocking claim posts inline, without the collapsed
-        // section riding it: the section lives in the body.
+        // section riding it: the section lives in the body. (The comment
+        // still carries its own collapsed attribution footer.)
         expect(plan.comments).toHaveLength(1);
         expect(plan.comments[0].body).toContain("**issue (blocking):**");
-        expect(plan.comments[0].body).not.toContain("<details>");
+        expect(plan.comments[0].body).not.toContain(
+            "Non-blocking observations",
+        );
         expect(plan.body).toContain("Non-blocking observations (2)");
         expect(plan.body).toContain(
-            "- `a.ts:9` nitpick (non-blocking): Rename the helper.",
+            "- `a.ts:9` nitpick (non-blocking): Rename the helper. " +
+                "<sub>(correctness-reviewer)</sub>",
         );
         expect(plan.body).toContain(
-            "- note (non-blocking): A cross-file observation.",
+            "- note (non-blocking): A cross-file observation. " +
+                "<sub>(correctness-reviewer)</sub>",
         );
         expect(plan.notes.join(" ")).toContain(
             "2 non-blocking claim(s) collapsed into the body (re-review blocking-only)",

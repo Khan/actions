@@ -11,6 +11,7 @@
  * code under review.
  */
 
+import type {AlsoFlagged} from "./attribution";
 import {
     validateFinding,
     type Anchor,
@@ -506,6 +507,14 @@ export type Claim = {
     confidence: number;
     author_dispute?: string;
     rule_quote?: string;
+    /**
+     * The cross-source duplicate copies dedup folded into this claim (one
+     * entry per other source; see dedup.ts). Structured rather than appended
+     * to `discussion` so a validator `corrected.discussion` rewrite cannot
+     * silently drop the record; the posting surface (submission.ts) renders
+     * it into the comment's collapsed attribution footer (attribution.ts).
+     */
+    also_flagged_by?: AlsoFlagged[];
 };
 
 export const buildClaims = (candidates: Candidate[]): Claim[] =>
