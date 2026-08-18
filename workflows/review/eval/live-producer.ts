@@ -379,12 +379,20 @@ const fromLabelShape = (
         schema_version: 2,
         id: `live-${agentName}-${index + 1}`,
         lens,
-        anchor: {
-            type: "line",
-            path: raw["path"],
-            line: raw["line"],
-            side: "RIGHT",
-        },
+        // Mirror production (dispatch-contracts.ts): a finding that omits
+        // `path`/`line` is the PR-level shape (the documentation reviewer's
+        // title/description finding) and anchors as `{type: "pr"}`. The old
+        // unconditional line anchor made such a finding fail schema parse in
+        // the harness, so a produced PR-level finding scored as a true miss.
+        anchor:
+            raw["path"] === undefined || raw["line"] === undefined
+                ? {type: "pr"}
+                : {
+                      type: "line",
+                      path: raw["path"],
+                      line: raw["line"],
+                      side: "RIGHT",
+                  },
         severity: isBlockingLabel(label) ? "blocking" : "advisory",
         confidence: LABEL_SHAPE_CONFIDENCE,
         evidence_trace: [

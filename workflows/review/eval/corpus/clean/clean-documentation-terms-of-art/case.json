@@ -1,0 +1,62 @@
+{
+    "id": "clean-documentation-terms-of-art",
+    "tags": [
+        "clean",
+        "documentation",
+        "live"
+    ],
+    "category": "clean",
+    "description": "The readability clauses' precision guard. Every vivid word in the added section is doing real work: 'folds' is the reducer's actual operation, the lock is genuinely 'held' for the swap's duration, and 'the two-clock rule' is a coinage the doc defines in the same sentence it introduces it. A reviewer treating the metaphor clause as a word list, or the coinage clause as a ban on naming things, flags here; the run must post nothing.",
+    "changedFiles": [
+        {
+            "path": "docs/locking.md",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "documentation"
+        ]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 0,
+        "mustNotPost": []
+    },
+    "diff": "diff --git a/docs/locking.md b/docs/locking.md\n--- a/docs/locking.md\n+++ b/docs/locking.md\n@@ -6,2 +6,12 @@\n Readers never take the shard lock: they read the last published generation\n and rely on the rebuild to swap atomically.\n+\n+## Shard counters\n+\n+The reducer folds the per-shard counts into one map while the shard lock is\n+held, so a rebuild never publishes a page that mixes two generations.\n+\n+We call this the two-clock rule: the wall clock orders user events, and the\n+generation counter orders rebuilds. A page is valid only when both clocks\n+agree, and every consumer checks the generation counter before trusting a\n+row's wall-clock timestamp.\n",
+    "live": {
+        "prContext": {
+            "title": "docs: document the shard-counter merge and the two-clock rule",
+            "description": "Documents how the reducer merges per-shard counts under the shard lock, and defines the two-clock rule consumers must check before trusting a row's timestamp.",
+            "author": "dev-search",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "doc-trap-fold-held",
+                "path": "docs/locking.md",
+                "lineStart": 11,
+                "lineEnd": 12,
+                "lens": "documentation",
+                "mechanism": [
+                    "fold",
+                    "held"
+                ]
+            },
+            {
+                "key": "doc-trap-two-clock-coinage",
+                "path": "docs/locking.md",
+                "lineStart": 14,
+                "lineEnd": 17,
+                "lens": "documentation",
+                "mechanism": [
+                    "two-clock",
+                    "coinage",
+                    "undefined term"
+                ]
+            }
+        ]
+    }
+}

@@ -47,7 +47,11 @@ export const buildArbiterPrompt = (
         "You are auditing one code-review comment against one labeled defect spec.",
         'Answer ONLY a JSON object: {"match": true|false}.',
         "",
-        `Labeled defect: in file ${spec.path}` +
+        `Labeled defect: ${
+            spec.prLevel === true
+                ? "in the PR title/description"
+                : `in file ${spec.path}`
+        }` +
             (spec.lineStart !== undefined
                 ? ` (lines ${spec.lineStart}-${spec.lineEnd ?? spec.lineStart})`
                 : "") +
