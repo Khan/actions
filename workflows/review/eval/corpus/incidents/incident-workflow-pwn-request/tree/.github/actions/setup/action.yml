@@ -18,3 +18,8 @@ runs:
         - name: Install dependencies
           shell: bash
           run: pnpm install --frozen-lockfile
+
+        - name: Report outdated dependencies
+          uses: dev-infra-tools/pnpm-outdated-annotate@v2
+          with:
+              fail-on: none

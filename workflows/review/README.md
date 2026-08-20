@@ -380,6 +380,19 @@ re-review scoped
   surface (see [Re-review modes](#re-review-modes-the-runs-per-pr-cost-lever));
   an unknown modifier warns and is ignored, and the mode still applies.
 
+The `security-auth` lens's GitHub Actions workflow hunts (`pwn-request`,
+`push-ref-race`, `over-scoped-secret`, `unpinned-action`) are gated on workflow
+and composite-action files, so they run only in a repo whose `ROUTING` routes
+those paths to the lens:
+
+```
+.github/workflows/**       tier=high lens=security-auth
+.github/actions/**         tier=high lens=security-auth
+```
+
+Without these lines the hunts stay dormant in that repo regardless of what the
+shared prompt defines.
+
 Glob semantics are a practical subset of gitignore/CODEOWNERS: `**` crosses
 directories, `*` and `?` stay within a segment, a trailing `/` matches everything
 under a directory, and a pattern without `/` matches the basename anywhere.
