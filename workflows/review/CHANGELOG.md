@@ -1,5 +1,149 @@
 # review
 
+## 1.16.0
+
+### Minor Changes
+
+-   9243690: review: honour `linguist-generated` negations the way git does, so deliberately un-marked files get reviewed
+
+    The router read `.gitattributes` as a set of "generated globs" and asked whether a
+    path matched _any_ of them. Git resolves an attribute per path by the **last**
+    matching line, so a negation placed after a broad glob is how a repo says "this
+    subtree is generated, except this part". The reviewer discarded those negations
+    while parsing, which meant it silently skipped review of exactly the files a repo
+    had gone out of its way to keep visible.
+
+    `parseGitattributesGenerated` now returns ordered `GeneratedRule[]`
+    (`{pattern, generated}`) instead of a flat pattern list, keeping negations rather
+    than dropping them, and `isGenerated` scans in reverse and returns the first
+    matching rule's verdict. A line that never mentions the attribute is not a rule at
+    all, so it cannot shadow one. `RouterConfig.generatedPatterns` is renamed to
+    `generatedRules` to match what it now carries.
+
+    All three of git's negation forms count as rules, since each one shadows an
+    earlier `=true` by last match: `-linguist-generated` (Unset),
+    `linguist-generated=false` (the value `false`), and `!linguist-generated`
+    (Unspecified). Unspecified is not generally the same as false (it is where
+    Linguist falls back to its content heuristic), but this router has no content
+    heuristic and treats an unmatched path as source, so the two reach the same
+    verdict here. A negation form the parser did not recognise was dropped as
+    not-a-rule, letting the broad glob win and skipping the path: the same silent
+    skip, by a different spelling.
+
+    Found while onboarding `Khan/agent-settings` (Khan/agent-settings#48), whose
+    `.gitattributes` marks the installer-written `.claude/**`, `.codex/**`, `.cursor/**`
+    and `.pi/**` output generated and then un-marks `.claude/skills/**` and
+    `.pi/git/**` with a comment saying to keep them visible in diffs. Its
+    `new-repo-config` skill — executable prose that steers every Claude session in that
+    repo — resolved to `trivial (generated)` and was excluded from review; it now
+    resolves to `medium` and is reviewed.
+
+    Blast radius is narrow and one-directional (strictly more review, never less):
+    only a repo that actually writes a negation after a broader `=true` glob changes at
+    all. `Khan/actions` and `Khan/frontend` have no negations, and webapp's single one
+    (`services/ai-guide/cmd/componentgen/main.go linguist-generated=false`) exists to
+    counter Linguist's content heuristic rather than an earlier `.gitattributes` rule,
+    so no earlier rule matches that path and its classification is unchanged.
+
+-   9243690: review: an onboarding playbook and a consumer-config checker for new consumer repos
+
+    Onboarding a repo (`Khan/kore-marketplace#3` is the current template) is five
+    hand-written config files, two local edits to the installed `review.md`, and a
+    handful of admin blockers only a repo admin can clear. Every mistake in that set
+    fails late and quietly, which is the problem both halves of this change address.
+
+    `lib/check-consumer-config.ts` validates an install through the **production**
+    parsers rather than a reimplementation: tiers, lenses, generated-file
+    classification and the budget come from `route()`, `ROUTING` from
+    `parseRoutingConfig`, `.gitattributes` from `parseGitattributesGenerated`. A
+    release that changes those semantics changes the checker's answers for free,
+    which is why it ships in `lib/` and is run from the tag the consumer pins (a
+    mismatch between the two is itself one of its warnings). It reports, as errors:
+    a missing or empty required config, a `${{ }}` expression inside a runtime
+    import or lens payload (gh-aw rejects those), `add-reviewer` defined in
+    `review.md` as well as `config.md` (the main workflow wins, silently discarding
+    the consumer's allowlist), a dropped `imports:` line, an empty
+    `allowed-team-reviewers` **in a repo that has a `.github/REVIEWERS` ownership
+    map**, and a missing `.lock.yml`. And as warnings: an unpinned or stale
+    `source:`, a live `observability:` block (both `GH_AW_OTEL_SENTRY_*` secrets are
+    hard-required while it is present, and a missing one kills the agent job at
+    startup), the shipped 1000-credit ceiling that `tier=high` runs have died at,
+    `ROUTING` parse warnings, inert lens payloads, a lock not marked
+    `linguist-generated`, an unmarked `agentics-maintenance.yml`, leftover `gh aw`
+    Copilot scaffolding, and reviewer config that does not itself route to `high`.
+
+    Two of those checks are deliberately shaped by what the router can actually do.
+    `.github/REVIEWERS` is its only source of team ownership, so in a repo without
+    one, Step 8 requests nobody no matter what `add-reviewer` allows: an empty
+    allowlist there is an accurate "this repo does not request reviewers" rather than
+    a dropped request, and it reports `reviewer-requests-inert` instead of failing.
+    Erroring would only get an inert team invented to satisfy the check. Separately,
+    `agentics-maintenance.yml` is `gh aw compile` output whose name is _not_
+    `*.lock.yml`, so the `.gitattributes` marker consumers were told to add misses it
+    and ~600 generated lines get line-reviewed until it gets its own.
+
+    Two views answer the question a tier map actually raises. `--files-from`
+    (`git ls-files | …`) prints the resolved tier of every tracked file with
+    per-tier samples and names the files no `tier=` rule matches at all, and
+    `--explain <path>` lists every matching rule in file order so last-match-wins
+    ordering is visible instead of inferred. That replaces the hand-verification
+    `kore-marketplace#3` did by importing the parser ad hoc.
+
+    `lib/frontmatter.ts` is the minimal structural frontmatter reader the checker
+    needs (indentation, `key:`, `- item`; no YAML dependency in `lib/`). One
+    behaviour is load-bearing: comment lines are dropped, so a commented-out block
+    reads as absent, which is exactly what disabling `observability:` means.
+
+    It also **normalises values**, because for a tool whose contract is "errors must
+    be zero" a false error is the worst failure mode, and each of these is valid YAML
+    a consumer can legitimately write:
+
+    -   **Inline comments are stripped** from values and list items (respecting quotes
+        and `url#frag`). This one fired on the skill's own prescribed flow, which tells
+        authors to label every local edit with a comment: `max-ai-credits: 2500 # LOCAL OVERRIDE` made `Number()` return `NaN`, silently suppressing the credit-ceiling
+        check; a labelled `source:` reported a spurious `source-ref-mismatch`; and a
+        labelled `imports` item produced a false `workflow-missing-config-import`
+        error.
+    -   **Surrounding quotes are stripped** by `scalar()`, so `max-ai-credits: "1000"`
+        no longer reads as `NaN` (and a quoted `imports` item no longer reads as a
+        missing import).
+    -   **Flow-style lists are read**: `allowed-team-reviewers: [kore]` is the spelling
+        the shipped `review.md` itself uses for `toolsets: [pull_requests, repos]`, and
+        it previously reported a false `config-empty-team-allowlist` error on a working
+        allowlist.
+
+    The new `list()` returns undefined only when a key is **absent**, which is what
+    lets the empty-allowlist check tell a deliberate omission from a key that yielded
+    nothing. Those are now separate outcomes: a present-but-empty key is always an
+    error (someone wrote the field and got nothing, and calling that deliberate would
+    read as an all-clear over a dropped allowlist), while an absent key defers to
+    `.github/REVIEWERS` as described above.
+
+    Still unsupported, and documented as such: multi-line flow sequences,
+    anchors/aliases, and block scalars.
+
+    The judgment half is `.claude/skills/review-onboarding/SKILL.md`: what stays the
+    operator's call (the team allowlist, the `enable` roster and `re-review` mode,
+    every admin blocker), the preflight inventory that becomes `ci-tooling.md` and
+    `skills.md`, the two local edits and when each applies, how to derive risk prose
+    and tiers from the repo's own blast radius rather than another consumer's file
+    (the three known consumers' radii differ completely), and the PR-body structure
+    that separates what is generated from what was decided, including what the author
+    did not verify.
+
+    No change to the shipped review workflow: `review.md`, the dispatcher, and every
+    routing default are untouched.
+
+-   a3afd04: Move the reviewer roster to Opus 5 (`claude-opus-5`). `pattern-triage` stays on Sonnet 4.6 as the cheap first pass.
+
+    The specialist lenses were kept off Fable 5 because cyber safety classifiers can refuse benign security-focused analysis, and a refused lens is a silent coverage hole: it surfaces as a missing agent result, not an error. Opus 5 can also return `stop_reason: "refusal"` on cyber-adjacent input, so this move re-opens that hole rather than closing it. The detector is the weekly drift corpus, where a refusing lens craters must-catch recall on security-adjacent cases while every other metric looks normal. On that signature, put the `security-auth` lens back on `claude-opus-4-8` first. Moving `security-auth` with the roster rather than carving it out pre-emptively is deliberate: the refusal hazard is intermittent and unproven on Opus 5, the one-hop runtime fallback (a refused agent re-dispatches once on `claude-opus-4-8`, recorded as `fellBackTo`) bounds each occurrence, and a uniform roster leaves one signature to watch and one revert to make instead of a permanent carve-out justified by a hazard that may not materialize.
+
+### Patch Changes
+
+-   590d47c: Meter AI credits at Khan's real Anthropic rate rather than list price. Khan bills list minus 50%, but the firewall api-proxy prices credits from a list-price catalog baked into its image, so `max-ai-credits` stops a run at half the spend it implies and the router's `maxUsd` targets are denominated in a currency twice as expensive as the real one. Adds gh-aw's `models.providers` overlay at 50% of list for every model the reviewer can run. Since a credit now means $0.01 of real spend, the existing caps and targets are correct as written, so `budgets.ts`, `credit-cap.ts` and the counters are untouched.
+
+    Inert until gh-aw v0.84.x is stable: `apiProxy.providers` needs firewall v0.27.43, and gh-aw v0.83.4 defaults to v0.27.42 and drops the key silently. Nothing else is required to activate it; recompiling on v0.84.x is enough.
+
 ## 1.15.0
 
 ### Minor Changes
