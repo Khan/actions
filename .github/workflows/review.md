@@ -244,7 +244,7 @@ pre-agent-steps:
       # `source:` below, so the prompt and the lib it invokes come from one version.
       # Even though this IS Khan/actions, the reviewer runs the released lib, not
       # the PR head; a PR must not be able to change the code that reviews it.
-      ref: review-v1.17.0
+      ref: review-v1.17.1
       path: gh-aw-review-lib
       persist-credentials: false
 
@@ -480,7 +480,7 @@ env:
   # KHAN/ACTIONS LOCAL OVERRIDE: the mirror of the raised max-ai-credits above
   # (the two values must stay in sync per the upstream comment).
   REVIEW_MAX_AI_CREDITS: "2500"
-source: Khan/actions/workflows/review/review.md@review-v1.17.0
+source: Khan/actions/workflows/review/review.md@review-v1.17.1
 ---
 
 # PR Reviewer
@@ -1027,7 +1027,7 @@ fully explained by a common pattern above:
 </details>
 
 <details><summary><sub>review details</sub></summary>
-<sub>review-v1.17.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
+<sub>review-v1.17.1 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
 </details>
 ````
 
