@@ -458,16 +458,26 @@ export const describesOpenThreadDefect = (
  * so bigrams break jaccard ties and overlap never ranks. Strictly-better
  * comparisons keep staging order as the final tiebreak, so an exact scoring
  * tie behaves as it did before.
+ *
+ * `ignorePath` drops the same-path key while keeping every floor as is (a
+ * pathED claim keeps {@link OTHER_LINE_FLOOR}; only a pathLESS one pays
+ * {@link PR_LEVEL_FLOOR}). The ONLY caller is the adjudicated pass
+ * (dedup-adjudicated.ts, which carries the measured justification); the open
+ * corpus stays path-keyed, because there a false cross-file match hides an
+ * undecided finding while here it eats one a human already settled.
  */
 export const bestOpenThreadMatch = (
     claim: Claim,
     threads: readonly OpenThread[],
+    options?: {ignorePath?: boolean},
 ): OpenThread | undefined => {
     let best: {thread: OpenThread; score: OpenThreadScore} | undefined;
     // A pathless (pr-level) claim compares against EVERY open thread.
     for (const thread of threads) {
         if (
-            (claim.path !== undefined && thread.path !== claim.path) ||
+            (options?.ignorePath !== true &&
+                claim.path !== undefined &&
+                thread.path !== claim.path) ||
             !describesOpenThreadDefect(claim, thread)
         ) {
             continue;

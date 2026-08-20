@@ -119,10 +119,21 @@ export const adjudicatedThreadsFromStaged = (threads: unknown): OpenThread[] =>
  *   audit trail, but submission.ts's floor requires the CANDIDATE to be
  *   blocking, which no claim suppressed here is.
  *
- * The match itself is the shared one (same path, no line window, the #245
- * similarity floors via {@link bestOpenThreadMatch}): an adjudicated defect's
- * rephrasing lands on nearby lines with new wording exactly the way a
- * persisting open defect's re-flag does.
+ * The match is the shared matcher with the PATH KEY DROPPED (`ignorePath`;
+ * same #245 similarity floors via {@link bestOpenThreadMatch}): an
+ * adjudicated defect's rephrasing routinely re-anchors on another file (the
+ * spec instead of the implementation, the test instead of the function), and
+ * the path key is what let the webapp#41290 families re-post for two weeks.
+ * Measured on that frozen corpus (Khan/plans,
+ * pr-review-agent/records/family-corpus-41290.json: 12 adjudicated threads,
+ * 33 labeled candidates): path-keyed scores 2/12 recall, key dropped scores
+ * 6/12, and BOTH make the same single false suppression (a same-path
+ * vocabulary-split pair), so the widening tripled recall and added zero
+ * false suppressions there. The asymmetry that licenses it is the human
+ * signal this corpus requires for membership: a false match here eats a
+ * finding a human already settled (and never a blocking one, per the rule
+ * above), while the same widening on the OPEN corpus would hide undecided
+ * findings, so that matcher stays path-keyed.
  */
 export const suppressAdjudicatedDuplicates = (
     claims: Claim[],
@@ -137,7 +148,7 @@ export const suppressAdjudicatedDuplicates = (
         const match =
             claim.path === undefined || isBlockingLabel(claim.label)
                 ? undefined
-                : bestOpenThreadMatch(claim, threads);
+                : bestOpenThreadMatch(claim, threads, {ignorePath: true});
         if (match === undefined) {
             kept.push(claim);
             continue;

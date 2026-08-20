@@ -5,6 +5,7 @@ import {
     suppressAdjudicatedDuplicates,
     suppressTrackedDuplicates,
 } from "./dedup-adjudicated";
+import {suppressOpenThreadDuplicates} from "./dedup";
 import type {Claim} from "./dispatch-contracts";
 
 /**
@@ -236,5 +237,69 @@ describe("suppressAdjudicatedDuplicates", () => {
         expect(result.suppressed[0].thread_id).toBe("T-open");
         expect(result.suppressed[0].adjudicated).toBeUndefined();
         expect(result.shapeFailure).toBeUndefined();
+    });
+});
+
+describe("cross-file adjudicated suppression (the path key dropped)", () => {
+    const adjudicatedThread = () => ({
+        thread_id: "T-adj",
+        path: "services/ai-guide/memory/expiration.go",
+        body: "**suggestion (non-blocking):** No test exercises the deletion path: TestExpiration only asserts that expired keys are identified, so a regression that identifies but never deletes expired memories stays green.",
+    });
+    const crossFile = (over: Partial<Claim> = {}) =>
+        claim({
+            id: "correctness-reviewer-9",
+            source: "correctness-reviewer",
+            path: "services/ai-guide/memory/expiration_test.go",
+            line: 7,
+            label: "suggestion (non-blocking)",
+            subject:
+                "TestExpiration never exercises the deletion path for expired keys.",
+            discussion:
+                "No test exercises the deletion path; TestExpiration asserts expired keys are identified but a regression that never deletes expired memories stays green.",
+            failure_scenario:
+                "A regression that identifies expired memories but skips the deletion ships green.",
+            ...over,
+        });
+
+    it("suppresses a re-derivation re-anchored on another file", () => {
+        // The webapp#41290 failure mode: the same settled defect re-posted
+        // at the spec, the implementation, and the test across runs, and the
+        // path key exempted every re-anchoring from the corpus. Measured on
+        // that frozen corpus (see the module header), dropping the key
+        // tripled recall (2/12 to 6/12) and added zero false suppressions.
+        const {kept, suppressed} = suppressAdjudicatedDuplicates(
+            [crossFile()],
+            [adjudicatedThread()],
+        );
+        expect(kept).toEqual([]);
+        expect(suppressed).toHaveLength(1);
+        expect(suppressed[0].thread_id).toBe("T-adj");
+        expect(suppressed[0].adjudicated).toBe(true);
+        expect(suppressed[0].path).toBe(
+            "services/ai-guide/memory/expiration_test.go",
+        );
+    });
+
+    it("still never suppresses a blocking candidate, cross-file included", () => {
+        const blocking = crossFile({label: "issue (blocking)"});
+        const {kept, suppressed} = suppressAdjudicatedDuplicates(
+            [blocking],
+            [adjudicatedThread()],
+        );
+        expect(kept).toEqual([blocking]);
+        expect(suppressed).toEqual([]);
+    });
+
+    it("leaves the OPEN corpus path-keyed: the same cross-file pair does not suppress there", () => {
+        // The asymmetry is the point: on the open corpus a false cross-file
+        // match hides an UNDECIDED finding, so its matcher keeps the path
+        // key; only human-settled threads earn the wide match.
+        const {kept, suppressed} = suppressOpenThreadDuplicates(
+            [crossFile()],
+            [adjudicatedThread()],
+        );
+        expect(kept).toHaveLength(1);
+        expect(suppressed).toEqual([]);
     });
 });
