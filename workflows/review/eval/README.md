@@ -77,6 +77,15 @@ gh workflow run review-eval-ab.yml --ref <branch> \
 gh workflow run review-eval-ab.yml --ref <branch> \
   -f base_ref=origin/<branch> -f force_arms=true -f full=true -f repeats=3 -f max_usd=220
 
+# Powered run for a dedup / duplicate-comment change (~$45): the cases that
+# actually produce multi-source clusters are the `documentation`-enabled ones
+# (that reviewer contributes the extra copy on a comment defect, which is the
+# shape production duplicated in run 30587343777), 5x per arm
+gh workflow run review-eval-ab.yml --ref <branch> \
+  -f base_ref=origin/main \
+  -f cases=golden-documentation-stale-and-narrated,golden-documentation-restated-docstring,golden-documentation-missing-why,golden-documentation-commented-out-code,clean-documentation-earned-comments \
+  -f repeats=5 -f max_usd=50
+
 # Pool reports across dispatches (run ids or local paths)
 pnpm dlx tsx workflows/review/eval/aggregate.ts <run-id> <run-id> ... [--out <path>]
 ```
@@ -145,6 +154,50 @@ claiming a band.
   a few lines off or past a short file's end) is what the gate's
   anchor-snap fallback repairs; a finding still landing in this bucket was
   outside both snap windows.
+- **Cross-source merges:** the report's "Cross-source claims merged (of
+  candidates)" row is the duplicate-comment observable, read from the merge
+  stage rather than from the posted set (merges happen upstream of every later
+  drop, and in production autofix satisfies surviving duplicates with one edit,
+  which hides the symptom on the PR). Tier 1, the calibrated text-similarity
+  floor, is shared code and runs in BOTH arms; tier 2, the `claim-clusterer`
+  agent, is carried by each arm's own review.md, so a baseline built from a ref
+  that predates the agent reports `tier 1 only` and the arm delta prices the
+  clusterer alone. Read it beside recall: a false merge drops a distinct
+  finding, so it shows up as candidate-arm recall loss, not as a better
+  duplicate number. The `by clusterer` share counts absorbed COPIES, not groups,
+  so a group both tiers contributed to credits tier 2 only with what it actually
+  brought; production's `clustering` block records the same per-copy number as
+  `clusterMerged` (its `clusterMerges` counts groups), so the artifact and the
+  report that graduated the tier cannot be read as disagreeing. The share
+  carries tier 2's own dollars and wall-clock beside it, because the dispatch
+  precondition is satisfied by most multi-finding reviews: the steady state is a
+  serial Sonnet call on nearly every run, and a merge count is a graduation
+  argument only next to what those merges cost. `rejected` counts cluster
+  MEMBERS the merge rules refused, so one bad
+  proposal naming three ids counts three (`unknown-id` there means the clusterer
+  named claims that do not exist, which is a prompt or staging failure rather
+  than a quiet zero). A dispatch that returned nothing usable is reported as
+  `N clusterer failure(s)` rather than folded into the zero: the arm paid and
+  measured nothing, which is not the claim that tier 2 found no duplicates.
+- **Tier 2's keep-or-cut bar,** written down before the next powered run so the
+  decision is auditable after it. The tier ships enabled in the default
+  template, so this is the bar it must keep clearing, not one it must clear to
+  arrive. Read on the candidate arm of a `--repeats` run:
+  - **Any recall loss cuts it.** One `lost` spec traceable to a tier-2 merge
+    ends the tier; no merge rate buys back a dropped finding. Same for a failed
+    adversarial gate. This one is not traded off against the others.
+  - **Rate floor: 0.15 absorbed copies per dispatched case** (`by clusterer`
+    over the cases where the clusterer actually ran). Run 30651373253 measured
+    0.20 (4 over 20 case-runs). Below the floor the steady state is a serial
+    Sonnet call on nearly every review that mostly does nothing, and the
+    dispatch precondition should be tightened or the tier cut.
+  - **Price ceiling: $0.50 per absorbed copy, and 8% of the arm's cost.** That
+    run measured $0.34 and +6% ($22.93 -> $24.30). The two are both needed: a
+    cheap tier that never fires and an expensive tier that fires often fail in
+    different ways.
+  - **Failures are not no-ops.** If `clusterer failure(s)` exceeds 10% of
+    dispatches the run measured plumbing, not a rate; fix it and re-measure
+    rather than reading the rate as a negative result.
 - **Anchor-snap and the arms:** the deterministic pipeline is shared by
   both arms, but the provenance gate emulates each arm's OWN review.md gate
   version, keyed on the literal `anchor-snap` marker in the gate step. A

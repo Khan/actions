@@ -667,18 +667,25 @@ describe("runDispatch", () => {
                 "pattern-triage",
                 "correctness-reviewer",
                 "skill-auditor",
+                "claim-clusterer",
                 "claim-validator",
             ),
         });
+        // The clusterer runs and proposes nothing: tier 1 owns this pair, and
+        // a silent tier 2 must not disturb it.
         const runner = stubRunner({
             "pattern-triage": TRIAGE_OK,
             "correctness-reviewer": duplicate("issue (blocking)"),
             "skill-auditor": duplicate("nitpick (non-blocking)"),
+            "claim-clusterer": JSON.stringify({clusters: []}),
             "claim-validator": VALIDATOR_CONFIRM,
         });
         const result = await runDispatch(options(fs, runner));
+        expect(result.merges[0].via).toBe("similarity");
         expect(result.claims).toMatchObject([{id: "correctness-reviewer-1"}]);
-        expect(result.claims[0].discussion).toContain("Also flagged by");
+        expect(result.claims[0].also_flagged_by).toEqual([
+            {source: "skill-auditor"},
+        ]);
         // The validator was dispatched on the merged set, and the merge is
         // recorded in dispatch-result.json for the run report.
         expect(JSON.parse(fs.files[`${REVIEW}/claims.json`])).toHaveLength(1);

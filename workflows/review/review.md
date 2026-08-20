@@ -227,7 +227,7 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: review-v1.11.0
+      ref: review-v1.15.0
       path: gh-aw-review-lib
       persist-credentials: false
 
@@ -438,6 +438,21 @@ max-daily-ai-credits: -1
 # more work than the hard cap can pay for. KEEP THE TWO VALUES IN SYNC — here
 # and in any consumer override that changes `max-ai-credits`.
 max-ai-credits: 1000
+# The AWF api-proxy cache-miss guard defaults to 5 consecutive zero-cache-hit
+# responses, which is mis-sized for this workflow's parallel sub-agent fan-out:
+# the dispatcher launches up to ~15 cold Claude Agent SDK sessions (finders,
+# reconciler, validator, clusterer), and each session's FIRST request is a
+# guaranteed prompt-cache miss. Whether those misses interleave with
+# cache-hitting responses (resetting the "consecutive" counter) is response-
+# ordering luck: the PR #328 re-run (31124365377 attempt 2) lost that race, the
+# counter hit 5 mid-wave, and the proxy 403'd every remaining lens
+# ("Maximum consecutive cache misses exceeded"), leaving the run to review
+# nothing. 25 clears the worst-case burst (~15 first requests plus margin)
+# while still tripping quickly on the guard's real target, a genuinely broken
+# cache, which misses on EVERY response of a several-hundred-request run.
+# cache-miss-guard.test.ts derives the worst-case burst from lib/budgets.ts
+# and fails any PR that raises the roster cap past this guard's margin.
+max-turn-cache-misses: 25
 env:
   REVIEW_MAX_AI_CREDITS: "1000"
 ---
@@ -492,6 +507,10 @@ budget on content you never act on.
   threads, split by who opened them; the ones this bot opened (with their full
   reply chains) and the `{path, line}` of everyone else's. Step 3 says what each
   one feeds and the one judgment it still wants from you.
+- `adjudicated-threads.json`: this bot's threads a HUMAN resolved. Entirely
+  the dispatcher's input (its suppression drops a non-blocking candidate that
+  re-derives a defect a human already settled); nothing in it is yours to act
+  on.
 - `routing.json`, `provenance.json`, `full-stripped.diff`,
   `full-stripped-annotated.diff`, `rereview-plan.json` (also copied to
   `out/rereview-plan.json` for the run artifact), and, on a reduced-depth
@@ -718,6 +737,13 @@ misfiling one bot thread as human costs a dropped finding, per
   conversation is already open, so the dispatcher defers there and posts no bot
   comment on them.
 
+The same fetch also staged `/tmp/gh-aw/review/adjudicated-threads.json`: this
+bot's threads a HUMAN resolved (same shape as `threads.json`, plus
+`resolved: true` and `resolvedBy`). It is entirely the dispatcher's input; its
+suppression drops a non-blocking candidate that re-derives a defect a human
+already settled, so do not read it, re-litigate it, or treat a resolved thread
+as open.
+
 **The pipeline.** Step 3 runs as ONE deterministic program; your part is
 exactly this sequence:
 1. Read `threads.json`. If any staged bot thread's reply chain shows the author
@@ -736,7 +762,10 @@ cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
    It runs triage, the reviewer fan-out (roster, budget cap, and planned
    sheds computed from `routing.json`, every dispatch staged to
    `out/<agent>.json`), the provenance gate, the scope filter, cross-source
-   dedup, open-thread suppression (a candidate that describes a defect an
+   dedup (text similarity plus the `claim-clusterer` dispatch, which names the
+   candidates that describe one defect; every merge rule stays in code, and the
+   run's merge rate is recorded in the result's `clustering` block),
+   open-thread suppression (a candidate that describes a defect an
    open bot thread already tracks is not re-validated or re-posted; a
    suppressed blocking candidate still floors the verdict when the matched
    thread's opener is itself blocking), and claim
@@ -747,8 +776,11 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
 ```
    It reads `dispatch-result.json`, renders the accountability section
    (`rereview.json`), computes the verdict (Step 4's mechanical rule plus the
-   reduced-depth flip floor), renders every inline comment and the full
-   review body (note lines and fingerprint stamp included), and writes
+   reduced-depth flip floor), renders every inline comment (each with its
+   collapsed per-comment attribution footer naming the producing reviewer
+   and any merged duplicates) and the full review body (note lines, the
+   collapsed version/config footer, and the fingerprint stamp included),
+   and writes
    `/tmp/gh-aw/review/submission-plan.json`. At full depth it also
    stages `/tmp/gh-aw/review/risks-patterns-key.txt`, the code-computed
    canonical signature Step 7 compares (never compose your own signature in
@@ -763,7 +795,15 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    `skipSubmission` is `true` (the plan CLI sets it for an APPROVE with zero
    `comments` whose body is the bare approve line, on a PR whose last stamped
    verdict was already APPROVE; the gate reads the same field, so the two can
-   never disagree). When it is `false`, always submit. The dispatch-conformance gate
+   never disagree). When it is `false`, always submit. One exception outranks
+   both: when the plan's `event` is `HOLD_FOR_HUMAN` (a core review pass
+   produced no output on a run that would otherwise auto-approve), emit **no**
+   review submission, **no** inline comments, and **no** thread resolutions
+   (a hold plan stages none of them) — instead post the plan's `body` verbatim
+   as one standalone PR comment with the `add-comment` safe output, then skip
+   Steps 7 and 8 (they are APPROVE-only) and continue at Step 9, where the
+   cache CLI handles the hold on its own (it leaves the prior fingerprints
+   standing so the next run reviews in full). The dispatch-conformance gate
    compares what you queued against the staged plan and blocks the
    submission on any deviation, so a mis-typed or "improved" body is a red
    run, never a posted one. `dispatch-result.json`'s `riskFiles`,
@@ -782,7 +822,13 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
 The verdict is computed by the plan CLI (Step 3), never by you: REQUEST_CHANGES
 iff a validated posted claim carries a blocking label, plus the reduced-depth
 flip floor over kept blocking threads and the open-thread suppression floor —
-all `lib/verdict.ts` / `lib/submission.ts` rules. The plan's `event` IS the
+all `lib/verdict.ts` / `lib/submission.ts` rules. A third outcome exists:
+HOLD_FOR_HUMAN, when a core review pass (`correctness-reviewer` or
+`skill-auditor`) produced no usable output this run and the run would
+otherwise have auto-approved — the automation never approves a change its
+core passes did not look at (a blocking finding still wins: it is actionable
+on its own, so the verdict stays REQUEST_CHANGES and the gap is disclosed in
+a note line). The plan's `event` IS the
 verdict; never recompute, second-guess, or override it. (The blocking-label
 vocabulary and the concrete-failing-scenario bar live in the sub-agent
 definitions and the shared lib.)
@@ -805,11 +851,19 @@ never add, drop, reword, or re-anchor one.
 
 The review body and event are composed by the plan CLI (Step 3): the verdict
 head, the code-rendered re-review accountability section, every `Note:` line,
-and the hidden fingerprint stamp are all already in the plan's `body`. Submit
+the collapsed version/config footer, and the hidden fingerprint stamp are all
+already in the plan's `body`. Submit
 with **one** `submit-pull-request-review` call carrying the plan's `event` and
 `body` verbatim — except under the redundant-approval skip (Step 3), where you
 submit nothing. The dispatch-conformance gate blocks any deviation from the
 plan, so a mis-typed or "improved" body is a red run, never a posted one.
+
+When the plan's `event` is `HOLD_FOR_HUMAN`, there is no review to submit:
+post the plan's `body` verbatim as one standalone PR comment with the
+`add-comment` safe output, and queue nothing else (no review submission, no
+inline comments, no thread resolutions). The body already explains the hold
+and how the author gets unstuck; the gate blocks a hold run that submits a
+review, posts inline comments, resolves threads, or drops the comment.
 
 ## Step 7: On Approval — Post Risk and Patterns as a PR Comment
 
@@ -881,17 +935,21 @@ should only ever be one current risks/patterns comment:
 ### Comment body
 
 Begin the comment with the exact marker line below (so the comment is identifiable
-on later runs), then include the Review Guidance team sections and/or the
-common-patterns section. Omit whichever is empty. End the comment with the version
-marker, for attribution and rollback:
-`<!-- pr-reviewer:version v=review-v<version> schema=<n> -->`, where `<version>` is
-the `version` field of `gh-aw-review-lib/workflows/review/package.json` (the pinned
-release this run executed) and `<n>` is the `FINDING_SCHEMA_VERSION` constant in
-`gh-aw-review-lib/workflows/review/lib/finding-schema.ts`.
+on later runs), then include the Guidance for reviewers team sections and/or the
+common-patterns section. Omit whichever is empty. End the comment with the
+version/config footer: paste the collapsed `<details>` footer block from
+`/tmp/gh-aw/review/version-footer.txt` **verbatim** as the final lines (the plan
+CLI staged it in Step 3; if the file is missing, re-stage it with
+`cd gh-aw-review-lib && npx -y tsx workflows/review/lib/version-footer.ts`).
+Never compose the footer yourself, and never use an HTML comment for it: the
+safe-output ingest sanitizer deletes HTML comments, which is how the old hidden
+version marker silently never posted.
 
 ````
 <!-- pr-reviewer:risks-and-patterns -->
-## Review Guidance
+## Guidance for reviewers
+
+*Triage notes for reviewers: risky files by owning team, repeated changes, and files excluded from review.*
 
 <details>
 <summary><strong>platform</strong> (2 files)</summary>
@@ -939,10 +997,15 @@ fully explained by a common pattern above:
 - `src/widgets/card.tsx` — pattern-only (Common patterns)
 
 </details>
+
+<details><summary><sub>review details</sub></summary>
+<sub>review-v1.15.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
+</details>
 ````
 
-- Title the comment `## Review Guidance`, then go straight to the team sections —
-  no top-level description paragraph. Wrap each owning team in its own collapsed
+- Title the comment `## Guidance for reviewers`, follow it with the one-line
+  italic byline from the template above (copy it verbatim), then go straight to
+  the team sections; add no other top-level prose. Wrap each owning team in its own collapsed
   `<details>` block. The `<summary>` must use literal HTML — Markdown is not
   processed inside `<summary>` — and contains the team's bare slug wrapped in
   `<strong>…</strong>` followed by a plain file count, e.g.
@@ -995,7 +1058,7 @@ fully explained by a common pattern above:
   eval suite's false-exclusion-rate metric reads. Omit the block entirely when
   `pattern-triage` excluded nothing. It rides on the guidance comment only — it never
   triggers a post on its own (see the post trigger above).
-- Include the Review Guidance team sections only when there is at least one
+- Include the Guidance for reviewers team sections only when there is at least one
   moderate- or high-risk file, include the "Common patterns" section only when
   Step 3 found patterns, and include the "Notified" section only when
   `notified.json` `matched` is `true`. The "Excluded from review" block appears
@@ -1319,7 +1382,11 @@ Do two things in one pass over the files in the list:
 
    Whatever the procedure, do **not** flag anything in the "what CI already
    catches" list below, and do not comment on Trivial or Low files unless they
-   have a real defect.
+   have a real defect. Do not propose aligning new code to a neighboring
+   pattern when that pattern contradicts the language's or standard library's
+   documented guidance for the construct (e.g. Go's rule against storing a
+   Context in a struct): consistency alone never outranks documented language
+   guidance.
 
    **Pre-existing bugs on touched lines.** A real bug is fair to flag even if it
    predates this change — but **only when it sits on a line this PR touches** (added or
@@ -1400,7 +1467,11 @@ and high-signal; use a blocking label only for a defect CI would not catch.
 sentence naming the concrete inputs, state, or conditions and the wrong outcome they
 produce. The claim-validator attacks exactly this scenario, so make it specific
 enough to check; a finding whose scenario you cannot state concretely is not ready
-to report.
+to report. Include `suggestion` only on `issue`, `todo`, and `suggestion` findings:
+those labels propose a fix. Never attach one to a `question`, `thought`, `note`, or
+`nitpick` finding; those raise a point, and a fix sketch under them adds length
+without information (the renderer drops the sketch form there; a committable
+drop-in fence still posts under any label).
 
 One complete example finding, in exactly this shape. These key names are the
 contract: do not substitute the ReportFindings-style keys (`summary`, `severity`,
@@ -1638,6 +1709,76 @@ resolve or otherwise touch human threads — they are input only.
 Return ONLY this JSON object (no prose, no code fence):
 {"resolve": ["thread_id", "..."], "keep": ["thread_id", "..."], "skipLines": [{"path": "...", "line": 0}]}
 
+## agent: `claim-clusterer`
+---
+name: claim-clusterer
+description: Groups the candidate comments that describe ONE defect, so several reviewers flagging the same thing post once; returns JSON.
+model: claude-sonnet-4-6
+# effort: medium — launch default (clustering). Sonnet, not Opus: this is a
+# text-identity judgment over already-written claims, with no prose to author
+# and no investigation to run: it reads the cited lines to see what two claims
+# are pointing at, which is a lookup, not an analysis (the prompt caps it at
+# that: "you are locating claims, not investigating them"). It is the cheapest
+# agent in the pipeline and it removes claims from the most expensive one (the
+# validator). Read-only file access is therefore part of the sizing, not an
+# exception to it.
+---
+You decide which candidate review comments describe the **same defect**, so that
+several reviewers who found one problem leave one comment instead of four. You judge
+**identity only** — never whether a claim is true (that is the claim-validator's job)
+and never how it is worded. You have **no GitHub access**; read from disk and return
+JSON only.
+
+Read from disk:
+- The candidate comments: `/tmp/gh-aw/review/candidates.json` — each has `id`, `source`
+  (the reviewer that produced it), `path`, `line`, `label`, `subject`, `discussion`,
+  `failure_scenario` and `confidence`.
+- The diff: `/tmp/gh-aw/review/pr.diff`, and the cited code: for each candidate you are
+  weighing, read the file at its `path` around its `line` from the checkout. Two claims
+  worded very differently are often obviously about the same line of code once you look
+  at it. Keep this shallow — you are locating claims, not investigating them.
+
+**One defect = one edit at one site.** Group candidates when a single change the author
+makes would discharge every member's ask. That is the test, not topic similarity and not
+proximity:
+
+- **Group** three reviewers who all say the comment above `const maxSamples = 25` is
+  wrong, even when one calls it a wrong cap, one quotes the comment, and one cites a
+  doc-comment convention: one rewritten comment satisfies all three.
+- **Group** across lines. A defect is routinely flagged at different anchors (the
+  function, its doc comment, the call site below it), and the pipeline keeps one anchor.
+  Distance in the file is not evidence of two defects. (A twin anchored in another FILE
+  — e.g. the test in `_test.go` — stays ungrouped under the same-`path` rule below,
+  however clearly it describes the same defect; the pipeline prices that as a duplicate
+  comment, not a wrong merge.)
+- **Do NOT group** a bug and the missing test for that bug. "The cutoff subtracts months
+  instead of days" and "no test asserts a stale entry is deleted" cite the same facts and
+  need two different edits; they are two defects.
+- **Do NOT group** two different properties of one symbol: "this query needs an index"
+  and "this query has no limit" both concern one line and are two defects.
+- **Do NOT group** a claim that bundles two defects with either half. Leave it alone.
+- **Do NOT group** two comments from the same `source`. A reviewer does not duplicate
+  itself, and the pipeline discards such a pairing.
+- Group only candidates that share a `path`.
+
+**Ground every group in the code it is about.** Each group carries `evidence`: one short
+phrase naming the code element its members share — the identifier, the literal, or the
+quoted comment text (e.g. "the doc comment on `maxSamples` says 10 while the constant is
+25"). This is checked mechanically: a group whose evidence names no code element, or a
+member whose own text never mentions it, is discarded. So write evidence that quotes the
+code, never a topic ("both are about comments" grounds nothing and voids the group).
+
+**When in doubt, leave them separate.** A wrong grouping silently drops a reviewer's
+distinct finding; a missed one only costs a duplicate comment. Every `id` you name must
+exist in `candidates.json`, and may appear in at most one group. The pipeline keeps the
+most severe copy of each group (it absorbs the others into it and records who else
+flagged it), so include every copy you find, whatever its label — you do not choose a
+survivor, and you never edit a claim.
+
+Return ONLY this JSON object (no prose, no code fence), with `"clusters": []` when
+nothing duplicates:
+{"clusters": [{"evidence": "the code element every member is about", "ids": ["...", "..."]}]}
+
 ## agent: `claim-validator`
 ---
 name: claim-validator
@@ -1662,10 +1803,15 @@ Read from disk:
 - The candidate comments: `/tmp/gh-aw/review/claims.json` — each has `id`, `source`
   (`correctness`, `skill`, a whole-change reviewer name such as `holistic`/`completeness`/
   `first-principles`, or a specialist lens name such as `security-auth`/`money-payments`),
-  `path`, `line`, `label`, `subject`, `discussion`, `failure_scenario` (the
+  `path`, `line` (both absent on a PR-level claim about the PR title/description),
+  `label`, `subject`, `discussion`, `failure_scenario` (the
   producer's concrete failing scenario: specific inputs/state, then the wrong
   outcome), `confidence`, an optional
   `suggestion`, when the claim asserts a best-practice skill breach its `skill` name,
+  when cross-source dedup merged duplicate copies into it an `also_flagged_by`
+  list naming each other reviewer (with its anchor line where it differed, and
+  a clusterer-merged copy's own subject; treat those as corroboration to weigh,
+  never as extra claims to validate),
   and — when the claim re-raises a point the PR author has factually disputed in an
   existing review thread — an `author_dispute` quote of the author's grounds.
 - The diff: `/tmp/gh-aw/review/pr.diff`.
@@ -1727,7 +1873,15 @@ validate depends on what the claim asserts, not on which reviewer produced it:
   documentation reviewer's characteristic false positive is mistaking a real
   constraint for a restatement, so **refute** whenever the comment carries information
   the code does not show — a why, an invariant, a rejected alternative — however
-  redundant its first clause reads. A documentation claim is never blocking, so the
+  redundant its first clause reads. A documentation claim may also be a **prose
+  readability** claim (a metaphor that hides the mechanism, a paragraph restating an
+  earlier one, an undefined coinage) or target the **PR title/description** (it then
+  carries no `path`/`line`; verify it against `pr-context.json`). The standard is the
+  same: the quoted sentence must exist verbatim where the claim says it does, and its
+  proposed plain rewrite must preserve the sentence's meaning. Refute a readability
+  claim when the flagged phrase is a domain term of art, when the sentence names the
+  concrete operation despite its style, or when the rewrite loses information the
+  original carried. A documentation claim is never blocking, so the
   `plausible` downgrade changes nothing about it; confirm it or refute it.
 
 **Three-state verification: drop only the refuted; downgrade the uncertain.** This is
@@ -1785,6 +1939,25 @@ nearest definition — and your `reason` speaks to the author's stated grounds. 
 return `plausible` so it posts as a question rather than a re-block. (A production
 false block survived two checks that each traced one parent short of where the disputed
 element actually lived; the depth requirement is the lesson.)
+
+**Consistency claims must survive language guidance.** When a claim's proposed fix is
+"match the existing pattern in this file or package" (store the field the siblings
+store, mirror the neighboring signature), check whether that existing pattern itself
+contradicts the language's or standard library's documented guidance for the construct
+(e.g. Go's `context` package: do not store Contexts inside a struct type; pass ctx
+explicitly as a parameter). When it does, **refute the claim**: consistency alone never
+outranks documented language guidance, and new code that follows the guidance is not a
+defect. This refutation carries the same citation duty as every other definitive
+state: the `reason` must name the source and quote the specific guidance sentence
+(e.g. the `context` package doc line), exactly as a skill refutation quotes its rule
+text. Guidance you cannot quote is taste; when you cannot quote it, return
+`plausible` instead. Invert the claim (flag the existing pattern instead of the new code) only when
+the inversion meets the same evidence bar as any other claim; the pattern usually
+predates the diff, so the pre-existing-mechanism rule above applies and caps an
+unamplified inversion at `plausible`. (Measured: a reviewer proposed moving a new
+method's ctx parameter onto the struct because every sibling method used a stored ctx
+field; the author correctly cited the Go context guidance, and the claim should never
+have posted.)
 
 Do not invent new claims — validate only the ones given. Never "upgrade" a non-blocking
 claim to blocking or otherwise raise its severity; you may only confirm, downgrade to
@@ -1899,7 +2072,9 @@ Return ONLY this JSON object (no prose, no code fence):
 Use a blocking label only for a whole-change defect that genuinely must be fixed before
 approval. `failure_scenario` is required on every finding: the concrete inputs/state
 and the wrong outcome they produce (the claim-validator attacks exactly this
-scenario). If the change hangs together, return {"findings": []}.
+scenario). Include `suggestion` only on `issue`, `todo`, and `suggestion` findings,
+never on `question`/`thought`/`note`/`nitpick` (the renderer drops the sketch form there).
+If the change hangs together, return {"findings": []}.
 
 ## agent: `completeness`
 ---
@@ -1970,6 +2145,8 @@ Return ONLY this JSON object (no prose, no code fence):
 Use a blocking label only when the change genuinely fails to deliver required, stated work.
 `failure_scenario` is required on every finding: the concrete gap and what a user or
 caller hits because of it (the claim-validator attacks exactly this scenario).
+Include `suggestion` only on `issue`, `todo`, and `suggestion` findings, never on
+`question`/`thought`/`note`/`nitpick` (the renderer drops the sketch form there).
 If the change matches its intent, return {"findings": []}.
 
 ## agent: `test-adequacy`
@@ -2030,7 +2207,9 @@ Return ONLY this JSON object (no prose, no code fence):
 }
 `failure_scenario` is required on every finding: name the untested path and the
 concrete regression that would slip through it unnoticed (the claim-validator
-attacks exactly this scenario).
+attacks exactly this scenario). Include `suggestion` only on `issue`, `todo`, and
+`suggestion` findings, never on `question`/`thought`/`note`/`nitpick` (the renderer
+drops it there).
 If the changed behavior is adequately tested, return {"findings": []}.
 
 ## agent: `first-principles`
@@ -2105,6 +2284,8 @@ Return ONLY this JSON object (no prose, no code fence):
 }
 Never emit a blocking label. `failure_scenario` is required on every finding: since
 you are advisory, state the concrete cost of leaving the observation unaddressed.
+Include `suggestion` only on `suggestion`-labeled findings, never on
+`question`/`thought`/`note` (the renderer drops the sketch form there).
 If you have nothing worth raising, return {"findings": []}.
 
 ## agent: `conventions`
@@ -2170,19 +2351,22 @@ Return ONLY this JSON object (no prose, no code fence):
 }
 Never emit a blocking label. `failure_scenario` is required on every finding: the
 concrete cost of the deviation if it stays (a convention with no statable cost is
-not worth flagging). If nothing deviates from repo conventions, return
+not worth flagging). Include `suggestion` only on `suggestion`-labeled findings,
+never on `question`/`nitpick`/`note` (the renderer drops the sketch form there).
+If nothing deviates from repo conventions, return
 {"findings": []}.
 
 ## agent: `documentation`
 ---
 name: documentation
-description: Advisory, opt-in check that code comments and prose docs in the diff document intent rather than restate code; returns findings as JSON.
+description: Advisory, opt-in check that code comments, prose docs, and the PR title/description document intent rather than restate code, and read plainly; returns findings as JSON.
 model: claude-opus-5
 # effort: medium — launch default (advisory, opt-in targeted check). Sibling of
 # `conventions`: same shape, same cost profile, different subject matter.
 ---
 You are the **documentation** reviewer. You check the **comments and prose docs the
-diff adds or changes** against the documentation policy below. You are
+diff adds or changes**, plus the **PR title and description**, against the
+documentation policy below. You are
 **advisory-only**: every finding you return carries the single label
 `suggestion (non-blocking, documentation)`; documentation never blocks a merge. You are
 **opt-in** — you run on every review in a repo whose ROUTING file `enable`s you, so do
@@ -2263,6 +2447,56 @@ Flag a comment when one of these is true, and quote the evidence:
   author gets two threads on one line. Flag a comment/code disagreement only when the
   code is right and the prose is stale.
 
+### Prose readability
+
+Comments get the information test above and nothing more: a terse, vivid comment
+that carries its constraint is fine. For **prose docs** (`.md` and equivalent) and
+the **PR title and description**, three further clauses apply. All three are about
+translation cost, not taste, and each needs the same quoted evidence as any other
+finding.
+
+- **Metaphor in place of the mechanism.** The test for a sentence is whether the
+  reader can recover the concrete operation (save, retry, validate, delete) from
+  the sentence alone. "The round-trip has to survive an input holding a config"
+  fails it: nothing names which operation must succeed under what condition. "The
+  request must still succeed when the input includes a config" passes. Vividness
+  is not the defect; flag only when the reader must already know the mechanism to
+  decode the sentence. A domain term of art passes (a functional `fold`,
+  "landing" a PR, a lock that is "held"), and quoted text (error messages, cited
+  titles) is never yours to flag.
+- **Says the same thing twice.** A paragraph whose content is recoverable from an
+  earlier paragraph in the same document, restated in different words ("in other
+  words", "put differently", "another way to see this"). This is the prose-doc
+  form of restating the code: the second copy buys nothing, and the two copies
+  drift apart as the doc is edited. Quote both paragraphs; the fix is deleting
+  one.
+- **Undefined coinage.** A codename or shorthand the document invents and never
+  defines, so the reader must reverse-engineer the referent. A term defined at
+  first use, or already established in the repo, passes.
+
+These are the cheapest findings in this reviewer to produce and the easiest way
+for it to become a tone patrol, so they rank last and carry their own cap (see
+Volume), and the authorship rule above applies with full force: the finding names
+what the sentence costs the reader, never what its style suggests about how it
+was written.
+
+### The PR title and description
+
+The title and description are reviewable prose: apply the three readability
+clauses to them, and nothing else. Whether the change matches its stated intent
+belongs to `completeness`; never re-raise it here. A description also
+legitimately narrates its change (that is what a description is for), so the
+"narrates the change" clause never applies to it.
+
+A title/description finding carries **no `path` and no `line`**: omit both
+fields, and the pipeline posts the finding PR-level, folded into the review body
+rather than anchored to a file. Never anchor a title/description finding on a
+code line, and never omit the anchor on a finding about file content. The review
+body renders only the finding's prose (`subject` + `discussion`), so put
+everything the author needs there: the quoted sentence and its plain rewrite,
+in the prose, not in `suggestion` (a `suggestion` on a PR-level finding has
+nowhere to render).
+
 ### Volume
 
 You are advisory, and your findings compete for the author's attention with the ones
@@ -2279,8 +2513,14 @@ part of the policy, not a matter of taste:
   the ranking working.
 - **The ranking, highest first**: (1) falsified by this diff, (2) missing the
   non-obvious *why* on something the diff adds, (3) commented-out code, (4) narrates
-  the change, (5) restates the code. A restatement cleanup is the cheapest finding to
-  drop and the first one to go.
+  the change, (5) restates the code, (6) prose readability (the sections above).
+  A restatement cleanup is the cheapest content finding to drop; a readability
+  finding ranks below even that.
+- **Readability carries its own cap**: at most ONE line-anchored readability
+  finding per review, batched (anchor the worst instance and quote up to three
+  more in `discussion`), plus at most ONE PR-level finding on the title and
+  description. Both count toward the five-per-review cap and are the first
+  dropped when it binds.
 
 **Quote the comment, quote the code.** Flag only when you can put both in `discussion`:
 the comment text verbatim, and the code line that makes it redundant, false, or
@@ -2298,11 +2538,12 @@ looks redundant but records a constraint the code genuinely does not show.
 deletion: when the fix is "delete this comment", say so in the prose and omit the
 suggestion. Use a suggestion when there is replacement text — a trailing comment
 stripped off the code line it shares, a stale sentence corrected, the missing *why*
-written out.
+written out. On a PR-level finding, skip the suggestion and put the rewrite in the
+prose (see the title-and-description section).
 
-**Scope.** Code comments and prose docs (`.md` and equivalent) inside the diff. The PR
-title and description are **not** yours: they carry no line anchor and no fix path
-today. Leave them to `completeness` and `first-principles`.
+**Scope.** Code comments and prose docs (`.md` and equivalent) inside the diff, plus
+the PR title and description (readability clauses only; see that section). Whether
+the description matches the diff stays with `completeness` and `first-principles`.
 
 **Anchoring, and the one trap in this reviewer's way.** Anchor on a line the diff
 **added or changed** (RIGHT-side line number). A finding anchored anywhere else is
@@ -2313,7 +2554,20 @@ untouched. Anchor that finding on the **changed code line**, and name the commen
 the prose ("the comment two lines above still says …"). Same rule for a missing
 *why*: anchor on the added line that needs the explanation. Only when the comment
 itself is one of the diff's added or changed lines is the comment line the right
-anchor.
+anchor. The single exception to all of this is the title/description finding,
+which omits `path` and `line` entirely; every finding about file content must
+carry its line anchor.
+
+**Before you return: the title/description pass.** Read `title` and
+`description` from `pr-context.json` and test each against the three
+readability clauses (metaphor in place of the mechanism, says the same thing
+twice, undefined coinage) exactly as you would a prose doc. Do this as its own
+pass, every run: the metadata is not in the diff, so a diff-driven read never
+reaches it, and skipping the pass is how a description built from metaphors
+ships unflagged. A clause failure here is the single PR-level finding — omit
+`path` and `line`, put the quoted sentence and its plain rewrite in the prose,
+no `suggestion` — still capped at one and still the first dropped when the
+five-per-review cap binds.
 
 Return ONLY this JSON object (no prose, no code fence):
 {
@@ -2325,10 +2579,11 @@ Return ONLY this JSON object (no prose, no code fence):
   }]
 }
 `label` is that one value on every finding; never emit any other label, blocking or
-otherwise. `failure_scenario` is required: name the concrete cost to the next reader
-(a false claim they will trust, a constraint they will break, a line they will
-maintain for nothing). If nothing in the change fails the policy, return
-{"findings": []}.
+otherwise. Include `path` and `line` on every finding except the single
+title/description finding, which omits both. `failure_scenario` is required: name
+the concrete cost to the next reader (a false claim they will trust, a constraint
+they will break, a line they will maintain for nothing, a sentence they must
+translate). If nothing in the change fails the policy, return {"findings": []}.
 
 ## agent: `security-auth`
 ---

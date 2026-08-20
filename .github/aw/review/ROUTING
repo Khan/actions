@@ -11,7 +11,7 @@
 # domains (auth resolvers, migrations, federation, ...) and none maps to this repo's
 # supply-chain surface. Whole-change reviewers mirror webapp's eval-justified roster.
 
-enable holistic,completeness,test-adequacy,first-principles,conventions
+enable holistic,completeness,test-adequacy,first-principles,conventions,documentation
 
 # Repeat reviews of the same PR run thread reconciliation plus the full
 # enabled roster over the new hunks (scoped staging); the first full review
@@ -22,15 +22,32 @@ enable holistic,completeness,test-adequacy,first-principles,conventions
 # whole-change reviewers, not only the correctness pass. Graduate to
 # flip-gated once re-reviews here show scoped is overpaying (see
 # workflows/review/README.md for the dial).
-re-review scoped
+#
+# blocking-only: repeat reviews keep the full scoped roster (blocking recall
+# unchanged) but post only blocking findings inline; validated non-blocking
+# findings collapse to one line each in the review body. First full reviews,
+# tripwire re-arms, and guard-degraded full runs still post everything.
+re-review scoped blocking-only
 
 # Shipped composite actions run inside consuming repos' CI with their credentials.
 actions/**                   tier=high
 # This repo's own CI, the publish pipeline, and the compiled agentic workflows.
 .github/workflows/**         tier=high
 utils/**                     tier=high
+# A workflow staged for a human `git mv` into .github/workflows/ is CI the moment
+# it moves, and it is reviewed here or nowhere.
+.github-staging/**           tier=high
 # The shared reviewer's deterministic enforcement layer.
 workflows/review/lib/**      tier=high
+# The autofix workflow's enforcement layer. It PUSHES COMMITS to PRs in consuming
+# repos, so it has at least the blast radius of the reviewer lib beside it; it was
+# falling to the default `low` purely because no rule named it.
+workflows/autofix/lib/**     tier=high
+# The dependency sets these shared workflows install INSIDE a consumer's CI run
+# (review.md's pre-agent step is `npm ci` against the released lockfile), so a
+# dependency added here executes in every consuming repo.
+workflows/*/package.json     tier=high
+workflows/*/package-lock.json tier=high
 
 # Dev-only surfaces.
 workflows/review/eval/**     tier=low
@@ -47,6 +64,12 @@ workflows/*/*.md             tier=high
 workflows/*/README.md        tier=trivial
 workflows/*/CHANGELOG.md     tier=trivial
 .github/workflows/*.md       tier=high
+# Same re-raise for the staging pen. A staged agentic workflow IS a .md (the
+# .lock.yml is compiled from it), so `.github-staging/** tier=high` above is
+# defeated for exactly the file that carries the frontmatter -- permissions,
+# secrets, network -- and the prompt. Nothing in the pen is docs; it holds files
+# awaiting a `git mv` into .github/workflows/.
+.github-staging/**/*.md      tier=high
 
 # More executable-not-docs prose the broad docs rule would drop to trivial:
 # skills steer the Claude agents that operate on this repo, and eval plan docs
@@ -55,9 +78,44 @@ workflows/*/CHANGELOG.md     tier=trivial
 # shed review dimensions for it.)
 .claude/skills/**            tier=medium
 workflows/review/eval/**/*.md tier=low
+# Same reasoning one directory over: Cursor rules steer an agent working here.
+.cursor/rules/**             tier=medium
 
 # The reviewer's own consumer config: config.md carries the add-reviewer team
 # allowlist and bot token, ROUTING sets these tiers, and the prose imports steer
 # every sub-agent. A PR tampering with any of them must not run at the trivial
 # or default budget.
 .github/aw/review/**         tier=high
+
+# gh-aw's action SHA lockfile: it pins every third-party action the compiled
+# workflows in this repo run. A diff here changes which third-party code executes
+# in our CI. Deliberately not classified generated even though `gh aw compile`
+# maintains it -- a SHA change is exactly what should be reviewed, not skipped.
+.github/aw/*.json            tier=high
+
+# Config that shapes releases, review routing, or what the reviewer itself can see,
+# without being executable: worth real review, short of the supply-chain tier.
+# `.changeset/config.json` shapes what gets versioned and tagged (the publish code
+# in utils/ and its version-sync test are the actual gate, hence medium not high);
+# `.github/REVIEWERS` is the ONLY source of the router's team ownership, so a wrong
+# line silently routes reviews to the wrong team or to nobody; `.gitattributes`
+# decides which files the reviewer treats as generated and therefore skips;
+# `tsconfig.json` decides what `pnpm typecheck` covers (today it excludes
+# `workflows/**` entirely, so nothing typechecks the reviewer lib).
+.changeset/config.json       tier=medium
+.github/REVIEWERS            tier=medium
+/.gitattributes              tier=medium
+/package.json                tier=medium
+/tsconfig.json               tier=medium
+
+# Repo-local dev surfaces: lint/format/test wiring, type shims, and eval output.
+# None of it ships, and none of it runs in another repo.
+/.eslintrc.js                tier=low
+/.prettierrc.js              tier=low
+/.gitignore                  tier=low
+/pnpm-workspace.yaml         tier=low
+/vitest.config.ts            tier=low
+config/**                    tier=low
+types/**                     tier=low
+.github/NOTIFIED             tier=low
+.github/review-eval/**       tier=low

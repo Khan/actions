@@ -104,7 +104,11 @@ CLI invocation (`lib/dispatch.ts`) that runs triage, the reviewer fan-out
 (roster, budget cap, and planned sheds computed from `routing.json`), the
 provenance gate, the scope filter, cross-source dedup, open-thread suppression
 (a candidate describing a defect an open bot thread already tracks posts no
-duplicate; a suppressed blocking candidate still floors the verdict), and
+duplicate; a suppressed blocking candidate still floors the verdict),
+adjudicated-thread suppression (a non-blocking candidate re-deriving a defect
+a human settled by resolving the bot's thread posts no new thread; a blocking
+candidate is never suppressed this way, so a regression re-flag stays
+visible), and
 claim validation, inside the same firewall sandbox (the api-proxy meters and
 caps script-spawned sub-agents exactly like Task-spawned ones). Each sub-agent
 delivers its result through an in-process `submit_result` MCP tool whose input
@@ -146,6 +150,57 @@ pins its own `pre-agent-steps` checkout `ref:` to that same version (the release
 flow rewrites it; see [Versioning](#versioning)), so after `gh aw add` or
 `gh aw update` the imported file already fetches the matching lib code and needs
 no manual fix-up of the ref.
+
+### Onboarding a whole repo
+
+`gh aw add` is the mechanical half. The judgment half (writing the five consumer
+config files for *that* repo's blast radius, the two local edits to the installed
+`review.md`, the admin blockers only a repo admin can clear, and a PR body that
+discloses what is generated versus decided) is choreographed by the
+[`review-onboarding` skill](../../.claude/skills/review-onboarding/SKILL.md)
+in this repo. [`Khan/kore-marketplace#3`](https://github.com/Khan/kore-marketplace/pull/3)
+is the template it produces.
+
+Validate any install (new or existing) with the consumer-config checker, run from
+a checkout of the tag the consumer pins:
+
+```sh
+git -C <consumer> ls-files | npx -y tsx workflows/review/lib/check-consumer-config.ts \
+    --repo <consumer> --files-from -
+
+# Why does this path get this tier? (every matching ROUTING rule, last one wins)
+npx -y tsx workflows/review/lib/check-consumer-config.ts --repo <consumer> --explain <path>
+```
+
+It reads the install through the *production* parsers (`route()`,
+`parseRoutingConfig`, `parseGitattributesGenerated`), so it never drifts from
+what a review actually does, and it reports the whole class of mistakes that
+otherwise surface as a red run on someone's PR: a missing runtime import, a
+`${{ }}` expression inside one, `add-reviewer` defined in both `review.md` and
+`config.md` (the main workflow wins, discarding the allowlist), a dropped
+`imports:` line, an empty team allowlist in a repo that *has* a `.github/REVIEWERS`
+ownership map, a missing or unmarked `.lock.yml`, an unmarked
+`agentics-maintenance.yml`, a live `observability:` block, the shipped credit
+ceiling, `ROUTING` parse warnings, inert lens payloads, reviewer config that does
+not route to `high`, and the resolved tier of every tracked file. Errors exit 1;
+`--strict` also fails on warnings, and `--json` emits the report for tooling.
+
+Two of those deserve a note, because both are "valid, but invisible" rather than
+broken. An empty `allowed-team-reviewers` is only an **error** when
+`.github/REVIEWERS` exists: that file is the router's only source of ownership, so
+without it Step 8 requests nobody regardless, and the empty allowlist is an accurate
+statement that the repo does not do reviewer requests (reported as
+`reviewer-requests-inert`). Requiring a team there would only get an inert one
+invented to satisfy the check. And `agentics-maintenance.yml` is `gh aw compile`
+output that is *not* named `*.lock.yml`, so the marker every consumer was told to add
+misses it, and ~600 generated lines get line-reviewed until it has its own.
+
+Follow-up, not yet built: the failure class the checker targets (config failing
+late and quietly) recurs on every later edit to ROUTING or `config.md`, not just
+at onboarding. `checkConsumerConfig` is pure with an injected filesystem and
+already ships `--json` and `--strict`, so a consumer CI job gating PRs that
+touch the config paths is the natural next layer; nothing in the checker
+blocks it.
 
 ## Consumer configuration
 
@@ -257,7 +312,7 @@ rule per line:
 ```
 # <pattern> [lens=<lens>,…] [tier=trivial|low|medium|high] [direction-dependent]
 # enable <reviewer>[,<reviewer>…]
-# re-review full|scoped|flip-gated|fast
+# re-review full|scoped|flip-gated|fast [blocking-only]
 services/**/migrations/**  tier=high lens=data-migrations
 **/*.graphql               lens=api-federation-compat
 pkg/auth/**                tier=high direction-dependent lens=security-auth
@@ -284,7 +339,10 @@ re-review scoped
   winning tier rule for the path.
 - `re-review` sets the repo's re-review mode (see the next section). Default
   `full`; when several lines set it, the last one wins with a warning. An
-  unknown mode degrades to `full`: toward more review, never less.
+  unknown mode degrades to `full`: toward more review, never less. The
+  optional `blocking-only` modifier changes the repeat review's posting
+  surface (see [Re-review modes](#re-review-modes-the-runs-per-pr-cost-lever));
+  an unknown modifier warns and is ignored, and the mode still applies.
 
 Glob semantics are a practical subset of gitignore/CODEOWNERS: `**` crosses
 directories, `*` and `?` stay within a segment, a trailing `/` matches everything
@@ -299,7 +357,8 @@ stays the model-facing prose about file *contents*; team ownership stays in
 ### The `documentation` reviewer (opt-in)
 
 `enable documentation` turns on a reviewer that checks the **comments and prose docs
-the diff adds or changes** against a documentation policy. It is advisory-only and
+the diff adds or changes**, plus the **PR title and description**, against a
+documentation policy. It is advisory-only and
 opt-in like `conventions`, and it exists because comment quality is an enforcement
 problem rather than a prompt problem: every author, human or agent, is told what a
 good comment looks like, and nothing checks.
@@ -314,13 +373,23 @@ that had not yet written the file. Repo-specific calibration rides the per-direc
 frontend want different things here": they can, per directory, without a global
 decision.
 
+The policy has two halves. The **content half** is the original test: a comment
+earns its line by carrying information the code does not. The **readability half**
+applies to prose docs and the PR title/description, and is about translation cost,
+not taste: metaphor in place of the mechanism (a sentence the reader cannot decode
+into concrete operations without already knowing them), a paragraph that restates
+an earlier one, and shorthand the document coins but never defines. A
+title/description finding carries no path/line and posts PR-level, folded into the
+review body; whether the description *matches the diff* stays with `completeness`.
+
 Two things it deliberately does not do:
 
 - **It never reasons about who wrote the text.** It cannot tell whether a human or a
   model wrote a comment, and the policy is the same either way. A finding that reads
   as an accusation of AI authorship is out of bounds even when the comment is bad.
-- **It does not review the PR title or description.** Those carry no line anchor and
-  no fix path today; `completeness` and `first-principles` already read them.
+- **It does not police tone or style.** Vivid prose that names its mechanism passes,
+  domain terms of art pass, and quoted text (error messages, cited titles) is never
+  flaggable. The readability clauses fire only when the reader has to translate.
 
 **The label is load-bearing.** Its findings render as
 `suggestion (non-blocking, documentation)` rather than a plain `suggestion
@@ -334,8 +403,11 @@ carrying this label before a documentation-scoped autofix finds anything.
 
 **Volume is part of its policy.** The definition caps this reviewer at one finding per
 comment, two per file, and five per review, and ranks the policy's clauses so the tail
-is dropped from the bottom (restatement cleanups go first; a comment the diff falsified
-never does). The cap is there because the failure mode is not precision, it is
+is dropped from the bottom (readability findings go first, then restatement cleanups; a
+comment the diff falsified never does). Readability carries its own sub-cap: at most one
+line-anchored readability finding per review (batched: worst instance anchored, up to
+three more quoted in its discussion) and at most one PR-level finding on the
+title/description. The cap is there because the failure mode is not precision, it is
 attention: on a 70-line fixture the reviewer returned seven findings, several of them the
 docstring half of a blocking finding whose code fix resolved the observation anyway, and
 one the *fourth* thread on a single comment. Two other rules do the same work from
@@ -385,7 +457,7 @@ matching deterministically (review.md Step 7 runs the CLI and pastes its rendere
 block); no file means no section, so it costs nothing where it is absent.
 
 **Delivery is approval-time, not on-touch.** The pings ride in the (approval-only)
-Review Guidance comment, so — unlike Gerald, which notifies on every push — a
+Guidance for reviewers comment, so — unlike Gerald, which notifies on every push — a
 watcher is pinged when the reviewer approves, and a PR held at REQUEST_CHANGES or
 merged before the AI verdict lands never pings them. This is intentional: the
 notification piggybacks on the one comment the reviewer already posts, and firing
@@ -408,7 +480,7 @@ relies on those may match a slightly different set than Gerald. An unsupported g
 construct matches nothing rather than crashing the review; a malformed rule (bad
 regex body, unterminated quote) is dropped and adds a `Note:` to the PR review.
 
-Because the notified `@mentions` ride in the Review Guidance comment (an
+Because the notified `@mentions` ride in the Guidance for reviewers comment (an
 `add-comment` safe output), gh-aw's mention sanitizer governs whether they
 actually ping: repository collaborators are allow-listed by default
 (`mentions.allow-team-members`), and to let arbitrary teams/users through, widen
@@ -449,6 +521,21 @@ Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministi
   divergent push gets the whole roster. This is what defeats
   rewrite-after-approval and sparse-PR-then-payload
   (`eval/lifecycle/`, replayed in `eval/lifecycle.test.ts`).
+
+**The `blocking-only` modifier** (`re-review scoped blocking-only`) composes
+with any mode: the depth's roster and staging are unchanged, but a repeat
+review posts only blocking findings inline; validated non-blocking findings
+collapse to one line each in a `<details>` block in the review body, and the
+depth note names the modifier. It applies exactly when the run executes at a
+reduced depth, so the first full review of a ready PR, a divergence-tripwire
+re-arm, and every guard that resolves to `full` still post everything (which
+is also why `full blocking-only` warns: it can never apply). The verdict is
+computed from every validated claim either way, so the modifier can never
+flip an outcome; it only moves non-blocking feedback off the inline surface.
+Use it when re-review chatter is the complaint but whole-change coverage
+(`scoped`) is still wanted: `flip-gated` silences the noise by not running
+the whole-change reviewers at all, while `scoped blocking-only` keeps their
+blocking recall and their body-collapsed observations.
 
 The dial is a measured change, not a default change: it ships `full`
 everywhere, so no consumer's behavior moves until its repo adds a `re-review`
@@ -705,16 +792,45 @@ v1.4.0 shipped still pointing at v1.2.2, before the sync existed).
 
 Semver is the behavior contract: a release that changes the reviewer's behavior bumps
 the major version, so a consumer pinned to `review-v<major>` can assume the fundamental
-behavior holds within a major. For attribution and rollback, the risks/patterns
-guidance comment (Step 7) carries the release the run executed, in one HTML marker
-reusing the `pr-reviewer:` marker namespace `#194` established:
+behavior holds within a major. For attribution and rollback, every submitted review
+body and the risks/patterns guidance comment (Step 7) end with a footer collapsed
+inside a `<details>` block (summary chip `review details`), rendered in code by
+`lib/version-footer.ts` from the pinned checkout's `package.json` and the staged
+run files (never composed by the model):
 
 ```
-<!-- pr-reviewer:version v=review-v<major>.<minor>.<patch> schema=<n> -->
+<details><summary><sub>review details</sub></summary>
+<sub>review-v<major>.<minor>.<patch> | schema <n> | depth <depth> | re-review <mode> [blocking-only] | enable <reviewer,...></sub>
+</details>
 ```
 
 `schema` is the finding-schema version (`FINDING_SCHEMA_VERSION` in
-`lib/finding-schema.ts`) the run was on. A bad reviewer release rolls back by
-re-pinning the previous tag; the marker on each posted review makes attribution
-immediate. There is no separate config-hash or drift-stamp mechanism — the release
-tag is the single version surface.
+`lib/finding-schema.ts`) the run was on; `depth` is the EXECUTED re-review depth;
+the `re-review` and `enable` segments echo the repo's ROUTING configuration, so a
+posted review attributes both the release and the config it ran under. A segment
+the staging cannot state is omitted rather than guessed. A bad reviewer release
+rolls back by re-pinning the previous tag; the footer on each posted review makes
+attribution immediate.
+
+The footer posts (collapsed, expandable) by necessity, not preference:
+attribution originally rode a hidden HTML marker
+(`<!-- pr-reviewer:version ... -->`), but gh-aw's safe-output
+ingest sanitizer deletes ALL XML/HTML comments (`removeXmlComments` in
+`sanitize_content_core.cjs`, the same strip documented for the fingerprint stamp
+in `lib/rereview-mode.ts`), so the marker never reached a posted comment; `sub`,
+`details`, and `summary` are on the sanitizer's allowed-tag list and survive
+ingest. There is no separate config-hash or drift-stamp mechanism; the release
+tag plus the footer's config segments are the version surface.
+
+Every inline review comment (and each pr-level finding folded into the review
+body) additionally ends with a per-comment attribution footer in the same
+collapsed block, naming the reviewer that produced the finding and, when
+cross-source dedup merged duplicates into it, each other reviewer that flagged
+the same defect (`lib/attribution.ts`; the merge record is the structured
+`also_flagged_by` field on the claim, so a validator discussion rewrite cannot
+drop it). Collapsed one-liners (the low-confidence `<details>` section and a
+hold comment's claim list) carry the short form, a trailing
+`<sub>(<source>)</sub>` tag. Text-similarity comparisons against
+previously-posted bodies (open-thread suppression, the adjudicated corpus)
+strip these footers first, so the shared boilerplate cannot inflate similarity
+between unrelated findings.

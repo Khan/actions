@@ -1,0 +1,89 @@
+{
+    "id": "golden-documentation-pr-description-metaphor",
+    "tags": [
+        "golden",
+        "documentation",
+        "live"
+    ],
+    "category": "golden",
+    "description": "The PR-metadata half of the readability policy. The code change is small and well documented (the MAX_JOBS_PER_PASS comment carries the why and is a must-not-flag trap), but the PR description is built entirely from metaphors ('teaches the drain loop to breathe', 'shoulders a bite-sized batch', 'land cleanly before the health check wakes up') and never states the cap or the deadline in plain terms. The reviewer must return ONE finding with no path/line (the PR-level form that folds into the review body), quoting the description and giving the plain rewrite in the prose.",
+    "changedFiles": [
+        {
+            "path": "src/jobs/drain.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "documentation"
+        ]
+    },
+    "findings": [
+        {
+            "source": "documentation",
+            "finding": {
+                "schema_version": 2,
+                "id": "doc-pr-description-metaphor",
+                "lens": "documentation",
+                "anchor": {
+                    "type": "pr"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "pr-context.json description: \"This change teaches the drain loop to breathe. Each pass now shoulders a bite-sized batch and has to land cleanly before the health check wakes up and starts asking questions; anything left over waits patiently for the next breath.\"",
+                    "the diff caps a drain pass at MAX_JOBS_PER_PASS = 50 against the worker's 60s health-check interval; the description names neither number and no concrete operation"
+                ],
+                "failure_scenario": "A reviewer or a future archaeologist reading the PR list cannot tell from the description what the change does (cap each drain pass at 50 jobs so a pass finishes inside the 60s health-check window) without opening the diff.",
+                "producing_hunt": "documentation:pr-metadata",
+                "model_authored_prose": "The description requires translating its metaphors to recover the change: \"teaches the drain loop to breathe\", \"shoulders a bite-sized batch\", \"has to land cleanly before the health check wakes up\". Plainer: \"Cap each drain pass at MAX_JOBS_PER_PASS (50) so a pass finishes inside the worker's 60s health-check interval instead of being killed mid-drain; remaining jobs are picked up by the next pass.\""
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "doc-pr-description-metaphor"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/jobs/drain.ts b/src/jobs/drain.ts\n--- a/src/jobs/drain.ts\n+++ b/src/jobs/drain.ts\n@@ -1,10 +1,15 @@\n import {claimJobs, runJob} from \"./queue\";\n \n+// 50 keeps one drain pass under the worker's 60s health-check interval:\n+// p95 job time is ~1.1s, and an unbounded pass was marked unhealthy and\n+// killed mid-drain during the 2026-07 backfill.\n+const MAX_JOBS_PER_PASS = 50;\n+\n export const drainQueue = async (): Promise<number> => {\n     let handled = 0;\n-    for (const job of await claimJobs()) {\n+    for (const job of await claimJobs(MAX_JOBS_PER_PASS)) {\n         await runJob(job);\n         handled += 1;\n     }\n     return handled;\n };\n",
+    "live": {
+        "prContext": {
+            "title": "jobs: bound each drain pass",
+            "description": "This change teaches the drain loop to breathe. Each pass now shoulders a bite-sized batch and has to land cleanly before the health check wakes up and starts asking questions; anything left over waits patiently for the next breath.",
+            "author": "dev-platform",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "doc-pr-description-metaphor",
+                "prLevel": true,
+                "lens": "documentation",
+                "mechanism": [
+                    "metaphor",
+                    "breathe",
+                    "land cleanly|wakes up|bite-sized",
+                    "plain(er)?",
+                    "concrete"
+                ]
+            }
+        ],
+        "mustNotFlagSpecs": [
+            {
+                "key": "doc-trap-batch-why-comment",
+                "path": "src/jobs/drain.ts",
+                "lineStart": 3,
+                "lineEnd": 6,
+                "lens": "documentation",
+                "mechanism": [
+                    "comment restates",
+                    "redundant comment",
+                    "delete the comment",
+                    "restates the constant"
+                ]
+            }
+        ]
+    }
+}

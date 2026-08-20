@@ -4,7 +4,7 @@ import {evaluateDispatchConformance} from "./dispatch-gate";
 import {labelForFinding, renderComment} from "./render-comment";
 import {renderRereviewStamp, STAMP_SCHEMA_VERSION} from "./rereview-mode";
 import {
-    isDropInSuggestion,
+    MAX_VERBATIM_FOLD_CHARS,
     renderClaimComment,
     runSubmissionCli,
     type SubmissionFs,
@@ -83,96 +83,6 @@ const priorApprove = (): Record<string, string> => ({
     }),
 });
 
-describe("renderClaimComment", () => {
-    it("renders the Conventional Comment with the post-validation label", () => {
-        expect(
-            renderClaimComment(
-                claim({
-                    label: "suggestion (non-blocking)",
-                    suggestion: "fixed()",
-                }) as never,
-            ),
-        ).toBe(
-            "**suggestion (non-blocking):** The guard was removed.\n\n```suggestion\nfixed()\n```",
-        );
-    });
-
-    it("keeps the rule quote as a blockquote between prose and fix", () => {
-        const body = renderClaimComment(
-            claim({rule_quote: "Always guard.\nEven here."}) as never,
-        );
-        expect(body).toContain("> **Rule:** Always guard.\n> Even here.");
-    });
-
-    it("keeps the suggestion fence for small code-shaped payloads", () => {
-        // Run 29897276810's legitimate drop-ins: a one-line cutoff fix and a
-        // five-line query chain.
-        expect(
-            isDropInSuggestion(
-                "\tcutoff := ctx.Time().Now().AddDate(0, 0, -MemoryTTLDays)",
-            ),
-        ).toBe(true);
-        expect(
-            isDropInSuggestion(
-                [
-                    "\tq := datastore.NewQuery(models.AIGuideMemoryKind).",
-                    '\t\tFilterField("kaid", "=", kaid).',
-                    '\t\tFilterField("created_at", "<", cutoff).',
-                    "\t\tKeysOnly().",
-                    "\t\tLimit(500)",
-                ].join("\n"),
-            ),
-        ).toBe(true);
-    });
-
-    it("treats prose that names code as prose (run 29901690493's fence misses)", () => {
-        expect(
-            isDropInSuggestion(
-                "Use ctx.Time().Now().AddDate(0, 0, -MemoryTTLDays), and add a test that writes a memory with created_at beyond the window and asserts it is deleted by the pass.",
-            ),
-        ).toBe(false);
-        expect(
-            isDropInSuggestion(
-                "Filter by the retention cutoff at read time in Query; keep (or drop) the write-path delete as a storage-cost optimization only.",
-            ),
-        ).toBe(false);
-    });
-
-    it("renders an English-prose suggestion as a sketch, not a suggestion fence (r3628128268)", () => {
-        const prose =
-            "Add a created_at >= cutoff filter in Query so stale memories can never surface regardless of write activity, and consider a native Datastore TTL policy on created_at in place of (or alongside) the write-path ExpireStale pass.";
-        expect(isDropInSuggestion(prose)).toBe(false);
-        const body = renderClaimComment(
-            claim({
-                label: "suggestion (non-blocking)",
-                suggestion: prose,
-            }) as never,
-        );
-        expect(body).not.toContain("```suggestion");
-        expect(body).toContain("A sketch, not a committable replacement:");
-        expect(body).toContain(`\`\`\`\`\n${prose}\n\`\`\`\``);
-    });
-
-    it("renders an oversized code payload as a sketch (r3628128224's 30-line test fn)", () => {
-        const testFn = [
-            "func (suite *expirationSuite) TestExpirationRemovesStaleMemories() {",
-            "\tctx := suite.KAContext()",
-            ...Array.from(
-                {length: 26},
-                (_, i) => `\tsuite.Require().NoError(step${i}(ctx))`,
-            ),
-            "\tsuite.Require().Len(keys, 1)",
-            "}",
-        ].join("\n");
-        expect(isDropInSuggestion(testFn)).toBe(false);
-        const body = renderClaimComment(
-            claim({label: "todo (blocking)", suggestion: testFn}) as never,
-        );
-        expect(body).not.toContain("```suggestion");
-        expect(body).toContain("A sketch, not a committable replacement:");
-    });
-});
-
 describe("runSubmissionCli", () => {
     it("plans REQUEST_CHANGES with the fixed body line when a blocking claim posts", () => {
         const fs = makeFakeFs(
@@ -192,7 +102,11 @@ describe("runSubmissionCli", () => {
             {
                 path: "a.ts",
                 line: 2,
-                body: "**issue (blocking):** The guard was removed.",
+                body:
+                    "**issue (blocking):** The guard was removed.\n\n" +
+                    "<details><summary><sub>review details</sub></summary>\n" +
+                    "<sub>found by correctness-reviewer</sub>\n" +
+                    "</details>",
             },
         ]);
         expect(plan.resolve).toEqual(["t1"]);
@@ -328,6 +242,7 @@ describe("runSubmissionCli", () => {
                         path: undefined,
                         line: undefined,
                         label: "note (non-blocking)",
+                        also_flagged_by: [{source: "completeness", line: 7}],
                     }),
                 ],
             }),
@@ -337,7 +252,54 @@ describe("runSubmissionCli", () => {
         expect(plan.body).toContain(
             "**note (non-blocking):** The guard was removed.",
         );
+        // The fold carries the same collapsed attribution footer an inline
+        // comment gets (submission.ts's pr-level branch).
+        expect(plan.body).toContain(
+            "<details><summary><sub>review details</sub></summary>\n" +
+                "<sub>found by correctness-reviewer | also flagged by " +
+                "completeness (at line 7)</sub>\n" +
+                "</details>",
+        );
+        expect(plan.body).not.toContain("<summary>Full finding</summary>");
         expect(plan.notes.join(" ")).toContain("folded into the review body");
+    });
+
+    it("folds a long pr-level claim as its subject plus a collapsed full finding", () => {
+        // webapp#41290 review 4867627688 folded a ~2,600-char pr-anchored
+        // finding verbatim into the body, burying the accountability
+        // section around it; past the verbatim cap the body carries the
+        // subject line and the discussion collapses.
+        const discussion = `The moderation goroutine races the completion goroutine. ${"Every detail of the trace is repeated at length here. ".repeat(
+            Math.ceil(MAX_VERBATIM_FOLD_CHARS / 50),
+        )}`;
+        const fs = makeFakeFs(
+            staged({
+                depth: "full",
+                claims: [
+                    claim({
+                        path: undefined,
+                        line: undefined,
+                        label: "issue (blocking)",
+                        subject:
+                            "The moderation goroutine races the completion goroutine.",
+                        discussion,
+                    }),
+                ],
+            }),
+        );
+        const plan = runSubmissionCli(fs);
+        expect(plan.comments).toEqual([]);
+        expect(plan.body).toContain(
+            "**issue (blocking):** The moderation goroutine races the completion goroutine.",
+        );
+        expect(plan.body).toContain("<summary>Full finding</summary>");
+        expect(plan.body).toContain(discussion);
+        // The verbatim wall is gone: the discussion appears only inside the
+        // details block, after the subject-line fold.
+        expect(plan.body.indexOf(discussion)).toBeGreaterThan(
+            plan.body.indexOf("<summary>Full finding</summary>"),
+        );
+        expect(plan.event).toBe("REQUEST_CHANGES");
     });
 
     it("throws when the dispatcher has not run", () => {
@@ -522,6 +484,28 @@ describe("the gate's plan-match rule (slice 4)", () => {
         );
     });
 
+    it("appends the attribution footer as the last visible line, before the stamp", () => {
+        const fs = makeFakeFs(
+            staged({
+                depth: "full",
+                claims: [claim()],
+            }),
+        );
+        const plan = runSubmissionCli(fs);
+        const lines = plan.body.split("\n");
+        // Stamp last (hidden), the collapsed footer block directly above it.
+        expect(lines.at(-1)).toMatch(/^<!--.*-->$/);
+        expect(lines.at(-2)).toBe("</details>");
+        expect(lines.at(-3)).toMatch(/^<sub>.*schema \d+.*<\/sub>$/);
+        expect(lines.at(-4)).toBe(
+            "<details><summary><sub>review details</sub></summary>",
+        );
+        // The CLI also staged the footer file Step 7 pastes.
+        expect(fs.files["/tmp/gh-aw/review/version-footer.txt"]).toBe(
+            lines.slice(-4, -1).join("\n"),
+        );
+    });
+
     it("the redundant-approval skip queues nothing only for an APPROVE plan with no comments", () => {
         const approvePlan = runSubmissionCli(
             makeFakeFs(staged({depth: "full", claims: []}, priorApprove())),
@@ -642,6 +626,9 @@ describe("re-review hardening (slice 4 feedback)", () => {
         });
         expect(dropped.conformant).toBe(false);
     });
+
+    // The blocking-only posting-surface cases live in
+    // submission-blocking-only.test.ts (this file's max-lines budget).
 
     it("refuses the skip without a prior APPROVE (a first approval must post)", () => {
         const plan = runSubmissionCli(

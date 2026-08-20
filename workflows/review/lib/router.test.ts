@@ -50,7 +50,7 @@ const file = (
 // map lives in its own .github/aw/review/ROUTING file), so the tests supply
 // the rules they exercise, shaped like a typical consumer config.
 const baseConfig: RouterConfig = {
-    generatedPatterns: [],
+    generatedRules: [],
     lensRules: [
         {pattern: "**/*.sql", lenses: ["data-migrations"]},
         {pattern: "**/migrations/**", lenses: ["data-migrations"]},
@@ -117,24 +117,6 @@ describe("patternSpecificity", () => {
 /* Config parsers                                                             */
 /* -------------------------------------------------------------------------- */
 
-describe("parseGitattributesGenerated", () => {
-    it("collects linguist-generated patterns and honours negation", () => {
-        const content = [
-            "# comment",
-            "",
-            "dist/** linguist-generated=true",
-            "vendor/** linguist-generated",
-            "generated/keep.ts -linguist-generated",
-            "src/*.ts text",
-            "other/*.js linguist-generated=false",
-        ].join("\n");
-        expect(parseGitattributesGenerated(content)).toEqual([
-            "dist/**",
-            "vendor/**",
-        ]);
-    });
-});
-
 describe("teamSlug", () => {
     it("strips @, org prefix, trailing !, and lowercases", () => {
         expect(teamSlug("@Khan/Security!")).toBe("security");
@@ -165,14 +147,14 @@ describe("parseReviewers", () => {
 
 describe("route: classification", () => {
     it("marks linguist-generated files generated with no lenses/teams/tier", () => {
-        const generatedPatterns = parseGitattributesGenerated(
+        const generatedRules = parseGitattributesGenerated(
             "dist/** linguist-generated=true",
         );
-        expect(isGenerated("dist/bundle.js", generatedPatterns)).toBe(true);
+        expect(isGenerated("dist/bundle.js", generatedRules)).toBe(true);
 
         const result = route(
             {files: [file("dist/bundle.js")]},
-            {...baseConfig, generatedPatterns},
+            {...baseConfig, generatedRules},
         );
         expect(result.perFile[0]).toMatchObject({
             path: "dist/bundle.js",
@@ -543,7 +525,11 @@ describe("toRoutingJson", () => {
         const reviewerRules = parseReviewers("src/auth/ @Khan/Security");
         const result = route(
             {files: [file("src/auth/login.ts"), file("dist/bundle.js")]},
-            {...baseConfig, generatedPatterns: ["dist/**"], reviewerRules},
+            {
+                ...baseConfig,
+                generatedRules: [{pattern: "dist/**", generated: true}],
+                reviewerRules,
+            },
         );
         const json = toRoutingJson(result);
         // Every tier is emitted in the display casing review.md consumes.
@@ -875,9 +861,13 @@ describe("parseRoutingConfig: re-review directive", () => {
         for (const mode of ["full", "scoped", "flip-gated", "fast"] as const) {
             const config = parseRoutingConfig(`re-review ${mode}`);
             expect(config.reReviewMode).toBe(mode);
+            expect(config.reReviewBlockingOnly).toBe(false);
             expect(config.warnings).toEqual([]);
         }
     });
+
+    // The blocking-only modifier's parse and CLI cases live in
+    // router-rereview-blocking-only.test.ts (max-lines budget).
 
     it("degrades an unknown mode to full with a warning; toward more review", () => {
         const config = parseRoutingConfig("re-review turbo");
@@ -888,9 +878,13 @@ describe("parseRoutingConfig: re-review directive", () => {
     });
 
     it("skips a re-review line with the wrong arity", () => {
-        const config = parseRoutingConfig("re-review scoped fast");
+        const config = parseRoutingConfig(
+            "re-review scoped blocking-only extra",
+        );
         expect(config.reReviewMode).toBe("full");
-        expect(config.warnings.join("\n")).toContain("exactly one mode");
+        expect(config.warnings.join("\n")).toContain(
+            "one mode and optionally blocking-only",
+        );
     });
 
     it("lets the last of duplicate lines win, with a warning", () => {
@@ -908,7 +902,9 @@ describe("runCli: re-review mode", () => {
             ]),
             [ROUTING_CONFIG_PATH]: "re-review scoped",
         });
-        expect(runCli(fs).reReviewMode).toBe("scoped");
+        const json = runCli(fs);
+        expect(json.reReviewMode).toBe("scoped");
+        expect(json.reReviewBlockingOnly).toBe(false);
     });
 
     it("defaults to full without a ROUTING config", () => {
@@ -917,7 +913,9 @@ describe("runCli: re-review mode", () => {
                 {path: "a.ts", status: "modified"},
             ]),
         });
-        expect(runCli(fs).reReviewMode).toBe("full");
+        const json = runCli(fs);
+        expect(json.reReviewMode).toBe("full");
+        expect(json.reReviewBlockingOnly).toBe(false);
     });
 });
 

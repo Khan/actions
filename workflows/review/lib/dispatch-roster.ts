@@ -24,6 +24,15 @@ export const DEFAULT_FINDERS = [
 ] as const;
 
 /**
+ * The skipped-dimension name the triage pass records (distinct from the
+ * `pattern-triage` agent name: note lines read "pattern triage not
+ * assessed"). Lives here with DEFAULT_FINDERS so the dispatcher (which
+ * writes the name) and the plan CLI's dimension mapping (which reads it,
+ * submission.ts) share one definition.
+ */
+export const TRIAGE_DIMENSION = "pattern triage";
+
+/**
  * The Step 3 dispatch/shed ranking, first-shed first. Fill order under the
  * invocation cap is this list reversed after the defaults and matched
  * lenses. An enabled reviewer this table does not know sheds after

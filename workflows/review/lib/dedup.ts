@@ -6,34 +6,135 @@
  * and every copy was separately validated — validation is the single largest
  * sub-agent cost line, so duplicates are merged before it, not after.
  *
- * The merge is deliberately conservative: only claims from DIFFERENT sources,
- * anchored on the same path, whose text clearly describes the same defect
- * (token-set similarity plus a shared-phrase floor, calibrated on the real
- * claim sets of runs 29897276810, 29943085279 and 30301235749). Still no
- * line window: run 29943085279's missing-deletion-test defect posted twice
- * with anchors 43 lines apart in expiration_test.go (:15 and :58), so
- * proximity can never be required. An IDENTICAL anchor is used the other
- * way round, as evidence: two sources landing on the same `(path, line)`
- * clear a lower text floor than two sources landing on different lines.
- * The survivor is the highest-severity copy, its discussion gains an "also
- * flagged by" note, and every merge is recorded for dispatch-result.json.
+ * Merges arrive from TWO tiers, and the split is the module's central idea.
  *
- * Determinism boundary: pure text arithmetic; no model call, no filesystem.
+ * 1. **Text similarity** (below): claims from DIFFERENT sources, anchored on
+ *    the same path, whose text clearly describes the same defect (token-set
+ *    similarity plus a shared-phrase floor, calibrated on the real claim sets
+ *    of runs 29897276810, 29943085279 and 30301235749). Still no line window:
+ *    run 29943085279's missing-deletion-test defect posted twice with anchors
+ *    43 lines apart in expiration_test.go (:15 and :58), so proximity can
+ *    never be required. An IDENTICAL anchor is used the other way round, as
+ *    evidence: two sources landing on the same `(path, line)` clear a lower
+ *    text floor than two sources landing on different lines.
+ * 2. **Model-proposed defect clusters** ({@link verifiableClusters}): the
+ *    `claim-clusterer` sub-agent reads the candidate set and names the groups
+ *    that describe ONE defect, each grounded in the code element its members
+ *    share. This module verifies that assertion and owns every merge rule; the
+ *    model contributes identity only.
+ *
+ * They run in that ORDER, and {@link dedupeClaims} explains why at length: tier
+ * 1 settles completely, and tier 2 only ever merges the comments it left
+ * standing. That is the whole of what makes tier 2 additive — no per-member
+ * check can promise it — and it is why a run with the clusterer can never post
+ * more comments than the same run without it.
+ *
+ * Why a second tier at all — the limit of tier 1, measured. Run 30587343777
+ * (webapp#41204, a FIRST review at `depth: full`, so no re-review artifact)
+ * had four sources flag one wrong doc comment (`// Keeps at most 10 samples
+ * per key.` above `const maxSamples = 25`) at window.go :8, :9, :8, :8, and
+ * merged none of them. Replaying that run's own claims.json: THREE of the four
+ * share the exact anchor and still score 0.060-0.068 Jaccard on a 0.14 floor
+ * with 0-1 shared bigrams on a floor of 4 — an order of magnitude below the
+ * tier, not a thin margin. Each reviewer wrote the same defect in different
+ * words ("wrong cap (10 vs 25)", "per-key cap is 10 but maxSamples is 25", a
+ * verbatim quote of the comment), and the terser the claim the less text
+ * arithmetic has to work with. The floor that admits 0.06 admits everything.
+ *
+ * And the discriminator cannot be recovered by reweighting the text, because
+ * the pairs this module deliberately KEEPS apart share more salient tokens
+ * than the real duplicates do: run 29943085279's AddDate arithmetic issue and
+ * its "central behavior never exercised" thought sit on one line and share
+ * AddDate, MemoryTTLDays, 180 and 15. Duplicates are "same ask, different
+ * words"; those pairs are "same facts, different ask" (a bug versus its
+ * missing test). Telling those apart is a semantic judgment, so tier 2 asks a
+ * model for it rather than pretending a fourth threshold would find it.
+ *
+ * Nor by asking each finder for an identity key of its own, which would
+ * cluster deterministically at zero dispatch and was the first thing tried on
+ * paper. A finder mints its key blind: it has not seen the other reviewers'
+ * findings, so two of them agreeing on one defect would have to independently
+ * choose the SAME string, which is the semantic-agreement problem the text
+ * floors already lose, moved into a shorter string with less to work with
+ * (`maxSamples`, "the doc/constant mismatch" and "window.go:8 comment" are all
+ * defensible keys for run 30587343777's one defect). Where a blind key DOES
+ * agree is the case that must not merge: the AddDate pair above would both key
+ * on `AddDate`, so the scheme collides hardest exactly where "same facts,
+ * different ask" needs separating. The clusterer's `evidence` is not that key
+ * and cannot be produced by a finder, because it is chosen AFTER reading the
+ * candidate set; comparison is what makes it possible, which is why it can be
+ * verified against every member's text here rather than merely trusted.
+ *
+ * The unit of identity, restated: the DEFECT, not the anchor. Tier 2 needs no
+ * line agreement at all, which is what finally makes the
+ * same-defect-different-anchor shape mergeable (one missing-test defect drew
+ * comments at three anchors in run 29943085279; tier 1 can only reach the
+ * pairs that also clear its looser text floor). The line survives as evidence
+ * inside tier 1 and as the survivor's posting anchor, and nothing more.
+ *
+ * The survivor is the highest-severity copy, it gains a structured
+ * `also_flagged_by` record (naming each other source, its anchor when it
+ * differs, and the subject of any copy tier 2 absorbed, whose ask the
+ * survivor's own prose is not known to restate; the posting surface
+ * renders the record into the comment's collapsed attribution footer,
+ * attribution.ts, so a validator discussion rewrite cannot drop it), and
+ * every merge is recorded for
+ * dispatch-result.json with the tier that found it (per group and per absorbed
+ * copy), so the merge rate is readable from the artifact rather than from what
+ * survives on the PR.
+ *
+ * Determinism boundary: every merge RULE is code — pure text arithmetic, no
+ * filesystem. The one model input is tier 2's identity assertion, and it
+ * enters through {@link verifiableClusters}, which trusts none of it: the ids
+ * must exist, the paths and sources must satisfy the same constraints tier 1
+ * enforces, the model's own grounding evidence must appear in every member's
+ * text, and only a NON-BLOCKING copy may be absorbed on a model's word
+ * ({@link clusterMemberRejection} carries the reasoning). What a tier-2 error
+ * can cost is bounded by code even where its judgment cannot be checked.
  */
 
-import {isRecord, type Claim} from "./dispatch-contracts";
+import {stripFooters, type AlsoFlagged} from "./attribution";
+import {bigrams, contentTokens, intersectionSize} from "./dedup-text";
+import {isRecord, type Claim, type ProposedCluster} from "./dispatch-contracts";
 import {isBlockingLabel} from "./render-comment";
+import {
+    clusterMemberRejection,
+    salientTokens,
+    sharesSalientToken,
+    verifiableClusters,
+    type ClusterRejection,
+} from "./dedup-cluster";
 // The identity of the review bot, shared with the producer that stages the
 // threads this module filters (stage-pr.ts). `threads.ts` owns a GitHub fetch
 // but runs nothing at import time and reaches the network only through an
 // injected port, so the determinism boundary above still holds here.
 import {isReviewBotAuthor} from "./threads";
 
+/** Which tier identified a merged group (dispatch-result.json audit). */
+export type MergeVia = "similarity" | "clusterer" | "both";
+
 export type ClaimMerge = {
     survivor: string;
-    merged: {id: string; source: string; label: string}[];
+    merged: {
+        id: string;
+        source: string;
+        label: string;
+        /** The merged copy's own anchor, when it differs from the survivor's. */
+        line?: number;
+        /**
+         * Present when THIS copy was absorbed on the clusterer's assertion
+         * rather than on the text floor; absent means tier 1 merged it. Per
+         * member because a group's own `via` can be `both`, and a reader
+         * counting tier 2's contribution from the group would then attribute
+         * tier 1's members to the clusterer.
+         */
+        via?: "clusterer";
+    }[];
     path: string;
     line: number;
+    via: MergeVia;
+    /** The clusterer's grounding evidence, when tier 2 found this group. */
+    evidence?: string;
 };
 
 /**
@@ -57,39 +158,18 @@ export type ClaimMerge = {
 const EXACT_ANCHOR_FLOOR = {jaccard: 0.14, overlap: 0.34, sharedBigrams: 4};
 const OTHER_LINE_FLOOR = {jaccard: 0.2, overlap: 0.35, sharedBigrams: 6};
 
-const STOPWORDS = new Set(
-    "the a an and or of to in is are was be for on with that this it as not no by at from so its their they".split(
-        " ",
-    ),
-);
-
-const contentTokens = (text: string): string[] => {
-    const tokens: string[] = [];
-    for (const word of text.toLowerCase().match(/[a-z0-9]+/g) ?? []) {
-        if (word.length >= 3 && !STOPWORDS.has(word)) {
-            tokens.push(word);
-        }
-    }
-    return tokens;
-};
-
-const bigrams = (tokens: string[]): Set<string> => {
-    const set = new Set<string>();
-    for (let i = 0; i + 1 < tokens.length; i += 1) {
-        set.add(`${tokens[i]} ${tokens[i + 1]}`);
-    }
-    return set;
-};
-
-const intersectionSize = <T>(a: Set<T>, b: Set<T>): number => {
-    let count = 0;
-    for (const item of a) {
-        if (b.has(item)) {
-            count += 1;
-        }
-    }
-    return count;
-};
+/**
+ * The floor for a claim with NO anchor at all (a pr-level finding) against
+ * an open thread: the least anchor evidence this module scores, so it pays
+ * with the highest bigram floor, one tier above {@link OTHER_LINE_FLOOR}.
+ * Calibrated on webapp#41290 review 4867627688 (a pr-anchored re-find of a
+ * data race two open blocking threads tracked re-posted in full, because
+ * the path gate made pr-level claims unsuppressable): the true counterparts
+ * score 0.342/0.558/40 and 0.329/0.643/23 (jaccard/overlap/bigrams), the
+ * six unrelated open threads top out at 0.051/0.180/1.
+ * `dedup-pr-level.test.ts` carries the run's real texts; re-derive, don't nudge.
+ */
+const PR_LEVEL_FLOOR = {jaccard: 0.2, overlap: 0.35, sharedBigrams: 8};
 
 const comparisonKey = (text: string): string =>
     text
@@ -148,16 +228,6 @@ export const describesSameDefect = (a: Claim, b: Claim): boolean => {
     );
 };
 
-/**
- * Same path, any line distance: run 29943085279 posted the
- * missing-deletion-test defect at expiration_test.go:15 and :58 (43 lines
- * apart), and the old two-line window kept both copies separate; the
- * similarity floors carry the precision, tiered on whether the two anchors
- * are identical. Cross-FILE merging stays out: that same run flagged the
- * defect in expiration.go too (:62, :38) and a floor loose enough to catch
- * a cross-file pair needs its own strictly higher calibration; a missed
- * merge only costs a duplicate comment.
- */
 /* -------------------------------------------------------------------------- */
 /* Open-thread suppression (trial suggestion g)                               */
 /* -------------------------------------------------------------------------- */
@@ -174,7 +244,7 @@ export type ThreadSuppression = {
     id: string;
     source: string;
     label: string;
-    path: string;
+    path?: string; // absent for a pr-level claim (no anchor)
     line?: number;
     thread_id: string;
     /**
@@ -186,6 +256,15 @@ export type ThreadSuppression = {
      * threads that clear the floor their labels can differ.
      */
     threadBlocking: boolean;
+    /**
+     * Present (and true) when the matched thread is from the ADJUDICATED
+     * corpus (a bot thread a human resolved) rather than an open one; see
+     * dedup-adjudicated.ts. Audit-trail only: an adjudicated suppression can
+     * never floor the verdict, because that pass never suppresses a blocking
+     * candidate and submission.ts's floor requires the CANDIDATE's label to
+     * be blocking too.
+     */
+    adjudicated?: true;
 };
 
 /**
@@ -199,7 +278,7 @@ export type ThreadSuppression = {
  * recognizable label reads as non-blocking, since an unvalidated floor is the
  * failure mode this guards.
  */
-const threadOpenerIsBlocking = (body: string): boolean => {
+export const threadOpenerIsBlocking = (body: string): boolean => {
     const label = /^\s*\*{0,2}([a-z]+ \([^)]*\))\*{0,2}:?/i.exec(body)?.[1];
     return (
         label !== undefined &&
@@ -214,14 +293,15 @@ const threadOpenerIsBlocking = (body: string): boolean => {
 
 /**
  * The prose of a previously-posted bot comment, for similarity comparison:
- * the leading `**label:**` template (tolerating the markdown-stripped form
+ * the collapsed attribution/version footers (attribution.ts's strip), the
+ * leading `**label:**` template (tolerating the markdown-stripped form
  * the staged bodies sometimes carry) and everything from the first code
  * fence on (a suggestion block) are dropped, as are rule-quote lines:
  * boilerplate shared by ALL bot comments would inflate similarity between
  * unrelated findings.
  */
 const threadProse = (body: string): string =>
-    body
+    stripFooters(body)
         .split("```")[0]
         .split("\n")
         .filter((line) => !line.trimStart().startsWith(">"))
@@ -236,7 +316,7 @@ const threadProse = (body: string): string =>
  * hand-built staging used to reproduce a run) inherits its shape. Absent
  * reads as unknown, not as open.
  */
-const stagedResolvedState = (thread: Record<string, unknown>): unknown =>
+export const stagedResolvedState = (thread: Record<string, unknown>): unknown =>
     thread["resolved"] ?? thread["is_resolved"] ?? thread["isResolved"];
 
 /**
@@ -336,15 +416,17 @@ export const describesOpenThreadDefect = (
     thread: OpenThread,
 ): boolean => {
     const {jaccard, overlap, sharedBigrams} = openThreadScore(claim, thread);
-    // The different-line tier: this match has no line window at all (see
+    // This match has no line window at all (see
     // `suppressOpenThreadDuplicates`), so it pays for the loose anchor with
     // the higher bigram floor, exactly as a cross-source pair on mismatched
-    // lines does. Erring strict is the safe direction: a missed suppression
-    // posts a duplicate comment, a false one silently drops a finding.
+    // lines does; a pathless (pr-level) claim has no anchor evidence at all
+    // and pays one tier more. Erring strict is the safe direction: a
+    // missed suppression posts a duplicate, a false one drops a finding.
+    const floor = claim.path === undefined ? PR_LEVEL_FLOOR : OTHER_LINE_FLOOR;
     return (
-        jaccard >= OTHER_LINE_FLOOR.jaccard &&
-        overlap >= OTHER_LINE_FLOOR.overlap &&
-        sharedBigrams >= OTHER_LINE_FLOOR.sharedBigrams
+        jaccard >= floor.jaccard &&
+        overlap >= floor.overlap &&
+        sharedBigrams >= floor.sharedBigrams
     );
 };
 
@@ -377,14 +459,15 @@ export const describesOpenThreadDefect = (
  * comparisons keep staging order as the final tiebreak, so an exact scoring
  * tie behaves as it did before.
  */
-const bestOpenThreadMatch = (
+export const bestOpenThreadMatch = (
     claim: Claim,
     threads: readonly OpenThread[],
 ): OpenThread | undefined => {
     let best: {thread: OpenThread; score: OpenThreadScore} | undefined;
+    // A pathless (pr-level) claim compares against EVERY open thread.
     for (const thread of threads) {
         if (
-            thread.path !== claim.path ||
+            (claim.path !== undefined && thread.path !== claim.path) ||
             !describesOpenThreadDefect(claim, thread)
         ) {
             continue;
@@ -482,8 +565,10 @@ export const threadSuppressionUnavailableWarning = (
  * Drop candidate claims that describe a defect an open bot thread already
  * tracks (trial run S4 r2: the missing-test defect re-flagged at
  * expiration.go:42 while its round-1 thread at :62 was still open, so the
- * same defect briefly had two open threads). The match is same-path plus the
- * calibrated #245 text-similarity floor, deliberately with NO line window:
+ * same defect briefly had two open threads). The match is same-path plus
+ * the calibrated #245 text-similarity floor (a pathless pr-level claim
+ * skips the path gate and pays the stricter {@link PR_LEVEL_FLOOR}),
+ * deliberately with NO line window:
  * a persisting defect's re-flag routinely lands on a different line
  * of the same file (the observed pair sat 20 lines apart); the similarity
  * floor carries the precision. The caller excludes threads the reconciler
@@ -507,10 +592,7 @@ export const suppressOpenThreadDuplicates = (
     const kept: Claim[] = [];
     const suppressed: ThreadSuppression[] = [];
     for (const claim of claims) {
-        const match =
-            claim.path === undefined
-                ? undefined
-                : bestOpenThreadMatch(claim, threads);
+        const match = bestOpenThreadMatch(claim, threads);
         if (match === undefined) {
             kept.push(claim);
             continue;
@@ -519,7 +601,7 @@ export const suppressOpenThreadDuplicates = (
             id: claim.id,
             source: claim.source,
             label: claim.label,
-            path: claim.path as string,
+            ...(claim.path !== undefined ? {path: claim.path} : {}),
             ...(claim.line !== undefined ? {line: claim.line} : {}),
             thread_id: match.thread_id,
             threadBlocking: threadOpenerIsBlocking(match.body),
@@ -528,6 +610,16 @@ export const suppressOpenThreadDuplicates = (
     return {kept, suppressed};
 };
 
+/**
+ * Same path, any line distance: run 29943085279 posted the
+ * missing-deletion-test defect at expiration_test.go:15 and :58 (43 lines
+ * apart), and the old two-line window kept both copies separate; the
+ * similarity floors carry the precision, tiered on whether the two anchors
+ * are identical. Cross-FILE merging stays out: that same run flagged the
+ * defect in expiration.go too (:62, :38) and a floor loose enough to catch
+ * a cross-file pair needs its own strictly higher calibration; a missed
+ * merge only costs a duplicate comment.
+ */
 const mergeable = (a: Claim, b: Claim): boolean =>
     a.source !== b.source &&
     a.path !== undefined &&
@@ -561,16 +653,60 @@ const survivorFirst = (
 };
 
 /**
- * Merge high-confidence cross-source duplicates, preserving claim order.
- * Non-anchored claims and everything below the similarity floor pass through
+ * Merge cross-source duplicates, preserving claim order: the similarity tier
+ * FIRST and on its own, then the defect clusters the clusterer proposed
+ * (verified here, never trusted) over whatever tier 1 left standing.
+ * Non-anchored claims and everything neither tier identifies pass through
  * untouched; when in doubt, don't merge (a false merge silently drops a
- * reviewer's distinct finding, a missed merge only costs a duplicate
- * comment).
+ * reviewer's distinct finding, a missed merge only costs a duplicate comment).
+ *
+ * The pass ORDER is the guarantee, not an implementation detail. Tier 2 may add
+ * merges and must never subtract them, and that only holds by construction if
+ * tier 1's groups are settled before a model-proposed cluster can touch them.
+ * A single union-find over both tiers cannot promise it however carefully each
+ * member is screened: unioning even a perfectly legal cluster member changes
+ * who wins the group's survivor election, and the star guard below then orphans
+ * the tier-1 duplicates that were mergeable against the OLD survivor and not
+ * against the new one. Concretely, with `b`, `c` and `d` all tier-1 mergeable
+ * against `a` and a higher-confidence `x` clustered with `b` alone, the merged
+ * group elects `x`, absorbs `b`, and leaves `a`, `c` and `d` posting three
+ * comments where tier 1 alone posted one.
+ *
+ * So: tier 1 runs to completion, and what it leaves standing — each surviving
+ * comment, plus every claim it declined to fold in — is the only thing tier 2
+ * gets to see. A cluster member tier 1 already absorbed is read at the comment
+ * it now posts under (its head), and a head absorbed by tier 2 carries its own
+ * tier-1 copies along, because this pass merges COMMENTS and that comment
+ * already speaks for them. A cluster whose members tier 1 has already collapsed
+ * into one head therefore merges nothing and rejects nothing: it asserted an
+ * identity the text floors had reached first.
+ *
+ * `clusterRejections` is the tier-2 audit trail (see {@link ClusterRejection});
+ * it is empty both when the clusterer proposed nothing and when everything it
+ * proposed merged, so read it beside the proposal count, never alone.
  */
 export const dedupeClaims = (
     claims: Claim[],
-): {claims: Claim[]; merges: ClaimMerge[]} => {
-    // Union-find over pairwise-mergeable claims.
+    proposals: readonly ProposedCluster[] = [],
+): {
+    claims: Claim[];
+    merges: ClaimMerge[];
+    clusterRejections: ClusterRejection[];
+} => {
+    const {clusterOf, evidence, rejections} = verifiableClusters(
+        claims,
+        proposals,
+    );
+    const clusterRejections = [...rejections];
+
+    /** Claim index -> the claim whose comment it posts under after tier 1. */
+    const head = claims.map((_, index) => index);
+    /** Survivor index -> the copies folded into it, with the tier that did it. */
+    const absorbed = new Map<number, {index: number; via?: "clusterer"}[]>();
+    /** Survivor index -> the clusterer's grounding evidence, when tier 2 fired. */
+    const groundedIn = new Map<number, string>();
+
+    // ---- Tier 1: union-find over pairwise-mergeable claims.
     const parent = claims.map((_, index) => index);
     const find = (index: number): number => {
         while (parent[index] !== index) {
@@ -591,10 +727,6 @@ export const dedupeClaims = (
         const root = find(index);
         groups.set(root, [...(groups.get(root) ?? []), index]);
     });
-
-    const drop = new Set<number>();
-    const replacement = new Map<number, Claim>();
-    const merges: ClaimMerge[] = [];
     for (const group of groups.values()) {
         if (group.length < 2) {
             continue;
@@ -602,36 +734,179 @@ export const dedupeClaims = (
         const survivorIndex = group.reduce((best, index) =>
             survivorFirst(best, index, claims),
         );
-        const survivor = claims[survivorIndex];
-        // Star guard: only a member that clears the floor against the
-        // survivor DIRECTLY merges. Union-find alone chains A~B~C through a
-        // bridging claim that bundles two defects (a test-adequacy finding
-        // naming both a missing test and an unbounded read links the two
-        // distinct correctness findings), and collapsing the chain would
-        // silently drop a distinct finding; with no line window bounding
-        // groups, a bridge can span a whole file. Chain-only members stay
-        // their own claims. Both recorded trial merges are unaffected: run
-        // 29897276810's four-way group is pairwise-complete and run
-        // 29943085279's is a direct pair.
-        const others = group.filter(
+        // Star guard: only a member {@link mergeable} against the survivor
+        // merges. Union-find alone chains A~B~C through a bridging claim that
+        // bundles two defects (a test-adequacy finding naming both a missing
+        // test and an unbounded read links the two distinct correctness
+        // findings), and collapsing the chain would silently drop a distinct
+        // finding; with no line window bounding groups, a bridge can span a
+        // whole file. Chain-only members stay their own claims. Both recorded
+        // trial merges are unaffected: run 29897276810's four-way group is
+        // pairwise-complete and run 29943085279's is a direct pair.
+        const merged = group.filter(
             (index) =>
                 index !== survivorIndex &&
-                describesSameDefect(survivor, claims[index]),
+                mergeable(claims[survivorIndex], claims[index]),
         );
-        if (others.length === 0) {
+        if (merged.length === 0) {
             continue;
         }
-        for (const index of others) {
+        for (const index of merged) {
+            head[index] = survivorIndex;
+        }
+        absorbed.set(
+            survivorIndex,
+            merged.map((index) => ({index})),
+        );
+    }
+
+    // ---- Tier 2: the verified clusters, over tier 1's heads.
+    //
+    // Each named member is read at its head, and a head takes the LOWEST
+    // ordinal that reaches it, so a head is a candidate in exactly one cluster
+    // however tier 1 has reshaped things and nothing can be absorbed twice.
+    // Rejections stay keyed to the ids the clusterer actually named.
+    const clusterHead = new Map<number, number>();
+    const namedByHead = new Map<number, string[]>();
+    for (const [index, ordinal] of clusterOf) {
+        const owner = head[index];
+        const seen = clusterHead.get(owner);
+        clusterHead.set(
+            owner,
+            seen === undefined ? ordinal : Math.min(seen, ordinal),
+        );
+        namedByHead.set(owner, [
+            ...(namedByHead.get(owner) ?? []),
+            claims[index].id,
+        ]);
+    }
+    const headsByOrdinal = new Map<number, number[]>();
+    for (const [owner, ordinal] of clusterHead) {
+        headsByOrdinal.set(ordinal, [
+            ...(headsByOrdinal.get(ordinal) ?? []),
+            owner,
+        ]);
+    }
+    for (const ordinal of [...headsByOrdinal.keys()].sort((a, b) => a - b)) {
+        const heads = (headsByOrdinal.get(ordinal) as number[]).sort(
+            (a, b) => a - b,
+        );
+        if (heads.length < 2) {
+            continue;
+        }
+        const survivorIndex = heads.reduce((best, index) =>
+            survivorFirst(best, index, claims),
+        );
+        const survivor = claims[survivorIndex];
+        // An evidence string naming no code element grounds nothing, and the
+        // survivor must name the element too: tier 1 can have elected a comment
+        // the proposal never saw, and absorbing a member into an unrelated
+        // comment is the failure mode this check exists to catch.
+        const groupEvidence = evidence[ordinal];
+        const evidenceTokens = salientTokens(groupEvidence);
+        const usable =
+            evidenceTokens.size > 0 &&
+            sharesSalientToken(evidenceTokens, survivor);
+        const into = absorbed.get(survivorIndex) ?? [];
+        for (const index of heads) {
+            if (index === survivorIndex) {
+                continue;
+            }
+            // The structural rules re-run here, not only in the parse-time
+            // screen: they were checked against the proposal's own anchor, and
+            // the head that survived tier 1 need not be the claim the model
+            // named.
+            const reason = !usable
+                ? ("ungrounded" as const)
+                : clusterMemberRejection(
+                      survivor,
+                      claims[index],
+                      evidenceTokens,
+                  );
+            if (reason !== undefined) {
+                for (const id of namedByHead.get(index) ?? []) {
+                    clusterRejections.push({id, reason});
+                }
+                continue;
+            }
+            // The head comes over with everything tier 1 folded into it: this
+            // pass merges COMMENTS, and that comment already speaks for its own
+            // absorbed copies. Dropping them here instead would leave them
+            // posting on their own — tier 2 subtracting a tier-1 merge.
+            into.push({index, via: "clusterer"});
+            into.push(...(absorbed.get(index) ?? []));
+            absorbed.delete(index);
+            groundedIn.set(survivorIndex, groupEvidence);
+        }
+        if (into.length > 0) {
+            absorbed.set(survivorIndex, into);
+        }
+    }
+
+    // ---- Render one merge per surviving comment, in claim order.
+    const drop = new Set<number>();
+    const replacement = new Map<number, Claim>();
+    const merges: ClaimMerge[] = [];
+    const entries = [...absorbed.entries()].filter(
+        ([, list]) => list.length > 0,
+    );
+    entries.sort(
+        ([a, listA], [b, listB]) =>
+            Math.min(a, ...listA.map((copy) => copy.index)) -
+            Math.min(b, ...listB.map((copy) => copy.index)),
+    );
+    for (const [survivorIndex, list] of entries) {
+        const survivor = claims[survivorIndex];
+        const others = [...list].sort((a, b) => a.index - b.index);
+        for (const {index} of others) {
             drop.add(index);
         }
-        const otherClaims = others.map((index) => claims[index]);
-        const sources = [
-            ...new Set(otherClaims.map((claim) => claim.source)),
-        ].filter((source) => source !== survivor.source);
-        const alsoFlagged =
-            sources.length === 0
-                ? ""
-                : `\n\nAlso flagged by ${sources.join(", ")}.`;
+        const otherClaims = others.map(({index}) => claims[index]);
+        // One entry per other source, first copy wins, naming that copy's
+        // anchor when it is not the survivor's. With tier 2 merging across
+        // anchors, "also flagged by test-adequacy" alone would hide that the
+        // second reviewer was looking at a different line, which is exactly
+        // the context an author needs to judge a same-defect-different-anchor
+        // merge (and to spot a wrong one).
+        //
+        // A tier-2 copy also carries its own SUBJECT, and only a tier-2 copy
+        // does. What the record must not lose is an ask the survivor's prose
+        // does not already make: run 30587343777's `conventions` copy of the
+        // wrong-cap defect asked for the symbol-name prefix, not for the
+        // number, and one rewritten comment discharges both only if the author
+        // is told about both. Tier 1 needs no such quote by construction: a
+        // copy merged there cleared the text floor AGAINST the survivor, which
+        // is exactly the evidence that it restates the survivor's own words;
+        // repeating four near-identical subjects would move the duplicate
+        // noise into the surviving comment rather than remove it. Tier 2 is
+        // the case where that evidence is missing (the floor is what it could
+        // not clear), so there the quote is the only thing carrying the ask.
+        //
+        // Recorded as the structured `also_flagged_by` field, NOT appended to
+        // `discussion`: dedup runs before the claim-validator, whose
+        // `corrected.discussion` rewrite replaces the prose wholesale, so a
+        // note riding the discussion could silently vanish. The posting
+        // surface (submission.ts) renders the field into the comment's
+        // collapsed attribution footer.
+        const sources: AlsoFlagged[] = [];
+        for (const {index, via} of others) {
+            const claim = claims[index];
+            if (
+                claim.source === survivor.source ||
+                sources.some((seen) => seen.source === claim.source)
+            ) {
+                continue;
+            }
+            sources.push({
+                source: claim.source,
+                ...(claim.line !== undefined && claim.line !== survivor.line
+                    ? {line: claim.line}
+                    : {}),
+                ...(via === "clusterer"
+                    ? {subject: claim.subject.replace(/\s+/g, " ").trim()}
+                    : {}),
+            });
+        }
         const adoptedSuggestion =
             survivor.suggestion === undefined
                 ? otherClaims.find((claim) => claim.suggestion !== undefined)
@@ -645,7 +920,7 @@ export const dedupeClaims = (
                 : undefined;
         replacement.set(survivorIndex, {
             ...survivor,
-            discussion: `${survivor.discussion}${alsoFlagged}`,
+            ...(sources.length > 0 ? {also_flagged_by: sources} : {}),
             ...(adoptedSuggestion !== undefined
                 ? {suggestion: adoptedSuggestion}
                 : {}),
@@ -653,15 +928,34 @@ export const dedupeClaims = (
                 ? {author_dispute: adoptedDispute}
                 : {}),
         });
+        const clusterCount = others.filter(
+            (copy) => copy.via === "clusterer",
+        ).length;
+        const via: MergeVia =
+            clusterCount === 0
+                ? "similarity"
+                : clusterCount === others.length
+                ? "clusterer"
+                : "both";
+        const groupEvidence = groundedIn.get(survivorIndex);
         merges.push({
             survivor: survivor.id,
-            merged: otherClaims.map((claim) => ({
-                id: claim.id,
-                source: claim.source,
-                label: claim.label,
-            })),
+            merged: others.map(({index, via: copyVia}) => {
+                const claim = claims[index];
+                return {
+                    id: claim.id,
+                    source: claim.source,
+                    label: claim.label,
+                    ...(claim.line !== undefined && claim.line !== survivor.line
+                        ? {line: claim.line}
+                        : {}),
+                    ...(copyVia === "clusterer" ? {via: copyVia} : {}),
+                };
+            }),
             path: survivor.path as string,
             line: survivor.line as number,
+            via,
+            ...(groupEvidence === undefined ? {} : {evidence: groupEvidence}),
         });
     }
     return {
@@ -669,5 +963,6 @@ export const dedupeClaims = (
             .map((claim, index) => replacement.get(index) ?? claim)
             .filter((_, index) => !drop.has(index)),
         merges,
+        clusterRejections,
     };
 };

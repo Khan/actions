@@ -11,6 +11,7 @@
  * code under review.
  */
 
+import type {AlsoFlagged} from "./attribution";
 import {
     validateFinding,
     type Anchor,
@@ -333,10 +334,68 @@ export const parseFinderOutput = (
 };
 
 /* -------------------------------------------------------------------------- */
+/* Defect clustering (the claim-clusterer contract)                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One group of candidate claims the `claim-clusterer` says describe ONE
+ * defect, plus the `evidence` it grounded the identity in: the code element,
+ * literal, or quoted text every member refers to.
+ *
+ * `evidence` is not documentation. It is the load-bearing half of the
+ * contract, because `dedup.ts` verifies the model's identity claim rather than
+ * trusting it: a cluster whose evidence names no code element at all is
+ * rejected outright, and a member whose own text never mentions that element
+ * is dropped from the group (see `verifiableClusters` there). A model asked
+ * for a grounded assertion is checkable; one asked only for a grouping is not.
+ */
+export type ProposedCluster = {evidence: string; ids: string[]};
+
+/**
+ * Parse the clusterer's output, per its contract (review.md):
+ * `{"clusters": [{"evidence": "...", "ids": ["...", "..."]}]}`. Malformed
+ * entries are skipped rather than thrown on — every skipped entry simply
+ * merges nothing, which is the safe direction (a missed merge costs a
+ * duplicate comment; a bad one drops a reviewer's distinct finding). A
+ * missing `clusters` array IS thrown on, so the one corrective re-dispatch
+ * fires: silently reading a drifted shape as "no duplicates" is how a paid-for
+ * dimension goes missing without a trace.
+ */
+export const parseClustererOutput = (output: string): ProposedCluster[] => {
+    const parsed = parseJsonObject(output);
+    const raw = parsed["clusters"];
+    if (!Array.isArray(raw)) {
+        throw new Error("clusterer output has no clusters array");
+    }
+    return raw.flatMap((entry): ProposedCluster[] => {
+        if (!isRecord(entry) || typeof entry["evidence"] !== "string") {
+            return [];
+        }
+        const ids = entry["ids"];
+        if (!Array.isArray(ids)) {
+            return [];
+        }
+        const strings = [
+            ...new Set(
+                ids.filter((id): id is string => typeof id === "string"),
+            ),
+        ];
+        return strings.length < 2
+            ? []
+            : [{evidence: entry["evidence"], ids: strings}];
+    });
+};
+
+/* -------------------------------------------------------------------------- */
 /* Structured-final contract checks                                           */
 /* -------------------------------------------------------------------------- */
 
-export type ContractKind = "finder" | "lens" | "validator" | "json";
+export type ContractKind =
+    | "finder"
+    | "lens"
+    | "validator"
+    | "clusterer"
+    | "json";
 
 /**
  * Build the structured-final contract check for one sub-agent: the exact
@@ -365,6 +424,8 @@ export const contractValidator = (
             const text = JSON.stringify(payload);
             if (kind === "validator") {
                 parseValidatorOutput(text);
+            } else if (kind === "clusterer") {
+                parseClustererOutput(text);
             } else if (kind === "finder" || kind === "lens") {
                 parseFinderOutput(name, text, new Set(), kind === "lens");
             }
@@ -446,6 +507,14 @@ export type Claim = {
     confidence: number;
     author_dispute?: string;
     rule_quote?: string;
+    /**
+     * The cross-source duplicate copies dedup folded into this claim (one
+     * entry per other source; see dedup.ts). Structured rather than appended
+     * to `discussion` so a validator `corrected.discussion` rewrite cannot
+     * silently drop the record; the posting surface (submission.ts) renders
+     * it into the comment's collapsed attribution footer (attribution.ts).
+     */
+    also_flagged_by?: AlsoFlagged[];
 };
 
 export const buildClaims = (candidates: Candidate[]): Claim[] =>

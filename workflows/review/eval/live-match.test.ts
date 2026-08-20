@@ -104,6 +104,20 @@ describe("matchesSpec", () => {
         );
     });
 
+    it("prLevel specs match pr-anchored candidates only", () => {
+        const prSpec: LiveDefectSpec = {
+            key: "pr-doc-1",
+            prLevel: true,
+            mechanism: ["float(ing)?[- ]?point", "rounds? late"],
+        };
+        expect(matchesSpec(candidate({anchor: {type: "pr"}}), prSpec)).toBe(
+            true,
+        );
+        // A line-anchored comment is about a file, whatever its mechanism
+        // says: it never claims the PR-level spec.
+        expect(matchesSpec(candidate(), prSpec)).toBe(false);
+    });
+
     it("accepts an anchor at any altLocation, window and mechanism intact", () => {
         // The defect spans files (migration + hot query): an anchor at the
         // alternate site is a catch, not a miss.

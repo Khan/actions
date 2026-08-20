@@ -1,5 +1,448 @@
 # review
 
+## 1.15.0
+
+### Minor Changes
+
+-   18bba4c: review: name the producing reviewer on every posted finding, in footers collapsed by default
+
+    Every inline review comment and pr-level body fold now ends with a collapsed
+    `<details>` attribution footer (summary chip `review details`) naming the
+    reviewer that produced the finding and, when cross-source dedup merged
+    duplicates into it, each other reviewer that flagged the same defect, with its
+    differing anchor line and (for clusterer-merged copies) its own subject.
+    Collapsed one-liners (the low-confidence section, a hold comment's claim list)
+    carry a short trailing `<sub>(<source>)</sub>` tag instead.
+
+    The dedup merge record moves from a prose note appended to the survivor's
+    `discussion` to a structured `also_flagged_by` field on the claim, rendered at
+    the posting surface (`submission.ts`): the claim-validator's
+    `corrected.discussion` rewrite could previously drop the note silently, and
+    the old "Also flagged by" wording never named the surviving reviewer at all.
+
+    The version/config footer on review bodies and the guidance comment is wrapped
+    in the same collapsed block (`details`/`summary`/`sub` are all on the ingest
+    sanitizer's allowed-tag list, so the block survives posting). Text-similarity
+    comparisons against previously posted bodies (open-thread suppression, the
+    adjudicated corpus) strip the footers first, so boilerplate shared by every
+    bot comment cannot inflate similarity between unrelated findings.
+
+-   4a30062: The documentation reviewer gains a readability half, and its scope grows to the
+    PR title and description.
+
+    The motivating problem is the slop register: technical prose (often
+    model-drafted) built from metaphorical verbs ("the round-trip has to survive an
+    input holding a config"), paragraphs that restate the previous paragraph in
+    different words, and shorthand a document coins and never defines. Readers
+    reported this as a real comprehension tax in docs and PR descriptions, and
+    nothing in the pipeline checked for it: the documentation policy was entirely
+    about information content (restates the code, narrates the change, falsified by
+    the diff, missing why), and the PR description was explicitly out of scope.
+
+    Three new clauses, framed as translation cost rather than taste so the reviewer
+    does not become a tone patrol:
+
+    -   **Metaphor in place of the mechanism.** The test is whether the reader can
+        recover the concrete operation from the sentence alone. Domain terms of art
+        (a functional `fold`, "landing" a PR, a lock that is "held") pass, and quoted
+        text is never flaggable.
+    -   **Says the same thing twice.** The prose-doc form of restating the code: a
+        paragraph recoverable from an earlier one. Both get quoted; the fix is
+        deleting one.
+    -   **Undefined coinage.** Shorthand invented and never defined; a term defined
+        at first use passes.
+
+    These are the cheapest findings to produce, so they rank below every content
+    clause and carry their own sub-cap: at most one line-anchored readability
+    finding per review (batched, worst instance anchored) plus at most one PR-level
+    finding, both counting toward the existing five-per-review cap and dropped
+    first when it binds.
+
+    The PR title and description become reviewable prose under exactly these three
+    clauses. Intent-versus-implementation stays with `completeness`, and the
+    "narrates the change" clause never applies to a description (narrating the
+    change is what a description is for). Mechanically this rides plumbing that
+    already existed end to end but had no deliberate producer: a finding that omits
+    `path`/`line` becomes a `{type: "pr"}` anchor (`dispatch-contracts.ts`), passes
+    the provenance gate and scope filter unconditionally, and `submission.ts` folds
+    it into the review body as a `**label:** prose` line. The claim-validator's
+    documentation section now covers both readability claims (refute when the
+    flagged phrase is a term of art, or when the rewrite loses information) and
+    PR-level claims (verified against `pr-context.json`).
+
+    Eval support: `LiveDefectSpec` gains `prLevel: true` for defects that live in
+    the PR metadata rather than a changed file (no path or line window; only a
+    pr-anchored candidate can satisfy the spec, so a line-anchored comment never
+    claims it). Three new corpus cases exercise the clauses: a golden readability
+    case (metaphor sentence + restated paragraph, with term-of-art and quoted-error
+    traps), a golden PR-description case (one PR-level finding, with the
+    well-commented constant as a must-not-flag trap), and a clean precision guard
+    where every vivid word is doing real work and the run must post nothing.
+
+## 1.14.0
+
+### Minor Changes
+
+-   512a2a7: review: merge one source's identical finding across files into a single pattern-level comment
+
+    Both dedup tiers require the same path and different sources by design: they
+    merge agreement between reviewers, not repetition by one reviewer. Measured on
+    Khan/webapp#41440, one source posted byte-identical documentation suggestions
+    on two sibling eval files as two comments (inline comments 3764122555 and
+    3764122558), and no existing rule could reach the pair.
+
+    A new pass (`dedup-crossfile.ts`) runs after the cross-source tiers settle:
+    findings from the same source with the same label on different files merge
+    when their text is identical, or near-identical above the strict
+    different-line similarity floor (equal line numbers in different files never
+    buy the laxer exact-anchor tier). The survivor is the first occurrence in
+    diff order; its discussion gains one trailing line naming the other
+    occurrences (path, and line where known); merged copies skip validation and
+    posting and are recorded in the run artifact under `crossFileMerges`. Label
+    equality keeps the verdict arithmetic unchanged: a merged blocking group
+    keeps one blocking claim and floors the verdict exactly once. Any doubt in
+    similarity posts separately; a missed merge costs a duplicate comment, a
+    wrong one drops a finding.
+
+-   0666eeb: A run whose core review pass (`correctness-reviewer` or `skill-auditor`)
+    produced no output no longer auto-approves: the plan CLI now feeds the
+    dispatcher's real `skippedDimensions` into `computeVerdict`, whose
+    HOLD_FOR_HUMAN gate was previously unreachable (the dimensions were hardcoded
+    "assessed"). A hold submits no review event; the plan's body posts as one
+    standalone PR comment explaining the hold and how to get unstuck, the
+    conformance gate blocks any other shape (a queued review event, inline
+    comments, thread resolutions, or a withheld hold comment), and the cache
+    writer leaves the prior fingerprints standing so the next run reviews in
+    full (it drops only `risksPatternsKey`, because posting the hold comment
+    collapses the standing guidance comment). Blocking findings still win: with
+    a validated blocking claim the verdict stays REQUEST_CHANGES and the dead
+    lens is disclosed in a note line. The production shape this closes:
+    Khan/actions#328's re-run, where every core lens died on an API auth error
+    and the bot still submitted "Approved" over seven "not assessed" notes.
+-   fb2cfe2: Resolving a bot thread now means "settled", not "open season for a rephrase". The staging collects the bot's threads a HUMAN resolved into a new adjudicated corpus (`adjudicated-threads.json`), and the dispatcher suppresses any non-blocking candidate that re-derives a defect that corpus already settled (same defect-identity match as open-thread suppression). Previously, resolution removed the thread from the only suppression corpus, so the next run could re-post the same concern with fresh wording as a brand-new thread, which every later accountability recap then reported as "still unaddressed" (webapp#41290: six resolved variants of one concern, then a seventh). Two safety asymmetries: a thread the BOT resolved (the reconciler, after a fix) never joins the corpus, and a BLOCKING candidate is never suppressed by it, so a fixed-then-regressed defect worth stopping the PR for always posts.
+-   8bb69d1: The accountability recap stops re-quoting non-blocking threads it already recapped: a kept non-blocking thread whose opener URL appears in any prior review body renders as label + link (no excerpt), fresh threads render full and lead the collapsed block, and the block's summary counts the repeats ("N non-blocking threads still open (M previously reported)"). Blocking threads are never damped; a thread with no staged URL renders full (fail toward more information). Measured on webapp#41290, where the same four threads were re-quoted in full across 25 re-reviews and the drumbeat read as the bot re-arguing threads the author was already looking at.
+-   62cb78d: review: replace the stripped hidden version marker with a visible code-rendered attribution footer
+
+    The `<!-- pr-reviewer:version -->` marker Step 7 instructed never posted:
+    gh-aw's safe-output ingest sanitizer deletes ALL XML/HTML comments
+    (`removeXmlComments`, the same strip that killed the fingerprint stamp),
+    verified on all 9 guidance comments and 13 review bodies posted to
+    Khan/webapp on 2026-08-11/12. Version and config attribution from the PR
+    surface was impossible.
+
+    Every submitted review body and the risks/patterns guidance comment now end
+    with a one-line `<sub>` footer (`<sub>` is on the sanitizer's allowed-tag
+    list) rendered in code by the new `lib/version-footer.ts`: release version
+    from the pinned checkout's package.json, finding-schema version, executed
+    re-review depth, the repo's re-review mode (blocking-only modifier included),
+    and the ROUTING enable list. A segment the staging cannot state is omitted,
+    never guessed. The submission CLI appends it to the body and stages
+    `version-footer.txt` for Step 7 to paste verbatim; the redundant-approval
+    skip compares the body minus the footer, so a bare approve still skips. The
+    hidden fingerprint stamp emission is unchanged (rereview-mode.ts documents
+    why it stays), and the README's Version attribution section now describes
+    the footer and the sanitizer constraint that forced it.
+
+### Patch Changes
+
+-   2c91d42: Size the AWF api-proxy cache-miss guard for the parallel sub-agent fan-out:
+    `max-turn-cache-misses: 25` (the compiled default of 5 was smaller than the
+    fan-out's worst-case burst of cold-session first requests, which are all
+    guaranteed prompt-cache misses; the PR #328 re-run lost that ordering race,
+    the proxy 403'd every remaining lens, and the run reviewed nothing). A
+    genuinely broken cache, the guard's real target, still trips quickly: it
+    misses on every response of a several-hundred-request run.
+-   1aec0ac: review: consistency findings must survive language guidance
+
+    A "match the existing pattern" claim now has to check the pattern itself: the
+    claim-validator refutes a consistency claim when the pattern the fix would
+    restore contradicts the language's or standard library's documented guidance
+    (the measured case: a reviewer proposed moving a new method's ctx parameter
+    onto the struct because sibling methods stored one, against the Go context
+    package's explicit rule). Consistency alone never outranks documented language
+    guidance; inverting the claim to flag the pattern instead needs the ordinary
+    evidence bar, and the pre-existing-mechanism cap applies. The
+    correctness-reviewer carries one mirroring sentence so fewer such claims are
+    generated, and a deterministic clean corpus case
+    (clean-consistency-ctx-param) pins the drop.
+
+-   0be565c: review: retitle the risks/patterns comment "Guidance for reviewers" and add a one-line byline naming its audience
+
+    "Review Guidance" parsed two ways on the PR timeline: guidance for reviewers,
+    or guidance from the bot's review. Sitting directly above the author-directed
+    finding threads, it read like the latter. The new title parses one way, and a
+    single italic byline under it ("Triage notes for reviewers: risky files by
+    owning team, repeated changes, and files excluded from review.") states the
+    audience and contents in the comment itself.
+
+    Nothing keys off the heading text: comment identity is the
+    `<!-- pr-reviewer:risks-and-patterns -->` marker, and the repost-dedup key is
+    content-based (risk files, owning teams, pattern file sets, excluded set,
+    NOTIFIED signature). The rename posts nothing and pings no one; existing
+    comments keep the old title until the next substantive change posts a new one.
+
+-   61f835b: Skill-doc only: add a `review-feedback-audit` skill that codifies the post-deploy audit of the reviewer's output and human feedback in a consumer repo, first executed by hand against Khan/webapp for the 2026-08-11/12 window. Inputs are the consumer repo, a cutoff timestamp (typically the deploy time), and the bot login (default `github-actions[bot]`). Collection is GET-only and dependency-free (`bash`, `jq`, `gh`): inline comments and issue comments via the repo-wide `since` listings (re-filtered on `created_at`, since `since` filters on `updated_at`), reviews via a PR search plus per-PR listing (no repo-wide reviews endpoint exists), reaction detail fetched only where the listing shows a nonzero count and always excluding the bot's own reactions, and human replies resolved through `in_reply_to_id` including parents older than the window. The metrics section covers verdict mix (with sweep follow-ups posted as COMMENTED reviews excluded from the run count), label mix off the Conventional-Comment prefixes, verbosity (mean/median/p90/max plus sketch-block share), duplication at three grains (byte-identical in-run bodies, same-run same-root-cause clusters, cross-run families that defect-identity suppression misses when variants span files), suppression notes parsed from review bodies, and the feedback loop (reactions, thumbs-sweep follow-up and reason-reply latencies, replies classified accepted/declined/answered). Two constraints are documented so the audit does not misread them: agent-written HTML comments are sanitizer-stripped, so `pr-reviewer:` marker absence is expected until a visible footer ships, and a GET-only gh broker blocks GraphQL, in which case thread-resolution counts are reported as unavailable rather than approximated. The report template ends by mapping every finding to an open Khan/actions PR or a new-PR candidate. No change to the shipped review workflow.
+-   5f11540: review: absorb the sanitizer's XML tag conversion in rule 7, which false-blocked a conforming run
+
+    The dispatch gate's rule 7 compares the staged submission plan against the
+    queued safe outputs under `normalizeBody`, which mirrors every ingest-sanitizer
+    transform it has chosen to absorb. XML tag conversion was on the
+    documented-not-absorbed list, justified as needing "a pathological body". It
+    does not: a reviewer writing a path template like
+    `plugins/<p>/skills/<skill>/SKILL.md` in prose is the most natural way to name
+    a placeholder, and gh-aw's `convertXmlTags` (sanitize_content_core.cjs)
+    rewrites the unknown `<skill>` to `(skill)` while preserving the allowed
+    `<p>`. The plan is staged before that pass, so the two sides differed by one
+    token on a fully conforming run, rule 7 reported `submission-plan-mismatch`,
+    and the whole REQUEST_CHANGES review was withheld
+    (Khan/kore-marketplace run 31609578203; the misleading `(4) do not match (4)`
+    detail is the count printing on a content mismatch).
+
+    `normalizeBody` now applies a `foldXmlTags` mirror of the sanitizer's
+    transform to BOTH sides: same tag regex, same https angle-bracket autolink
+    preservation, same allowed-tag list, same parenthesis rewrite. Splice
+    detection is preserved where it can be: a queued `(p)` against a staged `<p>`
+    (an allowed tag the sanitizer would have kept) still mismatches. The fold runs
+    before the URL folds so it never touches their `<url:host>` placeholders.
+    Remaining sub-residuals, still documented and still requiring a genuinely
+    pathological body: dangerous-attribute stripping inside a preserved allowed
+    tag, and CDATA marker rewriting.
+
+    Verified against the incident artifacts: the staged `comment-2.json` and the
+    sanitized queued item from `agent_output.pre-gate.json` now fold equal.
+
+    Hardened further against this PR's own review run (Khan/actions run
+    31616001094), which false-blocked on three URL-fold divergences from the
+    sanitizer:
+
+    -   Angle-bracket https autolinks now fold as a unit on both sides, mirroring
+        the sanitizer's autolink pass (which consumes the brackets and keeps a
+        `|label`); previously a redacted autolink left an orphaned `<` on the plan
+        side only.
+    -   Protocol-relative `//host` URLs now fold like the sanitizer's
+        protocol-relative pass. The incident body staged `.replace(/\u034f/g, "")`;
+        the sanitizer's zero-width strip turned it into `//g`, then redacted it to
+        `(g/redacted)`.
+    -   The https and scheme folds now match the sanitizer's URI shapes exactly:
+        paths stop at commas, hosts may carry ports, non-https schemes keep their
+        sanitized host, and redacted host names get the sanitizer's per-label
+        alphanumeric fold (`my-host.com` -> `myhost.com`).
+
+    The unicode folds also moved ahead of the comment/tag folds to match
+    `sanitizeContentCore` order (hardenUnicodeText runs first), so a
+    compatibility-form tag folds identically on both sides. Verified against the
+    run's artifacts: all four staged `comment-*.json` bodies now fold equal to
+    their sanitized queued forms.
+
+-   89fbb5b: review: emit fix sketches only under fix-proposing labels
+
+    Measured on Khan/webapp (2026-08-11/12): 31 of 57 posted inline comments
+    carried an "A sketch, not a committable replacement" block, including
+    question and thought comments that propose no fix; there the sketch restates
+    the prose and adds length (mean body 874 chars) without information.
+
+    Two layers. The renderer now appends a sketch only when the claim's base
+    label token is `issue`, `todo`, or `suggestion` (every variant counts:
+    `suggestion (non-blocking, documentation)` is a suggestion); a sketch under
+    `question`/`thought`/`note`/`nitpick` is dropped at render time. And the
+    finder prompts (correctness-reviewer, holistic, completeness, test-adequacy,
+    first-principles, conventions) now ask for `suggestion` only on
+    fix-proposing findings, so the payload is not authored in the first place.
+
+    Committable drop-in `suggestion` fences are unchanged, as are rule quotes
+    and the prose itself; an empty or unparseable label stays sketch-eligible
+    (fail toward more information).
+
+## 1.13.0
+
+### Minor Changes
+
+-   e70aaa6: review: a `blocking-only` modifier on the ROUTING `re-review` line, so repeat reviews can surface only blockers
+
+    `re-review scoped blocking-only` keeps the configured depth's roster and
+    staging (the whole enabled roster over the new hunks, for `scoped`) but
+    changes the REPEAT review's posting surface: only blocking findings post
+    inline; validated non-blocking findings collapse to one line each in a
+    `Non-blocking observations` `<details>` block in the review body, with a
+    note line naming the count and the dial, and the depth note names the
+    modifier. The section always rides the body, never an inline comment: the
+    point of the dial is no non-blocking noise on inline threads.
+
+    This is the quadrant the existing modes could not reach. webapp ran
+    `flip-gated` (#40940) to quiet re-review chatter, then reverted to `scoped`
+    (#40968) because flip-gated silences the noise by not running the
+    whole-change reviewers at all, leaving post-review pushes seen only by the
+    correctness pass. `scoped blocking-only` keeps their blocking recall and
+    their observations (collapsed) while taking the non-blocking chatter off the
+    inline surface.
+
+    Semantics are deliberately narrow:
+
+    -   It applies exactly when the run EXECUTES at a reduced depth. The first
+        full review of a ready PR, a divergence-tripwire re-arm, and every guard
+        that degrades to `full` still post everything; `re-review full blocking-only` warns at parse time that the modifier can never apply.
+    -   The verdict is computed from every validated claim either way, so the
+        modifier can never flip an outcome. A pr-level blocking claim still folds
+        into the body; only non-blocking claims move. An all-clear blocking-only
+        approval carrying the collapsed section is never the bare approve line,
+        so the redundant-approval skip cannot swallow it.
+    -   The modifier belongs to its line: with duplicate `re-review` lines the
+        last line wins whole, modifier included. An unknown modifier warns and is
+        ignored while the mode still applies (toward more review, never less).
+
+    Plumbing: `parseRoutingConfig` grows `reReviewBlockingOnly`, `routing.json`
+    carries it, and `submission.ts` applies it at the posting bar. Nothing
+    changes for any consumer until its ROUTING file adds the modifier, and the
+    line should be earned the way `re-review` modes are, through the live A/B.
+
+### Patch Changes
+
+-   9e1d33d: review: pr-level claims respect open-thread suppression, and a long pr-level fold collapses instead of walling the body
+
+    Measured on webapp#41290 review 4867627688: a reviewer re-found the data race
+    that two open blocking threads (r3721196429, r3721196434) already tracked,
+    anchored it `pr`-level (the race spans three files), and the review body
+    carried the full ~2,600-char finding as one unformatted paragraph, directly
+    under the accountability section listing those same two threads as "still
+    unaddressed". Two independent defects compounded there:
+
+    1. **Open-thread suppression had a pr-level hole.** `suppressOpenThreadDuplicates`
+       matched on `path`, and a pathless claim was passed through unconditionally,
+       so a pr-anchored duplicate of an open thread could never be suppressed (and
+       cross-source dedup requires path equality too, so its anchored siblings could
+       not absorb it either). A pathless claim now compares against every open
+       thread and pays for the missing anchor with a stricter floor, one tier above
+       the same-path rate (`PR_LEVEL_FLOOR`: 0.2 jaccard / 0.35 overlap / 8 shared
+       bigrams). Calibrated on that run's real texts: the two true counterparts
+       score 0.342/0.558/40 and 0.329/0.643/23 while the six unrelated open threads
+       top out at 0.051/0.180/1, so the floor clears both real duplicates with wide
+       margin and sits far above every non-duplicate. `dedup-pr-level.test.ts`
+       carries the run's texts as fixtures, including a tier-boundary case proving
+       the same text suppresses with an anchor and posts without one at 7 shared
+       bigrams. `ThreadSuppression.path` becomes optional to carry the pathless
+       record; a suppressed pr-level blocking candidate floors the verdict exactly
+       as an anchored one does.
+
+    2. **The body fold rendered the discussion verbatim, whatever its length.**
+       A pr-level claim that survives suppression still folds into the review body
+       (the inline-comment safe output needs a path and line), but past a
+       short-paragraph cap (`MAX_VERBATIM_FOLD_CHARS`, 400) the fold now carries
+       the claim's subject line with the full discussion in a `<details>` block,
+       so a genuinely new cross-file finding stays readable without burying the
+       accountability section and note lines around it. Short folds are unchanged
+       byte for byte, and the dispatch-conformance gate's plan-match rule is
+       unaffected because the plan and the queued body change together.
+
+    Both changes degrade safely: a missed suppression posts a duplicate comment
+    (the pre-existing behavior), never drops a finding, and the fold never loses
+    content, only collapses it.
+
+-   426094c: The claim-clusterer prompt's cross-anchor example no longer promises a grouping its own path rule forbids: "its test" (a separate `_test.go`, so a different `path`) is replaced by a same-file anchor, and the cross-file limit is stated explicitly beside the example. Found by the reviewer itself on the webapp v1.12.0 bump PR.
+
+## 1.12.0
+
+### Minor Changes
+
+-   cbcb494: Cross-source dedup gains a second tier: a `claim-clusterer` sub-agent names the
+    candidate comments that describe ONE defect, and `dedup.ts` verifies that
+    assertion and merges them. Several reviewers finding one problem now post once.
+
+    Run 30587343777 (webapp#41204) is the case. Four sources flagged one wrong doc
+    comment (`// Keeps at most 10 samples per key.` above `const maxSamples = 25`) at
+    window.go :8, :9, :8, :8, and `merges` recorded none of them; it was a FIRST
+    review at `depth: full`, so not a re-review artifact. Autofix later satisfied all
+    four with one rewritten comment, which is the proof they were one defect.
+
+    Replaying that run's own claims.json showed the similarity tier is not close to
+    reaching it. Three of the four share the EXACT anchor and still score
+    0.060-0.068 Jaccard against a 0.14 floor with 0-1 shared bigrams against a floor
+    of 4: an order of magnitude below the tier, so no re-derivation from the fixtures
+    gets there (the floor that admits 0.06 admits everything). Each reviewer wrote
+    the same defect in different words, and the terser the claim the less text
+    arithmetic has to work with. Nor can reweighting the text recover the
+    discriminator: the pairs dedup deliberately keeps apart share MORE salient
+    tokens than the real duplicates do (run 29943085279's AddDate issue and its
+    "central behavior never exercised" thought sit on one line and share AddDate,
+    MemoryTTLDays, 180, 15). Duplicates are "same ask, different words"; those are
+    "same facts, different ask", which is a semantic judgment.
+
+    Asking each finder for its own identity key would cluster deterministically at
+    zero dispatch, and it fails for the same reason. A finder mints its key blind to
+    the other reviewers, so two of them agreeing on one defect would have to
+    independently pick the same string; and where a blind key DOES agree is the case
+    that must not merge, since the AddDate bug and its missing-test todo would both
+    key on `AddDate`. The clusterer's grounding evidence is not that key: it is
+    chosen after reading the candidate set, which is what makes it both possible and
+    checkable against every member's text.
+
+    So the unit of identity is now the defect, not the anchor. Tier 2 requires no
+    line agreement at all, which is what makes the same-defect-different-anchor shape
+    mergeable for the first time (one missing-test defect drew comments at three
+    anchors in run 29943085279); the line survives as tier-1 evidence and as the
+    survivor's posting anchor.
+
+    The model contributes identity only. Every merge rule stays in code, and the
+    clusterer must ground each group in the code element its members share, which is
+    then checked: a group whose `evidence` names no identifier, literal, or quoted
+    text is discarded, and so is a member whose own text never mentions it. Same
+    path and different sources are enforced as in tier 1, and only a NON-BLOCKING
+    copy may be absorbed on a model's word — with the survivor always the
+    highest-severity copy, a false tier-2 merge can cost an advisory comment and can
+    never lose a blocking finding or soften a verdict. The accepted price: one defect
+    flagged blocking by two sources in different words still posts twice unless tier
+    1 reaches it.
+
+    Degradation is soft in both directions. The clusterer is dispatched only when the
+    candidates hold a pair it could legally merge (two anchored claims on one path
+    from two sources, at least one non-blocking), so a run with nothing to find never
+    pays for the step. A missing definition or an unusable reply leaves the run on
+    tier 1, exactly today's behavior, and surfaces as a run warning plus a
+    `clustering` block in `dispatch-result.json` (`candidates`, `proposed`,
+    `clusterMerges` per group, `clusterMerged` per absorbed copy, and every rejected
+    member with the rule that stopped it) rather
+    than as an author-facing note: duplicate hygiene is not a review dimension. Each
+    merge in `merges` now carries `via` (`similarity`/`clusterer`/`both`) plus the
+    tier and anchor of each absorbed copy, so the merge rate reads off the artifact
+    instead of off a PR that autofix has already tidied.
+
+    The "also flagged by" note names a source's line when it differs from the
+    survivor's, and quotes the subject of any copy tier 2 absorbed. One edit
+    discharging every member's ask does not mean every member asked in the same
+    words; run 30587343777's `conventions` copy wanted the symbol-name prefix, not
+    the corrected number. Tier 2 is exactly the case where the survivor's own
+    prose is known not to restate it (the text floor is what those copies could not
+    clear). Tier-1 copies are not quoted: clearing that floor against the survivor is
+    the evidence that they say the same thing, and repeating them would move the
+    duplicate noise into the surviving comment rather than remove it.
+
+    The live A/B now runs dedup, which it never did: a change to the merge rules was
+    unmeasurable by construction before this. Tier 1 runs in both arms (it is shared
+    code and production has had it since #245) while tier 2 is carried by each arm's
+    own review.md, exactly like the provenance gate's anchor-snap emulation, so the
+    arm delta prices the clusterer alone and a false merge shows up as recall loss.
+    The report gains a "Cross-source claims merged (of candidates)" row with tier 2's
+    share, its dollars and wall-clock, and per-case dedup counts.
+
+    Tier 2 can add merges and never subtract them, and that comes from the ORDER the
+    tiers run in rather than from any check on a proposal. Tier 1 settles completely,
+    and tier 2 then merges only the comments it left standing; a cluster member tier
+    1 has already absorbed is read at the comment it now posts under, and a comment
+    tier 2 absorbs carries its own tier-1 copies along. Screening each proposed
+    member before it was unioned was not enough, because a member can be legal in
+    every respect and still displace the survivor of a tier-1 group it was clustered
+    into, orphaning that group's other copies: with three copies folded into one
+    comment and a higher-confidence claim clustered with just one of them, the old
+    single-pass merge posted three comments where tier 1 alone posted one. The
+    structural pre-screen stays for what it does do (an illegal member cannot
+    out-rank the legal ones and take a good proposal down with it), as does the
+    per-member re-check against the elected survivor.
+
+    `dispatch.ts` was at its 1000-line cap again, so the clustering step lands in
+    `dispatch-cluster.ts` (dispatch, contract parse, telemetry) rather than raising
+    the cap, and tier 2's rules in `lib/dedup-cluster.ts` beside the tests that
+    already carried the name; the eval's dedup stage splits to
+    `eval/live-dedup.ts` on the same principle.
+
 ## 1.11.0
 
 ### Minor Changes

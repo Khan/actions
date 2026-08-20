@@ -291,7 +291,7 @@ export const stageCase = (
 
     // Deterministic routing, exactly as the no-post runner computes it.
     const routerConfig: RouterConfig = {
-        generatedPatterns: [],
+        generatedRules: [],
         ...(corpusCase.routerConfig as Partial<RouterConfig>),
     };
     const routing = route({files: corpusCase.changedFiles}, routerConfig);

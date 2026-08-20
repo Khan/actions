@@ -33,6 +33,17 @@
  *     post nor count toward the verdict.
  *   - REQUEST_CHANGES iff at least one posted claim carries a blocking label
  *     (via computeVerdict, threshold 1).
+ *   - HOLD_FOR_HUMAN when a core review pass (`correctness-reviewer` or
+ *     `skill-auditor`) produced no output this run and the run would
+ *     otherwise have auto-approved (computeVerdict's core-dimension gate,
+ *     fed from the dispatcher's `skippedDimensions`). A hold is not a
+ *     review event: the plan's body posts as one standalone PR comment,
+ *     nothing else queues, and no fingerprint stamp is written, so the
+ *     next run reviews in full. The production shape this closes:
+ *     Khan/actions#328's re-run (31124365377 attempt 2), where every core
+ *     lens died on an API auth error and the run still submitted
+ *     "Approved — no blocking issues found" over seven "not assessed"
+ *     note lines.
  *   - The reduced-depth flip rule: at flip-gated/fast depth over a prior
  *     REQUEST_CHANGES stamp, `rereview.json`'s keptBlockingCount floors the
  *     verdict at REQUEST_CHANGES.
@@ -49,10 +60,17 @@
  * under review.
  */
 
+import {renderAttributionFooter} from "./attribution";
 import {computeRisksPatternsKey, RISKS_PATTERNS_KEY_PATH} from "./cache-record";
 import type {Claim} from "./dispatch-contracts";
+import {DEFAULT_FINDERS, TRIAGE_DIMENSION} from "./dispatch-roster";
 import {runCli as runNotifiedCli} from "./notified";
-import {isBlockingLabel, renderReviewBody} from "./render-comment";
+import {
+    HOLD_HEAD,
+    HOLD_UNSTUCK_LINES,
+    isBlockingLabel,
+    renderReviewBody,
+} from "./render-comment";
 import {runRereviewCli, type RereviewCliFs} from "./rereview";
 import {normalizeBody} from "./sanitizer-normalize";
 import {
@@ -62,6 +80,8 @@ import {
     type PriorReview,
 } from "./rereview-mode";
 import {computeVerdict} from "./verdict";
+import type {DimensionStatus, VerdictReason} from "./verdict";
+import {runVersionFooterCli} from "./version-footer";
 
 /* -------------------------------------------------------------------------- */
 /* Types and paths                                                            */
@@ -73,9 +93,16 @@ const CACHE_MEMORY_DIR = "/tmp/gh-aw/cache-memory";
 export type PlannedComment = {path: string; line: number; body: string};
 
 export type SubmissionPlan = {
-    /** The event to submit (Step 4's two-state rule; never HOLD here). */
-    event: "APPROVE" | "REQUEST_CHANGES";
-    /** The full review body, stamp included; submit verbatim. */
+    /**
+     * The outcome: a review event to submit (Step 4's mechanical rule), or
+     * HOLD_FOR_HUMAN, which submits NO review — the orchestrator posts
+     * `body` as one standalone PR comment instead (Step 6's hold branch).
+     */
+    event: "APPROVE" | "REQUEST_CHANGES" | "HOLD_FOR_HUMAN";
+    /**
+     * The full text to post verbatim: the review body (stamp included) for
+     * a review event, or the hold comment (never stamped) for a hold.
+     */
     body: string;
     /**
      * Whether the orchestrator may emit NO submission at all (the
@@ -91,7 +118,7 @@ export type SubmissionPlan = {
     /** Thread ids to resolve (the reconciler's decision, passed through). */
     resolve: string[];
     /** Why the event is what it is (fixed-format, for the artifact). */
-    reasons: string[];
+    reasons: VerdictReason[];
     /** Non-blocking composition observations. */
     notes: string[];
 };
@@ -115,6 +142,15 @@ const parseSkipLines = (raw: unknown): Set<string> => {
         }
     }
     return keys;
+};
+
+/** Write the staged plan (`submission-plan.json`) and hand it back. */
+const stagePlan = (fs: SubmissionFs, plan: SubmissionPlan): SubmissionPlan => {
+    fs.writeFileSync(
+        `${REVIEW_DIR}/submission-plan.json`,
+        JSON.stringify(plan, null, 2),
+    );
+    return plan;
 };
 
 const readJson = (fs: SubmissionFs, path: string): unknown => {
@@ -161,6 +197,45 @@ export const MAX_INLINE_COMMENTS = 20;
 /** The medium-confidence inline floor (the Step 5 posting bar). */
 const MIN_INLINE_CONFIDENCE = 0.5;
 
+/**
+ * A pr-level claim's discussion folds into the body verbatim only up to
+ * this length; past it, the body carries the claim's subject line and the
+ * full discussion moves into a <details> block. webapp#41290 review
+ * 4867627688 folded a ~2,600-char single-paragraph finding directly into
+ * the body, burying the accountability section and the note lines around
+ * it; a short paragraph is the most a fold can carry without doing that.
+ */
+export const MAX_VERBATIM_FOLD_CHARS = 400;
+
+/**
+ * Render a pr-level claim for the review body: verbatim while it reads as
+ * a short paragraph, subject line plus a collapsed full finding once it
+ * does not.
+ */
+export const renderPrLevelFold = (claim: Claim): string => {
+    if (claim.discussion.length <= MAX_VERBATIM_FOLD_CHARS) {
+        return `**${claim.label}:** ${claim.discussion}`;
+    }
+    return [
+        `**${claim.label}:** ${claim.subject}`,
+        "<details>",
+        "<summary>Full finding</summary>",
+        "",
+        claim.discussion,
+        "",
+        "</details>",
+    ].join("\n");
+};
+
+/**
+ * The one-line source tag for collapsed/hold list entries: the same
+ * attribution the full comments carry, in the smallest form that fits a
+ * one-liner (a whole collapsed footer per list entry would bury the list).
+ * `<sub>` is sanitizer-allowed, and attribution.ts's stripFooters removes
+ * the span before any text-similarity comparison against posted bodies.
+ */
+const sourceTag = (claim: Claim): string => `<sub>(${claim.source})</sub>`;
+
 const lineHasCodeSignal = (line: string): boolean =>
     /\w\(/.test(line) || // a call
     /[{};]/.test(line) || // block/statement punctuation
@@ -200,10 +275,49 @@ export const isDropInSuggestion = (suggestion: string): boolean => {
 };
 
 /**
+ * The base label tokens whose comments propose a fix, and so may carry a
+ * sketch block. `issue` and `suggestion` are the fix-proposing labels;
+ * `todo (blocking)` is verdict-equivalent to `issue (blocking)` (see
+ * render-comment.ts), so stripping its fix would remove the sketch from a
+ * blocking finding. `question`, `thought`, `note`, and `nitpick` raise a
+ * point rather than propose a fix: measured on Khan/webapp (2026-08-11/12),
+ * 31 of 57 posted comments carried a sketch, including questions and
+ * thoughts whose sketch restated the prose without adding information.
+ *
+ * Deliberate consequence: a dispute-capped claim relabeled to
+ * `question (non-blocking)` by applyVerifications keeps its `suggestion`
+ * field but posts without the sketch block. The gate is about information
+ * loss, not the label's tone: a sketch restates prose (the measured
+ * sample), so dropping it under a non-fix label costs length, not content,
+ * whereas a drop-in fence IS the fix in committable form and renders under
+ * any label (see renderClaimComment). So a disputed claim keeps its
+ * one-click fix and loses only the restatement.
+ */
+const SKETCH_LABEL_TOKENS: ReadonlySet<string> = new Set([
+    "issue",
+    "todo",
+    "suggestion",
+]);
+
+/**
+ * Whether a claim's label admits a sketch block. Matches on the base label
+ * token so every variant counts (`suggestion (non-blocking, documentation)`
+ * is a suggestion). An unparseable label is sketch-eligible: fail toward
+ * more information, never toward silently dropping an authored fix.
+ */
+export const labelAdmitsSketch = (label: string): boolean => {
+    const token = label.trim().split(/[\s(:]/, 1)[0] ?? "";
+    return token === "" || SKETCH_LABEL_TOKENS.has(token.toLowerCase());
+};
+
+/**
  * Render one claim as its Conventional Comment (the renderComment layout,
  * driven by the claim's post-validation label rather than a recomputed one).
  * A suggestion only becomes a committable `suggestion` fence when it is
- * plausibly drop-in; otherwise it renders as a plain fenced sketch.
+ * plausibly drop-in; otherwise it renders as a plain fenced sketch, and only
+ * under a fix-proposing label ({@link labelAdmitsSketch}): a question or
+ * thought proposes no fix, so a sketch under it adds length, not
+ * information.
  */
 export const renderClaimComment = (claim: Claim): string => {
     const lines: string[] = [`**${claim.label}:** ${claim.discussion}`];
@@ -218,7 +332,7 @@ export const renderClaimComment = (claim: Claim): string => {
     if (claim.suggestion !== undefined) {
         if (isDropInSuggestion(claim.suggestion)) {
             lines.push("", "```suggestion", claim.suggestion, "```");
-        } else {
+        } else if (labelAdmitsSketch(claim.label)) {
             lines.push(
                 "",
                 "A sketch, not a committable replacement:",
@@ -267,6 +381,7 @@ export const runSubmissionCli = (
               riskFiles?: unknown;
               patterns?: unknown;
               excludedFiles?: unknown;
+              skippedDimensions?: unknown;
           }
         | undefined;
     if (dispatch === undefined) {
@@ -302,6 +417,31 @@ export const runSubmissionCli = (
           )
         : [];
     const depth = typeof dispatch.depth === "string" ? dispatch.depth : "full";
+    const routing = readJson(fs, `${REVIEW_DIR}/routing.json`) as
+        | {teams?: {owners?: unknown}; reReviewBlockingOnly?: unknown}
+        | undefined;
+    // The ROUTING `re-review <mode> blocking-only` modifier: a repeat review
+    // at a reduced depth posts only blocking findings inline; validated
+    // non-blocking findings collapse into the review body below. Keyed on
+    // the EXECUTED depth, not the configured mode, so the first full review,
+    // a tripwire re-arm, and every guard that resolves to full depth still
+    // post everything. The verdict counts every claim either way.
+    //
+    // Executed depth is a DELIBERATE key, not a proxy for "is a repeat
+    // review" (rereview-plan.json is staged and could key that directly): a
+    // guard degrades to full exactly when the pipeline could not trust the
+    // reduced-depth state — a divergence re-arm, an unparseable plan, a
+    // missing staging — and a run whose premise is "start over, trust
+    // nothing" should not inherit a posting filter from the state it just
+    // declined to trust. Guard-degraded repeats therefore stay loud BY
+    // DESIGN, priced as: guards are rare, and when one fires the review is
+    // effectively a first review of the current tree. If the live A/B shows
+    // degrade-to-full repeats still generating the chatter complaint, the
+    // revisit is to key on plan presence, not to widen this condition
+    // quietly — that trade (filtering a run built on distrusted state)
+    // deserves its own change and its own eval.
+    const blockingOnly =
+        depth !== "full" && routing?.reReviewBlockingOnly === true;
 
     // Stage the code-computed risks/patterns signature (trial suggestion b):
     // Step 7 compares THIS string against cache memory's `risksPatternsKey`
@@ -315,9 +455,6 @@ export const runSubmissionCli = (
     // narrower signature could collapse the standing full-run guidance the
     // next time any comment queues.
     if (depth === "full") {
-        const routing = readJson(fs, `${REVIEW_DIR}/routing.json`) as
-            | {teams?: {owners?: unknown}}
-            | undefined;
         // The NOTIFIED match set rides the same key: Step 7 posts one Review
         // Guidance comment for risks, patterns, AND notifications, so a run
         // that changed only the notified set must still re-post.
@@ -379,71 +516,29 @@ export const runSubmissionCli = (
     }
 
     // Inline comments need a path and a line; a PR-level claim folds into
-    // the body instead (rare: a pr-anchored finding).
+    // the body instead (rare: a pr-anchored finding). Under blocking-only a
+    // non-blocking pr-level claim joins the collapsed section instead.
     const anchored: Claim[] = [];
     const prLevelLines: string[] = [];
+    const prLevelCollapsed: Claim[] = [];
     for (const claim of claims) {
         if (claim.path !== undefined && claim.line !== undefined) {
             anchored.push(claim);
+        } else if (blockingOnly && !isBlockingLabel(claim.label)) {
+            prLevelCollapsed.push(claim);
         } else {
-            prLevelLines.push(`**${claim.label}:** ${claim.discussion}`);
+            // The fold carries the same collapsed attribution footer an
+            // inline comment gets: a pr-level finding names its reviewer too.
+            prLevelLines.push(
+                `${renderPrLevelFold(claim)}\n${renderAttributionFooter(
+                    claim.source,
+                    claim.also_flagged_by,
+                )}`,
+            );
             notes.push(
                 `pr-level claim ${claim.id} folded into the review body`,
             );
         }
-    }
-
-    // The posting bar (the Step 5 ranked bar, as code): rank
-    // blocking before non-blocking, then confidence descending (the sort is
-    // stable, so dispatch order breaks ties). A claim below medium
-    // confidence (< 0.5) never posts inline (a blocking claim always
-    // qualifies: it is validator-confirmed by construction), and at most
-    // MAX_INLINE_COMMENTS post inline: the frontmatter caps the
-    // create-pull-request-review-comment safe output at the same number, so
-    // a longer plan would have the engine reject the overflow and the
-    // conformance gate red the run after full spend. Everything else
-    // collapses to one terse line each in a single <details> block riding
-    // the highest-ranked inline comment (or the review body when nothing
-    // posts inline), so it is surfaced without scattering noise. The
-    // verdict is computed from ALL claims, so a collapsed blocking claim
-    // (a 21st blocking finding) still blocks.
-    const ranked = [...anchored].sort((a, b) => {
-        const blocking =
-            Number(isBlockingLabel(b.label)) - Number(isBlockingLabel(a.label));
-        return blocking !== 0 ? blocking : b.confidence - a.confidence;
-    });
-    const inlineWorthy = ranked.filter(
-        (claim) =>
-            isBlockingLabel(claim.label) ||
-            claim.confidence >= MIN_INLINE_CONFIDENCE,
-    );
-    const inlineClaims = new Set(inlineWorthy.slice(0, MAX_INLINE_COMMENTS));
-    const collapsed = ranked.filter((claim) => !inlineClaims.has(claim));
-    const inline: PlannedComment[] = [...inlineClaims].map((claim) => ({
-        path: claim.path as string,
-        line: claim.line as number,
-        body: renderClaimComment(claim),
-    }));
-    if (collapsed.length > 0) {
-        const section = [
-            "<details>",
-            `<summary>Lower-confidence observations (${collapsed.length})</summary>`,
-            "",
-            ...collapsed.map(
-                (claim) =>
-                    `- \`${claim.path}:${claim.line}\` ${claim.label}: ${claim.subject}`,
-            ),
-            "",
-            "</details>",
-        ].join("\n");
-        if (inline.length > 0) {
-            inline[0] = {...inline[0], body: `${inline[0].body}\n\n${section}`};
-        } else {
-            prLevelLines.push(section);
-        }
-        notes.push(
-            `${collapsed.length} claim(s) collapsed below the inline bar (cap ${MAX_INLINE_COMMENTS}, medium-confidence floor)`,
-        );
     }
 
     // A blocking candidate the dispatcher suppressed as a duplicate of a
@@ -470,27 +565,36 @@ export const runSubmissionCli = (
             (entry as {threadBlocking?: unknown}).threadBlocking === true,
     ).length;
 
+    // Real dimension availability (the hold rule's input): a core lens
+    // recorded in the dispatcher's `skippedDimensions` (either cause)
+    // produced no usable output this run and must not be reported
+    // "assessed", or a crashed run auto-approves. The dimension names are
+    // imported from the modules that write them (`DEFAULT_FINDERS`,
+    // `TRIAGE_DIMENSION`), so a rename cannot silently decouple the hold
+    // from the dispatcher. The production dispatcher always writes
+    // `skippedDimensions` (an empty array on a clean run); an absent field
+    // (hand-staged eval fixtures) reads as all-assessed rather than
+    // guessing at a hold.
+    const skippedDimensionNames = new Set(
+        (Array.isArray(dispatch.skippedDimensions)
+            ? dispatch.skippedDimensions
+            : []
+        )
+            .map((entry) => (entry as {dimension?: unknown}).dimension)
+            .filter((name): name is string => typeof name === "string"),
+    );
+    const dimensionStatus = (name: string): DimensionStatus =>
+        skippedDimensionNames.has(name) ? "unavailable" : "assessed";
+
     const verdict = computeVerdict({
         postedLabels: claims.map((claim) => claim.label),
         dimensions: {
-            correctness: "assessed",
-            skillSeverity: "assessed",
-            patternTriage: "assessed",
+            correctness: dimensionStatus(DEFAULT_FINDERS[0]),
+            skillSeverity: dimensionStatus(DEFAULT_FINDERS[1]),
+            patternTriage: dimensionStatus(TRIAGE_DIMENSION),
         },
         keptBlockingCount: keptBlockingFloor + suppressedBlocking,
     });
-    // With every dimension reported assessed (the dispatcher's unavailable
-    // dimensions surface as note lines instead), the two-state Step 4 rule
-    // is what remains: HOLD_FOR_HUMAN is unreachable here, and the guard
-    // makes a future edit that feeds real dimension availability into
-    // computeVerdict fail loudly instead of auto-approving a crashed run.
-    if (verdict.event === "HOLD_FOR_HUMAN") {
-        throw new Error(
-            "HOLD_FOR_HUMAN reached the submission plan: dimension availability must not feed this CLI without a hold path",
-        );
-    }
-    const event =
-        verdict.event === "REQUEST_CHANGES" ? "REQUEST_CHANGES" : "APPROVE";
 
     // The depth note (Step 3), when the run reduced.
     const plan = readJson(fs, `${REVIEW_DIR}/rereview-plan.json`) as
@@ -500,7 +604,9 @@ export const runSubmissionCli = (
     if (plan !== undefined && depth !== "full") {
         const mode = typeof plan.mode === "string" ? plan.mode : "full";
         depthNotes.push(
-            `Note: re-review ran at ${depth} depth (re-review mode ${mode}).`,
+            `Note: re-review ran at ${depth} depth (re-review mode ${mode}${
+                blockingOnly ? ", blocking-only" : ""
+            }).`,
         );
     }
     if (plan?.tripwireRearmed === true) {
@@ -514,13 +620,192 @@ export const runSubmissionCli = (
         );
     }
 
+    // The hold path (computeVerdict's core-dimension gate): a run whose
+    // correctness or skill/severity pass produced no output must not resolve
+    // to an approval the automation cannot stand behind. A hold is not a
+    // review event: the orchestrator posts this body as ONE standalone PR
+    // comment (the add-comment safe output) and submits no review, so the
+    // PR shows neither an approval nor a block. Claims that survived
+    // validation fold into the comment as one line each (blocking claims
+    // cannot exist here: they force REQUEST_CHANGES over the hold), the
+    // reconciler's resolutions are withheld (a partial run leaves existing
+    // threads standing), and no fingerprint stamp is written, so the cache
+    // writer refuses the record and the next run reviews in full.
+    if (verdict.event === "HOLD_FOR_HUMAN") {
+        // Both post-fold buckets ride the hold comment: anchored claims (no
+        // inline comments post on a hold) and the blocking-only collapsed
+        // pr-level claims (their collapsed section renders only on the
+        // normal path).
+        const heldClaimLines = [...anchored, ...prLevelCollapsed].map(
+            (claim) => {
+                notes.push(
+                    `claim ${claim.id} folded into the hold comment (a hold posts no inline comments)`,
+                );
+                return claim.path !== undefined && claim.line !== undefined
+                    ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${
+                          claim.subject
+                      } ${sourceTag(claim)}`
+                    : `- ${claim.label}: ${claim.subject} ${sourceTag(claim)}`;
+            },
+        );
+        return stagePlan(fs, {
+            event: "HOLD_FOR_HUMAN",
+            body: [
+                HOLD_HEAD,
+                rereview.section,
+                ...prLevelLines,
+                ...heldClaimLines,
+                ...noteLines,
+                ...depthNotes,
+                ...HOLD_UNSTUCK_LINES,
+            ]
+                .filter((line) => line !== "")
+                .join("\n"),
+            skipSubmission: false,
+            comments: [],
+            resolve: [],
+            reasons: verdict.reasons,
+            notes,
+        });
+    }
+
+    // The posting bar (the Step 5 ranked bar, as code): rank
+    // blocking before non-blocking, then confidence descending (the sort is
+    // stable, so dispatch order breaks ties). A claim below medium
+    // confidence (< 0.5) never posts inline (a blocking claim always
+    // qualifies: it is validator-confirmed by construction), and at most
+    // MAX_INLINE_COMMENTS post inline: the frontmatter caps the
+    // create-pull-request-review-comment safe output at the same number, so
+    // a longer plan would have the engine reject the overflow and the
+    // conformance gate red the run after full spend. Everything else
+    // collapses to one terse line each in a single <details> block riding
+    // the highest-ranked inline comment (or the review body when nothing
+    // posts inline), so it is surfaced without scattering noise. The
+    // verdict is computed from ALL claims, so a collapsed blocking claim
+    // (a 21st blocking finding) still blocks.
+    const ranked = [...anchored].sort((a, b) => {
+        const blocking =
+            Number(isBlockingLabel(b.label)) - Number(isBlockingLabel(a.label));
+        return blocking !== 0 ? blocking : b.confidence - a.confidence;
+    });
+    const inlineWorthy = ranked.filter(
+        (claim) =>
+            isBlockingLabel(claim.label) ||
+            (!blockingOnly && claim.confidence >= MIN_INLINE_CONFIDENCE),
+    );
+    const inlineClaims = new Set(inlineWorthy.slice(0, MAX_INLINE_COMMENTS));
+    const collapsed = [
+        ...ranked.filter((claim) => !inlineClaims.has(claim)),
+        ...prLevelCollapsed,
+    ];
+    const inlineList = [...inlineClaims];
+    const inline: PlannedComment[] = inlineList.map((claim) => ({
+        path: claim.path as string,
+        line: claim.line as number,
+        body: renderClaimComment(claim),
+    }));
+    if (collapsed.length > 0) {
+        // Why collapsed one-liners still cost full validation: the modifier
+        // filters at the POSTING surface, deliberately after validation.
+        // The validator's product for a non-blocking claim is not the line
+        // it posts but the lines that never post — false positives dropped
+        // and wrong labels corrected — and a collapsed list of unvalidated
+        // claims would re-import exactly the wrong-claim noise the pipeline
+        // exists to keep off the PR (a one-liner in the body still asserts
+        // the claim, links nothing to check it against, and is skimmed as
+        // the bot's word). Validation spend on the non-blocking tail is
+        // bounded by the investigation cap and the run budget; skipping it
+        // per-label would fork the validation policy for a saving the A/B
+        // has not shown to matter. If it ever does, the dial belongs at the
+        // validation-dispatch gate as its own evaluated change, with the
+        // unvalidated lines marked as such — not as a silent widening here.
+        //
+        // The cap can push a 21st+ blocking claim into the collapse; a
+        // "Non-blocking" heading would mislabel it, so the blocking-only
+        // wording applies only when every collapsed claim is non-blocking
+        // (each line still carries its own label either way, and the
+        // verdict already counted every claim above).
+        const collapsedNonBlockingOnly = !collapsed.some((entry) =>
+            isBlockingLabel(entry.label),
+        );
+        const summary =
+            blockingOnly && collapsedNonBlockingOnly
+                ? `Non-blocking observations (${collapsed.length})`
+                : `Lower-confidence observations (${collapsed.length})`;
+        const section = [
+            "<details>",
+            `<summary>${summary}</summary>`,
+            "",
+            ...collapsed.map((claim) =>
+                claim.path !== undefined && claim.line !== undefined
+                    ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${
+                          claim.subject
+                      } ${sourceTag(claim)}`
+                    : `- ${claim.label}: ${claim.subject} ${sourceTag(claim)}`,
+            ),
+            "",
+            "</details>",
+        ].join("\n");
+        // Under blocking-only the section always rides the review body: the
+        // point of the dial is no non-blocking noise on inline threads.
+        if (!blockingOnly && inline.length > 0) {
+            inline[0] = {...inline[0], body: `${inline[0].body}\n\n${section}`};
+        } else {
+            prLevelLines.push(section);
+        }
+        notes.push(
+            blockingOnly && collapsedNonBlockingOnly
+                ? `${collapsed.length} non-blocking claim(s) collapsed into the body (re-review blocking-only)`
+                : `${collapsed.length} claim(s) collapsed below the inline bar (cap ${MAX_INLINE_COMMENTS}, medium-confidence floor)`,
+        );
+    }
+
+    // The per-comment attribution footer (attribution.ts): which reviewer
+    // produced the finding, plus dedup's `also_flagged_by` record of every
+    // other reviewer that flagged the same defect. Appended here, after the
+    // collapsed-observations section ride, so the footer is each comment's
+    // final block; appended at the plan surface rather than inside
+    // renderClaimComment so the claim renderer stays byte-identical to
+    // renderComment on the same finding (the layout parity the tests pin).
+    inlineList.forEach((claim, index) => {
+        inline[index] = {
+            ...inline[index],
+            body: `${inline[index].body}\n\n${renderAttributionFooter(
+                claim.source,
+                claim.also_flagged_by,
+            )}`,
+        };
+    });
+
+    const event =
+        verdict.event === "REQUEST_CHANGES" ? "REQUEST_CHANGES" : "APPROVE";
+
     const head = renderReviewBody({
         event,
         hasInlineComments: inline.length > 0,
         rereviewSection: rereview.section,
     });
     const stamp = runRereviewStampCli(fs, event);
-    const body = [head, ...prLevelLines, ...noteLines, ...depthNotes]
+    // The body minus the attribution footer: the redundant-approval skip
+    // below compares THIS against the bare approve line, because the footer
+    // rides every submitted body (a bare approve differs from the bare
+    // render by exactly the footer, and that difference is not a reason to
+    // post).
+    const coreBody = [head, ...prLevelLines, ...noteLines, ...depthNotes]
+        .filter((line) => line !== "")
+        .join("\n");
+    // The version/config footer (version-footer.ts): code-rendered,
+    // collapsed by default (attribution.ts's shared <details> wrapper), and
+    // sanitizer-surviving (details/summary/sub are all allowed tags; the old
+    // hidden HTML marker never posted). The CLI also stages version-footer.txt for
+    // Step 7's guidance comment. The depth override hands the footer this
+    // run's executed depth from the SAME read that keys the depth Note and
+    // blocking-only gating, so the two surfaces cannot contradict; null
+    // (unreadable dispatch result) drops the segment rather than guessing.
+    const footer = runVersionFooterCli(fs, undefined, {
+        depth: typeof dispatch.depth === "string" ? dispatch.depth : null,
+    });
+    const body = [coreBody, footer]
         .filter((line) => line !== "")
         .join("\n")
         .concat(stamp === null ? "" : `\n${stamp}`)
@@ -539,14 +824,14 @@ export const runSubmissionCli = (
     const skipSubmission =
         event === "APPROVE" &&
         inline.length === 0 &&
-        normalizeBody(body) ===
+        normalizeBody(coreBody) ===
             normalizeBody(
                 renderReviewBody({event: "APPROVE", hasInlineComments: false}),
             ) &&
         priorStamp !== null &&
         priorStamp.verdict === "APPROVE";
 
-    const submission: SubmissionPlan = {
+    return stagePlan(fs, {
         event,
         body,
         skipSubmission,
@@ -558,12 +843,7 @@ export const runSubmissionCli = (
             : [],
         reasons: verdict.reasons,
         notes,
-    };
-    fs.writeFileSync(
-        `${REVIEW_DIR}/submission-plan.json`,
-        JSON.stringify(submission, null, 2),
-    );
-    return submission;
+    });
 };
 
 // Run only when executed directly (review.md Steps 4-6, scripted dispatch

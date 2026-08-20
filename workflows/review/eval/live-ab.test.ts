@@ -2,6 +2,7 @@ import {describe, it, expect} from "vitest";
 
 import {aggregateSamples, extractSamples} from "./aggregate";
 import {parseCase, type CorpusCase} from "./corpus/loader";
+import type {LiveDedupReport} from "./live-dedup";
 import {
     adversarialGateFailures,
     diffRegressions,
@@ -169,6 +170,208 @@ describe("selectCases", () => {
                 caseFilter: ["smoke-a", "not-a-case"],
             }),
         ).toThrow(/not in the live corpus: not-a-case/);
+    });
+});
+
+describe("runArm dedup accounting", () => {
+    /**
+     * The arm-level half of the duplicate-comment gate. A powered run reads its
+     * merge rate from here, so the plumbing has to carry the numbers AND the
+     * groups: the run that graduated the clusterer could see that four claims
+     * merged but not which, and a false merge is only diagnosable from the ids
+     * and the evidence the clusterer grounded them in.
+     */
+    const produceMerged =
+        (
+            clustererAbsent: boolean,
+            over: Partial<LiveDedupReport> = {},
+        ): ArmProduce =>
+        async () => {
+            const base = await produceHit(1)(liveCase("case-1"));
+            return {
+                ...base,
+                // The clusterer's own per-agent entry is where the merge row reads
+                // tier 2's price: an arm that never had the agent contributes no
+                // entry and therefore no cost.
+                perAgent: clustererAbsent
+                    ? base.perAgent
+                    : [
+                          ...base.perAgent,
+                          {
+                              name: "claim-clusterer",
+                              model: "sonnet",
+                              usd: 0.25,
+                              turns: 2,
+                              wallMs: 21_000,
+                              retried: false,
+                          },
+                      ],
+                dedup: {
+                    candidates: 4,
+                    merges: [
+                        {
+                            survivor: "live-hit",
+                            merged: [
+                                {
+                                    id: "live-doc-1",
+                                    source: "documentation",
+                                    label: "suggestion (non-blocking, documentation)",
+                                    line: 9,
+                                    via: "clusterer" as const,
+                                },
+                            ],
+                            path: "src/a.ts",
+                            line: 1,
+                            via: "clusterer" as const,
+                            evidence:
+                                "the `maxSamples` comment says 10, not 25",
+                        },
+                        // A group BOTH tiers contributed to: tier 1 reached the
+                        // conventions copy on its own and only the holistic one
+                        // needed the clusterer, so exactly one of these two copies
+                        // is tier 2's to claim.
+                        {
+                            survivor: "live-hit-2",
+                            merged: [
+                                {
+                                    id: "live-conv-1",
+                                    source: "conventions",
+                                    label: "nitpick (non-blocking)",
+                                },
+                                {
+                                    id: "live-holistic-1",
+                                    source: "holistic",
+                                    label: "note (non-blocking)",
+                                    via: "clusterer" as const,
+                                },
+                            ],
+                            path: "src/a.ts",
+                            line: 4,
+                            via: "both" as const,
+                            evidence: "the `staleAfter` window",
+                        },
+                    ],
+                    proposed: 1,
+                    rejected: [],
+                    clustererAbsent,
+                    clustererFailed: false,
+                    ...over,
+                },
+            };
+        };
+
+    it("carries the per-case counts and the merged groups", async () => {
+        const report = await runArm(
+            "candidate",
+            [liveCase("case-1")],
+            produceMerged(false),
+            {maxUsd: 10},
+        );
+        // `clusterMerged` counts absorbed COPIES the clusterer is responsible
+        // for, not every copy in a group it touched: the `both` group below
+        // carries one of each, and crediting tier 2 with the pair would
+        // overstate the delta that decides graduation.
+        expect(report.perCase[0].dedup).toEqual({
+            candidates: 4,
+            merged: 3,
+            clusterMerged: 2,
+            rejected: 0,
+            clustererAbsent: false,
+            clustererUsd: 0.25,
+            clustererWallMs: 21_000,
+            groups: [
+                {
+                    survivor: "live-hit",
+                    absorbed: [{id: "live-doc-1", via: "clusterer"}],
+                    via: "clusterer",
+                    evidence: "the `maxSamples` comment says 10, not 25",
+                },
+                {
+                    survivor: "live-hit-2",
+                    absorbed: [
+                        {id: "live-conv-1"},
+                        {id: "live-holistic-1", via: "clusterer"},
+                    ],
+                    via: "both",
+                    evidence: "the `staleAfter` window",
+                },
+            ],
+        });
+    });
+
+    it("renders the merge row, marking an arm that never had the clusterer", async () => {
+        const baseline = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            produceMerged(true),
+            {maxUsd: 10},
+        );
+        const candidate = await runArm(
+            "candidate",
+            [liveCase("case-1")],
+            produceMerged(false),
+            {maxUsd: 10},
+        );
+        const markdown = renderMarkdownReport({
+            baseRef: "origin/main",
+            reviewMdSha: {baseline: "a".repeat(12), candidate: "b".repeat(12)},
+            arms: {baseline, candidate},
+            regressions: {lost: [], gained: []},
+            adversarialFailures: [],
+            gateRetries: [],
+        });
+        expect(markdown).toContain(
+            "Cross-source claims merged (of candidates)",
+        );
+        // `tier 1 only` is the expected baseline shape in the A/B that
+        // graduates the clusterer: a zero there is asymmetry, not a result.
+        expect(markdown).toContain("3 / 4 (tier 1 only)");
+        // Tier 2's share carries its price: a merge count with no cost beside
+        // it cannot answer whether a serial dispatch on nearly every run is
+        // worth its place, which is the question graduation turns on.
+        expect(markdown).toContain("3 / 4 (2 by clusterer at $0.25 / 21s)");
+    });
+
+    it("renders rejected members, and a paid dispatch that measured nothing", async () => {
+        // Both notes hang off the same row and neither was rendered by a test:
+        // `rejected` is how a clusterer proposing junk shows up at all, and
+        // `clustererFailed` is what keeps a parse failure from reading as
+        // "tier 2 ran and found no duplicates" in the row that graduates it.
+        const report = await runArm(
+            "candidate",
+            [liveCase("case-1")],
+            produceMerged(false, {
+                clustererFailed: true,
+                rejected: [
+                    {id: "live-x-1", reason: "ungrounded"},
+                    {id: "live-x-2", reason: "other-path"},
+                ],
+            }),
+            {maxUsd: 10},
+        );
+        expect(report.perCase[0].dedup?.clustererFailed).toBe(true);
+        const markdown = renderMarkdownReport({
+            baseRef: "origin/main",
+            reviewMdSha: {baseline: "a".repeat(12), candidate: "b".repeat(12)},
+            arms: {baseline: report, candidate: report},
+            regressions: {lost: [], gained: []},
+            adversarialFailures: [],
+            gateRetries: [],
+        });
+        expect(markdown).toContain(
+            "3 / 4 (2 by clusterer at $0.25 / 21s, " +
+                "2 proposed member(s) rejected, 1 clusterer failure(s))",
+        );
+    });
+
+    it("omits the block for a producer that runs no dedup at all", async () => {
+        const report = await runArm(
+            "candidate",
+            [liveCase("case-1")],
+            produceHit(1),
+            {maxUsd: 10},
+        );
+        expect(report.perCase[0].dedup).toBeUndefined();
     });
 });
 

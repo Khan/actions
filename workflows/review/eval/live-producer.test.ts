@@ -256,6 +256,18 @@ describe("produceLive", () => {
                             discussion:
                                 '"// a is always 1" no longer holds: line 1 sets it to 2.',
                         },
+                        // The PR-level shape: no path, no line. Production
+                        // maps this to a {type: "pr"} anchor; the producer
+                        // must too, or a real title/description finding
+                        // scores as a true miss (run 31738849545, 0/3).
+                        {
+                            label: "suggestion (non-blocking, documentation)",
+                            failure_scenario:
+                                "every reader translates the description's metaphors before they can act.",
+                            subject: "Description is built from metaphors",
+                            discussion:
+                                '"teaches the loop to breathe" names no operation; plainer: "bounds each drain pass".',
+                        },
                     ],
                 }),
             ],
@@ -263,6 +275,10 @@ describe("produceLive", () => {
                 validatorOutput([
                     {
                         id: "produce-enabled:live-documentation-1",
+                        verification: "confirmed",
+                    },
+                    {
+                        id: "produce-enabled:live-documentation-2",
                         verification: "confirmed",
                     },
                 ]),
@@ -299,6 +315,11 @@ describe("produceLive", () => {
         const docs = result.findings.find((f) => f.source === "documentation");
         expect(docs?.finding.lens).toBe("documentation");
         expect(docs?.finding.severity).toBe("advisory");
+        // The path-less finding maps to a pr anchor, mirroring production.
+        const prLevel = result.findings.find(
+            (f) => f.finding.id === "produce-enabled:live-documentation-2",
+        );
+        expect(prLevel?.finding.anchor).toEqual({type: "pr"});
         expect(
             result.perAgent.find((a) => a.name === "documentation")?.failed,
         ).toBeFalsy();
@@ -669,5 +690,192 @@ describe("resolveRuntimeImports", () => {
             (r) => r.name === "skill-auditor",
         )?.prompt;
         expect(skillPrompt).toContain("## the case skills index");
+    });
+});
+
+/**
+ * The cross-source merge, in the arm shape the A/B prices: tier 1 is shared
+ * code and runs in both arms, while the `claim-clusterer` agent is carried by
+ * each arm's own review.md, so a baseline predating it measures tier 1 alone.
+ *
+ * The fixture is run 30587343777's real shape, trimmed: two reviewers on one
+ * wrong doc comment, worded with almost nothing in common, which is what tier 1
+ * cannot reach.
+ */
+describe("produceLive cross-source dedup", () => {
+    const CAP_NOTE = {
+        path: "src/a.ts",
+        line: 1,
+        label: "note (non-blocking)",
+        subject: "Comment says the per-key cap is 10 but maxSamples is 25.",
+        discussion:
+            'The comment on `maxSamples` reads "Keeps at most 10 samples per key" while the constant is 25.',
+        failure_scenario:
+            "Comment says the per-key cap is 10 but maxSamples is 25",
+    };
+    const CAP_NITPICK = {
+        path: "src/a.ts",
+        line: 1,
+        label: "nitpick (non-blocking)",
+        subject: "Declaration doc comment doesn't begin with the symbol name.",
+        discussion:
+            "Every declaration comment here starts with the declared name; `// Keeps at most 10 samples per key.` above `const maxSamples = 25` is the only one that omits the prefix.",
+        failure_scenario:
+            "A `go doc` reader won't associate the comment with `maxSamples`.",
+    };
+    const CLUSTER_OUT = JSON.stringify({
+        clusters: [
+            {
+                evidence:
+                    "the doc comment on `maxSamples` says 10 while the constant is 25",
+                ids: [
+                    "produce-case:live-correctness-reviewer-1",
+                    "produce-case:live-skill-auditor-1",
+                ],
+            },
+        ],
+    });
+
+    const scripts = () => ({
+        "correctness-reviewer": [JSON.stringify({findings: [CAP_NOTE]})],
+        "skill-auditor": [JSON.stringify({findings: [CAP_NITPICK]})],
+        "money-payments": [JSON.stringify({findings: []})],
+        "claim-clusterer": [CLUSTER_OUT],
+        "claim-validator": [validatorOutput([])],
+    });
+
+    const withClusterer = new Map([
+        ...AGENTS,
+        ["claim-clusterer", agent("claim-clusterer")],
+    ]);
+
+    it("merges on the clusterer's proposal, and validates only the survivor", async () => {
+        const {runner, requests} = scriptedRunner(scripts());
+        const vol = caseVol();
+        const result = await produceLive(CASE, withClusterer, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(vol),
+        });
+        expect(requests.map((r) => r.name)).toContain("claim-clusterer");
+        // The clusterer reads its own staged file: the PRE-merge candidates.
+        expect(
+            JSON.parse(
+                vol.readFileSync(
+                    "/stage/context/candidates.json",
+                    "utf8",
+                ) as string,
+            ),
+        ).toHaveLength(2);
+        // One finding survives (the merge itself is recorded in the dedup
+        // report; the structured `also_flagged_by` record renders only at
+        // production's posting surface), and the validator is dispatched
+        // over the merged set only.
+        expect(result.findings).toHaveLength(1);
+        expect(result.findings[0].finding.model_authored_prose).not.toContain(
+            "Also flagged by",
+        );
+        expect(
+            JSON.parse(
+                vol.readFileSync(
+                    "/stage/context/claims.json",
+                    "utf8",
+                ) as string,
+            ),
+        ).toHaveLength(1);
+        expect(result.dedup).toMatchObject({
+            candidates: 2,
+            proposed: 1,
+            rejected: [],
+            clustererAbsent: false,
+        });
+        expect(result.dedup.merges[0].via).toBe("clusterer");
+    });
+
+    it("runs tier 1 alone on an arm whose review.md has no clusterer", async () => {
+        const {runner, requests} = scriptedRunner(scripts());
+        const result = await produceLive(CASE, AGENTS, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        expect(requests.map((r) => r.name)).not.toContain("claim-clusterer");
+        // Both copies post: the asymmetric-arm baseline, recorded rather than
+        // silent, so a reader can tell it from a clusterer that found nothing.
+        expect(result.findings).toHaveLength(2);
+        expect(result.dedup).toEqual({
+            candidates: 2,
+            merges: [],
+            proposed: 0,
+            rejected: [],
+            clustererAbsent: true,
+            clustererFailed: false,
+        });
+    });
+
+    it("records a clusterer that was paid for and returned nothing usable", async () => {
+        // Production keeps a failed dispatch apart from a clusterer that ran
+        // and proposed nothing (`DispatchClustering.unavailable`); the A/B has
+        // to as well, because the two are the same zero in the merge row that
+        // decides whether tier 2 keeps its place.
+        const {runner} = scriptedRunner({
+            ...scripts(),
+            "claim-clusterer": ["not a contract", "still not a contract"],
+        });
+        const result = await produceLive(CASE, withClusterer, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        expect(result.dedup.clustererFailed).toBe(true);
+        expect(result.dedup.proposed).toBe(0);
+        expect(result.findings).toHaveLength(2);
+    });
+
+    it("carries a merged copy's suggested patch onto the survivor", async () => {
+        // The survivor posts the comment, so it has to post the fix too: an
+        // absorbed copy's patch is the one committable thing a merge can
+        // silently throw away, and dedup adopts it only when the survivor has
+        // none of its own. Nothing downstream of the merge re-reads the
+        // absorbed finding, so this is the only place it can be checked.
+        const {runner} = scriptedRunner({
+            ...scripts(),
+            "skill-auditor": [
+                JSON.stringify({
+                    findings: [
+                        {
+                            ...CAP_NITPICK,
+                            suggestion: "// Keeps at most 25 samples per key.",
+                        },
+                    ],
+                }),
+            ],
+        });
+        const result = await produceLive(CASE, withClusterer, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        expect(result.findings).toHaveLength(1);
+        expect(result.findings[0].finding.id).toContain(
+            "live-correctness-reviewer-1",
+        );
+        expect(result.findings[0].finding.suggested_patch).toBe(
+            "// Keeps at most 25 samples per key.",
+        );
+    });
+
+    it("never dispatches the clusterer when one source produced everything", async () => {
+        const {runner, requests} = scriptedRunner({
+            ...scripts(),
+            "skill-auditor": [JSON.stringify({findings: []})],
+        });
+        const result = await produceLive(CASE, withClusterer, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        expect(requests.map((r) => r.name)).not.toContain("claim-clusterer");
+        expect(result.dedup.candidates).toBe(1);
     });
 });

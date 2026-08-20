@@ -26,13 +26,13 @@ const CLOSED_LONG_AGO = "2026-07-03T00:00:00Z"; // past the closed grace
 // Production summary comments carry gh-aw's engine-emitted call-id marker,
 // not (yet) the pr-reviewer marker — mirror that shape here.
 const SUMMARY_BODY = [
-    "## Review Guidance",
+    "## Guidance for reviewers",
     "<!-- gh-aw-workflow-call-id: Khan/webapp/review -->",
 ].join("\n");
 
 const PR_REVIEWER_SUMMARY_BODY = [
     "<!-- pr-reviewer:risks-and-patterns -->",
-    "## Review Guidance",
+    "## Guidance for reviewers",
     "<!-- pr-reviewer:version v=review-v1.4.0 schema=1 -->",
 ].join("\n");
 
