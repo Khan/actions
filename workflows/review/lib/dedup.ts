@@ -88,7 +88,8 @@
  * enters through {@link verifiableClusters}, which trusts none of it: the ids
  * must exist, the paths and sources must satisfy the same constraints tier 1
  * enforces, the model's own grounding evidence must appear in every member's
- * text, and only a NON-BLOCKING copy may be absorbed on a model's word
+ * text unless the member sits on the survivor's exact line, and only a
+ * NON-BLOCKING copy may be absorbed on a model's word
  * ({@link clusterMemberRejection} carries the reasoning). What a tier-2 error
  * can cost is bounded by code even where its judgment cannot be checked.
  */
@@ -128,6 +129,15 @@ export type ClaimMerge = {
          * tier 1's members to the clusterer.
          */
         via?: "clusterer";
+        /**
+         * Which path grounded a clusterer-absorbed copy: the exactly shared
+         * anchor, or the evidence's vocabulary. Present exactly when `via`
+         * is. The planned audit of "ungrounded" rejections reads
+         * dispatch-result.json, and without this field an anchor-grounded
+         * merge is indistinguishable there from an evidence-grounded one
+         * (the stamped evidence string may have contributed nothing).
+         */
+        groundedBy?: "anchor" | "evidence";
     }[];
     path: string;
     line: number;
@@ -701,7 +711,14 @@ export const dedupeClaims = (
     /** Claim index -> the claim whose comment it posts under after tier 1. */
     const head = claims.map((_, index) => index);
     /** Survivor index -> the copies folded into it, with the tier that did it. */
-    const absorbed = new Map<number, {index: number; via?: "clusterer"}[]>();
+    const absorbed = new Map<
+        number,
+        {
+            index: number;
+            via?: "clusterer";
+            groundedBy?: "anchor" | "evidence";
+        }[]
+    >();
     /** Survivor index -> the clusterer's grounding evidence, when tier 2 fired. */
     const groundedIn = new Map<number, string>();
 
@@ -829,7 +846,18 @@ export const dedupeClaims = (
             // pass merges COMMENTS, and that comment already speaks for its own
             // absorbed copies. Dropping them here instead would leave them
             // posting on their own — tier 2 subtracting a tier-1 merge.
-            into.push({index, via: "clusterer"});
+            // Mirrors the first grounding test in clusterMemberRejection: a
+            // member on the survivor's exact line was admitted by the anchor
+            // before any vocabulary ran, everything else by the evidence.
+            into.push({
+                index,
+                via: "clusterer",
+                groundedBy:
+                    claims[index].line !== undefined &&
+                    claims[index].line === survivor.line
+                        ? "anchor"
+                        : "evidence",
+            });
             into.push(...(absorbed.get(index) ?? []));
             absorbed.delete(index);
             groundedIn.set(survivorIndex, groupEvidence);
@@ -936,7 +964,7 @@ export const dedupeClaims = (
         const groupEvidence = groundedIn.get(survivorIndex);
         merges.push({
             survivor: survivor.id,
-            merged: others.map(({index, via: copyVia}) => {
+            merged: others.map(({index, via: copyVia, groundedBy}) => {
                 const claim = claims[index];
                 return {
                     id: claim.id,
@@ -946,6 +974,7 @@ export const dedupeClaims = (
                         ? {line: claim.line}
                         : {}),
                     ...(copyVia === "clusterer" ? {via: copyVia} : {}),
+                    ...(groundedBy === undefined ? {} : {groundedBy}),
                 };
             }),
             path: survivor.path as string,

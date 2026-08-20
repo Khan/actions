@@ -200,18 +200,21 @@ describe("dedupeClaims with model-proposed clusters", () => {
                         label: "question (non-blocking)",
                         line: 9,
                         via: "clusterer",
+                        groundedBy: "evidence",
                     },
                     {
                         id: "conventions-1",
                         source: "conventions",
                         label: "nitpick (non-blocking)",
                         via: "clusterer",
+                        groundedBy: "anchor",
                     },
                     {
                         id: "documentation-1",
                         source: "documentation",
                         label: "suggestion (non-blocking, documentation)",
                         via: "clusterer",
+                        groundedBy: "anchor",
                     },
                 ],
                 path: "dev/af19_trial/window.go",
@@ -316,12 +319,14 @@ describe("dedupeClaims with model-proposed clusters", () => {
                         source: "conventions",
                         label: "nitpick (non-blocking)",
                         via: "clusterer",
+                        groundedBy: "anchor",
                     },
                     {
                         id: "documentation-1",
                         source: "documentation",
                         label: "suggestion (non-blocking, documentation)",
                         via: "clusterer",
+                        groundedBy: "anchor",
                     },
                 ],
                 path: "dev/af19_trial/window.go",
@@ -673,6 +678,7 @@ describe("dedupeClaims with model-proposed clusters", () => {
                 source: "documentation",
                 label: "note (non-blocking)",
                 via: "clusterer",
+                groundedBy: "anchor",
             },
             {
                 id: "conventions-1",
@@ -957,6 +963,7 @@ describe("dedupeClaims with model-proposed clusters", () => {
                 label: "note (non-blocking)",
                 line: 58,
                 via: "clusterer",
+                groundedBy: "evidence",
             },
         ]);
         // The record quotes only the copy tier 2 brought: the survivor's own

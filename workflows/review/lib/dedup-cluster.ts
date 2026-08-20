@@ -97,6 +97,9 @@ export const salientTokens = (text: string): Set<string> => {
     for (const raw of text.match(/[A-Za-z_$][A-Za-z0-9_$]*|\d+/g) ?? []) {
         if (isSalientToken(raw)) {
             const canonical = canonicalToken(raw);
+            // A token of underscores alone (`_`, `__`) is salient on its raw
+            // spelling but folds to the empty string, which would then ground
+            // any two claims that each quote one (e.g. Go's blank identifier).
             if (canonical !== "") {
                 tokens.add(canonical);
             }
@@ -109,7 +112,7 @@ export const salientTokens = (text: string): Set<string> => {
 const claimText = (claim: Claim): string =>
     `${claim.subject} ${claim.discussion} ${claim.failure_scenario}`;
 
-export const sharesSalientToken = (
+const sharesSalientToken = (
     evidenceTokens: ReadonlySet<string>,
     claim: Claim,
 ): boolean => {
