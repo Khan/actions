@@ -151,6 +151,57 @@ flow rewrites it; see [Versioning](#versioning)), so after `gh aw add` or
 `gh aw update` the imported file already fetches the matching lib code and needs
 no manual fix-up of the ref.
 
+### Onboarding a whole repo
+
+`gh aw add` is the mechanical half. The judgment half (writing the five consumer
+config files for *that* repo's blast radius, the two local edits to the installed
+`review.md`, the admin blockers only a repo admin can clear, and a PR body that
+discloses what is generated versus decided) is choreographed by the
+[`review-onboarding` skill](../../.claude/skills/review-onboarding/SKILL.md)
+in this repo. [`Khan/kore-marketplace#3`](https://github.com/Khan/kore-marketplace/pull/3)
+is the template it produces.
+
+Validate any install (new or existing) with the consumer-config checker, run from
+a checkout of the tag the consumer pins:
+
+```sh
+git -C <consumer> ls-files | npx -y tsx workflows/review/lib/check-consumer-config.ts \
+    --repo <consumer> --files-from -
+
+# Why does this path get this tier? (every matching ROUTING rule, last one wins)
+npx -y tsx workflows/review/lib/check-consumer-config.ts --repo <consumer> --explain <path>
+```
+
+It reads the install through the *production* parsers (`route()`,
+`parseRoutingConfig`, `parseGitattributesGenerated`), so it never drifts from
+what a review actually does, and it reports the whole class of mistakes that
+otherwise surface as a red run on someone's PR: a missing runtime import, a
+`${{ }}` expression inside one, `add-reviewer` defined in both `review.md` and
+`config.md` (the main workflow wins, discarding the allowlist), a dropped
+`imports:` line, an empty team allowlist in a repo that *has* a `.github/REVIEWERS`
+ownership map, a missing or unmarked `.lock.yml`, an unmarked
+`agentics-maintenance.yml`, a live `observability:` block, the shipped credit
+ceiling, `ROUTING` parse warnings, inert lens payloads, reviewer config that does
+not route to `high`, and the resolved tier of every tracked file. Errors exit 1;
+`--strict` also fails on warnings, and `--json` emits the report for tooling.
+
+Two of those deserve a note, because both are "valid, but invisible" rather than
+broken. An empty `allowed-team-reviewers` is only an **error** when
+`.github/REVIEWERS` exists: that file is the router's only source of ownership, so
+without it Step 8 requests nobody regardless, and the empty allowlist is an accurate
+statement that the repo does not do reviewer requests (reported as
+`reviewer-requests-inert`). Requiring a team there would only get an inert one
+invented to satisfy the check. And `agentics-maintenance.yml` is `gh aw compile`
+output that is *not* named `*.lock.yml`, so the marker every consumer was told to add
+misses it, and ~600 generated lines get line-reviewed until it has its own.
+
+Follow-up, not yet built: the failure class the checker targets (config failing
+late and quietly) recurs on every later edit to ROUTING or `config.md`, not just
+at onboarding. `checkConsumerConfig` is pure with an injected filesystem and
+already ships `--json` and `--strict`, so a consumer CI job gating PRs that
+touch the config paths is the natural next layer; nothing in the checker
+blocks it.
+
 ## Consumer configuration
 
 The workflow imports the following files **from the consuming repo** (they resolve

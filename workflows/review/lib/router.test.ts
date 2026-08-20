@@ -50,7 +50,7 @@ const file = (
 // map lives in its own .github/aw/review/ROUTING file), so the tests supply
 // the rules they exercise, shaped like a typical consumer config.
 const baseConfig: RouterConfig = {
-    generatedPatterns: [],
+    generatedRules: [],
     lensRules: [
         {pattern: "**/*.sql", lenses: ["data-migrations"]},
         {pattern: "**/migrations/**", lenses: ["data-migrations"]},
@@ -117,24 +117,6 @@ describe("patternSpecificity", () => {
 /* Config parsers                                                             */
 /* -------------------------------------------------------------------------- */
 
-describe("parseGitattributesGenerated", () => {
-    it("collects linguist-generated patterns and honours negation", () => {
-        const content = [
-            "# comment",
-            "",
-            "dist/** linguist-generated=true",
-            "vendor/** linguist-generated",
-            "generated/keep.ts -linguist-generated",
-            "src/*.ts text",
-            "other/*.js linguist-generated=false",
-        ].join("\n");
-        expect(parseGitattributesGenerated(content)).toEqual([
-            "dist/**",
-            "vendor/**",
-        ]);
-    });
-});
-
 describe("teamSlug", () => {
     it("strips @, org prefix, trailing !, and lowercases", () => {
         expect(teamSlug("@Khan/Security!")).toBe("security");
@@ -165,14 +147,14 @@ describe("parseReviewers", () => {
 
 describe("route: classification", () => {
     it("marks linguist-generated files generated with no lenses/teams/tier", () => {
-        const generatedPatterns = parseGitattributesGenerated(
+        const generatedRules = parseGitattributesGenerated(
             "dist/** linguist-generated=true",
         );
-        expect(isGenerated("dist/bundle.js", generatedPatterns)).toBe(true);
+        expect(isGenerated("dist/bundle.js", generatedRules)).toBe(true);
 
         const result = route(
             {files: [file("dist/bundle.js")]},
-            {...baseConfig, generatedPatterns},
+            {...baseConfig, generatedRules},
         );
         expect(result.perFile[0]).toMatchObject({
             path: "dist/bundle.js",
@@ -543,7 +525,11 @@ describe("toRoutingJson", () => {
         const reviewerRules = parseReviewers("src/auth/ @Khan/Security");
         const result = route(
             {files: [file("src/auth/login.ts"), file("dist/bundle.js")]},
-            {...baseConfig, generatedPatterns: ["dist/**"], reviewerRules},
+            {
+                ...baseConfig,
+                generatedRules: [{pattern: "dist/**", generated: true}],
+                reviewerRules,
+            },
         );
         const json = toRoutingJson(result);
         // Every tier is emitted in the display casing review.md consumes.
