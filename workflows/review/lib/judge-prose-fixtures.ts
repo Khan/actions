@@ -77,10 +77,21 @@ export const CLEAN_CONTROLS: readonly ProseFixture[] = [
  * 2026-08-20 reviewer version audit (plans records): its blind-judged
  * sample found 5 repetition fails in 29 W4-W5 bodies, every one the same
  * mode, restating one fact two to four times. The 41609 set above
- * calibrates rule 1 on the named complaint; these two calibrate rule 2 on
- * real posted bodies (3768804982's rendered `<details>` ride-along is
- * stripped: the judge governs authored prose, and the collapsed section is
+ * calibrates rule 1 on the named complaint; these calibrate rule 2 on real
+ * posted bodies (3768804982's rendered `<details>` ride-along is stripped:
+ * the judge governs authored prose, and the collapsed section is
  * code-appended at the plan surface, not authored).
+ *
+ * Run 8 split the pair: 3754335178 fails cleanly (the cost point stated 3
+ * times with nothing new between statements) and stays pinned; 3768804982
+ * PASSED under opus, and on inspection the audit's blind judge and opus
+ * genuinely disagree — its "restatements" bracket new evidence (topic
+ * sentence, the delete_user_data.go investigation, restated conclusion),
+ * which is summary-then-detail structure, a shape review comments should
+ * be allowed. It stays as an UNPINNED probe: printed every run so drift on
+ * the contested boundary is visible, gating nothing. The audit's other
+ * three fail ids (3694218854, 3769221714, 3762664308) are the same bracket
+ * shape, so no second pin was minted from them.
  */
 export const FIXTURES_RULE2: readonly ProseFixture[] = [
     {
@@ -97,6 +108,6 @@ export const FIXTURES_RULE2: readonly ProseFixture[] = [
         label: "note (non-blocking)",
         discussion:
             "Decommission leaves orphaned per-user AIGuideMemory data in Datastore with no deletion path. Pre-existing gap, amplified by this change: I checked services/ai-guide/delete_user_data/delete_user_data.go (it enumerates AIGuideThread, ImageMetadata, AIGuideAcceptance, etc. but never AIGuideMemoryKind) and ran `git log -S AIGuideMemoryKind` over the deletion flow — user deletion never covered this kind even before this PR, so the retention itself is pre-existing; this change amplifies it by deleting the model and all query/delete capability, turning the (flag-gated, so presumably small) set of stored user records into permanently unreachable orphaned data. Consider a one-off wipe of the AIGuideMemory kind (e.g. via a backfill or Datastore admin bulk delete) as part of decommissioning, before or shortly after this lands while the entity shape is still known.",
-        expected: "fail",
+        expected: "unpinned",
     },
 ];

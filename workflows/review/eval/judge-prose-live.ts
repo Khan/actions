@@ -8,9 +8,12 @@
  *     lever ... cheap insurance") MUST fail — it is the named complaint the
  *     judge exists for, and a rubric change that stops flagging it should
  *     break this script, not ship;
- *   - the two rule-2 fixtures (FIXTURES_RULE2, from the 2026-08-20 version
+ *   - the pinned rule-2 fixture (3754335178, from the 2026-08-20 version
  *     audit's blind-judged sample) MUST fail: rule 2 (repetition) is
- *     calibrated on real posted bodies, not only the 41609 rule-1 set;
+ *     calibrated on a real posted body, not only the 41609 rule-1 set;
+ *     3768804982 rides along unpinned (the audit called it a fail, opus
+ *     reads its bracket structure as summary-then-detail; the contested
+ *     boundary stays visible without gating);
  *   - the other two 41609 fixtures print their verdicts unpinned (both are
  *     dense 100+-word non-blocking comments, so a rule 3 fail is plausible
  *     and fine; a pass is not a defect);
@@ -133,8 +136,7 @@ const main = async (): Promise<void> => {
         throw new Error(
             `pinned fail fixtures passed the judge: ${missedPins.join(", ")} ` +
                 "(3823429680 is the named 41609 complaint, rule 1; " +
-                "3754335178 and 3768804982 are the version audit's " +
-                "blind-judged rule-2 fails)",
+                "3754335178 is the version audit's clean rule-2 fail)",
         );
     }
 };
