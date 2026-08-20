@@ -51,3 +51,23 @@ export const FIXTURES_41609: readonly ProseFixture[] = [
         expected: "fail",
     },
 ];
+
+/**
+ * The clean control: prose that SHOULD pass, because every 41609 fixture is
+ * drawn from the complaint and a fixture set with no expected-pass case
+ * cannot show over-flagging. This is the second calibration run's rewrite
+ * of 3823429676 (456 chars, facts intact, question kept), kept as the
+ * canary the live script prints a loud warning about when the judge flags
+ * it. Deliberately not a pinned assertion: a style judgment call should
+ * not block a merge, it should be visible when it drifts.
+ */
+export const CLEAN_CONTROLS: readonly ProseFixture[] = [
+    {
+        commentId: 3823429676,
+        path: "services/ai-guide/chat/ask/v2/moderation_helpers.go",
+        label: "question (non-blocking)",
+        discussion:
+            "The experiment enrolled 3 configs; this enables parallel moderation in all v2 configs that declare `pre_flight_moderation_check` (~112 of 151 config files). Only Exercise.json, activity-tutor-me.json, and classroom-learner-exercise.json currently import the moderation-parallelism partial. In parallel mode, every flagged turn pays for a main completion whose output is discarded. Was a gradual rollout considered, starting with the 3 experimented configs?",
+        expected: "unpinned",
+    },
+];

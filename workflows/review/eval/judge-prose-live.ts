@@ -29,7 +29,7 @@ import {
     parseJudgeVerdict,
     PINNED_PROSE_JUDGE_MODEL,
 } from "../lib/judge-prose";
-import {FIXTURES_41609} from "../lib/judge-prose-fixtures";
+import {CLEAN_CONTROLS, FIXTURES_41609} from "../lib/judge-prose-fixtures";
 
 const API_URL = "https://api.anthropic.com/v1/messages";
 
@@ -99,6 +99,32 @@ const main = async (): Promise<void> => {
                         problems: verdict.problems,
                     },
                 ])}`,
+            );
+        }
+    }
+    // The clean controls: prose that should pass, printed as a canary for
+    // over-flagging (a warning, never an exit code; a style judgment call
+    // should not block a merge).
+    for (const control of CLEAN_CONTROLS) {
+        const verdict = parseJudgeVerdict(
+            await callModel(
+                buildJudgePrompt(control.discussion, control.label),
+            ),
+        );
+        // eslint-disable-next-line no-console
+        console.log(`\n=== clean control (${control.label})`);
+        if (verdict === null) {
+            // eslint-disable-next-line no-console
+            console.log("unparseable reply");
+        } else if (verdict.pass) {
+            // eslint-disable-next-line no-console
+            console.log("verdict: pass (as expected)");
+        } else {
+            // eslint-disable-next-line no-console
+            console.log(
+                `WARNING, over-flagging canary tripped: FAIL${verdict.problems
+                    .map((problem) => `\n  - ${problem}`)
+                    .join("")}`,
             );
         }
     }
