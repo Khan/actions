@@ -482,10 +482,15 @@ export const VERDICTS_PATH = "/tmp/gh-aw/review/judge-prose-verdicts.json";
  * control on prose a judge-driven rewrite had itself produced ("pays for a
  * main completion"). An unstable judge cannot be fixed with rubric text,
  * and every false bounce re-runs an authoring turn on the lens model, so
- * the stronger judge plausibly nets cheaper. `claude-opus-4-8` is the
- * repo's established always-available pin (the refusal fallback). Pinned
- * rather than inherited so a consumer's orchestrator model never silently
- * changes this per-finding cost.
+ * the stronger judge plausibly nets cheaper. `claude-opus-4-8` over the
+ * cheaper-listed `claude-sonnet-5`: the stable firewall's curated pricing
+ * table (review.md's default-ai-credits-pricing note) stops at opus-4-8
+ * plus fable-5, so an un-curated model bills at the opus-rate fallback
+ * anyway while that toolchain binds, and its availability through that
+ * proxy version is unverified; opus-4-8 is the refusal-fallback pin,
+ * proven invokable and correctly priced everywhere. Pinned rather than
+ * inherited so a consumer's orchestrator model never silently changes
+ * this per-finding cost.
  */
 export const PINNED_PROSE_JUDGE_MODEL = "claude-opus-4-8";
 
