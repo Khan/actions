@@ -88,17 +88,132 @@ export type Candidate = {
 };
 
 /**
+ * Fold a prose token toward its stem so an inflection difference does not
+ * defeat the restatement check below ("drops" vs "dropped", "cache" vs
+ * "caches"). Deliberately crude: strip one of ing/ed/es/s, collapse a
+ * doubled final consonant ("dropped" -> "dropp" -> "drop"), then strip a
+ * trailing "e" so "caches" -> "cach" meets "cache" -> "cach". Both sides
+ * of every comparison fold identically, and a miss is safe — the subject
+ * is kept and the body merely stays as long as it is today.
+ */
+const foldToken = (token: string): string => {
+    if (token.length <= 3) {
+        return token;
+    }
+    let folded = token;
+    for (const suffix of ["ing", "ed", "es", "s"]) {
+        if (folded.endsWith(suffix) && folded.length - suffix.length >= 3) {
+            folded = folded.slice(0, folded.length - suffix.length);
+            break;
+        }
+    }
+    if (/([b-df-hj-np-tv-z])\1$/.test(folded)) {
+        folded = folded.slice(0, -1);
+    }
+    return folded.length >= 4 && folded.endsWith("e")
+        ? folded.slice(0, -1)
+        : folded;
+};
+
+/**
+ * Function words that carry no claim content; ignored on the SUBJECT side
+ * of the restatement check so "turns are dropped" still matches "drops
+ * turns" (the sentence has no "are"). Never filtered from the sentence
+ * side — there they can only help containment, not hurt it.
+ */
+const STOPWORDS = new Set([
+    "a",
+    "an",
+    "the",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "it",
+    "its",
+    "this",
+    "that",
+    "these",
+    "those",
+    "and",
+    "or",
+    "of",
+    "to",
+    "in",
+    "on",
+    "by",
+    "for",
+    "with",
+    "as",
+    "at",
+    "so",
+]);
+
+/**
+ * The comparable word tokens of a prose fragment: markdown emphasis
+ * stripped, lowercased, internal punctuation kept (`counts.go` is one
+ * token) but trailing punctuation shed ("turns." and "turns" are the same
+ * word).
+ */
+const proseTokens = (text: string): string[] =>
+    (
+        text
+            .toLowerCase()
+            .replace(/[`*_]/g, "")
+            .match(/[a-z0-9][a-z0-9./:-]*/g) ?? []
+    ).map((token) => token.replace(/[./:-]+$/, ""));
+
+/**
+ * Whether the subject merely restates one sentence of the discussion:
+ * every folded subject token already appears in a single discussion
+ * sentence, so prepending the subject adds repetition and no vocabulary.
+ * This is the W4-W5 prose failure mode the 2026-08-20 version audit
+ * measured (5 of 29 sampled bodies restated one fact two to four times, vs
+ * 1 of 60 in W0-W3): producers routinely emit a `subject` that restates a
+ * `discussion` claim, and the v1.8.0 task-mode removal deleted the
+ * orchestrator rewrite pass that used to absorb the overlap (PRA-46).
+ * Per-sentence containment is the conservative direction — a subject
+ * summarizing ACROSS sentences (tokens no single sentence holds) is a
+ * genuine lede and is kept whole, as is one carrying any token the
+ * discussion lacks.
+ */
+export const subjectRestatesDiscussion = (
+    subject: string,
+    discussion: string,
+): boolean => {
+    const subjectTokens = proseTokens(subject)
+        .filter((token) => !STOPWORDS.has(token))
+        .map(foldToken);
+    if (subjectTokens.length === 0) {
+        return false;
+    }
+    return discussion.split(/(?<=[.!?])\s/).some((sentence) => {
+        const sentenceTokens = new Set(proseTokens(sentence).map(foldToken));
+        return subjectTokens.every((token) => sentenceTokens.has(token));
+    });
+};
+
+/**
  * Join the label contract's `subject` and `discussion` into one prose block.
  * A subject with no terminal punctuation gets a sentence break, not a bare
  * space (run 29897276810 posted "...memory Both TestExpiration..."); the
  * break also keeps `buildClaims`' first-sentence split recovering the
  * subject.
+ *
+ * A subject that restates the discussion's opening sentence
+ * ({@link subjectRestatesDiscussion}) is dropped instead of joined: the
+ * posted body then opens with the discussion's own first claim, and
+ * `buildClaims`' first-sentence split recovers that as the subject, so
+ * nothing downstream loses a field — only the duplicate sentence.
  */
 export const joinProse = (subject: string, discussion: string): string => {
     if (discussion === "") {
         return subject.trim();
     }
-    if (subject === "") {
+    if (subject === "" || subjectRestatesDiscussion(subject, discussion)) {
         return discussion.trim();
     }
     const trimmed = subject.trimEnd();

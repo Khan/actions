@@ -92,6 +92,31 @@ const CACHE_MEMORY_DIR = "/tmp/gh-aw/cache-memory";
 
 export type PlannedComment = {path: string; line: number; body: string};
 
+/**
+ * Size accounting for what this plan posts, staged with the plan so a
+ * render-path change that moves body sizes is visible in the first runs'
+ * artifacts. The motivating gap is PRA-46: the v1.8.0 task-mode removal
+ * shipped a +60% median-body step (557 -> 889 chars across webapp's
+ * v1.7.0 -> v1.11.0 bump) with no changelog entry, and the detection
+ * mechanism was a by-version audit four versions later. Measured over the
+ * final comment bodies (footer and collapsed-section rides included), so
+ * it counts what the author actually sees.
+ */
+export type PlanBodyStats = {
+    /** Inline comments in the plan. */
+    comments: number;
+    /** Median rendered comment body length, chars (0 when none post). */
+    medianChars: number;
+    /** 90th-percentile comment body length, chars (nearest-rank). */
+    p90Chars: number;
+    /** Longest comment body, chars. */
+    maxChars: number;
+    /** Sum over all comment bodies, chars. */
+    totalChars: number;
+    /** The review (or hold) body's length, chars. */
+    bodyChars: number;
+};
+
 export type SubmissionPlan = {
     /**
      * The outcome: a review event to submit (Step 4's mechanical rule), or
@@ -121,6 +146,8 @@ export type SubmissionPlan = {
     reasons: VerdictReason[];
     /** Non-blocking composition observations. */
     notes: string[];
+    /** Posted-size accounting (artifact-only; nothing gates on it). */
+    bodyStats: PlanBodyStats;
 };
 
 export type SubmissionFs = RereviewCliFs;
@@ -144,13 +171,44 @@ const parseSkipLines = (raw: unknown): Set<string> => {
     return keys;
 };
 
+/** Nearest-rank percentile of an ascending-sorted list (0 when empty). */
+const percentile = (sorted: number[], p: number): number =>
+    sorted.length === 0
+        ? 0
+        : sorted[Math.max(0, Math.ceil((p / 100) * sorted.length) - 1)] ?? 0;
+
+/** Compute {@link PlanBodyStats} from the plan's final rendered text. */
+export const computeBodyStats = (
+    comments: PlannedComment[],
+    body: string,
+): PlanBodyStats => {
+    const lengths = comments
+        .map((comment) => comment.body.length)
+        .sort((a, b) => a - b);
+    return {
+        comments: lengths.length,
+        medianChars: percentile(lengths, 50),
+        p90Chars: percentile(lengths, 90),
+        maxChars: lengths.length === 0 ? 0 : lengths[lengths.length - 1] ?? 0,
+        totalChars: lengths.reduce((sum, length) => sum + length, 0),
+        bodyChars: body.length,
+    };
+};
+
 /** Write the staged plan (`submission-plan.json`) and hand it back. */
-const stagePlan = (fs: SubmissionFs, plan: SubmissionPlan): SubmissionPlan => {
+const stagePlan = (
+    fs: SubmissionFs,
+    plan: Omit<SubmissionPlan, "bodyStats">,
+): SubmissionPlan => {
+    const staged: SubmissionPlan = {
+        ...plan,
+        bodyStats: computeBodyStats(plan.comments, plan.body),
+    };
     fs.writeFileSync(
         `${REVIEW_DIR}/submission-plan.json`,
-        JSON.stringify(plan, null, 2),
+        JSON.stringify(staged, null, 2),
     );
-    return plan;
+    return staged;
 };
 
 const readJson = (fs: SubmissionFs, path: string): unknown => {
@@ -860,6 +918,7 @@ if (typeof require !== "undefined" && require.main === module) {
                     comments: plan.comments.length,
                     resolve: plan.resolve.length,
                     reasons: plan.reasons,
+                    bodyStats: plan.bodyStats,
                 },
                 null,
                 2,

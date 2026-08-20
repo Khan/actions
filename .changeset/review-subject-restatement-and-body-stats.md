@@ -1,0 +1,9 @@
+---
+"review": minor
+---
+
+Stop posting a subject line that restates the discussion, and stage body-size stats with every submission plan.
+
+The 2026-08-20 by-version audit of webapp reviews found a prose repetition cluster in the v1.11.0-v1.13.0 windows (5 of 29 blind-judged bodies restated one fact two to four times, vs 1 of 60 before), and the root cause is mechanical: `joinProse` concatenates the label contract's `subject` and `discussion` verbatim, producers routinely emit a subject that restates a discussion claim, and the v1.8.0 task-mode removal (#284/#288/#289) deleted the orchestrator rewrite pass that used to absorb the overlap. `joinProse` now drops a subject whose folded tokens are all contained in a single discussion sentence (stopwords ignored on the subject side, light inflection folding on both sides, markdown and trailing punctuation stripped); a subject carrying any token no single sentence holds is kept whole, so the check can only remove a duplicate sentence, never content. `buildClaims`' first-sentence split then recovers the discussion's own opening claim as the subject, so no downstream field goes empty.
+
+The same audit found the +60% median-body step (557 to 889 chars across webapp's v1.7.0 to v1.11.0 bump) shipped with no changeset naming it, and a by-version audit four versions later was the detection mechanism. `submission-plan.json` now carries `bodyStats` (comment count, median/p90/max/total rendered chars over the final comment bodies, footer rides included, plus the review body's length), echoed in the CLI's run-log summary, so the next render-path regression is visible in the first runs' artifacts. Artifact-only; nothing gates on it. The README's versioning section now requires render-path changesets to state their expected output-shape effect.

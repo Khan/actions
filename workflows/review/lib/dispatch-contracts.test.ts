@@ -259,6 +259,65 @@ describe("label-contract enforcement (run 29897276810)", () => {
         expect(joinProse("Only a subject", "")).toBe("Only a subject");
         expect(joinProse("", "Only a discussion.")).toBe("Only a discussion.");
     });
+
+    it("drops a subject that restates a discussion sentence (PRA-46 W4-W5 repetition mode)", () => {
+        // Verbatim restatement: the discussion opens with the subject.
+        expect(
+            joinProse(
+                "The merger drops flagged turns.",
+                "The merger drops flagged turns whenever moderation flags a turn mid-stream.",
+            ),
+        ).toBe(
+            "The merger drops flagged turns whenever moderation flags a turn mid-stream.",
+        );
+        // Inflected restatement: "dropped" vs "drops" still folds together.
+        expect(
+            joinProse(
+                "Flagged turns are dropped by the merger.",
+                "The merger drops flagged turns because the filter runs before the merge, so a flagged turn never reaches the sink.",
+            ),
+        ).toBe(
+            "The merger drops flagged turns because the filter runs before the merge, so a flagged turn never reaches the sink.",
+        );
+        // Markdown wrapping does not defeat the comparison.
+        expect(
+            joinProse(
+                "`counts.go` recomputes the total.",
+                "counts.go recomputes the total on every call.",
+            ),
+        ).toBe("counts.go recomputes the total on every call.");
+        // Restating a LATER sentence is the same duplication.
+        expect(
+            joinProse(
+                "A delete leaves the stale entry behind.",
+                "The cache is written in save(). A delete leaves the stale entry behind.",
+            ),
+        ).toBe(
+            "The cache is written in save(). A delete leaves the stale entry behind.",
+        );
+    });
+
+    it("keeps a subject that carries information the opening sentence lacks", () => {
+        // "never invalidated" is not in the first sentence: kept whole.
+        expect(
+            joinProse(
+                "The cache is never invalidated.",
+                "The cache is written in save(). A delete leaves the stale entry behind.",
+            ),
+        ).toBe(
+            "The cache is never invalidated. The cache is written in save(). A delete leaves the stale entry behind.",
+        );
+        // A subject summarizing ACROSS sentences (no single sentence holds
+        // all its tokens) is a genuine lede and survives.
+        expect(
+            joinProse(
+                "save() caches, delete leaves it stale.",
+                "The cache is written in save(). A delete leaves the stale entry behind.",
+            ),
+        ).toBe(
+            "save() caches, delete leaves it stale. The cache is written in save(). A delete leaves the stale entry behind.",
+        );
+    });
 });
 
 describe("label-shape lens assignment", () => {

@@ -4,6 +4,7 @@ import {evaluateDispatchConformance} from "./dispatch-gate";
 import {labelForFinding, renderComment} from "./render-comment";
 import {renderRereviewStamp, STAMP_SCHEMA_VERSION} from "./rereview-mode";
 import {
+    computeBodyStats,
     MAX_VERBATIM_FOLD_CHARS,
     renderClaimComment,
     runSubmissionCli,
@@ -83,6 +84,22 @@ const priorApprove = (): Record<string, string> => ({
     }),
 });
 
+describe("computeBodyStats", () => {
+    it("reports nearest-rank percentiles over comment body lengths", () => {
+        const comments = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map(
+            (length) => ({path: "a.ts", line: 1, body: "x".repeat(length)}),
+        );
+        expect(computeBodyStats(comments, "body")).toEqual({
+            comments: 10,
+            medianChars: 50, // nearest-rank: ceil(0.5 * 10) = 5th of 10
+            p90Chars: 90, // ceil(0.9 * 10) = 9th of 10
+            maxChars: 100,
+            totalChars: 550,
+            bodyChars: 4,
+        });
+    });
+});
+
 describe("runSubmissionCli", () => {
     it("plans REQUEST_CHANGES with the fixed body line when a blocking claim posts", () => {
         const fs = makeFakeFs(
@@ -141,6 +158,47 @@ describe("runSubmissionCli", () => {
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("APPROVE");
         expect(plan.body).toContain("Approved — no blocking issues found.");
+    });
+
+    it("stages body-size stats measured over the final rendered bodies (PRA-46)", () => {
+        const fs = makeFakeFs(
+            staged({
+                depth: "full",
+                claims: [claim()],
+                noteLines: [],
+                reconciliation: {resolve: [], keep: []},
+            }),
+        );
+        const plan = runSubmissionCli(fs);
+        // One comment: every percentile is that comment's FINAL length
+        // (attribution footer included), not the bare claim render.
+        const commentChars = plan.comments[0]?.body.length as number;
+        expect(plan.bodyStats).toEqual({
+            comments: 1,
+            medianChars: commentChars,
+            p90Chars: commentChars,
+            maxChars: commentChars,
+            totalChars: commentChars,
+            bodyChars: plan.body.length,
+        });
+        expect(plan.comments[0]?.body).toContain("review details");
+        // The stats ride the staged artifact for the live drift watch.
+        expect(
+            JSON.parse(fs.files[`${REVIEW}/submission-plan.json`]).bodyStats,
+        ).toEqual(plan.bodyStats);
+    });
+
+    it("stages zeroed comment stats when nothing posts inline", () => {
+        const fs = makeFakeFs(staged({depth: "full", claims: []}));
+        const plan = runSubmissionCli(fs);
+        expect(plan.bodyStats).toEqual({
+            comments: 0,
+            medianChars: 0,
+            p90Chars: 0,
+            maxChars: 0,
+            totalChars: 0,
+            bodyChars: plan.body.length,
+        });
     });
 
     it("applies the reduced-depth flip floor from kept blocking threads", () => {
