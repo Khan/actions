@@ -84,14 +84,16 @@ export const CLEAN_CONTROLS: readonly ProseFixture[] = [
  *
  * Run 8 split the pair: 3754335178 fails cleanly (the cost point stated 3
  * times with nothing new between statements) and stays pinned; 3768804982
- * PASSED under opus, and on inspection the audit's blind judge and opus
- * genuinely disagree — its "restatements" bracket new evidence (topic
- * sentence, the delete_user_data.go investigation, restated conclusion),
- * which is summary-then-detail structure, a shape review comments should
- * be allowed. It stays as an UNPINNED probe: printed every run so drift on
- * the contested boundary is visible, gating nothing. The audit's other
- * three fail ids (3694218854, 3769221714, 3762664308) are the same bracket
- * shape, so no second pin was minted from them.
+ * passed under opus on run 8 and FAILED on run 9 (verbosity), so the case
+ * is not an audit-vs-opus disagreement but genuinely borderline: its
+ * "restatements" bracket new evidence (topic sentence, the
+ * delete_user_data.go investigation, restated conclusion), a
+ * summary-then-detail shape one judge lands on differently per run. It
+ * stays as an UNPINNED probe: printed every run so the contested boundary
+ * is visible, gating nothing, and its production cost is bounded (a
+ * bracket-shaped comment occasionally eats one capped bounce). The
+ * audit's other three fail ids (3694218854, 3769221714, 3762664308) are
+ * the same bracket shape, so no second pin was minted from them.
  */
 export const FIXTURES_RULE2: readonly ProseFixture[] = [
     {
