@@ -100,7 +100,6 @@ import {isBlockingLabel} from "./render-comment";
 import {
     clusterMemberRejection,
     salientTokens,
-    sharesSalientToken,
     verifiableClusters,
     type ClusterRejection,
 } from "./dedup-cluster";
@@ -798,15 +797,14 @@ export const dedupeClaims = (
             survivorFirst(best, index, claims),
         );
         const survivor = claims[survivorIndex];
-        // An evidence string naming no code element grounds nothing, and the
-        // survivor must name the element too: tier 1 can have elected a comment
-        // the proposal never saw, and absorbing a member into an unrelated
-        // comment is the failure mode this check exists to catch.
+        // The grounding rules (both ends of the vocabulary check, and the
+        // shared-anchor path that needs no vocabulary) live in
+        // clusterMemberRejection, per member: the survivor-end test cannot sit
+        // out here as a group-level gate or it would veto a member the anchor
+        // path grounds (run 32390393344's pair, where the survivor shares no
+        // token with the evidence and the member sits on its exact line).
         const groupEvidence = evidence[ordinal];
         const evidenceTokens = salientTokens(groupEvidence);
-        const usable =
-            evidenceTokens.size > 0 &&
-            sharesSalientToken(evidenceTokens, survivor);
         const into = absorbed.get(survivorIndex) ?? [];
         for (const index of heads) {
             if (index === survivorIndex) {
@@ -816,13 +814,11 @@ export const dedupeClaims = (
             // screen: they were checked against the proposal's own anchor, and
             // the head that survived tier 1 need not be the claim the model
             // named.
-            const reason = !usable
-                ? ("ungrounded" as const)
-                : clusterMemberRejection(
-                      survivor,
-                      claims[index],
-                      evidenceTokens,
-                  );
+            const reason = clusterMemberRejection(
+                survivor,
+                claims[index],
+                evidenceTokens,
+            );
             if (reason !== undefined) {
                 for (const id of namedByHead.get(index) ?? []) {
                     clusterRejections.push({id, reason});
