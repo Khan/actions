@@ -107,6 +107,19 @@ export const isReviewBotAuthor = (login: string): boolean =>
  * reconciler contract wants the whole chain, because an author's reply is
  * often what says a finding is already handled. `isResolved` is fetched so
  * resolved threads are dropped here rather than downstream.
+ *
+ * `reactions(first: 10)`, NOT 100: GitHub prices a query by its potential
+ * nodes (each page size multiplied down the nesting) against a 500,000 cap,
+ * and rejects an over-budget query STATICALLY, before looking at the PR. At
+ * 100 this query priced at 100 + 100*100 + 100*100*100 = 1,010,100, so every
+ * staging failed with `MAX_NODE_LIMIT_EXCEEDED` whatever the PR held
+ * (Khan/agent-settings#76 was the first consumer to hit it, on the v1.17.0
+ * bump itself). 10 prices it at 110,100. The depth is semantically free:
+ * only the opener's reactions are read (`openerDownvotes`), the consumer's
+ * threshold is `> 0`, and the only non-human reaction to skip past is the
+ * bot's own single nudge seed, so 10 attributable reactors is already 10x
+ * what adjudication needs. The budget is pinned by a test in
+ * stage-threads.test.ts; check it before widening any `first:` here.
  */
 const THREADS_QUERY = `
 query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
@@ -125,7 +138,7 @@ query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
                             author { login }
                             body
                             url
-                            reactions(first: 100, content: THUMBS_DOWN) {
+                            reactions(first: 10, content: THUMBS_DOWN) {
                                 nodes { user { login } }
                             }
                         }

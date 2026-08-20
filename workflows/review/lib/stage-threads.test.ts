@@ -4,7 +4,11 @@ import {openThreadsFromStaged, stagedThreadShapeFailure} from "./dedup";
 import {adjudicatedThreadsFromStaged} from "./dedup-adjudicated";
 import {computeRoster} from "./dispatch-roster";
 import {runStagePrCli, type GhGet, type StagePrFs} from "./stage-pr";
-import {withGraphqlRateLimitRetry, type GhGraphql} from "./threads";
+import {
+    collectReviewThreads,
+    withGraphqlRateLimitRetry,
+    type GhGraphql,
+} from "./threads";
 
 /**
  * Review-thread staging: the last load-bearing staging review.md Step 3 asked
@@ -724,5 +728,46 @@ describe("withGraphqlRateLimitRetry", () => {
 
         await wrapped("q", {});
         expect(waits).toEqual([1000, 2000]);
+    });
+});
+
+describe("THREADS_QUERY node budget", () => {
+    // GitHub prices a GraphQL query by its POTENTIAL nodes — each connection's
+    // page size multiplied down the nesting — against a 500,000 cap, and
+    // rejects an over-budget query statically, before reading any data. So an
+    // over-budget THREADS_QUERY is not a big-PR edge case: it fails EVERY
+    // staging on every PR. reactions(first: 100) shipped exactly that in
+    // v1.17.0 (1,010,100 potential nodes; Khan/agent-settings#76 hit it on the
+    // bump itself), which no fixture-driven test above can catch because the
+    // fake GraphQL port never prices the query. This pins the arithmetic
+    // itself, from the query string the production code actually sends.
+    it("stays under GitHub's 500,000 potential-node cap", async () => {
+        let captured = "";
+        const graphql: GhGraphql = (query) => {
+            captured = query;
+            return Promise.resolve({
+                data: {
+                    repository: {
+                        pullRequest: {
+                            reviewThreads: {
+                                pageInfo: {hasNextPage: false, endCursor: ""},
+                                nodes: [],
+                            },
+                        },
+                    },
+                },
+            });
+        };
+        await collectReviewThreads(graphql, "Khan", "repo", 1);
+
+        // Nesting order in the query: reviewThreads, comments, reactions.
+        const firsts = [...captured.matchAll(/\(first: (\d+)/g)].map((m) =>
+            Number(m[1]),
+        );
+        expect(firsts).toHaveLength(3);
+        const [threads, comments, reactions] = firsts;
+        const potentialNodes =
+            threads + threads * comments + threads * comments * reactions;
+        expect(potentialNodes).toBeLessThanOrEqual(500_000);
     });
 });
