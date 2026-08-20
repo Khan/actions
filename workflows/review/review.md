@@ -772,7 +772,20 @@ cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
    suppressed blocking candidate still floors the verdict when the matched
    thread's opener is itself blocking), and claim
    validation, and writes `/tmp/gh-aw/review/dispatch-result.json`.
-3. Compose the submission deterministically, once:
+3. Run the prose judge, once:
+```
+cd gh-aw-review-lib && npx -y tsx workflows/review/lib/judge-prose.ts
+```
+   It judges each validated claim's rendered comment against the vendored
+   plain-prose rubric and replaces a failing claim's `discussion` with one
+   constrained rewrite, in place in `dispatch-result.json`, before the plan
+   is composed. It never drops a claim, never changes a label, anchor, or
+   suggestion, and fails open: a judge error or refused rewrite posts the
+   original text, and the pass records four states per claim
+   (skipped/pass/fail/error) in `/tmp/gh-aw/review/judge-prose-verdicts.json`.
+   Its exit code is always 0; never re-run it, and never edit claim prose
+   yourself in either direction.
+4. Compose the submission deterministically, once:
 ```
 cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
 ```
@@ -787,7 +800,7 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    stages `/tmp/gh-aw/review/risks-patterns-key.txt`, the code-computed
    canonical signature Step 7 compares (never compose your own signature in
    this mode).
-4. Emit the safe outputs **exactly** as the plan says, nothing more and
+5. Emit the safe outputs **exactly** as the plan says, nothing more and
    nothing less: one `create-pull-request-review-comment` per `comments`
    entry (its `path`, `line`, and `body` verbatim), one
    `resolve-pull-request-review-thread` per `resolve` id (batched in one
@@ -1460,7 +1473,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "issue (blocking)|todo (blocking)|suggestion (non-blocking)|nitpick (non-blocking)|question (non-blocking)|thought (non-blocking)|note (non-blocking)",
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
-    "subject": "one line", "discussion": "1-2 sentences, optional", "suggestion": "optional fix code"
+    "subject": "one line", "discussion": "1-2 sentences, optional: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }]
 }
 `line` is a RIGHT-side (added/context) line number from the diff. Keep findings tight
@@ -2068,7 +2081,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "issue (blocking)|todo (blocking)|suggestion (non-blocking)|nitpick (non-blocking)|question (non-blocking)|thought (non-blocking)|note (non-blocking)",
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
-    "subject": "one line", "discussion": "1-2 sentences, optional", "suggestion": "optional fix code"
+    "subject": "one line", "discussion": "1-2 sentences, optional: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }]
 }
 Use a blocking label only for a whole-change defect that genuinely must be fixed before
@@ -2141,7 +2154,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "issue (blocking)|todo (blocking)|suggestion (non-blocking)|nitpick (non-blocking)|question (non-blocking)|thought (non-blocking)|note (non-blocking)",
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
-    "subject": "one line", "discussion": "1-2 sentences, optional", "suggestion": "optional fix code"
+    "subject": "one line", "discussion": "1-2 sentences, optional: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }]
 }
 Use a blocking label only when the change genuinely fails to deliver required, stated work.
@@ -2204,7 +2217,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "todo (blocking)|issue (blocking)|suggestion (non-blocking)|nitpick (non-blocking)|question (non-blocking)|thought (non-blocking)|note (non-blocking)",
     "failure_scenario": "one sentence: the untested path and the regression that slips through it",
-    "subject": "one line", "discussion": "1-2 sentences, optional", "suggestion": "optional test code"
+    "subject": "one line", "discussion": "1-2 sentences, optional: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional test code"
   }]
 }
 `failure_scenario` is required on every finding: name the untested path and the
@@ -2281,7 +2294,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "thought (non-blocking)|suggestion (non-blocking)|question (non-blocking)|note (non-blocking)",
     "failure_scenario": "one sentence: the concrete cost of leaving this unaddressed",
-    "subject": "one line", "discussion": "1-2 sentences, optional", "suggestion": "optional alternative"
+    "subject": "one line", "discussion": "1-2 sentences, optional: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional alternative"
   }]
 }
 Never emit a blocking label. `failure_scenario` is required on every finding: since
