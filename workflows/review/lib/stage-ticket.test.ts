@@ -12,9 +12,10 @@ import {
  * Linked-ticket staging tests. The contract under pin: ticket-context.json is
  * ALWAYS writable (every path returns a context, nothing throws), a ticket is
  * never a prerequisite (each degradation carries a machine-readable reason and
- * the prompts fall back to the PR description), every candidate key is tried
- * (noise 404s out; it never blocks a real key), and content is size-capped
- * because the file is prompt input.
+ * the prompts fall back to the PR description), known key-shaped noise sinks
+ * below plausible keys before the fetch cap applies (so it can't spend the
+ * budget; survivors 404 out), and content is size-capped because the file is
+ * prompt input.
  */
 
 const OPTIONS = {
@@ -75,13 +76,27 @@ describe("extractIssueKeys", () => {
         expect(extractIssueKeys("no key", "no-key", "none here")).toEqual([]);
     });
 
-    it("keeps key-shaped noise as candidates (the fetch 404s them out)", () => {
-        // UTF-8, SHA-256, CVE-2024-1234 all match the key regex; they are
-        // candidates like any other, so a bogus token can never block a
-        // real key by winning first-match.
+    it("keeps key-shaped noise as candidates, sunk below plausible keys", () => {
+        // UTF-8, SHA-256, CVE-2024-1234 all match the key regex; they stay
+        // candidates (the fetch 404s them out) but sort behind anything not
+        // on the known-noise list.
         expect(
             extractIssueKeys("Fix UTF-8 handling for KORE-123", "", ""),
-        ).toEqual(["UTF-8", "KORE-123"]);
+        ).toEqual(["KORE-123", "UTF-8"]);
+    });
+
+    it("never lets known noise crowd a real key out of the fetch cap", () => {
+        // The regression that motivated the sink, reproduced from a real PR
+        // body: four noise tokens ahead of the real key leave it one slot
+        // from being sliced off. With the sink, the real keys always land
+        // inside the cap.
+        const keys = extractIssueKeys(
+            "Fix UTF-8 and SHA-256 handling",
+            "",
+            "Covers CVE-2024-1234 and RFC-9110, ISO-8601 dates; see KORE-2510",
+        );
+        expect(keys).toHaveLength(MAX_TICKET_FETCHES);
+        expect(keys[0]).toBe("KORE-2510");
     });
 
     it("matches keys inside URLs but not lowercase hyphenated prose", () => {
@@ -236,6 +251,17 @@ describe("stageTicketContext", () => {
             reason: "not-found",
         });
         expect(notFound.warnings).toEqual([]);
+
+        // 400 is the same candidate noise in malformed-key form: silent.
+        const malformed = await stageTicketContext(
+            () => Promise.resolve({status: 400, json: null}),
+            OPTIONS,
+        );
+        expect(malformed.context).toEqual({
+            available: false,
+            reason: "not-found",
+        });
+        expect(malformed.warnings).toEqual([]);
 
         const denied = await stageTicketContext(
             () => Promise.resolve({status: 401, json: null}),

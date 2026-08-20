@@ -250,7 +250,8 @@ pre-agent-steps:
   # The three REVIEW_JIRA_* values are OPTIONAL consumer config for the
   # linked-ticket staging (lib/stage-ticket.ts → ticket-context.json): a repo
   # variable for the base URL and two secrets for a read-only Jira API token.
-  # Every issue key the PR references is fetched; which tickets that can
+  # Issue keys the PR references are fetched (up to 5, known key-shaped
+  # noise sunk below plausible keys); which tickets that can
   # reach is bounded by the service account's own Jira permissions (grant it
   # Browse Projects on only the projects reviews may quote), enforced
   # server-side. A repo without these stages {available: false, reason:
@@ -497,8 +498,8 @@ budget on content you never act on.
 - `pr-context.json` — the PR metadata (number, title, description, author,
   `baseBranch`, `headSha`, `isDraft`, `repo`). The one authoritative PR-level
   context surface: you and every sub-agent read PR metadata from here.
-- `ticket-context.json`: the linked Jira tickets (every issue key the PR
-  references, as a `tickets` array), fetched read-only at staging time when
+- `ticket-context.json`: the linked Jira tickets (the issue keys the PR
+  references, up to 5, as a `tickets` array), fetched read-only at staging time when
   the consumer configures it (`REVIEW_JIRA_*`); otherwise
   `{available: false, reason}`. Not yours to act on: the intent-reading
   sub-agents (completeness, first-principles) read it, and when unavailable

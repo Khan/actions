@@ -797,11 +797,12 @@ Optional:
   `REVIEW_JIRA_API_TOKEN` (repo **secrets**): the linked-ticket staging
   (`lib/stage-ticket.ts`). When all three are set, the pre-agent staging
   collects every Jira issue key the PR references (title, head branch, and
-  description, deduped, capped at 5), fetches each read-only on the host,
-  and stages the ones that resolve as `ticket-context.json` (a `tickets`
-  array) for the intent-reading sub-agents (completeness, first-principles).
-  Key-shaped noise (`UTF-8`, `SHA-256`, `CVE-2024-1234`) and stale keys 404
-  and drop silently, so they never block a real ticket. The disclosure
+  description, deduped; known key-shaped noise like `UTF-8`, `SHA-256`, and
+  `CVE-2024-1234` sinks to the back before the cap of 5 applies), fetches
+  each read-only on the host, and stages the ones that resolve as
+  `ticket-context.json` (a `tickets` array) for the intent-reading
+  sub-agents (completeness, first-principles). Noise and stale keys 404 and
+  drop silently. The disclosure
   bound (which tickets author-written keys can pull into a review that
   posts publicly) is the service account's own Jira permissions, enforced
   server-side: use a dedicated service account granted Browse Projects on

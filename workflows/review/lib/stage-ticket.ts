@@ -16,11 +16,13 @@
  * model runs, with the agent sandbox needing no Jira egress at all.
  *
  * Candidate stance: every key-shaped token in the title, head branch, and
- * description is a candidate (deduped, in order of appearance, capped at
- * MAX_TICKET_FETCHES), and every candidate is tried. Key-shaped noise
- * (UTF-8, SHA-256, CVE-2024-1234 all match the regex) simply 404s and drops
- * silently, so a bogus token can never block a real key, and a PR that
- * references several tickets stages all of them.
+ * description is a candidate (deduped, in order of appearance). Known
+ * key-shaped noise (UTF-8, SHA-256, CVE-2024-1234 all match the regex) sinks
+ * to the back of the candidate list before the MAX_TICKET_FETCHES cap
+ * applies, so the cap spends its budget on plausible keys first; whatever
+ * survives the cap is tried, and misses simply 404 and drop silently. The
+ * residual bound: a real key is only ever crowded out by MAX_TICKET_FETCHES
+ * or more earlier key-shaped tokens that are not on the noise list.
  *
  * Failure stance: a ticket is context, not a prerequisite; a review must run
  * identically on a PR with no ticket, a repo with no Jira credentials, or a
@@ -109,15 +111,39 @@ export type StageTicketOptions = {
 const ISSUE_KEY_RE = /\b([A-Z][A-Z0-9]{1,9}-\d+)\b/g;
 
 /**
+ * Well-known key-shaped tokens that are never Jira issue keys. Not a
+ * precision filter (unknown noise still 404s out downstream): this only
+ * keeps the usual suspects from spending the fetch budget ahead of a real
+ * key when a PR body mentions more than MAX_TICKET_FETCHES key-shaped
+ * tokens.
+ */
+const NON_KEY_PREFIXES = new Set([
+    "UTF",
+    "SHA",
+    "MD",
+    "CVE",
+    "RFC",
+    "ISO",
+    "AES",
+    "RSA",
+    "HTTP",
+    "IPV",
+]);
+
+/**
  * The fetch cap: the staged file is prompt input, and a PR body that
  * mentions dozens of key-shaped tokens must not turn staging into a crawl.
  */
 export const MAX_TICKET_FETCHES = 5;
 
 /**
- * Every candidate key in order of appearance (title, then head branch, then
- * description), deduped, capped at MAX_TICKET_FETCHES. All of them get
- * tried: noise and stale keys 404 out downstream.
+ * Every candidate key (title, then head branch, then description), deduped,
+ * with well-known noise sunk to the back, capped at MAX_TICKET_FETCHES.
+ * The sink caps the FETCHES rather than the raw candidate list: without it,
+ * a title like "Fix UTF-8 and SHA-256 handling" spends cap slots on tokens
+ * that can only 404, and enough of them silently crowd out the real key.
+ * Survivors keep order of appearance within their tier; whatever is left
+ * gets tried, and noise or stale keys 404 out downstream.
  */
 export const extractIssueKeys = (
     title: string,
@@ -132,7 +158,17 @@ export const extractIssueKeys = (
             }
         }
     }
-    return keys.slice(0, MAX_TICKET_FETCHES);
+    const isNoise = (key: string): boolean =>
+        NON_KEY_PREFIXES.has(key.slice(0, key.indexOf("-")));
+    return keys
+        .map((key, index) => ({key, index}))
+        .sort(
+            (a, b) =>
+                Number(isNoise(a.key)) - Number(isNoise(b.key)) ||
+                a.index - b.index,
+        )
+        .slice(0, MAX_TICKET_FETCHES)
+        .map((candidate) => candidate.key);
 };
 
 /** Size caps: the staged file is prompt input, not an archive. */
@@ -241,6 +277,9 @@ const attemptFetch = async (
     auth: string,
     key: string,
 ): Promise<Attempt> => {
+    // v2, not Jira Cloud's current v3: v2 returns `description` and comment
+    // bodies as plain text, while v3 returns Atlassian Document Format JSON,
+    // which is useless as prompt input.
     const url = `${baseUrl}/rest/api/2/issue/${key}?fields=${[
         "summary",
         "description",

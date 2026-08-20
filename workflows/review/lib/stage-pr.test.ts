@@ -17,6 +17,7 @@ import {
     type GhGet,
     type StagePrFs,
 } from "./stage-pr";
+import type {TicketFetch} from "./stage-ticket";
 import type {GhGraphql} from "./threads";
 
 /**
@@ -67,7 +68,7 @@ const ghGetFromMap =
  * without fetching. The ticket staging itself is exercised in
  * stage-ticket.test.ts.
  */
-const noTicket = () => (): Promise<{status: number; json: unknown}> =>
+const noTicket = (): TicketFetch => () =>
     Promise.reject(new Error("unexpected ticket fetch"));
 
 /**
