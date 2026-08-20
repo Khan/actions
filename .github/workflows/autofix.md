@@ -242,7 +242,7 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: autofix-v0.0.0
+      ref: autofix-v0.3.0
       path: gh-aw-autofix-lib
       persist-credentials: false
 
@@ -336,7 +336,7 @@ env:
   GIT_CONFIG_KEY_1: remote.origin.partialclonefilter
   GIT_CONFIG_VALUE_1: "blob:none"
 
-source: Khan/actions/workflows/autofix/autofix.md@autofix-v0.0.0
+source: Khan/actions/workflows/autofix/autofix.md@autofix-v0.3.0
 ---
 
 # PR Autofixer
@@ -476,16 +476,60 @@ Edit the files directly in the workspace. Rules, all hard:
 - **A documentation item changes text, never code.** An item labelled
   `suggestion (non-blocking, documentation)` is a finding about a comment or a
   prose doc, and the whole reason its scope exists is that its edits cannot
-  alter behaviour. Deleting a comment the finding calls redundant is the
-  expected fix, not an overreach, and such a finding often carries no
-  suggestion block precisely because a deletion cannot be expressed as one. But
-  if the honest fix would touch an executable line — renaming the symbol the
-  comment misdescribes, changing the constant the comment contradicts — that is
-  a code change wearing a documentation label: leave the item unfixed and say
-  why in Step 7. Fix the sentence, or fix nothing.
-- **Do not touch files no item points at.** The one exception is a change that
-  is mechanically forced by a fix (a caller that must be updated for a changed
-  signature); note any such file in Step 7.
+  alter behaviour. Such a finding often carries no suggestion block precisely
+  because the fix is a deletion, which cannot be expressed as one. But if the
+  honest fix would touch an executable line — renaming the symbol the comment
+  misdescribes, changing the constant the comment contradicts — that is a code
+  change wearing a documentation label: leave the item unfixed and say why in
+  Step 7. Fix the sentence, or fix nothing.
+- **On a documentation item, rewrite before you delete.** Deleting a comment the
+  finding calls redundant is a legitimate fix and not an overreach, but it is
+  the *second* choice. If the code the comment sits on has a non-obvious reason
+  to be the way it is — a magic value, a timeout, a retry count, an ordering
+  requirement, a workaround — and that reason is recoverable from the diff, the
+  surrounding code, or the reviewer's own thread, replace the restatement with
+  the reason. Deleting is right when the comment is pure restatement of
+  something that needs no explanation. What makes the difference is whether the
+  reason is *recoverable*, not whether it would be nice to have: **never invent
+  a rationale.** A plausible-sounding reason you cannot source is worse than no
+  comment, because the next reader will trust it and the reviewer cannot tell
+  the difference.
+- **A readability item is fixed with the reviewer's own words.** A documentation
+  finding may flag prose readability (a metaphor that hides the mechanism, a
+  paragraph restating an earlier one, shorthand the document never defines)
+  rather than comment content, and it carries the plain rewrite, quoted in its
+  body or as a suggestion block. Apply that rewrite verbatim: it survived claim
+  validation, which checked that it preserves the original sentence's meaning,
+  and a paraphrase you improvise did not. If the file has drifted and the quoted
+  rewrite no longer fits the text, leave the item unfixed and say so in Step 7
+  rather than composing your own.
+- **On a says-the-same-thing-twice item, delete; never mint a third phrasing.**
+  The rewrite-before-delete bias above is calibrated for a restated comment
+  sitting on unexplained code. A duplicated paragraph is the opposite case: the
+  content already exists in the copy that stays, so the fix is deleting the copy
+  the finding names, and rewording the duplicate into different words is the
+  failure mode the finding exists to stop, not a fix for it.
+- **Say when a deletion left a hole.** If you delete a comment off a constant,
+  magic value, or workaround without being able to state why the value is what
+  it is, the thread is fixed and the code is still unexplained. Report both in
+  Step 7, naming the symbol, so the author knows there is a sentence only they
+  can write (`staleAfter`'s restating comment is gone; nothing records why the
+  window is that long). Reporting it as plainly fixed hides the one thing a
+  human still needs to do.
+- **Do not touch files no item points at.** Two exceptions. First, a change
+  mechanically forced by a fix (a caller that must be updated for a changed
+  signature). Second, the instances a batched documentation item quotes: the
+  documentation reviewer caps readability at one thread per review and
+  enumerates up to three further instances, verbatim, in that thread's body, so
+  each **quoted** instance is part of the finding wherever it lives; fix those
+  too. An instance the body merely alludes to without quoting is not part of
+  the finding. The verbatim-rewrite rule above still governs each quoted
+  instance: the reviewer is only required to quote it, not to rewrite it, so
+  fix a quoted instance when its fix needs no words of yours (a duplicated
+  paragraph: delete the quoted copy) or when the thread body carries a rewrite
+  for that instance; a quoted metaphor or coinage with no rewrite of its own is
+  left unfixed and reported in Step 7, exactly like a drifted quote. Note any
+  file either exception led you into in Step 7.
 - **Do not amend, rebase, or force-push.** You produce working-tree changes;
   the push is a safe output.
 - If a fix would require a design decision the reviewer did not make for you,
@@ -611,7 +655,11 @@ Write the body directly, in this order, including only the parts that apply:
    tense and the plural right; the work is already done by the time anyone
    reads this.
 2. If anything was fixed: a list, one line per finding, `path:line` plus what
-   changed. Link each to its thread `url` when the item has one.
+   changed. Link each to its thread `url` when the item has one. When a
+   documentation fix **deleted** a comment without being able to record why the
+   code is the way it is (Step 4), say so on that line and name the symbol: the
+   thread is fixed and the value is still unexplained, and this is the only
+   place a human learns there is a sentence only they can write.
 3. If anything was left unfixed: a list, one line each, with the reason. This
    is the most important section in the comment; never omit or soften it.
 4. If `plan.skipped` contains entries whose reason is **not** `out-of-scope`:
