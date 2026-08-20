@@ -3,22 +3,28 @@
  * loop) that turns reviewer-comment reactions into structured feedback.
  *
  * Reviewers on a PR react to the bot's comments with 👍 / 👎. This sweep runs
- * on a poll (e.g. a scheduled workflow), collects those reactions at two grains,
- * and for every comment that has newly acquired a 👎 posts exactly ONE follow-up
- * asking *why* — offering the fixed reason vocabulary (incorrect / unimportant /
- * unclear / duplicate) plus free text. It never re-pings: once a comment has a
- * follow-up it is skipped on every later sweep.
+ * on a poll (e.g. a scheduled workflow), collects those reactions at two
+ * grains, and reports them. It is READ-ONLY: it posts nothing.
+ *
+ * It used to post a "why?" follow-up on every newly-downvoted comment,
+ * offering a closed reason vocabulary. That surface was retired after the
+ * 2026-08-20 version audit: 31 follow-ups drew 2 reason replies ever, 26 of
+ * them landed as bursts on a single PR, and GitHub wraps each posted reply in
+ * an implicit empty COMMENTED review event that pollutes run counts and the
+ * PR timeline. A bare 👎 has adjudicated the finding directly since v1.17.0
+ * (the staging reads thread-opener reactions), so the ask carried no
+ * remaining purpose. The follow-up marker parser below is retained so the
+ * traversal keeps recognising the historical follow-ups still present on PRs.
  *
  * Division of labour (mirrors the finding-schema / verdict split):
- *   - CODE (this module) owns all control flow, the two-grain traversal, the
- *     idempotency rule, and the fixed follow-up template. There is no prose
- *     synthesis and no model call here — the follow-up body is a constant string.
- *   - The GitHub side effects (listing comments, reading reactions, posting the
- *     follow-up) live behind an injected {@link ThumbsSweepPort} so this module
- *     stays pure and unit-testable, and so the same logic can be pointed at
- *     either consumer repo (Khan/webapp, Khan/frontend) purely by constructing
- *     the port + config differently — the interface guarantee of §4.3. No
- *     consumer commit is required.
+ *   - CODE (this module) owns the two-grain tally and the config guard. There
+ *     is no prose synthesis and no model call here.
+ *   - The GitHub reads (listing comments, reading reactions) live behind an
+ *     injected {@link ThumbsSweepPort} so this module stays pure and
+ *     unit-testable, and so the same logic can be pointed at either consumer
+ *     repo (Khan/webapp, Khan/frontend) purely by constructing the port +
+ *     config differently — the interface guarantee of §4.3. No consumer
+ *     commit is required.
  */
 
 /**
@@ -44,21 +50,6 @@ export type FeedbackGrain = typeof FEEDBACK_GRAINS[number];
 export const POSITIVE_REACTIONS = ["+1", "heart", "hooray", "rocket"] as const;
 export const NEGATIVE_REACTIONS = ["-1", "confused"] as const;
 
-/**
- * The fixed vocabulary a follow-up offers the reactor for *why* they downvoted.
- * Deliberately closed so the labels aggregate cleanly (they calibrate the
- * eval-suite judge and feed the dismissal-learning candidates); free text
- * is invited in addition, not instead.
- */
-export const DOWNVOTE_REASONS = [
-    "incorrect",
-    "unimportant",
-    "unclear",
-    "duplicate",
-] as const;
-
-export type DownvoteReason = typeof DOWNVOTE_REASONS[number];
-
 /** A single reaction observed on a bot comment. */
 export type Reaction = {
     /** GitHub reaction content, e.g. `"+1"` / `"-1"` (other emoji are ignored). */
@@ -76,8 +67,8 @@ export type BotComment = {
     grain: FeedbackGrain;
     /**
      * GitHub id of the comment. Inline review-comment ids and issue-comment ids
-     * are separate id spaces that can collide, so the idempotency key always
-     * pairs the id with its grain.
+     * are separate id spaces that can collide, so a comment is always
+     * identified by the (grain, id) pair.
      */
     id: number;
     /** Reactions currently on the comment (as returned by the reactions API). */
@@ -98,60 +89,36 @@ export type ThumbsSweepConfig = {
 
 /**
  * The GitHub side-effect boundary. A real deployment supplies an octokit-backed
- * implementation; tests supply an in-memory fake. Keeping every network call
- * behind this interface is what makes the sweep a pure function of its inputs.
+ * implementation; tests supply an in-memory fake. The port is read-only: the
+ * sweep never writes to GitHub.
  */
 export interface ThumbsSweepPort {
     /** Bot-authored comments at `grain`, each carrying its current reactions. */
     listBotComments(grain: FeedbackGrain): Promise<BotComment[]>;
-    /**
-     * Bodies of every follow-up already posted by prior sweeps. The sweep scans
-     * these for its marker to decide what has already been pinged — this is the
-     * durable idempotency source, so no external state store is needed.
-     */
-    listExistingFollowups(): Promise<string[]>;
-    /** Post a single follow-up comment. Called at most once per (grain, id). */
-    postFollowup(followup: PostedFollowup): Promise<void>;
 }
 
-/** A follow-up the sweep asks the port to post. */
-export type PostedFollowup = {
-    grain: FeedbackGrain;
-    /** Id of the comment the follow-up is about. */
-    commentId: number;
-    /** Fully rendered body (hidden marker + the fixed prompt). */
-    body: string;
-};
-
-/** Why the sweep did (or did not) post a follow-up for one comment. */
-export type SweepActionReason =
-    | "posted"
-    | "no-downvote"
-    | "already-followed-up";
-
-/** The decision the sweep made for a single comment. */
+/** The per-comment tally the sweep produced. */
 export type SweepAction = {
     grain: FeedbackGrain;
     commentId: number;
     /** Number of 👎 currently on the comment (0 when none; the bot's own 👎 never counts). */
     downvotes: number;
-    /** Whether a follow-up was posted this sweep. */
-    posted: boolean;
-    reason: SweepActionReason;
 };
 
 /** Aggregate outcome of one sweep. */
 export type SweepResult = {
     actions: SweepAction[];
-    /** Count of follow-ups posted this sweep (invariant: <= new-downvote count). */
-    followupsPosted: number;
+    /** Count of comments carrying at least one human 👎. */
+    downvotedComments: number;
 };
 
 /**
- * Hidden HTML marker that stamps a follow-up so later sweeps recognise it and do
- * not re-ping. It encodes the grain + comment id it answers. Same mechanism as
- * #194's HTML comment markers — invisible in the rendered thread, machine
- * readable on the next poll.
+ * Hidden HTML marker the retired follow-ups were stamped with. Parsing is
+ * retained so the traversal keeps recognising historical follow-ups (they are
+ * bot-authored comments on PRs inside the lookback window and must never be
+ * classified as reviewer findings). It encodes the grain + comment id the
+ * follow-up answered. Same mechanism as #194's HTML comment markers —
+ * invisible in the rendered thread, machine readable on a poll.
  */
 const MARKER_PREFIX = "review-thumbs-followup";
 
@@ -162,7 +129,7 @@ const MARKER_RE = new RegExp(
     "g",
 );
 
-/** Build the hidden idempotency marker for a (grain, commentId) pair. */
+/** Build the hidden marker for a (grain, commentId) pair (test fixtures). */
 export const buildFollowupMarker = (
     grain: FeedbackGrain,
     commentId: number,
@@ -188,28 +155,6 @@ export const parseFollowupMarkers = (body: string): FollowupRef[] => {
     }
     return refs;
 };
-
-/**
- * Render the follow-up body: the hidden marker followed by the fixed prompt.
- * Pure and constant given (grain, commentId) — no model, no per-run wording.
- */
-export const renderFollowupBody = (
-    grain: FeedbackGrain,
-    commentId: number,
-): string => {
-    const reasons = DOWNVOTE_REASONS.map((r) => `\`${r}\``).join(" · ");
-    return [
-        buildFollowupMarker(grain, commentId),
-        "Thanks for the 👎 — a quick note on **why** helps tune the reviewer.",
-        "",
-        `Reply with one of: ${reasons} — plus any free-text detail.`,
-        "You only need to answer once; this bot won't ask again on this comment.",
-    ].join("\n");
-};
-
-/** Stable idempotency key for a comment across both id spaces. */
-const key = (grain: FeedbackGrain, commentId: number): string =>
-    `${grain}:${commentId}`;
 
 /**
  * Count the negative reactions (👎/😕, per {@link NEGATIVE_REACTIONS}) on a
@@ -259,19 +204,10 @@ export const validateSweepConfig = (input: unknown): ConfigValidation => {
 };
 
 /**
- * Run one thumbs sweep.
- *
- * For each grain, for each bot comment:
- *   1. count its 👎;
- *   2. if none, record `no-downvote` and move on;
- *   3. if it already has a follow-up (marker seen in `listExistingFollowups`, or
- *      posted earlier in THIS sweep), record `already-followed-up` — never
- *      re-ping;
- *   4. otherwise post exactly one follow-up and record `posted`.
- *
- * The result is fully determined by the port's responses, so the whole thing is
- * unit-testable with an in-memory fake. Idempotency holds both across sweeps (via
- * the durable markers) and within a sweep (via the in-memory `followedUp` set).
+ * Run one thumbs sweep: for each grain, for each bot comment, count its human
+ * 👎 reactions and record the tally. The result is fully determined by the
+ * port's responses, so the whole thing is unit-testable with an in-memory
+ * fake, and nothing is ever written to GitHub.
  */
 export const sweepThumbs = async (
     port: ThumbsSweepPort,
@@ -286,63 +222,21 @@ export const sweepThumbs = async (
         );
     }
 
-    // Seed the "already handled" set from durable markers on prior follow-ups.
-    const followedUp = new Set<string>();
-    for (const body of await port.listExistingFollowups()) {
-        for (const ref of parseFollowupMarkers(body)) {
-            followedUp.add(key(ref.grain, ref.commentId));
-        }
-    }
-
     const actions: SweepAction[] = [];
 
     for (const grain of FEEDBACK_GRAINS) {
         const comments = await port.listBotComments(grain);
         for (const comment of comments) {
-            const downvotes = countDownvotes(comment, config.botLogin);
-
-            if (downvotes === 0) {
-                actions.push({
-                    grain,
-                    commentId: comment.id,
-                    downvotes,
-                    posted: false,
-                    reason: "no-downvote",
-                });
-                continue;
-            }
-
-            const k = key(grain, comment.id);
-            if (followedUp.has(k)) {
-                actions.push({
-                    grain,
-                    commentId: comment.id,
-                    downvotes,
-                    posted: false,
-                    reason: "already-followed-up",
-                });
-                continue;
-            }
-
-            await port.postFollowup({
-                grain,
-                commentId: comment.id,
-                body: renderFollowupBody(grain, comment.id),
-            });
-            // Guard against a duplicate comment id within this same sweep.
-            followedUp.add(k);
             actions.push({
                 grain,
                 commentId: comment.id,
-                downvotes,
-                posted: true,
-                reason: "posted",
+                downvotes: countDownvotes(comment, config.botLogin),
             });
         }
     }
 
     return {
         actions,
-        followupsPosted: actions.filter((a) => a.posted).length,
+        downvotedComments: actions.filter((a) => a.downvotes > 0).length,
     };
 };

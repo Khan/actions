@@ -4,30 +4,24 @@ import {
     FEEDBACK_GRAINS,
     POSITIVE_REACTIONS,
     NEGATIVE_REACTIONS,
-    DOWNVOTE_REASONS,
     buildFollowupMarker,
     parseFollowupMarkers,
-    renderFollowupBody,
     validateSweepConfig,
     sweepThumbs,
     type BotComment,
     type FeedbackGrain,
-    type PostedFollowup,
     type ThumbsSweepConfig,
     type ThumbsSweepPort,
 } from "./thumbs-sweep.ts";
 
 /**
- * Unit tests for the thumbs feedback sweep. Four behaviors must hold; each has
- * its own describe block below:
- *   - new-👎 detection    -> a comment that carries a 👎 is picked up
- *   - single follow-up    -> exactly one follow-up per newly-downvoted comment
- *   - no re-ping          -> a comment already followed up is never pinged again
+ * Unit tests for the thumbs feedback sweep. Three behaviors must hold:
+ *   - 👎 tally           -> human downvotes are counted, the bot's own never
  *   - two-grain collection -> inline + summary comments are both swept
+ *   - read-only          -> the sweep needs nothing but listBotComments
  *
- * The sweep is a pure function of its port's responses, so every test drives an
- * in-memory fake port and asserts on the recorded side effects — no network, no
- * model, fully deterministic.
+ * The sweep is a pure function of its port's responses, so every test drives
+ * an in-memory fake port — no network, no model, fully deterministic.
  */
 
 const VALID_CONFIG: ThumbsSweepConfig = {
@@ -39,35 +33,14 @@ const VALID_CONFIG: ThumbsSweepConfig = {
 const up = (): {content: string} => ({content: "+1"});
 const down = (): {content: string} => ({content: "-1"});
 
-/**
- * An in-memory {@link ThumbsSweepPort}. Comments are supplied per grain; posted
- * follow-ups are captured; `existingFollowups` seeds the durable idempotency
- * source (as if prior sweeps had run). `postFollowup` also appends to
- * `existingFollowups` so a second sweep in the same test sees the first sweep's
- * markers — exactly what a real GitHub thread would show on the next poll.
- */
+/** An in-memory read-only {@link ThumbsSweepPort}. */
 class FakePort implements ThumbsSweepPort {
-    posted: PostedFollowup[] = [];
-
     constructor(
         private readonly commentsByGrain: Record<FeedbackGrain, BotComment[]>,
-        private readonly existingFollowups: string[] = [],
     ) {}
 
     listBotComments(grain: FeedbackGrain): Promise<BotComment[]> {
         return Promise.resolve(this.commentsByGrain[grain] ?? []);
-    }
-
-    listExistingFollowups(): Promise<string[]> {
-        return Promise.resolve(this.existingFollowups);
-    }
-
-    postFollowup(followup: PostedFollowup): Promise<void> {
-        this.posted.push(followup);
-        // Mirror the real thread: the follow-up (with its marker) is now visible
-        // to any later sweep.
-        this.existingFollowups.push(followup.body);
-        return Promise.resolve();
     }
 }
 
@@ -85,7 +58,7 @@ const noComments = (): Record<FeedbackGrain, BotComment[]> => ({
 describe("self-reaction filtering", () => {
     const BOT = VALID_CONFIG.botLogin;
 
-    it("the bot's own thumbs-down never triggers a follow-up", async () => {
+    it("the bot's own thumbs-down never counts", async () => {
         // The bot's reactions exist on real comments: the review workflow
         // seeds the 👍/👎 nudge pair on its comments at post time.
         const port = new FakePort({
@@ -93,12 +66,11 @@ describe("self-reaction filtering", () => {
             summary: [],
         });
         const result = await sweepThumbs(port, VALID_CONFIG);
-        expect(port.posted).toEqual([]);
         expect(result.actions[0]?.downvotes).toBe(0);
-        expect(result.actions[0]?.reason).toBe("no-downvote");
+        expect(result.downvotedComments).toBe(0);
     });
 
-    it("a real user's thumbs-down still triggers alongside the bot's reactions", async () => {
+    it("a real user's thumbs-down still counts alongside the bot's reactions", async () => {
         const port = new FakePort({
             inline: [
                 makeComment("inline", 1, [
@@ -110,8 +82,8 @@ describe("self-reaction filtering", () => {
             summary: [],
         });
         const result = await sweepThumbs(port, VALID_CONFIG);
-        expect(port.posted).toHaveLength(1);
         expect(result.actions[0]?.downvotes).toBe(1);
+        expect(result.downvotedComments).toBe(1);
     });
 
     it("a reaction with no login is treated as a real user's", async () => {
@@ -137,15 +109,6 @@ describe("exported constants", () => {
             "rocket",
         ]);
         expect([...NEGATIVE_REACTIONS]).toEqual(["-1", "confused"]);
-    });
-
-    it("DOWNVOTE_REASONS is the fixed closed vocabulary", () => {
-        expect([...DOWNVOTE_REASONS]).toEqual([
-            "incorrect",
-            "unimportant",
-            "unclear",
-            "duplicate",
-        ]);
     });
 });
 
@@ -188,18 +151,14 @@ describe("validateSweepConfig", () => {
     });
 });
 
-describe("marker + follow-up rendering", () => {
+describe("historical follow-up markers", () => {
+    // The follow-up surface is retired, but its markers exist on older PRs and
+    // the traversal still uses the parser to exclude them from candidates.
     it("builds a hidden HTML marker encoding grain + comment id", () => {
         const marker = buildFollowupMarker("inline", 123);
         expect(marker).toBe(
             "<!-- review-thumbs-followup grain=inline comment-id=123 -->",
         );
-    });
-
-    it("round-trips a marker through parseFollowupMarkers", () => {
-        const body = renderFollowupBody("summary", 987);
-        const refs = parseFollowupMarkers(body);
-        expect(refs).toEqual([{grain: "summary", commentId: 987}]);
     });
 
     it("parses every marker in a body and ignores prose without one", () => {
@@ -215,56 +174,24 @@ describe("marker + follow-up rendering", () => {
     });
 
     it("parseFollowupMarkers is pure across repeated calls (no shared lastIndex)", () => {
-        const body = renderFollowupBody("inline", 55);
+        const body = buildFollowupMarker("inline", 55);
         expect(parseFollowupMarkers(body)).toEqual(parseFollowupMarkers(body));
-    });
-
-    it("the follow-up body offers the full reason vocabulary plus free text", () => {
-        const body = renderFollowupBody("inline", 7);
-        for (const reason of DOWNVOTE_REASONS) {
-            expect(body).toContain(reason);
-        }
-        expect(body).toMatch(/free-text/i);
-        // The idempotency promise is stated to the reader, too.
-        expect(body).toMatch(/won't ask again/i);
     });
 });
 
-describe("new-👎 detection", () => {
-    it("posts a follow-up for a comment carrying a 👎", async () => {
-        const port = new FakePort({
-            inline: [makeComment("inline", 10, [down()])],
-            summary: [],
-        });
-        const result = await sweepThumbs(port, VALID_CONFIG);
-
-        expect(port.posted).toHaveLength(1);
-        expect(port.posted[0]).toMatchObject({grain: "inline", commentId: 10});
-        expect(result.followupsPosted).toBe(1);
-
-        const action = result.actions.find((a) => a.commentId === 10);
-        expect(action).toMatchObject({
-            grain: "inline",
-            downvotes: 1,
-            posted: true,
-            reason: "posted",
-        });
-    });
-
-    it("counts multiple 👎 but still treats the comment as one downvoted unit", async () => {
+describe("👎 tally", () => {
+    it("counts multiple 👎 on one comment", async () => {
         const port = new FakePort({
             inline: [makeComment("inline", 11, [down(), down(), up()])],
             summary: [],
         });
         const result = await sweepThumbs(port, VALID_CONFIG);
-
-        expect(port.posted).toHaveLength(1);
         const action = result.actions.find((a) => a.commentId === 11);
         expect(action?.downvotes).toBe(2);
-        expect(action?.posted).toBe(true);
+        expect(result.downvotedComments).toBe(1);
     });
 
-    it("does NOT follow up a comment with only 👍 or no reactions", async () => {
+    it("a comment with only 👍 or no reactions is not downvoted", async () => {
         const port = new FakePort({
             inline: [
                 makeComment("inline", 20, [up()]),
@@ -273,12 +200,8 @@ describe("new-👎 detection", () => {
             summary: [makeComment("summary", 22, [up(), up()])],
         });
         const result = await sweepThumbs(port, VALID_CONFIG);
-
-        expect(port.posted).toHaveLength(0);
-        expect(result.followupsPosted).toBe(0);
+        expect(result.downvotedComments).toBe(0);
         for (const action of result.actions) {
-            expect(action.posted).toBe(false);
-            expect(action.reason).toBe("no-downvote");
             expect(action.downvotes).toBe(0);
         }
     });
@@ -295,8 +218,7 @@ describe("new-👎 detection", () => {
             summary: [],
         });
         const result = await sweepThumbs(port, VALID_CONFIG);
-        expect(port.posted).toHaveLength(0);
-        expect(result.actions[0]?.reason).toBe("no-downvote");
+        expect(result.actions[0]?.downvotes).toBe(0);
     });
 
     it("treats confused as a negative signal (outcome-collector set)", async () => {
@@ -305,13 +227,11 @@ describe("new-👎 detection", () => {
             summary: [],
         });
         const result = await sweepThumbs(port, VALID_CONFIG);
-        expect(port.posted).toHaveLength(1);
-        expect(result.actions[0]?.reason).toBe("posted");
+        expect(result.actions[0]?.downvotes).toBe(1);
+        expect(result.downvotedComments).toBe(1);
     });
-});
 
-describe("single follow-up", () => {
-    it("posts exactly one follow-up per downvoted comment in a sweep", async () => {
+    it("counts each downvoted comment once in downvotedComments", async () => {
         const port = new FakePort({
             inline: [
                 makeComment("inline", 40, [down()]),
@@ -320,133 +240,7 @@ describe("single follow-up", () => {
             summary: [makeComment("summary", 42, [down()])],
         });
         const result = await sweepThumbs(port, VALID_CONFIG);
-
-        // Three distinct downvoted comments -> three follow-ups, one each.
-        expect(result.followupsPosted).toBe(3);
-        const postedKeys = port.posted.map((p) => `${p.grain}:${p.commentId}`);
-        expect(postedKeys).toEqual(["inline:40", "inline:41", "summary:42"]);
-        // No duplicates.
-        expect(new Set(postedKeys).size).toBe(postedKeys.length);
-    });
-
-    it("invariant: followupsPosted never exceeds the new-downvote count", async () => {
-        const port = new FakePort({
-            inline: [
-                makeComment("inline", 50, [down()]),
-                makeComment("inline", 51, [up()]),
-            ],
-            summary: [makeComment("summary", 52, [down()])],
-        });
-        const result = await sweepThumbs(port, VALID_CONFIG);
-        const newDownvotedComments = result.actions.filter(
-            (a) => a.downvotes > 0 && a.reason !== "already-followed-up",
-        ).length;
-        expect(result.followupsPosted).toBeLessThanOrEqual(
-            newDownvotedComments,
-        );
-        expect(result.followupsPosted).toBe(2);
-    });
-
-    it("dedups a colliding comment id that appears within the same sweep", async () => {
-        // Real GitHub would not list the same (grain,id) twice, but the guard is
-        // defensive: the in-sweep set must prevent a second post.
-        const dup = makeComment("inline", 60, [down()]);
-        const port = new FakePort({
-            inline: [dup, {...dup, reactions: [down()]}],
-            summary: [],
-        });
-        const result = await sweepThumbs(port, VALID_CONFIG);
-
-        expect(port.posted).toHaveLength(1);
-        const reasons = result.actions
-            .filter((a) => a.commentId === 60)
-            .map((a) => a.reason);
-        expect(reasons).toContain("posted");
-        expect(reasons).toContain("already-followed-up");
-    });
-});
-
-describe("no re-ping", () => {
-    it("skips a comment whose follow-up marker already exists (prior sweep)", async () => {
-        const port = new FakePort(
-            {inline: [makeComment("inline", 70, [down()])], summary: []},
-            [buildFollowupMarker("inline", 70)],
-        );
-        const result = await sweepThumbs(port, VALID_CONFIG);
-
-        expect(port.posted).toHaveLength(0);
-        expect(result.followupsPosted).toBe(0);
-        const action = result.actions.find((a) => a.commentId === 70);
-        expect(action).toMatchObject({
-            downvotes: 1,
-            posted: false,
-            reason: "already-followed-up",
-        });
-    });
-
-    it("is idempotent across consecutive sweeps of the same downvoted comment", async () => {
-        const port = new FakePort({
-            inline: [makeComment("inline", 80, [down()])],
-            summary: [],
-        });
-
-        const first = await sweepThumbs(port, VALID_CONFIG);
-        expect(first.followupsPosted).toBe(1);
-
-        // The FakePort records the posted body into existingFollowups, so the
-        // second sweep sees the marker exactly as a real re-poll would.
-        const second = await sweepThumbs(port, VALID_CONFIG);
-        expect(second.followupsPosted).toBe(0);
-        expect(port.posted).toHaveLength(1);
-        expect(second.actions.find((a) => a.commentId === 80)?.reason).toBe(
-            "already-followed-up",
-        );
-    });
-
-    it("re-pings a DIFFERENT comment even when another was already followed up", async () => {
-        const port = new FakePort(
-            {
-                inline: [
-                    makeComment("inline", 90, [down()]), // already handled
-                    makeComment("inline", 91, [down()]), // brand new 👎
-                ],
-                summary: [],
-            },
-            [buildFollowupMarker("inline", 90)],
-        );
-        await sweepThumbs(port, VALID_CONFIG);
-
-        expect(port.posted).toHaveLength(1);
-        expect(port.posted[0]?.commentId).toBe(91);
-    });
-
-    it("does not confuse the two id spaces (same id, different grain)", async () => {
-        // inline #100 already followed up; summary #100 is a distinct comment
-        // and must still be pinged — the key pairs id WITH grain.
-        const port = new FakePort(
-            {
-                inline: [makeComment("inline", 100, [down()])],
-                summary: [makeComment("summary", 100, [down()])],
-            },
-            [buildFollowupMarker("inline", 100)],
-        );
-        const result = await sweepThumbs(port, VALID_CONFIG);
-
-        expect(port.posted).toHaveLength(1);
-        expect(port.posted[0]).toMatchObject({
-            grain: "summary",
-            commentId: 100,
-        });
-        expect(
-            result.actions.find(
-                (a) => a.grain === "inline" && a.commentId === 100,
-            )?.reason,
-        ).toBe("already-followed-up");
-        expect(
-            result.actions.find(
-                (a) => a.grain === "summary" && a.commentId === 100,
-            )?.reason,
-        ).toBe("posted");
+        expect(result.downvotedComments).toBe(3);
     });
 });
 
@@ -460,25 +254,25 @@ describe("two-grain collection", () => {
 
         const grains = new Set(result.actions.map((a) => a.grain));
         expect(grains).toEqual(new Set(["inline", "summary"]));
-        expect(result.followupsPosted).toBe(2);
-        expect(port.posted.map((p) => p.grain).sort()).toEqual([
-            "inline",
-            "summary",
-        ]);
+        expect(result.downvotedComments).toBe(2);
     });
 
-    it("collects the two grains independently — a summary miss doesn't gate inline", async () => {
+    it("does not confuse the two id spaces (same id, different grain)", async () => {
         const port = new FakePort({
-            inline: [makeComment("inline", 120, [down()])],
-            summary: [makeComment("summary", 121, [up()])],
+            inline: [makeComment("inline", 100, [down()])],
+            summary: [makeComment("summary", 100, [up()])],
         });
         const result = await sweepThumbs(port, VALID_CONFIG);
-
-        expect(port.posted).toHaveLength(1);
-        expect(port.posted[0]?.grain).toBe("inline");
-        expect(result.actions.find((a) => a.grain === "summary")?.reason).toBe(
-            "no-downvote",
-        );
+        expect(
+            result.actions.find(
+                (a) => a.grain === "inline" && a.commentId === 100,
+            )?.downvotes,
+        ).toBe(1);
+        expect(
+            result.actions.find(
+                (a) => a.grain === "summary" && a.commentId === 100,
+            )?.downvotes,
+        ).toBe(0);
     });
 
     it("produces one action per comment across both grains", async () => {
@@ -497,8 +291,7 @@ describe("two-grain collection", () => {
         const port = new FakePort(noComments());
         const result = await sweepThumbs(port, VALID_CONFIG);
         expect(result.actions).toHaveLength(0);
-        expect(result.followupsPosted).toBe(0);
-        expect(port.posted).toHaveLength(0);
+        expect(result.downvotedComments).toBe(0);
     });
 });
 
@@ -515,7 +308,5 @@ describe("config guard", () => {
                 botLogin: "",
             } as ThumbsSweepConfig),
         ).rejects.toThrow(/Invalid thumbs-sweep config/);
-        // Nothing was posted because the guard fires before any traversal.
-        expect(port.posted).toHaveLength(0);
     });
 });

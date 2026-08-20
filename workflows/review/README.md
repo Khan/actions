@@ -149,14 +149,14 @@ you can pick the one that says what you mean:
   do not join the corpus; a fixed defect that reappears is a fresh finding.
 - **👎 the finding's comment.** Same adjudication as resolving, through the
   reaction channel: a 👎 on a thread's OPENING comment puts its defect in the
-  adjudicated corpus whether or not you also resolve. The feedback sweep may
-  additionally ask one follow-up ("why?"), which calibrates the eval suite;
-  answering it is welcome but the 👎 alone is what suppresses. Reactions on
-  replies are conversation, not adjudication. 👎 is the ONLY adjudicating
-  reaction: a 😕 triggers the sweep's follow-up question like a 👎 does, but
-  it does not suppress (😕 reads as "unclear", not "wrong", and ambiguity is
-  worth a question, not a standing suppression). The bot's own seeded nudge
-  reactions never count as adjudication either.
+  adjudicated corpus whether or not you also resolve. The 👎 alone is what
+  suppresses; if you want to say why, reply in the thread (replies reach the
+  maintainer via the weekly feedback report). Reactions on replies are
+  conversation, not adjudication. 👎 is the ONLY adjudicating reaction: a 😕
+  counts as negative signal in the sweep's tallies but does not suppress (😕
+  reads as "unclear", not "wrong", and ambiguity is worth a conversation, not
+  a standing suppression). The bot's own seeded nudge reactions never count
+  as adjudication either.
 - **Hide the comment.** Reads as nothing. The reviewer does not see hidden
   state; resolve or 👎 instead.
 
@@ -718,18 +718,21 @@ out this repo at the pinned `review-v*` tag and run lib scripts with
 - **Thumbs sweep** (`lib/run-thumbs-sweep.ts`, every 1-2 hours): collects
   reactions on the reviewer's comments at both grains (inline review comments,
   identified by the code-owned Conventional-Comment label prefixes; the
-  risks/patterns summary comment, identified by its hidden marker) and posts
-  exactly one "why?" follow-up per newly-downvoted comment, offering the closed
-  reason vocabulary (`incorrect` / `unimportant` / `unclear` / `duplicate`).
-  Reactions are tallied with the same sets gh-aw's outcome evaluation uses
-  (👍/❤️/🎉/🚀 positive, 👎/😕 negative; a 😕 triggers the follow-up like a 👎),
-  and resolved inline threads are counted as their own positive column: threads
-  also get resolved just to clear noise, so resolution is reported alongside
-  the reaction tallies rather than folded into them. Idempotent across restarts
-  via the hidden follow-up markers; bounded to PRs updated in the last 14 days
-  (`REVIEW_SWEEP_LOOKBACK_DAYS`), skipping PRs closed or merged more than 3
-  days ago (`REVIEW_SWEEP_CLOSED_GRACE_DAYS`; feedback lands around merge time,
-  after which a landed PR stops changing). Needs only `pull-requests: write`.
+  risks/patterns summary comment, identified by its hidden marker) and reports
+  them. Read-only: it posts nothing. (It used to post a "why?" follow-up per
+  newly-downvoted comment; that surface was retired after the 2026-08-20
+  audit measured 2 reason replies across 31 follow-ups, with each follow-up
+  also registering as an implicit empty review event. A bare 👎 adjudicates
+  directly since v1.17.0, and thread replies reach the maintainer via the
+  weekly feedback report.) Reactions are tallied with the same sets gh-aw's
+  outcome evaluation uses (👍/❤️/🎉/🚀 positive, 👎/😕 negative), and resolved
+  inline threads are counted as their own positive column: threads also get
+  resolved just to clear noise, so resolution is reported alongside the
+  reaction tallies rather than folded into them. Bounded to PRs updated in the
+  last 14 days (`REVIEW_SWEEP_LOOKBACK_DAYS`), skipping PRs closed or merged
+  more than 3 days ago (`REVIEW_SWEEP_CLOSED_GRACE_DAYS`; feedback lands
+  around merge time, after which a landed PR stops changing). Needs only
+  `pull-requests: read`.
   The sweep run needs `npm ci --omit=dev` in the checked-out
   `workflows/review/` first (the sweep's `octokit` dependency is pinned exactly
   in `package.json`, with the transitive tree locked by the committed
@@ -741,9 +744,9 @@ out this repo at the pinned `review-v*` tag and run lib scripts with
   comments/run, validator drop rate, cost/run. Needs only `actions: read`.
 
 The reviewer posts as `github-actions[bot]` (gh-aw safe outputs use the
-workflow's own token), so that login is both the sweep's `botLogin` filter and
-the author of its follow-ups; every count in the sweep excludes that login's
-own reactions, so the seeded nudge pair (below) is never live signal.
+workflow's own token), so that login is the sweep's `botLogin` filter; every
+count in the sweep excludes that login's own reactions, so the seeded nudge
+pair (below) is never live signal.
 
 ### Relationship to the gh-aw outcome-collector
 
@@ -752,13 +755,12 @@ classifies every agentic safe output as accepted / rejected / ignored /
 pending and exports the results to Sentry over OTLP. The two systems answer
 different questions and neither replaces the other:
 
-- **Outcome-collector**: passive fleet-wide acceptance telemetry. It never
-  writes to GitHub, so it can observe engagement but cannot ask *why* a
-  comment was downvoted. Its data lives in Sentry.
-- **Thumbs sweep**: active reason elicitation for the reviewer's tuning loop.
-  Its "why?" follow-ups produce the closed reason labels that calibrate the
-  eval-suite judge and feed dismissal learning. Its data lives in each run's
-  job summary and stdout JSON (not exported to OTel today).
+- **Outcome-collector**: passive fleet-wide acceptance telemetry across every
+  agentic workflow. Its data lives in Sentry.
+- **Thumbs sweep**: identity-filtered reaction tallies scoped to the
+  reviewer's own comments (the outcome-collector counts any reaction with no
+  reactor identity, so it cannot exclude the seeded nudges). Its data lives in
+  each run's job summary and stdout JSON (not exported to OTel today).
 
 Two known interactions:
 

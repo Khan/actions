@@ -11,9 +11,9 @@ import {buildFollowupMarker, sweepThumbs} from "./thumbs-sweep.ts";
 
 /**
  * Tests for the octokit-backed port. A fake `request` function dispatches on
- * the route template and records writes, so the traversal, the two-grain
- * classification, the reaction resolution, and the write routing are all
- * exercised without a network.
+ * the route template and records any writes (there must be none — the sweep
+ * is read-only), so the traversal, the two-grain classification, and the
+ * reaction resolution are all exercised without a network.
  */
 
 const BOT = "github-actions[bot]";
@@ -251,10 +251,6 @@ describe("traversal and classification", () => {
 
         const summary = await port.listBotComments("summary");
         expect(summary.map((c) => c.id)).toEqual([201]);
-
-        const followups = await port.listExistingFollowups();
-        expect(followups).toHaveLength(1);
-        expect(followups[0]).toContain("comment-id=999");
     });
 
     it("stays within the lookback + closed-grace windows and reports auditable stats", async () => {
@@ -276,44 +272,8 @@ describe("traversal and classification", () => {
     });
 });
 
-describe("writes", () => {
-    it("routes follow-ups per grain (inline reply vs PR comment)", async () => {
-        const {request, writes} = makeFakeGithub();
-        const port = makePort(request);
-        await port.listBotComments("inline"); // populate the comment->PR map
-
-        await port.postFollowup({
-            grain: "inline",
-            commentId: 101,
-            body: "why?",
-        });
-        await port.postFollowup({
-            grain: "summary",
-            commentId: 201,
-            body: "why?",
-        });
-
-        expect(writes.map((w) => w.route)).toEqual([
-            "POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies",
-            "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
-        ]);
-        expect(writes[0]?.params["pull_number"]).toBe(7);
-        expect(writes[0]?.params["comment_id"]).toBe(101);
-        expect(writes[1]?.params["issue_number"]).toBe(7);
-    });
-
-    it("rejects a follow-up for a comment the traversal never saw", async () => {
-        const {request} = makeFakeGithub();
-        const port = makePort(request);
-        await port.listBotComments("inline");
-        await expect(
-            port.postFollowup({grain: "inline", commentId: 555, body: "?"}),
-        ).rejects.toThrow(/unknown comment/);
-    });
-});
-
 describe("end-to-end with the sweep core", () => {
-    it("follows up the human 👎 exactly once", async () => {
+    it("tallies the human 👎 and never writes to GitHub", async () => {
         const {request, writes} = makeFakeGithub();
         const port = makePort(request);
 
@@ -323,14 +283,14 @@ describe("end-to-end with the sweep core", () => {
             botLogin: BOT,
         });
 
-        // The human 👎 on 101 draws exactly one follow-up, threaded inline.
-        expect(result.followupsPosted).toBe(1);
-        const followupWrites = writes.filter((w) =>
-            w.route.includes("replies"),
-        );
-        expect(followupWrites).toHaveLength(1);
-        expect(String(followupWrites[0]?.params["body"])).toContain(
-            "review-thumbs-followup grain=inline comment-id=101",
-        );
+        expect(result.downvotedComments).toBe(1);
+        expect(
+            result.actions.find(
+                (a) => a.grain === "inline" && a.commentId === 101,
+            )?.downvotes,
+        ).toBe(1);
+        // The sweep is read-only: no write route is ever hit (the GraphQL
+        // read is dispatched explicitly by the fake, not recorded here).
+        expect(writes).toHaveLength(0);
     });
 });

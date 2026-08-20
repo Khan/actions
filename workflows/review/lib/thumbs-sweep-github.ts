@@ -1,13 +1,12 @@
 /**
  * The octokit-backed {@link ThumbsSweepPort} — the production GitHub
- * implementation of the side-effect boundary `thumbs-sweep.ts` defines.
+ * implementation of the read boundary `thumbs-sweep.ts` defines.
  *
  * Division of labour (unchanged from the sweep module): `thumbs-sweep.ts` owns
- * all control flow and idempotency; this module owns only the GitHub traversal —
- * which comments are the reviewer's, at which grain, with which reactions and
- * thread state — and the write call (`postFollowup`). It holds no sweep logic:
- * a bug here can mis-list or mis-post, but it cannot re-ping, because that rule
- * lives in the sweep core.
+ * the tally; this module owns only the GitHub traversal — which comments are
+ * the reviewer's, at which grain, with which reactions and thread state. It is
+ * read-only: the sweep's follow-up posting was retired (see the sweep module's
+ * header), so nothing here writes to GitHub.
  *
  * How the reviewer's comments are identified (per grain):
  *
@@ -26,9 +25,8 @@
  *     is the identifying signature; it is code-owned and templated, so the match
  *     is exact, not heuristic prose-sniffing.
  *
- * Comments containing a thumbs-followup marker are never candidates at either
- * grain — they are returned through `listExistingFollowups` instead, which is
- * what makes the sweep idempotent across restarts with no state store.
+ * Comments containing a thumbs-followup marker (the retired follow-ups, still
+ * present on older PRs) are never candidates at either grain.
  *
  * API-call bounding: the traversal reads only pull requests updated within
  * `lookbackDays` (default 14), newest first, capped at `maxPulls`; closed or
@@ -45,7 +43,6 @@
 import type {
     BotComment,
     FeedbackGrain,
-    PostedFollowup,
     Reaction,
     ThumbsSweepPort,
 } from "./thumbs-sweep.ts";
@@ -153,7 +150,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export type SweepTraversalStats = {
     /** PRs whose comments were traversed this sweep. */
     pullsScanned: number;
-    /** Total GitHub API requests issued (reads and writes). */
+    /** Total GitHub API requests issued (all reads). */
     apiRequests: number;
     /**
      * Real-user reaction tallies observed across the reviewer's comments (the
@@ -323,15 +320,7 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
     private resolvedInlineThreads = 0;
     private pullsScanned = 0;
 
-    /** (grain, commentId) -> PR number, filled by the traversal. */
-    private readonly pullByComment = new Map<string, number>();
-
-    private snapshot:
-        | Promise<{
-              comments: Map<FeedbackGrain, BotComment[]>;
-              followupBodies: string[];
-          }>
-        | undefined;
+    private snapshot: Promise<Map<FeedbackGrain, BotComment[]>> | undefined;
 
     constructor(request: OctokitRequestFn, options: GithubThumbsSweepOptions) {
         this.request = request;
@@ -363,49 +352,8 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
     }
 
     async listBotComments(grain: FeedbackGrain): Promise<BotComment[]> {
-        const {comments} = await this.load();
+        const comments = await this.load();
         return comments.get(grain) ?? [];
-    }
-
-    async listExistingFollowups(): Promise<string[]> {
-        const {followupBodies} = await this.load();
-        return followupBodies;
-    }
-
-    async postFollowup(followup: PostedFollowup): Promise<void> {
-        const pullNumber = this.pullByComment.get(
-            `${followup.grain}:${followup.commentId}`,
-        );
-        if (pullNumber === undefined) {
-            throw new Error(
-                `postFollowup: unknown comment ${followup.grain}:${followup.commentId}`,
-            );
-        }
-        if (followup.grain === "inline") {
-            // Reply in the inline comment's own thread, so the "why?" prompt
-            // sits next to the finding it asks about.
-            await this.write(
-                "POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies",
-                {
-                    owner: this.owner,
-                    repo: this.repo,
-                    pull_number: pullNumber,
-                    comment_id: followup.commentId,
-                    body: followup.body,
-                },
-            );
-            return;
-        }
-        // Summary follow-ups are ordinary PR (issue) comments.
-        await this.write(
-            "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
-            {
-                owner: this.owner,
-                repo: this.repo,
-                issue_number: pullNumber,
-                body: followup.body,
-            },
-        );
     }
 
     private load() {
@@ -420,14 +368,6 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
         this.apiRequests += 1;
         const {data} = await this.request(route, params);
         return data;
-    }
-
-    private async write(
-        route: string,
-        params: Record<string, unknown>,
-    ): Promise<void> {
-        this.apiRequests += 1;
-        await this.request(route, params);
     }
 
     /** All pages of a list endpoint, in listing order. */
@@ -540,12 +480,8 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
         return reactions;
     }
 
-    private async traverse(): Promise<{
-        comments: Map<FeedbackGrain, BotComment[]>;
-        followupBodies: string[];
-    }> {
+    private async traverse(): Promise<Map<FeedbackGrain, BotComment[]>> {
         const candidates: CandidateComment[] = [];
-        const followupBodies: string[] = [];
 
         const pullNumbers = await this.recentPullNumbers();
         for (const pullNumber of pullNumbers) {
@@ -570,17 +506,15 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
                         continue;
                     }
                     const body = bodyOf(comment);
-                    // Follow-ups are collected for idempotency at both grains
-                    // and are never themselves candidates.
+                    // The retired follow-ups still exist on older PRs and are
+                    // never candidates.
                     if (isFollowupBody(body)) {
-                        followupBodies.push(body);
                         continue;
                     }
                     const id = idOf(comment);
                     if (id === undefined || !isCandidateBody(body)) {
                         continue;
                     }
-                    this.pullByComment.set(`${grain}:${id}`, pullNumber);
                     candidates.push({
                         grain,
                         id,
@@ -639,7 +573,7 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
             );
         }
 
-        return {comments, followupBodies};
+        return comments;
     }
 
     /**

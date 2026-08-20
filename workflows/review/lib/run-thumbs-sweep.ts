@@ -15,8 +15,8 @@
  * YAML with no arguments to quote:
  *
  *   GITHUB_TOKEN                  required; the workflow's token
- *                                 (`pull-requests: write` is the only scope the
- *                                 sweep needs).
+ *                                 (`pull-requests: read` is the only scope the
+ *                                 sweep needs — it never writes).
  *   GITHUB_REPOSITORY             `owner/repo`; provided by Actions.
  *   REVIEW_SWEEP_BOT_LOGIN        login the reviewer posts as
  *                                 (default `github-actions[bot]`).
@@ -24,9 +24,6 @@
  *   REVIEW_SWEEP_MAX_PULLS        traversal cap (default 200).
  *   REVIEW_SWEEP_CLOSED_GRACE_DAYS  days a closed/merged PR stays in the
  *                                 sweep after closing (default 3).
- *   REVIEW_SWEEP_DRY_RUN          `true` to traverse and decide without
- *                                 posting anything (first-run
- *                                 audit; default `false`).
  *   REVIEW_SWEEP_WORKFLOW_IDS     comma-separated gh-aw workflow ids whose
  *                                 call-id markers identify the summary
  *                                 comment (default `review`).
@@ -38,11 +35,7 @@
 
 import {appendFileSync} from "node:fs";
 
-import {
-    sweepThumbs,
-    type SweepResult,
-    type ThumbsSweepPort,
-} from "./thumbs-sweep.ts";
+import {sweepThumbs, type SweepResult} from "./thumbs-sweep.ts";
 import {
     GithubThumbsSweepPort,
     type OctokitRequestFn,
@@ -70,38 +63,24 @@ const intEnv = (name: string): number | undefined => {
 export const renderSweepSummary = (
     result: SweepResult,
     stats: SweepTraversalStats,
-    options: {dryRun?: boolean} = {},
 ): string => {
-    const byReason = new Map<string, number>();
-    for (const action of result.actions) {
-        byReason.set(action.reason, (byReason.get(action.reason) ?? 0) + 1);
-    }
     const downvoted = result.actions.filter((a) => a.downvotes > 0);
 
     const lines = [
-        options.dryRun === true
-            ? "## Thumbs feedback sweep (DRY RUN — nothing was posted)"
-            : "## Thumbs feedback sweep",
+        "## Thumbs feedback sweep",
         "",
         `- Reviewer comments swept: **${result.actions.length}** across ${stats.pullsScanned} recently-active PRs`,
         `- Live reactions observed (bot's own excluded; 👍/❤️/🎉/🚀 vs 👎/😕): **${stats.reactions.positive} positive / ${stats.reactions.negative} negative**`,
         `- Reviewer inline threads resolved: **${stats.resolvedInlineThreads}**`,
-        `- Follow-ups posted this sweep: **${result.followupsPosted}**` +
-            ` (already followed up: ${
-                byReason.get("already-followed-up") ?? 0
-            })`,
+        `- Comments currently downvoted: **${result.downvotedComments}**`,
         `- GitHub API requests used: ${stats.apiRequests}`,
     ];
 
     if (downvoted.length > 0) {
-        lines.push(
-            "",
-            "| Grain | Comment | 👎 | Action |",
-            "| --- | --- | --- | --- |",
-        );
+        lines.push("", "| Grain | Comment | 👎 |", "| --- | --- | --- |");
         for (const action of downvoted) {
             lines.push(
-                `| ${action.grain} | ${action.commentId} | ${action.downvotes} | ${action.reason} |`,
+                `| ${action.grain} | ${action.commentId} | ${action.downvotes} |`,
             );
         }
     }
@@ -125,7 +104,6 @@ const main = async (): Promise<void> => {
     const lookbackDays = intEnv("REVIEW_SWEEP_LOOKBACK_DAYS");
     const maxPulls = intEnv("REVIEW_SWEEP_MAX_PULLS");
     const closedGraceDays = intEnv("REVIEW_SWEEP_CLOSED_GRACE_DAYS");
-    const dryRun = env("REVIEW_SWEEP_DRY_RUN") === "true";
     const reviewWorkflowIds = (env("REVIEW_SWEEP_WORKFLOW_IDS") ?? "review")
         .split(",")
         .map((id) => id.trim())
@@ -152,34 +130,18 @@ const main = async (): Promise<void> => {
         ...(closedGraceDays !== undefined ? {closedGraceDays} : {}),
     });
 
-    // Dry-run mode (`REVIEW_SWEEP_DRY_RUN=true`): traverse and decide exactly
-    // as a real sweep would, but swallow the write call. Useful for a
-    // first-run audit of what a repo's sweep WOULD post.
-    const effectivePort: ThumbsSweepPort = dryRun
-        ? {
-              listBotComments: (grain) => port.listBotComments(grain),
-              listExistingFollowups: () => port.listExistingFollowups(),
-              postFollowup: async () => {},
-          }
-        : port;
-
-    const result = await sweepThumbs(effectivePort, {
+    const result = await sweepThumbs(port, {
         owner,
         repo,
         botLogin,
     });
     const stats = port.stats();
 
-    process.stdout.write(
-        `${JSON.stringify({dryRun, result, stats}, null, 2)}\n`,
-    );
+    process.stdout.write(`${JSON.stringify({result, stats}, null, 2)}\n`);
 
     const summaryPath = env("GITHUB_STEP_SUMMARY");
     if (summaryPath !== undefined) {
-        appendFileSync(
-            summaryPath,
-            renderSweepSummary(result, stats, {dryRun}),
-        );
+        appendFileSync(summaryPath, renderSweepSummary(result, stats));
     }
 };
 
