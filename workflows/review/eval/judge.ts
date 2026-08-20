@@ -1,7 +1,7 @@
 /**
  * LLM-judge: an Opus-4.8 judge that scores the *quality* of the
  * comments a run posted, a human-audit sample surfaced from its output, and a
- * calibration pass against the thumbs-sweep labels.
+ * calibration pass against the (historical) thumbs-sweep labels.
  *
  * Why a judge at all: the deterministic metrics (recall/precision/noise) score
  * whether the reviewer posted the *right findings* against corpus ground truth.

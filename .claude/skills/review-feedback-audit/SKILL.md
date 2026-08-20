@@ -169,9 +169,9 @@ jq '[.[] | {id, pr: (.pull_request_url|split("/")|last|tonumber), path,
 ```
 
 **Thumbs-sweep follow-ups (historical only).** The sweep's "why?" follow-up
-was retired (see the `workflows/review` CHANGELOG entry for the retirement);
-the sweep is read-only and posts nothing, so PRs reviewed after that release
-never carry follow-ups, and old ones age out of the sweep's 14-day lookback.
+was retired and the sweep itself then deleted entirely (see the
+`workflows/review` CHANGELOG entries for both); PRs reviewed after the
+retirement release never carry follow-ups.
 When the audit window predates the retirement, follow-ups carry the
 `review-thumbs-followup` marker (a sweep-posted comment survived the
 sanitizer because the sweep posted through the plain API, not through safe
