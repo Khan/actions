@@ -11,11 +11,11 @@
  * What it stages under /tmp/gh-aw/review/ (the Step 1 contract):
  *
  *   pr-context.json     PR metadata (untrusted author text included verbatim)
- *   ticket-context.json the linked Jira ticket (stage-ticket.ts): the PR's
- *                       issue key resolved and fetched read-only when the
- *                       consumer configures credentials; otherwise (and on
- *                       any fetch failure) {available: false, reason} — a
- *                       ticket is context, never a prerequisite
+ *   ticket-context.json the linked Jira tickets (stage-ticket.ts): every
+ *                       issue key the PR references, resolved and fetched
+ *                       read-only when the consumer configures credentials;
+ *                       otherwise (and when none resolve) {available: false,
+ *                       reason}. A ticket is context, never a prerequisite.
  *   files.json          path/status/hasPatch per changed file
  *   full.diff           standard unified diff rebuilt from the per-file
  *                       patches (diff --git + ---/+++ headers per file, which
@@ -429,7 +429,7 @@ export const runStagePrCli = async (
         ),
     );
 
-    // 1b. The linked Jira ticket → ticket-context.json (never a
+    // 1b. The linked Jira tickets → ticket-context.json (never a
     // prerequisite: every degradation stages {available: false, reason} and
     // the intent-reading sub-agents fall back to the PR description).
     // stage-ticket.ts owns every degradation shape, including the
@@ -438,7 +438,6 @@ export const runStagePrCli = async (
         baseUrl: env.REVIEW_JIRA_BASE_URL ?? "",
         email: env.REVIEW_JIRA_EMAIL ?? "",
         apiToken: env.REVIEW_JIRA_API_TOKEN ?? "",
-        projects: env.REVIEW_JIRA_PROJECTS ?? "",
         title: pr.title ?? "",
         headBranch: pr.head?.ref ?? "",
         description: pr.body ?? "",
@@ -891,10 +890,10 @@ if (typeof require !== "undefined" && require.main === module) {
         process.exit(2);
     }
     // The linked-ticket GET (stage-ticket.ts). Plain fetch, no retry, and a
-    // hard 10s bound (a blackholed Jira host must not stall staging until
-    // the job timeout): a ticket is context, not a prerequisite, and
-    // stage-ticket degrades every failure to {available: false} rather than
-    // failing the staging.
+    // hard 10s bound per candidate, fetched in parallel (a blackholed Jira
+    // host must not stall staging until the job timeout): a ticket is
+    // context, not a prerequisite, and stage-ticket degrades every failure
+    // rather than failing the staging.
     const ticketFetch = async (
         url: string,
         headers: Record<string, string>,

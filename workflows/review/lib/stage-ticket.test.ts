@@ -1,9 +1,9 @@
 import {describe, it, expect} from "vitest";
 
 import {
-    buildTicketContext,
-    extractIssueKey,
-    parseProjectAllowlist,
+    buildStagedTicket,
+    extractIssueKeys,
+    MAX_TICKET_FETCHES,
     stageTicketContext,
     type TicketFetch,
 } from "./stage-ticket";
@@ -12,7 +12,8 @@ import {
  * Linked-ticket staging tests. The contract under pin: ticket-context.json is
  * ALWAYS writable (every path returns a context, nothing throws), a ticket is
  * never a prerequisite (each degradation carries a machine-readable reason and
- * the prompts fall back to the PR description), and content is size-capped
+ * the prompts fall back to the PR description), every candidate key is tried
+ * (noise 404s out; it never blocks a real key), and content is size-capped
  * because the file is prompt input.
  */
 
@@ -20,7 +21,6 @@ const OPTIONS = {
     baseUrl: "https://khanacademy.atlassian.net",
     email: "bot@khanacademy.org",
     apiToken: "tok",
-    projects: "KORE",
     title: "Make parallel moderation the default",
     headBranch: "moderation-defaults",
     description: "Concludes the experiment.\n\nIssue: KORE-2393",
@@ -51,82 +51,58 @@ const okFetch =
     () =>
         Promise.resolve({status: 200, json});
 
-const PROJECTS = ["KORE", "PROJ", "ABC"];
+/** A fetch that resolves some keys and 404s the rest. */
+const fetchByKey =
+    (issues: Record<string, unknown>): TicketFetch =>
+    (url) => {
+        const key = /issue\/([A-Z0-9-]+)\?/.exec(url)?.[1] ?? "";
+        return Promise.resolve(
+            key in issues
+                ? {status: 200, json: issues[key]}
+                : {status: 404, json: null},
+        );
+    };
 
-describe("extractIssueKey", () => {
-    it("prefers title over branch over description", () => {
+describe("extractIssueKeys", () => {
+    it("collects every candidate in order of appearance, deduped", () => {
         expect(
-            extractIssueKey("KORE-1 x", "PROJ-2-branch", "see ABC-3", PROJECTS),
-        ).toBe("KORE-1");
+            extractIssueKeys(
+                "KORE-1 x",
+                "feature/PROJ-2",
+                "see ABC-3, then KORE-1 again",
+            ),
+        ).toEqual(["KORE-1", "PROJ-2", "ABC-3"]);
+        expect(extractIssueKeys("no key", "no-key", "none here")).toEqual([]);
+    });
+
+    it("keeps key-shaped noise as candidates (the fetch 404s them out)", () => {
+        // UTF-8, SHA-256, CVE-2024-1234 all match the key regex; they are
+        // candidates like any other, so a bogus token can never block a
+        // real key by winning first-match.
         expect(
-            extractIssueKey("no key", "feature/PROJ-2", "see ABC-3", PROJECTS),
-        ).toBe("PROJ-2");
-        expect(
-            extractIssueKey("no key", "no-key", "Issue: KORE-2393", PROJECTS),
-        ).toBe("KORE-2393");
+            extractIssueKeys("Fix UTF-8 handling for KORE-123", "", ""),
+        ).toEqual(["UTF-8", "KORE-123"]);
     });
 
     it("matches keys inside URLs but not lowercase hyphenated prose", () => {
         expect(
-            extractIssueKey(
+            extractIssueKeys(
                 "",
                 "",
                 "https://khanacademy.atlassian.net/browse/KORE-2510",
-                PROJECTS,
             ),
-        ).toBe("KORE-2510");
-        expect(
-            extractIssueKey("re-123 follow-up", "fix-42", "", PROJECTS),
-        ).toBeNull();
+        ).toEqual(["KORE-2510"]);
+        expect(extractIssueKeys("re-123 follow-up", "fix-42", "")).toEqual([]);
     });
 
-    it("skips key-shaped tokens outside the project allowlist", () => {
-        // UTF-8, SHA-256, CVE-2024-1234 all match the key regex; without the
-        // allowlist gate the first would win and block the real key.
-        expect(
-            extractIssueKey(
-                "Fix UTF-8 handling for KORE-123",
-                "",
-                "",
-                PROJECTS,
-            ),
-        ).toBe("KORE-123");
-        expect(
-            extractIssueKey(
-                "Bump to SHA-256 digests (PROJ-9)",
-                "",
-                "Handle CVE-2024-1234 in deps",
-                PROJECTS,
-            ),
-        ).toBe("PROJ-9");
-        expect(
-            extractIssueKey("Handle CVE-2024-1234 in deps", "", "", PROJECTS),
-        ).toBeNull();
-    });
-
-    it("takes the LAST allowed key in the description", () => {
-        // The `~/bin/gh` convention puts the tracking key at the END of the
-        // body, after any tickets the prose mentions (this repo's own PR
-        // bodies mention e.g. PRA-43 before the trailing KORE link).
-        expect(
-            extractIssueKey(
-                "no key",
-                "no-key",
-                "tracked separately (ABC-43). More prose.\n\n[KORE-2510](https://x/browse/KORE-2510)",
-                PROJECTS,
-            ),
-        ).toBe("KORE-2510");
-    });
-});
-
-describe("parseProjectAllowlist", () => {
-    it("splits, trims, uppercases, and drops empties", () => {
-        expect(parseProjectAllowlist("KORE, fei,,PRA ")).toEqual([
-            "KORE",
-            "FEI",
-            "PRA",
-        ]);
-        expect(parseProjectAllowlist("")).toEqual([]);
+    it("caps the candidate list", () => {
+        const description = Array.from(
+            {length: 10},
+            (_, i) => `KORE-${i}`,
+        ).join(" ");
+        expect(extractIssueKeys("", "", description)).toHaveLength(
+            MAX_TICKET_FETCHES,
+        );
     });
 });
 
@@ -137,8 +113,12 @@ describe("stageTicketContext", () => {
             OPTIONS,
         );
         expect(warnings).toEqual([]);
-        expect(context).toMatchObject({
-            available: true,
+        expect(context.available).toBe(true);
+        if (!context.available) {
+            throw new Error("unreachable");
+        }
+        expect(context.tickets).toHaveLength(1);
+        expect(context.tickets[0]).toMatchObject({
             key: "KORE-2393",
             url: "https://khanacademy.atlassian.net/browse/KORE-2393",
             summary: "Moderation parallelism experiment",
@@ -148,7 +128,7 @@ describe("stageTicketContext", () => {
             labels: ["ai-guide"],
             truncated: false,
         });
-        expect(context.comments).toEqual([
+        expect(context.tickets[0].comments).toEqual([
             {
                 author: "Susanna",
                 created: "2026-08-01T00:00:00.000+0000",
@@ -157,7 +137,46 @@ describe("stageTicketContext", () => {
         ]);
     });
 
-    it("requests the ticket with Basic auth against the v2 issue endpoint", async () => {
+    it("stages every ticket the PR references, in candidate order", async () => {
+        const {context, warnings} = await stageTicketContext(
+            fetchByKey({
+                "KORE-1": {fields: {summary: "first"}},
+                "ABC-3": {fields: {summary: "third"}},
+            }),
+            {
+                ...OPTIONS,
+                title: "KORE-1: do the thing",
+                headBranch: "kore1",
+                description: "relates to PROJ-2 and ABC-3",
+            },
+        );
+        expect(warnings).toEqual([]);
+        expect(context).toMatchObject({available: true});
+        if (!context.available) {
+            throw new Error("unreachable");
+        }
+        // PROJ-2 404d (noise or not browsable) and dropped silently.
+        expect(context.tickets.map((t) => t.key)).toEqual(["KORE-1", "ABC-3"]);
+    });
+
+    it("never lets key-shaped noise block a real key", async () => {
+        const {context} = await stageTicketContext(
+            fetchByKey({"KORE-123": {fields: {summary: "real"}}}),
+            {
+                ...OPTIONS,
+                title: "Fix UTF-8 handling for KORE-123",
+                headBranch: "",
+                description: "Handle CVE-2024-1234 in deps",
+            },
+        );
+        expect(context).toMatchObject({available: true});
+        if (!context.available) {
+            throw new Error("unreachable");
+        }
+        expect(context.tickets.map((t) => t.key)).toEqual(["KORE-123"]);
+    });
+
+    it("requests each ticket with Basic auth against the v2 issue endpoint", async () => {
         const calls: {url: string; headers: Record<string, string>}[] = [];
         const spyFetch: TicketFetch = (url, headers) => {
             calls.push({url, headers});
@@ -200,22 +219,7 @@ describe("stageTicketContext", () => {
         }
     });
 
-    it("stages not-configured with a warning when only the allowlist is missing", async () => {
-        // Credentials without REVIEW_JIRA_PROJECTS is a half-configured
-        // consumer: same degradation, but visibly.
-        const neverFetch: TicketFetch = () => {
-            throw new Error("must not fetch");
-        };
-        const {context, warnings} = await stageTicketContext(neverFetch, {
-            ...OPTIONS,
-            projects: "",
-        });
-        expect(context).toEqual({available: false, reason: "not-configured"});
-        expect(warnings).toHaveLength(1);
-        expect(warnings[0]).toContain("REVIEW_JIRA_PROJECTS");
-    });
-
-    it("stages no-issue-key when nothing ticket-shaped is referenced", async () => {
+    it("stages no-issue-key when nothing key-shaped is referenced", async () => {
         const {context} = await stageTicketContext(okFetch(ISSUE), {
             ...OPTIONS,
             title: "fix typo",
@@ -225,15 +229,11 @@ describe("stageTicketContext", () => {
         expect(context).toEqual({available: false, reason: "no-issue-key"});
     });
 
-    it("degrades a 404 silently and other failures with a warning", async () => {
-        const notFound = await stageTicketContext(
-            () => Promise.resolve({status: 404, json: null}),
-            OPTIONS,
-        );
+    it("degrades all-404 silently and auth/network failures with warnings", async () => {
+        const notFound = await stageTicketContext(fetchByKey({}), OPTIONS);
         expect(notFound.context).toEqual({
             available: false,
             reason: "not-found",
-            key: "KORE-2393",
         });
         expect(notFound.warnings).toEqual([]);
 
@@ -241,21 +241,43 @@ describe("stageTicketContext", () => {
             () => Promise.resolve({status: 401, json: null}),
             OPTIONS,
         );
-        expect(denied.context).toMatchObject({
+        expect(denied.context).toEqual({
             available: false,
             reason: "fetch-failed",
         });
         expect(denied.warnings).toHaveLength(1);
+        expect(denied.warnings[0]).toContain("fall back");
 
         const down = await stageTicketContext(
             () => Promise.reject(new Error("ECONNREFUSED")),
             OPTIONS,
         );
-        expect(down.context).toMatchObject({
+        expect(down.context).toEqual({
             available: false,
             reason: "fetch-failed",
         });
         expect(down.warnings[0]).toContain("ECONNREFUSED");
+    });
+
+    it("stages the survivors when one candidate fails and another resolves", async () => {
+        const flaky: TicketFetch = (url) =>
+            url.includes("KORE-1?")
+                ? Promise.reject(new Error("ETIMEDOUT"))
+                : Promise.resolve({status: 200, json: ISSUE});
+        const {context, warnings} = await stageTicketContext(flaky, {
+            ...OPTIONS,
+            title: "KORE-1 and KORE-2393",
+            headBranch: "",
+            description: "",
+        });
+        expect(context).toMatchObject({available: true});
+        if (!context.available) {
+            throw new Error("unreachable");
+        }
+        expect(context.tickets.map((t) => t.key)).toEqual(["KORE-2393"]);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("ETIMEDOUT");
+        expect(warnings[0]).toContain("other tickets staged");
     });
 
     it("degrades a 200 whose body is not a Jira issue", async () => {
@@ -269,7 +291,6 @@ describe("stageTicketContext", () => {
             expect(context).toEqual({
                 available: false,
                 reason: "fetch-failed",
-                key: "KORE-2393",
             });
             expect(warnings).toHaveLength(1);
             expect(warnings[0]).toContain("non-issue body");
@@ -277,9 +298,9 @@ describe("stageTicketContext", () => {
     });
 });
 
-describe("buildTicketContext", () => {
+describe("buildStagedTicket", () => {
     it("caps description and comment sizes and keeps the LAST 20 comments", () => {
-        const context = buildTicketContext(
+        const ticket = buildStagedTicket(
             "KORE-1",
             "https://khanacademy.atlassian.net",
             {
@@ -296,19 +317,18 @@ describe("buildTicketContext", () => {
                 },
             },
         );
-        expect(context.truncated).toBe(true);
-        expect(context.description?.length).toBeLessThan(9000);
-        expect(context.description).toContain("[truncated]");
-        expect(context.comments).toHaveLength(20);
+        expect(ticket.truncated).toBe(true);
+        expect(ticket.description.length).toBeLessThan(9000);
+        expect(ticket.description).toContain("[truncated]");
+        expect(ticket.comments).toHaveLength(20);
         // Oldest-first input: the survivors are the most recent 20.
-        expect(context.comments?.[0].author).toBe("a5");
-        expect(context.comments?.[19].body).toContain("[truncated]");
+        expect(ticket.comments[0].author).toBe("a5");
+        expect(ticket.comments[19].body).toContain("[truncated]");
     });
 
     it("tolerates a bare issue with every field missing", () => {
-        const context = buildTicketContext("K-1", "https://x", {});
-        expect(context).toMatchObject({
-            available: true,
+        const ticket = buildStagedTicket("K-1", "https://x", {});
+        expect(ticket).toMatchObject({
             key: "K-1",
             summary: "",
             resolution: null,
@@ -318,8 +338,7 @@ describe("buildTicketContext", () => {
         });
         // Belt and braces: the null-body guard lives in stageTicketContext,
         // but this function must not throw either.
-        expect(buildTicketContext("K-1", "https://x", null)).toMatchObject({
-            available: true,
+        expect(buildStagedTicket("K-1", "https://x", null)).toMatchObject({
             key: "K-1",
             comments: [],
         });
@@ -329,7 +348,7 @@ describe("buildTicketContext", () => {
         // Jira's `comment` field is a pagination envelope: `comments` is one
         // page and `total` the true count, so a long ticket's tail can live
         // beyond the page even under this module's own cap.
-        const context = buildTicketContext("K-1", "https://x", {
+        const ticket = buildStagedTicket("K-1", "https://x", {
             fields: {
                 comment: {
                     comments: [{body: "only one staged"}],
@@ -337,7 +356,7 @@ describe("buildTicketContext", () => {
                 },
             },
         });
-        expect(context.truncated).toBe(true);
-        expect(context.comments).toHaveLength(1);
+        expect(ticket.truncated).toBe(true);
+        expect(ticket.comments).toHaveLength(1);
     });
 });

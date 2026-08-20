@@ -132,8 +132,7 @@ describe("stageCase", () => {
         const vol = treeVol();
         const ticket = {
             available: true,
-            key: "KORE-1",
-            summary: "the ticket",
+            tickets: [{key: "KORE-1", summary: "the ticket"}],
         };
         stageCase(
             liveCase({

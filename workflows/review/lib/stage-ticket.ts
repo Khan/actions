@@ -1,9 +1,10 @@
 /**
- * Deterministic linked-ticket staging: fetch the Jira issue the PR references
- * and write it to /tmp/gh-aw/review/ticket-context.json alongside the rest of
- * the pre-agent staging (stage-pr.ts), so the sub-agents that reason about
- * the PR's stated intent (completeness, first-principles) read the actual
- * ticket instead of reconstructing intent from the author's summary of it.
+ * Deterministic linked-ticket staging: fetch the Jira issues the PR
+ * references and write them to /tmp/gh-aw/review/ticket-context.json
+ * alongside the rest of the pre-agent staging (stage-pr.ts), so the
+ * sub-agents that reason about the PR's stated intent (completeness,
+ * first-principles) read the actual tickets instead of reconstructing intent
+ * from the author's summary of them.
  *
  * History: the completeness prompt used to GRANT itself a Jira/Confluence
  * network read ("the tokens are scoped read-only and provided by the consumer
@@ -14,6 +15,13 @@
  * other input already follows: fetched once, deterministically, before any
  * model runs, with the agent sandbox needing no Jira egress at all.
  *
+ * Candidate stance: every key-shaped token in the title, head branch, and
+ * description is a candidate (deduped, in order of appearance, capped at
+ * MAX_TICKET_FETCHES), and every candidate is tried. Key-shaped noise
+ * (UTF-8, SHA-256, CVE-2024-1234 all match the regex) simply 404s and drops
+ * silently, so a bogus token can never block a real key, and a PR that
+ * references several tickets stages all of them.
+ *
  * Failure stance: a ticket is context, not a prerequisite; a review must run
  * identically on a PR with no ticket, a repo with no Jira credentials, or a
  * Jira outage. So this staging NEVER fails the run: every degradation writes
@@ -23,42 +31,48 @@
  *
  * Trust stance: ticket text is untrusted input under review, same as the PR
  * description. The staged JSON carries content verbatim (size-capped); the
- * consuming prompts carry the never-follow-instructions rule. The project
- * allowlist (REVIEW_JIRA_PROJECTS) bounds WHICH tickets author text can pull
- * in: an issue key is author-controlled input, and without the allowlist any
- * key written into a PR would fetch an arbitrary internal ticket with the
- * org token and feed it to prompts that post publicly.
+ * consuming prompts carry the never-follow-instructions rule. The disclosure
+ * bound (which tickets author-written keys can pull into a review that posts
+ * publicly) is the service account's Jira permissions, enforced server-side:
+ * grant it Browse Projects on only the projects reviews may quote, and
+ * anything else 404s like a stale key.
  *
- * Determinism boundary: one authenticated GET plus pure functions of its
- * result; no model call, no prose about the code under review.
+ * Determinism boundary: authenticated GETs plus pure functions of their
+ * results; no model call, no prose about the code under review.
  */
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
 /* -------------------------------------------------------------------------- */
 
-/**
- * The staged shape. `available: false` always carries a `reason`; the content
- * fields exist only when `available: true`.
- */
-export type TicketContext = {
-    available: boolean;
-    reason?:
-        | "not-configured" // no Jira base URL / credentials / project allowlist
-        | "no-issue-key" // no allowlisted issue key in the PR title/branch/description
-        | "not-found" // the key resolved but Jira returned 404 (stale/foreign key)
-        | "fetch-failed"; // auth failure, 5xx, network error
-    key?: string;
-    url?: string;
-    summary?: string;
-    status?: string;
-    resolution?: string | null;
-    type?: string;
-    labels?: string[];
-    description?: string;
-    comments?: {author: string; created: string; body: string}[];
-    truncated?: boolean;
+/** One staged ticket (content fields verbatim, size-capped). */
+export type StagedTicket = {
+    key: string;
+    url: string;
+    summary: string;
+    status: string;
+    resolution: string | null;
+    type: string;
+    labels: string[];
+    description: string;
+    comments: {author: string; created: string; body: string}[];
+    truncated: boolean;
 };
+
+/**
+ * The staged shape. `available: false` always carries a `reason`;
+ * `available: true` carries every ticket that resolved, in candidate order.
+ */
+export type TicketContext =
+    | {available: true; tickets: StagedTicket[]}
+    | {
+          available: false;
+          reason:
+              | "not-configured" // no Jira base URL / credentials in the consumer repo
+              | "no-issue-key" // nothing key-shaped in the PR title/branch/description
+              | "not-found" // every candidate 404d (noise, stale, or not browsable)
+              | "fetch-failed"; // auth failure, 5xx, or network error; none resolved
+      };
 
 /**
  * One JSON GET, injected so tests never touch the network. Returns the HTTP
@@ -75,13 +89,6 @@ export type StageTicketOptions = {
     /** Atlassian API token auth pair; empty means not configured. */
     email: string;
     apiToken: string;
-    /**
-     * Comma-separated project-key allowlist (REVIEW_JIRA_PROJECTS, e.g.
-     * "KORE,FEI"); empty means not configured. Required: it is both the
-     * false-positive filter (UTF-8, SHA-256, CVE-2024-1234 all match the
-     * key regex) and the disclosure bound (see the trust stance above).
-     */
-    projects: string;
     /** Key-extraction inputs, in precedence order (title, branch, body). */
     title: string;
     headBranch: string;
@@ -96,43 +103,36 @@ export type StageTicketOptions = {
  * A Jira issue key: uppercase project key (letter first, 2-10 chars total),
  * hyphen, number. Word-bounded so PROJ-123 inside a URL or backticks still
  * matches but lowercase prose ("re-123") does not. The shape alone is NOT
- * enough (UTF-8, SHA-256, CVE-2024-1234 all match), so every candidate is
- * gated on the project allowlist.
+ * precise (UTF-8, SHA-256, CVE-2024-1234 all match); precision comes from
+ * trying every candidate and letting the misses 404.
  */
 const ISSUE_KEY_RE = /\b([A-Z][A-Z0-9]{1,9}-\d+)\b/g;
 
-/** REVIEW_JIRA_PROJECTS ("KORE, FEI") → normalized project keys. */
-export const parseProjectAllowlist = (raw: string): string[] =>
-    raw
-        .split(",")
-        .map((project) => project.trim().toUpperCase())
-        .filter((project) => project !== "");
-
-const allowedKeys = (text: string, projects: string[]): string[] =>
-    [...text.matchAll(ISSUE_KEY_RE)]
-        .map((match) => match[1])
-        .filter((key) => projects.includes(key.split("-")[0]));
+/**
+ * The fetch cap: the staged file is prompt input, and a PR body that
+ * mentions dozens of key-shaped tokens must not turn staging into a crawl.
+ */
+export const MAX_TICKET_FETCHES = 5;
 
 /**
- * The PR's own ticket key, gated on the project allowlist. Title and branch
- * outrank the body because a body routinely *mentions* other tickets in
- * prose while the title/branch carry the PR's identity; within the title and
- * branch the FIRST allowed match wins, but within the description the LAST
- * one does (the `~/bin/gh` convention puts the tracking key at the end of
- * the body, after any tickets the prose mentions).
+ * Every candidate key in order of appearance (title, then head branch, then
+ * description), deduped, capped at MAX_TICKET_FETCHES. All of them get
+ * tried: noise and stale keys 404 out downstream.
  */
-export const extractIssueKey = (
+export const extractIssueKeys = (
     title: string,
     headBranch: string,
     description: string,
-    projects: string[],
-): string | null => {
-    return (
-        allowedKeys(title, projects)[0] ??
-        allowedKeys(headBranch, projects)[0] ??
-        allowedKeys(description, projects).at(-1) ??
-        null
-    );
+): string[] => {
+    const keys: string[] = [];
+    for (const text of [title, headBranch, description]) {
+        for (const match of text.matchAll(ISSUE_KEY_RE)) {
+            if (!keys.includes(match[1])) {
+                keys.push(match[1]);
+            }
+        }
+    }
+    return keys.slice(0, MAX_TICKET_FETCHES);
 };
 
 /** Size caps: the staged file is prompt input, not an archive. */
@@ -179,11 +179,11 @@ type JiraIssue = {
  * a dedicated comment fetch is not worth a second HTTP call until a real
  * run shows a long ticket whose tail mattered.
  */
-export const buildTicketContext = (
+export const buildStagedTicket = (
     key: string,
     baseUrl: string,
     issue: JiraIssue | null,
-): TicketContext => {
+): StagedTicket => {
     const fields = issue?.fields ?? {};
     let truncated = false;
     const description = capText(fields.description ?? "", DESCRIPTION_CAP);
@@ -204,7 +204,6 @@ export const buildTicketContext = (
         };
     });
     return {
-        available: true,
         key,
         url: `${baseUrl}/browse/${key}`,
         summary: fields.summary ?? "",
@@ -230,48 +229,19 @@ export type StageTicketResult = {
     warnings: string[];
 };
 
-/**
- * Resolve the PR's linked ticket to a `TicketContext`. Every path returns a
- * writable context; nothing here throws.
- */
-export const stageTicketContext = async (
+/** One candidate's outcome. */
+type Attempt =
+    | {kind: "ticket"; ticket: StagedTicket}
+    | {kind: "not-found"}
+    | {kind: "failed"; warning: string};
+
+const attemptFetch = async (
     fetchJson: TicketFetch,
-    options: StageTicketOptions,
-): Promise<StageTicketResult> => {
-    const {baseUrl, email, apiToken} = options;
-    if (baseUrl === "" || email === "" || apiToken === "") {
-        return {
-            context: {available: false, reason: "not-configured"},
-            warnings: [],
-        };
-    }
-    const projects = parseProjectAllowlist(options.projects);
-    if (projects.length === 0) {
-        // Credentials without the allowlist is a half-configured consumer,
-        // not an unconfigured one: warn, so the misconfiguration is visible.
-        return {
-            context: {available: false, reason: "not-configured"},
-            warnings: [
-                'ticket staging: REVIEW_JIRA_BASE_URL is set but REVIEW_JIRA_PROJECTS is not; staged unavailable (set the project-key allowlist, e.g. "KORE,FEI", to enable ticket staging)',
-            ],
-        };
-    }
-    const key = extractIssueKey(
-        options.title,
-        options.headBranch,
-        options.description,
-        projects,
-    );
-    if (key === null) {
-        return {
-            context: {available: false, reason: "no-issue-key"},
-            warnings: [],
-        };
-    }
-    const url = `${baseUrl.replace(
-        /\/+$/,
-        "",
-    )}/rest/api/2/issue/${key}?fields=${[
+    baseUrl: string,
+    auth: string,
+    key: string,
+): Promise<Attempt> => {
+    const url = `${baseUrl}/rest/api/2/issue/${key}?fields=${[
         "summary",
         "description",
         "status",
@@ -280,26 +250,21 @@ export const stageTicketContext = async (
         "labels",
         "comment",
     ].join(",")}`;
-    const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
     try {
         const response = await fetchJson(url, {
             accept: "application/json",
             authorization: `Basic ${auth}`,
         });
-        if (response.status === 404) {
-            // A stale or foreign-project key is normal PR noise, not a
-            // configuration problem: no warning.
-            return {
-                context: {available: false, reason: "not-found", key},
-                warnings: [],
-            };
+        // 404 is normal candidate noise (key-shaped tokens, stale keys,
+        // tickets the service account cannot browse): dropped silently.
+        // 400 is the same noise in malformed-key form.
+        if (response.status === 404 || response.status === 400) {
+            return {kind: "not-found"};
         }
         if (response.status !== 200) {
             return {
-                context: {available: false, reason: "fetch-failed", key},
-                warnings: [
-                    `ticket staging: GET ${key} -> ${response.status}; staged unavailable (prompts fall back to the PR description)`,
-                ],
+                kind: "failed",
+                warning: `ticket staging: GET ${key} -> ${response.status}`,
             };
         }
         if (
@@ -310,28 +275,81 @@ export const stageTicketContext = async (
             // A 200 whose body is not a JSON object (an SSO login page on a
             // misconfigured host, say) is a config problem, not a ticket.
             return {
-                context: {available: false, reason: "fetch-failed", key},
-                warnings: [
-                    `ticket staging: GET ${key} -> 200 with a non-issue body; staged unavailable (prompts fall back to the PR description)`,
-                ],
+                kind: "failed",
+                warning: `ticket staging: GET ${key} -> 200 with a non-issue body`,
             };
         }
         return {
-            context: buildTicketContext(
+            kind: "ticket",
+            ticket: buildStagedTicket(
                 key,
-                baseUrl.replace(/\/+$/, ""),
+                baseUrl,
                 response.json as JiraIssue | null,
             ),
-            warnings: [],
         };
     } catch (error) {
         return {
-            context: {available: false, reason: "fetch-failed", key},
-            warnings: [
-                `ticket staging: GET ${key} failed (${
-                    error instanceof Error ? error.message : String(error)
-                }); staged unavailable (prompts fall back to the PR description)`,
-            ],
+            kind: "failed",
+            warning: `ticket staging: GET ${key} failed (${
+                error instanceof Error ? error.message : String(error)
+            })`,
         };
     }
+};
+
+/**
+ * Resolve the PR's linked tickets to a `TicketContext`. Every path returns a
+ * writable context; nothing here throws.
+ */
+export const stageTicketContext = async (
+    fetchJson: TicketFetch,
+    options: StageTicketOptions,
+): Promise<StageTicketResult> => {
+    const {email, apiToken} = options;
+    const baseUrl = options.baseUrl.replace(/\/+$/, "");
+    if (baseUrl === "" || email === "" || apiToken === "") {
+        return {
+            context: {available: false, reason: "not-configured"},
+            warnings: [],
+        };
+    }
+    const keys = extractIssueKeys(
+        options.title,
+        options.headBranch,
+        options.description,
+    );
+    if (keys.length === 0) {
+        return {
+            context: {available: false, reason: "no-issue-key"},
+            warnings: [],
+        };
+    }
+    const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
+    const attempts = await Promise.all(
+        keys.map((key) => attemptFetch(fetchJson, baseUrl, auth, key)),
+    );
+    const tickets = attempts.flatMap((attempt) =>
+        attempt.kind === "ticket" ? [attempt.ticket] : [],
+    );
+    const warnings = attempts.flatMap((attempt) =>
+        attempt.kind === "failed"
+            ? [
+                  `${attempt.warning}; ${
+                      tickets.length > 0
+                          ? "other tickets staged"
+                          : "staged unavailable (prompts fall back to the PR description)"
+                  }`,
+              ]
+            : [],
+    );
+    if (tickets.length > 0) {
+        return {context: {available: true, tickets}, warnings};
+    }
+    return {
+        context: {
+            available: false,
+            reason: warnings.length > 0 ? "fetch-failed" : "not-found",
+        },
+        warnings,
+    };
 };

@@ -248,7 +248,6 @@ describe("runStagePrCli", () => {
                     REVIEW_JIRA_BASE_URL: "https://khanacademy.atlassian.net",
                     REVIEW_JIRA_EMAIL: "bot@khanacademy.org",
                     REVIEW_JIRA_API_TOKEN: "tok",
-                    REVIEW_JIRA_PROJECTS: "KORE",
                 },
             },
         );
@@ -256,12 +255,14 @@ describe("runStagePrCli", () => {
         expect(fetched).toEqual([
             "https://khanacademy.atlassian.net/rest/api/2/issue/KORE-9?fields=summary,description,status,resolution,issuetype,labels,comment",
         ]);
-        expect(
-            JSON.parse(fs.files[`${REVIEW}/ticket-context.json`]),
-        ).toMatchObject({
+        expect(JSON.parse(fs.files[`${REVIEW}/ticket-context.json`])).toEqual({
             available: true,
-            key: "KORE-9",
-            summary: "the ticket",
+            tickets: [
+                expect.objectContaining({
+                    key: "KORE-9",
+                    summary: "the ticket",
+                }),
+            ],
         });
     });
 
@@ -281,7 +282,6 @@ describe("runStagePrCli", () => {
                     REVIEW_JIRA_BASE_URL: "https://khanacademy.atlassian.net",
                     REVIEW_JIRA_EMAIL: "bot@khanacademy.org",
                     REVIEW_JIRA_API_TOKEN: "stale",
-                    REVIEW_JIRA_PROJECTS: "KORE",
                 },
             },
         );

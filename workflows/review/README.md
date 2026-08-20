@@ -793,19 +793,20 @@ Two known interactions:
 
 Optional:
 
-- `REVIEW_JIRA_BASE_URL` and `REVIEW_JIRA_PROJECTS` (repo **variables**),
-  `REVIEW_JIRA_EMAIL` and `REVIEW_JIRA_API_TOKEN` (repo **secrets**): the
-  linked-ticket staging (`lib/stage-ticket.ts`). When all four are set, the
-  pre-agent staging resolves the PR's Jira issue key (first match in the
-  title, then the head branch, then the last match in the description),
-  fetches the ticket read-only on the host, and stages it as
-  `ticket-context.json` for the intent-reading sub-agents (completeness,
-  first-principles). `REVIEW_JIRA_PROJECTS` is a comma-separated project-key
-  allowlist (e.g. `KORE,FEI`); only keys in those projects are resolved, both
-  to filter key-shaped noise (`UTF-8`, `SHA-256`, `CVE-2024-1234`) and to
-  bound which tickets author-written text can pull into a review that posts
-  publicly. The agent sandbox never sees the credentials and has no Jira
-  egress. Use a service-account API token with read-only scope. Without
+- `REVIEW_JIRA_BASE_URL` (repo **variable**), `REVIEW_JIRA_EMAIL` and
+  `REVIEW_JIRA_API_TOKEN` (repo **secrets**): the linked-ticket staging
+  (`lib/stage-ticket.ts`). When all three are set, the pre-agent staging
+  collects every Jira issue key the PR references (title, head branch, and
+  description, deduped, capped at 5), fetches each read-only on the host,
+  and stages the ones that resolve as `ticket-context.json` (a `tickets`
+  array) for the intent-reading sub-agents (completeness, first-principles).
+  Key-shaped noise (`UTF-8`, `SHA-256`, `CVE-2024-1234`) and stale keys 404
+  and drop silently, so they never block a real ticket. The disclosure
+  bound (which tickets author-written keys can pull into a review that
+  posts publicly) is the service account's own Jira permissions, enforced
+  server-side: use a dedicated service account granted Browse Projects on
+  only the projects reviews may quote, with a read-only API token. The
+  agent sandbox never sees the credentials and has no Jira egress. Without
   these, the file stages `{available: false, reason: "not-configured"}` and
   those sub-agents fall back to the PR description; a ticket is context,
   never a prerequisite, so nothing else changes.
