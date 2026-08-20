@@ -2641,9 +2641,10 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`injection-sink`** — trace user-controlled input to a SQL/HTML/path/URL/shell/
   deserialization sink without validation or parameterization. `found` on an unguarded
   sink.
-- **`pwn-request`** — when workflow or composite-action files change
-  (`.github/workflows/*.{yml,yaml}`, `.github/actions/**/action.{yml,yaml}`):
-  a job that combines all three of:
+- **`pwn-request`** — when workflow or action-definition files change
+  (`.github/workflows/*.{yml,yaml}`, or an `action.yml`/`action.yaml`
+  anywhere in the tree — action definitions are not confined to
+  `.github/actions/`): a job that combines all three of:
   1. a privileged trigger: `pull_request_target`, `issue_comment`, or
      `workflow_run` watching a workflow that a fork PR can start;
   2. untrusted content brought into the job: the PR head checked out, or an
@@ -2652,8 +2653,8 @@ Skills index for this repo (read only the entries relevant to this lens's domain
      files) while the job holds secrets or a write-capable token.
   A plain `pull_request` fork run holds a read-only token and no secrets, so
   it is not this pattern. `found` only when all three are present.
-- **`push-ref-race`** — when workflow or composite-action files change (same
-  globs): a workflow push that can silently overwrite commits that landed on
+- **`push-ref-race`** — when workflow or action-definition files change (same
+  files as `pwn-request`): a workflow push that can silently overwrite commits that landed on
   the branch after the job's checkout — `git push --force`, or a push after
   an amend/rebase that cannot fast-forward — without re-verifying that the
   remote tip still equals the SHA observed at checkout
@@ -2661,15 +2662,12 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   plain non-force push just fails if the branch moved, and is not this
   pattern). `found` when a commit pushed in that window would be silently
   overwritten.
-- **`over-scoped-secret`** — when workflow or composite-action files change
-  (same globs): a workflow granting `secrets.GITHUB_TOKEN` or a custom org
-  token a permission no step uses (e.g., `contents: write` when every step
-  only reads, or a broad PAT where the default `GITHUB_TOKEN` suffices).
-  `found` names the unneeded permission and the step-by-step reason no step
-  needs it.
-- **`unpinned-action`** — when workflow or composite-action files change (same
-  globs): a non-GitHub-owned action referenced by tag or branch (`@v3`,
-  `@main`) rather than a commit SHA. `found` per unpinned reference.
+- **`over-scoped-secret`** — when workflow or action-definition files change
+  (same files as `pwn-request`): a workflow granting `secrets.GITHUB_TOKEN`
+  or a custom org token a permission no step uses (e.g., `contents: write`
+  when every step only reads, or a broad PAT where the default
+  `GITHUB_TOKEN` suffices). `found` names the unneeded permission and the
+  step-by-step reason no step needs it.
 
 ### Repo-specific rules and hunts (optional)
 Additional review rules and hunts the host repo defines for this lens, imported when
