@@ -179,7 +179,7 @@ observability:
 # job-level timeout-minutes still bounds the run.
 engine:
   id: claude
-  model: claude-opus-4-8
+  model: claude-opus-5
   env:
     BASH_DEFAULT_TIMEOUT_MS: "60000"
     BASH_MAX_TIMEOUT_MS: "1200000"
@@ -343,23 +343,60 @@ post-steps:
 # Do NOT collapse these to a bare `claude-opus-4` prefix: prefix matching would
 # also capture opus-4-0/4-1, which list at 3x the 4-5+ rate.
 models:
+  # claude-opus-5 (the engine and roster pin) is NOT in the firewall
+  # api-proxy's curated AI-credits pricing table at v0.27.42, the release
+  # gh-aw v0.83.4 defaults to (that table carries claude-opus-4-5 through 4-8
+  # and claude-fable-5, and stops there). The proxy's AI-credits guard rejects
+  # an un-priced model with a 400 BEFORE the request reaches the model, so
+  # without this fallback every dispatch fails on the stable toolchain: the
+  # #266 failure that killed the first-principles dispatch on every run,
+  # except the whole roster runs the un-priced model rather than two opt-in
+  # agents. Units differ from the overlay below and the two are not
+  # interchangeable: `default-ai-credits-pricing` is $/1M tokens and feeds
+  # the credit guard; `providers` is $/token. Rates here are Anthropic LIST
+  # (Opus 5 lists at exactly Opus 4.8's price), deliberately not Khan's 50%
+  # rate: in the only window where this fallback binds (stable gh-aw v0.83.x,
+  # firewall v0.27.42, which drops the `providers` block silently) every
+  # other model bills at list from the curated table, so list keeps Opus 5
+  # denominated consistently with the rest of the roster. Two caveats: the
+  # default-pricing path does not bill cache writes ($6.25/M real), so credit
+  # accounting under-counts that component while it binds; and the fallback
+  # applies to ANY un-priced model, so a typo'd model id bills at Opus rates
+  # instead of failing loudly.
+  #
+  # REMOVE THIS FALLBACK when a gh-aw release defaults the firewall to
+  # v0.27.43 or later: that release carries a curated claude-opus-5 entry at
+  # the same list rates and bills cache writes, and the recompile also makes
+  # the `providers` overlay below live (the higher-precedence source). Do NOT
+  # reach for `sandbox.agent.version: v0.27.43` to get there early; a version
+  # is pinned here only to hold a release BACK, never to move one forward.
+  #
+  # MINIMUM COMPILER: gh-aw >= v0.83.0 for `models.default-ai-credits-pricing`.
+  # $/1M tokens. `input` and `output` are the only rates the schema accepts,
+  # so the cache rates are the proxy's derivations, not ours.
+  default-ai-credits-pricing:
+    input: 5.0
+    output: 25.0
   providers:
     anthropic:
       models:
-        # Current engine model.
+        # The refusal-fallback target (the one-hop re-dispatch of #315) and
+        # an `engine:` override candidate; the engine until the roster moved
+        # to Opus 5.
         claude-opus-4-8:
           cost:
             input: "2.5e-06"
             output: "1.25e-05"
             cache_read: "2.5e-07"
             cache_write: "3.125e-06"
-        # Engine models a consumer may select via an `engine:` override.
+        # Current engine and roster model.
         claude-opus-5:
           cost:
             input: "2.5e-06"
             output: "1.25e-05"
             cache_read: "2.5e-07"
             cache_write: "3.125e-06"
+        # Engine models a consumer may select via an `engine:` override.
         claude-sonnet-5:
           cost:
             input: "1e-06"
@@ -1249,11 +1286,12 @@ return `{"findings": [], "hunts": [...]}` with the hunt states still recorded.
 ---
 name: correctness-reviewer
 description: Classifies each changed file's risk and reviews the diff for correctness defects; returns JSON.
-model: claude-fable-5
+model: claude-opus-5
 # effort: high — launch default (whole-change reviewer). gh-aw has no per-agent
 # effort field yet; the per-role model/effort table lives in the README.
-# Fable 5: bug-finding recall is this workflow's load-bearing metric, and
-# stronger real-defect detection is Fable's headline gain over Opus 4.8.
+# Opus 5: bug-finding recall is this workflow's load-bearing metric; the
+# 2026-07-20 A/B recall gain that lived on Fable 5 is carried by Opus 5 at
+# Opus 4.8's per-token price. See the roster table in the README.
 ---
 You are a correctness-focused code reviewer. You have **no GitHub access** — read the
 diff and file list from disk and return your result as JSON only.
@@ -1452,7 +1490,7 @@ before (run 29943085279 carried its one-line fix under `suggested_patch`):
 ---
 name: skill-auditor
 description: Evaluates the diff against the repo's best-practice skills and returns findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (whole-change reviewer).
 ---
 You audit a PR diff for best-practice "skill" violations. You have **no GitHub
@@ -1616,7 +1654,7 @@ Return ONLY this JSON object (no prose, no code fence):
 ---
 name: thread-reconciler
 description: Decides which of the workflow's earlier review threads the current code has addressed; returns thread ids.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: medium — launch default (reconciliation).
 ---
 You decide which earlier review threads the current code has resolved. You have **no
@@ -1745,7 +1783,7 @@ nothing duplicates:
 ---
 name: claim-validator
 description: Re-checks each candidate review comment against the actual code and the repo's best-practice skills, and drops or corrects the ones that are wrong; returns JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: xhigh — launch default (claim-validator). Deliberately NOT moved to
 # Fable 5 with the correctness reviewer: in the 2026-07-20 pooled A/B the
 # Fable validator did not offset the higher flag rate (noise 43% -> 49%, one
@@ -1964,7 +2002,7 @@ Every input `id` must appear exactly once.
 ---
 name: holistic
 description: Reviews the change as a whole — is the overall approach sound and coherent — and returns findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (whole-change reviewer).
 ---
 You are the **holistic** reviewer. Your single mandate is to **judge the
@@ -2042,7 +2080,7 @@ If the change hangs together, return {"findings": []}.
 ---
 name: completeness
 description: Checks the change against its stated intent (PR description + linked ticket/doc) and returns findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (whole-change reviewer).
 ---
 You are the **completeness** reviewer. Your single mandate is to **check
@@ -2115,7 +2153,7 @@ If the change matches its intent, return {"findings": []}.
 ---
 name: test-adequacy
 description: Evaluates whether the changed behavior is adequately tested and returns findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (whole-change reviewer).
 ---
 You are the **test-adequacy** reviewer. Your job is to judge whether the **changed
@@ -2178,10 +2216,11 @@ If the changed behavior is adequately tested, return {"findings": []}.
 ---
 name: first-principles
 description: A diverse-perspective, advisory-only sanity check on whether the change should exist as written; returns findings as JSON.
-model: claude-fable-5
-# effort: high — launch default. Ran on Fable 5 (claude-fable-5) from day one;
-# the correctness reviewer joined it after the 2026-07-20 A/B. Advisory-only,
-# never blocks.
+model: claude-opus-5
+# effort: high — launch default. Ran on Fable 5 (claude-fable-5) from day one,
+# partly to be the one non-Opus reviewer; the correctness reviewer joined it
+# after the 2026-07-20 A/B, and it moved to Opus 5 with the roster.
+# Advisory-only, never blocks.
 ---
 You are the **first-principles** reviewer. Your single mandate is to review the
 **justification for the change, not the change itself**: where `holistic` asks
@@ -2253,7 +2292,7 @@ If you have nothing worth raising, return {"findings": []}.
 ---
 name: conventions
 description: Advisory, opt-in check of repo-specific conventions; returns findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: medium — launch default (advisory, opt-in targeted check).
 ---
 You are the **conventions** reviewer. You check the change against this repository's
@@ -2321,7 +2360,7 @@ If nothing deviates from repo conventions, return
 ---
 name: documentation
 description: Advisory, opt-in check that code comments, prose docs, and the PR title/description document intent rather than restate code, and read plainly; returns findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: medium — launch default (advisory, opt-in targeted check). Sibling of
 # `conventions`: same shape, same cost profile, different subject matter.
 ---
@@ -2550,7 +2589,7 @@ translate). If nothing in the change fails the policy, return {"findings": []}.
 ---
 name: security-auth
 description: Specialist security & auth lens — reviews touched files for authorization, secrets, injection, and unsafe-deserialization defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: xhigh — launch default. The security & auth lens is the one specialist
 # lens pinned to xhigh (per-role table in the README). gh-aw has no
 # per-agent effort field yet; this annotation and the README table are the authoritative
@@ -2638,7 +2677,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: ai-safety-moderation
 description: Specialist AI safety & moderation lens — reviews AI/generation paths for missing moderation, prompt-injection surfaces, and PII exposure; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **AI safety & moderation** specialist lens. You review only AI/model and
@@ -2708,7 +2747,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: mass-comms-coppa
 description: Specialist mass-comms & COPPA lens — reviews bulk-communication paths for audience/consent/age-gating defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **mass-comms & COPPA** specialist lens. You review only bulk-communication
@@ -2776,7 +2815,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: caching-resource
 description: Specialist caching & resource lens — reviews caching and resource-management paths for key-scoping, invalidation, and exhaustion defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **caching & resource** specialist lens. You review only caching and
@@ -2851,7 +2890,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: data-migrations
 description: Specialist data & migrations lens — reviews schema/migration/backfill changes for compatibility and safety defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **data & migrations** specialist lens. You review only schema changes,
@@ -2921,7 +2960,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: concurrency-async
 description: Specialist concurrency & async lens — reviews concurrent/async code for races, unawaited work, and idempotency defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **concurrency & async** specialist lens. You review only concurrent and
@@ -2990,7 +3029,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: api-federation-compat
 description: Specialist API & federation compatibility lens — reviews public API and GraphQL/federation changes for breaking-change defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **API & federation compatibility** specialist lens. You review only changes to
@@ -3059,7 +3098,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: cross-deploy-serialization
 description: Specialist cross-deploy serialization lens — reviews persisted/queued/cached serialized shapes for rolling-deploy compatibility defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **cross-deploy serialization** specialist lens. You review only changes to
@@ -3132,7 +3171,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: deploy-infra-config
 description: Specialist deploy & infra config lens — reviews deployment, infra-as-code, and config/flag changes for rollout-safety defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **deploy & infra config** specialist lens. You review only deployment
@@ -3203,7 +3242,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: money-payments
 description: Specialist money & payments lens — reviews monetary and payment code for precision, idempotency, and currency defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **money & payments** specialist lens. You review only monetary computation and
@@ -3272,7 +3311,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: content-i18n
 description: Specialist content & i18n lens — reviews user-facing content for localization and internationalization defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **content & i18n** specialist lens. You review only user-facing content for
