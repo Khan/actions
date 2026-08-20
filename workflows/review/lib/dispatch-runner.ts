@@ -91,6 +91,13 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
         // captured payload IS the agent's output; the free-text final
         // remains the fallback.
         let captured: Record<string, unknown> | undefined;
+        // The last CONTRACT-VALID payload, held even while the prose gate
+        // bounces it: a style rejection re-opens the session, and a session
+        // can die there (turns, timeout). Style enforcement may cost prose
+        // quality, never a dimension, so every fallback path below salvages
+        // `captured ?? provisional` — the styled acceptance when one
+        // happened, else the best contract-valid submission seen.
+        let provisional: Record<string, unknown> | undefined;
         const validate = request.validate;
         if (validate !== undefined) {
             options.mcpServers = {
@@ -118,6 +125,7 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                                         isError: true,
                                     };
                                 }
+                                provisional = payload;
                                 // The prose gate (judge-prose.ts), AFTER the
                                 // contract check: the judge only ever sees
                                 // payloads the collection phase could accept,
@@ -126,8 +134,10 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                                 // plain-prose loop: haiku judges, the author
                                 // rewrites in-session with its repo context
                                 // intact). The gate caps its own bounces and
-                                // fails open, so this await can slow a
-                                // submission but never lose one.
+                                // fails open, and `provisional` above keeps
+                                // the pre-style payload salvageable, so this
+                                // await can slow a submission or cost prose
+                                // quality, never lose one.
                                 if (request.judgeProse !== undefined) {
                                     const styleRejection =
                                         await request.judgeProse(payload);
@@ -233,9 +243,10 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                 usd = Number(message["total_cost_usd"] ?? 0);
                 turns = Number(message["num_turns"] ?? 0);
             }
-            if (captured !== undefined) {
+            const salvage = captured ?? provisional;
+            if (salvage !== undefined) {
                 return {
-                    output: JSON.stringify(captured),
+                    output: JSON.stringify(salvage),
                     usd,
                     turns,
                     toolCalls,
@@ -260,9 +271,10 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
             // submission, a max-turns overrun). Cost fields are best-effort
             // zero here; the metered proxy still charged the run, but the
             // SDK never delivered its result record.
-            if (captured !== undefined) {
+            const salvage = captured ?? provisional;
+            if (salvage !== undefined) {
                 return {
-                    output: JSON.stringify(captured),
+                    output: JSON.stringify(salvage),
                     usd: 0,
                     turns: 0,
                     wallMs: Date.now() - started,

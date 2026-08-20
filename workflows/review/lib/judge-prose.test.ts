@@ -121,6 +121,54 @@ describe("extractProseUnits", () => {
         expect(extractProseUnits({findings: "nope"})).toEqual([]);
         expect(extractProseUnits({findings: [{id: "x"}, 3]})).toEqual([]);
     });
+
+    it("reads the validator's corrected prose (it replaces what posts)", () => {
+        const units = extractProseUnits({
+            claims: [
+                {id: "c-1", verification: "confirmed"},
+                {
+                    id: "c-2",
+                    verification: "confirmed",
+                    corrected: {
+                        label: "question (non-blocking)",
+                        subject: "Corrected subject.",
+                        discussion: "Corrected discussion.",
+                    },
+                },
+                {verification: "confirmed", corrected: {discussion: "x"}},
+            ],
+        });
+        expect(units).toEqual([
+            {
+                key: "c-2.corrected",
+                label: "question (non-blocking)",
+                prose: "Corrected subject. Corrected discussion.",
+            },
+            {
+                key: "claims[2].corrected",
+                label: "suggestion (non-blocking)",
+                prose: "x",
+            },
+        ]);
+    });
+
+    it("reads out-of-lane observations (they post as questions)", () => {
+        const units = extractProseUnits({
+            findings: [],
+            out_of_lane_observations: [
+                {observation: "The sibling test asserts the wrong constant."},
+                {observation: "   "},
+                "junk",
+            ],
+        });
+        expect(units).toEqual([
+            {
+                key: "out_of_lane_observations[0]",
+                label: "question (non-blocking)",
+                prose: "The sibling test asserts the wrong constant.",
+            },
+        ]);
+    });
 });
 
 describe("createProseGate", () => {

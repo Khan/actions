@@ -1597,7 +1597,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "skill": "skill name", "path": "...", "line": 0,
     "label": "issue (blocking, best-practice)|suggestion (non-blocking, best-practice)",
     "failure_scenario": "one sentence: the concrete consequence of the breach (what goes wrong, for whom)",
-    "subject": "one line naming the skill area", "discussion": "the rule violated and the fix, quoting both", "suggestion": "optional fix code"
+    "subject": "one line naming the skill area", "discussion": "the rule violated and the fix, quoting both; otherwise at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }],
   "out_of_lane_observations": [{
     "path": "...", "line": 0,
@@ -1998,7 +1998,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "verification": "confirmed|plausible|refuted",
     "confidence": 0.0,
     "reason": "one line: the line(s) that confirm it, the disproof that refutes it, or what stayed uncertain",
-    "corrected": {"line": 0, "label": "...", "subject": "...", "discussion": "...", "suggestion": "..."}
+    "corrected": {"line": 0, "label": "...", "subject": "...", "discussion": "... (corrected prose posts verbatim: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor)", "suggestion": "..."}
   }]
 }
 `confidence` in [0,1] is your confidence in the claim after verification — it becomes the
@@ -2355,7 +2355,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "suggestion (non-blocking)|nitpick (non-blocking)|note (non-blocking)|question (non-blocking)",
     "failure_scenario": "one sentence: the concrete cost of the deviation if it stays",
-    "subject": "one line", "discussion": "1-2 sentences quoting the existing usage and the deviating line", "suggestion": "optional fix code"
+    "subject": "one line", "discussion": "1-2 sentences quoting the existing usage and the deviating line; otherwise at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }]
 }
 Never emit a blocking label. `failure_scenario` is required on every finding: the
@@ -2584,7 +2584,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "suggestion (non-blocking, documentation)",
     "failure_scenario": "one sentence: the concrete cost to the next reader if this stays",
-    "subject": "one line", "discussion": "1-2 sentences quoting the comment and the code line", "suggestion": "optional replacement text"
+    "subject": "one line", "discussion": "1-2 sentences quoting the comment and the code line; otherwise at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional replacement text"
   }]
 }
 `label` is that one value on every finding; never emit any other label, blocking or
@@ -2673,7 +2673,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw — the grep, the traced caller, the line"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "authz-on-new-endpoint",
-    "model_authored_prose": "the one- or two-sentence comment the author will read",
+    "model_authored_prose": "the one- or two-sentence comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional replacement/patch text",
     "pre_merge_obligation": "optional: a condition that must hold before merge",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
@@ -2744,7 +2744,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "unmoderated-model-output",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -2812,7 +2812,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "bulk-send-without-audience-filter",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -2887,7 +2887,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "cache-key-missing-identifier",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -2957,7 +2957,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "non-nullable-column-without-default",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -3026,7 +3026,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "unawaited-async",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -3095,7 +3095,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "breaking-field-removal-or-retype",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -3168,7 +3168,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "serialized-shape-change",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -3239,7 +3239,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "flag-default-unsafe",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -3308,7 +3308,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "float-money",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -3380,7 +3380,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "hardcoded-user-facing-string",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],

@@ -23,6 +23,8 @@
  * Run: ANTHROPIC_API_KEY=... npx tsx workflows/review/eval/judge-prose-live.ts
  */
 
+/* eslint-disable no-console -- CLI entry point; console IS the interface. */
+
 import {
     buildBounceMessage,
     buildJudgePrompt,
@@ -69,19 +71,16 @@ const main = async (): Promise<void> => {
             buildJudgePrompt(fixture.discussion, fixture.label),
         );
         const verdict = parseJudgeVerdict(reply);
-        // eslint-disable-next-line no-console
         console.log(
             `\n=== ${fixture.commentId} (${fixture.label}, expected ${fixture.expected})`,
         );
         if (verdict === null) {
-            // eslint-disable-next-line no-console
             console.log(`unparseable reply: ${reply}`);
             if (fixture.expected === "fail") {
                 pinnedFailMissed = true;
             }
             continue;
         }
-        // eslint-disable-next-line no-console
         console.log(
             `verdict: ${verdict.pass ? "pass" : "FAIL"}${verdict.problems
                 .map((problem) => `\n  - ${problem}`)
@@ -91,7 +90,6 @@ const main = async (): Promise<void> => {
             pinnedFailMissed = true;
         }
         if (!verdict.pass) {
-            // eslint-disable-next-line no-console
             console.log(
                 `bounce message the author would see:\n${buildBounceMessage([
                     {
@@ -111,16 +109,12 @@ const main = async (): Promise<void> => {
                 buildJudgePrompt(control.discussion, control.label),
             ),
         );
-        // eslint-disable-next-line no-console
         console.log(`\n=== clean control (${control.label})`);
         if (verdict === null) {
-            // eslint-disable-next-line no-console
             console.log("unparseable reply");
         } else if (verdict.pass) {
-            // eslint-disable-next-line no-console
             console.log("verdict: pass (as expected)");
         } else {
-            // eslint-disable-next-line no-console
             console.log(
                 `WARNING, over-flagging canary tripped: FAIL${verdict.problems
                     .map((problem) => `\n  - ${problem}`)
@@ -136,7 +130,6 @@ const main = async (): Promise<void> => {
 };
 
 main().catch((error) => {
-    // eslint-disable-next-line no-console
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
 });

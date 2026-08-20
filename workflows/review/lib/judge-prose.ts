@@ -167,21 +167,80 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
- * Pull the human-read prose out of one payload: schema findings carry
- * `model_authored_prose` (plus `severity` for a label), label-shape lens
- * findings carry `label`/`subject`/`discussion`. Anything else (triage,
- * reconciler, clusterer payloads) yields no units and passes the gate for
- * free. Extraction is deliberately tolerant: a shape this function cannot
- * read is the contract validator's problem, not the style gate's.
+ * Pull the human-read prose out of one payload, covering every path by
+ * which submitted text reaches a posted comment (PR #362's re-review found
+ * the two non-`findings[]` paths shipping unjudged):
+ *   - schema findings carry `model_authored_prose` (plus `severity` for a
+ *     label); label-shape lens findings carry `label`/`subject`/
+ *     `discussion`;
+ *   - `out_of_lane_observations[].observation` posts as a
+ *     `question (non-blocking)` candidate (dispatch-contracts.ts's
+ *     `fromOutOfLane`);
+ *   - the validator's `claims[].corrected.subject`/`.discussion` REPLACES a
+ *     claim's posted prose (`applyVerifications`), so a validator that
+ *     rewrites wording is an author whose prose posts.
+ * Anything else (triage, reconciler, clusterer payloads) yields no units
+ * and passes the gate for free. Extraction is deliberately tolerant: a
+ * shape this function cannot read is the contract validator's problem, not
+ * the style gate's.
  */
 export const extractProseUnits = (
     payload: Record<string, unknown>,
 ): ProseUnit[] => {
+    const units: ProseUnit[] = [];
+    const outOfLane = payload["out_of_lane_observations"];
+    if (Array.isArray(outOfLane)) {
+        outOfLane.forEach((entry, index) => {
+            if (!isRecord(entry)) {
+                return;
+            }
+            const observation = entry["observation"];
+            if (typeof observation === "string" && observation.trim() !== "") {
+                units.push({
+                    key: `out_of_lane_observations[${index}]`,
+                    label: "question (non-blocking)",
+                    prose: observation,
+                });
+            }
+        });
+    }
+    const rawClaims = payload["claims"];
+    if (Array.isArray(rawClaims)) {
+        // The validator's contract: `claims[].corrected` prose replaces the
+        // original claim's wording at application time.
+        rawClaims.forEach((entry, index) => {
+            if (!isRecord(entry) || !isRecord(entry["corrected"])) {
+                return;
+            }
+            const corrected = entry["corrected"];
+            const joined = [corrected["subject"], corrected["discussion"]]
+                .filter(
+                    (part): part is string =>
+                        typeof part === "string" && part.trim() !== "",
+                )
+                .join(" ");
+            if (joined === "") {
+                return;
+            }
+            const key =
+                typeof entry["id"] === "string" && entry["id"] !== ""
+                    ? `${entry["id"]}.corrected`
+                    : `claims[${index}].corrected`;
+            units.push({
+                key,
+                label:
+                    typeof corrected["label"] === "string" &&
+                    corrected["label"] !== ""
+                        ? corrected["label"]
+                        : "suggestion (non-blocking)",
+                prose: joined,
+            });
+        });
+    }
     const rawFindings = payload["findings"];
     if (!Array.isArray(rawFindings)) {
-        return [];
+        return units;
     }
-    const units: ProseUnit[] = [];
     rawFindings.forEach((entry, index) => {
         if (!isRecord(entry)) {
             return;
@@ -434,6 +493,33 @@ export type ProseJudgeArtifact = {
         bounces: number;
     };
     verdicts: JudgeRecord[];
+};
+
+/**
+ * Stage the artifact where it is actually read: VERDICTS_PATH for the
+ * review dir, `out/` so the Step 9 artifact upload carries it
+ * (`upload-artifact.allowed-paths` is `out/**`; a review-dir-only file is
+ * invisible post-run, the same lesson dispatch-result.json learned), and a
+ * workflow warning when any judge call errored, because fail-open means a
+ * dead judge otherwise produces nothing but a quietly empty artifact.
+ */
+export const stageProseJudgeArtifact = (
+    writeFile: (path: string, data: string) => void,
+    writeOut: (name: string, data: string) => void,
+    artifact: ProseJudgeArtifact | undefined,
+): void => {
+    if (artifact === undefined) {
+        return;
+    }
+    const serialized = JSON.stringify(artifact, null, 2);
+    writeFile(VERDICTS_PATH, serialized);
+    writeOut("judge-prose-verdicts", serialized);
+    if (artifact.counts.error > 0) {
+        // eslint-disable-next-line no-console
+        console.log(
+            `::warning title=prose judge::${artifact.counts.error}/${artifact.counts.total} judge calls errored (fail-open: affected findings posted unjudged)`,
+        );
+    }
 };
 
 /** Fold gate records (plus fallback skips) into the artifact shape. */

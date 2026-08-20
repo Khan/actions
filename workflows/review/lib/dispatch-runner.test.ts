@@ -244,6 +244,53 @@ describe("createSdkRunner prose gate (PRA-45)", () => {
         expect(judged).toHaveLength(2);
     });
 
+    it("salvages the contract-valid payload when the session dies mid style bounce", async () => {
+        session = async function* (tools) {
+            const bounced = await tools[0].handler(
+                {result: {findings: [{id: "pre-style"}]}},
+                undefined,
+            );
+            expect(bounced.isError).toBe(true);
+            throw new Error("session died before the rewrite came back");
+            // eslint-disable-next-line no-unreachable
+            yield success("never reached");
+        };
+        const result = await (
+            await createSdkRunner()
+        )(
+            request({
+                judgeProse: () => Promise.resolve("Result rejected: style"),
+            }),
+        );
+        // Style enforcement may cost prose quality, never a dimension: the
+        // pre-style payload posts rather than the lens being shed.
+        expect(result.structured).toBe(true);
+        expect(JSON.parse(result.output)).toEqual({
+            findings: [{id: "pre-style"}],
+        });
+    });
+
+    it("prefers the contract-valid provisional over an unvalidated free-text final", async () => {
+        session = async function* (tools) {
+            await tools[0].handler(
+                {result: {findings: [{id: "pre-style"}]}},
+                undefined,
+            );
+            yield success("free text the model pasted instead of re-calling");
+        };
+        const result = await (
+            await createSdkRunner()
+        )(
+            request({
+                judgeProse: () => Promise.resolve("Result rejected: style"),
+            }),
+        );
+        expect(result.structured).toBe(true);
+        expect(JSON.parse(result.output)).toEqual({
+            findings: [{id: "pre-style"}],
+        });
+    });
+
     it("never judges a payload the contract already rejected", async () => {
         let judgeCalls = 0;
         session = async function* (tools) {

@@ -71,7 +71,7 @@ import {
     buildProseJudgeArtifact,
     createProseGate,
     fallbackSkippedRecord,
-    VERDICTS_PATH,
+    stageProseJudgeArtifact,
     type JudgeRecord,
     type ProseJudgeArtifact,
     type ProseRunner,
@@ -930,12 +930,11 @@ export const runDispatch = async (
         perAgent,
         totalUsd: perAgent.reduce((sum, agent) => sum + agent.usd, 0),
     };
-    if (result.proseJudge !== undefined) {
-        fs.writeFileSync(
-            VERDICTS_PATH,
-            JSON.stringify(result.proseJudge, null, 2),
-        );
-    }
+    stageProseJudgeArtifact(
+        (path, data) => fs.writeFileSync(path, data),
+        writeOut,
+        result.proseJudge,
+    );
     const serialized = JSON.stringify(result, null, 2);
     fs.writeFileSync(`${REVIEW_DIR}/dispatch-result.json`, serialized);
     // Also staged under out/ so the Step 9 artifact upload carries it: run
