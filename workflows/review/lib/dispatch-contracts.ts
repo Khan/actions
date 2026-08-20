@@ -703,3 +703,44 @@ export const applyVerifications = (
     }
     return surviving;
 };
+
+/** The reconciler's decision, as {@link parseReconciliation} admits it. */
+export type Reconciliation = {
+    resolve: string[];
+    keep: string[];
+    /**
+     * Kept threads whose reply chain shows the author CONCEDED the finding
+     * with the fix still pending. Optional: older reconciler outputs omit
+     * it. Recorded for the run artifact and the recap renderer
+     * (rereview.ts VERIFIES each id against the staged reply chain before
+     * counting it); it is a membership feed for the adjudicated-corpus
+     * suppression (dedup-adjudicated.ts). No suppression pass consumes it
+     * yet, so a wrong entry costs a mislabeled recap line at worst.
+     */
+    acknowledged?: string[];
+    skipLines: unknown;
+};
+
+/**
+ * Admit the reconciler's parsed JSON leniently: non-string ids are filtered
+ * (never fatal), a malformed or absent `acknowledged` stays absent rather
+ * than empty so the artifact distinguishes "an older reconciler" from
+ * "nothing acknowledged", and `skipLines` passes through raw (its consumer
+ * shape-checks it).
+ */
+export const parseReconciliation = (
+    parsed: Record<string, unknown>,
+): Reconciliation => {
+    const ids = (value: unknown): string[] =>
+        Array.isArray(value)
+            ? value.filter((v): v is string => typeof v === "string")
+            : [];
+    return {
+        resolve: ids(parsed["resolve"]),
+        keep: ids(parsed["keep"]),
+        ...(Array.isArray(parsed["acknowledged"])
+            ? {acknowledged: ids(parsed["acknowledged"])}
+            : {}),
+        skipLines: parsed["skipLines"] ?? [],
+    };
+};

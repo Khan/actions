@@ -26,6 +26,7 @@
  */
 
 import {isBlockingLabel} from "./render-comment";
+import {isReviewBotAuthor, sameLogin} from "./threads";
 
 /** One staged unresolved bot thread (`threads.json`, review.md Step 3 Phase 2). */
 export type StagedThread = {
@@ -47,6 +48,75 @@ export type StagedThread = {
 export type ReconcilerResult = {
     resolve: string[];
     keep: string[];
+    /**
+     * Kept threads whose reply chain shows the AUTHOR conceded the finding
+     * (agreed it should change, a fix is under way, a TODO stands in) with
+     * the code not yet changed. Optional: older reconciler outputs omit it.
+     * These render as acknowledged (fix pending) in the recap instead of
+     * counting as plain "unaddressed", and the VERIFIED subset (see
+     * {@link verifiedAcknowledgedIds}) is an acknowledgment membership
+     * signal for the adjudicated-corpus suppression (dedup-adjudicated.ts).
+     */
+    acknowledged?: string[];
+};
+
+/**
+ * The acknowledged ids that survive the mechanical fail-closed checks, the
+ * code-side half of the staged-decision-plus-verification pattern the thread
+ * resolutions use (the reconciler asserts, code verifies, and nothing
+ * downstream consumes an unverified assertion):
+ *
+ * - The id must be in `keep`. An acknowledgment on a resolved thread is a
+ *   contradiction (resolution already accounts for it), and an id the
+ *   reconciler never decided is a fabrication.
+ * - The staged thread must carry a REPLY (not the opener) whose author is
+ *   the PR author. "Bot replies never count" is the #332 fail-closed rule
+ *   this enforces mechanically: the thumbs sweep's follow-ups and autofix's
+ *   replies sit on exactly these threads, and a reconciler hallucinating an
+ *   acknowledgment out of one must contribute nothing. The author
+ *   comparison is {@link sameLogin} (the REST/GraphQL bot-suffix split
+ *   applies to human logins too, trivially), belt-and-suspendered by the
+ *   explicit bot guards for the case where the PR author IS a bot (an
+ *   autofix PR must not self-acknowledge).
+ * - No PR author staged reads as NO verified acknowledgments. Absent,
+ *   malformed, or unmatchable data fails toward a plain kept thread, whose
+ *   worst case is the recap line reading "unaddressed" when the author
+ *   already said "will fix": noise, never a dropped accountability line.
+ */
+export const verifiedAcknowledgedIds = (
+    reconciler: ReconcilerResult,
+    threads: readonly StagedThread[],
+    prAuthor: string | undefined,
+): Set<string> => {
+    const verified = new Set<string>();
+    if (
+        prAuthor === undefined ||
+        prAuthor === "" ||
+        isReviewBotAuthor(prAuthor) ||
+        /\[bot\]$/i.test(prAuthor)
+    ) {
+        return verified;
+    }
+    const kept = new Set(reconciler.keep);
+    for (const id of reconciler.acknowledged ?? []) {
+        if (!kept.has(id)) {
+            continue;
+        }
+        const thread = threads.find((t) => t.thread_id === id);
+        const authorReplied = thread?.comments
+            .slice(1)
+            .some(
+                (comment) =>
+                    comment.author !== "" &&
+                    !isReviewBotAuthor(comment.author) &&
+                    !/\[bot\]$/i.test(comment.author) &&
+                    sameLogin(comment.author, prAuthor),
+            );
+        if (authorReplied === true) {
+            verified.add(id);
+        }
+    }
+    return verified;
 };
 
 export type RereviewSection = {
@@ -54,6 +124,15 @@ export type RereviewSection = {
     section: string;
     keptCount: number;
     resolvedCount: number;
+    /**
+     * The VERIFIED acknowledged kept threads ({@link verifiedAcknowledgedIds}),
+     * sorted for determinism. Written into `rereview.json` so the run
+     * artifact records the acknowledgment membership the recap counted;
+     * `acknowledgedCount` is its length, kept separately because the
+     * artifact's numeric consumers read counts, not lists.
+     */
+    acknowledged: string[];
+    acknowledgedCount: number;
     /**
      * How many kept threads carry a blocking opening label, plus any whose
      * label could not be parsed (unknown fails closed; see keptEntryFor).
@@ -126,12 +205,21 @@ type KeptEntry = {
     url: string | undefined;
     label: string;
     blocking: boolean;
+    /**
+     * Verified author acknowledgment (fix pending). Rendering only: an
+     * acknowledged BLOCKING thread still renders visibly and still counts
+     * toward `keptBlockingCount`, so "will fix" never weakens the
+     * reduced-depth flip gate; the code change itself is what resolves the
+     * thread and releases the verdict.
+     */
+    acknowledged: boolean;
     excerpt: string;
 };
 
 const keptEntryFor = (
     threadId: string,
     threads: readonly StagedThread[],
+    acknowledgedIds: ReadonlySet<string>,
 ): KeptEntry => {
     const thread = threads.find((t) => t.thread_id === threadId);
     if (thread === undefined) {
@@ -144,6 +232,7 @@ const keptEntryFor = (
             url: undefined,
             label: "unknown",
             blocking: true,
+            acknowledged: false,
             excerpt: "(not in the staged threads)",
         };
     }
@@ -167,6 +256,7 @@ const keptEntryFor = (
         // REQUEST_CHANGES until a full-depth review re-judges it, which is
         // noise, not a wrongly-permitted approval.
         blocking: label === "unknown" || isBlockingLabel(label),
+        acknowledged: acknowledgedIds.has(threadId),
         excerpt: excerptOpeningComment(opener),
     };
 };
@@ -182,13 +272,17 @@ const compareKept = (a: KeptEntry, b: KeptEntry): number => {
     return a.threadId < b.threadId ? -1 : a.threadId > b.threadId ? 1 : 0;
 };
 
+/** The rendered marker for a verified author acknowledgment. */
+const ACK_MARKER = " (acknowledged, fix pending)";
+
 const renderKeptLine = (entry: KeptEntry): string => {
     const anchorToken = `\`${entry.anchor}\``;
     const linked =
         entry.url !== undefined
             ? `[${anchorToken}](${entry.url})`
             : anchorToken;
-    return `- **${entry.label}** ${linked}: ${entry.excerpt}`;
+    const marker = entry.acknowledged ? ACK_MARKER : "";
+    return `- **${entry.label}** ${linked}${marker}: ${entry.excerpt}`;
 };
 
 /**
@@ -206,7 +300,8 @@ const renderKeptLineCompact = (entry: KeptEntry): string => {
         entry.url !== undefined
             ? `[${anchorToken}](${entry.url})`
             : anchorToken;
-    return `- **${entry.label}** ${linked}`;
+    const marker = entry.acknowledged ? ACK_MARKER : "";
+    return `- **${entry.label}** ${linked}${marker}`;
 };
 
 /**
@@ -244,6 +339,13 @@ export type RenderRereviewInput = {
      * entry full, which is exactly the pre-damping behavior.
      */
     priorReviewBodies?: readonly string[];
+    /**
+     * The PR author's login (staged pr-context.json), read only to verify
+     * the reconciler's `acknowledged` ids against the reply chains
+     * ({@link verifiedAcknowledgedIds}). Absent verifies nothing: every
+     * kept thread renders as plain kept.
+     */
+    prAuthor?: string;
 };
 
 /**
@@ -264,9 +366,23 @@ export const renderRereviewSection = (
     const resolvedCount = input.reconciler.resolve.length;
     const keptCount = input.reconciler.keep.length;
     const total = resolvedCount + keptCount;
+    const acknowledgedIds = verifiedAcknowledgedIds(
+        input.reconciler,
+        input.threads,
+        input.prAuthor,
+    );
+    const acknowledged = [...acknowledgedIds].sort();
+    const acknowledgedCount = acknowledged.length;
 
     if (total === 0) {
-        return {section: "", keptCount, resolvedCount, keptBlockingCount: 0};
+        return {
+            section: "",
+            keptCount,
+            resolvedCount,
+            acknowledged: [],
+            acknowledgedCount: 0,
+            keptBlockingCount: 0,
+        };
     }
 
     if (keptCount === 0) {
@@ -274,23 +390,37 @@ export const renderRereviewSection = (
             resolvedCount === 1
                 ? "The 1 prior review thread is resolved."
                 : `All ${resolvedCount} prior review threads are resolved.`;
-        return {section, keptCount, resolvedCount, keptBlockingCount: 0};
+        return {
+            section,
+            keptCount,
+            resolvedCount,
+            acknowledged: [],
+            acknowledgedCount: 0,
+            keptBlockingCount: 0,
+        };
     }
 
     const asOf =
         input.headSha !== undefined && input.headSha.length > 0
             ? ` as of ${input.headSha.slice(0, 7)}`
             : "";
+    // With verified acknowledgments the header stops calling those threads
+    // "unaddressed" (the author has addressed the ARGUMENT; the fix is
+    // pending), without changing the zero-acknowledgment wording at all.
+    const still =
+        acknowledgedCount > 0
+            ? `still open, ${acknowledgedCount} of them acknowledged (fix pending)`
+            : "still unaddressed";
     const header =
         resolvedCount === 0
             ? `${keptCount} of ${total} prior review ${
                   total === 1 ? "thread is" : "threads are"
-              } still unaddressed${asOf}:`
+              } ${still}${asOf}:`
             : `${resolvedCount} of ${total} prior review threads resolved; ` +
-              `${keptCount} still unaddressed${asOf}:`;
+              `${keptCount} ${still}${asOf}:`;
 
     const entries = input.reconciler.keep
-        .map((id) => keptEntryFor(id, input.threads))
+        .map((id) => keptEntryFor(id, input.threads, acknowledgedIds))
         .sort(compareKept);
     const blocking = entries.filter((entry) => entry.blocking);
     const nonBlocking = entries.filter((entry) => !entry.blocking);
@@ -338,6 +468,12 @@ export const renderRereviewSection = (
         section: parts.join("\n"),
         keptCount,
         resolvedCount,
+        acknowledged,
+        acknowledgedCount,
+        // Acknowledged blocking threads still count: "will fix" must never
+        // let a reduced-depth run flip a prior REQUEST_CHANGES to APPROVE
+        // past the still-open blocking thread (the code change is what
+        // resolves it, through the reconciler).
         keptBlockingCount: blocking.length,
     };
 };
@@ -430,7 +566,17 @@ const parseReconciler = (raw: unknown): ReconcilerResult | undefined => {
     if (resolve === undefined || keep === undefined) {
         return undefined;
     }
-    return {resolve, keep};
+    // A malformed `acknowledged` degrades to none (the field is an optional
+    // refinement over keep, so dropping it renders plain kept threads); it
+    // must not invalidate the whole reconciliation the way a malformed
+    // resolve/keep does, or a bad ack array would erase the accountability
+    // section entirely.
+    const acknowledged = ids(raw["acknowledged"]);
+    return {
+        resolve,
+        keep,
+        ...(acknowledged !== undefined ? {acknowledged} : {}),
+    };
 };
 
 /**
@@ -448,6 +594,8 @@ export const runRereviewCli = (fs: RereviewCliFs): RereviewSection => {
             section: "",
             keptCount: 0,
             resolvedCount: 0,
+            acknowledged: [],
+            acknowledgedCount: 0,
             keptBlockingCount: 0,
         };
     } else {
@@ -455,6 +603,10 @@ export const runRereviewCli = (fs: RereviewCliFs): RereviewSection => {
         const headSha =
             isRecord(prContext) && typeof prContext["headSha"] === "string"
                 ? prContext["headSha"]
+                : undefined;
+        const prAuthor =
+            isRecord(prContext) && typeof prContext["author"] === "string"
+                ? prContext["author"]
                 : undefined;
         // Prior review bodies feed the recap damping only; a missing or
         // malformed staging reads as no prior reviews, and every kept thread
@@ -467,6 +619,7 @@ export const runRereviewCli = (fs: RereviewCliFs): RereviewSection => {
             reconciler,
             headSha,
             priorReviewBodies,
+            prAuthor,
         });
     }
 

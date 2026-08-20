@@ -6,6 +6,7 @@ import {
     parseLeadingLabel,
     renderRereviewSection,
     runRereviewCli,
+    verifiedAcknowledgedIds,
     type RereviewCliFs,
     type StagedThread,
 } from "./rereview";
@@ -575,6 +576,8 @@ describe("runRereviewCli", () => {
             section: "",
             keptCount: 0,
             resolvedCount: 0,
+            acknowledged: [],
+            acknowledgedCount: 0,
             keptBlockingCount: 0,
         });
         expect(JSON.parse(written[RESULT])).toEqual(result);
@@ -670,5 +673,290 @@ describe("keptBlockingCount (the mode dial's flip-gate input)", () => {
             reconciler: {resolve: [], keep: ["ghost"]},
         });
         expect(result.keptBlockingCount).toBe(1);
+    });
+});
+
+describe("acknowledged threads (the will-fix signal, webapp#41290)", () => {
+    // The motivating pathology: the author replied will-fix/TODO on a bot
+    // thread without resolving it, and every later recap counted the thread
+    // "unaddressed" while the pipeline re-derived the defect afresh. The
+    // reconciler now reports conceded-but-unfixed keeps as `acknowledged`;
+    // code verifies each id against the staged reply chain (the reconciler
+    // asserts, code verifies, like thread resolutions) and the recap counts
+    // them addressed-pending.
+    const ackThread = (
+        id: string,
+        replies: {author: string; body: string}[],
+        opener = "**note (non-blocking):** Side effects escape the gate.",
+    ): StagedThread =>
+        thread({
+            thread_id: id,
+            path: "a/a.go",
+            line: 5,
+            url: `https://github.com/o/r/pull/1#discussion_${id}`,
+            comments: [{author: "github-actions", body: opener}, ...replies],
+        });
+
+    describe("verifiedAcknowledgedIds", () => {
+        const author = "octocat";
+
+        it("verifies an ack backed by the PR author's reply on a kept thread", () => {
+            const ids = verifiedAcknowledgedIds(
+                {
+                    resolve: [],
+                    keep: ["t1"],
+                    acknowledged: ["t1"],
+                },
+                [ackThread("t1", [{author, body: "yes, will fix (TODO)"}])],
+                author,
+            );
+            expect([...ids]).toEqual(["t1"]);
+        });
+
+        it("matches the author across the REST/GraphQL bot-suffix split rules", () => {
+            // sameLogin is case-folded; a human login never carries the
+            // suffix, so this is just the case fold.
+            const ids = verifiedAcknowledgedIds(
+                {resolve: [], keep: ["t1"], acknowledged: ["t1"]},
+                [ackThread("t1", [{author: "OctoCat", body: "ok"}])],
+                author,
+            );
+            expect(ids.has("t1")).toBe(true);
+        });
+
+        it("never counts bot replies (thumbs follow-ups, autofix)", () => {
+            // The sweep's follow-up and autofix's replies sit on exactly
+            // these threads; a reconciler hallucinating a concession out of
+            // one must contribute nothing.
+            const ids = verifiedAcknowledgedIds(
+                {resolve: [], keep: ["t1", "t2"], acknowledged: ["t1", "t2"]},
+                [
+                    ackThread("t1", [
+                        {
+                            author: "github-actions",
+                            body: "Thanks for the downvote",
+                        },
+                    ]),
+                    ackThread("t2", [
+                        {author: "khan-autofix[bot]", body: "pushed a fix"},
+                    ]),
+                ],
+                author,
+            );
+            expect(ids.size).toBe(0);
+        });
+
+        it("ignores replies from humans other than the PR author", () => {
+            const ids = verifiedAcknowledgedIds(
+                {resolve: [], keep: ["t1"], acknowledged: ["t1"]},
+                [ackThread("t1", [{author: "someone-else", body: "agreed"}])],
+                author,
+            );
+            expect(ids.size).toBe(0);
+        });
+
+        it("requires keep membership: resolved or unknown ids are dropped", () => {
+            const ids = verifiedAcknowledgedIds(
+                {
+                    resolve: ["t1"],
+                    keep: [],
+                    acknowledged: ["t1", "ghost"],
+                },
+                [ackThread("t1", [{author, body: "will fix"}])],
+                author,
+            );
+            expect(ids.size).toBe(0);
+        });
+
+        it("verifies nothing without a usable PR author (absent, empty, or a bot)", () => {
+            const reconciler = {
+                resolve: [],
+                keep: ["t1"],
+                acknowledged: ["t1"],
+            };
+            const threads = [ackThread("t1", [{author, body: "will fix"}])];
+            expect(
+                verifiedAcknowledgedIds(reconciler, threads, undefined).size,
+            ).toBe(0);
+            expect(verifiedAcknowledgedIds(reconciler, threads, "").size).toBe(
+                0,
+            );
+            expect(
+                verifiedAcknowledgedIds(reconciler, threads, "github-actions")
+                    .size,
+            ).toBe(0);
+            expect(
+                verifiedAcknowledgedIds(
+                    reconciler,
+                    threads,
+                    "khan-autofix[bot]",
+                ).size,
+            ).toBe(0);
+        });
+
+        it("requires a reply: the opener alone verifies nothing", () => {
+            const ids = verifiedAcknowledgedIds(
+                {resolve: [], keep: ["t1"], acknowledged: ["t1"]},
+                [ackThread("t1", [])],
+                author,
+            );
+            expect(ids.size).toBe(0);
+        });
+    });
+
+    describe("renderRereviewSection with acknowledgments", () => {
+        const author = "octocat";
+
+        it("counts verified acks as addressed-pending in the header and marks their lines", () => {
+            const result = renderRereviewSection({
+                threads: [
+                    ackThread("ack", [{author, body: "yes, TODO filed"}]),
+                    ackThread("plain", []),
+                ],
+                reconciler: {
+                    resolve: ["done"],
+                    keep: ["ack", "plain"],
+                    acknowledged: ["ack"],
+                },
+                headSha: "abcdef1234567890",
+                prAuthor: author,
+            });
+            expect(result.section.split("\n")[0]).toBe(
+                "1 of 3 prior review threads resolved; 2 still open, " +
+                    "1 of them acknowledged (fix pending) as of abcdef1:",
+            );
+            expect(result.section).toContain(
+                "[`a/a.go:5`](https://github.com/o/r/pull/1#discussion_ack)" +
+                    " (acknowledged, fix pending): Side effects escape the gate.",
+            );
+            expect(result.acknowledged).toEqual(["ack"]);
+            expect(result.acknowledgedCount).toBe(1);
+        });
+
+        it("keeps the exact pre-acknowledgment wording when nothing verifies", () => {
+            const result = renderRereviewSection({
+                threads: [ackThread("t1", [{author, body: "will fix"}])],
+                reconciler: {
+                    resolve: [],
+                    keep: ["t1"],
+                    acknowledged: ["t1"],
+                },
+                // No prAuthor staged: verification fails closed, and the
+                // section is byte-identical to the pre-PRA-47 render.
+            });
+            expect(result.section).toContain("still unaddressed");
+            expect(result.section).not.toContain("acknowledged");
+            expect(result.acknowledged).toEqual([]);
+            expect(result.acknowledgedCount).toBe(0);
+        });
+
+        it("never lets an acknowledged blocking thread fold or release the flip gate", () => {
+            const result = renderRereviewSection({
+                threads: [
+                    ackThread(
+                        "blk",
+                        [{author, body: "true, fixing"}],
+                        "**issue (blocking):** The guard was removed.",
+                    ),
+                ],
+                reconciler: {
+                    resolve: [],
+                    keep: ["blk"],
+                    acknowledged: ["blk"],
+                },
+                prAuthor: author,
+            });
+            // Visible line (no <details>), marked, and still counted: the
+            // code change is what resolves a blocking thread, never the
+            // promise of one.
+            expect(result.keptBlockingCount).toBe(1);
+            expect(result.section).not.toContain("<details>");
+            expect(result.section).toContain(
+                "- **issue (blocking)** " +
+                    "[`a/a.go:5`](https://github.com/o/r/pull/1#discussion_blk)" +
+                    " (acknowledged, fix pending): The guard was removed.",
+            );
+        });
+
+        it("keeps the marker on a damped (previously recapped) line", () => {
+            const url = "https://github.com/o/r/pull/1#discussion_ack";
+            const result = renderRereviewSection({
+                threads: [ackThread("ack", [{author, body: "yep"}])],
+                reconciler: {
+                    resolve: [],
+                    keep: ["ack"],
+                    acknowledged: ["ack"],
+                },
+                priorReviewBodies: [`- [\`a/a.go:5\`](${url}): quoted before`],
+                prAuthor: author,
+            });
+            expect(result.section).toContain(
+                `- **note (non-blocking)** [\`a/a.go:5\`](${url})` +
+                    " (acknowledged, fix pending)\n",
+            );
+            expect(result.section).not.toContain(
+                ": Side effects escape the gate.",
+            );
+        });
+    });
+
+    describe("runRereviewCli with acknowledgments", () => {
+        const makeFs = (files: Record<string, string>) => {
+            const written: Record<string, string> = {};
+            const fs: RereviewCliFs = {
+                existsSync: (p) => p in files,
+                readFileSync: (p) => files[p],
+                writeFileSync: (p, data) => {
+                    written[p] = data;
+                },
+                mkdirSync: () => {},
+            };
+            return {fs, written};
+        };
+        const THREADS = "/tmp/gh-aw/review/threads.json";
+        const RECONCILER = "/tmp/gh-aw/review/out/thread-reconciler.json";
+        const PR_CONTEXT = "/tmp/gh-aw/review/pr-context.json";
+        const RESULT = "/tmp/gh-aw/review/rereview.json";
+
+        it("reads the staged PR author and records verified acks in rereview.json", () => {
+            const {fs, written} = makeFs({
+                [THREADS]: JSON.stringify([
+                    ackThread("t1", [{author: "octocat", body: "will fix"}]),
+                ]),
+                [RECONCILER]: JSON.stringify({
+                    resolve: [],
+                    keep: ["t1"],
+                    acknowledged: ["t1"],
+                    skipLines: [],
+                }),
+                [PR_CONTEXT]: JSON.stringify({
+                    author: "octocat",
+                    headSha: "abc",
+                }),
+            });
+            const result = runRereviewCli(fs);
+            expect(result.acknowledged).toEqual(["t1"]);
+            expect(result.acknowledgedCount).toBe(1);
+            expect(JSON.parse(written[RESULT]).acknowledged).toEqual(["t1"]);
+        });
+
+        it("degrades a malformed acknowledged array to none, keeping the section", () => {
+            const {fs} = makeFs({
+                [THREADS]: JSON.stringify([
+                    ackThread("t1", [{author: "octocat", body: "will fix"}]),
+                ]),
+                [RECONCILER]: JSON.stringify({
+                    resolve: [],
+                    keep: ["t1"],
+                    acknowledged: [42],
+                    skipLines: [],
+                }),
+                [PR_CONTEXT]: JSON.stringify({author: "octocat"}),
+            });
+            const result = runRereviewCli(fs);
+            expect(result.acknowledgedCount).toBe(0);
+            expect(result.keptCount).toBe(1);
+            expect(result.section).toContain("still unaddressed");
+        });
     });
 });

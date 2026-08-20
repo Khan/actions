@@ -533,10 +533,15 @@ describe("runDispatch", () => {
             ]),
             ...agentFiles("thread-reconciler"),
         });
+        // `acknowledged` rides the reconciliation record into the run
+        // artifact (the recap CLI verifies each id separately, from the
+        // staged reply chains); non-string entries are filtered exactly
+        // like resolve/keep.
         const runner = stubRunner({
             "thread-reconciler": JSON.stringify({
                 resolve: ["t1"],
                 keep: [],
+                acknowledged: ["t1", 42],
                 skipLines: [],
             }),
         });
@@ -545,6 +550,7 @@ describe("runDispatch", () => {
         expect(result.reconciliation).toEqual({
             resolve: ["t1"],
             keep: [],
+            acknowledged: ["t1"],
             skipLines: [],
         });
     });
