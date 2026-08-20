@@ -793,6 +793,17 @@ Two known interactions:
 
 Optional:
 
+- `REVIEW_JIRA_BASE_URL` (repo **variable**), `REVIEW_JIRA_EMAIL` and
+  `REVIEW_JIRA_API_TOKEN` (repo **secrets**) – the linked-ticket staging
+  (`lib/stage-ticket.ts`). When all three are set, the pre-agent staging
+  resolves the PR's Jira issue key (title, then head branch, then
+  description), fetches the ticket read-only on the host, and stages it as
+  `ticket-context.json` for the intent-reading sub-agents (completeness,
+  first-principles). The agent sandbox never sees the credentials and has no
+  Jira egress. Use a service-account API token with read-only scope. Without
+  these, the file stages `{available: false, reason: "not-configured"}` and
+  those sub-agents fall back to the PR description; a ticket is context,
+  never a prerequisite, so nothing else changes.
 - `REVIEW_BOT_LOGIN` — the account this workflow posts reviews as, default
   `github-actions[bot]`. Set it only in a repo that posts under its own GitHub
   App, in the installed `review.md`'s workflow-level `env:` block (the one

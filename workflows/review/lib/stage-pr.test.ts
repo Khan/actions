@@ -85,7 +85,7 @@ const PR_META = {
     body: "d",
     user: {login: "octo"},
     base: {ref: "main"},
-    head: {sha: "abc123"},
+    head: {sha: "abc123", ref: "feature/KORE-9"},
     draft: false,
 };
 
@@ -215,6 +215,46 @@ describe("computeDiffFingerprint", () => {
 describe("runStagePrCli", () => {
     const options = {repo: "o/r", prNumber: 7, repoRoot: "/work"};
 
+    it("wires the ticket staging through env and the PR's head branch", async () => {
+        const fs = makeFakeFs();
+        const fetched: string[] = [];
+        await runStagePrCli(
+            fs,
+            ghGetFromMap(
+                baseRoutes([
+                    {filename: "a.ts", status: "modified", patch: PATCH_ONE},
+                ]),
+            ),
+            noThreads(),
+            {
+                ...options,
+                env: {
+                    REVIEW_JIRA_BASE_URL: "https://khanacademy.atlassian.net",
+                    REVIEW_JIRA_EMAIL: "bot@khanacademy.org",
+                    REVIEW_JIRA_API_TOKEN: "tok",
+                },
+                ticketFetch: (url) => {
+                    fetched.push(url);
+                    return Promise.resolve({
+                        status: 200,
+                        json: {fields: {summary: "the ticket"}},
+                    });
+                },
+            },
+        );
+        // The key comes from the head branch (the title carries none).
+        expect(fetched).toEqual([
+            "https://khanacademy.atlassian.net/rest/api/2/issue/KORE-9?fields=summary,description,status,resolution,issuetype,labels,comment",
+        ]);
+        expect(
+            JSON.parse(fs.files[`${REVIEW}/ticket-context.json`]),
+        ).toMatchObject({
+            available: true,
+            key: "KORE-9",
+            summary: "the ticket",
+        });
+    });
+
     it("stages the full Step 1 + Step 3 contract for a first review", async () => {
         const fs = makeFakeFs({
             "/tmp/gh-aw/aw-prompts/prompt.txt": [
@@ -250,6 +290,12 @@ describe("runStagePrCli", () => {
             {path: "a.ts", status: "modified", hasPatch: true},
             {path: "bin.png", status: "modified", hasPatch: false},
         ]);
+        // ticket-context.json is ALWAYS written (readers never need an
+        // existence check); without a ticketFetch it stages not-configured.
+        expect(JSON.parse(read("ticket-context.json"))).toEqual({
+            available: false,
+            reason: "not-configured",
+        });
         expect(read("full.diff")).toContain("diff --git a/a.ts b/a.ts");
         const facts = JSON.parse(read("diff-facts.json"));
         expect(Object.keys(facts.diffFingerprint)).toEqual(["a.ts", "bin.png"]);
