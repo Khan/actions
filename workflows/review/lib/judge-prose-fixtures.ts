@@ -71,3 +71,32 @@ export const CLEAN_CONTROLS: readonly ProseFixture[] = [
         expected: "unpinned",
     },
 ];
+
+/**
+ * Rule-2 (repetition) calibration fixtures from production, per the
+ * 2026-08-20 reviewer version audit (plans records): its blind-judged
+ * sample found 5 repetition fails in 29 W4-W5 bodies, every one the same
+ * mode, restating one fact two to four times. The 41609 set above
+ * calibrates rule 1 on the named complaint; these two calibrate rule 2 on
+ * real posted bodies (3768804982's rendered `<details>` ride-along is
+ * stripped: the judge governs authored prose, and the collapsed section is
+ * code-appended at the plan surface, not authored).
+ */
+export const FIXTURES_RULE2: readonly ProseFixture[] = [
+    {
+        commentId: 3754335178,
+        path: "services/ai-guide/moderation/escalation_check/versions.go",
+        label: "note (non-blocking)",
+        discussion:
+            'V2 RC1 preset silently adds ServiceTier: "priority" (and temperature 1.0), unmentioned in the description. The description characterizes the RC as gpt-5.2 low-reasoning + revised prompt; the registry entry additionally sets ServiceTier "priority" (cost/latency impact) and Temperature 1.0. Temperature 1.0 is plausibly required for the reasoning model, but the priority tier is a substantive, cost-bearing behavior not called out in the stated intent — worth surfacing so the rollout\'s cost profile is understood.',
+        expected: "fail",
+    },
+    {
+        commentId: 3768804982,
+        path: "services/ai-guide/chat/threads/facets.go",
+        label: "note (non-blocking)",
+        discussion:
+            "Decommission leaves orphaned per-user AIGuideMemory data in Datastore with no deletion path. Pre-existing gap, amplified by this change: I checked services/ai-guide/delete_user_data/delete_user_data.go (it enumerates AIGuideThread, ImageMetadata, AIGuideAcceptance, etc. but never AIGuideMemoryKind) and ran `git log -S AIGuideMemoryKind` over the deletion flow — user deletion never covered this kind even before this PR, so the retention itself is pre-existing; this change amplifies it by deleting the model and all query/delete capability, turning the (flag-gated, so presumably small) set of stored user records into permanently unreachable orphaned data. Consider a one-off wipe of the AIGuideMemory kind (e.g. via a backfill or Datastore admin bulk delete) as part of decommissioning, before or shortly after this lands while the entity shape is still known.",
+        expected: "fail",
+    },
+];
