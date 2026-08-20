@@ -1,5 +1,6 @@
 import {describe, expect, it, vi} from "vitest";
 
+import {PINNED_PROSE_JUDGE_MODEL} from "./judge-prose";
 import {
     createDefaultProseRunner,
     createJudgeRunner,
@@ -90,6 +91,6 @@ describe("createDefaultProseRunner", () => {
         const runner = await createDefaultProseRunner();
         expect(runner).toBeDefined();
         await expect(runner!("prompt")).resolves.toBe("ok");
-        expect(lastOptions["model"]).toBe("claude-haiku-4-5-20251001");
+        expect(lastOptions["model"]).toBe(PINNED_PROSE_JUDGE_MODEL);
     });
 });

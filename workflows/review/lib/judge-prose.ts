@@ -474,13 +474,20 @@ export const fallbackSkippedRecord = (source: string): JudgeRecord => ({
 export const VERDICTS_PATH = "/tmp/gh-aw/review/judge-prose-verdicts.json";
 
 /**
- * The judge model: bounded classification, so the cheap tier (the same pin
- * as eval/match-arbiter.ts, chosen there for the same shape of task).
- * Pinned rather than inherited so a consumer's orchestrator model never
- * multiplies this per-finding cost. The rewrite needs no model of its own
- * anymore: the author does it.
+ * The judge model. Started on the haiku tier (bounded classification, the
+ * match-arbiter's reasoning), and the fifth live calibration moved it up:
+ * haiku re-flagged carve-out phrasings added verbatim two runs earlier
+ * ("flips parallel moderation on", "graduates the behavior"), its verdicts
+ * flickered run to run on identical rubric text, and it failed the clean
+ * control on prose a judge-driven rewrite had itself produced ("pays for a
+ * main completion"). An unstable judge cannot be fixed with rubric text,
+ * and every false bounce re-runs an authoring turn on the lens model, so
+ * the stronger judge plausibly nets cheaper. `claude-opus-4-8` is the
+ * repo's established always-available pin (the refusal fallback). Pinned
+ * rather than inherited so a consumer's orchestrator model never silently
+ * changes this per-finding cost.
  */
-export const PINNED_PROSE_JUDGE_MODEL = "claude-haiku-4-5-20251001";
+export const PINNED_PROSE_JUDGE_MODEL = "claude-opus-4-8";
 
 export type ProseJudgeArtifact = {
     model: string;

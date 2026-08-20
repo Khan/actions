@@ -9,6 +9,7 @@ import {
     LABEL_RUBRIC_EXTRA,
     MAX_PROSE_BOUNCES,
     parseJudgeVerdict,
+    PINNED_PROSE_JUDGE_MODEL,
     PLAIN_PROSE_RUBRIC,
     type ProseRunner,
 } from "./judge-prose";
@@ -338,6 +339,6 @@ describe("buildProseJudgeArtifact", () => {
             error: 1,
             bounces: 1,
         });
-        expect(artifact.model).toBe("claude-haiku-4-5-20251001");
+        expect(artifact.model).toBe(PINNED_PROSE_JUDGE_MODEL);
     });
 });
