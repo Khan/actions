@@ -2628,12 +2628,6 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   `pickle.loads`, unsafe YAML load, prototype-polluting merges).
 - **Guards are not silently removed.** A removed (`-`) auth/permission/validation
   check on a path the change keeps is a finding — judge the effect of the removal.
-- **Documentation that promises a guarantee must match the code.** A docstring,
-  schema comment, or field description promising a security/privacy property
-  ("without answers", "without PII", "redacted for non-owners") is a contract
-  clients trust; a resolver or handler whose runtime contradicts it means the
-  schema lies. Verify docstring/runtime parity on every changed field or
-  endpoint that carries such a promise.
 
 ### Incident-derived hunts (tri-state)
 - **`authz-on-new-endpoint`** — for each added/modified endpoint, handler, resolver, or
