@@ -140,6 +140,80 @@ describe("run 32390393344's vetoed true merge", () => {
     });
 });
 
+describe("the vocabulary path's casing fold", () => {
+    it("grounds a cross-line member that spells the evidence's name in another convention", () => {
+        // The merge-level case the fold exists for, one step milder than run
+        // 32390393344 (there the two spellings lived in the two CLAIMS, and
+        // grounding compares the evidence against each claim, so the fold
+        // alone could not have saved that merge; the anchor path did). Here
+        // the evidence names the config key in the hunk's Go casing, the
+        // member's claim names it in the configs' JSON casing, and the member
+        // sits off the survivor's line so the anchor path cannot carry it.
+        // Without `canonicalToken`'s fold the spellings share nothing and the
+        // member is rejected "ungrounded"; the unit assertion above pins the
+        // fold itself, this pins a merge outcome on it.
+        const {claims, merges, clusterRejections} = dedupeClaims(
+            [
+                claim({
+                    id: "holistic-1",
+                    source: "holistic",
+                    path: "services/ai-guide/chat/ask/v2/moderation_helpers.go",
+                    line: 31,
+                    label: "thought (non-blocking)",
+                    subject:
+                        "Parallel moderation now applies to every v2 config, not just the enrolled three.",
+                    discussion:
+                        "Parallel moderation now applies to every v2 config, not just the enrolled three. `shouldModerateDuringMainCompletion` gates on the moderation modifier alone, so the rollout is no longer scoped to the experiment.",
+                    failure_scenario:
+                        "An unenrolled config regresses without ever having been measured.",
+                }),
+                claim({
+                    id: "first-principles-1",
+                    source: "first-principles",
+                    path: "services/ai-guide/chat/ask/v2/moderation_helpers.go",
+                    line: 45,
+                    label: "question (non-blocking)",
+                    subject:
+                        "112 of 151 v2 configs declare pre_flight_moderation_check; was a staged rollout considered?",
+                    discussion:
+                        "112 of 151 v2 configs declare pre_flight_moderation_check; was a staged rollout considered? The cost profile on high-flag-rate configs outside the experiment is unmeasured.",
+                    failure_scenario:
+                        "A config with a different traffic shape hits a spend regression the three-config experiment could not surface.",
+                }),
+            ],
+            [
+                {
+                    evidence:
+                        "`shouldModerateDuringMainCompletion` now returns true for every v2 config that declares `PreFlightModerationCheck`",
+                    ids: ["holistic-1", "first-principles-1"],
+                },
+            ],
+        );
+        expect(claims.map((c) => c.id)).toEqual(["holistic-1"]);
+        expect(merges).toEqual([
+            {
+                survivor: "holistic-1",
+                merged: [
+                    {
+                        id: "first-principles-1",
+                        source: "first-principles",
+                        label: "question (non-blocking)",
+                        line: 45,
+                        via: "clusterer",
+                        groundedBy: "evidence",
+                    },
+                ],
+                path: "services/ai-guide/chat/ask/v2/moderation_helpers.go",
+                line: 31,
+                via: "clusterer",
+                evidence:
+                    "`shouldModerateDuringMainCompletion` now returns true for every v2 config that declares `PreFlightModerationCheck`",
+            },
+        ]);
+        expect(clusterRejections).toEqual([]);
+    });
+});
+
 /**
  * What the anchor path gives up, pinned so the trade stays recorded rather
  * than rediscovered. Modeled on run 30587343777's counterexample (the fixture
@@ -216,6 +290,84 @@ describe("the anchor path's accepted cost", () => {
                 line: 8,
                 via: "clusterer",
                 evidence: "the `maxSamples` comment claims a cap of 10, not 25",
+            },
+        ]);
+        expect(clusterRejections).toEqual([]);
+    });
+
+    it("grounds on the anchor against a tier-1 head the clusterer never named", () => {
+        // The survivor can be a claim the proposal never saw: tier 1 bridges
+        // the named member into a higher-severity head, and the member is
+        // re-checked against THAT claim. The identity chain still holds by
+        // transitivity (the clusterer asserted member ≡ named claim, tier 1's
+        // text floor asserted named claim ≡ head), so the anchor grounds here
+        // too, even though the head never names the evidence, which is
+        // exactly the survivor-end failure the vocabulary path would veto
+        // (dedup-cluster.test.ts pins that veto for a member OFF the line).
+        const {claims, merges, clusterRejections} = dedupeClaims(
+            [
+                claim({
+                    id: "holistic-1",
+                    source: "holistic",
+                    path: "dev/af19_trial/window.go",
+                    line: 8,
+                    label: "issue (blocking)",
+                    subject:
+                        "The declaration comment above the constant states a retention bound the code does not enforce.",
+                    failure_scenario:
+                        "A maintainer sizes downstream buffers from the stated retention bound and under-provisions.",
+                }),
+                claim({
+                    id: "correctness-reviewer-3",
+                    source: "correctness-reviewer",
+                    path: "dev/af19_trial/window.go",
+                    line: 8,
+                    label: "note (non-blocking)",
+                    subject:
+                        "The declaration comment above `maxSamples` states a retention bound the code does not enforce.",
+                    failure_scenario:
+                        "A maintainer sizes downstream buffers from the stated retention bound and under-provisions.",
+                }),
+                claim({
+                    id: "documentation-1",
+                    source: "documentation",
+                    path: "dev/af19_trial/window.go",
+                    line: 8,
+                    label: "suggestion (non-blocking, documentation)",
+                    subject: "Wrong cap in prose: 10 vs 25.",
+                    failure_scenario:
+                        "`maxSamples` is 25 and the doc says 10, so a reader trusts a number that was never true.",
+                }),
+            ],
+            [
+                {
+                    evidence: "the `maxSamples` cap",
+                    ids: ["correctness-reviewer-3", "documentation-1"],
+                },
+            ],
+        );
+        expect(claims.map((c) => c.id)).toEqual(["holistic-1"]);
+        expect(merges).toEqual([
+            {
+                survivor: "holistic-1",
+                merged: [
+                    {
+                        id: "correctness-reviewer-3",
+                        source: "correctness-reviewer",
+                        label: "note (non-blocking)",
+                    },
+                    {
+                        id: "documentation-1",
+                        source: "documentation",
+                        label: "suggestion (non-blocking, documentation)",
+                        via: "clusterer",
+                        groundedBy: "anchor",
+                    },
+                ],
+                path: "dev/af19_trial/window.go",
+                line: 8,
+                via: "both",
+                evidence: "the `maxSamples` cap",
             },
         ]);
         expect(clusterRejections).toEqual([]);
