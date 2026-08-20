@@ -14,10 +14,12 @@
  * call uses, so the judge is priced and capped like the rest of the run.
  */
 
+import type {ProseRunner} from "./judge-prose";
+
 /**
  * Per-call ceiling. A judge call is a bounded classification over one
- * comment; a rewrite is one short paragraph. Two minutes is generous for
- * both and keeps a wedged call from stalling the whole pipeline step.
+ * comment; two minutes is generous and keeps a wedged call from stalling
+ * the submit_result path it runs inside.
  */
 const CALL_TIMEOUT_MS = 120_000;
 
@@ -35,7 +37,7 @@ const JUDGE_MAX_RETRIES = "2";
  * unjudged rather than red.
  */
 export const createDefaultProseRunner = async (): Promise<
-    ((prompt: string) => Promise<string>) | undefined
+    ProseRunner | undefined
 > => {
     try {
         const {PINNED_PROSE_JUDGE_MODEL} = await import("./judge-prose");
@@ -53,7 +55,7 @@ export const createDefaultProseRunner = async (): Promise<
 
 export const createJudgeRunner = async (
     model: string,
-): Promise<(prompt: string) => Promise<string>> => {
+): Promise<ProseRunner> => {
     const sdk = (await import("@anthropic-ai/claude-agent-sdk")) as {
         query: (input: {
             prompt: string;

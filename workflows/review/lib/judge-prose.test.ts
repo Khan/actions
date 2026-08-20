@@ -197,6 +197,9 @@ describe("createProseGate", () => {
         );
         expect(rejection).toContain("call submit_result again");
         expect(records[0]).toMatchObject({state: "fail", bounced: true});
+        // The audit snapshot: a fail records the judged prose so the
+        // artifact carries the before side of the author's rewrite.
+        expect(records[0].prose).toContain("last runtime lever");
     });
 
     it("accepts as-is once the bounce cap is reached, recording unbounced fails", async () => {
@@ -212,6 +215,10 @@ describe("createProseGate", () => {
         expect(await gate(lensPayload())).toBeNull();
         const last = records[records.length - 1];
         expect(last).toMatchObject({attempt: 3, state: "fail", bounced: false});
+        // Every post-bounce attempt snapshots its prose (the after side of
+        // the audit pair), capped.
+        expect(last.prose).toBeDefined();
+        expect(last.prose!.length).toBeLessThanOrEqual(600);
     });
 
     it("accepts immediately on a judge error and records it (fail-open)", async () => {

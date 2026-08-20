@@ -308,13 +308,28 @@ export type JudgeRecord = {
     bounced: boolean;
     /** Why an `error` or `skipped` state happened. */
     reason?: string;
+    /**
+     * The judged prose (capped at {@link PROSE_SNAPSHOT_CHARS}), recorded on
+     * every fail and on every post-bounce attempt, so the artifact carries
+     * the before/after pair: the gate never edits a finding, but the AUTHOR
+     * rewrites under bounce pressure, and without the snapshots that drift
+     * is unauditable (PR #362's fidelity thought).
+     */
+    prose?: string;
 };
 
+/** Snapshot cap: enough to diff a comment, not enough to bloat artifacts. */
+export const PROSE_SNAPSHOT_CHARS = 600;
+
 /**
- * Style rejections per agent before the gate accepts as-is. Two bounces is
- * plain-prose's practical behavior (the author nearly always fixes it in
- * one); past the cap a stubborn or confused agent posts its original prose
- * rather than losing its findings or its budget to a style loop.
+ * Style rejections per gate before it accepts as-is, and a gate lives for
+ * one dispatch ATTEMPT (dispatch.ts constructs a fresh one per attempt, so
+ * a malformed-output retry or a refusal fallback starts with a fresh cap;
+ * "per agent" is only true for the common single-attempt case). Two
+ * bounces is plain-prose's practical behavior (the author nearly always
+ * fixes it in one); past the cap a stubborn or confused agent posts its
+ * original prose rather than losing its findings or its budget to a style
+ * loop.
  */
 export const MAX_PROSE_BOUNCES = 2;
 
@@ -377,29 +392,61 @@ export const createProseGate = (options: {
         payload: Record<string, unknown>,
     ): Promise<string | null> => {
         attempt += 1;
+        const units = extractProseUnits(payload);
+        // One judge call per finding, in parallel: the gate sits on the
+        // submit_result path, so its wall time is the author's wait, and
+        // the calls are independent. Records are pushed in unit order below
+        // so the artifact stays deterministic regardless of completion
+        // order.
+        const outcomes = await Promise.all(
+            units.map(
+                async (
+                    unit,
+                ): Promise<{verdict: JudgeVerdict | null; error?: string}> => {
+                    try {
+                        return {
+                            verdict: parseJudgeVerdict(
+                                await runner(
+                                    buildJudgePrompt(unit.prose, unit.label),
+                                ),
+                            ),
+                        };
+                    } catch (error) {
+                        return {
+                            verdict: null,
+                            error:
+                                error instanceof Error
+                                    ? error.message
+                                    : String(error),
+                        };
+                    }
+                },
+            ),
+        );
         const failures: {key: string; problems: string[]}[] = [];
-        for (const unit of extractProseUnits(payload)) {
+        units.forEach((unit, index) => {
+            const {verdict, error} = outcomes[index];
             const base = {
                 source,
                 key: unit.key,
                 label: unit.label,
                 attempt,
+                // Post-bounce attempts always snapshot (the after side of
+                // the audit pair); first-attempt snapshots ride on fails
+                // only, added below.
+                ...(attempt > 1
+                    ? {prose: unit.prose.slice(0, PROSE_SNAPSHOT_CHARS)}
+                    : {}),
             };
-            let verdict: JudgeVerdict | null;
-            try {
-                verdict = parseJudgeVerdict(
-                    await runner(buildJudgePrompt(unit.prose, unit.label)),
-                );
-            } catch (error) {
+            if (error !== undefined) {
                 records.push({
                     ...base,
                     state: "error",
                     problems: [],
                     bounced: false,
-                    reason:
-                        error instanceof Error ? error.message : String(error),
+                    reason: error,
                 });
-                continue;
+                return;
             }
             if (verdict === null) {
                 records.push({
@@ -409,7 +456,7 @@ export const createProseGate = (options: {
                     bounced: false,
                     reason: "unparseable judge reply",
                 });
-                continue;
+                return;
             }
             if (verdict.pass) {
                 records.push({
@@ -418,18 +465,19 @@ export const createProseGate = (options: {
                     problems: [],
                     bounced: false,
                 });
-                continue;
+                return;
             }
             failures.push({key: unit.key, problems: verdict.problems});
             records.push({
                 ...base,
                 state: "fail",
                 problems: verdict.problems,
+                prose: unit.prose.slice(0, PROSE_SNAPSHOT_CHARS),
                 // Whether this fail actually bounces is decided below; patch
                 // the flag once the decision is known.
                 bounced: false,
             });
-        }
+        });
         if (failures.length === 0) {
             return null;
         }
@@ -471,7 +519,10 @@ export const fallbackSkippedRecord = (source: string): JudgeRecord => ({
 /* Artifact shape                                                             */
 /* -------------------------------------------------------------------------- */
 
-export const VERDICTS_PATH = "/tmp/gh-aw/review/judge-prose-verdicts.json";
+/** The staged review directory (the same root every lib module builds on). */
+const REVIEW_DIR = "/tmp/gh-aw/review";
+
+export const VERDICTS_PATH = `${REVIEW_DIR}/judge-prose-verdicts.json`;
 
 /**
  * The judge model. Started on the haiku tier (bounded classification, the
