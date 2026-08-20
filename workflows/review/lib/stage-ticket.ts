@@ -23,7 +23,11 @@
  *
  * Trust stance: ticket text is untrusted input under review, same as the PR
  * description. The staged JSON carries content verbatim (size-capped); the
- * consuming prompts carry the never-follow-instructions rule.
+ * consuming prompts carry the never-follow-instructions rule. The project
+ * allowlist (REVIEW_JIRA_PROJECTS) bounds WHICH tickets author text can pull
+ * in: an issue key is author-controlled input, and without the allowlist any
+ * key written into a PR would fetch an arbitrary internal ticket with the
+ * org token and feed it to prompts that post publicly.
  *
  * Determinism boundary: one authenticated GET plus pure functions of its
  * result; no model call, no prose about the code under review.
@@ -40,8 +44,8 @@
 export type TicketContext = {
     available: boolean;
     reason?:
-        | "not-configured" // no Jira base URL / credentials in the consumer repo
-        | "no-issue-key" // nothing ticket-shaped in the PR title/branch/description
+        | "not-configured" // no Jira base URL / credentials / project allowlist
+        | "no-issue-key" // no allowlisted issue key in the PR title/branch/description
         | "not-found" // the key resolved but Jira returned 404 (stale/foreign key)
         | "fetch-failed"; // auth failure, 5xx, network error
     key?: string;
@@ -71,6 +75,13 @@ export type StageTicketOptions = {
     /** Atlassian API token auth pair; empty means not configured. */
     email: string;
     apiToken: string;
+    /**
+     * Comma-separated project-key allowlist (REVIEW_JIRA_PROJECTS, e.g.
+     * "KORE,FEI"); empty means not configured. Required: it is both the
+     * false-positive filter (UTF-8, SHA-256, CVE-2024-1234 all match the
+     * key regex) and the disclosure bound (see the trust stance above).
+     */
+    projects: string;
     /** Key-extraction inputs, in precedence order (title, branch, body). */
     title: string;
     headBranch: string;
@@ -84,30 +95,44 @@ export type StageTicketOptions = {
 /**
  * A Jira issue key: uppercase project key (letter first, 2-10 chars total),
  * hyphen, number. Word-bounded so PROJ-123 inside a URL or backticks still
- * matches but lowercase prose ("re-123") does not.
+ * matches but lowercase prose ("re-123") does not. The shape alone is NOT
+ * enough (UTF-8, SHA-256, CVE-2024-1234 all match), so every candidate is
+ * gated on the project allowlist.
  */
-const ISSUE_KEY_RE = /\b([A-Z][A-Z0-9]{1,9}-\d+)\b/;
+const ISSUE_KEY_RE = /\b([A-Z][A-Z0-9]{1,9}-\d+)\b/g;
+
+/** REVIEW_JIRA_PROJECTS ("KORE, FEI") → normalized project keys. */
+export const parseProjectAllowlist = (raw: string): string[] =>
+    raw
+        .split(",")
+        .map((project) => project.trim().toUpperCase())
+        .filter((project) => project !== "");
+
+const allowedKeys = (text: string, projects: string[]): string[] =>
+    [...text.matchAll(ISSUE_KEY_RE)]
+        .map((match) => match[1])
+        .filter((key) => projects.includes(key.split("-")[0]));
 
 /**
- * The PR's own ticket key: first match in title, then head branch, then
- * description. Title and branch outrank the body because a body routinely
- * *mentions* other tickets in prose while the title/branch carry the PR's
- * identity (the `~/bin/gh` convention also puts the tracking key at the end
- * of the body, but "first in title" and "last in body" cannot both win, and
- * the title is the stronger signal).
+ * The PR's own ticket key, gated on the project allowlist. Title and branch
+ * outrank the body because a body routinely *mentions* other tickets in
+ * prose while the title/branch carry the PR's identity; within the title and
+ * branch the FIRST allowed match wins, but within the description the LAST
+ * one does (the `~/bin/gh` convention puts the tracking key at the end of
+ * the body, after any tickets the prose mentions).
  */
 export const extractIssueKey = (
     title: string,
     headBranch: string,
     description: string,
+    projects: string[],
 ): string | null => {
-    for (const text of [title, headBranch, description]) {
-        const match = ISSUE_KEY_RE.exec(text);
-        if (match !== null) {
-            return match[1];
-        }
-    }
-    return null;
+    return (
+        allowedKeys(title, projects)[0] ??
+        allowedKeys(headBranch, projects)[0] ??
+        allowedKeys(description, projects).at(-1) ??
+        null
+    );
 };
 
 /** Size caps: the staged file is prompt input, not an archive. */
@@ -135,27 +160,40 @@ type JiraIssue = {
                 created?: string;
                 body?: string;
             }[];
+            /**
+             * The field is a pagination envelope: `comments` is one page and
+             * `total` the true count, so `total > comments.length` means the
+             * staged trail is partial even before this module's own cap.
+             */
+            total?: number;
         };
     };
 };
 
 /**
  * The staged shape from a fetched issue. Comments keep the LAST
- * COMMENT_COUNT_CAP (Jira returns them oldest-first, and the decision trail
- * a reviewer wants ("experiment concluded, graduate everywhere") lands at
- * the end).
+ * COMMENT_COUNT_CAP of the returned page (Jira returns them oldest-first,
+ * and the decision trail a reviewer wants ("experiment concluded, graduate
+ * everywhere") lands at the end). When the envelope's `total` exceeds the
+ * page, the true tail may live beyond it; `truncated` covers that too, and
+ * a dedicated comment fetch is not worth a second HTTP call until a real
+ * run shows a long ticket whose tail mattered.
  */
 export const buildTicketContext = (
     key: string,
     baseUrl: string,
-    issue: JiraIssue,
+    issue: JiraIssue | null,
 ): TicketContext => {
-    const fields = issue.fields ?? {};
+    const fields = issue?.fields ?? {};
     let truncated = false;
     const description = capText(fields.description ?? "", DESCRIPTION_CAP);
     truncated = truncated || description.cut;
     const allComments = fields.comment?.comments ?? [];
-    truncated = truncated || allComments.length > COMMENT_COUNT_CAP;
+    truncated =
+        truncated ||
+        allComments.length > COMMENT_COUNT_CAP ||
+        (typeof fields.comment?.total === "number" &&
+            fields.comment.total > allComments.length);
     const comments = allComments.slice(-COMMENT_COUNT_CAP).map((comment) => {
         const body = capText(comment.body ?? "", COMMENT_BODY_CAP);
         truncated = truncated || body.cut;
@@ -207,10 +245,22 @@ export const stageTicketContext = async (
             warnings: [],
         };
     }
+    const projects = parseProjectAllowlist(options.projects);
+    if (projects.length === 0) {
+        // Credentials without the allowlist is a half-configured consumer,
+        // not an unconfigured one: warn, so the misconfiguration is visible.
+        return {
+            context: {available: false, reason: "not-configured"},
+            warnings: [
+                'ticket staging: REVIEW_JIRA_BASE_URL is set but REVIEW_JIRA_PROJECTS is not; staged unavailable (set the project-key allowlist, e.g. "KORE,FEI", to enable ticket staging)',
+            ],
+        };
+    }
     const key = extractIssueKey(
         options.title,
         options.headBranch,
         options.description,
+        projects,
     );
     if (key === null) {
         return {
@@ -252,11 +302,25 @@ export const stageTicketContext = async (
                 ],
             };
         }
+        if (
+            response.json === null ||
+            typeof response.json !== "object" ||
+            Array.isArray(response.json)
+        ) {
+            // A 200 whose body is not a JSON object (an SSO login page on a
+            // misconfigured host, say) is a config problem, not a ticket.
+            return {
+                context: {available: false, reason: "fetch-failed", key},
+                warnings: [
+                    `ticket staging: GET ${key} -> 200 with a non-issue body; staged unavailable (prompts fall back to the PR description)`,
+                ],
+            };
+        }
         return {
             context: buildTicketContext(
                 key,
                 baseUrl.replace(/\/+$/, ""),
-                response.json as JiraIssue,
+                response.json as JiraIssue | null,
             ),
             warnings: [],
         };

@@ -8,7 +8,7 @@
  * (dispatch-gate.ts) stops trusting the orchestrator to have staged its own
  * rule inputs honestly.
  *
- * What it stages under /tmp/gh-aw/review/ (the Step 1 contract, unchanged):
+ * What it stages under /tmp/gh-aw/review/ (the Step 1 contract):
  *
  *   pr-context.json     PR metadata (untrusted author text included verbatim)
  *   ticket-context.json the linked Jira ticket (stage-ticket.ts): the PR's
@@ -170,12 +170,6 @@ export type StagePrOptions = {
     repoRoot: string;
     /** Env forwarded to the router (`REVIEW_MAX_AI_CREDITS`). */
     env?: Record<string, string | undefined>;
-    /**
-     * Jira GET for the linked-ticket staging (stage-ticket.ts). Absent (tests
-     * that don't exercise it) behaves like an unconfigured consumer:
-     * ticket-context.json stages `{available: false}`.
-     */
-    ticketFetch?: TicketFetch;
     /** Cache-memory dir override (tests). */
     cacheMemoryDir?: string;
     /** Rendered-prompt path override (tests); default gh-aw's prompt.txt. */
@@ -378,6 +372,7 @@ export const runStagePrCli = async (
     fs: StagePrFs,
     ghGet: GhGet,
     ghGraphql: GhGraphql,
+    ticketFetch: TicketFetch,
     options: StagePrOptions,
 ): Promise<StagePrResult> => {
     const {repo, prNumber, repoRoot} = options;
@@ -437,23 +432,17 @@ export const runStagePrCli = async (
     // 1b. The linked Jira ticket → ticket-context.json (never a
     // prerequisite: every degradation stages {available: false, reason} and
     // the intent-reading sub-agents fall back to the PR description).
-    const ticket =
-        options.ticketFetch === undefined
-            ? {
-                  context: {
-                      available: false as const,
-                      reason: "not-configured" as const,
-                  },
-                  warnings: [],
-              }
-            : await stageTicketContext(options.ticketFetch, {
-                  baseUrl: env.REVIEW_JIRA_BASE_URL ?? "",
-                  email: env.REVIEW_JIRA_EMAIL ?? "",
-                  apiToken: env.REVIEW_JIRA_API_TOKEN ?? "",
-                  title: pr.title ?? "",
-                  headBranch: pr.head?.ref ?? "",
-                  description: pr.body ?? "",
-              });
+    // stage-ticket.ts owns every degradation shape, including the
+    // unconfigured one, so an env without REVIEW_JIRA_* never fetches.
+    const ticket = await stageTicketContext(ticketFetch, {
+        baseUrl: env.REVIEW_JIRA_BASE_URL ?? "",
+        email: env.REVIEW_JIRA_EMAIL ?? "",
+        apiToken: env.REVIEW_JIRA_API_TOKEN ?? "",
+        projects: env.REVIEW_JIRA_PROJECTS ?? "",
+        title: pr.title ?? "",
+        headBranch: pr.head?.ref ?? "",
+        description: pr.body ?? "",
+    });
     warnings.push(...ticket.warnings);
     write(TICKET_CONTEXT_OUT, JSON.stringify(ticket.context, null, 2));
 
@@ -901,25 +890,29 @@ if (typeof require !== "undefined" && require.main === module) {
         );
         process.exit(2);
     }
-    // The linked-ticket GET (stage-ticket.ts). Plain fetch, no retry: a
-    // ticket is context, not a prerequisite, and stage-ticket degrades every
-    // failure to {available: false} rather than failing the staging.
+    // The linked-ticket GET (stage-ticket.ts). Plain fetch, no retry, and a
+    // hard 10s bound (a blackholed Jira host must not stall staging until
+    // the job timeout): a ticket is context, not a prerequisite, and
+    // stage-ticket degrades every failure to {available: false} rather than
+    // failing the staging.
     const ticketFetch = async (
         url: string,
         headers: Record<string, string>,
     ): Promise<{status: number; json: unknown}> => {
-        const response = await fetch(url, {headers});
+        const response = await fetch(url, {
+            headers,
+            signal: AbortSignal.timeout(10_000),
+        });
         return {
             status: response.status,
             json: await response.json().catch(() => null),
         };
     };
-    void runStagePrCli(nodeFs, ghGet, ghGraphql, {
+    void runStagePrCli(nodeFs, ghGet, ghGraphql, ticketFetch, {
         repo,
         prNumber,
         repoRoot,
         env: process.env,
-        ticketFetch,
     })
         .then((result) => {
             // eslint-disable-next-line no-console

@@ -3,6 +3,7 @@ import {describe, it, expect} from "vitest";
 import {
     buildTicketContext,
     extractIssueKey,
+    parseProjectAllowlist,
     stageTicketContext,
     type TicketFetch,
 } from "./stage-ticket";
@@ -19,6 +20,7 @@ const OPTIONS = {
     baseUrl: "https://khanacademy.atlassian.net",
     email: "bot@khanacademy.org",
     apiToken: "tok",
+    projects: "KORE",
     title: "Make parallel moderation the default",
     headBranch: "moderation-defaults",
     description: "Concludes the experiment.\n\nIssue: KORE-2393",
@@ -49,17 +51,19 @@ const okFetch =
     () =>
         Promise.resolve({status: 200, json});
 
+const PROJECTS = ["KORE", "PROJ", "ABC"];
+
 describe("extractIssueKey", () => {
     it("prefers title over branch over description", () => {
-        expect(extractIssueKey("KORE-1 x", "PROJ-2-branch", "see ABC-3")).toBe(
-            "KORE-1",
-        );
-        expect(extractIssueKey("no key", "feature/PROJ-2", "see ABC-3")).toBe(
-            "PROJ-2",
-        );
-        expect(extractIssueKey("no key", "no-key", "Issue: KORE-2393")).toBe(
-            "KORE-2393",
-        );
+        expect(
+            extractIssueKey("KORE-1 x", "PROJ-2-branch", "see ABC-3", PROJECTS),
+        ).toBe("KORE-1");
+        expect(
+            extractIssueKey("no key", "feature/PROJ-2", "see ABC-3", PROJECTS),
+        ).toBe("PROJ-2");
+        expect(
+            extractIssueKey("no key", "no-key", "Issue: KORE-2393", PROJECTS),
+        ).toBe("KORE-2393");
     });
 
     it("matches keys inside URLs but not lowercase hyphenated prose", () => {
@@ -68,9 +72,61 @@ describe("extractIssueKey", () => {
                 "",
                 "",
                 "https://khanacademy.atlassian.net/browse/KORE-2510",
+                PROJECTS,
             ),
         ).toBe("KORE-2510");
-        expect(extractIssueKey("re-123 follow-up", "fix-42", "")).toBeNull();
+        expect(
+            extractIssueKey("re-123 follow-up", "fix-42", "", PROJECTS),
+        ).toBeNull();
+    });
+
+    it("skips key-shaped tokens outside the project allowlist", () => {
+        // UTF-8, SHA-256, CVE-2024-1234 all match the key regex; without the
+        // allowlist gate the first would win and block the real key.
+        expect(
+            extractIssueKey(
+                "Fix UTF-8 handling for KORE-123",
+                "",
+                "",
+                PROJECTS,
+            ),
+        ).toBe("KORE-123");
+        expect(
+            extractIssueKey(
+                "Bump to SHA-256 digests (PROJ-9)",
+                "",
+                "Handle CVE-2024-1234 in deps",
+                PROJECTS,
+            ),
+        ).toBe("PROJ-9");
+        expect(
+            extractIssueKey("Handle CVE-2024-1234 in deps", "", "", PROJECTS),
+        ).toBeNull();
+    });
+
+    it("takes the LAST allowed key in the description", () => {
+        // The `~/bin/gh` convention puts the tracking key at the END of the
+        // body, after any tickets the prose mentions (this repo's own PR
+        // bodies mention e.g. PRA-43 before the trailing KORE link).
+        expect(
+            extractIssueKey(
+                "no key",
+                "no-key",
+                "tracked separately (ABC-43). More prose.\n\n[KORE-2510](https://x/browse/KORE-2510)",
+                PROJECTS,
+            ),
+        ).toBe("KORE-2510");
+    });
+});
+
+describe("parseProjectAllowlist", () => {
+    it("splits, trims, uppercases, and drops empties", () => {
+        expect(parseProjectAllowlist("KORE, fei,,PRA ")).toEqual([
+            "KORE",
+            "FEI",
+            "PRA",
+        ]);
+        expect(parseProjectAllowlist("")).toEqual([]);
     });
 });
 
@@ -144,6 +200,21 @@ describe("stageTicketContext", () => {
         }
     });
 
+    it("stages not-configured with a warning when only the allowlist is missing", async () => {
+        // Credentials without REVIEW_JIRA_PROJECTS is a half-configured
+        // consumer: same degradation, but visibly.
+        const neverFetch: TicketFetch = () => {
+            throw new Error("must not fetch");
+        };
+        const {context, warnings} = await stageTicketContext(neverFetch, {
+            ...OPTIONS,
+            projects: "",
+        });
+        expect(context).toEqual({available: false, reason: "not-configured"});
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("REVIEW_JIRA_PROJECTS");
+    });
+
     it("stages no-issue-key when nothing ticket-shaped is referenced", async () => {
         const {context} = await stageTicketContext(okFetch(ISSUE), {
             ...OPTIONS,
@@ -186,6 +257,24 @@ describe("stageTicketContext", () => {
         });
         expect(down.warnings[0]).toContain("ECONNREFUSED");
     });
+
+    it("degrades a 200 whose body is not a Jira issue", async () => {
+        // The production fetch wrapper stages `json: null` for any
+        // unparseable 200 body (an SSO login page on a misconfigured host).
+        for (const json of [null, "<html>", [1]]) {
+            const {context, warnings} = await stageTicketContext(
+                okFetch(json),
+                OPTIONS,
+            );
+            expect(context).toEqual({
+                available: false,
+                reason: "fetch-failed",
+                key: "KORE-2393",
+            });
+            expect(warnings).toHaveLength(1);
+            expect(warnings[0]).toContain("non-issue body");
+        }
+    });
 });
 
 describe("buildTicketContext", () => {
@@ -227,5 +316,28 @@ describe("buildTicketContext", () => {
             comments: [],
             truncated: false,
         });
+        // Belt and braces: the null-body guard lives in stageTicketContext,
+        // but this function must not throw either.
+        expect(buildTicketContext("K-1", "https://x", null)).toMatchObject({
+            available: true,
+            key: "K-1",
+            comments: [],
+        });
+    });
+
+    it("marks a partial comment page truncated via the envelope total", () => {
+        // Jira's `comment` field is a pagination envelope: `comments` is one
+        // page and `total` the true count, so a long ticket's tail can live
+        // beyond the page even under this module's own cap.
+        const context = buildTicketContext("K-1", "https://x", {
+            fields: {
+                comment: {
+                    comments: [{body: "only one staged"}],
+                    total: 60,
+                },
+            },
+        });
+        expect(context.truncated).toBe(true);
+        expect(context.comments).toHaveLength(1);
     });
 });
