@@ -192,3 +192,119 @@ describe("createSdkRunner sub-agent environment", () => {
         expect(env["PATH"]).toBe(process.env["PATH"]);
     });
 });
+
+type HookCallback = (
+    input?: unknown,
+    toolUseID?: unknown,
+    extra?: unknown,
+) => Promise<Record<string, unknown>>;
+
+/** The Stop hook the runner registered on the last query, if any. */
+const stopHook = (): HookCallback | undefined => {
+    const hooks = lastOptions["hooks"] as
+        | Record<string, {hooks: HookCallback[]}[]>
+        | undefined;
+    return hooks?.["Stop"]?.[0]?.hooks[0];
+};
+
+describe("createSdkRunner prose gate (PRA-45)", () => {
+    it("bounces a style rejection to the author AFTER the contract accepts", async () => {
+        const judged: string[] = [];
+        session = async function* (tools) {
+            const bounced = await tools[0].handler(
+                {result: {findings: [{id: "f1"}]}},
+                undefined,
+            );
+            expect(bounced.isError).toBe(true);
+            expect(bounced.content[0].text).toBe("Result rejected: style");
+            // The author rewrites and re-calls; second submission passes.
+            const accepted = await tools[0].handler(
+                {result: {findings: [{id: "f1-rewritten"}]}},
+                undefined,
+            );
+            expect(accepted.isError).toBeUndefined();
+            yield success("trailing prose");
+        };
+        const result = await (
+            await createSdkRunner()
+        )(
+            request({
+                judgeProse: (payload) => {
+                    judged.push(JSON.stringify(payload));
+                    return Promise.resolve(
+                        judged.length === 1 ? "Result rejected: style" : null,
+                    );
+                },
+            }),
+        );
+        expect(result.structured).toBe(true);
+        expect(JSON.parse(result.output)).toEqual({
+            findings: [{id: "f1-rewritten"}],
+        });
+        expect(judged).toHaveLength(2);
+    });
+
+    it("never judges a payload the contract already rejected", async () => {
+        let judgeCalls = 0;
+        session = async function* (tools) {
+            const rejected = await tools[0].handler(
+                {result: {finding: "drifted"}},
+                undefined,
+            );
+            expect(rejected.isError).toBe(true);
+            yield success('{"findings": []}');
+        };
+        await (
+            await createSdkRunner()
+        )(
+            request({
+                judgeProse: () => {
+                    judgeCalls += 1;
+                    return Promise.resolve(null);
+                },
+            }),
+        );
+        expect(judgeCalls).toBe(0);
+    });
+});
+
+describe("createSdkRunner Stop hook (the free-text fallback funnel)", () => {
+    it("blocks a stop without a submission, twice, then lets the fallback proceed", async () => {
+        session = async function* () {
+            yield success("free text");
+        };
+        await (
+            await createSdkRunner()
+        )(request());
+        const hook = stopHook();
+        expect(hook).toBeDefined();
+        const first = await hook!();
+        expect(first).toMatchObject({decision: "block"});
+        expect(String(first["reason"])).toContain("submit_result");
+        expect(await hook!()).toMatchObject({decision: "block"});
+        // Cap spent: the third stop goes through (the genuine fallback).
+        expect(await hook!()).toEqual({});
+    });
+
+    it("lets a stop through once a payload was accepted", async () => {
+        session = async function* (tools) {
+            await tools[0].handler({result: {findings: []}}, undefined);
+            yield success("done");
+        };
+        await (
+            await createSdkRunner()
+        )(request());
+        const hook = stopHook();
+        expect(await hook!()).toEqual({});
+    });
+
+    it("registers no Stop hook without a validate contract (no tool to point at)", async () => {
+        session = async function* () {
+            yield success("free text");
+        };
+        await (
+            await createSdkRunner()
+        )(request({validate: undefined}));
+        expect(stopHook()).toBeUndefined();
+    });
+});

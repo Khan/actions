@@ -19,6 +19,14 @@ import type {AgentRequest, AgentResult, AgentRunner} from "./dispatch";
 const SUBAGENT_MAX_RETRIES = "2";
 
 /**
+ * Times the Stop hook redirects a sub-agent that ended its turn without
+ * calling `submit_result` back to the tool. Past the cap the free-text
+ * fallback proceeds (fail-open: the fallback exists precisely so a
+ * tool-shy model cannot void a dimension).
+ */
+const MAX_STOP_BLOCKS = 2;
+
+/**
  * Build the production runner. The SDK and zod are imported lazily here
  * (both installed by the scripted-mode `npm ci` pre-agent step); zod is the
  * SDK's own schema language for in-process MCP tools (a peer dependency).
@@ -93,14 +101,14 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                             "submit_result",
                             "Deliver your final structured result. Pass the entire output-contract JSON object as `result`.",
                             {result: z.record(z.string(), z.unknown())},
-                            (args) => {
+                            async (args) => {
                                 const payload = args["result"] as Record<
                                     string,
                                     unknown
                                 >;
                                 const rejection = validate(payload);
                                 if (rejection !== null) {
-                                    return Promise.resolve({
+                                    return {
                                         content: [
                                             {
                                                 type: "text",
@@ -108,23 +116,77 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                                             },
                                         ],
                                         isError: true,
-                                    });
+                                    };
+                                }
+                                // The prose gate (judge-prose.ts), AFTER the
+                                // contract check: the judge only ever sees
+                                // payloads the collection phase could accept,
+                                // and its rejection bounces to the AUTHOR the
+                                // same way a contract rejection does (the
+                                // plain-prose loop: haiku judges, the author
+                                // rewrites in-session with its repo context
+                                // intact). The gate caps its own bounces and
+                                // fails open, so this await can slow a
+                                // submission but never lose one.
+                                if (request.judgeProse !== undefined) {
+                                    const styleRejection =
+                                        await request.judgeProse(payload);
+                                    if (styleRejection !== null) {
+                                        return {
+                                            content: [
+                                                {
+                                                    type: "text",
+                                                    text: styleRejection,
+                                                },
+                                            ],
+                                            isError: true,
+                                        };
+                                    }
                                 }
                                 captured = payload;
-                                return Promise.resolve({
+                                return {
                                     content: [
                                         {
                                             type: "text",
                                             text: "Result recorded. End the turn now; no further output is needed.",
                                         },
                                     ],
-                                });
+                                };
                             },
                         ),
                     ],
                 }),
             };
             allowedTools.push("mcp__review__submit_result");
+            // The Stop hook: an agent ending its turn WITHOUT having called
+            // submit_result is heading for the free-text fallback, which
+            // skips both the in-session contract bounce and the prose gate.
+            // Block the stop (the model sees `reason` and continues) and
+            // point it back at the tool, at most twice: past the cap a
+            // confused agent gets its genuine fallback rather than a loop,
+            // and dispatch.ts records its findings as skipped by the gate.
+            let stopBlocks = 0;
+            options.hooks = {
+                Stop: [
+                    {
+                        hooks: [
+                            () => {
+                                if (
+                                    captured === undefined &&
+                                    stopBlocks < MAX_STOP_BLOCKS
+                                ) {
+                                    stopBlocks += 1;
+                                    return Promise.resolve({
+                                        decision: "block" as const,
+                                        reason: "You have not delivered your result yet. Call the submit_result tool ONCE now, passing the ENTIRE JSON object your output contract specifies as its `result` argument; do not paste the JSON as a message.",
+                                    });
+                                }
+                                return Promise.resolve({});
+                            },
+                        ],
+                    },
+                ],
+            };
         }
         try {
             const run = sdk.query({prompt: request.prompt, options});

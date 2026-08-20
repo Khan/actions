@@ -1,7 +1,7 @@
 /**
  * Live calibration for the prose judge (lib/judge-prose.ts) over the
  * Khan/webapp#41609 fixtures: real model, real prompts, the verdicts the
- * done-when requires. The unit tests pin the pipeline mechanics with a
+ * done-when requires. The unit tests pin the bounce mechanics with a
  * stubbed runner; THIS is where the model's judgment is asserted:
  *
  *   - the SPEC.md comment (3823429680, "Graduation removes the last runtime
@@ -11,8 +11,10 @@
  *   - the other two fixtures print their verdicts unpinned (both are dense
  *     100+-word non-blocking comments, so a rule 3 fail is plausible and
  *     fine; a pass is not a defect);
- *   - every failing fixture also runs the constrained rewrite, printed for
- *     eyeball calibration of the shape contract.
+ *   - every failing fixture also prints its bounce message, because in
+ *     production that text is the entire style spec the authoring agent
+ *     sees at rewrite time (there is no rewrite call to eyeball anymore;
+ *     the author rewrites in-session).
  *
  * Eval-side, so a raw fetch is correct here (the sandbox-proxy constraint in
  * judge-prose-runner.ts is a production concern; this runs on a dev machine
@@ -21,15 +23,13 @@
  * Run: ANTHROPIC_API_KEY=... npx tsx workflows/review/eval/judge-prose-live.ts
  */
 
-import type {Claim} from "../lib/dispatch-contracts";
 import {
+    buildBounceMessage,
     buildJudgePrompt,
-    buildRewritePrompt,
     parseJudgeVerdict,
     PINNED_PROSE_JUDGE_MODEL,
 } from "../lib/judge-prose";
 import {FIXTURES_41609} from "../lib/judge-prose-fixtures";
-import {renderClaimComment} from "../lib/submission";
 
 const API_URL = "https://api.anthropic.com/v1/messages";
 
@@ -65,19 +65,8 @@ const main = async (): Promise<void> => {
     }
     let pinnedFailMissed = false;
     for (const fixture of FIXTURES_41609) {
-        const claim: Claim = {
-            id: `fixture-${fixture.commentId}`,
-            source: "fixture",
-            path: fixture.path,
-            line: 1,
-            label: fixture.label,
-            subject: "",
-            discussion: fixture.discussion,
-            failure_scenario: "",
-            confidence: 0.7,
-        };
         const reply = await callModel(
-            buildJudgePrompt(renderClaimComment(claim), claim.label),
+            buildJudgePrompt(fixture.discussion, fixture.label),
         );
         const verdict = parseJudgeVerdict(reply);
         // eslint-disable-next-line no-console
@@ -102,16 +91,14 @@ const main = async (): Promise<void> => {
             pinnedFailMissed = true;
         }
         if (!verdict.pass) {
-            const rewrite = await callModel(
-                buildRewritePrompt(
-                    fixture.discussion,
-                    fixture.label,
-                    verdict.problems,
-                ),
-            );
             // eslint-disable-next-line no-console
             console.log(
-                `rewrite (${rewrite.trim().length} chars):\n${rewrite.trim()}`,
+                `bounce message the author would see:\n${buildBounceMessage([
+                    {
+                        key: `comment-${fixture.commentId}`,
+                        problems: verdict.problems,
+                    },
+                ])}`,
             );
         }
     }

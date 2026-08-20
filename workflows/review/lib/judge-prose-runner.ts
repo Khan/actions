@@ -28,6 +28,29 @@ const CALL_TIMEOUT_MS = 120_000;
  */
 const JUDGE_MAX_RETRIES = "2";
 
+/**
+ * The dispatch CLI's construction path: the pinned judge model, fail-open
+ * at construction too. A judge that cannot even be built must cost nothing
+ * but a workflow warning, so the dispatch (and the review) proceeds
+ * unjudged rather than red.
+ */
+export const createDefaultProseRunner = async (): Promise<
+    ((prompt: string) => Promise<string>) | undefined
+> => {
+    try {
+        const {PINNED_PROSE_JUDGE_MODEL} = await import("./judge-prose");
+        return await createJudgeRunner(PINNED_PROSE_JUDGE_MODEL);
+    } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error(
+            `::warning title=prose judge::judge unavailable (review proceeds unjudged): ${
+                error instanceof Error ? error.message : String(error)
+            }`,
+        );
+        return undefined;
+    }
+};
+
 export const createJudgeRunner = async (
     model: string,
 ): Promise<(prompt: string) => Promise<string>> => {
