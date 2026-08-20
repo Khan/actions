@@ -52,6 +52,30 @@ describe("adjudicatedThreadsFromStaged", () => {
         ]);
     });
 
+    it("admits a bot thread whose opener a reviewer downvoted, whatever its resolution state", () => {
+        // The 👎 channel: the same judgment as resolving, delivered through
+        // the reaction the thumbs sweep advertises. Resolution state does not
+        // gate it; a still-open downvoted thread is also in the open corpus,
+        // and the composed pass attributes a double match to the open thread.
+        for (const state of [
+            {resolved: false, resolvedBy: ""},
+            {resolved: true, resolvedBy: "github-actions"},
+            {resolved: undefined, resolvedBy: undefined},
+        ]) {
+            expect(
+                adjudicatedThreadsFromStaged([
+                    adjudicated({...state, openerDownvotes: 1}),
+                ]),
+            ).toEqual([
+                {
+                    thread_id: "T1",
+                    path: "a.ts",
+                    body: "**suggestion (non-blocking):** opener",
+                },
+            ]);
+        }
+    });
+
     it("fails closed on every guard: unresolved, bot-resolved, unattributable resolver, human opener, malformed staging", () => {
         // Each rejected shape degrades to a duplicate comment, never to a
         // suppression the staging cannot justify: this corpus grants the
@@ -61,6 +85,16 @@ describe("adjudicatedThreadsFromStaged", () => {
             adjudicated({resolved: false}),
             adjudicated({resolved: undefined}),
             adjudicated({resolved: "true"}),
+            // A downvote count must be an explicit positive number: absent,
+            // zero, or malformed reads as no downvote, and a downvote alone
+            // never launders a thread that fails the bot-opener guard.
+            adjudicated({resolved: false, openerDownvotes: 0}),
+            adjudicated({resolved: false, openerDownvotes: "1"}),
+            adjudicated({
+                resolved: false,
+                openerDownvotes: 1,
+                comments: [{author: "jwbron", body: "human opener"}],
+            }),
             // The bot resolving its own thread is the reconciler marking a
             // defect FIXED; a fixed defect that reappears is a fresh finding.
             adjudicated({resolvedBy: "github-actions"}),
