@@ -381,13 +381,19 @@ re-review scoped
   an unknown modifier warns and is ignored, and the mode still applies.
 
 The `security-auth` lens's GitHub Actions workflow hunts (`pwn-request`,
-`push-ref-race`, `over-scoped-secret`) run only when the lens spawns, so a
-repo that wants workflow changes reviewed must route the workflow paths:
+`over-scoped-secret`) run only when the lens spawns, so a repo that wants
+workflow changes reviewed must route the workflow paths:
 
 ```
 .github/workflows/**       tier=high lens=security-auth
 **/action.yml              tier=high lens=security-auth
+**/action.yaml             tier=high lens=security-auth
 ```
+
+A repo that stages deliberately-vulnerable workflow fixtures (test corpora,
+training material) should scope these patterns to its real action directories
+instead of `**`: lenses cannot be un-routed by a later rule, so a broad
+pattern would route the fixtures to a live lens.
 
 Glob semantics are a practical subset of gitignore/CODEOWNERS: `**` crosses
 directories, `*` and `?` stay within a segment, a trailing `/` matches everything

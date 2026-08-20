@@ -99,11 +99,10 @@
                 "key": "workflow-pwn-request",
                 "path": ".github/workflows/lint-workflows.yml",
                 "lineStart": 3,
-                "lineEnd": 23,
+                "lineEnd": 8,
                 "mechanism": [
                     "pwn.?request",
-                    "pull_request_target",
-                    "untrusted (code|PR)",
+                    "pull_request_target.{0,160}(checks? out|checkout|head\\.sha|head\\.ref|execut)",
                     "fork\\w*\\b.{0,80}(secret|token|privileg|trusted|base repo)",
                     "checkout.*(PR|head).*(run|execut|untrusted)",
                     "(head\\.sha|head\\.ref|head sha|head ref).{0,80}(write|bot token|PAT|git push|execut|arbitrary)",
@@ -113,8 +112,8 @@
                 "altLocations": [
                     {
                         "path": ".github/workflows/lint-workflows.yml",
-                        "lineStart": 13,
-                        "lineEnd": 15
+                        "lineStart": 17,
+                        "lineEnd": 23
                     },
                     {
                         "path": ".github/workflows/lint-workflows.yml",

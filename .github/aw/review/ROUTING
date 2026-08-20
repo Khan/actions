@@ -7,9 +7,12 @@
 # matching rules. This file complements risk-classification.md (model-facing prose);
 # team ownership stays in .github/REVIEWERS.
 #
-# No specialist lenses are enabled: the eleven lens prompts target webapp's backend
-# domains (auth resolvers, migrations, federation, ...) and none maps to this repo's
-# supply-chain surface. Whole-change reviewers mirror webapp's eval-justified roster.
+# security-auth runs its workflow hunts (pwn-request, over-scoped-secret) on this
+# repo's own workflows and shipped actions. Its rules below use actions/** rather
+# than the README's **/action.yml: the eval corpus stages deliberately-vulnerable
+# fixture workflows, and lenses cannot be un-routed by a later rule. No other
+# lens is routed — the rest target webapp's backend domains. The enable line
+# turns on the same reviewers webapp uses, chosen there by eval results.
 
 enable holistic,completeness,test-adequacy,first-principles,conventions,documentation
 
@@ -31,8 +34,10 @@ re-review scoped blocking-only
 
 # Shipped composite actions run inside consuming repos' CI with their credentials.
 actions/**                   tier=high
+actions/**/action.yml        tier=high lens=security-auth
+actions/**/action.yaml       tier=high lens=security-auth
 # This repo's own CI, the publish pipeline, and the compiled agentic workflows.
-.github/workflows/**         tier=high
+.github/workflows/**         tier=high lens=security-auth
 utils/**                     tier=high
 # A workflow staged for a human `git mv` into .github/workflows/ is CI the moment
 # it moves, and it is reviewed here or nowhere.
