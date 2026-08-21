@@ -17,6 +17,16 @@ The reference bumps are the 2026-08-20 set:
 [`Khan/actions#356`](https://github.com/Khan/actions/pull/356). Every pitfall
 below was hit live in that session.
 
+## What stays human
+
+Confirm with the operator before opening any PR:
+
+1. **The consumer set and the target version(s).** Step 1's search is
+   discovery, not authorization: name the repos and the version hop it found
+   and get an explicit yes before branching in any of them.
+2. **Force-pushing an open PR** (Step 6's mid-rollout update). Rewriting
+   commits under someone's in-flight review is the operator's call.
+
 ## Step 1: discover the consumers
 
 Do not work from a remembered list; discover the consumers each time. Every
@@ -58,19 +68,26 @@ It is the obvious tool and it fails twice, both observed live:
 2. Its 3-way merge emptied the consumer's `review.md` to 0 bytes in one run
    against `Khan/kore-marketplace` (gh-aw v0.85.4).
 
-The manual merge below is what the tool would do if it worked, and it is four
-commands.
+The manual merge below is what the tool would do if it worked.
 
 ## Step 2: the merge
 
 Work in a fresh clone of the consumer, on a new branch. From a `Khan/actions`
-checkout, extract the shared file at the consumer's **current** pin (the base)
-and at the **target** tag (theirs); the installed copy is ours:
+checkout, with the installed copy as ours:
 
-1. `git -C <actions> show review-v<current>:workflows/review/review.md > /tmp/base.md`
-2. `git -C <actions> show review-v<target>:workflows/review/review.md > /tmp/new.md`
-3. `git merge-file .github/workflows/review.md /tmp/base.md /tmp/new.md`
-4. Bump the `source:` line by hand: it exists only in the installed copy, so
+1. `git -C <actions> fetch --tags`: a tag cut during the rollout will not be
+   in a stale clone, and steps 2-3 fail silently on a tag the clone lacks.
+2. `git -C <actions> show review-v<current>:workflows/review/review.md > /tmp/base.md`
+   (the consumer's **current** pin; the base).
+3. `git -C <actions> show review-v<target>:workflows/review/review.md > /tmp/new.md`
+   (the **target** tag; theirs).
+4. `test -s /tmp/base.md && test -s /tmp/new.md`: a tag the clone does not
+   have makes `git show` fail while the `>` redirect still leaves a 0-byte
+   file, and `git merge-file` reads an empty theirs as "upstream deleted the
+   file". That is the same emptying this skill exists to prevent, and the
+   conflict-marker gate in Step 5 will not catch it.
+5. `git merge-file .github/workflows/review.md /tmp/base.md /tmp/new.md`
+6. Bump the `source:` line by hand: it exists only in the installed copy, so
    the merge never touches it. The `pre-agent-steps` checkout `ref:` needs no
    hand edit; the release flow rewrites it inside the tag, so it arrives from
    theirs.
@@ -128,8 +145,12 @@ effects, each observed on v0.85.4:
 
 1. No conflict markers: `grep -n "^<<<<<<<" .github/workflows/review.md`.
 2. The pricing overlay is live: `providers` must appear inside **both**
-   awf-config payloads of `review.lock.yml` (`grep -c '"providers"'` returns
-   2). Presence in `GH_AW_INFO_MODEL_COSTS` alone means it is NOT live
+   awf-config payloads of `review.lock.yml`. The second payload writes its
+   JSON with backslash-escaped quotes, so one pattern cannot see both; count
+   them separately. `grep -c '"providers"'` returns 2 (the unescaped payload
+   plus the `GH_AW_INFO_MODEL_COSTS` env line, which does not count) and
+   `grep -c '\\"providers\\"'` returns 1 (the escaped payload). Presence in
+   `GH_AW_INFO_MODEL_COSTS` alone means the overlay is NOT live
    (Khan/actions#314 documents why).
 3. Run the consumer-config checker **from a checkout of the target tag**, not
    whatever tag you had lying around: a version-skewed checker produces
