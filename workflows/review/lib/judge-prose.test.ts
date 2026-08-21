@@ -75,6 +75,16 @@ describe("parseJudgeVerdict", () => {
         ).toEqual({pass: false, problems: ["judge: x"]});
     });
 
+    it("survives prose braces outside the verdict (shared agent-json leniency)", () => {
+        // A greedy first-brace-to-last-brace slice would grab the whole
+        // line, fail to parse, and count a real fail as a judge error.
+        expect(
+            parseJudgeVerdict(
+                'The phrase {like this} is flourish. {"pass": false, "problems": ["judge: metaphor"]}',
+            ),
+        ).toEqual({pass: false, problems: ["judge: metaphor"]});
+    });
+
     it("returns null (the error state) on non-JSON or non-boolean pass", () => {
         expect(parseJudgeVerdict("looks fine")).toBeNull();
         expect(parseJudgeVerdict('{"pass": "yes"}')).toBeNull();
@@ -268,6 +278,67 @@ describe("createProseGate", () => {
             "fail",
             "pass",
         ]);
+    });
+
+    it("never re-judges a finding that already passed (monotonic bounces)", async () => {
+        const judged: string[] = [];
+        const runner: ProseRunner = (prompt) => {
+            judged.push(prompt);
+            return Promise.resolve(
+                prompt.includes("f-1-prose")
+                    ? '{"pass": false, "problems": ["judge: verbosity"]}'
+                    : '{"pass": true, "problems": []}',
+            );
+        };
+        const {gate, records} = createProseGate({
+            runner,
+            source: "correctness-reviewer",
+        });
+        const payload = {
+            findings: [
+                {
+                    id: "f-0",
+                    severity: "advisory",
+                    model_authored_prose: "f-0-prose",
+                },
+                {
+                    id: "f-1",
+                    severity: "advisory",
+                    model_authored_prose: "f-1-prose",
+                },
+            ],
+        };
+        expect(await gate(payload)).not.toBeNull();
+        expect(judged).toHaveLength(2);
+        // The resubmission re-judges only the failing finding: the passed
+        // one is unchanged, so a flickery judge cannot flip it to fail and
+        // spend bounce budget the author did nothing to earn.
+        judged.length = 0;
+        expect(await gate(payload)).not.toBeNull();
+        expect(judged).toHaveLength(1);
+        expect(judged[0]).toContain("f-1-prose");
+        // The untouched finding still records a pass on attempt 2.
+        expect(
+            records.filter((r) => r.attempt === 2).map((r) => r.state),
+        ).toEqual(["pass", "fail"]);
+    });
+
+    it("records a finding the author dropped between attempts", async () => {
+        const {gate, records} = createProseGate({
+            runner: failRunner,
+            source: "correctness-reviewer",
+        });
+        expect(await gate(finderPayload())).not.toBeNull();
+        const shrunk = finderPayload() as {findings: unknown[]};
+        shrunk.findings = shrunk.findings.slice(0, 2);
+        expect(await gate(shrunk)).not.toBeNull();
+        const dropped = records.filter((r) => r.state === "skipped");
+        expect(dropped).toHaveLength(1);
+        expect(dropped[0]).toMatchObject({
+            key: "f-2",
+            attempt: 2,
+            reason: "finding dropped by the author between attempts",
+        });
     });
 
     it("passes a prose-free payload without a model call", async () => {

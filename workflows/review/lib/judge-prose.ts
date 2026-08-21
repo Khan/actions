@@ -27,12 +27,16 @@
  *   - a judge error or unparseable verdict accepts immediately and is
  *     recorded as `error`, never bounced: style enforcement may not tax a
  *     finding for the judge's own failure;
- *   - the artifact records four states per finding (skipped/pass/fail/
- *     error), because fail-open makes a broken judge look like clean prose
- *     unless errors are counted separately. Findings that arrive through
- *     the free-text fallback never reach this gate; the runner's Stop hook
- *     funnels non-tool endings back to the tool (capped), and whatever
- *     still falls through is recorded `skipped` by dispatch.ts.
+ *   - the artifact records four states (skipped/pass/fail/error), because
+ *     fail-open makes a broken judge look like clean prose unless errors
+ *     are counted separately. `pass`/`fail`/`error` are per finding;
+ *     `skipped` is coarser — one `key: "*"` record per agent whose whole
+ *     output arrived through the free-text fallback and never reached this
+ *     gate (the runner's Stop hook funnels non-tool endings back to the
+ *     tool, capped; dispatch.ts records what still falls through), plus
+ *     one record per finding an author dropped between attempts — so
+ *     `counts.total` mixes the two granularities and is not a finding
+ *     count.
  *
  * There is deliberately NO minimum-length floor: the reference
  * implementation skips texts under 200 chars, but the complaint this exists
@@ -54,6 +58,8 @@
  * a fetch-based judge would error on every finding and fail-open would
  * silently turn enforcement off.
  */
+
+import {extractJsonObject} from "./agent-json.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Rubric and prompts                                                         */
@@ -123,19 +129,15 @@ export type JudgeVerdict = {pass: boolean; problems: string[]};
 
 /**
  * Parse the judge's reply. The backend is told to reply with only JSON;
- * stray text around it is tolerated (the reference implementation's
- * `grep -o '{.*}'`), and anything unparseable returns `null` — the caller's
- * error state, never a verdict.
+ * stray text around it is tolerated via `agent-json.ts`'s shared leniency
+ * (the one rule every consumer of a model's final text applies — a greedy
+ * first-brace-to-last-brace slice would let a prose brace turn a real fail
+ * into a fail-open judge error), and anything unparseable returns `null` —
+ * the caller's error state, never a verdict.
  */
 export const parseJudgeVerdict = (output: string): JudgeVerdict | null => {
-    const match = output.replace(/\n/g, " ").match(/\{.*\}/);
-    if (match === null) {
-        return null;
-    }
-    let parsed: unknown;
-    try {
-        parsed = JSON.parse(match[0]);
-    } catch {
+    const parsed = extractJsonObject(output);
+    if (parsed === undefined) {
         return null;
     }
     const pass = (parsed as {pass?: unknown}).pass;
@@ -387,12 +389,43 @@ export const createProseGate = (options: {
     const records: JudgeRecord[] = [];
     let bounces = 0;
     let attempt = 0;
+    // (key, prose) pairs that already passed: a bounce tells the author to
+    // rewrite ONLY the failing findings, so an untouched finding must never
+    // be re-judged — re-judging lets a borderline pass flip to fail on a
+    // later attempt and consume bounce budget the author did nothing to
+    // earn (the loop stays monotonic), and it saves the judge calls.
+    const passedUnits = new Set<string>();
+    const unitMemoKey = (unit: ProseUnit): string =>
+        `${unit.key}\u0000${unit.label}\u0000${unit.prose}`;
+    // The unit keys seen on the previous attempt, so a resubmission that
+    // DROPS a finding is recorded: the gate never edits a payload, but the
+    // author re-emits it whole, and a silent shrink would otherwise be
+    // invisible in the artifact.
+    let previousKeys: Set<string> | undefined;
 
     const gate = async (
         payload: Record<string, unknown>,
     ): Promise<string | null> => {
         attempt += 1;
         const units = extractProseUnits(payload);
+        if (previousKeys !== undefined) {
+            const currentKeys = new Set(units.map((unit) => unit.key));
+            for (const key of previousKeys) {
+                if (!currentKeys.has(key)) {
+                    records.push({
+                        source,
+                        key,
+                        label: "",
+                        attempt,
+                        state: "skipped",
+                        problems: [],
+                        bounced: false,
+                        reason: "finding dropped by the author between attempts",
+                    });
+                }
+            }
+        }
+        previousKeys = new Set(units.map((unit) => unit.key));
         // One judge call per finding, in parallel: the gate sits on the
         // submit_result path, so its wall time is the author's wait, and
         // the calls are independent. Records are pushed in unit order below
@@ -403,6 +436,11 @@ export const createProseGate = (options: {
                 async (
                     unit,
                 ): Promise<{verdict: JudgeVerdict | null; error?: string}> => {
+                    if (passedUnits.has(unitMemoKey(unit))) {
+                        // Unchanged since a prior pass: accept without a
+                        // judge call.
+                        return {verdict: {pass: true, problems: []}};
+                    }
                     try {
                         return {
                             verdict: parseJudgeVerdict(
@@ -459,6 +497,7 @@ export const createProseGate = (options: {
                 return;
             }
             if (verdict.pass) {
+                passedUnits.add(unitMemoKey(unit));
                 records.push({
                     ...base,
                     state: "pass",

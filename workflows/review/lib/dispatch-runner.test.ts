@@ -130,6 +130,25 @@ describe("createSdkRunner submit_result (trial suggestion h)", () => {
         expect(result.usd).toBe(0);
     });
 
+    it("salvages the last assistant text when the session dies without success", async () => {
+        // The Stop hook pushes a free-text agent to keep going, so it can
+        // burn its last turns being redirected and end on error_max_turns
+        // with a usable final already written; that text is the output.
+        session = async function* () {
+            yield {
+                type: "assistant",
+                message: {
+                    content: [{type: "text", text: "the free-text findings"}],
+                },
+            };
+            yield {type: "result", subtype: "error_max_turns"};
+        };
+        const result = await (await createSdkRunner())(request());
+        expect(result.structured).toBeUndefined();
+        expect(result.output).toBe("the free-text findings");
+        expect(result.usd).toBe(0);
+    });
+
     it("still throws a dead session with nothing accepted", async () => {
         session = async function* () {
             yield {type: "result", subtype: "error_max_turns"};

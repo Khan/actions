@@ -198,6 +198,12 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                 ],
             };
         }
+        // The last assistant text seen. The Stop hook pushes a free-text
+        // agent to keep going, so it can spend its final turns being
+        // redirected and die on a non-success subtype (error_max_turns) with
+        // a usable final already written; the catch below salvages this text
+        // so the redirect can cost turns, never the output.
+        let lastText: string | undefined;
         try {
             const run = sdk.query({prompt: request.prompt, options});
             let output = "";
@@ -226,6 +232,12 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                     for (const block of inner?.content ?? []) {
                         if (block.type === "tool_use") {
                             toolCalls += 1;
+                        }
+                        if (block.type === "text") {
+                            const text = (block as {text?: unknown}).text;
+                            if (typeof text === "string" && text.length > 0) {
+                                lastText = text;
+                            }
                         }
                     }
                 }
@@ -279,6 +291,18 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                     turns: 0,
                     wallMs: Date.now() - started,
                     structured: true,
+                };
+            }
+            // No structured payload, but the agent did write a final: the
+            // free-text fallback path. Return it instead of discarding a
+            // usable output because the session then died (the Stop hook
+            // makes that ending common for free-text agents).
+            if (lastText !== undefined) {
+                return {
+                    output: lastText,
+                    usd: 0,
+                    turns: 0,
+                    wallMs: Date.now() - started,
                 };
             }
             // The SDK reports an abort as a generic "aborted by user";
