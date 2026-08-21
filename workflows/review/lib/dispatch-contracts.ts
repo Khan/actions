@@ -119,9 +119,11 @@ const foldToken = (token: string): string => {
  * Function words that carry no claim content; ignored on the SUBJECT side
  * of the restatement check so "turns are dropped" still matches "drops
  * turns" (the sentence has no "are"). Never filtered from the sentence
- * side — there they can only help containment, not hurt it.
+ * side — there they can only help containment, not hurt it. Distinct from
+ * dedup-text.ts's STOPWORDS (near-identical list, different semantics:
+ * that one filters both sides of a similarity score).
  */
-const STOPWORDS = new Set([
+const SUBJECT_STOPWORDS = new Set([
     "a",
     "an",
     "the",
@@ -169,12 +171,16 @@ const proseTokens = (text: string): string[] =>
 /**
  * Whether the subject merely restates the discussion's FIRST sentence:
  * every folded subject token already appears there, so prepending the
- * subject adds repetition and no vocabulary. This is the W4-W5 prose
- * failure mode the 2026-08-20 version audit measured (5 of 29 sampled
- * bodies restated one fact two to four times, vs 1 of 60 in W0-W3):
- * producers routinely emit a `subject` that restates the `discussion`
- * lede, and the v1.8.0 task-mode removal deleted the orchestrator rewrite
- * pass that used to absorb the overlap (PRA-46).
+ * subject adds repetition and no vocabulary. This is the mechanical
+ * subset of the prose repetition the 2026-08-20 version audit measured
+ * in v1.11.0-v1.13.0 bodies (5 of 29 sampled bodies restated one fact two
+ * to four times, vs 1 of 60 before): the v1.8.0 task-mode removal deleted
+ * the orchestrator rewrite pass that used to absorb subject/discussion
+ * overlap (PRA-46). Re-fetching the 5 audited fail bodies shows their
+ * restatement is mostly paraphrase (same fact, different vocabulary),
+ * which a token-containment check deliberately does not touch; that mode
+ * is producer-side (finding-contract wording, PRA-46 follow-up). This
+ * drop removes only the strict duplicate, where firing is provably safe.
  *
  * First-sentence-only is deliberate. When the drop fires, `buildClaims`'
  * first-sentence split recovers the discussion's opening sentence as
@@ -193,7 +199,7 @@ const subjectRestatesDiscussion = (
     discussion: string,
 ): boolean => {
     const subjectTokens = proseTokens(subject)
-        .filter((token) => !STOPWORDS.has(token))
+        .filter((token) => !SUBJECT_STOPWORDS.has(token))
         .map(foldToken);
     if (subjectTokens.length === 0) {
         return false;

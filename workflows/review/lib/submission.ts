@@ -198,8 +198,10 @@ export const computeBodyStats = (
 /**
  * Write the staged plan (`submission-plan.json`) and hand it back. A second
  * copy lands under `out/` because that is the only directory the run
- * uploads (review.md Step 9's `upload-artifact` allows
- * `/tmp/gh-aw/review/out/**` and nothing else): the copy is what makes
+ * uploads (review.md Step 9's `upload-artifact` matches the
+ * staging-relative `out/**`; the absolute `/tmp/gh-aw/review/out/**`
+ * pattern alongside it matches nothing under gh-aw v0.81.6 and is kept
+ * only as future-proofing): the copy is what makes
  * `bodyStats` readable from a run's artifact without a runner. The
  * `REVIEW_DIR` original stays the read path for the dispatch gate and the
  * cache-record writer.
