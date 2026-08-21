@@ -126,16 +126,23 @@ const mergeableAcrossFiles = (a: Claim, b: Claim): boolean =>
  * validated nor separately posted (suppression also precedes validation, so
  * the cost saving is identical).
  *
- * The position after suppression is load-bearing, not stylistic.
- * `bestOpenThreadMatch` only matches a thread to a claim on the thread's own
- * path, so if this merge ran first, an open thread on the survivor's file
- * would suppress the survivor and silently drop every other file's
- * occurrence with it: an author who copies a flawed file A into a new
+ * The position after suppression is load-bearing, not stylistic. For the
+ * OPEN corpus `bestOpenThreadMatch` only matches a thread to a claim on the
+ * thread's own path, so if this merge ran first, an open thread on the
+ * survivor's file would suppress the survivor and silently drop every other
+ * file's occurrence with it: an author who copies a flawed file A into a new
  * sibling B, with A's finding already tracked in an open thread, would never
  * hear about B, on this run or any later one. Running after suppression, A's
  * copy exits through the thread and B posts alone. The inverse cost, an open
  * thread that was itself a merged comment already naming B, is one duplicate
  * comment on B: the failure direction this module's rules already prefer.
+ * The ADJUDICATED pass matches cross-file on purpose (`ignorePath`,
+ * dedup-adjudicated.ts), so there B's near-identical copy exits through A's
+ * settled thread too, before this merge ever sees the pair. That is that
+ * corpus's semantics (a human declined the same non-blocking ask, and a
+ * blocking re-presentation still posts), not a leak in this ordering, and
+ * the ordering stays load-bearing for the open corpus either way;
+ * dedup-crossfile.test.ts pins both directions.
  *
  * `pathOrder` is the diff's file order (staged files.json); the survivor is
  * the group's first occurrence in that order, with claim order breaking ties
@@ -252,8 +259,10 @@ export const mergeCrossFileDuplicates = (
  * The composed suppression-then-merge step dispatch calls, in this order
  * because the ordering is load-bearing (see {@link mergeCrossFileDuplicates}):
  * both thread-suppression passes first ({@link suppressTrackedDuplicates}:
- * the open corpus, then the adjudicated one), so a suppressed file's copy
- * exits through its thread and the other files' occurrences still post; the
+ * the open corpus, then the adjudicated one), so a file's copy suppressed by
+ * an OPEN thread exits through it and the other files' occurrences still
+ * post (an adjudicated thread reaches near-identical sibling copies too,
+ * deliberately; see {@link mergeCrossFileDuplicates}'s ordering note); the
  * cross-file merge second, over the survivors. `stagedOpen`,
  * `stagedAdjudicated`, and `stagedFiles` are the raw staged values; a
  * missing or malformed files.json degrades to claim order, never to a

@@ -120,20 +120,35 @@ export const adjudicatedThreadsFromStaged = (threads: unknown): OpenThread[] =>
  *   blocking, which no claim suppressed here is.
  *
  * The match is the shared matcher with the PATH KEY DROPPED (`ignorePath`;
- * same #245 similarity floors via {@link bestOpenThreadMatch}): an
- * adjudicated defect's rephrasing routinely re-anchors on another file (the
- * spec instead of the implementation, the test instead of the function), and
- * the path key is what let the webapp#41290 families re-post for two weeks.
- * Measured on that frozen corpus (Khan/plans,
+ * same #245 similarity floors via {@link bestOpenThreadMatch}, whose doc
+ * carries the cross-file floor calibration): an adjudicated defect's
+ * rephrasing routinely re-anchors on another file (the spec instead of the
+ * implementation, the test instead of the function), and the path key is
+ * what let the webapp#41290 families re-post for two weeks. Measured on that
+ * frozen corpus (Khan/plans,
  * pr-review-agent/records/family-corpus-41290.json: 12 adjudicated threads,
  * 33 labeled candidates): path-keyed scores 2/12 recall, key dropped scores
- * 6/12, and BOTH make the same single false suppression (a same-path
- * vocabulary-split pair), so the widening tripled recall and added zero
- * false suppressions there. The asymmetry that licenses it is the human
- * signal this corpus requires for membership: a false match here eats a
- * finding a human already settled (and never a blocking one, per the rule
- * above), while the same widening on the OPEN corpus would hide undecided
- * findings, so that matcher stays path-keyed.
+ * 6/12 with correct family attribution on every match, and BOTH make the
+ * same single false suppression (folding two distinct same-path findings
+ * whose wording shares the file's vocabulary), so the widening tripled
+ * recall and added zero false suppressions there.
+ *
+ * What licenses the reach is the corpus's membership rule plus the blocking
+ * exemption, not a claim that false matches are free: a false match drops a
+ * non-blocking finding whose text sits within the floors of one a human
+ * explicitly settled, and a defect that matters enough to block re-presents
+ * at blocking severity and posts. The reach deliberately includes the
+ * sibling-copy shape (webapp#41440: one source stamping near-identical text
+ * across sibling files): with a settled thread on file A, file B's copy now
+ * exits through the same thread instead of posting alone
+ * (dedup-crossfile.ts documents the interaction with its merge ordering).
+ * The human declined that exact ask once, and the path key never protected
+ * the matching same-file case (a fresh same-file instance of a settled
+ * defect was already suppressed), so this widens the reach of an accepted
+ * risk rather than adding a new class. The OPEN corpus keeps its path key:
+ * its members carry no human judgment, so a false cross-file match there
+ * would hide an undecided finding on nothing but the bot's own earlier
+ * text.
  */
 export const suppressAdjudicatedDuplicates = (
     claims: Claim[],

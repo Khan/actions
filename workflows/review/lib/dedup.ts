@@ -459,12 +459,28 @@ export const describesOpenThreadDefect = (
  * comparisons keep staging order as the final tiebreak, so an exact scoring
  * tie behaves as it did before.
  *
- * `ignorePath` drops the same-path key while keeping every floor as is (a
- * pathED claim keeps {@link OTHER_LINE_FLOOR}; only a pathLESS one pays
- * {@link PR_LEVEL_FLOOR}). The ONLY caller is the adjudicated pass
- * (dedup-adjudicated.ts, which carries the measured justification); the open
- * corpus stays path-keyed, because there a false cross-file match hides an
- * undecided finding while here it eats one a human already settled.
+ * `ignorePath` drops the same-path key on the CLAIM side and keeps every
+ * floor as is. The ONLY caller is the adjudicated pass
+ * (dedup-adjudicated.ts, which carries the measured justification), and it
+ * exempts pathless claims before calling, so under `ignorePath` every claim
+ * that reaches here is pathed and pays {@link OTHER_LINE_FLOOR}; the
+ * {@link PR_LEVEL_FLOOR} branch is live only for the path-keyed callers.
+ * Keeping OTHER_LINE_FLOOR for the cross-file comparisons is itself
+ * measured, not reused by analogy: on the frozen webapp#41290 family corpus
+ * every cross-file pair that clears this floor is a true family match, the
+ * strongest cross-file NEGATIVE scores jaccard 0.168 against the 0.2 floor
+ * (its bigram counts reach 13, so jaccard is the guard that holds), and the
+ * weakest true cross-file match sits at exactly 7 shared bigrams, so the
+ * pr-level tier's floor of 8 would trade a measured true variant for no
+ * measured precision. Re-derive from that corpus before touching either
+ * number. The THREAD side keeps a key even here: a corpus member with no
+ * usable path never matches, because under the path key such a thread could
+ * never reach a pathed claim (the fail-closed degradation
+ * {@link openThreadsFromStaged} documents), and dropping the claim-side key
+ * must not flip that thread into a wildcard suppressor. The open corpus
+ * stays path-keyed: its members carry no human judgment, so a false
+ * cross-file match there would hide an undecided finding on nothing but the
+ * bot's own earlier text.
  */
 export const bestOpenThreadMatch = (
     claim: Claim,
@@ -475,9 +491,11 @@ export const bestOpenThreadMatch = (
     // A pathless (pr-level) claim compares against EVERY open thread.
     for (const thread of threads) {
         if (
-            (options?.ignorePath !== true &&
-                claim.path !== undefined &&
-                thread.path !== claim.path) ||
+            (options?.ignorePath !== true
+                ? claim.path !== undefined && thread.path !== claim.path
+                : // A thread with no usable path stays inert (see the doc
+                  // above): fail-closed, never a PR-wide wildcard.
+                  thread.path === undefined || thread.path === "") ||
             !describesOpenThreadDefect(claim, thread)
         ) {
             continue;

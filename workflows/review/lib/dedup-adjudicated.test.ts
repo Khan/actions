@@ -266,8 +266,9 @@ describe("cross-file adjudicated suppression (the path key dropped)", () => {
         // The webapp#41290 failure mode: the same settled defect re-posted
         // at the spec, the implementation, and the test across runs, and the
         // path key exempted every re-anchoring from the corpus. Measured on
-        // that frozen corpus (see the module header), dropping the key
-        // tripled recall (2/12 to 6/12) and added zero false suppressions.
+        // that frozen corpus (see suppressAdjudicatedDuplicates's doc),
+        // dropping the key tripled recall (2/12 to 6/12) and added zero
+        // false suppressions.
         const {kept, suppressed} = suppressAdjudicatedDuplicates(
             [crossFile()],
             [adjudicatedThread()],
@@ -289,6 +290,63 @@ describe("cross-file adjudicated suppression (the path key dropped)", () => {
         );
         expect(kept).toEqual([blocking]);
         expect(suppressed).toEqual([]);
+    });
+
+    it("pays OTHER_LINE_FLOOR cross-file, not the pr-level tier", () => {
+        // This fixture scores 7 shared bigrams against T-adj (jaccard 0.481,
+        // overlap 0.722, via the real tokenizer): inside the band where
+        // OTHER_LINE_FLOOR (>=6) and PR_LEVEL_FLOOR (>=8) disagree, so it
+        // pins the documented floor choice rather than clearing both. The
+        // weakest true cross-file match on the frozen 41290 corpus sits at
+        // exactly 7; a floor of 8 would lose it for no measured precision
+        // (see bestOpenThreadMatch's calibration note).
+        const marginal = crossFile({
+            subject: "The deletion path for expired keys is untested.",
+            discussion:
+                "TestExpiration stops at identification; nothing checks the memories are actually removed afterwards.",
+            failure_scenario:
+                "A regression that identifies expired memories but never deletes them stays green.",
+        });
+        const {kept, suppressed} = suppressAdjudicatedDuplicates(
+            [marginal],
+            [adjudicatedThread()],
+        );
+        expect(kept).toEqual([]);
+        expect(suppressed).toHaveLength(1);
+    });
+
+    it("picks the best-scoring adjudicated thread across files, independent of staging order", () => {
+        // Both corpus members clear the floor against the candidate (the
+        // discursive SPEC.md thread scores jaccard 0.467, the true
+        // counterpart 0.85), so ranking, not the floor, decides attribution.
+        const weaker = {
+            thread_id: "T-spec",
+            path: "services/ai-guide/memory/spec/SPEC.md",
+            body: "**note (non-blocking):** The spec promises that expired memories are deleted, and TestExpiration exercises only the identification half: expired keys are asserted as identified, deletion is never checked, so a regression that identifies but never deletes expired memories stays green and the spec's deletion promise goes untested.",
+        };
+        const both = [weaker, adjudicatedThread()];
+        const {suppressed} = suppressAdjudicatedDuplicates([crossFile()], both);
+        expect(suppressed[0].thread_id).toBe("T-adj");
+        expect(
+            suppressAdjudicatedDuplicates([crossFile()], [...both].reverse())
+                .suppressed[0],
+        ).toEqual(suppressed[0]);
+    });
+
+    it("an adjudicated thread staged without a usable path suppresses nothing", () => {
+        // Under the path key an anchorless corpus member could never match a
+        // pathed claim (openThreadsFromStaged calls that degradation
+        // fail-closed); dropping the claim-side key must not flip it into a
+        // PR-wide wildcard, so the thread side keeps its gate.
+        for (const path of [undefined, ""]) {
+            const anchorless = {...adjudicatedThread(), path};
+            const {kept, suppressed} = suppressAdjudicatedDuplicates(
+                [crossFile()],
+                [anchorless],
+            );
+            expect(kept).toHaveLength(1);
+            expect(suppressed).toEqual([]);
+        }
     });
 
     it("leaves the OPEN corpus path-keyed: the same cross-file pair does not suppress there", () => {
