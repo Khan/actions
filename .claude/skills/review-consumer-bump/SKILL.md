@@ -17,7 +17,7 @@ The reference bumps are the 2026-08-20 set:
 [`Khan/actions#356`](https://github.com/Khan/actions/pull/356). Every pitfall
 below was hit live in that session.
 
-## Consumers
+## Step 1: discover the consumers
 
 Do not work from a remembered list; discover the consumers each time. Every
 install carries a `source:` line at the bottom of the installed file's
@@ -29,8 +29,14 @@ reviewer's own README and lib:
 
 ```sh
 gh api 'search/code?q=org%3AKhan%20%22workflows%2Freview%2Freview.md%40review-v%22&per_page=100' \
-    | jq -r '.items[] | select(.path == ".github/workflows/review.md") | .repository.full_name' | sort -u
+    | jq -r 'if .total_count > 100 then error("over 100 hits; re-run with --paginate") else . end
+             | .items[] | select(.path == ".github/workflows/review.md") | .repository.full_name' \
+    | sort -u
 ```
+
+The `total_count` guard is not decoration: the command reads a single
+100-item page, and without the check a rollout past 100 consumers silently
+drops the overflow.
 
 The same search with the autofix phrase
 (`workflows%2Fautofix%2Fautofix.md%40autofix-v`, path
@@ -55,7 +61,7 @@ It is the obvious tool and it fails twice, both observed live:
 The manual merge below is what the tool would do if it worked, and it is four
 commands.
 
-## The merge
+## Step 2: the merge
 
 Work in a fresh clone of the consumer, on a new branch. From a `Khan/actions`
 checkout, extract the shared file at the consumer's **current** pin (the base)
@@ -84,7 +90,7 @@ repos without the Sentry secrets, and raised `max-ai-credits` values with
 their `REVIEW_MAX_AI_CREDITS` env mirror (the two stay in sync per the
 upstream comment).
 
-## Autofix
+## Step 3: autofix (if applicable)
 
 The `autofix-v<version>` tag file ships install-ready: the release flow writes
 its own `source:` and `ref:` lines into it. No consumer carries local autofix
@@ -101,7 +107,7 @@ remote (one consumer was pinned to `autofix-v0.0.0`; the tag was never
 pushed). Treat a nonexistent pin as "content matches whichever real tag diffs
 clean apart from the pin lines" and move on.
 
-## Recompile
+## Step 4: recompile
 
 Run `gh aw compile` in the consumer with current stable gh-aw. Expected side
 effects, each observed on v0.85.4:
@@ -112,11 +118,13 @@ effects, each observed on v0.85.4:
   line. Revert with `git checkout -- .gitattributes` after every compile; the
   repo authored that merge driver deliberately.
 - gh-aw v0.85.x no longer generates `agentics-maintenance.yml` and deletes it.
-  Keep the deletion and remove its now-stale `.gitattributes` line.
+  Keep the deletion and remove its now-stale `.gitattributes` line, but only
+  after the final compile: the `git checkout` above discards every
+  uncommitted edit to `.gitattributes`, this removal included.
 - `'engine.model' is deprecated` warnings come from the shared file and are
   upstream's to fix. Do not run `gh aw fix` in a consumer.
 
-## Verify
+## Step 5: verify
 
 1. No conflict markers: `grep -n "^<<<<<<<" .github/workflows/review.md`.
 2. The pricing overlay is live: `providers` must appear inside **both**
@@ -147,7 +155,7 @@ effects, each observed on v0.85.4:
    `REVIEW_MAX_AI_CREDITS` mirror); the fix is a marker comment on the
    orphaned override, never a weaker test.
 
-## The PRs
+## Step 6: the PRs
 
 One per repo. Each body names: the version hop and what the release notes say
 it brings, the overrides that were kept, the compile side effects, the checker
