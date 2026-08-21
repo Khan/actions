@@ -1,6 +1,6 @@
 import {describe, it, expect} from "vitest";
 
-import {suppressOpenThreadDuplicates} from "./dedup";
+import {suppressOpenThreadDuplicates} from "./dedup-threads";
 import type {Claim} from "./dispatch-contracts";
 
 /**

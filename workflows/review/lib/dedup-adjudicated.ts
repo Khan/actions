@@ -36,7 +36,7 @@ import {
     threadOpenerIsBlocking,
     type OpenThread,
     type ThreadSuppression,
-} from "./dedup";
+} from "./dedup-threads";
 import {isRecord, type Claim} from "./dispatch-contracts";
 import {isBlockingLabel} from "./render-comment";
 import {isReviewBotAuthor} from "./threads";

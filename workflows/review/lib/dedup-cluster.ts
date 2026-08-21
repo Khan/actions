@@ -41,7 +41,7 @@ import {isBlockingLabel} from "./render-comment";
  * One member a proposed cluster named that did NOT merge, with the rule that
  * rejected it. Recorded per run because an empty rejection list and an empty
  * proposal list mean opposite things, and the module has already been burned
- * by that ambiguity once (see `dedup.ts`'s `stagedThreadShapeFailure`):
+ * by that ambiguity once (see `dedup-threads.ts`'s `stagedThreadShapeFailure`):
  * a clusterer naming ids that do not exist is a prompt or staging failure, and
  * it must not read as "no duplicates found".
  */

@@ -24,7 +24,7 @@
  * no filesystem, no clock, no model call.
  */
 
-import {threadSuppressionUnavailableWarning} from "./dedup";
+import {threadSuppressionUnavailableWarning} from "./dedup-threads";
 
 /**
  * Every workflow-command line to re-emit for this run, given the `out/`

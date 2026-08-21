@@ -56,11 +56,11 @@
  * dispatch-result.json like the other tiers' merges.
  */
 
+import {describesSameDefect} from "./dedup";
 import {
-    describesSameDefect,
     type stagedThreadShapeFailure,
     type ThreadSuppression,
-} from "./dedup";
+} from "./dedup-threads";
 import {suppressTrackedDuplicates} from "./dedup-adjudicated";
 import {isRecord, type Claim} from "./dispatch-contracts";
 
