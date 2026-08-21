@@ -7,12 +7,17 @@
 # matching rules. This file complements risk-classification.md (model-facing prose);
 # team ownership stays in .github/REVIEWERS.
 #
-# security-auth runs its workflow hunts (pwn-request, over-scoped-secret) on this
-# repo's own workflows and shipped actions. Its rules below use actions/** rather
-# than the README's **/action.yml: the eval corpus stages deliberately-vulnerable
-# fixture workflows, and lenses cannot be un-routed by a later rule. No other
-# lens is routed — the rest target webapp's backend domains. The enable line
-# turns on the same reviewers webapp uses, chosen there by eval results.
+# security-auth is routed over this repo's workflows and shipped actions. The
+# installed reviewer (.github/workflows/review.md) pins a released tag, so the
+# workflow hunts (pwn-request, over-scoped-secret) only run here once a release
+# carrying them ships and that pin is bumped; until then the lens runs its
+# generic hunts (secrets, injection, dropped guards) on these files. Routing now
+# keeps activation automatic at the bump instead of depending on a hand edit to
+# that separate bump PR. Its rules below use actions/** rather than the README's
+# **/action.yml: the eval corpus stages deliberately-vulnerable fixture
+# workflows, and lenses cannot be un-routed by a later rule. No other lens is
+# routed — the rest target webapp's backend domains. The enable line turns on
+# the same reviewers webapp uses, chosen there by eval results.
 
 enable holistic,completeness,test-adequacy,first-principles,conventions,documentation
 

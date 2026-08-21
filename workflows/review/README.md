@@ -407,6 +407,12 @@ whose frontmatter carries the trigger, permissions, and secrets — matches the
 pattern, and the hunts' own file gate includes it (the compiled `.lock.yml`
 beside it is generated output the reviewer skips).
 
+A repo that stages workflow files outside `.github/workflows/` pending a later
+move into it (e.g. a `.github-staging/` pen) should route that directory to the
+lens as well; the hunts' file gate covers staged workflow definitions by
+content, so they are reviewed before the move (the move itself is a rename
+that shows no content diff).
+
 A repo that stages deliberately-vulnerable workflow fixtures (test corpora,
 training material) should scope these patterns to its real action directories
 instead of `**`: lenses cannot be un-routed by a later rule, so a broad
