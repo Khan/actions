@@ -149,6 +149,45 @@ describe("createSdkRunner submit_result (trial suggestion h)", () => {
         expect(result.usd).toBe(0);
     });
 
+    it("reports a timeout instead of salvaging mid-investigation narration", async () => {
+        // Nearly every agent emits assistant text before it finishes, so a
+        // lastText salvage that outranks the timeout check would make the
+        // timeout error unreachable: the narration would come back as the
+        // output, fail the contract parse, and burn the one
+        // malformed-output re-dispatch (paying for the timed-out run
+        // twice). The timeout must win over lastText.
+        session = async function* () {
+            yield {
+                type: "assistant",
+                message: {
+                    content: [{type: "text", text: "still investigating..."}],
+                },
+            };
+            await new Promise((resolve) => setTimeout(resolve, 25));
+            throw new Error("aborted by user");
+        };
+        await expect(
+            (
+                await createSdkRunner()
+            )(request({timeoutMs: 5})),
+        ).rejects.toThrow(/timed out after 5ms/);
+    });
+
+    it("still salvages an ACCEPTED payload past the timeout", async () => {
+        // A payload submit_result accepted is complete and validated; the
+        // session then hanging until the timeout should not discard it.
+        session = async function* (tools) {
+            await tools[0].handler({result: {findings: []}}, undefined);
+            await new Promise((resolve) => setTimeout(resolve, 25));
+            throw new Error("aborted by user");
+            // eslint-disable-next-line no-unreachable
+            yield success("never reached");
+        };
+        const result = await (await createSdkRunner())(request({timeoutMs: 5}));
+        expect(result.structured).toBe(true);
+        expect(JSON.parse(result.output)).toEqual({findings: []});
+    });
+
     it("still throws a dead session with nothing accepted", async () => {
         session = async function* () {
             yield {type: "result", subtype: "error_max_turns"};

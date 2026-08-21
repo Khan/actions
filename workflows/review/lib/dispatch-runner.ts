@@ -131,9 +131,9 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                                 // payloads the collection phase could accept,
                                 // and its rejection bounces to the AUTHOR the
                                 // same way a contract rejection does (the
-                                // plain-prose loop: haiku judges, the author
-                                // rewrites in-session with its repo context
-                                // intact). The gate caps its own bounces and
+                                // plain-prose loop: the pinned judge model
+                                // scores, the author rewrites in-session
+                                // with its repo context intact). The gate caps its own bounces and
                                 // fails open, and `provisional` above keeps
                                 // the pre-style payload salvageable, so this
                                 // await can slow a submission or cost prose
@@ -293,6 +293,18 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                     structured: true,
                 };
             }
+            // The SDK reports an abort as a generic "aborted by user";
+            // surface the actual cause BEFORE the lastText salvage: a
+            // timeout is a real failure whose text is mid-investigation
+            // narration, and returning it as the output re-dispatches the
+            // agent as "malformed" and pays for the run twice (the staged
+            // error record exists because run 29901690493's two shed
+            // finders were 5-minute timeouts, unreadably recorded).
+            if (timedOut) {
+                throw new Error(
+                    `sub-agent timed out after ${request.timeoutMs}ms`,
+                );
+            }
             // No structured payload, but the agent did write a final: the
             // free-text fallback path. Return it instead of discarding a
             // usable output because the session then died (the Stop hook
@@ -304,15 +316,6 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                     turns: 0,
                     wallMs: Date.now() - started,
                 };
-            }
-            // The SDK reports an abort as a generic "aborted by user";
-            // surface the actual cause so the staged error record and the
-            // run report say what happened (run 29901690493's two shed
-            // finders were 5-minute timeouts, unreadably recorded).
-            if (timedOut) {
-                throw new Error(
-                    `sub-agent timed out after ${request.timeoutMs}ms`,
-                );
             }
             throw error;
         } finally {
