@@ -177,13 +177,24 @@ observability:
 # the deterministic dispatcher (lib/dispatch.ts) as ONE blocking Bash call that
 # waits for the whole sub-agent fan-out, which takes minutes, not seconds. The
 # job-level timeout-minutes still bounds the run.
+#
+# The ceiling is 30 minutes (with timeout-minutes at 50), not 20 (at 40). This
+# is a pragmatic cap sized to observed runs, not a bound: the dispatcher awaits
+# four sequential agent stages (triage, finder fan-out in waves of 4, the
+# clusterer, claim validation), each sub-agent capped at 15 minutes and
+# re-dispatched once on a parse failure, so the theoretical worst case exceeds
+# any ceiling worth setting. Run 32418662895 (Khan/actions#362) was killed
+# mid-claim-validation at the old 20-minute line, posting nothing, and the
+# turn cap raise to 100 lets agents run longer, so the ceiling moves in
+# lockstep; the job cap keeps ~20 minutes of headroom over the dispatcher call
+# so the two never collapse into the same kill line.
 engine:
   id: claude
   model: claude-opus-5
   env:
     BASH_DEFAULT_TIMEOUT_MS: "60000"
-    BASH_MAX_TIMEOUT_MS: "1200000"
-timeout-minutes: 40
+    BASH_MAX_TIMEOUT_MS: "1800000"
+timeout-minutes: 50
 
 # The awf sandbox stays declared (its api-proxy is what meters AI credits and
 # caps a runaway fan-out), but its version now floats with the gh-aw release
@@ -777,7 +788,7 @@ exactly this sequence:
    none. This is the only thread work left to you: what a reply chain concedes
    or refutes is a judgment, while fetching and classifying the threads is not.
 2. Invoke the dispatcher, once, as a single Bash call with `timeout` set to
-   `1200000` (it waits for the whole sub-agent fan-out; the engine's Bash
+   `1800000` (it waits for the whole sub-agent fan-out; the engine's Bash
    ceiling is raised for exactly this call):
 ```
 cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
