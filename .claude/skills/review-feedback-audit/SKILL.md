@@ -1,6 +1,6 @@
 ---
 name: review-feedback-audit
-description: Audit the PR review workflow's posted output and human feedback in a consumer repo over a time window (typically since a reviewer deploy). Computes volume, verdict mix, label mix, verbosity, duplication at three grains, suppression notes, and human feedback (reactions, thumbs-sweep replies, thread replies), then maps each finding to an open Khan/actions PR or a new-PR candidate. Invoke with a consumer repo, a cutoff timestamp, and optionally the bot login.
+description: Audit the PR review workflow's posted output and human feedback in a consumer repo over a time window (typically since a reviewer deploy). Computes volume, verdict mix, label mix, verbosity, duplication at three grains, suppression notes, and human feedback (reactions, thread replies, and, in windows predating the follow-up retirement, thumbs-sweep follow-up replies), then maps each finding to an open Khan/actions PR or a new-PR candidate. Invoke with a consumer repo, a cutoff timestamp, and optionally the bot login.
 ---
 
 # Review quality and feedback audit
@@ -49,7 +49,8 @@ jq --arg bot "$BOT" --arg c "$CUTOFF" \
   "$WORK/pc.json" > "$WORK/bot_inline_raw.json"
 ```
 
-**Issue comments** (guidance comments, sweep follow-ups, CI noise). The
+**Issue comments** (guidance comments, CI noise, and, in windows predating
+the follow-up retirement, sweep follow-ups). The
 reviewer's guidance comment is identified by the engine-appended
 `gh-aw-agentic-workflow` marker, not by any bot-authored marker: the ingest
 sanitizer strips agent-written HTML comments (see Known constraints).
@@ -80,13 +81,15 @@ while read -r pr; do
   gh api --paginate "repos/$REPO/pulls/$pr/reviews?per_page=100" \
     --jq "[.[] | select(.user.login==\"$BOT\"
         and .submitted_at >= \"$CUTOFF\")]
-      | .[] | [$pr, .id, .state, .submitted_at, (.body|length)] | @tsv" \
+      | .[] | [$pr, .id, .state, .submitted_at, (.body|length),
+        (.body|test(\"review-v[0-9]\"))] | @tsv" \
     < /dev/null >> "$WORK/reviews.tsv"
 done < "$WORK/prs.txt"
 ```
 
 Redirecting stdin from `/dev/null` inside the loop matters: `gh` can consume
-the loop's stdin and truncate the PR list.
+the loop's stdin and truncate the PR list. The last column marks rows whose
+body carries the v1.14.0+ version footer; Step 3's run count keys on it.
 
 **Reactions.** The listing's `reactions` object gives counts; fetch the
 detail endpoint only for comments with `total_count > 0`, and exclude the
@@ -150,8 +153,10 @@ Every later step reads `bot_replies.tsv`; `replies.tsv` is an intermediate.
 **Conventional-Comment labels.** Parse the label prefix off each bot body:
 `issue`, `suggestion`, `question`, `note`, `nitpick`, `thought`, plus
 variants like `(non-blocking, documentation)` and
-`(non-blocking, best-practice)`. Bodies with no label are usually
-thumbs-sweep follow-ups (next paragraph):
+`(non-blocking, best-practice)`. In windows predating the follow-up
+retirement, bodies with no label are usually thumbs-sweep follow-ups (next
+paragraph); in windows after it, an unlabeled bot body is an anomaly worth
+reading rather than bucketing:
 
 ```sh
 jq '[.[] | {id, pr: (.pull_request_url|split("/")|last|tonumber), path,
@@ -163,25 +168,43 @@ jq '[.[] | {id, pr: (.pull_request_url|split("/")|last|tonumber), path,
   "$WORK/bot_inline_raw.json" > "$WORK/bot_inline.json"
 ```
 
-**Thumbs-sweep follow-ups** carry the `review-thumbs-followup` marker (a
-sweep-posted comment survives the sanitizer because the sweep posts through
-the plain API, not through safe outputs). Count them separately from
-findings, and note that a follow-up posted as a review shows up in
-`reviews.tsv` as a `COMMENTED` review; do not count it as a review run.
+**Thumbs-sweep follow-ups (historical only).** The sweep's "why?" follow-up
+was retired (see the `workflows/review` CHANGELOG entry for the retirement);
+the sweep is read-only and posts nothing, so PRs reviewed after that release
+never carry follow-ups, and old ones age out of the sweep's 14-day lookback.
+When the audit window predates the retirement, follow-ups carry the
+`review-thumbs-followup` marker (a sweep-posted comment survived the
+sanitizer because the sweep posted through the plain API, not through safe
+outputs). Count them separately from findings, and note that a follow-up
+posted as a review shows up in `reviews.tsv` as a `COMMENTED` review; the
+run-count rule in Step 3 keeps it out of run totals.
 
-**Reason replies** use the closed vocabulary the follow-up offers:
-`incorrect`, `unimportant`, `unclear`, `duplicate`. Match replies to
-follow-ups by thread and record the latency from downvote to follow-up and
-from follow-up to reply.
+**Reason replies (historical only).** Follow-ups offered a closed
+vocabulary: `incorrect`, `unimportant`, `unclear`, `duplicate`. It survives
+in code only as the permanently-unpopulated `DownvoteReason` type in
+`workflows/review/eval/judge.ts`, kept to type historical labels. For
+pre-retirement windows, match replies to follow-ups by thread and record
+the latency from downvote to follow-up and from follow-up to reply; skip
+both metrics for windows after the retirement (there is nothing to measure).
 
 **Human replies**: classify each thread's outcome by reading the exchange:
 `accepted` (author changed code or agreed), `declined` (author rejected with
 a reason), `answered` (bot asked, author answered, no change requested).
+Thread replies reach a maintainer only through this skill or manual reading;
+no automated job consumes them (the weekly report is `counters-report.ts`
+and has no reply handling), so treat an unaddressed reply as unseen, not
+triaged.
 
 ## Step 3: compute the metrics
 
-- **Runs and verdicts**: rows of `reviews.tsv` minus sweep follow-ups;
-  verdict mix (`APPROVED` / `CHANGES_REQUESTED` / `COMMENTED`).
+- **Runs and verdicts**: count review runs by the v1.14.0+ version footer
+  (the `review-v<version>` segment in the review body's collapsed
+  `<details>` block), not by review events: the autofix workflow's thread
+  replies arrive as implicit empty `COMMENTED` review events (as did sweep
+  follow-ups, pre-retirement), so a raw `reviews.tsv` row count overstates
+  runs. Verdict mix (`APPROVED` / `CHANGES_REQUESTED` / `COMMENTED`) over
+  the footer-bearing rows. For windows predating v1.14.0 no footer exists;
+  fall back to review events minus sweep follow-ups and say so in Caveats.
 - **Volume**: bot inline comments per PR and per run; guidance comments.
 - **Label mix**: count per label; blocking vs non-blocking split.
 - **Verbosity**: mean / median / p90 / max body chars over top-level bot
@@ -210,8 +233,9 @@ jq '[.[] | select(.body
 - **Suppression notes**, parsed from review bodies: `not re-posted (already
   tracked)`, `shed under the ... run budget`, and the `N of M prior review
   threads` accountability lines. These show which mitigations fired.
-- **Feedback**: reactions by kind and reactor; sweep follow-up latency;
-  reason-reply latency; human replies by outcome class.
+- **Feedback**: reactions by kind and reactor; human replies by outcome
+  class; for pre-retirement windows only, sweep follow-up latency and
+  reason-reply latency.
 - **Attribution**: check each posted review body and guidance comment for a
   version marker or footer, and report presence per body.
 
@@ -241,13 +265,16 @@ jq '[.[] | select(.body
   a lower bound.
 - **Sentinel strings live in lib code.** The markers this audit greps for
   are defined in Khan/actions source, and a zero count is indistinguishable
-  from a renamed marker: `review-thumbs-followup` and the reason vocabulary
-  in `workflows/review/lib/thumbs-sweep.ts`, "A sketch, not a committable
-  replacement" in `workflows/review/lib/submission.ts`, the suppression
-  note phrasing in `workflows/review/lib/dispatch.ts`, and the
-  `gh-aw-agentic-workflow` marker appended by the gh-aw engine. Before
-  trusting any zero measurement, re-derive the string from the checkout
-  being audited.
+  from a renamed marker: "A sketch, not a committable replacement" in
+  `workflows/review/lib/submission.ts`, the suppression note phrasing in
+  `workflows/review/lib/dispatch.ts`, and the `gh-aw-agentic-workflow`
+  marker appended by the gh-aw engine. Before trusting any zero
+  measurement, re-derive the string from the checkout being audited. The
+  `review-thumbs-followup` marker and the downvote-reason vocabulary were
+  deleted from the lib with the follow-up retirement; when auditing a
+  pre-retirement window, re-derive them from the `workflows/review`
+  CHANGELOG entry for the retirement or from a pre-retirement tag's
+  `lib/thumbs-sweep.ts`.
 
 ## Step 4: report
 
@@ -260,7 +287,8 @@ Use these sections, in order:
 4. **Verbosity**: the stats above, sketch-block share, review-body and
    guidance-comment sizes.
 5. **Duplication**: one subsection per grain, with ids.
-6. **Human feedback**: reactions, sweep loop latencies, replies by outcome.
+6. **Human feedback**: reactions, replies by outcome, and (pre-retirement
+   windows only) sweep follow-up loop latencies.
 7. **Caveats**: GraphQL availability, marker expectations, sample-size
    limits, anything unverifiable.
 
