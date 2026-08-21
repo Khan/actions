@@ -1788,9 +1788,9 @@ proximity:
 **Ground every group in the code it is about.** Each group carries `evidence`: one short
 phrase naming the code element its members share — the identifier, the literal, or the
 quoted comment text (e.g. "the doc comment on `maxSamples` says 10 while the constant is
-25"). This is checked mechanically: a group whose evidence names no code element, or a
-member whose own text never mentions it, is discarded. So write evidence that quotes the
-code, never a topic ("both are about comments" grounds nothing and voids the group).
+25"). The pipeline checks this: a group whose evidence names no code element, or a
+member whose own text never mentions it, is normally discarded. So write evidence that
+quotes the code, never a topic ("both are about comments" grounds nothing).
 
 **When in doubt, leave them separate.** A wrong grouping silently drops a reviewer's
 distinct finding; a missed one only costs a duplicate comment. Every `id` you name must
