@@ -556,7 +556,7 @@ export const runStagePrCli = async (
     // particular shape, and everything downstream then depended on a
     // model-produced file: `hasThreads` (which decides whether the
     // thread-reconciler is dispatched at all, so it changes the roster),
-    // open-thread suppression (dedup.ts), and the accountability recap
+    // open-thread suppression (dedup-threads.ts), and the accountability recap
     // (rereview.ts). Khan/actions#302 patched a symptom of that seam: a
     // CONFORMING staging produced zero usable threads for a whole release
     // because the prompt's selection rule and the code's guard spelled the
@@ -622,7 +622,7 @@ export const runStagePrCli = async (
             botThreads.map((thread) => ({
                 ...thread,
                 // Unresolved by construction (the partition above drops
-                // resolved threads), but written anyway: dedup.ts requires an
+                // resolved threads), but written anyway: dedup-threads.ts requires an
                 // explicit `resolved: false` and fails closed without one.
                 // That guard stays deliberately, rather than trusting this
                 // producer.

@@ -39,7 +39,8 @@
  * note lines) is pure code. No prose about the code under review.
  */
 
-import {dedupeClaims, type ClaimMerge, type ThreadSuppression} from "./dedup";
+import {dedupeClaims, type ClaimMerge} from "./dedup";
+import {type ThreadSuppression} from "./dedup-threads";
 import {
     reapplyCrossFileOccurrences,
     suppressThenMergeCrossFile,
@@ -113,12 +114,11 @@ export {
     type AgentDefinition,
     type DispatchFs,
 } from "./dispatch-agents";
+export {dedupeClaims, type ClaimMerge} from "./dedup";
 export {
-    dedupeClaims,
     suppressOpenThreadDuplicates,
-    type ClaimMerge,
     type ThreadSuppression,
-} from "./dedup";
+} from "./dedup-threads";
 export {type ClusterRejection} from "./dedup-cluster";
 
 /* -------------------------------------------------------------------------- */
