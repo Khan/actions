@@ -1,0 +1,33 @@
+name: Update contributors list
+
+on:
+    push:
+        branches:
+            - main
+
+jobs:
+    update-contributors:
+        runs-on: ubuntu-latest
+        # contents: write is consumed by the push step below; only trusted code
+        # from main runs under this trigger (no PR-authored input reaches it).
+        permissions:
+            contents: write
+        steps:
+            - name: Check out main
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+            - name: Regenerate CONTRIBUTORS.md
+              uses: minicli/action-contributors@d09dd7cec2764341eb90a4b29ee7e5ce71ea9308 # v3
+              env:
+                  CONTRIB_REPOSITORY: ${{ github.repository }}
+                  CONTRIB_OUTPUT_FILE: CONTRIBUTORS.md
+
+            - name: Push the regenerated list
+              shell: bash
+              run: |
+                  if [ -n "$(git status --porcelain)" ]; then
+                      git config user.name "docs-bot"
+                      git config user.email "docs-bot@example.com"
+                      git commit -am "Regenerate CONTRIBUTORS.md"
+                      git push
+                  fi
