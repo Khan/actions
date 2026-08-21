@@ -279,9 +279,10 @@ export type DownvoteReason =
     | "duplicate";
 
 /**
- * A human thumbs signal on a posted comment, mined by the thumbs sweep. `up`
- * means 👍 (the human agreed with the comment), `down` means 👎 (disagreed);
- * `reason` is the sweep's fixed downvote vocabulary when the human gave one.
+ * A human thumbs signal on a posted comment, mined by the (now deleted)
+ * thumbs sweep. `up` means 👍 (the human agreed with the comment), `down`
+ * means 👎 (disagreed); `reason` is set only on labels mined before the
+ * "why?" follow-up was retired (see {@link DownvoteReason}).
  */
 export type ThumbsLabel = {
     findingId: string;

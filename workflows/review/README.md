@@ -150,9 +150,10 @@ you can pick the one that says what you mean:
 - **👎 the finding's comment.** Same adjudication as resolving, through the
   reaction channel: a 👎 on a thread's OPENING comment puts its defect in the
   adjudicated corpus whether or not you also resolve. The 👎 alone is what
-  suppresses; if you want to say why, reply in the thread (replies surface
-  when a maintainer runs the `review-feedback-audit` skill; no automated job
-  reads them). Reactions on replies are
+  suppresses; if you want to say why, reply in the thread: the reconciler and
+  claim validation read replies as described above, nothing prompts you for a
+  reason any more, and replies only reach a feedback report when a maintainer
+  runs the `review-feedback-audit` skill. Reactions on replies are
   conversation, not adjudication. 👎 is the ONLY adjudicating reaction: a 😕
   does not suppress (😕 reads as "unclear", not "wrong", and ambiguity is
   worth a conversation, not a standing suppression). The bot's own seeded
