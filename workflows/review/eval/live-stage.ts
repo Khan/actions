@@ -8,6 +8,12 @@
  * run against a real PR:
  *
  *   <dest>/context/pr-context.json    PR metadata (from the case's live block)
+ *   <dest>/context/ticket-context.json the linked-ticket surface (the case's
+ *                                       live.ticket block, or the production
+ *                                       unconfigured shape {available: false,
+ *                                       reason: "not-configured"}): always
+ *                                       written, matching stage-ticket.ts's
+ *                                       no-existence-check contract
  *   <dest>/context/full.diff          the case diff (git-style unified diff)
  *   <dest>/context/full-stripped.diff = full.diff (corpus diffs carry no
  *                                       generated files to strip)
@@ -317,6 +323,19 @@ export const stageCase = (
                 diffPath: `${contextDir}/full.diff`,
                 filesPath: `${contextDir}/files.json`,
             },
+            null,
+            2,
+        ),
+    );
+
+    // The linked-ticket surface (stage-ticket.ts's contract: the file is
+    // ALWAYS written, so prompt readers never need an existence check). A
+    // case without a ticket block stages the same shape an unconfigured
+    // production consumer does.
+    fs.writeFileSync(
+        `${contextDir}/ticket-context.json`,
+        JSON.stringify(
+            live.ticket ?? {available: false, reason: "not-configured"},
             null,
             2,
         ),

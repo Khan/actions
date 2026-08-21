@@ -178,6 +178,14 @@ export type CaseLive = {
      * nothing more.
      */
     tree: string;
+    /**
+     * Optional staged ticket-context.json content, for cases exercising the
+     * ticket-present path of the intent-reading prompts (the shape is
+     * lib/stage-ticket.ts's TicketContext; only `available` is validated).
+     * Absent, staging writes `{available: false, reason: "not-configured"}`,
+     * matching an unconfigured production consumer.
+     */
+    ticket?: Record<string, unknown>;
     /** Labeled defects a live run must catch. */
     mustCatchSpecs?: LiveDefectSpec[];
     /** Labeled traps a live run must NOT flag (clean-case ground truth). */
@@ -649,12 +657,30 @@ export const parseLive = (
         errors,
     );
 
+    const rawTicket = raw["ticket"];
+    let ticket: Record<string, unknown> | undefined;
+    if (rawTicket !== undefined) {
+        if (
+            !isRecord(rawTicket) ||
+            typeof rawTicket["available"] !== "boolean"
+        ) {
+            errors.push(
+                "live.ticket: must be an object with a boolean `available` when present",
+            );
+        } else {
+            ticket = rawTicket;
+        }
+    }
+
     const rereview = parseRereview(raw["rereview"], errors);
 
     if (prContext === undefined) {
         return undefined;
     }
     const live: CaseLive = {prContext, tree};
+    if (ticket !== undefined) {
+        live.ticket = ticket;
+    }
     if (mustCatchSpecs !== undefined) {
         live.mustCatchSpecs = mustCatchSpecs;
     }

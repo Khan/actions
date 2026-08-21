@@ -118,6 +118,45 @@ describe("stageCase", () => {
             "lensesToSpawn",
         );
         expect(vol.existsSync("/stage/context/out")).toBe(true);
+
+        // ticket-context.json is ALWAYS written (stage-ticket.ts's
+        // no-existence-check contract); without a live.ticket block it
+        // stages the production unconfigured shape.
+        expect(JSON.parse(read("/stage/context/ticket-context.json"))).toEqual({
+            available: false,
+            reason: "not-configured",
+        });
+    });
+
+    it("stages a case's live.ticket block as ticket-context.json", () => {
+        const vol = treeVol();
+        const ticket = {
+            available: true,
+            tickets: [{key: "KORE-1", summary: "the ticket"}],
+        };
+        stageCase(
+            liveCase({
+                live: {
+                    prContext: {
+                        title: "A staged change",
+                        description: "body text",
+                        author: "octocat",
+                        baseBranch: "main",
+                    },
+                    ticket,
+                },
+            }),
+            "/stage",
+            volFs(vol),
+        );
+        expect(
+            JSON.parse(
+                vol.readFileSync(
+                    "/stage/context/ticket-context.json",
+                    "utf8",
+                ) as string,
+            ),
+        ).toEqual(ticket);
     });
 
     it("copies the tree recursively into the checkout", () => {
