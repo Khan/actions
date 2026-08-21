@@ -51,13 +51,14 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
    open threads states that every prior thread is resolved — resolving some threads
    never leaves the rest silently open.
    A kept thread whose reply chain shows the AUTHOR conceded the finding (will fix,
-   TODO stands in) is reported by the reconciler as `acknowledged`, verified in code
-   against the staged reply chain (the id must be kept, and the PR author must have
-   actually replied; bot replies never count), and recapped as "acknowledged (fix
-   pending)" instead of unaddressed. Acknowledgment never weakens the flip gate: an
-   acknowledged blocking thread still counts toward `keptBlockingCount`, and the
-   verified ids land in `rereview.json` as a membership feed for the
-   adjudicated-corpus suppression (`lib/dedup-adjudicated.ts`).
+   TODO stands in) is reported by the reconciler as `acknowledged` and recapped as
+   "acknowledged (fix pending)" instead of unaddressed. Code verifies the mechanical
+   preconditions against the staged reply chain (the id must be kept, and the PR
+   author must have actually replied; bot replies never count); whether that reply
+   concedes rather than pushes back is the reconciler's judgment, and the cost of a
+   wrong call is one mislabeled recap line. Acknowledgment never weakens the flip
+   gate: an acknowledged blocking thread still counts toward `keptBlockingCount`.
+   The verified ids are recorded in `rereview.json`; nothing consumes them yet.
    A reviewer that surfaces a real concern its own mandate does not let it report — a
    correctness problem the skill-auditor cannot quote a rule for, or something outside
    a specialist lens's domain — hands it off as an `out_of_lane_observations[]` entry

@@ -829,6 +829,13 @@ describe("acknowledged threads (the will-fix signal, webapp#41290)", () => {
                 "[`a/a.go:5`](https://github.com/o/r/pull/1#discussion_ack)" +
                     " (acknowledged, fix pending): Side effects escape the gate.",
             );
+            // The unacknowledged kept thread beside it renders WITHOUT the
+            // marker: the per-entry semantics, not just the header count.
+            expect(result.section).toContain(
+                "- **note (non-blocking)** " +
+                    "[`a/a.go:5`](https://github.com/o/r/pull/1#discussion_plain): " +
+                    "Side effects escape the gate.",
+            );
             expect(result.acknowledged).toEqual(["ack"]);
             expect(result.acknowledgedCount).toBe(1);
         });
@@ -842,7 +849,7 @@ describe("acknowledged threads (the will-fix signal, webapp#41290)", () => {
                     acknowledged: ["t1"],
                 },
                 // No prAuthor staged: verification fails closed, and the
-                // section is byte-identical to the pre-PRA-47 render.
+                // section is byte-identical to the pre-acknowledgment render.
             });
             expect(result.section).toContain("still unaddressed");
             expect(result.section).not.toContain("acknowledged");
@@ -868,7 +875,13 @@ describe("acknowledged threads (the will-fix signal, webapp#41290)", () => {
             });
             // Visible line (no <details>), marked, and still counted: the
             // code change is what resolves a blocking thread, never the
-            // promise of one.
+            // promise of one. The header assertion pins the acknowledged
+            // wording on the resolvedCount === 0 branch (the mixed test
+            // covers the resolved-count form).
+            expect(result.section.split("\n")[0]).toBe(
+                "1 of 1 prior review thread is still open, " +
+                    "1 of them acknowledged (fix pending):",
+            );
             expect(result.keptBlockingCount).toBe(1);
             expect(result.section).not.toContain("<details>");
             expect(result.section).toContain(
@@ -940,7 +953,10 @@ describe("acknowledged threads (the will-fix signal, webapp#41290)", () => {
             expect(JSON.parse(written[RESULT]).acknowledged).toEqual(["t1"]);
         });
 
-        it("degrades a malformed acknowledged array to none, keeping the section", () => {
+        it("filters non-string acknowledged entries, keeping real acks", () => {
+            // One junk entry must not erase a real acknowledgment: the
+            // field is an optional refinement over keep, and every
+            // surviving id still passes verification.
             const {fs} = makeFs({
                 [THREADS]: JSON.stringify([
                     ackThread("t1", [{author: "octocat", body: "will fix"}]),
@@ -948,7 +964,25 @@ describe("acknowledged threads (the will-fix signal, webapp#41290)", () => {
                 [RECONCILER]: JSON.stringify({
                     resolve: [],
                     keep: ["t1"],
-                    acknowledged: [42],
+                    acknowledged: [42, "t1"],
+                    skipLines: [],
+                }),
+                [PR_CONTEXT]: JSON.stringify({author: "octocat"}),
+            });
+            const result = runRereviewCli(fs);
+            expect(result.acknowledged).toEqual(["t1"]);
+            expect(result.acknowledgedCount).toBe(1);
+        });
+
+        it("degrades a non-array acknowledged to none, keeping the section", () => {
+            const {fs} = makeFs({
+                [THREADS]: JSON.stringify([
+                    ackThread("t1", [{author: "octocat", body: "will fix"}]),
+                ]),
+                [RECONCILER]: JSON.stringify({
+                    resolve: [],
+                    keep: ["t1"],
+                    acknowledged: "t1",
                     skipLines: [],
                 }),
                 [PR_CONTEXT]: JSON.stringify({author: "octocat"}),

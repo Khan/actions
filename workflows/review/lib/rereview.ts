@@ -26,7 +26,7 @@
  */
 
 import {isBlockingLabel} from "./render-comment";
-import {isReviewBotAuthor, sameLogin} from "./threads";
+import {isBotLogin, isReviewBotAuthor, sameLogin} from "./threads";
 
 /** One staged unresolved bot thread (`threads.json`, review.md Step 3 Phase 2). */
 export type StagedThread = {
@@ -52,19 +52,24 @@ export type ReconcilerResult = {
      * Kept threads whose reply chain shows the AUTHOR conceded the finding
      * (agreed it should change, a fix is under way, a TODO stands in) with
      * the code not yet changed. Optional: older reconciler outputs omit it.
-     * These render as acknowledged (fix pending) in the recap instead of
-     * counting as plain "unaddressed", and the VERIFIED subset (see
-     * {@link verifiedAcknowledgedIds}) is an acknowledgment membership
-     * signal for the adjudicated-corpus suppression (dedup-adjudicated.ts).
+     * The subset surviving {@link verifiedAcknowledgedIds} renders as
+     * acknowledged (fix pending) in the recap instead of counting as plain
+     * "unaddressed", and is recorded in `rereview.json`. Nothing else
+     * consumes it.
      */
     acknowledged?: string[];
 };
 
 /**
- * The acknowledged ids that survive the mechanical fail-closed checks, the
- * code-side half of the staged-decision-plus-verification pattern the thread
- * resolutions use (the reconciler asserts, code verifies, and nothing
- * downstream consumes an unverified assertion):
+ * The acknowledged ids that survive the mechanical fail-closed checks. What
+ * code verifies here is deliberately WEAKER than what the reconciler
+ * asserts: these checks establish that a real, non-bot PR-author reply
+ * exists on a kept thread (necessary for a concession), not that the reply
+ * CONCEDES rather than pushes back. Concession-vs-pushback stays the
+ * reconciler's judgment (its prompt says "when in doubt, leave it out"),
+ * and the cost of a wrong call is one mislabeled recap line, rendered
+ * directly under the reply's own author. This is NOT the thread-resolution
+ * pattern, where code re-checks the same property the reconciler asserted.
  *
  * - The id must be in `keep`. An acknowledgment on a resolved thread is a
  *   contradiction (resolution already accounts for it), and an id the
@@ -93,7 +98,7 @@ export const verifiedAcknowledgedIds = (
         prAuthor === undefined ||
         prAuthor === "" ||
         isReviewBotAuthor(prAuthor) ||
-        /\[bot\]$/i.test(prAuthor)
+        isBotLogin(prAuthor)
     ) {
         return verified;
     }
@@ -109,7 +114,7 @@ export const verifiedAcknowledgedIds = (
                 (comment) =>
                     comment.author !== "" &&
                     !isReviewBotAuthor(comment.author) &&
-                    !/\[bot\]$/i.test(comment.author) &&
+                    !isBotLogin(comment.author) &&
                     sameLogin(comment.author, prAuthor),
             );
         if (authorReplied === true) {
@@ -566,12 +571,15 @@ const parseReconciler = (raw: unknown): ReconcilerResult | undefined => {
     if (resolve === undefined || keep === undefined) {
         return undefined;
     }
-    // A malformed `acknowledged` degrades to none (the field is an optional
-    // refinement over keep, so dropping it renders plain kept threads); it
-    // must not invalidate the whole reconciliation the way a malformed
-    // resolve/keep does, or a bad ack array would erase the accountability
-    // section entirely.
-    const acknowledged = ids(raw["acknowledged"]);
+    // `acknowledged` is an optional refinement over keep, so it degrades
+    // instead of invalidating: non-string entries are FILTERED (one junk
+    // entry must not erase real acknowledgments, and every surviving id
+    // still has to pass verifiedAcknowledgedIds), and a non-array value
+    // degrades to absent. A malformed resolve/keep still invalidates the
+    // whole reconciliation, because those two lists ARE the accounting.
+    const acknowledged = Array.isArray(raw["acknowledged"])
+        ? raw["acknowledged"].filter((v): v is string => typeof v === "string")
+        : undefined;
     return {
         resolve,
         keep,

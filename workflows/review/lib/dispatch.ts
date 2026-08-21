@@ -59,14 +59,12 @@ import {
     parseClustererOutput,
     parseFinderOutput,
     parseJsonObject,
-    parseReconciliation,
     parseValidatorOutput,
     applyVerifications,
     anchorPathLine,
     isRecord,
     type Candidate,
     type Claim,
-    type Reconciliation,
 } from "./dispatch-contracts";
 import {loadAgents, type DispatchFs} from "./dispatch-agents";
 
@@ -278,9 +276,8 @@ export type DispatchResult = {
     threadSuppressions: ThreadSuppression[];
     /** Set when every staged thread failed the filter (see dedup.ts). */
     threadSuppressionUnavailable?: {unusableThreads: number; warning: string};
-    /** The reconciler's decision, when it ran and parsed (see
-     * {@link parseReconciliation} for the shape rules). */
-    reconciliation?: Reconciliation;
+    /** The reconciler's decision, when it ran and parsed. */
+    reconciliation?: {resolve: string[]; keep: string[]; skipLines: unknown};
     /** correctness-reviewer `files[]` risk levels (Steps 7-8). */
     riskFiles?: unknown;
     /** pattern-triage patterns + excluded files (Step 7). */
@@ -683,7 +680,19 @@ export const runDispatch = async (
                 shedDimension();
                 continue;
             }
-            reconciliation = parseReconciliation(parsed);
+            reconciliation = {
+                resolve: Array.isArray(parsed["resolve"])
+                    ? parsed["resolve"].filter(
+                          (v): v is string => typeof v === "string",
+                      )
+                    : [],
+                keep: Array.isArray(parsed["keep"])
+                    ? parsed["keep"].filter(
+                          (v): v is string => typeof v === "string",
+                      )
+                    : [],
+                skipLines: parsed["skipLines"] ?? [],
+            };
         } else {
             const parsed = await parseWithRetry(entry.name, output, (raw) =>
                 parseFinderOutput(
