@@ -178,14 +178,16 @@ observability:
 # waits for the whole sub-agent fan-out, which takes minutes, not seconds. The
 # job-level timeout-minutes still bounds the run.
 #
-# The ceiling is 30 minutes (with timeout-minutes at 50), not 20 (at 40): the
-# dispatch phases are sequential (finder fan-out, dedup, claim validation, each
-# sub-agent under the 15-minute per-agent cap), so worst case is ~30 minutes
-# before overhead, and run 32418662895 (Khan/actions#362) was killed mid-claim-
-# validation at the 20-minute line, posting nothing. Raising the turn cap to 100
-# (this release) lets agents run longer, so the ceiling moves in lockstep; the
-# job cap keeps ~20 minutes of headroom over the dispatcher call so the two
-# never collapse into the same kill line.
+# The ceiling is 30 minutes (with timeout-minutes at 50), not 20 (at 40). This
+# is a pragmatic cap sized to observed runs, not a bound: the dispatcher awaits
+# four sequential agent stages (triage, finder fan-out in waves of 4, the
+# clusterer, claim validation), each sub-agent capped at 15 minutes and
+# re-dispatched once on a parse failure, so the theoretical worst case exceeds
+# any ceiling worth setting. Run 32418662895 (Khan/actions#362) was killed
+# mid-claim-validation at the old 20-minute line, posting nothing, and the
+# turn cap raise to 100 lets agents run longer, so the ceiling moves in
+# lockstep; the job cap keeps ~20 minutes of headroom over the dispatcher call
+# so the two never collapse into the same kill line.
 engine:
   id: claude
   model: claude-opus-5
