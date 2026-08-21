@@ -689,6 +689,31 @@ describe("leftover scaffolding", () => {
     });
 });
 
+describe("the repo root", () => {
+    it("throws on a --repo that is not a path on disk", () => {
+        // `--repo Khan/webapp` parses fine and resolves as a relative path;
+        // without the guard every check reports missing instead of naming
+        // the typo.
+        expect(() => check({}, {repoRoot: "Khan/webapp"})).toThrow(
+            "--repo path does not exist: Khan/webapp",
+        );
+    });
+
+    it("accepts a root that exists and prefixes every path with it", () => {
+        const inputs = Object.fromEntries(
+            Object.entries(validInstall()).map(([path, content]) => [
+                `../consumer/${path}`,
+                content,
+            ]),
+        );
+        const report = checkConsumerConfig(fakeFs(inputs), {
+            repoRoot: "../consumer",
+            checkerVersion: "1.11.0",
+        });
+        expect(codes(report, "error")).toEqual([]);
+    });
+});
+
 describe("parseArgs", () => {
     it("reads the flags the CLI documents", () => {
         expect(
