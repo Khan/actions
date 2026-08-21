@@ -251,6 +251,42 @@ const refuse = (reason: string): CacheRecordResult => ({
 });
 
 /**
+ * Shared compensation for a run whose only post was a standalone PR comment
+ * (the hold disclosure, or the dispatcher-death notice): `hide-older-comments`
+ * makes that comment collapse the standing risks/patterns guidance comment,
+ * and the next approving run would read the unchanged `risksPatternsKey` as
+ * "guidance already posted" and never restore it. Dropping the key makes
+ * that run repost the guidance; everything else in the prior record carries
+ * verbatim (fingerprints untouched, so the next run reviews in full).
+ */
+const dropRisksPatternsKey = (
+    fs: CacheRecordFs,
+    label: string,
+): CacheRecordResult => {
+    const pr = readJson(fs, `${REVIEW_DIR}/pr-context.json`) as
+        | {number?: unknown}
+        | undefined;
+    if (typeof pr?.number !== "number") {
+        return skip(`${label}: no pr-context, nothing to update`);
+    }
+    const recordPath = `${CACHE_MEMORY_DIR}/pr-${pr.number}.json`;
+    const prior = readJson(fs, recordPath);
+    if (!isRecord(prior) || !("risksPatternsKey" in prior)) {
+        return skip(
+            `${label}: no prior record or no risksPatternsKey to drop; the prior record stands`,
+        );
+    }
+    const {risksPatternsKey: _, ...kept} = prior;
+    fs.mkdirSync(CACHE_MEMORY_DIR, {recursive: true});
+    fs.writeFileSync(recordPath, JSON.stringify(kept, null, 2));
+    return {
+        written: true,
+        reason: `${label}: dropped risksPatternsKey from ${recordPath} (the ${label} comment collapsed the standing guidance comment); fingerprints untouched`,
+        record: kept,
+    };
+};
+
+/**
  * Write the Step 9 cache record from staged truth. `nowIso` is injected so
  * the builder stays a pure function of its inputs in tests; `queuePath` is
  * the in-run safe-output JSONL (`GH_AW_SAFE_OUTPUTS`).
@@ -264,6 +300,29 @@ export const runCacheRecordCli = (
         | {event?: unknown; comments?: unknown}
         | undefined;
     if (plan === undefined) {
+        // Almost every no-plan shape is a run that died before posting
+        // anything, and the benign skip below is right for those. ONE
+        // no-plan shape posts: the dispatcher-death notice (review.md Step
+        // 3, `dispatch-result.json` missing after the dispatcher call) is a
+        // standalone add-comment queued with no plan staged at all, and it
+        // collapses the standing guidance comment exactly like a hold
+        // comment does, so the same compensation must run. Corroboration is
+        // the queued add_comment itself; with no plan asserting a comment
+        // SHOULD have queued, an unreadable queue is indistinguishable from
+        // an ordinary early death, so that stays the benign skip rather
+        // than the hold branch's loud refusal.
+        if (!fs.existsSync(BLOCKED_SENTINEL_PATH)) {
+            const {items: deathItems, readable: deathReadable} = readQueue(
+                fs,
+                queuePath,
+            );
+            if (
+                deathReadable &&
+                deathItems.some((item) => item["type"] === "add_comment")
+            ) {
+                return dropRisksPatternsKey(fs, "dispatcher-death");
+            }
+        }
         return skip(
             "no submission plan staged (the run ended before the plan): the cache write stays with the orchestrator",
         );
@@ -303,27 +362,7 @@ export const runCacheRecordCli = (
                 "hold plan with no queued hold comment: the prior record stands untouched",
             );
         }
-        const holdPr = readJson(fs, `${REVIEW_DIR}/pr-context.json`) as
-            | {number?: unknown}
-            | undefined;
-        if (typeof holdPr?.number !== "number") {
-            return skip("hold plan and no pr-context: nothing to update");
-        }
-        const holdRecordPath = `${CACHE_MEMORY_DIR}/pr-${holdPr.number}.json`;
-        const holdPrior = readJson(fs, holdRecordPath);
-        if (!isRecord(holdPrior) || !("risksPatternsKey" in holdPrior)) {
-            return skip(
-                "hold plan: no prior record or no risksPatternsKey to drop; the prior record stands",
-            );
-        }
-        const {risksPatternsKey: _, ...holdKept} = holdPrior;
-        fs.mkdirSync(CACHE_MEMORY_DIR, {recursive: true});
-        fs.writeFileSync(holdRecordPath, JSON.stringify(holdKept, null, 2));
-        return {
-            written: true,
-            reason: `hold: dropped risksPatternsKey from ${holdRecordPath} (the hold comment collapsed the standing guidance comment); fingerprints untouched`,
-            record: holdKept,
-        };
+        return dropRisksPatternsKey(fs, "hold");
     }
     if (plan.event !== "APPROVE" && plan.event !== "REQUEST_CHANGES") {
         return refuse("the staged plan carries no submittable event");

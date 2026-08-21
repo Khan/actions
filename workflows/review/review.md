@@ -843,10 +843,12 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    there is no plan and you compose nothing by hand: post exactly one
    standalone PR comment with the `add-comment` safe output stating that
    the automated review died mid-dispatch and posted no review, linking
-   this run (`$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID`),
+   this run (`${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`),
    and noting that the next push triggers a fresh full review; then report
    the run incomplete, skip Steps 4-8, and continue at Step 9 (the cache
-   CLI tolerates the missing result and leaves the prior fingerprints
+   CLI recognizes the no-plan death shape from the queued comment: it
+   drops `risksPatternsKey` so the next run reposts the guidance comment
+   your death notice collapsed, and leaves the prior fingerprints
    standing). Exists because run 32418662895 (Khan/actions#362) was killed
    at the Bash ceiling during claim validation and posted nothing: the run
    stayed green, and the incomplete report's fallback (filing an issue) is

@@ -491,3 +491,84 @@ describe("the hold record (HOLD_FOR_HUMAN plans)", () => {
         expect(fs.files[`${CACHE}/pr-41.json`]).toBe(prior);
     });
 });
+
+describe("the dispatcher-death record (no plan, death comment queued)", () => {
+    // The dispatcher-death notice (review.md Step 3, run 32418662895): the
+    // dispatcher's Bash call died without writing dispatch-result.json, so
+    // no plan was staged and the orchestrator posted one standalone
+    // add-comment. That comment collapses the standing guidance comment
+    // exactly like a hold comment does, so the same risksPatternsKey drop
+    // must run even though the plan is missing.
+    const deathStaged = (
+        over: Record<string, string> = {},
+    ): Record<string, string> => {
+        const files = staged({
+            [QUEUE]: JSON.stringify({
+                items: [
+                    {
+                        type: "add_comment",
+                        body: "The automated review died mid-dispatch and posted no review.",
+                    },
+                ],
+            }),
+            ...over,
+        });
+        delete files[`${REVIEW}/submission-plan.json`];
+        // The death shape's defining fact: the dispatcher never wrote it.
+        delete files[`${REVIEW}/dispatch-result.json`];
+        return files;
+    };
+
+    const priorRecord = JSON.stringify({
+        timestamp: "2026-07-01T00:00:00.000Z",
+        verdict: "APPROVE",
+        diffFingerprint: {"a.ts": "prior-sha"},
+        reviewedHunks: {"a.ts": ["prior-hunk"]},
+        risksPatternsKey: "risk:a.ts:t1",
+        requestedTeams: ["t1"],
+    });
+
+    it("drops risksPatternsKey when the death comment queued with no plan", () => {
+        const fs = makeFakeFs(
+            deathStaged({[`${CACHE}/pr-41.json`]: priorRecord}),
+        );
+        const result = runCacheRecordCli(fs, NOW);
+        expect(result.written).toBe(true);
+        const record = JSON.parse(fs.files[`${CACHE}/pr-41.json`] as string);
+        // The key is gone (the death comment collapsed the standing guidance
+        // comment, so the next approving run must repost it) …
+        expect(record.risksPatternsKey).toBeUndefined();
+        // … and everything else carries verbatim: this run reviewed nothing,
+        // so fingerprints, verdict, and supplements stay the prior run's.
+        expect(record.verdict).toBe("APPROVE");
+        expect(record.diffFingerprint).toEqual({"a.ts": "prior-sha"});
+        expect(record.reviewedHunks).toEqual({"a.ts": ["prior-hunk"]});
+        expect(record.requestedTeams).toEqual(["t1"]);
+    });
+
+    it("stays a benign skip on an unreadable queue (indistinguishable from an ordinary early death)", () => {
+        // Unlike the hold branch, no plan asserts a comment should have
+        // queued, so an unreadable queue must NOT refuse loudly: it is the
+        // normal shape of a run that died before posting anything.
+        const files = deathStaged({[`${CACHE}/pr-41.json`]: priorRecord});
+        delete files[QUEUE];
+        const fs = makeFakeFs(files);
+        const result = runCacheRecordCli(fs, NOW);
+        expect(result.written).toBe(false);
+        expect(result.warn).toBeUndefined();
+        expect(result.reason).toMatch(/no submission plan staged/);
+        expect(fs.files[`${CACHE}/pr-41.json`]).toBe(priorRecord);
+    });
+
+    it("leaves the prior record untouched when the gate blocked the run", () => {
+        const fs = makeFakeFs(
+            deathStaged({
+                [`${CACHE}/pr-41.json`]: priorRecord,
+                [SENTINEL]: "",
+            }),
+        );
+        const result = runCacheRecordCli(fs, NOW);
+        expect(result.written).toBe(false);
+        expect(fs.files[`${CACHE}/pr-41.json`]).toBe(priorRecord);
+    });
+});
