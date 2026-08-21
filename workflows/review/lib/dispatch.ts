@@ -199,7 +199,8 @@ export type AgentRunner = (request: AgentRequest) => Promise<AgentResult>;
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const OUT_DIR = `${REVIEW_DIR}/out`;
 
-const DEFAULT_MAX_TURNS = 30;
+// 100, not 30: #295 held twice on error_max_turns (a loop guard only).
+const DEFAULT_MAX_TURNS = 100;
 /**
  * Per-sub-agent wall-clock cap. 15 minutes, not 5: trial run 29901690493
  * killed both default finders (correctness-reviewer, skill-auditor) at
