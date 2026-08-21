@@ -259,6 +259,68 @@ describe("label-contract enforcement (run 29897276810)", () => {
         expect(joinProse("Only a subject", "")).toBe("Only a subject");
         expect(joinProse("", "Only a discussion.")).toBe("Only a discussion.");
     });
+
+    it("drops a subject that restates the discussion's first sentence (PRA-46 W4-W5 repetition mode)", () => {
+        // Verbatim restatement: the discussion opens with the subject.
+        expect(
+            joinProse(
+                "The merger drops flagged turns.",
+                "The merger drops flagged turns whenever moderation flags a turn mid-stream.",
+            ),
+        ).toBe(
+            "The merger drops flagged turns whenever moderation flags a turn mid-stream.",
+        );
+        // Inflected restatement: "dropped" vs "drops" still folds together.
+        expect(
+            joinProse(
+                "Flagged turns are dropped by the merger.",
+                "The merger drops flagged turns because the filter runs before the merge, so a flagged turn never reaches the sink.",
+            ),
+        ).toBe(
+            "The merger drops flagged turns because the filter runs before the merge, so a flagged turn never reaches the sink.",
+        );
+        // Markdown wrapping does not defeat the comparison.
+        expect(
+            joinProse(
+                "`counts.go` recomputes the total.",
+                "counts.go recomputes the total on every call.",
+            ),
+        ).toBe("counts.go recomputes the total on every call.");
+    });
+
+    it("keeps a subject that carries information the opening sentence lacks", () => {
+        // Restating a LATER sentence keeps the subject: dropping it would
+        // make buildClaims recover the discussion's opening SETUP sentence
+        // as claim.subject, which renderPrLevelFold and the HOLD/over-cap
+        // collapsed lists print as the finding's one-line header.
+        expect(
+            joinProse(
+                "A delete leaves the stale entry behind.",
+                "The cache is written in save(). A delete leaves the stale entry behind.",
+            ),
+        ).toBe(
+            "A delete leaves the stale entry behind. The cache is written in save(). A delete leaves the stale entry behind.",
+        );
+        // "never invalidated" is not in the first sentence: kept whole.
+        expect(
+            joinProse(
+                "The cache is never invalidated.",
+                "The cache is written in save(). A delete leaves the stale entry behind.",
+            ),
+        ).toBe(
+            "The cache is never invalidated. The cache is written in save(). A delete leaves the stale entry behind.",
+        );
+        // A subject summarizing ACROSS sentences (no single sentence holds
+        // all its tokens) is a genuine lede and survives.
+        expect(
+            joinProse(
+                "save() caches, delete leaves it stale.",
+                "The cache is written in save(). A delete leaves the stale entry behind.",
+            ),
+        ).toBe(
+            "save() caches, delete leaves it stale. The cache is written in save(). A delete leaves the stale entry behind.",
+        );
+    });
 });
 
 describe("label-shape lens assignment", () => {
@@ -434,6 +496,39 @@ describe("verification mechanics", () => {
             failure_scenario: "nil deref on empty input",
             confidence: 0.7,
         });
+    });
+
+    it("recovers the discussion's opening claim and a discussion-salvaged failure_scenario when the restatement drop fires (PRA-46)", () => {
+        const {candidates} = parseFinderOutput(
+            "correctness-reviewer",
+            JSON.stringify({
+                findings: [
+                    {
+                        path: "a.ts",
+                        line: 2,
+                        label: "issue (blocking)",
+                        // Inflected restatement of the discussion's first
+                        // sentence: joinProse drops it.
+                        subject: "Flagged turns are dropped by the merger.",
+                        discussion:
+                            "The merger drops flagged turns. The filter runs before the merge.",
+                    },
+                ],
+            }),
+            new Set(),
+        );
+        const [claimed] = buildClaims(candidates);
+        // The HOLD/over-cap collapsed lists and renderPrLevelFold print
+        // claim.subject as the finding's one-line header: after the drop it
+        // is the discussion's own opening claim, never empty.
+        expect(claimed?.subject).toBe("The merger drops flagged turns.");
+        // The salvage skips the dropped subject: dedup's comparedText reads
+        // the discussion only when failure_scenario prefix-matches
+        // claim.subject, and the inflected subject would fail that test and
+        // compare the claim on one sentence plus its own restatement.
+        expect(claimed?.failure_scenario).toBe(
+            "The merger drops flagged turns. The filter runs before the merge.",
+        );
     });
 });
 

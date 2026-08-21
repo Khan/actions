@@ -842,6 +842,24 @@ bump lands in the same Version Packages commit that gets tagged.
 literals do not match the `review` package version (releases v1.3.0 through
 v1.4.0 shipped still pointing at v1.2.2, before the sync existed).
 
+### Output-shape changes belong in the changeset
+
+A change to the render path (`lib/submission.ts`, `lib/render-comment.ts`,
+`lib/dispatch-contracts.ts` prose composition) that alters what authors see
+must say so in its changeset, including the expected direction of body-size
+change. The v1.8.0 task-mode removal shipped a +60% median-body step (557 to
+889 chars across webapp's v1.7.0 to v1.11.0 bump, sketch share 15.6% to 48.6%)
+with changesets framed entirely as conformance wins; the regression went
+unattributed for four versions until a by-version audit reconstructed it
+(PRA-46). Each staged `submission-plan.json` now carries `bodyStats`
+(per-comment median/p90/max/total chars and the review body's length), and a
+copy of the plan is staged under `out/` so it rides the run's uploaded
+artifact (Step 9's `upload-artifact` matches the staging-relative `out/**`;
+the absolute `/tmp/gh-aw/review/out/**` pattern alongside it matches nothing
+under gh-aw v0.81.6 and is kept only as future-proofing); compare a
+release's first live artifacts against the prior version's when a render
+change ships.
+
 ### Version attribution
 
 Semver is the behavior contract: a release that changes the reviewer's behavior bumps
