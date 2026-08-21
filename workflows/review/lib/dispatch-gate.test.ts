@@ -145,6 +145,34 @@ describe("evaluateDispatchConformance", () => {
         expect(result.commentCount).toBe(0);
     });
 
+    it("passes the dispatcher-death shape: a lone add_comment, no submission plan, empty out/", () => {
+        // Run 32418662895: the dispatcher's Bash call was killed at the
+        // engine ceiling before writing dispatch-result.json, so review.md
+        // (Step 3) posts one standalone add-comment death notice and queues
+        // nothing else. The rereview plan and routing WERE staged before the
+        // dispatcher died. add_comment is NOT in KEEP_ITEM_TYPES, so any
+        // violation here would strip the death notice and the failure would
+        // go invisible again; this pins the shape green.
+        const result = evaluate({
+            items: [
+                {
+                    type: "add_comment",
+                    body: "The automated review died mid-dispatch and posted no review.",
+                },
+                uploadItem,
+            ],
+            plan: {depth: "full"},
+            routing: {
+                enabledReviewers: ["correctness-reviewer", "security-auth"],
+                lensesToSpawn: [],
+            },
+            outFiles: {},
+        });
+        expect(result.violations).toEqual([]);
+        expect(result.conformant).toBe(true);
+        expect(result.verdictEvent).toBeNull();
+    });
+
     describe("per depth mode", () => {
         it("requires the correctness pass at full, scoped, and flip-gated", () => {
             for (const depth of ["full", "scoped", "flip-gated"]) {

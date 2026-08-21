@@ -835,9 +835,25 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    `reconciliation.skipLines` is already reflected in the plan. Steps 4-6
    below are the plan CLI's; continue at Step 7.
    Do not dispatch any sub-agent yourself in this mode, and do not re-run
-   the dispatcher; if its call failed, treat the run as over budget and land
-   the review from whatever `out/` evidence exists (the gate decides whether
-   a verdict may post). Step 9's cache-memory record is also code-owned
+   the dispatcher; if its call failed but `dispatch-result.json` exists,
+   treat the run as over budget and land the review from whatever `out/`
+   evidence exists (the gate decides whether a verdict may post). If
+   `dispatch-result.json` is MISSING after the dispatcher call (the Bash
+   call was killed at the engine ceiling or crashed before writing it),
+   there is no plan and you compose nothing by hand: post exactly one
+   standalone PR comment with the `add-comment` safe output stating that
+   the automated review died mid-dispatch and posted no review, linking
+   this run (`${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`),
+   and noting that the next push triggers a fresh full review; then report
+   the run incomplete, skip Steps 4-8, and continue at Step 9 (the cache
+   CLI recognizes the no-plan death shape from the queued comment: it
+   drops `risksPatternsKey` so the next run reposts the guidance comment
+   your death notice collapsed, and leaves the prior fingerprints
+   standing). Exists because run 32418662895 (Khan/actions#362) was killed
+   at the Bash ceiling during claim validation and posted nothing: the run
+   stayed green, and the incomplete report's fallback (filing an issue) is
+   unavailable on a repo with issues disabled, so the death was invisible
+   on the PR. Step 9's cache-memory record is also code-owned
    (`lib/cache-record.ts`, invoked there); never write or edit
    `/tmp/gh-aw/cache-memory/pr-*.json` yourself.
 
