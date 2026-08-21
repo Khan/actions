@@ -181,10 +181,12 @@ This copies `review.md` into the consuming repo's `.github/workflows/`, records 
 plus the consumer config files below. Version bumps arrive as PRs from the
 maintainers: a manual `git merge-file` 3-way merge that preserves your local
 edits (the playbook is `.claude/skills/review-consumer-bump/SKILL.md` in this
-repo). Do not run `gh aw update` yourself: it treats `review-v*` tags as
+repo, landing via [Khan/actions#357](https://github.com/Khan/actions/pull/357)).
+Do not run `gh aw update` yourself: it treats `review-v*` tags as
 branches and repins to main's head commit as a raw SHA, and its own merge
 once emptied an installed `review.md` to 0 bytes (both observed on gh-aw
-v0.85.4).
+v0.85.4; neither failure is filed upstream yet, so re-test both on a scratch
+install before trusting a newer gh-aw release with this).
 
 The tag is self-consistent: the `review.md` inside each `review-v<version>` tag
 pins its own `pre-agent-steps` checkout `ref:` to that same version (the release
