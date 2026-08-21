@@ -25,8 +25,9 @@
  *     is the identifying signature; it is code-owned and templated, so the match
  *     is exact, not heuristic prose-sniffing.
  *
- * Comments containing a thumbs-followup marker (the retired follow-ups, still
- * present on older PRs) are never candidates at either grain.
+ * Historical follow-up comments (the retired write path) fail both signatures
+ * (their bodies start with an HTML marker, not a label, and carry no summary
+ * marker), so they are never candidates at either grain.
  *
  * API-call bounding: the traversal reads only pull requests updated within
  * `lookbackDays` (default 14), newest first, capped at `maxPulls`; closed or
@@ -46,11 +47,7 @@ import type {
     Reaction,
     ThumbsSweepPort,
 } from "./thumbs-sweep.ts";
-import {
-    NEGATIVE_REACTIONS,
-    parseFollowupMarkers,
-    POSITIVE_REACTIONS,
-} from "./thumbs-sweep.ts";
+import {NEGATIVE_REACTIONS, POSITIVE_REACTIONS} from "./thumbs-sweep.ts";
 import {BLOCKING_LABELS, NON_BLOCKING_LABELS} from "./render-comment.ts";
 
 /**
@@ -110,10 +107,6 @@ export const isReviewerSummaryBody = (
     body.includes(SUMMARY_COMMENT_MARKER) ||
     extraMarkers.some((marker) => body.includes(marker));
 
-/** Whether a body is a thumbs-sweep follow-up (any grain). */
-export const isFollowupBody = (body: string): boolean =>
-    parseFollowupMarkers(body).length > 0;
-
 /** Traversal bounds and identity for one repo's sweep. */
 export type GithubThumbsSweepOptions = {
     owner: string;
@@ -162,8 +155,8 @@ export type SweepTraversalStats = {
     /**
      * Reviewer inline threads currently resolved — reported as its own
      * positive column, not folded into the reaction tallies (threads are also
-     * resolved just to clear noise, and a resolution can't answer a "why?"
-     * follow-up).
+     * resolved just to clear noise, so a resolution is weaker signal than an
+     * explicit reaction).
      */
     resolvedInlineThreads: number;
 };
@@ -505,12 +498,11 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
                     if (loginOf(comment) !== this.botLogin) {
                         continue;
                     }
+                    // Historical follow-ups (the retired write path) are
+                    // rejected here too: their bodies start with an HTML
+                    // marker, not a Conventional-Comment label, and carry no
+                    // summary marker.
                     const body = bodyOf(comment);
-                    // The retired follow-ups still exist on older PRs and are
-                    // never candidates.
-                    if (isFollowupBody(body)) {
-                        continue;
-                    }
                     const id = idOf(comment);
                     if (id === undefined || !isCandidateBody(body)) {
                         continue;
@@ -555,8 +547,9 @@ export class GithubThumbsSweepPort implements ThumbsSweepPort {
         }
 
         // Resolved inline threads, one GraphQL query per PR that has reviewer
-        // inline comments. Counted here (not fed to the sweep core): resolution
-        // is a reported positive signal, never a follow-up trigger.
+        // inline comments. Counted here, not fed to the sweep core: resolution
+        // is reported alongside the reaction tallies rather than folded into
+        // them.
         const inlineByPull = new Map<number, Set<number>>();
         for (const candidate of candidates) {
             if (candidate.grain !== "inline") {

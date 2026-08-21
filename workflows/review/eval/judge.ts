@@ -265,16 +265,12 @@ export const selectAuditSample = (
 /* -------------------------------------------------------------------------- */
 
 /**
- * The fixed downvote-reason vocabulary the thumbs sweep offers on a 👎.
- *
- * Declared locally rather than imported from `../lib/thumbs-sweep` on purpose:
- * the judge consumes thumbs labels as *data* (see {@link ThumbsLabel}) and never
- * needs the sweep module at build time, so importing its type would create a
- * build dependency on the thumbs sweep for a field this module only carries
- * through (calibration keys off `direction`, not `reason`). This union is
- * structurally identical to the thumbs sweep's `DownvoteReason`, so a value produced there
- * is assignable here and vice versa; keep the two in sync if the sweep's
- * vocabulary changes.
+ * The downvote-reason vocabulary the thumbs sweep USED to elicit via its
+ * "why?" follow-up, retired with that surface (the sweep no longer defines or
+ * produces it). Retained only to type historical thumbs labels: calibration
+ * keys off `direction`, so `reason` is carry-through data and stays
+ * permanently unpopulated for labels mined after the retirement. There is no
+ * longer a sweep-side counterpart to keep in sync with.
  */
 export type DownvoteReason =
     | "incorrect"

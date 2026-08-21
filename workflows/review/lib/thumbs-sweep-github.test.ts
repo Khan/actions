@@ -7,7 +7,7 @@ import {
     isReviewerSummaryBody,
     type OctokitRequestFn,
 } from "./thumbs-sweep-github.ts";
-import {buildFollowupMarker, sweepThumbs} from "./thumbs-sweep.ts";
+import {sweepThumbs} from "./thumbs-sweep.ts";
 
 /**
  * Tests for the octokit-backed port. A fake `request` function dispatches on
@@ -53,11 +53,12 @@ const makeFakeGithub = () => {
             reactions: {total_count: 3},
         },
         {
-            // The sweep's own earlier follow-up reply: idempotency source,
-            // never a candidate.
+            // A historical follow-up from the retired write path: its body
+            // starts with the old HTML marker, not a Conventional-Comment
+            // label, so the candidate signature rejects it.
             id: 102,
             user: {login: BOT},
-            body: `${buildFollowupMarker("inline", 999)}\nThanks!`,
+            body: "<!-- review-thumbs-followup grain=inline comment-id=999 -->\nThanks!",
             reactions: {total_count: 0},
         },
         {

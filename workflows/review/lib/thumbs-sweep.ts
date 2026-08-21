@@ -6,15 +6,9 @@
  * on a poll (e.g. a scheduled workflow), collects those reactions at two
  * grains, and reports them. It is READ-ONLY: it posts nothing.
  *
- * It used to post a "why?" follow-up on every newly-downvoted comment,
- * offering a closed reason vocabulary. That surface was retired after the
- * 2026-08-20 version audit: 31 follow-ups drew 2 reason replies ever, 26 of
- * them landed as bursts on a single PR, and GitHub wraps each posted reply in
- * an implicit empty COMMENTED review event that pollutes run counts and the
- * PR timeline. A bare 👎 has adjudicated the finding directly since v1.17.0
- * (the staging reads thread-opener reactions), so the ask carried no
- * remaining purpose. The follow-up marker parser below is retained so the
- * traversal keeps recognising the historical follow-ups still present on PRs.
+ * The sweep once posted a "why?" follow-up per newly-downvoted comment; that
+ * write path was retired (see the changelog for the audit numbers), so
+ * everything here is tallying.
  *
  * Division of labour (mirrors the finding-schema / verdict split):
  *   - CODE (this module) owns the two-grain tally and the config guard. There
@@ -45,7 +39,9 @@ export type FeedbackGrain = typeof FEEDBACK_GRAINS[number];
  * These match gh-aw's outcome-collector exactly, so the sweep and the outcome
  * collector agree on what counts as a signal: 👍/❤️/🎉/🚀 are positive,
  * 👎/😕 are negative. (GitHub models 👍 as `"+1"` and 👎 as `"-1"` on the
- * reactions API.)
+ * reactions API.) These sets feed only the traversal's aggregate
+ * positive/negative tallies; the per-comment `downvotes` / `confused` counts
+ * below are each keyed to one exact reaction, never to these sets.
  */
 export const POSITIVE_REACTIONS = ["+1", "heart", "hooray", "rocket"] as const;
 export const NEGATIVE_REACTIONS = ["-1", "confused"] as const;
@@ -103,6 +99,12 @@ export type SweepAction = {
     commentId: number;
     /** Number of 👎 currently on the comment (0 when none; the bot's own 👎 never counts). */
     downvotes: number;
+    /**
+     * Number of 😕 currently on the comment. Reported separately from
+     * `downvotes` because 👎 is the only adjudicating reaction (README
+     * "Adjudication"): a 😕 is negative signal but must never read as a 👎.
+     */
+    confused: number;
 };
 
 /** Aggregate outcome of one sweep. */
@@ -110,62 +112,21 @@ export type SweepResult = {
     actions: SweepAction[];
     /** Count of comments carrying at least one human 👎. */
     downvotedComments: number;
+    /** Count of comments carrying at least one human 😕 (and it counts here only). */
+    confusedComments: number;
 };
 
 /**
- * Hidden HTML marker the retired follow-ups were stamped with. Parsing is
- * retained so the traversal keeps recognising historical follow-ups (they are
- * bot-authored comments on PRs inside the lookback window and must never be
- * classified as reviewer findings). It encodes the grain + comment id the
- * follow-up answered. Same mechanism as #194's HTML comment markers —
- * invisible in the rendered thread, machine readable on a poll.
+ * Count a comment's human reactions matching `content` exactly. The bot's own
+ * reactions (e.g. post-time seeded nudges) are never feedback.
  */
-const MARKER_PREFIX = "review-thumbs-followup";
-
-const MARKER_RE = new RegExp(
-    `<!--\\s*${MARKER_PREFIX}\\s+grain=(${FEEDBACK_GRAINS.join(
-        "|",
-    )})\\s+comment-id=(\\d+)\\s*-->`,
-    "g",
-);
-
-/** Build the hidden marker for a (grain, commentId) pair (test fixtures). */
-export const buildFollowupMarker = (
-    grain: FeedbackGrain,
-    commentId: number,
-): string => `<!-- ${MARKER_PREFIX} grain=${grain} comment-id=${commentId} -->`;
-
-/** A (grain, commentId) reference recovered from a follow-up marker. */
-export type FollowupRef = {grain: FeedbackGrain; commentId: number};
-
-/**
- * Extract every follow-up marker from a comment body. A body normally carries
- * one, but parsing all of them is robust to any accidental concatenation.
- */
-export const parseFollowupMarkers = (body: string): FollowupRef[] => {
-    const refs: FollowupRef[] = [];
-    // `matchAll` needs a fresh lastIndex; construct a per-call regex to stay
-    // pure (a shared /g regex would carry lastIndex between calls).
-    const re = new RegExp(MARKER_RE.source, "g");
-    for (const match of body.matchAll(re)) {
-        refs.push({
-            grain: match[1] as FeedbackGrain,
-            commentId: Number(match[2]),
-        });
-    }
-    return refs;
-};
-
-/**
- * Count the negative reactions (👎/😕, per {@link NEGATIVE_REACTIONS}) on a
- * comment. The bot's own reactions (e.g. post-time seeded nudges) are never
- * feedback.
- */
-const countDownvotes = (comment: BotComment, botLogin: string): number =>
+const countReaction = (
+    comment: BotComment,
+    botLogin: string,
+    content: string,
+): number =>
     comment.reactions.filter(
-        (r) =>
-            r.user !== botLogin &&
-            (NEGATIVE_REACTIONS as readonly string[]).includes(r.content),
+        (r) => r.user !== botLogin && r.content === content,
     ).length;
 
 /**
@@ -205,9 +166,10 @@ export const validateSweepConfig = (input: unknown): ConfigValidation => {
 
 /**
  * Run one thumbs sweep: for each grain, for each bot comment, count its human
- * 👎 reactions and record the tally. The result is fully determined by the
- * port's responses, so the whole thing is unit-testable with an in-memory
- * fake, and nothing is ever written to GitHub.
+ * 👎 and 😕 reactions and record the tallies (separately: only 👎 adjudicates).
+ * The result is fully determined by the port's responses, so the whole thing
+ * is unit-testable with an in-memory fake, and nothing is ever written to
+ * GitHub.
  */
 export const sweepThumbs = async (
     port: ThumbsSweepPort,
@@ -230,7 +192,8 @@ export const sweepThumbs = async (
             actions.push({
                 grain,
                 commentId: comment.id,
-                downvotes: countDownvotes(comment, config.botLogin),
+                downvotes: countReaction(comment, config.botLogin, "-1"),
+                confused: countReaction(comment, config.botLogin, "confused"),
             });
         }
     }
@@ -238,5 +201,6 @@ export const sweepThumbs = async (
     return {
         actions,
         downvotedComments: actions.filter((a) => a.downvotes > 0).length,
+        confusedComments: actions.filter((a) => a.confused > 0).length,
     };
 };

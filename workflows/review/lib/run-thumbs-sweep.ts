@@ -64,7 +64,11 @@ export const renderSweepSummary = (
     result: SweepResult,
     stats: SweepTraversalStats,
 ): string => {
-    const downvoted = result.actions.filter((a) => a.downvotes > 0);
+    // 👎 and 😕 are reported separately: 👎 is the only adjudicating reaction
+    // (README "Adjudication"), so a 😕 must never be presented as a 👎.
+    const flagged = result.actions.filter(
+        (a) => a.downvotes > 0 || a.confused > 0,
+    );
 
     const lines = [
         "## Thumbs feedback sweep",
@@ -72,15 +76,19 @@ export const renderSweepSummary = (
         `- Reviewer comments swept: **${result.actions.length}** across ${stats.pullsScanned} recently-active PRs`,
         `- Live reactions observed (bot's own excluded; 👍/❤️/🎉/🚀 vs 👎/😕): **${stats.reactions.positive} positive / ${stats.reactions.negative} negative**`,
         `- Reviewer inline threads resolved: **${stats.resolvedInlineThreads}**`,
-        `- Comments currently downvoted: **${result.downvotedComments}**`,
+        `- Comments currently downvoted: **${result.downvotedComments}** (👎), unclear: **${result.confusedComments}** (😕)`,
         `- GitHub API requests used: ${stats.apiRequests}`,
     ];
 
-    if (downvoted.length > 0) {
-        lines.push("", "| Grain | Comment | 👎 |", "| --- | --- | --- |");
-        for (const action of downvoted) {
+    if (flagged.length > 0) {
+        lines.push(
+            "",
+            "| Grain | Comment | 👎 | 😕 |",
+            "| --- | --- | --- | --- |",
+        );
+        for (const action of flagged) {
             lines.push(
-                `| ${action.grain} | ${action.commentId} | ${action.downvotes} |`,
+                `| ${action.grain} | ${action.commentId} | ${action.downvotes} | ${action.confused} |`,
             );
         }
     }

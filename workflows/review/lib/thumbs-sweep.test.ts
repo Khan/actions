@@ -4,8 +4,6 @@ import {
     FEEDBACK_GRAINS,
     POSITIVE_REACTIONS,
     NEGATIVE_REACTIONS,
-    buildFollowupMarker,
-    parseFollowupMarkers,
     validateSweepConfig,
     sweepThumbs,
     type BotComment,
@@ -151,34 +149,6 @@ describe("validateSweepConfig", () => {
     });
 });
 
-describe("historical follow-up markers", () => {
-    // The follow-up surface is retired, but its markers exist on older PRs and
-    // the traversal still uses the parser to exclude them from candidates.
-    it("builds a hidden HTML marker encoding grain + comment id", () => {
-        const marker = buildFollowupMarker("inline", 123);
-        expect(marker).toBe(
-            "<!-- review-thumbs-followup grain=inline comment-id=123 -->",
-        );
-    });
-
-    it("parses every marker in a body and ignores prose without one", () => {
-        expect(parseFollowupMarkers("just a normal comment")).toEqual([]);
-        const concatenated =
-            buildFollowupMarker("inline", 1) +
-            "\nsome text\n" +
-            buildFollowupMarker("summary", 2);
-        expect(parseFollowupMarkers(concatenated)).toEqual([
-            {grain: "inline", commentId: 1},
-            {grain: "summary", commentId: 2},
-        ]);
-    });
-
-    it("parseFollowupMarkers is pure across repeated calls (no shared lastIndex)", () => {
-        const body = buildFollowupMarker("inline", 55);
-        expect(parseFollowupMarkers(body)).toEqual(parseFollowupMarkers(body));
-    });
-});
-
 describe("👎 tally", () => {
     it("counts multiple 👎 on one comment", async () => {
         const port = new FakePort({
@@ -221,14 +191,16 @@ describe("👎 tally", () => {
         expect(result.actions[0]?.downvotes).toBe(0);
     });
 
-    it("treats confused as a negative signal (outcome-collector set)", async () => {
+    it("counts 😕 separately: never as a 👎 (👎 is the only adjudicating reaction)", async () => {
         const port = new FakePort({
             inline: [makeComment("inline", 31, [{content: "confused"}])],
             summary: [],
         });
         const result = await sweepThumbs(port, VALID_CONFIG);
-        expect(result.actions[0]?.downvotes).toBe(1);
-        expect(result.downvotedComments).toBe(1);
+        expect(result.actions[0]?.downvotes).toBe(0);
+        expect(result.actions[0]?.confused).toBe(1);
+        expect(result.downvotedComments).toBe(0);
+        expect(result.confusedComments).toBe(1);
     });
 
     it("counts each downvoted comment once in downvotedComments", async () => {

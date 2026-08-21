@@ -150,8 +150,9 @@ you can pick the one that says what you mean:
 - **👎 the finding's comment.** Same adjudication as resolving, through the
   reaction channel: a 👎 on a thread's OPENING comment puts its defect in the
   adjudicated corpus whether or not you also resolve. The 👎 alone is what
-  suppresses; if you want to say why, reply in the thread (replies reach the
-  maintainer via the weekly feedback report). Reactions on replies are
+  suppresses; if you want to say why, reply in the thread (replies surface
+  when a maintainer runs the `review-feedback-audit` skill; no automated job
+  reads them). Reactions on replies are
   conversation, not adjudication. 👎 is the ONLY adjudicating reaction: a 😕
   counts as negative signal in the sweep's tallies but does not suppress (😕
   reads as "unclear", not "wrong", and ambiguity is worth a conversation, not
@@ -719,13 +720,11 @@ out this repo at the pinned `review-v*` tag and run lib scripts with
   reactions on the reviewer's comments at both grains (inline review comments,
   identified by the code-owned Conventional-Comment label prefixes; the
   risks/patterns summary comment, identified by its hidden marker) and reports
-  them. Read-only: it posts nothing. (It used to post a "why?" follow-up per
-  newly-downvoted comment; that surface was retired after the 2026-08-20
-  audit measured 2 reason replies across 31 follow-ups, with each follow-up
-  also registering as an implicit empty review event. A bare 👎 adjudicates
-  directly since v1.17.0, and thread replies reach the maintainer via the
-  weekly feedback report.) Reactions are tallied with the same sets gh-aw's
-  outcome evaluation uses (👍/❤️/🎉/🚀 positive, 👎/😕 negative), and resolved
+  them. Read-only: it posts nothing (the retired "why?" follow-up's history
+  lives in the changelog). Aggregate reactions are tallied with the same sets
+  gh-aw's outcome evaluation uses (👍/❤️/🎉/🚀 positive, 👎/😕 negative); the
+  per-comment tallies report 👎 and 😕 separately (👎 is the only adjudicating
+  reaction), and resolved
   inline threads are counted as their own positive column: threads also get
   resolved just to clear noise, so resolution is reported alongside the
   reaction tallies rather than folded into them. Bounded to PRs updated in the
