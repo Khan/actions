@@ -165,7 +165,7 @@ network:
 # Both secrets are hard-required while this block is present: a missing one compiles to
 # an empty value that the MCP gateway's OTLP config schema rejects, so the agent job
 # dies at startup instead of skipping trace export. A repo without them must comment
-# this block out in its installed review.md (a local edit `gh aw update` preserves)
+# this block out in its installed review.md (a local edit the 3-way merge update flow preserves)
 # and recompile.
 #
 # KHAN/ACTIONS LOCAL OVERRIDE: the `observability:` block is disabled here because this

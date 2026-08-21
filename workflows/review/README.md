@@ -178,13 +178,20 @@ gh aw add Khan/actions/workflows/review/review.md@review-v<major>.<minor>.<patch
 
 This copies `review.md` into the consuming repo's `.github/workflows/`, records a
 `source:` field pointing back here, and compiles `review.lock.yml`. Commit both,
-plus the consumer config files below. Pull future updates with `gh aw update`
-(a 3-way merge that preserves your local edits).
+plus the consumer config files below. Version bumps arrive as PRs from the
+maintainers: a manual `git merge-file` 3-way merge that preserves your local
+edits (the playbook is `.claude/skills/review-consumer-bump/SKILL.md` in this
+repo, landing via [Khan/actions#357](https://github.com/Khan/actions/pull/357)).
+Do not run `gh aw update` yourself: it treats `review-v*` tags as
+branches and repins to main's head commit as a raw SHA, and its own merge
+once emptied an installed `review.md` to 0 bytes (both observed on gh-aw
+v0.85.4; neither failure is filed upstream yet, so re-test both on a scratch
+install before trusting a newer gh-aw release with this).
 
 The tag is self-consistent: the `review.md` inside each `review-v<version>` tag
 pins its own `pre-agent-steps` checkout `ref:` to that same version (the release
-flow rewrites it; see [Versioning](#versioning)), so after `gh aw add` or
-`gh aw update` the imported file already fetches the matching lib code and needs
+flow rewrites it; see [Versioning](#versioning)), so after `gh aw add` or a
+version bump the imported file already fetches the matching lib code and needs
 no manual fix-up of the ref.
 
 ### Onboarding a whole repo
@@ -271,7 +278,7 @@ main workflow would override the import and discard your allowlist.
 
 Repo-specific frontmatter that imports can't merge (e.g. an `if:` condition to skip
 deploy/automation branches or forks) goes directly in your installed `review.md` as
-a local edit; `gh aw update` preserves it.
+a local edit; the bump merge preserves it.
 
 ### Per-lens payloads (`lenses/<lens>.md`)
 
@@ -789,7 +796,7 @@ Two known interactions:
   rejects it, and the agent job dies at startup instead of skipping trace
   export (observed on Khan/actions#241). A repo without these secrets must
   comment out the `observability:` block in its installed `review.md` as a
-  local edit (which `gh aw update` preserves) and recompile.
+  local edit (which the bump merge preserves) and recompile.
 
 Optional:
 
