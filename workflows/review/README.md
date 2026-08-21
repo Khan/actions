@@ -834,9 +834,11 @@ change. The v1.8.0 task-mode removal shipped a +60% median-body step (557 to
 with changesets framed entirely as conformance wins; the regression went
 unattributed for four versions until a by-version audit reconstructed it
 (PRA-46). Each staged `submission-plan.json` now carries `bodyStats`
-(per-comment median/p90/max/total chars and the review body's length), so
-compare a release's first live artifacts against the prior version's when a
-render change ships.
+(per-comment median/p90/max/total chars and the review body's length), and a
+copy of the plan is staged under `out/` so it rides the run's uploaded
+artifact (Step 9 uploads only `/tmp/gh-aw/review/out/**`); compare a
+release's first live artifacts against the prior version's when a render
+change ships.
 
 ### Version attribution
 

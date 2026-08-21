@@ -195,7 +195,15 @@ export const computeBodyStats = (
     };
 };
 
-/** Write the staged plan (`submission-plan.json`) and hand it back. */
+/**
+ * Write the staged plan (`submission-plan.json`) and hand it back. A second
+ * copy lands under `out/` because that is the only directory the run
+ * uploads (review.md Step 9's `upload-artifact` allows
+ * `/tmp/gh-aw/review/out/**` and nothing else): the copy is what makes
+ * `bodyStats` readable from a run's artifact without a runner. The
+ * `REVIEW_DIR` original stays the read path for the dispatch gate and the
+ * cache-record writer.
+ */
 const stagePlan = (
     fs: SubmissionFs,
     plan: Omit<SubmissionPlan, "bodyStats">,
@@ -204,10 +212,10 @@ const stagePlan = (
         ...plan,
         bodyStats: computeBodyStats(plan.comments, plan.body),
     };
-    fs.writeFileSync(
-        `${REVIEW_DIR}/submission-plan.json`,
-        JSON.stringify(staged, null, 2),
-    );
+    const json = JSON.stringify(staged, null, 2);
+    fs.writeFileSync(`${REVIEW_DIR}/submission-plan.json`, json);
+    fs.mkdirSync(`${REVIEW_DIR}/out`, {recursive: true});
+    fs.writeFileSync(`${REVIEW_DIR}/out/submission-plan.json`, json);
     return staged;
 };
 

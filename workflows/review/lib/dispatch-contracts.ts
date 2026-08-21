@@ -167,20 +167,28 @@ const proseTokens = (text: string): string[] =>
     ).map((token) => token.replace(/[./:-]+$/, ""));
 
 /**
- * Whether the subject merely restates one sentence of the discussion:
- * every folded subject token already appears in a single discussion
- * sentence, so prepending the subject adds repetition and no vocabulary.
- * This is the W4-W5 prose failure mode the 2026-08-20 version audit
- * measured (5 of 29 sampled bodies restated one fact two to four times, vs
- * 1 of 60 in W0-W3): producers routinely emit a `subject` that restates a
- * `discussion` claim, and the v1.8.0 task-mode removal deleted the
- * orchestrator rewrite pass that used to absorb the overlap (PRA-46).
- * Per-sentence containment is the conservative direction — a subject
- * summarizing ACROSS sentences (tokens no single sentence holds) is a
- * genuine lede and is kept whole, as is one carrying any token the
- * discussion lacks.
+ * Whether the subject merely restates the discussion's FIRST sentence:
+ * every folded subject token already appears there, so prepending the
+ * subject adds repetition and no vocabulary. This is the W4-W5 prose
+ * failure mode the 2026-08-20 version audit measured (5 of 29 sampled
+ * bodies restated one fact two to four times, vs 1 of 60 in W0-W3):
+ * producers routinely emit a `subject` that restates the `discussion`
+ * lede, and the v1.8.0 task-mode removal deleted the orchestrator rewrite
+ * pass that used to absorb the overlap (PRA-46).
+ *
+ * First-sentence-only is deliberate. When the drop fires, `buildClaims`'
+ * first-sentence split recovers the discussion's opening sentence as
+ * `claim.subject`, and that string is a visible header downstream (the
+ * HOLD_FOR_HUMAN and over-cap collapsed lists, `renderPrLevelFold`), so it
+ * must be the claim; matching a later sentence would leave setup prose
+ * there. A subject restating a later sentence, one summarizing across
+ * sentences, or one carrying any token the first sentence lacks is kept
+ * whole. The comparison is an unordered token bag, so a subject reusing
+ * the sentence's exact vocabulary to state a different relation would be
+ * dropped too; accepted, since the audited failure mode is restatement and
+ * the sentence carrying that vocabulary still posts.
  */
-export const subjectRestatesDiscussion = (
+const subjectRestatesDiscussion = (
     subject: string,
     discussion: string,
 ): boolean => {
@@ -190,10 +198,9 @@ export const subjectRestatesDiscussion = (
     if (subjectTokens.length === 0) {
         return false;
     }
-    return discussion.split(/(?<=[.!?])\s/).some((sentence) => {
-        const sentenceTokens = new Set(proseTokens(sentence).map(foldToken));
-        return subjectTokens.every((token) => sentenceTokens.has(token));
-    });
+    const firstSentence = discussion.split(/(?<=[.!?])\s/, 1)[0] ?? "";
+    const sentenceTokens = new Set(proseTokens(firstSentence).map(foldToken));
+    return subjectTokens.every((token) => sentenceTokens.has(token));
 };
 
 /**
@@ -206,8 +213,8 @@ export const subjectRestatesDiscussion = (
  * A subject that restates the discussion's opening sentence
  * ({@link subjectRestatesDiscussion}) is dropped instead of joined: the
  * posted body then opens with the discussion's own first claim, and
- * `buildClaims`' first-sentence split recovers that as the subject, so
- * nothing downstream loses a field — only the duplicate sentence.
+ * `buildClaims`' first-sentence split recovers that as the subject, so no
+ * downstream field goes empty; the body loses the duplicate sentence.
  */
 export const joinProse = (subject: string, discussion: string): string => {
     if (discussion === "") {
@@ -282,9 +289,20 @@ const fromLabelShape = (
         // valid labels with only {id, anchor, discussion}; rejecting it for
         // the missing failure_scenario voided the whole correctness
         // dimension twice, which is strictly worse than validating against
-        // the discussion prose.
+        // the discussion prose. A subject joinProse drops (restatement)
+        // salvages from the discussion too: dedup's comparedText reads the
+        // discussion only when failure_scenario prefix-matches
+        // claim.subject (dedup.ts), and after the drop claim.subject is
+        // the discussion's first sentence, which prefix-matches the
+        // discussion itself but not an inflected or reordered dropped
+        // subject; salvaging that subject would compare the claim on one
+        // sentence plus its own restatement, the exact shape run
+        // 30301235749 failed to merge.
         failure_scenario:
-            raw["failure_scenario"] ?? (subject !== "" ? subject : discussion),
+            raw["failure_scenario"] ??
+            (subject !== "" && !subjectRestatesDiscussion(subject, discussion)
+                ? subject
+                : discussion),
         producing_hunt: `dispatch:${agentName}`,
         model_authored_prose: joinProse(subject, discussion),
         // Suggestion salvage, like the anchor/subject salvage above: run

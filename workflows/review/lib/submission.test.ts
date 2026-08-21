@@ -86,7 +86,10 @@ const priorApprove = (): Record<string, string> => ({
 
 describe("computeBodyStats", () => {
     it("reports nearest-rank percentiles over comment body lengths", () => {
-        const comments = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map(
+        // Deliberately unordered: real plans hold comments in file/line
+        // order, so lengths arrive unsorted and the sort must earn the
+        // percentiles.
+        const comments = [50, 10, 100, 30, 90, 20, 80, 40, 70, 60].map(
             (length) => ({path: "a.ts", line: 1, body: "x".repeat(length)}),
         );
         expect(computeBodyStats(comments, "body")).toEqual({
@@ -182,10 +185,15 @@ describe("runSubmissionCli", () => {
             bodyChars: plan.body.length,
         });
         expect(plan.comments[0]?.body).toContain("review details");
-        // The stats ride the staged artifact for the live drift watch.
+        // The stats ride the staged plan, and a copy lands under out/ (the
+        // only directory Step 9 uploads) so the drift watch can read them
+        // from a run's artifact.
         expect(
             JSON.parse(fs.files[`${REVIEW}/submission-plan.json`]).bodyStats,
         ).toEqual(plan.bodyStats);
+        expect(fs.files[`${REVIEW}/out/submission-plan.json`]).toBe(
+            fs.files[`${REVIEW}/submission-plan.json`],
+        );
     });
 
     it("stages zeroed comment stats when nothing posts inline", () => {
