@@ -2642,18 +2642,25 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   deserialization sink without validation or parameterization. `found` on an unguarded
   sink.
 - **`pwn-request`** — when workflow or action-definition files change
-  (`.github/workflows/*.{yml,yaml}`, `action.yml`/`action.yaml` anywhere in the
-  tree): a job combining a privileged trigger (`pull_request_target`,
+  (`.github/workflows/*.{yml,yaml,md}` — in a gh-aw repo the authored workflow is
+  the `.md` whose frontmatter carries the trigger, permissions, and secrets, and
+  the compiled `.lock.yml` beside it is generated output stripped from the diff —
+  plus `action.yml`/`action.yaml` anywhere in the tree): a job combining a
+  privileged trigger (`pull_request_target`,
   `issue_comment`, or `workflow_run` startable by a fork PR), untrusted content
   brought in (PR head checked out, or an artifact from the triggering run), and
   execution of that content while holding secrets or a write-capable token. A
   plain `pull_request` fork run holds neither. `found` only when all three are
   present.
 - **`over-scoped-secret`** — same file gate as `pwn-request`: a workflow granting
-  `secrets.GITHUB_TOKEN` or a custom org token a permission no step uses (e.g.,
-  `contents: write` when every step only reads, or a broad PAT where the default
-  `GITHUB_TOKEN` suffices). `found` names the unneeded permission and why no
-  step needs it.
+  `secrets.GITHUB_TOKEN` or a custom org token a permission nothing in the
+  workflow uses (e.g., `contents: write` when every step only reads, or a broad
+  PAT where the default `GITHUB_TOKEN` suffices). Non-use must be decidable from
+  the file: every step's use of the token is visible (inline `run:` commands,
+  in-diff scripts and actions) and none needs the permission. A step invoking an
+  opaque script or third-party action that could consume the token makes the
+  permission undecidable — not `found`. `found` names the unneeded permission
+  and why no step needs it.
 
 ### Repo-specific rules and hunts (optional)
 Additional review rules and hunts the host repo defines for this lens, imported when

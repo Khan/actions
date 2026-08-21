@@ -40,8 +40,8 @@ actions/**/action.yaml       tier=high lens=security-auth
 .github/workflows/**         tier=high lens=security-auth
 utils/**                     tier=high
 # A workflow staged for a human `git mv` into .github/workflows/ is CI the moment
-# it moves, and it is reviewed here or nowhere.
-.github-staging/**           tier=high
+# it moves, and it is reviewed here or nowhere — so it gets the workflow hunts too.
+.github-staging/**           tier=high lens=security-auth
 # The shared reviewer's deterministic enforcement layer.
 workflows/review/lib/**      tier=high
 # The autofix workflow's enforcement layer. It PUSHES COMMITS to PRs in consuming

@@ -135,6 +135,21 @@
                 ],
                 "lens": "security-auth"
             }
+        ],
+        "mustNotFlagSpecs": [
+            {
+                "key": "setup-action-not-a-pwn-request",
+                "path": ".github/actions/setup/action.yml",
+                "lineStart": 1,
+                "lineEnd": 20,
+                "mechanism": [
+                    "pwn.?request",
+                    "over.?scoped",
+                    "(unused|unneeded) (write )?(scope|permission)"
+                ],
+                "lens": "security-auth",
+                "blockingOnly": true
+            }
         ]
     },
     "routerConfig": {
