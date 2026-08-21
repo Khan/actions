@@ -192,7 +192,7 @@ network:
 # job-level timeout-minutes still bounds the run.
 engine:
   id: claude
-  model: claude-opus-4-8
+  model: claude-opus-5
   env:
     BASH_DEFAULT_TIMEOUT_MS: "60000"
     BASH_MAX_TIMEOUT_MS: "1200000"
@@ -244,7 +244,7 @@ pre-agent-steps:
       # `source:` below, so the prompt and the lib it invokes come from one version.
       # Even though this IS Khan/actions, the reviewer runs the released lib, not
       # the PR head; a PR must not be able to change the code that reviews it.
-      ref: review-v1.13.0
+      ref: review-v1.17.1
       path: gh-aw-review-lib
       persist-credentials: false
 
@@ -316,7 +316,134 @@ post-steps:
       echo "::warning title=dispatch-conformance gate::gate could not run (infra failure; review not blocked)"
       exit 0
 
-# Cost guardrails (AI credits; 1 credit = $0.01). gh-aw >= v0.79 bakes in
+# Anthropic pricing overlay, so an AI credit means $0.01 of what Khan actually
+# pays.
+#
+# INERT UNTIL gh-aw v0.84.x GOES STABLE. `apiProxy.providers` was added to
+# awf-config-schema.json in AWF v0.27.43, and gh-aw gates emitting it on that
+# floor (`AWFAPIProxyProvidersMinVersion`) because older AWF strict config
+# validation rejects unknown apiProxy properties. gh-aw v0.83.4 (the version
+# this lock was compiled with, and still `releases/latest`) defaults to AWF
+# v0.27.42, one patch below, so it SILENTLY DROPS this block: it compiles
+# clean, the rates land only in the informational `GH_AW_INFO_MODEL_COSTS` env
+# var, and metering stays at list price. gh-aw raises `DefaultFirewallVersion`
+# to v0.27.43 as of v0.84.0, but v0.83.5/v0.84.0/v0.84.1 are all prereleases,
+# so recompiling is blocked on that line going stable rather than on any edit
+# here. Do NOT pin the extension to a prerelease to force it: nothing in CI
+# runs `gh aw compile`, so the next compile on stable would silently drop
+# `providers` again with no test failure.
+#
+# VERIFY AFTER ANY TOOLCHAIN BUMP: `providers` must appear inside the
+# `apiProxy` object of both awf-config payloads in review.lock.yml. Its
+# presence in `GH_AW_INFO_MODEL_COSTS` alone means the overlay is NOT live.
+#
+# Deliberately NOT solved by pinning `sandbox.agent.version: v0.27.43`: the
+# sandbox block above documents that a version is re-pinned here only to hold a
+# firewall release BACK, never to move one forward, and a forward pin would
+# recreate the stale-floor failure that broke run 30290472047.
+#
+# WHY THE OVERLAY: Khan bills Anthropic list minus 50%, but the firewall api-proxy meters
+# credits against a list-price catalog baked into its image, so every dollar
+# figure downstream (the caps below, the router's `maxUsd` soft targets, the
+# cost counters) reads 2x high and a run is cut off at half the real spend its
+# cap implies.
+#
+# `models.providers` is gh-aw's operator overlay: it compiles to the firewall's
+# `apiProxy.providers` and is the highest-precedence pricing source, ahead of
+# runtime provider discovery, the curated table, and the bundled models.dev
+# catalog (awf-config-spec 10.7.1). It applies to the threat-detection proxy as
+# well as the agent's. Rates are per-token USD at 50% of Anthropic list.
+#
+# MAINTENANCE: entries are matched per model, and an unlisted model silently
+# falls through to full list price rather than erroring. Add an entry when the
+# engine model changes, and re-halve these when Anthropic list prices move.
+# Do NOT collapse these to a bare `claude-opus-4` prefix: prefix matching would
+# also capture opus-4-0/4-1, which list at 3x the 4-5+ rate.
+models:
+  # claude-opus-5 (the engine and roster pin) is NOT in the firewall
+  # api-proxy's curated AI-credits pricing table at v0.27.42, the release
+  # gh-aw v0.83.4 defaults to (that table carries claude-opus-4-5 through 4-8
+  # and claude-fable-5, and stops there). The proxy's AI-credits guard rejects
+  # an un-priced model with a 400 BEFORE the request reaches the model, so
+  # without this fallback every dispatch fails on the stable toolchain: the
+  # #266 failure that killed the first-principles dispatch on every run,
+  # except the whole roster runs the un-priced model rather than two opt-in
+  # agents. Units differ from the overlay below and the two are not
+  # interchangeable: `default-ai-credits-pricing` is $/1M tokens and feeds
+  # the credit guard; `providers` is $/token. Rates here are Anthropic LIST
+  # (Opus 5 lists at exactly Opus 4.8's price), deliberately not Khan's 50%
+  # rate: in the only window where this fallback binds (stable gh-aw v0.83.x,
+  # firewall v0.27.42, which drops the `providers` block silently) every
+  # other model bills at list from the curated table, so list keeps Opus 5
+  # denominated consistently with the rest of the roster. Two caveats: the
+  # default-pricing path does not bill cache writes ($6.25/M real), so credit
+  # accounting under-counts that component while it binds; and the fallback
+  # applies to ANY un-priced model, so a typo'd model id bills at Opus rates
+  # instead of failing loudly.
+  #
+  # REMOVE THIS FALLBACK when a gh-aw release defaults the firewall to
+  # v0.27.43 or later: that release carries a curated claude-opus-5 entry at
+  # the same list rates and bills cache writes, and the recompile also makes
+  # the `providers` overlay below live (the higher-precedence source). Do NOT
+  # reach for `sandbox.agent.version: v0.27.43` to get there early; a version
+  # is pinned here only to hold a release BACK, never to move one forward.
+  #
+  # MINIMUM COMPILER: gh-aw >= v0.83.0 for `models.default-ai-credits-pricing`.
+  # $/1M tokens. `input` and `output` are the only rates the schema accepts,
+  # so the cache rates are the proxy's derivations, not ours.
+  default-ai-credits-pricing:
+    input: 5.0
+    output: 25.0
+  providers:
+    anthropic:
+      models:
+        # The refusal-fallback target (the one-hop re-dispatch of #315) and
+        # an `engine:` override candidate; the engine until the roster moved
+        # to Opus 5.
+        claude-opus-4-8:
+          cost:
+            input: "2.5e-06"
+            output: "1.25e-05"
+            cache_read: "2.5e-07"
+            cache_write: "3.125e-06"
+        # Current engine and roster model.
+        claude-opus-5:
+          cost:
+            input: "2.5e-06"
+            output: "1.25e-05"
+            cache_read: "2.5e-07"
+            cache_write: "3.125e-06"
+        # Engine models a consumer may select via an `engine:` override.
+        claude-sonnet-5:
+          cost:
+            input: "1e-06"
+            output: "5e-06"
+            cache_read: "1e-07"
+            cache_write: "1.25e-06"
+        claude-haiku-4-5:
+          cost:
+            input: "5e-07"
+            output: "2.5e-06"
+            cache_read: "5e-08"
+            cache_write: "6.25e-07"
+        claude-fable-5:
+          cost:
+            input: "5e-06"
+            output: "2.5e-05"
+            cache_read: "5e-07"
+            cache_write: "6.25e-06"
+        # The pattern-triage sub-agent's pin (the cheap first pass; see its
+        # `model:` line below). Not an engine model, but dispatched inside
+        # the sandboxed agent step and metered by the same api-proxy.
+        claude-sonnet-4-6:
+          cost:
+            input: "1.5e-06"
+            output: "7.5e-06"
+            cache_read: "1.5e-07"
+            cache_write: "1.875e-06"
+
+# Cost guardrails (AI credits; 1 credit = $0.01 of real spend, given the
+# pricing overlay above). gh-aw >= v0.79 bakes in
 # defaults of 1000/run ($10) and 5000/day ($50). Disable the daily ceiling
 # (-1) so reviews are never skipped on a busy PR day; the per-run cap below
 # still bounds the cost of any single review.
@@ -350,8 +477,10 @@ max-ai-credits: 2500
 # and fails any PR that raises the roster cap past this guard's margin.
 max-turn-cache-misses: 25
 env:
+  # KHAN/ACTIONS LOCAL OVERRIDE: the mirror of the raised max-ai-credits above
+  # (the two values must stay in sync per the upstream comment).
   REVIEW_MAX_AI_CREDITS: "2500"
-source: Khan/actions/workflows/review/review.md@review-v1.13.0
+source: Khan/actions/workflows/review/review.md@review-v1.17.1
 ---
 
 # PR Reviewer
@@ -404,6 +533,11 @@ budget on content you never act on.
   threads, split by who opened them; the ones this bot opened (with their full
   reply chains) and the `{path, line}` of everyone else's. Step 3 says what each
   one feeds and the one judgment it still wants from you.
+- `adjudicated-threads.json`: this bot's threads a HUMAN resolved or
+  downvoted. Entirely
+  the dispatcher's input (its suppression drops a non-blocking candidate that
+  re-derives a defect a human already settled); nothing in it is yours to act
+  on.
 - `routing.json`, `provenance.json`, `full-stripped.diff`,
   `full-stripped-annotated.diff`, `rereview-plan.json` (also copied to
   `out/rereview-plan.json` for the run artifact), and, on a reduced-depth
@@ -630,6 +764,14 @@ misfiling one bot thread as human costs a dropped finding, per
   conversation is already open, so the dispatcher defers there and posts no bot
   comment on them.
 
+The same fetch also staged `/tmp/gh-aw/review/adjudicated-threads.json`: this
+bot's threads a HUMAN resolved or whose opener a reviewer downvoted (same
+shape as `threads.json`, plus `resolved`, `resolvedBy`, and
+`openerDownvotes`). It is entirely the dispatcher's input; its
+suppression drops a non-blocking candidate that re-derives a defect a human
+already settled, so do not read it, re-litigate it, or treat a resolved thread
+as open.
+
 **The pipeline.** Step 3 runs as ONE deterministic program; your part is
 exactly this sequence:
 1. Read `threads.json`. If any staged bot thread's reply chain shows the author
@@ -662,8 +804,11 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
 ```
    It reads `dispatch-result.json`, renders the accountability section
    (`rereview.json`), computes the verdict (Step 4's mechanical rule plus the
-   reduced-depth flip floor), renders every inline comment and the full
-   review body (note lines and fingerprint stamp included), and writes
+   reduced-depth flip floor), renders every inline comment (each with its
+   collapsed per-comment attribution footer naming the producing reviewer
+   and any merged duplicates) and the full review body (note lines, the
+   collapsed version/config footer, and the fingerprint stamp included),
+   and writes
    `/tmp/gh-aw/review/submission-plan.json`. At full depth it also
    stages `/tmp/gh-aw/review/risks-patterns-key.txt`, the code-computed
    canonical signature Step 7 compares (never compose your own signature in
@@ -678,7 +823,15 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    `skipSubmission` is `true` (the plan CLI sets it for an APPROVE with zero
    `comments` whose body is the bare approve line, on a PR whose last stamped
    verdict was already APPROVE; the gate reads the same field, so the two can
-   never disagree). When it is `false`, always submit. The dispatch-conformance gate
+   never disagree). When it is `false`, always submit. One exception outranks
+   both: when the plan's `event` is `HOLD_FOR_HUMAN` (a core review pass
+   produced no output on a run that would otherwise auto-approve), emit **no**
+   review submission, **no** inline comments, and **no** thread resolutions
+   (a hold plan stages none of them) — instead post the plan's `body` verbatim
+   as one standalone PR comment with the `add-comment` safe output, then skip
+   Steps 7 and 8 (they are APPROVE-only) and continue at Step 9, where the
+   cache CLI handles the hold on its own (it leaves the prior fingerprints
+   standing so the next run reviews in full). The dispatch-conformance gate
    compares what you queued against the staged plan and blocks the
    submission on any deviation, so a mis-typed or "improved" body is a red
    run, never a posted one. `dispatch-result.json`'s `riskFiles`,
@@ -697,7 +850,13 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
 The verdict is computed by the plan CLI (Step 3), never by you: REQUEST_CHANGES
 iff a validated posted claim carries a blocking label, plus the reduced-depth
 flip floor over kept blocking threads and the open-thread suppression floor —
-all `lib/verdict.ts` / `lib/submission.ts` rules. The plan's `event` IS the
+all `lib/verdict.ts` / `lib/submission.ts` rules. A third outcome exists:
+HOLD_FOR_HUMAN, when a core review pass (`correctness-reviewer` or
+`skill-auditor`) produced no usable output this run and the run would
+otherwise have auto-approved — the automation never approves a change its
+core passes did not look at (a blocking finding still wins: it is actionable
+on its own, so the verdict stays REQUEST_CHANGES and the gap is disclosed in
+a note line). The plan's `event` IS the
 verdict; never recompute, second-guess, or override it. (The blocking-label
 vocabulary and the concrete-failing-scenario bar live in the sub-agent
 definitions and the shared lib.)
@@ -720,11 +879,19 @@ never add, drop, reword, or re-anchor one.
 
 The review body and event are composed by the plan CLI (Step 3): the verdict
 head, the code-rendered re-review accountability section, every `Note:` line,
-and the hidden fingerprint stamp are all already in the plan's `body`. Submit
+the collapsed version/config footer, and the hidden fingerprint stamp are all
+already in the plan's `body`. Submit
 with **one** `submit-pull-request-review` call carrying the plan's `event` and
 `body` verbatim — except under the redundant-approval skip (Step 3), where you
 submit nothing. The dispatch-conformance gate blocks any deviation from the
 plan, so a mis-typed or "improved" body is a red run, never a posted one.
+
+When the plan's `event` is `HOLD_FOR_HUMAN`, there is no review to submit:
+post the plan's `body` verbatim as one standalone PR comment with the
+`add-comment` safe output, and queue nothing else (no review submission, no
+inline comments, no thread resolutions). The body already explains the hold
+and how the author gets unstuck; the gate blocks a hold run that submits a
+review, posts inline comments, resolves threads, or drops the comment.
 
 ## Step 7: On Approval — Post Risk and Patterns as a PR Comment
 
@@ -796,17 +963,21 @@ should only ever be one current risks/patterns comment:
 ### Comment body
 
 Begin the comment with the exact marker line below (so the comment is identifiable
-on later runs), then include the Review Guidance team sections and/or the
-common-patterns section. Omit whichever is empty. End the comment with the version
-marker, for attribution and rollback:
-`<!-- pr-reviewer:version v=review-v<version> schema=<n> -->`, where `<version>` is
-the `version` field of `gh-aw-review-lib/workflows/review/package.json` (the pinned
-release this run executed) and `<n>` is the `FINDING_SCHEMA_VERSION` constant in
-`gh-aw-review-lib/workflows/review/lib/finding-schema.ts`.
+on later runs), then include the Guidance for reviewers team sections and/or the
+common-patterns section. Omit whichever is empty. End the comment with the
+version/config footer: paste the collapsed `<details>` footer block from
+`/tmp/gh-aw/review/version-footer.txt` **verbatim** as the final lines (the plan
+CLI staged it in Step 3; if the file is missing, re-stage it with
+`cd gh-aw-review-lib && npx -y tsx workflows/review/lib/version-footer.ts`).
+Never compose the footer yourself, and never use an HTML comment for it: the
+safe-output ingest sanitizer deletes HTML comments, which is how the old hidden
+version marker silently never posted.
 
 ````
 <!-- pr-reviewer:risks-and-patterns -->
-## Review Guidance
+## Guidance for reviewers
+
+*Triage notes for reviewers: risky files by owning team, repeated changes, and files excluded from review.*
 
 <details>
 <summary><strong>platform</strong> (2 files)</summary>
@@ -854,10 +1025,15 @@ fully explained by a common pattern above:
 - `src/widgets/card.tsx` — pattern-only (Common patterns)
 
 </details>
+
+<details><summary><sub>review details</sub></summary>
+<sub>review-v1.17.1 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
+</details>
 ````
 
-- Title the comment `## Review Guidance`, then go straight to the team sections —
-  no top-level description paragraph. Wrap each owning team in its own collapsed
+- Title the comment `## Guidance for reviewers`, follow it with the one-line
+  italic byline from the template above (copy it verbatim), then go straight to
+  the team sections; add no other top-level prose. Wrap each owning team in its own collapsed
   `<details>` block. The `<summary>` must use literal HTML — Markdown is not
   processed inside `<summary>` — and contains the team's bare slug wrapped in
   `<strong>…</strong>` followed by a plain file count, e.g.
@@ -910,7 +1086,7 @@ fully explained by a common pattern above:
   eval suite's false-exclusion-rate metric reads. Omit the block entirely when
   `pattern-triage` excluded nothing. It rides on the guidance comment only — it never
   triggers a post on its own (see the post trigger above).
-- Include the Review Guidance team sections only when there is at least one
+- Include the Guidance for reviewers team sections only when there is at least one
   moderate- or high-risk file, include the "Common patterns" section only when
   Step 3 found patterns, and include the "Notified" section only when
   `notified.json` `matched` is `true`. The "Excluded from review" block appears
@@ -1138,11 +1314,12 @@ return `{"findings": [], "hunts": [...]}` with the hunt states still recorded.
 ---
 name: correctness-reviewer
 description: Classifies each changed file's risk and reviews the diff for correctness defects; returns JSON.
-model: claude-fable-5
+model: claude-opus-5
 # effort: high — launch default (whole-change reviewer). gh-aw has no per-agent
 # effort field yet; the per-role model/effort table lives in the README.
-# Fable 5: bug-finding recall is this workflow's load-bearing metric, and
-# stronger real-defect detection is Fable's headline gain over Opus 4.8.
+# Opus 5: bug-finding recall is this workflow's load-bearing metric; the
+# 2026-07-20 A/B recall gain that lived on Fable 5 is carried by Opus 5 at
+# Opus 4.8's per-token price. See the roster table in the README.
 ---
 You are a correctness-focused code reviewer. You have **no GitHub access** — read the
 diff and file list from disk and return your result as JSON only.
@@ -1233,7 +1410,11 @@ Do two things in one pass over the files in the list:
 
    Whatever the procedure, do **not** flag anything in the "what CI already
    catches" list below, and do not comment on Trivial or Low files unless they
-   have a real defect.
+   have a real defect. Do not propose aligning new code to a neighboring
+   pattern when that pattern contradicts the language's or standard library's
+   documented guidance for the construct (e.g. Go's rule against storing a
+   Context in a struct): consistency alone never outranks documented language
+   guidance.
 
    **Pre-existing bugs on touched lines.** A real bug is fair to flag even if it
    predates this change — but **only when it sits on a line this PR touches** (added or
@@ -1314,7 +1495,11 @@ and high-signal; use a blocking label only for a defect CI would not catch.
 sentence naming the concrete inputs, state, or conditions and the wrong outcome they
 produce. The claim-validator attacks exactly this scenario, so make it specific
 enough to check; a finding whose scenario you cannot state concretely is not ready
-to report.
+to report. Include `suggestion` only on `issue`, `todo`, and `suggestion` findings:
+those labels propose a fix. Never attach one to a `question`, `thought`, `note`, or
+`nitpick` finding; those raise a point, and a fix sketch under them adds length
+without information (the renderer drops the sketch form there; a committable
+drop-in fence still posts under any label).
 
 One complete example finding, in exactly this shape. These key names are the
 contract: do not substitute the ReportFindings-style keys (`summary`, `severity`,
@@ -1333,7 +1518,7 @@ before (run 29943085279 carried its one-line fix under `suggested_patch`):
 ---
 name: skill-auditor
 description: Evaluates the diff against the repo's best-practice skills and returns findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (whole-change reviewer).
 ---
 You audit a PR diff for best-practice "skill" violations. You have **no GitHub
@@ -1497,7 +1682,7 @@ Return ONLY this JSON object (no prose, no code fence):
 ---
 name: thread-reconciler
 description: Decides which of the workflow's earlier review threads the current code has addressed; returns thread ids.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: medium — launch default (reconciliation).
 ---
 You decide which earlier review threads the current code has resolved. You have **no
@@ -1626,7 +1811,7 @@ nothing duplicates:
 ---
 name: claim-validator
 description: Re-checks each candidate review comment against the actual code and the repo's best-practice skills, and drops or corrects the ones that are wrong; returns JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: xhigh — launch default (claim-validator). Deliberately NOT moved to
 # Fable 5 with the correctness reviewer: in the 2026-07-20 pooled A/B the
 # Fable validator did not offset the higher flag rate (noise 43% -> 49%, one
@@ -1646,10 +1831,15 @@ Read from disk:
 - The candidate comments: `/tmp/gh-aw/review/claims.json` — each has `id`, `source`
   (`correctness`, `skill`, a whole-change reviewer name such as `holistic`/`completeness`/
   `first-principles`, or a specialist lens name such as `security-auth`/`money-payments`),
-  `path`, `line`, `label`, `subject`, `discussion`, `failure_scenario` (the
+  `path`, `line` (both absent on a PR-level claim about the PR title/description),
+  `label`, `subject`, `discussion`, `failure_scenario` (the
   producer's concrete failing scenario: specific inputs/state, then the wrong
   outcome), `confidence`, an optional
   `suggestion`, when the claim asserts a best-practice skill breach its `skill` name,
+  when cross-source dedup merged duplicate copies into it an `also_flagged_by`
+  list naming each other reviewer (with its anchor line where it differed, and
+  a clusterer-merged copy's own subject; treat those as corroboration to weigh,
+  never as extra claims to validate),
   and — when the claim re-raises a point the PR author has factually disputed in an
   existing review thread — an `author_dispute` quote of the author's grounds.
 - The diff: `/tmp/gh-aw/review/pr.diff`.
@@ -1711,7 +1901,15 @@ validate depends on what the claim asserts, not on which reviewer produced it:
   documentation reviewer's characteristic false positive is mistaking a real
   constraint for a restatement, so **refute** whenever the comment carries information
   the code does not show — a why, an invariant, a rejected alternative — however
-  redundant its first clause reads. A documentation claim is never blocking, so the
+  redundant its first clause reads. A documentation claim may also be a **prose
+  readability** claim (a metaphor that hides the mechanism, a paragraph restating an
+  earlier one, an undefined coinage) or target the **PR title/description** (it then
+  carries no `path`/`line`; verify it against `pr-context.json`). The standard is the
+  same: the quoted sentence must exist verbatim where the claim says it does, and its
+  proposed plain rewrite must preserve the sentence's meaning. Refute a readability
+  claim when the flagged phrase is a domain term of art, when the sentence names the
+  concrete operation despite its style, or when the rewrite loses information the
+  original carried. A documentation claim is never blocking, so the
   `plausible` downgrade changes nothing about it; confirm it or refute it.
 
 **Three-state verification: drop only the refuted; downgrade the uncertain.** This is
@@ -1770,6 +1968,25 @@ return `plausible` so it posts as a question rather than a re-block. (A producti
 false block survived two checks that each traced one parent short of where the disputed
 element actually lived; the depth requirement is the lesson.)
 
+**Consistency claims must survive language guidance.** When a claim's proposed fix is
+"match the existing pattern in this file or package" (store the field the siblings
+store, mirror the neighboring signature), check whether that existing pattern itself
+contradicts the language's or standard library's documented guidance for the construct
+(e.g. Go's `context` package: do not store Contexts inside a struct type; pass ctx
+explicitly as a parameter). When it does, **refute the claim**: consistency alone never
+outranks documented language guidance, and new code that follows the guidance is not a
+defect. This refutation carries the same citation duty as every other definitive
+state: the `reason` must name the source and quote the specific guidance sentence
+(e.g. the `context` package doc line), exactly as a skill refutation quotes its rule
+text. Guidance you cannot quote is taste; when you cannot quote it, return
+`plausible` instead. Invert the claim (flag the existing pattern instead of the new code) only when
+the inversion meets the same evidence bar as any other claim; the pattern usually
+predates the diff, so the pre-existing-mechanism rule above applies and caps an
+unamplified inversion at `plausible`. (Measured: a reviewer proposed moving a new
+method's ctx parameter onto the struct because every sibling method used a stored ctx
+field; the author correctly cited the Go context guidance, and the claim should never
+have posted.)
+
 Do not invent new claims — validate only the ones given. Never "upgrade" a non-blocking
 claim to blocking or otherwise raise its severity; you may only confirm, downgrade to
 plausible, or (when you can cite the disproof) refute.
@@ -1813,7 +2030,7 @@ Every input `id` must appear exactly once.
 ---
 name: holistic
 description: Reviews the change as a whole — is the overall approach sound and coherent — and returns findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (whole-change reviewer).
 ---
 You are the **holistic** reviewer. Your single mandate is to **judge the
@@ -1883,13 +2100,15 @@ Return ONLY this JSON object (no prose, no code fence):
 Use a blocking label only for a whole-change defect that genuinely must be fixed before
 approval. `failure_scenario` is required on every finding: the concrete inputs/state
 and the wrong outcome they produce (the claim-validator attacks exactly this
-scenario). If the change hangs together, return {"findings": []}.
+scenario). Include `suggestion` only on `issue`, `todo`, and `suggestion` findings,
+never on `question`/`thought`/`note`/`nitpick` (the renderer drops the sketch form there).
+If the change hangs together, return {"findings": []}.
 
 ## agent: `completeness`
 ---
 name: completeness
 description: Checks the change against its stated intent (PR description + linked ticket/doc) and returns findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (whole-change reviewer).
 ---
 You are the **completeness** reviewer. Your single mandate is to **check
@@ -1954,13 +2173,15 @@ Return ONLY this JSON object (no prose, no code fence):
 Use a blocking label only when the change genuinely fails to deliver required, stated work.
 `failure_scenario` is required on every finding: the concrete gap and what a user or
 caller hits because of it (the claim-validator attacks exactly this scenario).
+Include `suggestion` only on `issue`, `todo`, and `suggestion` findings, never on
+`question`/`thought`/`note`/`nitpick` (the renderer drops the sketch form there).
 If the change matches its intent, return {"findings": []}.
 
 ## agent: `test-adequacy`
 ---
 name: test-adequacy
 description: Evaluates whether the changed behavior is adequately tested and returns findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (whole-change reviewer).
 ---
 You are the **test-adequacy** reviewer. Your job is to judge whether the **changed
@@ -2014,17 +2235,20 @@ Return ONLY this JSON object (no prose, no code fence):
 }
 `failure_scenario` is required on every finding: name the untested path and the
 concrete regression that would slip through it unnoticed (the claim-validator
-attacks exactly this scenario).
+attacks exactly this scenario). Include `suggestion` only on `issue`, `todo`, and
+`suggestion` findings, never on `question`/`thought`/`note`/`nitpick` (the renderer
+drops it there).
 If the changed behavior is adequately tested, return {"findings": []}.
 
 ## agent: `first-principles`
 ---
 name: first-principles
 description: A diverse-perspective, advisory-only sanity check on whether the change should exist as written; returns findings as JSON.
-model: claude-fable-5
-# effort: high — launch default. Ran on Fable 5 (claude-fable-5) from day one;
-# the correctness reviewer joined it after the 2026-07-20 A/B. Advisory-only,
-# never blocks.
+model: claude-opus-5
+# effort: high — launch default. Ran on Fable 5 (claude-fable-5) from day one,
+# partly to be the one non-Opus reviewer; the correctness reviewer joined it
+# after the 2026-07-20 A/B, and it moved to Opus 5 with the roster.
+# Advisory-only, never blocks.
 ---
 You are the **first-principles** reviewer. Your single mandate is to review the
 **justification for the change, not the change itself**: where `holistic` asks
@@ -2088,13 +2312,15 @@ Return ONLY this JSON object (no prose, no code fence):
 }
 Never emit a blocking label. `failure_scenario` is required on every finding: since
 you are advisory, state the concrete cost of leaving the observation unaddressed.
+Include `suggestion` only on `suggestion`-labeled findings, never on
+`question`/`thought`/`note` (the renderer drops the sketch form there).
 If you have nothing worth raising, return {"findings": []}.
 
 ## agent: `conventions`
 ---
 name: conventions
 description: Advisory, opt-in check of repo-specific conventions; returns findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: medium — launch default (advisory, opt-in targeted check).
 ---
 You are the **conventions** reviewer. You check the change against this repository's
@@ -2153,19 +2379,22 @@ Return ONLY this JSON object (no prose, no code fence):
 }
 Never emit a blocking label. `failure_scenario` is required on every finding: the
 concrete cost of the deviation if it stays (a convention with no statable cost is
-not worth flagging). If nothing deviates from repo conventions, return
+not worth flagging). Include `suggestion` only on `suggestion`-labeled findings,
+never on `question`/`nitpick`/`note` (the renderer drops the sketch form there).
+If nothing deviates from repo conventions, return
 {"findings": []}.
 
 ## agent: `documentation`
 ---
 name: documentation
-description: Advisory, opt-in check that code comments and prose docs in the diff document intent rather than restate code; returns findings as JSON.
-model: claude-opus-4-8
+description: Advisory, opt-in check that code comments, prose docs, and the PR title/description document intent rather than restate code, and read plainly; returns findings as JSON.
+model: claude-opus-5
 # effort: medium — launch default (advisory, opt-in targeted check). Sibling of
 # `conventions`: same shape, same cost profile, different subject matter.
 ---
 You are the **documentation** reviewer. You check the **comments and prose docs the
-diff adds or changes** against the documentation policy below. You are
+diff adds or changes**, plus the **PR title and description**, against the
+documentation policy below. You are
 **advisory-only**: every finding you return carries the single label
 `suggestion (non-blocking, documentation)`; documentation never blocks a merge. You are
 **opt-in** — you run on every review in a repo whose ROUTING file `enable`s you, so do
@@ -2246,6 +2475,56 @@ Flag a comment when one of these is true, and quote the evidence:
   author gets two threads on one line. Flag a comment/code disagreement only when the
   code is right and the prose is stale.
 
+### Prose readability
+
+Comments get the information test above and nothing more: a terse, vivid comment
+that carries its constraint is fine. For **prose docs** (`.md` and equivalent) and
+the **PR title and description**, three further clauses apply. All three are about
+translation cost, not taste, and each needs the same quoted evidence as any other
+finding.
+
+- **Metaphor in place of the mechanism.** The test for a sentence is whether the
+  reader can recover the concrete operation (save, retry, validate, delete) from
+  the sentence alone. "The round-trip has to survive an input holding a config"
+  fails it: nothing names which operation must succeed under what condition. "The
+  request must still succeed when the input includes a config" passes. Vividness
+  is not the defect; flag only when the reader must already know the mechanism to
+  decode the sentence. A domain term of art passes (a functional `fold`,
+  "landing" a PR, a lock that is "held"), and quoted text (error messages, cited
+  titles) is never yours to flag.
+- **Says the same thing twice.** A paragraph whose content is recoverable from an
+  earlier paragraph in the same document, restated in different words ("in other
+  words", "put differently", "another way to see this"). This is the prose-doc
+  form of restating the code: the second copy buys nothing, and the two copies
+  drift apart as the doc is edited. Quote both paragraphs; the fix is deleting
+  one.
+- **Undefined coinage.** A codename or shorthand the document invents and never
+  defines, so the reader must reverse-engineer the referent. A term defined at
+  first use, or already established in the repo, passes.
+
+These are the cheapest findings in this reviewer to produce and the easiest way
+for it to become a tone patrol, so they rank last and carry their own cap (see
+Volume), and the authorship rule above applies with full force: the finding names
+what the sentence costs the reader, never what its style suggests about how it
+was written.
+
+### The PR title and description
+
+The title and description are reviewable prose: apply the three readability
+clauses to them, and nothing else. Whether the change matches its stated intent
+belongs to `completeness`; never re-raise it here. A description also
+legitimately narrates its change (that is what a description is for), so the
+"narrates the change" clause never applies to it.
+
+A title/description finding carries **no `path` and no `line`**: omit both
+fields, and the pipeline posts the finding PR-level, folded into the review body
+rather than anchored to a file. Never anchor a title/description finding on a
+code line, and never omit the anchor on a finding about file content. The review
+body renders only the finding's prose (`subject` + `discussion`), so put
+everything the author needs there: the quoted sentence and its plain rewrite,
+in the prose, not in `suggestion` (a `suggestion` on a PR-level finding has
+nowhere to render).
+
 ### Volume
 
 You are advisory, and your findings compete for the author's attention with the ones
@@ -2262,8 +2541,14 @@ part of the policy, not a matter of taste:
   the ranking working.
 - **The ranking, highest first**: (1) falsified by this diff, (2) missing the
   non-obvious *why* on something the diff adds, (3) commented-out code, (4) narrates
-  the change, (5) restates the code. A restatement cleanup is the cheapest finding to
-  drop and the first one to go.
+  the change, (5) restates the code, (6) prose readability (the sections above).
+  A restatement cleanup is the cheapest content finding to drop; a readability
+  finding ranks below even that.
+- **Readability carries its own cap**: at most ONE line-anchored readability
+  finding per review, batched (anchor the worst instance and quote up to three
+  more in `discussion`), plus at most ONE PR-level finding on the title and
+  description. Both count toward the five-per-review cap and are the first
+  dropped when it binds.
 
 **Quote the comment, quote the code.** Flag only when you can put both in `discussion`:
 the comment text verbatim, and the code line that makes it redundant, false, or
@@ -2281,11 +2566,12 @@ looks redundant but records a constraint the code genuinely does not show.
 deletion: when the fix is "delete this comment", say so in the prose and omit the
 suggestion. Use a suggestion when there is replacement text — a trailing comment
 stripped off the code line it shares, a stale sentence corrected, the missing *why*
-written out.
+written out. On a PR-level finding, skip the suggestion and put the rewrite in the
+prose (see the title-and-description section).
 
-**Scope.** Code comments and prose docs (`.md` and equivalent) inside the diff. The PR
-title and description are **not** yours: they carry no line anchor and no fix path
-today. Leave them to `completeness` and `first-principles`.
+**Scope.** Code comments and prose docs (`.md` and equivalent) inside the diff, plus
+the PR title and description (readability clauses only; see that section). Whether
+the description matches the diff stays with `completeness` and `first-principles`.
 
 **Anchoring, and the one trap in this reviewer's way.** Anchor on a line the diff
 **added or changed** (RIGHT-side line number). A finding anchored anywhere else is
@@ -2296,7 +2582,20 @@ untouched. Anchor that finding on the **changed code line**, and name the commen
 the prose ("the comment two lines above still says …"). Same rule for a missing
 *why*: anchor on the added line that needs the explanation. Only when the comment
 itself is one of the diff's added or changed lines is the comment line the right
-anchor.
+anchor. The single exception to all of this is the title/description finding,
+which omits `path` and `line` entirely; every finding about file content must
+carry its line anchor.
+
+**Before you return: the title/description pass.** Read `title` and
+`description` from `pr-context.json` and test each against the three
+readability clauses (metaphor in place of the mechanism, says the same thing
+twice, undefined coinage) exactly as you would a prose doc. Do this as its own
+pass, every run: the metadata is not in the diff, so a diff-driven read never
+reaches it, and skipping the pass is how a description built from metaphors
+ships unflagged. A clause failure here is the single PR-level finding — omit
+`path` and `line`, put the quoted sentence and its plain rewrite in the prose,
+no `suggestion` — still capped at one and still the first dropped when the
+five-per-review cap binds.
 
 Return ONLY this JSON object (no prose, no code fence):
 {
@@ -2308,16 +2607,17 @@ Return ONLY this JSON object (no prose, no code fence):
   }]
 }
 `label` is that one value on every finding; never emit any other label, blocking or
-otherwise. `failure_scenario` is required: name the concrete cost to the next reader
-(a false claim they will trust, a constraint they will break, a line they will
-maintain for nothing). If nothing in the change fails the policy, return
-{"findings": []}.
+otherwise. Include `path` and `line` on every finding except the single
+title/description finding, which omits both. `failure_scenario` is required: name
+the concrete cost to the next reader (a false claim they will trust, a constraint
+they will break, a line they will maintain for nothing, a sentence they must
+translate). If nothing in the change fails the policy, return {"findings": []}.
 
 ## agent: `security-auth`
 ---
 name: security-auth
 description: Specialist security & auth lens — reviews touched files for authorization, secrets, injection, and unsafe-deserialization defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: xhigh — launch default. The security & auth lens is the one specialist
 # lens pinned to xhigh (per-role table in the README). gh-aw has no
 # per-agent effort field yet; this annotation and the README table are the authoritative
@@ -2405,7 +2705,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: ai-safety-moderation
 description: Specialist AI safety & moderation lens — reviews AI/generation paths for missing moderation, prompt-injection surfaces, and PII exposure; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **AI safety & moderation** specialist lens. You review only AI/model and
@@ -2475,7 +2775,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: mass-comms-coppa
 description: Specialist mass-comms & COPPA lens — reviews bulk-communication paths for audience/consent/age-gating defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **mass-comms & COPPA** specialist lens. You review only bulk-communication
@@ -2543,7 +2843,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: caching-resource
 description: Specialist caching & resource lens — reviews caching and resource-management paths for key-scoping, invalidation, and exhaustion defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **caching & resource** specialist lens. You review only caching and
@@ -2618,7 +2918,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: data-migrations
 description: Specialist data & migrations lens — reviews schema/migration/backfill changes for compatibility and safety defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **data & migrations** specialist lens. You review only schema changes,
@@ -2688,7 +2988,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: concurrency-async
 description: Specialist concurrency & async lens — reviews concurrent/async code for races, unawaited work, and idempotency defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **concurrency & async** specialist lens. You review only concurrent and
@@ -2757,7 +3057,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: api-federation-compat
 description: Specialist API & federation compatibility lens — reviews public API and GraphQL/federation changes for breaking-change defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **API & federation compatibility** specialist lens. You review only changes to
@@ -2826,7 +3126,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: cross-deploy-serialization
 description: Specialist cross-deploy serialization lens — reviews persisted/queued/cached serialized shapes for rolling-deploy compatibility defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **cross-deploy serialization** specialist lens. You review only changes to
@@ -2899,7 +3199,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: deploy-infra-config
 description: Specialist deploy & infra config lens — reviews deployment, infra-as-code, and config/flag changes for rollout-safety defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **deploy & infra config** specialist lens. You review only deployment
@@ -2970,7 +3270,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: money-payments
 description: Specialist money & payments lens — reviews monetary and payment code for precision, idempotency, and currency defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **money & payments** specialist lens. You review only monetary computation and
@@ -3039,7 +3339,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
 ---
 name: content-i18n
 description: Specialist content & i18n lens — reviews user-facing content for localization and internationalization defects; returns structured findings as JSON.
-model: claude-opus-4-8
+model: claude-opus-5
 # effort: high — launch default (specialist lens).
 ---
 You are the **content & i18n** specialist lens. You review only user-facing content for
