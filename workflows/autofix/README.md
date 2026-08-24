@@ -16,7 +16,7 @@ Two ways to arm it, and they are peers. Neither is a shorthand for the other.
 | Label              | Fixes                                                      |
 | ------------------ | ---------------------------------------------------------- |
 | `autofix: blocking` | The reviewer's open blocking threads (`issue (blocking)`, `issue (blocking, best-practice)`, `todo (blocking)`) |
-| `autofix: nits`     | The reviewer's open non-blocking threads (suggestions, nitpicks, questions, thoughts, notes) |
+| `autofix: nits`     | The reviewer's open non-blocking threads (suggestions, nitpicks, questions, thoughts, notes). The reviewer's posting surface never posts `nitpick (non-blocking)` findings as inline threads (review-v1.20+, the non-blocking budget change), so nitpick-class items reach this scope only once the work list also reads the review body's collapsed section. |
 | `autofix: docs`     | Only the `documentation` reviewer's threads (`suggestion (non-blocking, documentation)`) — a subset of `nits`, see below |
 
 **Or comment on the PR:**

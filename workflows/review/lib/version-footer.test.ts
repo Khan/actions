@@ -149,6 +149,19 @@ describe("runVersionFooterCli", () => {
         expect(runVersionFooterCli(fs, LIB)).toContain("depth scoped");
     });
 
+    it("carries a non-default routing.json budget into the footer", () => {
+        const files = fullStaging();
+        files[`${REVIEW}/routing.json`] = JSON.stringify({
+            reReviewMode: "scoped",
+            reReviewBlockingOnly: true,
+            enabledReviewers: ["holistic", "documentation"],
+            nonBlockingInlineBudget: 5,
+        });
+        expect(runVersionFooterCli(makeFakeFs(files), LIB)).toContain(
+            "| non-blocking-budget 5",
+        );
+    });
+
     it("omits the depth segment when dispatch has not run", () => {
         // No fallback to the planned depth: a plan is a guess about what
         // executed, and every unstateable segment drops rather than guesses.

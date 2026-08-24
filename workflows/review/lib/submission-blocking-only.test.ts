@@ -110,7 +110,7 @@ describe("runSubmissionCli: re-review blocking-only", () => {
             "Non-blocking observations",
         );
         expect(plan.body).toContain(
-            "Non-blocking observations (2; top: a.ts:9 nitpick (non-blocking))",
+            "Non-blocking observations (2; top: a.ts:9 nitpick (non-blocking): Rename the helper.)",
         );
         expect(plan.body).toContain(
             "- `a.ts:9` nitpick (non-blocking): Rename the helper. " +
@@ -218,7 +218,7 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         expect(plan.comments).toHaveLength(20);
         expect(plan.body).not.toContain("Non-blocking observations");
         expect(plan.body).toContain(
-            "Lower-confidence observations (1; top: a.ts:21 issue (blocking))",
+            "Lower-confidence observations (1; top: a.ts:21 issue (blocking): s)",
         );
         expect(plan.body).toContain("issue (blocking)");
         expect(plan.notes.join(" ")).toContain(
@@ -248,10 +248,35 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         expect(plan.event).toBe("APPROVE");
         expect(plan.comments).toEqual([]);
         expect(plan.body).toContain(
-            "Non-blocking observations (1; top: a.ts:2 nitpick (non-blocking))",
+            "Non-blocking observations (1; top: a.ts:2 nitpick (non-blocking): Rename the helper.)",
         );
         // A body carrying the collapsed section is never the bare approve
         // line, so the redundant-approval skip cannot swallow it.
         expect(plan.skipSubmission).toBe(false);
+    });
+});
+
+describe("the collapsed summary's pr-level arm", () => {
+    it("names a pr-level top entry by label and subject (no anchor to show)", () => {
+        const fs = makeFakeFs(
+            staged(
+                {
+                    depth: "scoped",
+                    claims: [
+                        claim({
+                            id: "pr-note",
+                            path: undefined,
+                            line: undefined,
+                            label: "note (non-blocking)",
+                            subject: "A cross-file observation.",
+                        }),
+                    ],
+                },
+                true,
+            ),
+        );
+        expect(runSubmissionCli(fs).body).toContain(
+            "Non-blocking observations (1; top: note (non-blocking): A cross-file observation.)",
+        );
     });
 });

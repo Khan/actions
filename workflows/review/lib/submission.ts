@@ -70,6 +70,7 @@ import {
     HOLD_HEAD,
     HOLD_UNSTUCK_LINES,
     isBlockingLabel,
+    NITPICK_LABEL,
     renderReviewBody,
 } from "./render-comment";
 import {DEFAULT_NON_BLOCKING_INLINE_BUDGET} from "./routing-config";
@@ -638,13 +639,25 @@ export const runSubmissionCli = (
         budgetRaw >= 0
             ? budgetRaw
             : DEFAULT_NON_BLOCKING_INLINE_BUDGET;
+    const isNitpick = (claim: Claim): boolean =>
+        labelToken(claim.label) === labelToken(NITPICK_LABEL);
     const ranked = [...anchored].sort((a, b) => {
         const blocking =
             Number(isBlockingLabel(b.label)) - Number(isBlockingLabel(a.label));
-        return blocking !== 0 ? blocking : b.confidence - a.confidence;
+        if (blocking !== 0) {
+            return blocking;
+        }
+        // Nitpicks rank last among non-blocking claims, whatever their
+        // confidence: `collapsed` keeps this order and the disclosure names
+        // its first entry, so without the demotion the class this surface
+        // deliberately never posts would routinely win the summary slot
+        // built for the tail's best finding.
+        const nitpick = Number(isNitpick(a)) - Number(isNitpick(b));
+        return nitpick !== 0 ? nitpick : b.confidence - a.confidence;
     });
     let budgetLeft = nonBlockingBudget;
     let budgetShed = 0;
+    let nitpickShed = 0;
     const inlineWorthy = ranked.filter((claim) => {
         if (isBlockingLabel(claim.label)) {
             return true;
@@ -652,7 +665,8 @@ export const runSubmissionCli = (
         if (blockingOnly || claim.confidence < MIN_INLINE_CONFIDENCE) {
             return false;
         }
-        if (labelToken(claim.label) === "nitpick") {
+        if (isNitpick(claim)) {
+            nitpickShed++;
             return false;
         }
         if (claim.label === DOCUMENTATION_LABEL) {
@@ -708,11 +722,14 @@ export const runSubmissionCli = (
         // worth spending more. `collapsed` is in ranked order (the budget
         // shed comes off the ranked list; pr-level claims append after), so
         // entry 0 is the best of the tail.
+        // The subject rides the tag, not only the location and label: the
+        // subject is the claim itself, and it is what tells a reader whether
+        // the expando is worth opening.
         const top = collapsed[0];
         const topTag =
             top.path !== undefined && top.line !== undefined
-                ? `; top: ${top.path}:${top.line} ${top.label}`
-                : `; top: ${top.label}`;
+                ? `; top: ${top.path}:${top.line} ${top.label}: ${top.subject}`
+                : `; top: ${top.label}: ${top.subject}`;
         const summary =
             blockingOnly && collapsedNonBlockingOnly
                 ? `Non-blocking observations (${collapsed.length}${topTag})`
@@ -746,6 +763,14 @@ export const runSubmissionCli = (
         if (budgetShed > 0) {
             notes.push(
                 `${budgetShed} non-blocking claim(s) collapsed over the inline budget (non-blocking budget ${nonBlockingBudget})`,
+            );
+        }
+        if (nitpickShed > 0) {
+            // The no-silent-caps rule, per shed reason: the nitpick ban is
+            // its own posting rule, so its shed gets its own line rather
+            // than hiding inside the budget's.
+            notes.push(
+                `${nitpickShed} nitpick claim(s) collapsed (nitpick-class never posts inline)`,
             );
         }
     }

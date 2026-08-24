@@ -52,6 +52,14 @@ export const BLOCKING_LABELS = [
  */
 export const DOCUMENTATION_LABEL = "suggestion (non-blocking, documentation)";
 
+/**
+ * The nitpick label. Named for the same reason {@link DOCUMENTATION_LABEL}
+ * is: it is a selection key, not only a description — the posting surface
+ * (`submission.ts`) never posts nitpick-class findings inline, so the string
+ * is imported rather than re-spelled downstream.
+ */
+export const NITPICK_LABEL = "nitpick (non-blocking)";
+
 /** Every other Conventional-Comment label; none of these block. */
 export const NON_BLOCKING_LABELS = [
     "suggestion (non-blocking)",

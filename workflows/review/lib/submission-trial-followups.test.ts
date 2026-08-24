@@ -126,7 +126,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         );
         expect(plan.comments).toHaveLength(20);
         expect(plan.comments[0].body).toContain(
-            "Lower-confidence observations (2; top: a.ts:21 issue (blocking))",
+            "Lower-confidence observations (2; top: a.ts:21 issue (blocking): finding 21)",
         );
         expect(plan.comments[0].body).toContain("`a.ts:21`");
         expect(plan.comments[0].body).toContain("`a.ts:22`");
@@ -159,7 +159,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         expect(plan.comments).toHaveLength(4);
         expect(plan.comments[0].line).toBe(99);
         expect(plan.comments[0].body).toContain(
-            "Lower-confidence observations (17; top: a.ts:4 suggestion (non-blocking))",
+            "Lower-confidence observations (17; top: a.ts:4 suggestion (non-blocking): finding 4)",
         );
         expect(plan.notes).toContainEqual(
             "17 non-blocking claim(s) collapsed over the inline budget (non-blocking budget 3)",
@@ -213,7 +213,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         expect(plan.comments).toHaveLength(1);
         expect(plan.comments[0].line).toBe(2);
         expect(plan.comments[0].body).toContain(
-            "Lower-confidence observations (1; top: a.ts:1 nitpick (non-blocking))",
+            "Lower-confidence observations (1; top: a.ts:1 nitpick (non-blocking): rename it)",
         );
     });
 
@@ -280,7 +280,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         );
         expect(plan.comments).toEqual([]);
         expect(plan.body).toContain(
-            "Lower-confidence observations (1; top: a.ts:2 thought (non-blocking))",
+            "Lower-confidence observations (1; top: a.ts:2 thought (non-blocking): a hunch)",
         );
         expect(plan.body).toContain("a hunch");
     });
@@ -367,5 +367,40 @@ describe("open-thread suppression verdict floor (trial suggestion g)", () => {
             }),
         );
         expect(runSubmissionCli(fs).event).toBe("APPROVE");
+    });
+});
+
+describe("the nitpick posting rules", () => {
+    it("ranks nitpicks last in the collapse, whatever their confidence, and notes the shed", () => {
+        const claims = [
+            claim({
+                id: "nit",
+                line: 1,
+                label: "nitpick (non-blocking)",
+                confidence: 0.95,
+                subject: "rename it",
+            }),
+            claim({
+                id: "weak-thought",
+                line: 2,
+                label: "thought (non-blocking)",
+                confidence: 0.3,
+                subject: "a hunch",
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        // Both collapse (the nitpick by the ban, the thought by the
+        // confidence floor), and the disclosure's top slot goes to the
+        // thought: the class this surface never posts must not win the
+        // summary line built for the tail's best finding.
+        expect(plan.comments).toEqual([]);
+        expect(plan.body).toContain(
+            "Lower-confidence observations (2; top: a.ts:2 thought (non-blocking): a hunch)",
+        );
+        expect(plan.notes).toContainEqual(
+            "1 nitpick claim(s) collapsed (nitpick-class never posts inline)",
+        );
     });
 });

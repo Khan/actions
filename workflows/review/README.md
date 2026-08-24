@@ -402,10 +402,12 @@ re-review scoped
   `nitpick (non-blocking)` findings never post inline at all; documentation
   findings are exempt (the documentation reviewer self-caps, and its autofix
   selects work by the label on posted threads). Findings over budget collapse
-  into a `<details>` block in the review body whose summary names the
-  top-ranked entry; nothing is dropped and the verdict counts every validated
-  finding. A malformed value warns and keeps the default; when several lines
-  set it, the last one wins.
+  into a `<details>` block riding the top-ranked inline comment (or the review
+  body, when nothing posts inline or a reduced-depth modifier applies) whose
+  summary names the top-ranked entry; nothing is dropped and the verdict
+  counts every validated finding. A malformed value warns and keeps the
+  previous value (the default when no earlier line set one); when several
+  lines set it, the last one wins.
 
 Glob semantics are a practical subset of gitignore/CODEOWNERS: `**` crosses
 directories, `*` and `?` stay within a segment, a trailing `/` matches everything
@@ -885,14 +887,16 @@ run files (never composed by the model):
 
 ```
 <details><summary><sub>review details</sub></summary>
-<sub>review-v<major>.<minor>.<patch> | schema <n> | depth <depth> | re-review <mode> [blocking-only] | enable <reviewer,...></sub>
+<sub>review-v<major>.<minor>.<patch> | schema <n> | depth <depth> | re-review <mode> [blocking-only] | enable <reviewer,...> | non-blocking-budget <n></sub>
 </details>
 ```
 
 `schema` is the finding-schema version (`FINDING_SCHEMA_VERSION` in
 `lib/finding-schema.ts`) the run was on; `depth` is the EXECUTED re-review depth;
-the `re-review` and `enable` segments echo the repo's ROUTING configuration, so a
-posted review attributes both the release and the config it ran under. A segment
+the `re-review`, `enable`, and `non-blocking-budget` segments echo the repo's
+ROUTING configuration, so a posted review attributes both the release and the
+config it ran under (`non-blocking-budget` appears only at a non-default value:
+the footer states configuration, not defaults). A segment
 the staging cannot state is omitted rather than guessed. A bad reviewer release
 rolls back by re-pinning the previous tag; the footer on each posted review makes
 attribution immediate.
