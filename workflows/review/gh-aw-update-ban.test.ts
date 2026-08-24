@@ -9,8 +9,15 @@
  * ban, and a mention anywhere else fails red so the author reads the skill
  * before re-recommending.
  *
- * `.changeset/` is excluded (transient release notes describing the ban) and
- * `gh-aw-review-lib/` is a runtime checkout, never tracked.
+ * Known limit: the allowlist is file-granular. It catches the ban RELOCATING
+ * (a mention appearing in a new file) but not a recommending sentence added
+ * to a file already allowed to mention the tool; that stays a review-time
+ * judgment. Excluded from the sweep entirely: `.changeset/` and the package
+ * CHANGELOG.md files (changeset bodies describing the ban are copied
+ * verbatim into the CHANGELOG at `changeset version`, so both carry the
+ * phrase legitimately and transiently grow), and the eval corpus (case
+ * fixtures quote arbitrary text; vitest.config.ts already carves out its
+ * tree/ dirs for the same reason).
  */
 import {spawnSync} from "node:child_process";
 import * as fs from "fs";
@@ -20,10 +27,11 @@ import {describe, expect, it} from "vitest";
 const repoRoot = path.resolve(new URL(".", import.meta.url).pathname, "../..");
 
 /**
- * Files allowed to mention the tool, every one prohibitively: the ban's own
- * section in the bump skill, the two onboarding-skill warnings, the consumer
- * README's warning, and review-pins.test.ts's doc comments about why the
- * pins need a backstop at all.
+ * Files allowed to mention the tool: the ban's own section in the bump skill,
+ * the two onboarding-skill warnings, the consumer README's warning,
+ * review-pins.test.ts's doc comments about why the pins need a backstop at
+ * all, and this file, which carries the search string itself (the one
+ * non-prohibitive mention).
  */
 const ALLOWED = new Set([
     ".claude/skills/review-consumer-bump/SKILL.md",
@@ -35,22 +43,30 @@ const ALLOWED = new Set([
 
 describe("the gh aw update ban", () => {
     it("is mentioned only where it is being banned", () => {
-        const ls = spawnSync("git", ["ls-files", "*.md", "*.ts"], {
+        // Every tracked file, not an extension list: the ban's residue has
+        // already turned up in .md prose, .ts warning strings, and a
+        // compiled .lock.yml, so an extension filter is just a bet on where
+        // the next one lands. Reading a binary as utf8 cannot match the
+        // phrase, so no file type needs excluding for safety.
+        const ls = spawnSync("git", ["ls-files"], {
             cwd: repoRoot,
             encoding: "utf8",
         });
         expect(ls.status).toBe(0);
-        const offenders = ls.stdout
-            .split("\n")
-            .filter(
-                (file) =>
-                    file !== "" &&
-                    !file.startsWith(".changeset/") &&
-                    !ALLOWED.has(file) &&
-                    fs
-                        .readFileSync(path.join(repoRoot, file), "utf8")
-                        .includes("gh aw update"),
-            );
+        const offenders = ls.stdout.split("\n").filter(
+            (file) =>
+                file !== "" &&
+                !file.startsWith(".changeset/") &&
+                // `changeset version` copies each changeset body verbatim
+                // into the package CHANGELOG.md, so the released notes
+                // inherit whatever mentions .changeset/ was excused for.
+                !file.endsWith("CHANGELOG.md") &&
+                !file.startsWith("workflows/review/eval/corpus/") &&
+                !ALLOWED.has(file) &&
+                fs
+                    .readFileSync(path.join(repoRoot, file), "utf8")
+                    .includes("gh aw update"),
+        );
         expect(offenders).toEqual([]);
     });
 
