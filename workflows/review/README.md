@@ -178,13 +178,16 @@ gh aw add Khan/actions/workflows/review/review.md@review-v<major>.<minor>.<patch
 
 This copies `review.md` into the consuming repo's `.github/workflows/`, records a
 `source:` field pointing back here, and compiles `review.lock.yml`. Commit both,
-plus the consumer config files below. Pull future updates with `gh aw update`
-(a 3-way merge that preserves your local edits).
+plus the consumer config files below. Pull future updates with the 3-way merge
+flow in [`review-consumer-bump`](../../.claude/skills/review-consumer-bump/SKILL.md),
+**not** `gh aw update`: the tool does not recognize the `review-v<version>` tag
+scheme, repins to main's head SHA instead, and has emptied an installed
+`review.md` to 0 bytes.
 
 The tag is self-consistent: the `review.md` inside each `review-v<version>` tag
 pins its own `pre-agent-steps` checkout `ref:` to that same version (the release
-flow rewrites it; see [Versioning](#versioning)), so after `gh aw add` or
-`gh aw update` the imported file already fetches the matching lib code and needs
+flow rewrites it; see [Versioning](#versioning)), so after `gh aw add` or a
+merge-based update the imported file already fetches the matching lib code and needs
 no manual fix-up of the ref.
 
 ### Onboarding a whole repo
@@ -271,7 +274,7 @@ main workflow would override the import and discard your allowlist.
 
 Repo-specific frontmatter that imports can't merge (e.g. an `if:` condition to skip
 deploy/automation branches or forks) goes directly in your installed `review.md` as
-a local edit; `gh aw update` preserves it.
+a local edit; the 3-way merge update flow preserves it.
 
 ### Per-lens payloads (`lenses/<lens>.md`)
 
@@ -790,7 +793,7 @@ Two known interactions:
   rejects it, and the agent job dies at startup instead of skipping trace
   export (observed on Khan/actions#241). A repo without these secrets must
   comment out the `observability:` block in its installed `review.md` as a
-  local edit (which `gh aw update` preserves) and recompile.
+  local edit (which the 3-way merge update flow preserves) and recompile.
 
 Optional:
 
