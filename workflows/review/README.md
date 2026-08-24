@@ -696,6 +696,7 @@ sub-agent models — this table is the human-facing summary:
 | `documentation` | `claude-opus-5` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
 | `first-principles` | `claude-opus-5` | high | Opt-in advisory-only; reviews the change's justification |
 | `claim-validator` | `claude-opus-5` | xhigh | Adversarial claim validation; stays Opus (the Fable arm did not improve precision) |
+| prose judge | `claude-opus-4-8` | (single completion) | In-session style gate on submitted finding prose (`judge-prose.ts`); haiku's verdicts flickered run to run, and opus-4-8 is proven invokable and curated-priced through the stable firewall |
 | specialist lenses | `claude-opus-5` | high | Opt-in via `lens=` in `ROUTING`; the security & auth lens is xhigh |
 
 Only the orchestrator and the default roster (`pattern-triage`,
