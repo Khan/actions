@@ -403,14 +403,21 @@ export const runSubmissionCli = (
         depth === "scoped" && fs.existsSync(`${REVIEW_DIR}/scoped.diff`)
             ? `${REVIEW_DIR}/scoped.diff`
             : `${REVIEW_DIR}/full.diff`;
-    const vetoed = applyMediumVeto(
-        claims,
-        computeChangedLines(
-            fs.existsSync(vetoDiffPath)
-                ? fs.readFileSync(vetoDiffPath, "utf8")
-                : "",
-        ),
-    );
+    const vetoDiffText = fs.existsSync(vetoDiffPath)
+        ? fs.readFileSync(vetoDiffPath, "utf8")
+        : "";
+    const vetoed = applyMediumVeto(claims, computeChangedLines(vetoDiffText));
+    if (
+        vetoDiffText === "" &&
+        claims.some((claim) => claim.importance === "medium")
+    ) {
+        // A missing diff demotes every medium for a reason unrelated to
+        // reviewer behavior; without this line the calibration count below
+        // reads as roster under-use.
+        notes.push(
+            "medium veto ran with no staged diff (all medium claims demoted)",
+        );
+    }
     // The day-one calibration instrument (artifact-only): whether the
     // roster uses the tier at all is unobservable from posted output alone
     // (under-use looks exactly like the pre-tier surface), so every plan

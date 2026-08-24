@@ -100,7 +100,7 @@ describe("runSubmissionCli: re-review blocking-medium", () => {
         expect(plan.comments).toHaveLength(1);
         expect(plan.comments[0].line).toBe(2);
         expect(plan.body).toContain(
-            "Non-blocking observations (1; top: a.ts:9 suggestion (non-blocking): Rename the helper.)",
+            "Non-blocking observations (1; top: `a.ts:9` suggestion (non-blocking): Rename the helper.)",
         );
         expect(plan.notes.join(" ")).toContain(
             "1 non-blocking claim(s) collapsed into the body (re-review blocking-medium)",
@@ -235,5 +235,51 @@ describe("runSubmissionCli: re-review blocking-medium", () => {
         // confidence in the set.
         expect(plan.comments).toHaveLength(1);
         expect(plan.comments[0].line).toBe(9);
+    });
+});
+
+describe("the veto's diff sources", () => {
+    it("vetoes against scoped.diff when the scoped run staged one", () => {
+        const files = staged({
+            depth: "scoped",
+            claims: [
+                claim({id: "in-scoped", line: 2, importance: "medium"}),
+                claim({id: "outside", line: 9, importance: "medium"}),
+            ],
+        });
+        // The scoped diff carries only line 2: reviewers on this run saw
+        // only that hunk, so only the claim anchored inside it keeps the
+        // tier; line 9 is added in full.diff but not in this run's view.
+        files[`${REVIEW}/scoped.diff`] = [
+            "diff --git a/a.ts b/a.ts",
+            "--- a/a.ts",
+            "+++ b/a.ts",
+            "@@ -1,1 +1,2 @@",
+            " line 1",
+            "+line 2",
+            "",
+        ].join("\n");
+        const plan = runSubmissionCli(makeFakeFs(files));
+        expect(plan.comments).toHaveLength(1);
+        expect(plan.comments[0].line).toBe(2);
+        expect(plan.notes).toContainEqual(
+            "medium-importance claims this run: 1",
+        );
+    });
+
+    it("notes the demotion when no diff is staged at all", () => {
+        const files = staged({
+            depth: "scoped",
+            claims: [claim({id: "medium", importance: "medium"})],
+        });
+        delete files[`${REVIEW}/full.diff`];
+        const plan = runSubmissionCli(makeFakeFs(files));
+        expect(plan.comments).toHaveLength(0);
+        expect(plan.notes).toContainEqual(
+            "medium veto ran with no staged diff (all medium claims demoted)",
+        );
+        expect(plan.notes).toContainEqual(
+            "medium-importance claims this run: 0",
+        );
     });
 });

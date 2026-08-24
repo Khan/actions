@@ -2081,7 +2081,8 @@ claim whose evidence clearly does. This is not the never-raise rule's
 territory: importance is prominence (which non-blocking findings post inline),
 never severity, and it cannot affect the verdict. A `plausible` or `refuted`
 claim needs no importance call from you; code strips the tier from every
-unconfirmed claim mechanically.
+claim you verify as plausible or refute (a claim your output never mentions
+keeps whatever it arrived with, per the missing-output rule).
 
 What this repo's CI and tooling already catch — a claim about any of
 these is a false positive, so drop it:

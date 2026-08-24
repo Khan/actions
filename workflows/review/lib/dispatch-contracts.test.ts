@@ -843,3 +843,35 @@ describe("the medium importance tier (PRA-7)", () => {
         expect(result).toHaveLength(4);
     });
 });
+
+describe("the medium veto's change-anchored line set", () => {
+    const DIFF_WITH_REMOVAL = [
+        "diff --git a/b.ts b/b.ts",
+        "--- a/b.ts",
+        "+++ b/b.ts",
+        "@@ -4,3 +4,2 @@",
+        " context above",
+        "-the removed guard",
+        " context below",
+    ].join("\n");
+
+    it("keeps medium on a removal-adjacent anchor (dropped-guard findings)", () => {
+        const changed = computeChangedLines(DIFF_WITH_REMOVAL);
+        const claims: Claim[] = [
+            {
+                id: "dropped-guard",
+                source: "correctness-reviewer",
+                path: "b.ts",
+                line: 4,
+                label: "note (non-blocking)",
+                subject: "s",
+                discussion: "d",
+                failure_scenario: "f",
+                confidence: 0.8,
+                importance: "medium",
+            },
+        ];
+        const result = applyMediumVeto(claims, changed);
+        expect(result[0].importance).toBe("medium");
+    });
+});

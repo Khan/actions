@@ -87,8 +87,8 @@ export const isBlockingLabel = (label: string): boolean =>
 
 /**
  * Lenses whose findings render as *best-practice* labels rather than plain
- * correctness labels. The finding schema deliberately keeps only a two-value
- * `severity` (blocking/advisory); the richer Conventional taxonomy is applied
+ * correctness labels. The finding schema deliberately keeps a small three-value
+ * `severity` (blocking/medium/advisory); the richer Conventional taxonomy is applied
  * here at render time (schema comment on `SEVERITIES`). #194 maps skill/
  * best-practice findings to the `, best-practice` label variants, so among
  * schema findings only the conventions lens gets them (the skill-auditor's
@@ -145,7 +145,7 @@ const DOCUMENTATION_LENSES: ReadonlySet<Lens> = new Set<Lens>([
  * safe direction (a blocking finding wants a human, not a scoped bulk fix).
  *
  * The finer labels a human reviewer might pick (`todo`, `nitpick`, `question`,
- * `thought`, `note`) are not expressible in the two-value schema, so lenses fold
+ * `thought`, `note`) are not expressible in the three-value schema, so lenses fold
  * them into the canonical issue/suggestion pair. `verdict.ts` and `review.md`
  * both treat `issue (blocking*)` and `todo (blocking)` identically, so the fold
  * is verdict-preserving.

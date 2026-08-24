@@ -949,3 +949,37 @@ describe("openThreadsFromStaged", () => {
         expect(openThreadsFromStaged([humanThread], new Set())).toEqual([]);
     });
 });
+
+describe("survivor election and the medium tier", () => {
+    it("prefers the copy carrying medium over a higher-confidence minor copy", () => {
+        // Two non-blocking copies of one defect, same anchor, near-identical
+        // text: the tier must survive corroboration (and keep the plan's
+        // medium-count instrument honest), so the medium copy wins the
+        // election despite the lower confidence.
+        const minor = claim({
+            id: "holistic-1",
+            source: "holistic",
+            label: "note (non-blocking)",
+            confidence: 0.9,
+            subject:
+                "AddDate(0, -MemoryTTLDays, 0) subtracts 180 months, not 180 days, so nothing expires.",
+            failure_scenario:
+                "AddDate(0, -MemoryTTLDays, 0) subtracts 180 months, not 180 days, so nothing expires",
+        });
+        const medium = claim({
+            id: "correctness-reviewer-1",
+            source: "correctness-reviewer",
+            label: "note (non-blocking)",
+            confidence: 0.6,
+            importance: "medium",
+            subject:
+                "AddDate(0, -MemoryTTLDays, 0) subtracts 180 months, not 180 days, so nothing expires.",
+            failure_scenario:
+                "AddDate(0, -MemoryTTLDays, 0) subtracts 180 months, not 180 days, so nothing expires",
+        });
+        const {claims} = dedupeClaims([minor, medium]);
+        expect(claims).toHaveLength(1);
+        expect(claims[0].id).toBe("correctness-reviewer-1");
+        expect(claims[0].importance).toBe("medium");
+    });
+});

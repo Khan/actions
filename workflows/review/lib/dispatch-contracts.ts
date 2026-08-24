@@ -741,14 +741,18 @@ export const buildClaims = (candidates: Candidate[]): Claim[] =>
 /**
  * The deterministic changed-lines veto on the medium tier (PRA-7): medium
  * prominence is defined over "code this PR adds", so a medium claim must
- * anchor on a line the staged diff ADDED; anything else (context-line,
- * file-level, or pr-level anchors, or a path outside the diff) keeps the
- * claim and loses only the tier. Runs at the posting surface, AFTER
- * validation, so it has the last word over both a reviewer's proposal and a
- * validator grant — code vetoes, models propose. Measured on the 08-24
- * collapsed-tail corpus the veto barely binds (86 of 91 entries anchored to
- * added lines already), which is the point: it is a cheap floor against the
- * drift case, not a filter that does daily work.
+ * anchor on a line the staged diff changed: an ADDED line, or a line
+ * adjacent to a removal (the provenance gate's change-anchored set; a
+ * dropped-guard finding anchors on the line neighbouring the deletion, and
+ * review.md's removed-behavior audit tells reviewers to anchor exactly
+ * there). Anything else (other context lines, file-level or pr-level
+ * anchors, a path outside the diff) keeps the claim and loses only the
+ * tier. Runs at the posting surface, AFTER validation, so it has the last
+ * word over both a reviewer's proposal and a validator grant; code vetoes,
+ * models propose. Measured on the 08-24 collapsed-tail corpus the veto
+ * barely binds (86 of 91 entries anchored to added lines already), which is
+ * the point: it is a cheap floor against the drift case, not a filter that
+ * does daily work.
  */
 export const applyMediumVeto = (
     claims: Claim[],
@@ -758,14 +762,13 @@ export const applyMediumVeto = (
         if (claim.importance !== "medium") {
             return claim;
         }
-        const added =
-            claim.path !== undefined
-                ? changedLines[claim.path]?.added
-                : undefined;
+        const file =
+            claim.path !== undefined ? changedLines[claim.path] : undefined;
         if (
             claim.line !== undefined &&
-            added !== undefined &&
-            added.includes(claim.line)
+            file !== undefined &&
+            (file.added.includes(claim.line) ||
+                file.removedAdjacent.includes(claim.line))
         ) {
             return claim;
         }
