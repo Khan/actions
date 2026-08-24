@@ -130,6 +130,64 @@ describe("createSdkRunner submit_result (trial suggestion h)", () => {
         expect(result.usd).toBe(0);
     });
 
+    it("salvages the last assistant text when the session dies without success", async () => {
+        // The Stop hook pushes a free-text agent to keep going, so it can
+        // burn its last turns being redirected and end on error_max_turns
+        // with a usable final already written; that text is the output.
+        session = async function* () {
+            yield {
+                type: "assistant",
+                message: {
+                    content: [{type: "text", text: "the free-text findings"}],
+                },
+            };
+            yield {type: "result", subtype: "error_max_turns"};
+        };
+        const result = await (await createSdkRunner())(request());
+        expect(result.structured).toBeUndefined();
+        expect(result.output).toBe("the free-text findings");
+        expect(result.usd).toBe(0);
+    });
+
+    it("reports a timeout instead of salvaging mid-investigation narration", async () => {
+        // Nearly every agent emits assistant text before it finishes, so a
+        // lastText salvage that outranks the timeout check would make the
+        // timeout error unreachable: the narration would come back as the
+        // output, fail the contract parse, and burn the one
+        // malformed-output re-dispatch (paying for the timed-out run
+        // twice). The timeout must win over lastText.
+        session = async function* () {
+            yield {
+                type: "assistant",
+                message: {
+                    content: [{type: "text", text: "still investigating..."}],
+                },
+            };
+            await new Promise((resolve) => setTimeout(resolve, 25));
+            throw new Error("aborted by user");
+        };
+        await expect(
+            (
+                await createSdkRunner()
+            )(request({timeoutMs: 5})),
+        ).rejects.toThrow(/timed out after 5ms/);
+    });
+
+    it("still salvages an ACCEPTED payload past the timeout", async () => {
+        // A payload submit_result accepted is complete and validated; the
+        // session then hanging until the timeout should not discard it.
+        session = async function* (tools) {
+            await tools[0].handler({result: {findings: []}}, undefined);
+            await new Promise((resolve) => setTimeout(resolve, 25));
+            throw new Error("aborted by user");
+            // eslint-disable-next-line no-unreachable
+            yield success("never reached");
+        };
+        const result = await (await createSdkRunner())(request({timeoutMs: 5}));
+        expect(result.structured).toBe(true);
+        expect(JSON.parse(result.output)).toEqual({findings: []});
+    });
+
     it("still throws a dead session with nothing accepted", async () => {
         session = async function* () {
             yield {type: "result", subtype: "error_max_turns"};
@@ -190,5 +248,168 @@ describe("createSdkRunner sub-agent environment", () => {
         const env = lastOptions["env"] as Record<string, string | undefined>;
         expect(env["GH_AW_DISPATCH_RUNNER_PROBE"]).toBe("inherited");
         expect(env["PATH"]).toBe(process.env["PATH"]);
+    });
+});
+
+type HookCallback = (
+    input?: unknown,
+    toolUseID?: unknown,
+    extra?: unknown,
+) => Promise<Record<string, unknown>>;
+
+/** The Stop hook the runner registered on the last query, if any. */
+const stopHook = (): HookCallback | undefined => {
+    const hooks = lastOptions["hooks"] as
+        | Record<string, {hooks: HookCallback[]}[]>
+        | undefined;
+    return hooks?.["Stop"]?.[0]?.hooks[0];
+};
+
+describe("createSdkRunner prose gate (PRA-45)", () => {
+    it("bounces a style rejection to the author AFTER the contract accepts", async () => {
+        const judged: string[] = [];
+        session = async function* (tools) {
+            const bounced = await tools[0].handler(
+                {result: {findings: [{id: "f1"}]}},
+                undefined,
+            );
+            expect(bounced.isError).toBe(true);
+            expect(bounced.content[0].text).toBe("Result rejected: style");
+            // The author rewrites and re-calls; second submission passes.
+            const accepted = await tools[0].handler(
+                {result: {findings: [{id: "f1-rewritten"}]}},
+                undefined,
+            );
+            expect(accepted.isError).toBeUndefined();
+            yield success("trailing prose");
+        };
+        const result = await (
+            await createSdkRunner()
+        )(
+            request({
+                judgeProse: (payload) => {
+                    judged.push(JSON.stringify(payload));
+                    return Promise.resolve(
+                        judged.length === 1 ? "Result rejected: style" : null,
+                    );
+                },
+            }),
+        );
+        expect(result.structured).toBe(true);
+        expect(JSON.parse(result.output)).toEqual({
+            findings: [{id: "f1-rewritten"}],
+        });
+        expect(judged).toHaveLength(2);
+    });
+
+    it("salvages the contract-valid payload when the session dies mid style bounce", async () => {
+        session = async function* (tools) {
+            const bounced = await tools[0].handler(
+                {result: {findings: [{id: "pre-style"}]}},
+                undefined,
+            );
+            expect(bounced.isError).toBe(true);
+            throw new Error("session died before the rewrite came back");
+            // eslint-disable-next-line no-unreachable
+            yield success("never reached");
+        };
+        const result = await (
+            await createSdkRunner()
+        )(
+            request({
+                judgeProse: () => Promise.resolve("Result rejected: style"),
+            }),
+        );
+        // Style enforcement may cost prose quality, never a dimension: the
+        // pre-style payload posts rather than the lens being shed.
+        expect(result.structured).toBe(true);
+        expect(JSON.parse(result.output)).toEqual({
+            findings: [{id: "pre-style"}],
+        });
+    });
+
+    it("prefers the contract-valid provisional over an unvalidated free-text final", async () => {
+        session = async function* (tools) {
+            await tools[0].handler(
+                {result: {findings: [{id: "pre-style"}]}},
+                undefined,
+            );
+            yield success("free text the model pasted instead of re-calling");
+        };
+        const result = await (
+            await createSdkRunner()
+        )(
+            request({
+                judgeProse: () => Promise.resolve("Result rejected: style"),
+            }),
+        );
+        expect(result.structured).toBe(true);
+        expect(JSON.parse(result.output)).toEqual({
+            findings: [{id: "pre-style"}],
+        });
+    });
+
+    it("never judges a payload the contract already rejected", async () => {
+        let judgeCalls = 0;
+        session = async function* (tools) {
+            const rejected = await tools[0].handler(
+                {result: {finding: "drifted"}},
+                undefined,
+            );
+            expect(rejected.isError).toBe(true);
+            yield success('{"findings": []}');
+        };
+        await (
+            await createSdkRunner()
+        )(
+            request({
+                judgeProse: () => {
+                    judgeCalls += 1;
+                    return Promise.resolve(null);
+                },
+            }),
+        );
+        expect(judgeCalls).toBe(0);
+    });
+});
+
+describe("createSdkRunner Stop hook (the free-text fallback funnel)", () => {
+    it("blocks a stop without a submission, twice, then lets the fallback proceed", async () => {
+        session = async function* () {
+            yield success("free text");
+        };
+        await (
+            await createSdkRunner()
+        )(request());
+        const hook = stopHook();
+        expect(hook).toBeDefined();
+        const first = await hook!();
+        expect(first).toMatchObject({decision: "block"});
+        expect(String(first["reason"])).toContain("submit_result");
+        expect(await hook!()).toMatchObject({decision: "block"});
+        // Cap spent: the third stop goes through (the genuine fallback).
+        expect(await hook!()).toEqual({});
+    });
+
+    it("lets a stop through once a payload was accepted", async () => {
+        session = async function* (tools) {
+            await tools[0].handler({result: {findings: []}}, undefined);
+            yield success("done");
+        };
+        await (
+            await createSdkRunner()
+        )(request());
+        const hook = stopHook();
+        expect(await hook!()).toEqual({});
+    });
+
+    it("registers no Stop hook without a validate contract (no tool to point at)", async () => {
+        session = async function* () {
+            yield success("free text");
+        };
+        await (
+            await createSdkRunner()
+        )(request({validate: undefined}));
+        expect(stopHook()).toBeUndefined();
     });
 });
