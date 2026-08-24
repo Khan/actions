@@ -353,6 +353,69 @@ describe("suppressThenMergeCrossFile", () => {
         expect(result.crossFileMerges).toHaveLength(1);
     });
 
+    const staged = (over: Record<string, unknown>) => [
+        {
+            thread_id: "T-1",
+            path: EXERCISE,
+            comments: [
+                {
+                    author: "github-actions",
+                    body: `**suggestion (non-blocking, documentation):** ${
+                        claim({}).subject
+                    } ${claim({}).discussion}`,
+                },
+            ],
+            ...over,
+        },
+    ];
+
+    it("open corpus: a tracked file's copy exits through its thread and the sibling posts alone", () => {
+        // The ordering rationale in mergeCrossFileDuplicates's doc, pinned:
+        // the open matcher is path-keyed, so the thread on EXERCISE takes
+        // its own file's copy and the TUTOR_ME occurrence still posts.
+        const result = suppressThenMergeCrossFile(
+            pair(),
+            staged({resolved: false}),
+            [],
+            new Set(),
+            [EXERCISE, TUTOR_ME],
+        );
+        expect(result.claims.map((kept) => kept.id)).toEqual([
+            "documentation-2",
+        ]);
+        expect(result.suppressed).toHaveLength(1);
+        expect(result.suppressed[0].id).toBe("documentation-1");
+        expect(result.suppressed[0].adjudicated).toBeUndefined();
+        expect(result.crossFileMerges).toEqual([]);
+    });
+
+    it("adjudicated corpus: a settled thread takes the near-identical sibling copy too", () => {
+        // The deliberate contrast with the open-corpus case above: the
+        // adjudicated matcher drops the path key, so both stamped copies of
+        // the human-settled non-blocking ask exit through the one thread and
+        // nothing reaches the merge. A blocking re-presentation would post
+        // (dedup-adjudicated.test.ts pins that exemption).
+        const result = suppressThenMergeCrossFile(
+            pair(),
+            [],
+            staged({resolved: true, resolvedBy: "sxkosone"}),
+            new Set(),
+            [EXERCISE, TUTOR_ME],
+        );
+        expect(result.claims).toEqual([]);
+        expect(result.suppressed).toHaveLength(2);
+        expect(
+            result.suppressed.map((entry) => ({
+                id: entry.id,
+                adjudicated: entry.adjudicated,
+            })),
+        ).toEqual([
+            {id: "documentation-1", adjudicated: true},
+            {id: "documentation-2", adjudicated: true},
+        ]);
+        expect(result.crossFileMerges).toEqual([]);
+    });
+
     it("re-applies the occurrence list a corrected discussion erased", () => {
         const merged = mergeCrossFileDuplicates(pair(), [EXERCISE, TUTOR_ME]);
         const corrected = merged.claims.map((kept) => ({

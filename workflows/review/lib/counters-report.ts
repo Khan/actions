@@ -327,8 +327,7 @@ export const renderCountersMarkdown = (
     lines.push("", "### Thumbs and cost", "");
     lines.push(
         counters.thumbs.agreeRate === null
-            ? "- Thumbs: none recorded in per-run artifacts (live tallies are" +
-                  " reported by each thumbs-sweep run's job summary)"
+            ? "- Thumbs: none recorded in per-run artifacts"
             : `- Thumbs: ${counters.thumbs.up} 👍 / ${counters.thumbs.down} 👎` +
                   ` (agree rate ${pct(counters.thumbs.agreeRate)})`,
     );
