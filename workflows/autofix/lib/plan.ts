@@ -24,9 +24,10 @@
  * rule is that the trigger decides: they never union with each other.
  */
 
+import {parseCollapsedObservations} from "./collapsed.ts";
 import {AUTOFIX_LABEL_PREFIX, resolveCommand, resolveScope} from "./scope.ts";
 import type {RequestSurface, ScopeResolution} from "./scope.ts";
-import {buildWorkList} from "./worklist.ts";
+import {buildBodyWorkList, buildWorkList} from "./worklist.ts";
 import type {SkippedThread, WorkItem} from "./worklist.ts";
 import {
     assessReviewCurrency,
@@ -199,11 +200,23 @@ export const buildPlan = (input: PlanInput): AutofixPlan => {
 
     const stalePaths = currency.status === "current" ? currency.stalePaths : [];
     const stale = new Set(stalePaths);
-    const {items, skipped} = buildWorkList(
+    const {items: threadItems, skipped: threadSkipped} = buildWorkList(
         input.threads,
         resolution.request.findingLabels,
         input.botLogin,
     );
+    // The second source (PRA-7): collapsed observations from the latest
+    // review body, so the reviewer's posting budget cannot silently shrink
+    // autofix's scope. Thread items come first: they carry the full finding
+    // and a reply surface; a body item is a one-line subject with a
+    // synthetic id, reported in the run summary instead.
+    const bodyList = buildBodyWorkList(
+        parseCollapsedObservations(input.priorReviews),
+        resolution.request.findingLabels,
+        input.threads,
+    );
+    const items = [...threadItems, ...bodyList.items];
+    const skipped = [...threadSkipped, ...bodyList.skipped];
 
     // Drop findings whose file moved on after the review that raised them. The
     // finding may already be fixed, or may describe code that no longer exists;

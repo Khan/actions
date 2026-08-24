@@ -218,7 +218,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         );
     });
 
-    it("exempts documentation-label claims from the budget (autofix selects by posted label)", () => {
+    it("budgets documentation-label claims like any other (autofix reads the collapsed section)", () => {
         const claims = [
             ...manyClaims(3, {
                 label: "suggestion (non-blocking)",
@@ -235,10 +235,13 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
             makeFakeFs(staged({depth: "full", claims})),
         );
         // Three suggestions spend the whole budget; the documentation claim
-        // still posts inline (it must become a thread for the documentation
-        // autofix to see it).
-        expect(plan.comments).toHaveLength(4);
-        expect(plan.comments.map((entry) => entry.line)).toContain(30);
+        // collapses, where the autofix's body-sourced work list still
+        // reaches it (workflows/autofix/lib/collapsed.ts).
+        expect(plan.comments).toHaveLength(3);
+        expect(plan.comments.map((entry) => entry.line)).not.toContain(30);
+        // The collapsed section (riding the top comment at full depth)
+        // still carries the entry the body-sourced work list parses.
+        expect(plan.comments[0].body).toContain("`a.ts:30`");
     });
 
     it("collapses sub-medium-confidence non-blocking claims even under the cap", () => {

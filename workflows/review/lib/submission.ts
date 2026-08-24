@@ -68,7 +68,6 @@ import {computeChangedLines} from "./diff";
 import {DEFAULT_FINDERS, TRIAGE_DIMENSION} from "./dispatch-roster";
 import {runCli as runNotifiedCli} from "./notified";
 import {
-    DOCUMENTATION_LABEL,
     HOLD_HEAD,
     HOLD_UNSTUCK_LINES,
     isBlockingLabel,
@@ -678,12 +677,10 @@ export const runSubmissionCli = (
     //   - At most `nonBlockingInlineBudget` other non-blocking claims post
     //     inline (routing.json's `non-blocking-budget` line, default 3);
     //     the budget spends in ranked order, so what sheds is chosen.
-    //   - The documentation label is exempt from the budget: the
-    //     documentation reviewer self-caps at five per review, and the
-    //     documentation autofix selects its work by parsing that label off
-    //     posted threads, so budgeting those would silently shrink a
-    //     shipped feature's scope (until the autofix learns to read the
-    //     collapsed section, at which point the exemption goes).
+    //     Documentation-label claims are budgeted like any other since the
+    //     autofix learned to read the collapsed section (its selection used
+    //     to be posted threads only, which made collapsing a doc finding
+    //     silently shrink a shipped feature's scope).
     //
     // Everything else collapses to one terse line each in a single
     // <details> block riding the highest-ranked inline comment (or the
@@ -746,9 +743,6 @@ export const runSubmissionCli = (
         if (isNitpick(claim)) {
             nitpickShed++;
             return false;
-        }
-        if (claim.label === DOCUMENTATION_LABEL) {
-            return true;
         }
         if (budgetLeft > 0) {
             budgetLeft--;

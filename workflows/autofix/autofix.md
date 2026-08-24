@@ -454,6 +454,11 @@ widen someone's `/autofix blocking`. `plan.surface` records which one won.
 For every item in `plan.items`, read the file at `path` around `line` from the
 Actions workspace (the PR head is checked out; read from disk, not through the
 API). The item's `body` is the reviewer's statement of the problem, verbatim.
+For a body-sourced item (id starting `review-body:`, parsed off the latest
+review body's collapsed observations) the `body` is a one-line subject rather
+than a full finding, so the read-the-code step carries more of the weight:
+if the line does not make the problem evident, leave the item alone and say
+so in Step 7.
 
 Work out what the reviewer meant. If a finding is ambiguous, or you cannot
 determine what a correct fix would be, **leave it alone** and record it as
@@ -608,6 +613,12 @@ For every item you fixed, emit one `reply-to-pull-request-review-comment` on
 that item's thread, stating what you changed in one or two sentences. Be
 specific: "Renamed to `parsedConfig` and updated the three call sites" beats
 "Fixed".
+
+**Exception: body-sourced items.** An item whose id starts `review-body:` came
+from the latest review body's collapsed observations, not from a thread; there
+is nothing to reply on. Skip it here and report what you did (fixed, left
+unfixed and why) in the Step 7 summary instead, one line per body-sourced
+item: `` `path:line`: <what changed, or why not> ``.
 
 Do **not** resolve any thread. The next review decides whether the fix settled
 the finding; that is the whole verification story for this workflow, it is

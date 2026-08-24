@@ -23,6 +23,8 @@
  * to act on and any edit would be guesswork.
  */
 
+import {bodyItemId} from "./collapsed.ts";
+import type {CollapsedObservation} from "./collapsed.ts";
 import {parseLeadingLabel} from "../../review/lib/rereview.ts";
 import type {StagedThread} from "../../review/lib/rereview.ts";
 
@@ -51,7 +53,10 @@ export type SkippedThread = {
         /** The file changed after the review that raised this finding. */
         | "stale-path"
         /** Somebody other than the reviewer opened it; not v1's to act on. */
-        | "not-reviewer-thread";
+        | "not-reviewer-thread"
+        /** A body-sourced observation whose anchor an open thread already
+         * covers; the thread is the work item, the body line is its echo. */
+        | "thread-covered";
     /** The parsed label when there was one; absent for unparseable. */
     label?: string;
 };
@@ -147,5 +152,60 @@ export const buildWorkList = (
         });
     }
 
+    return {items, skipped};
+};
+
+/**
+ * Select the body-sourced observations in scope for this run (the collapsed
+ * entries of the latest review body; see `collapsed.ts` for why those exist
+ * and why latest-only). Same in-scope rule as {@link buildWorkList}, plus one
+ * extra guard: an observation whose `path:line` an open reviewer thread
+ * already covers is skipped as `thread-covered`, so one finding cannot
+ * become two work items when a re-review posts what an earlier run
+ * collapsed. Body items carry a synthetic `review-body:` id ({@link
+ * bodyItemId}); there is no thread to reply on, so the prompt reports their
+ * fixes in the run summary instead (autofix.md Step 6).
+ */
+export const buildBodyWorkList = (
+    observations: readonly CollapsedObservation[],
+    findingLabels: readonly string[],
+    threads: readonly StagedThread[],
+): WorkList => {
+    const inScope = new Set(findingLabels);
+    const covered = new Set(
+        threads
+            .filter((thread) => typeof thread.line === "number")
+            .map((thread) => `${thread.path}:${thread.line}`),
+    );
+    const items: WorkItem[] = [];
+    const skipped: SkippedThread[] = [];
+    for (const observation of observations) {
+        const id = bodyItemId(observation);
+        if (!inScope.has(observation.label)) {
+            skipped.push({
+                threadId: id,
+                path: observation.path,
+                reason: "out-of-scope",
+                label: observation.label,
+            });
+            continue;
+        }
+        if (covered.has(`${observation.path}:${observation.line}`)) {
+            skipped.push({
+                threadId: id,
+                path: observation.path,
+                reason: "thread-covered",
+                label: observation.label,
+            });
+            continue;
+        }
+        items.push({
+            threadId: id,
+            path: observation.path,
+            line: observation.line,
+            label: observation.label,
+            body: observation.subject,
+        });
+    }
     return {items, skipped};
 };

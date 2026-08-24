@@ -1,6 +1,7 @@
 import {describe, expect, it} from "vitest";
 
-import {buildWorkList} from "./worklist.ts";
+import {buildBodyWorkList, buildWorkList} from "./worklist.ts";
+import type {CollapsedObservation} from "./collapsed.ts";
 import type {StagedThread} from "../../review/lib/rereview.ts";
 import {
     BLOCKING_LABELS,
@@ -185,5 +186,60 @@ describe("thread ownership", () => {
         expect(
             buildWorkList([staged], BLOCKING, "other-bot").items,
         ).toHaveLength(1);
+    });
+});
+
+describe("buildBodyWorkList", () => {
+    const observation = (over: Partial<CollapsedObservation> = {}) => ({
+        path: "src/a.ts",
+        line: 12,
+        label: "suggestion (non-blocking, documentation)",
+        subject: "Trim the doc comment.",
+        ...over,
+    });
+
+    it("selects in-scope observations as review-body items", () => {
+        const {items, skipped} = buildBodyWorkList(
+            [observation()],
+            ["suggestion (non-blocking, documentation)"],
+            [],
+        );
+        expect(skipped).toEqual([]);
+        expect(items).toEqual([
+            {
+                threadId: "review-body:src/a.ts:12",
+                path: "src/a.ts",
+                line: 12,
+                label: "suggestion (non-blocking, documentation)",
+                body: "Trim the doc comment.",
+            },
+        ]);
+    });
+
+    it("skips out-of-scope observations, recording the label", () => {
+        const {items, skipped} = buildBodyWorkList(
+            [observation({label: "question (non-blocking)"})],
+            ["suggestion (non-blocking, documentation)"],
+            [],
+        );
+        expect(items).toEqual([]);
+        expect(skipped).toEqual([
+            {
+                threadId: "review-body:src/a.ts:12",
+                path: "src/a.ts",
+                reason: "out-of-scope",
+                label: "question (non-blocking)",
+            },
+        ]);
+    });
+
+    it("skips an observation whose anchor an open thread already covers", () => {
+        const {items, skipped} = buildBodyWorkList(
+            [observation()],
+            ["suggestion (non-blocking, documentation)"],
+            [thread({body: "**suggestion (non-blocking):** same spot"})],
+        );
+        expect(items).toEqual([]);
+        expect(skipped[0]).toMatchObject({reason: "thread-covered"});
     });
 });

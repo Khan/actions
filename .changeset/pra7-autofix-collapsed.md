@@ -1,0 +1,6 @@
+---
+"autofix": minor
+"review": minor
+---
+
+Autofix now parses the review body's collapsed observations as a second work-list source, and the reviewer's documentation-label budget exemption goes away. The coupling this fixes: autofix selected its work exclusively off posted threads (the label parse on each opener), so any finding the reviewer's posting surface collapsed (the non-blocking budget, `blocking-only`/`blocking-medium` re-reviews) silently vanished from autofix's scope; the documentation autofix was the acute case, since its entire selection is one label. The plan reads the collapsed entries of the latest bot review body (`workflows/autofix/lib/collapsed.ts`, parsing the exact line grammar `submission.ts` renders), filtered by the same scope labels, deduplicated against open threads (`thread-covered`), and subject to the same stale-path currency check. Body-sourced items carry a synthetic `review-body:path:line` id; there is no thread to reply on, so the prompt reports their outcomes in the run summary instead of Step 6 replies. With that in place, the review side drops the documentation exemption from the non-blocking inline budget: doc findings are budgeted like any other, and collapsing one no longer shrinks the autofix's reach.

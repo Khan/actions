@@ -513,3 +513,62 @@ describe("skip-ai-review does not disarm autofix", () => {
         expect(plan.reason).toBe(REFUSAL_REASONS["no-review"]);
     });
 });
+
+describe("buildPlan: body-sourced items (the collapsed-section source)", () => {
+    const collapsedBody = (stampBody: string) =>
+        [
+            stampBody,
+            "<details>",
+            "<summary>Non-blocking observations (2; top: src/a.ts:2 suggestion (non-blocking, documentation))</summary>",
+            "",
+            "- `src/a.ts:2` suggestion (non-blocking, documentation): Trim the doc. <sub>(documentation)</sub>",
+            "- `src/b.ts:9` question (non-blocking): Why the retry? <sub>(holistic)</sub>",
+            "",
+            "</details>",
+        ].join("\n");
+
+    it("arms on collapsed in-scope observations with no threads at all", () => {
+        const stamped = reviewStamped(DIFF);
+        const plan = buildPlan(
+            input({
+                labels: ["autofix: docs"],
+                threads: [],
+                priorReviews: [{...stamped, body: collapsedBody(stamped.body)}],
+            }),
+        );
+        expect(plan.status).toBe("armed");
+        expect(plan.items.map((item) => item.threadId)).toEqual([
+            "review-body:src/a.ts:2",
+        ]);
+        // The out-of-scope question is recorded, not silently dropped.
+        expect(plan.skipped).toContainEqual({
+            threadId: "review-body:src/b.ts:9",
+            path: "src/b.ts",
+            reason: "out-of-scope",
+            label: "question (non-blocking)",
+        });
+        expect(plan.trailer).toContain("review-body:src/a.ts:2");
+    });
+
+    it("thread items stay first and stale paths drop body items too", () => {
+        const stamped = reviewStamped(DIFF);
+        const plan = buildPlan(
+            input({
+                labels: ["autofix: docs"],
+                threads: [
+                    thread({
+                        thread_id: "T-doc",
+                        path: "src/c.ts",
+                        body: "**suggestion (non-blocking, documentation):** fix the docstring",
+                    }),
+                ],
+                priorReviews: [{...stamped, body: collapsedBody(stamped.body)}],
+            }),
+        );
+        expect(plan.status).toBe("armed");
+        expect(plan.items.map((item) => item.threadId)).toEqual([
+            "T-doc",
+            "review-body:src/a.ts:2",
+        ]);
+    });
+});
