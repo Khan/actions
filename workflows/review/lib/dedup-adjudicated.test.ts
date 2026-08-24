@@ -5,6 +5,12 @@ import {
     suppressAdjudicatedDuplicates,
     suppressTrackedDuplicates,
 } from "./dedup-adjudicated";
+import {
+    bigrams,
+    contentTokens,
+    intersectionSize,
+    OTHER_LINE_FLOOR,
+} from "./dedup-text";
 import {suppressOpenThreadDuplicates} from "./dedup-threads";
 import type {Claim} from "./dispatch-contracts";
 
@@ -341,6 +347,35 @@ describe("cross-file adjudicated suppression (the path key dropped)", () => {
         );
         expect(kept).toEqual([negative]);
         expect(suppressed).toEqual([]);
+        // Assert the calibration band, not just the outcome: a fixture that
+        // quietly drifted out of the band (rejected on bigrams instead of
+        // jaccard) would still pass the kept assertion while pinning
+        // nothing. Scored with the same primitives production scores with;
+        // the thread's prose is its body minus the label prefix, matching
+        // threadProse's strip.
+        const tokensA = contentTokens(
+            `${negative.subject} ${negative.discussion} ${negative.failure_scenario}`,
+        );
+        const tokensB = contentTokens(
+            adjudicatedThread().body.replace(
+                /^\*\*suggestion \(non-blocking\):\*\* /,
+                "",
+            ),
+        );
+        const setA = new Set(tokensA);
+        const setB = new Set(tokensB);
+        const shared = intersectionSize(setA, setB);
+        const jaccard = shared / (setA.size + setB.size - shared);
+        const overlap = shared / Math.min(setA.size, setB.size);
+        const sharedBigrams = intersectionSize(
+            bigrams(tokensA),
+            bigrams(tokensB),
+        );
+        expect(sharedBigrams).toBeGreaterThanOrEqual(
+            OTHER_LINE_FLOOR.sharedBigrams,
+        );
+        expect(overlap).toBeGreaterThanOrEqual(OTHER_LINE_FLOOR.overlap);
+        expect(jaccard).toBeLessThan(OTHER_LINE_FLOOR.jaccard);
     });
 
     it("picks the best-scoring adjudicated thread across files, independent of staging order", () => {

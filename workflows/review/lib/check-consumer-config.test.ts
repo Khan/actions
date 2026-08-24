@@ -706,7 +706,7 @@ describe("the repo root", () => {
                 content,
             ]),
         );
-        const report = checkConsumerConfig(fakeFs(inputs), {
+        const report = check(inputs, {
             repoRoot: "../consumer",
             checkerVersion: "1.11.0",
         });

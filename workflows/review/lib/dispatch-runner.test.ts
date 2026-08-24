@@ -125,15 +125,17 @@ describe("createSdkRunner submit_result (trial suggestion h)", () => {
         const result = await (await createSdkRunner())(request());
         expect(result.structured).toBe(true);
         expect(JSON.parse(result.output)).toEqual({findings: []});
-        // Cost fields are best-effort zero: the SDK never delivered its
-        // result record.
+        // Cost fields are best-effort zero ONLY here: the stream died with
+        // no result record of any subtype, so there is nothing to report.
         expect(result.usd).toBe(0);
     });
 
     it("salvages the last assistant text when the session dies without success", async () => {
         // The Stop hook pushes a free-text agent to keep going, so it can
         // burn its last turns being redirected and end on error_max_turns
-        // with a usable final already written; that text is the output.
+        // with a usable final already written; that text is the output, and
+        // the metering comes from the non-success result record rather than
+        // a systematic zero (the record still carries cost and turns).
         session = async function* () {
             yield {
                 type: "assistant",
@@ -141,12 +143,86 @@ describe("createSdkRunner submit_result (trial suggestion h)", () => {
                     content: [{type: "text", text: "the free-text findings"}],
                 },
             };
-            yield {type: "result", subtype: "error_max_turns"};
+            yield {
+                type: "result",
+                subtype: "error_max_turns",
+                total_cost_usd: 1.5,
+                num_turns: 100,
+            };
         };
         const result = await (await createSdkRunner())(request());
         expect(result.structured).toBeUndefined();
         expect(result.output).toBe("the free-text findings");
-        expect(result.usd).toBe(0);
+        expect(result.usd).toBe(1.5);
+        expect(result.turns).toBe(100);
+    });
+
+    it("the LAST assistant text wins when several were emitted", async () => {
+        // "last" was previously unasserted: an agent narrates before its
+        // final, and salvaging the narration instead of the final would
+        // silently ship the wrong text.
+        session = async function* () {
+            for (const text of ["narration", "the real final"]) {
+                yield {
+                    type: "assistant",
+                    message: {content: [{type: "text", text}]},
+                };
+            }
+            yield {type: "result", subtype: "error_max_turns"};
+        };
+        const result = await (await createSdkRunner())(request());
+        expect(result.output).toBe("the real final");
+    });
+
+    it("does not salvage lastText on a hard failure with no result record", async () => {
+        // The gate on the lastText salvage: a session that dies mid-stream
+        // (no result record of any subtype) left narration, not a final;
+        // returning it would fail the contract parse and burn the
+        // malformed-output re-dispatch, exactly like the timeout case.
+        session = async function* () {
+            yield {
+                type: "assistant",
+                message: {content: [{type: "text", text: "narration"}]},
+            };
+            throw new Error("stream died");
+        };
+        await expect((await createSdkRunner())(request())).rejects.toThrow(
+            /stream died/,
+        );
+    });
+
+    it("a bounced provisional payload outranks lastText and reports the run's metering", async () => {
+        // provisional-beats-lastText in the catch path: a contract-valid
+        // submission the prose gate was still bouncing salvages as the
+        // structured output even though a later free-text final exists.
+        session = async function* (tools) {
+            const bounced = await tools[0].handler(
+                {result: {findings: [{id: "styled"}]}},
+                undefined,
+            );
+            expect(bounced.isError).toBe(true);
+            yield {
+                type: "assistant",
+                message: {content: [{type: "text", text: "free-text final"}]},
+            };
+            yield {
+                type: "result",
+                subtype: "error_max_turns",
+                total_cost_usd: 2.25,
+                num_turns: 42,
+            };
+        };
+        const result = await (
+            await createSdkRunner()
+        )(
+            request({
+                judgeProse: async () => "prose rejected: too poetic",
+            }),
+        );
+        expect(result.structured).toBe(true);
+        expect(JSON.parse(result.output)).toEqual({findings: [{id: "styled"}]});
+        expect(result.usd).toBe(2.25);
+        expect(result.turns).toBe(42);
     });
 
     it("reports a timeout instead of salvaging mid-investigation narration", async () => {

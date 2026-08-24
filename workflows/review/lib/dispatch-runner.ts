@@ -133,11 +133,12 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                                 // same way a contract rejection does (the
                                 // plain-prose loop: the pinned judge model
                                 // scores, the author rewrites in-session
-                                // with its repo context intact). The gate caps its own bounces and
-                                // fails open, and `provisional` above keeps
-                                // the pre-style payload salvageable, so this
-                                // await can slow a submission or cost prose
-                                // quality, never lose one.
+                                // with its repo context intact). The gate
+                                // caps its own bounces and fails open, and
+                                // `provisional` above keeps the pre-style
+                                // payload salvageable, so this await can
+                                // slow a submission or cost prose quality,
+                                // never lose one.
                                 if (request.judgeProse !== undefined) {
                                     const styleRejection =
                                         await request.judgeProse(payload);
@@ -168,30 +169,37 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                 }),
             };
             allowedTools.push("mcp__review__submit_result");
-            // The Stop hook: an agent ending its turn WITHOUT having called
-            // submit_result is heading for the free-text fallback, which
-            // skips both the in-session contract bounce and the prose gate.
-            // Block the stop (the model sees `reason` and continues) and
-            // point it back at the tool, at most twice: past the cap a
-            // confused agent gets its genuine fallback rather than a loop,
-            // and dispatch.ts records its findings as skipped by the gate.
+            // The Stop hook: an agent ending its turn WITHOUT an accepted
+            // submission is heading for the free-text fallback, which skips
+            // both the in-session contract bounce and the prose gate. Block
+            // the stop (the model sees `reason` and continues) and point it
+            // back at the tool, at most twice: past the cap a confused agent
+            // gets its genuine fallback rather than a loop, and dispatch.ts
+            // records its findings as skipped by the gate. `captured` empty
+            // does NOT mean "never called": a submission the contract or
+            // prose gate bounced leaves it empty too, so the reason names
+            // the state the agent is actually in (`provisional` set means a
+            // contract-valid submission is mid-bounce).
             let stopBlocks = 0;
             options.hooks = {
                 Stop: [
                     {
                         hooks: [
-                            () => {
+                            async () => {
                                 if (
                                     captured === undefined &&
                                     stopBlocks < MAX_STOP_BLOCKS
                                 ) {
                                     stopBlocks += 1;
-                                    return Promise.resolve({
+                                    return {
                                         decision: "block" as const,
-                                        reason: "You have not delivered your result yet. Call the submit_result tool ONCE now, passing the ENTIRE JSON object your output contract specifies as its `result` argument; do not paste the JSON as a message.",
-                                    });
+                                        reason:
+                                            provisional === undefined
+                                                ? "You have not delivered your result yet. Call the submit_result tool ONCE now, passing the ENTIRE JSON object your output contract specifies as its `result` argument; do not paste the JSON as a message."
+                                                : "Your submission was rejected and must be corrected. Rewrite what the rejection message named and call submit_result again with the full corrected result object; do not paste the JSON as a message.",
+                                    };
                                 }
-                                return Promise.resolve({});
+                                return {};
                             },
                         ],
                     },
@@ -204,6 +212,16 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
         // a usable final already written; the catch below salvages this text
         // so the redirect can cost turns, never the output.
         let lastText: string | undefined;
+        // Metering from a NON-success result record (error_max_turns et al.
+        // still carry total_cost_usd/num_turns): captured before the throw
+        // so the salvage paths report what the run really cost instead of a
+        // systematic zero (the Stop hook makes non-success endings common
+        // for free-text agents, so the zeros were not a rare best-effort
+        // case but a standing undercount in dispatch's perAgent entries and
+        // the totalUsd summed over them).
+        let endedUsd = 0;
+        let endedTurns = 0;
+        let ended = false;
         try {
             const run = sdk.query({prompt: request.prompt, options});
             let output = "";
@@ -245,6 +263,9 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                     continue;
                 }
                 if (message["subtype"] !== "success") {
+                    endedUsd = Number(message["total_cost_usd"] ?? 0);
+                    endedTurns = Number(message["num_turns"] ?? 0);
+                    ended = true;
                     throw new Error(
                         `sub-agent ended without success: ${String(
                             message["subtype"],
@@ -278,17 +299,18 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                 wallMs: Date.now() - started,
             };
         } catch (error) {
-            // A payload the tool already accepted is complete and validated:
-            // salvage it even when the session then dies (a hang after
-            // submission, a max-turns overrun). Cost fields are best-effort
-            // zero here; the metered proxy still charged the run, but the
-            // SDK never delivered its result record.
+            // A payload the tool accepted (or a contract-valid one the prose
+            // gate was still bouncing) is complete: salvage it even when the
+            // session then dies (a hang after submission, a max-turns
+            // overrun). Cost fields come from the non-success result record
+            // when the SDK delivered one; they are best-effort zero only
+            // when the stream died with no record at all.
             const salvage = captured ?? provisional;
             if (salvage !== undefined) {
                 return {
                     output: JSON.stringify(salvage),
-                    usd: 0,
-                    turns: 0,
+                    usd: endedUsd,
+                    turns: endedTurns,
                     wallMs: Date.now() - started,
                     structured: true,
                 };
@@ -305,15 +327,19 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                     `sub-agent timed out after ${request.timeoutMs}ms`,
                 );
             }
-            // No structured payload, but the agent did write a final: the
-            // free-text fallback path. Return it instead of discarding a
-            // usable output because the session then died (the Stop hook
-            // makes that ending common for free-text agents).
-            if (lastText !== undefined) {
+            // No structured payload, but the agent did write a final AND
+            // the session ended with a delivered result record (the
+            // max-turns shape the Stop hook makes common): the free-text
+            // fallback path. Gated on `ended`, not on any error: a hard
+            // failure mid-stream has no result record and its lastText is
+            // mid-investigation narration, which would fail the contract
+            // parse and burn the malformed-output re-dispatch, exactly like
+            // the timeout case above.
+            if (ended && lastText !== undefined) {
                 return {
                     output: lastText,
-                    usd: 0,
-                    turns: 0,
+                    usd: endedUsd,
+                    turns: endedTurns,
                     wallMs: Date.now() - started,
                 };
             }

@@ -108,15 +108,19 @@ export const verifiedAcknowledgedIds = (
             continue;
         }
         const thread = threads.find((t) => t.thread_id === id);
-        const authorReplied = thread?.comments
-            .slice(1)
-            .some(
-                (comment) =>
-                    comment.author !== "" &&
-                    !isReviewBotAuthor(comment.author) &&
-                    !isBotLogin(comment.author) &&
-                    sameLogin(comment.author, prAuthor),
-            );
+        const authorReplied = thread?.comments.slice(1).some(
+            (comment) =>
+                comment.author !== "" &&
+                !isReviewBotAuthor(comment.author) &&
+                // Belt-and-suspenders only: staged threads carry
+                // GraphQL's bare logins, which never end in `[bot]`, so
+                // this clause fires only if staging ever switches to the
+                // REST spelling. The guards that actually hold are the
+                // bot-PR-author early return above and the sameLogin
+                // comparison below.
+                !isBotLogin(comment.author) &&
+                sameLogin(comment.author, prAuthor),
+        );
         if (authorReplied === true) {
             verified.add(id);
         }

@@ -725,9 +725,13 @@ describe("acknowledged threads (the will-fix signal, webapp#41290)", () => {
         });
 
         it("never counts bot replies (thumbs follow-ups, autofix)", () => {
-            // The sweep's follow-up and autofix's replies sit on exactly
-            // these threads; a reconciler hallucinating a concession out of
-            // one must contribute nothing.
+            // Autofix's replies (and retired sweep follow-ups on older
+            // threads) sit on exactly these threads; a reconciler
+            // hallucinating a concession out of one must contribute nothing.
+            // t1 is the spelling staged threads actually carry (GraphQL's
+            // bare login, caught by isReviewBotAuthor); t2's `[bot]` suffix
+            // is the REST spelling, unreachable from today's staging and
+            // kept only to pin the isBotLogin belt-and-suspenders clause.
             const ids = verifiedAcknowledgedIds(
                 {resolve: [], keep: ["t1", "t2"], acknowledged: ["t1", "t2"]},
                 [
