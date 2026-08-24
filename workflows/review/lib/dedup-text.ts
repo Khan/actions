@@ -60,6 +60,16 @@ export const intersectionSize = <T>(a: Set<T>, b: Set<T>): number => {
  * by construction: the exact-anchor tier separates on bigrams 4 vs 3, the
  * other-line tier on 6 vs 5. Re-derive them from `dedup.test.ts`'s fixtures
  * rather than nudging them by feel.
+ *
+ * OTHER_LINE_FLOOR carries a SECOND calibration since the adjudicated pass
+ * dropped its claim-side path key: it is also the cross-file floor for
+ * `bestOpenThreadMatch({ignorePath: true})` (dedup-threads.ts), calibrated
+ * on the frozen webapp#41290 family corpus, where the strongest cross-file
+ * negative scores jaccard 0.168 against the 0.2 floor and the weakest true
+ * match sits at exactly 7 shared bigrams. `dedup-adjudicated.test.ts` pins
+ * both edges (the 7-bigram marginal match and a jaccard-only hard negative),
+ * but a change to any number here must be re-derived against that corpus
+ * too; see `bestOpenThreadMatch`'s doc.
  */
 export const EXACT_ANCHOR_FLOOR = {
     jaccard: 0.14,
@@ -70,7 +80,7 @@ export const OTHER_LINE_FLOOR = {jaccard: 0.2, overlap: 0.35, sharedBigrams: 6};
 
 /**
  * The floor for a claim with NO anchor at all (a pr-level finding) against
- * an open thread: the least anchor evidence this module scores, so it pays
+ * an open thread: the least anchor evidence dedup-threads.ts scores, so it pays
  * with the highest bigram floor, one tier above {@link OTHER_LINE_FLOOR}.
  * Calibrated on webapp#41290 review 4867627688 (a pr-anchored re-find of a
  * data race two open blocking threads tracked re-posted in full, because

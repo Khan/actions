@@ -315,6 +315,34 @@ describe("cross-file adjudicated suppression (the path key dropped)", () => {
         expect(suppressed).toHaveLength(1);
     });
 
+    it("keeps a cross-file hard negative: shared vocabulary alone does not clear the jaccard guard", () => {
+        // The precision half of dropping the path key. This candidate is a
+        // DIFFERENT defect (the sweep holds the lock across the deletion
+        // pass, not a missing test) that reuses the thread's vocabulary
+        // heavily enough to clear the other two floors: 6 shared bigrams
+        // (exactly OTHER_LINE_FLOOR's 6) and overlap 0.444 against the 0.35
+        // floor, with jaccard 0.157 against 0.2, via the real tokenizer.
+        // Only jaccard rejects it, which is the guard the frozen 41290
+        // corpus measured at 0.168 on its strongest cross-file negative
+        // (see bestOpenThreadMatch's calibration note); a false suppression
+        // here drops a finding with no trace, so this pins the floor's
+        // precision side the way the marginal fixture above pins recall.
+        const negative = crossFile({
+            subject:
+                "The expiration sweep holds the write lock for the whole deletion pass.",
+            discussion:
+                "Expire acquires the global mutex once and walks every shard under it; the deletion path never deletes expired memories individually, so the expired keys identified by the scan are removed while readers block on the same mutex.",
+            failure_scenario:
+                "A large batch of expired entries stalls every concurrent reader of the memory store until the sweep's pass finishes.",
+        });
+        const {kept, suppressed} = suppressAdjudicatedDuplicates(
+            [negative],
+            [adjudicatedThread()],
+        );
+        expect(kept).toEqual([negative]);
+        expect(suppressed).toEqual([]);
+    });
+
     it("picks the best-scoring adjudicated thread across files, independent of staging order", () => {
         // Both corpus members clear the floor against the candidate (the
         // discursive SPEC.md thread scores jaccard 0.467, the true

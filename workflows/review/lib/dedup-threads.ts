@@ -281,13 +281,13 @@ export const describesOpenThreadDefect = (
 export const bestOpenThreadMatch = (
     claim: Claim,
     threads: readonly OpenThread[],
-    options?: {ignorePath?: boolean},
+    options: {ignorePath?: boolean} = {},
 ): OpenThread | undefined => {
     let best: {thread: OpenThread; score: OpenThreadScore} | undefined;
     // A pathless (pr-level) claim compares against EVERY open thread.
     for (const thread of threads) {
         if (
-            (options?.ignorePath !== true
+            (options.ignorePath !== true
                 ? claim.path !== undefined && thread.path !== claim.path
                 : // A thread with no usable path stays inert (see the doc
                   // above): fail-closed, never a PR-wide wildcard.
