@@ -255,7 +255,7 @@ pre-agent-steps:
       # `source:` below, so the prompt and the lib it invokes come from one version.
       # Even though this IS Khan/actions, the reviewer runs the released lib, not
       # the PR head; a PR must not be able to change the code that reviews it.
-      ref: review-v1.18.0
+      ref: review-v1.19.0
       path: gh-aw-review-lib
       persist-credentials: false
 
@@ -506,7 +506,7 @@ env:
   # KHAN/ACTIONS LOCAL OVERRIDE: the mirror of the raised max-ai-credits above
   # (the two values must stay in sync per the upstream comment).
   REVIEW_MAX_AI_CREDITS: "2500"
-source: Khan/actions/workflows/review/review.md@review-v1.18.0
+source: Khan/actions/workflows/review/review.md@review-v1.19.0
 ---
 
 # PR Reviewer
@@ -879,9 +879,26 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    `reconciliation.skipLines` is already reflected in the plan. Steps 4-6
    below are the plan CLI's; continue at Step 7.
    Do not dispatch any sub-agent yourself in this mode, and do not re-run
-   the dispatcher; if its call failed, treat the run as over budget and land
-   the review from whatever `out/` evidence exists (the gate decides whether
-   a verdict may post). Step 9's cache-memory record is also code-owned
+   the dispatcher; if its call failed but `dispatch-result.json` exists
+   and parses, treat the run as over budget and land the review from
+   whatever `out/` evidence exists (the gate decides whether a verdict may
+   post). If `dispatch-result.json` is MISSING OR UNPARSEABLE after the
+   dispatcher call (the Bash call was killed at the engine ceiling, or
+   crashed part-way through writing it),
+   there is no plan and you compose nothing by hand: post exactly one
+   standalone PR comment with the `add-comment` safe output stating that
+   the automated review died mid-dispatch and posted no review, linking
+   this run (`${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`),
+   and noting that the next push triggers a fresh full review; then report
+   the run incomplete, skip Steps 4-8, and continue at Step 9 (the cache
+   CLI recognizes the no-plan death shape from the queued comment: it
+   drops `risksPatternsKey` so the next run reposts the guidance comment
+   your death notice collapsed, and leaves the prior fingerprints
+   standing). Exists because run 32418662895 (Khan/actions#362) was killed
+   at the Bash ceiling during claim validation and posted nothing: the run
+   stayed green, and the incomplete report's fallback (filing an issue) is
+   unavailable on a repo with issues disabled, so the death was invisible
+   on the PR. Step 9's cache-memory record is also code-owned
    (`lib/cache-record.ts`, invoked there); never write or edit
    `/tmp/gh-aw/cache-memory/pr-*.json` yourself.
 
@@ -1067,7 +1084,7 @@ fully explained by a common pattern above:
 </details>
 
 <details><summary><sub>review details</sub></summary>
-<sub>review-v1.18.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
+<sub>review-v1.19.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
 </details>
 ````
 
@@ -1747,11 +1764,21 @@ Read from disk:
 including the author's replies, and weigh the author's reasoning before deciding:
 - **resolve** — the flagged code is fixed, removed, or no longer applies.
 - **keep** — the issue is still live in the code and unaddressed.
-- If the author has **conceded** the point in the chain (agreed it should change, or a
-  fix is under way) but the code is not yet changed, still **keep** the thread so the
-  acknowledgment stands — a conceded point must **never be re-raised** as a fresh
-  comment (the pipeline opens no duplicate for a kept thread). Likewise do
-  not re-litigate a point the author has already refuted with sound reasoning.
+- If the author has **conceded** the point in the chain (agreed it should change, a
+  fix is under way, or a TODO stands in for one) but the code is not yet changed, still
+  **keep** the thread so the acknowledgment stands — a conceded point must **never be
+  re-raised** as a fresh comment (the pipeline opens no duplicate for a kept thread).
+  Likewise do not re-litigate a point the author has already refuted with sound
+  reasoning.
+- Additionally list every such conceded-but-unfixed thread id in **acknowledged**
+  (always alongside its `keep` entry, never instead of it). Only the **author's own
+  reply** in the chain counts as a concession: never a bot reply (the thumbs-sweep
+  follow-ups and autofix replies sit on these threads), never a reply that pushes back,
+  and never a TODO you inferred from the code alone. The pipeline verifies each id
+  against the reply chain and renders those threads as "acknowledged (fix pending)"
+  in the accountability recap instead of counting them unaddressed. When in doubt,
+  leave the id out: a missed acknowledgment is one mislabeled recap line, a wrong one
+  marks a live disagreement settled.
 
 **Per-finding resolution on re-review.** On a re-review, every actionable finding
 the workflow raised in a prior run must reach one of three terminal resolutions — never
@@ -1774,8 +1801,9 @@ or `keep`.
 already open; the pipeline will not post a bot comment there. Do not
 resolve or otherwise touch human threads — they are input only.
 
-Return ONLY this JSON object (no prose, no code fence):
-{"resolve": ["thread_id", "..."], "keep": ["thread_id", "..."], "skipLines": [{"path": "...", "line": 0}]}
+Return ONLY this JSON object (no prose, no code fence; `acknowledged` may be empty or
+omitted, and every entry in it must also be in `keep`):
+{"resolve": ["thread_id", "..."], "keep": ["thread_id", "..."], "acknowledged": ["thread_id", "..."], "skipLines": [{"path": "...", "line": 0}]}
 
 ## agent: `claim-clusterer`
 ---
