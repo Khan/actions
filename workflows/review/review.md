@@ -177,13 +177,24 @@ observability:
 # the deterministic dispatcher (lib/dispatch.ts) as ONE blocking Bash call that
 # waits for the whole sub-agent fan-out, which takes minutes, not seconds. The
 # job-level timeout-minutes still bounds the run.
+#
+# The ceiling is 30 minutes (with timeout-minutes at 50), not 20 (at 40). This
+# is a pragmatic cap sized to observed runs, not a bound: the dispatcher awaits
+# four sequential agent stages (triage, finder fan-out in waves of 4, the
+# clusterer, claim validation), each sub-agent capped at 15 minutes and
+# re-dispatched once on a parse failure, so the theoretical worst case exceeds
+# any ceiling worth setting. Run 32418662895 (Khan/actions#362) was killed
+# mid-claim-validation at the old 20-minute line, posting nothing, and the
+# turn cap raise to 100 lets agents run longer, so the ceiling moves in
+# lockstep; the job cap keeps ~20 minutes of headroom over the dispatcher call
+# so the two never collapse into the same kill line.
 engine:
   id: claude
   model: claude-opus-5
   env:
     BASH_DEFAULT_TIMEOUT_MS: "60000"
-    BASH_MAX_TIMEOUT_MS: "1200000"
-timeout-minutes: 40
+    BASH_MAX_TIMEOUT_MS: "1800000"
+timeout-minutes: 50
 
 # The awf sandbox stays declared (its api-proxy is what meters AI credits and
 # caps a runaway fan-out), but its version now floats with the gh-aw release
@@ -227,7 +238,7 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: review-v1.17.1
+      ref: review-v1.18.0
       path: gh-aw-review-lib
       persist-credentials: false
 
@@ -777,7 +788,7 @@ exactly this sequence:
    none. This is the only thread work left to you: what a reply chain concedes
    or refutes is a judgment, while fetching and classifying the threads is not.
 2. Invoke the dispatcher, once, as a single Bash call with `timeout` set to
-   `1200000` (it waits for the whole sub-agent fan-out; the engine's Bash
+   `1800000` (it waits for the whole sub-agent fan-out; the engine's Bash
    ceiling is raised for exactly this call):
 ```
 cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
@@ -793,7 +804,14 @@ cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
    open bot thread already tracks is not re-validated or re-posted; a
    suppressed blocking candidate still floors the verdict when the matched
    thread's opener is itself blocking), and claim
-   validation, and writes `/tmp/gh-aw/review/dispatch-result.json`.
+   validation, and writes `/tmp/gh-aw/review/dispatch-result.json`. The
+   dispatcher also runs the prose judge inside each sub-agent's
+   `submit_result` path: a finding whose prose fails the vendored
+   plain-prose rubric is rejected back to its own author, who rewrites it
+   in-session (capped, fail-open; a judge error never costs a finding), and
+   the four-state verdicts (skipped/pass/fail/error) land in
+   `/tmp/gh-aw/review/judge-prose-verdicts.json` and the result's
+   `proseJudge` block. Never edit claim prose yourself in either direction.
 3. Compose the submission deterministically, once:
 ```
 cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
@@ -1039,7 +1057,7 @@ fully explained by a common pattern above:
 </details>
 
 <details><summary><sub>review details</sub></summary>
-<sub>review-v1.17.1 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
+<sub>review-v1.18.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
 </details>
 ````
 
@@ -1498,7 +1516,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "issue (blocking)|todo (blocking)|suggestion (non-blocking)|nitpick (non-blocking)|question (non-blocking)|thought (non-blocking)|note (non-blocking)",
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
-    "subject": "one line", "discussion": "1-2 sentences, optional", "suggestion": "optional fix code"
+    "subject": "one line", "discussion": "1-2 sentences, optional: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }]
 }
 `line` is a RIGHT-side (added/context) line number from the diff. Keep findings tight
@@ -1628,7 +1646,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "skill": "skill name", "path": "...", "line": 0,
     "label": "issue (blocking, best-practice)|suggestion (non-blocking, best-practice)",
     "failure_scenario": "one sentence: the concrete consequence of the breach (what goes wrong, for whom)",
-    "subject": "one line naming the skill area", "discussion": "the rule violated and the fix, quoting both", "suggestion": "optional fix code"
+    "subject": "one line naming the skill area", "discussion": "the rule violated and the fix, quoting both; otherwise at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }],
   "out_of_lane_observations": [{
     "path": "...", "line": 0,
@@ -2029,7 +2047,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "verification": "confirmed|plausible|refuted",
     "confidence": 0.0,
     "reason": "one line: the line(s) that confirm it, the disproof that refutes it, or what stayed uncertain",
-    "corrected": {"line": 0, "label": "...", "subject": "...", "discussion": "...", "suggestion": "..."}
+    "corrected": {"line": 0, "label": "...", "subject": "...", "discussion": "... (corrected prose posts verbatim: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor)", "suggestion": "..."}
   }]
 }
 `confidence` in [0,1] is your confidence in the claim after verification — it becomes the
@@ -2106,7 +2124,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "issue (blocking)|todo (blocking)|suggestion (non-blocking)|nitpick (non-blocking)|question (non-blocking)|thought (non-blocking)|note (non-blocking)",
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
-    "subject": "one line", "discussion": "1-2 sentences, optional", "suggestion": "optional fix code"
+    "subject": "one line", "discussion": "1-2 sentences, optional: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }]
 }
 Use a blocking label only for a whole-change defect that genuinely must be fixed before
@@ -2179,7 +2197,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "issue (blocking)|todo (blocking)|suggestion (non-blocking)|nitpick (non-blocking)|question (non-blocking)|thought (non-blocking)|note (non-blocking)",
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
-    "subject": "one line", "discussion": "1-2 sentences, optional", "suggestion": "optional fix code"
+    "subject": "one line", "discussion": "1-2 sentences, optional: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }]
 }
 Use a blocking label only when the change genuinely fails to deliver required, stated work.
@@ -2242,7 +2260,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "todo (blocking)|issue (blocking)|suggestion (non-blocking)|nitpick (non-blocking)|question (non-blocking)|thought (non-blocking)|note (non-blocking)",
     "failure_scenario": "one sentence: the untested path and the regression that slips through it",
-    "subject": "one line", "discussion": "1-2 sentences, optional", "suggestion": "optional test code"
+    "subject": "one line", "discussion": "1-2 sentences, optional: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional test code"
   }]
 }
 `failure_scenario` is required on every finding: name the untested path and the
@@ -2346,7 +2364,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "thought (non-blocking)|suggestion (non-blocking)|question (non-blocking)|note (non-blocking)",
     "failure_scenario": "one sentence: the concrete cost of leaving this unaddressed",
-    "subject": "one line", "discussion": "1-2 sentences, optional", "suggestion": "optional alternative"
+    "subject": "one line", "discussion": "1-2 sentences, optional: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional alternative"
   }]
 }
 Never emit a blocking label. `failure_scenario` is required on every finding: since
@@ -2413,7 +2431,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "suggestion (non-blocking)|nitpick (non-blocking)|note (non-blocking)|question (non-blocking)",
     "failure_scenario": "one sentence: the concrete cost of the deviation if it stays",
-    "subject": "one line", "discussion": "1-2 sentences quoting the existing usage and the deviating line", "suggestion": "optional fix code"
+    "subject": "one line", "discussion": "1-2 sentences quoting the existing usage and the deviating line; otherwise at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }]
 }
 Never emit a blocking label. `failure_scenario` is required on every finding: the
@@ -2642,7 +2660,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "suggestion (non-blocking, documentation)",
     "failure_scenario": "one sentence: the concrete cost to the next reader if this stays",
-    "subject": "one line", "discussion": "1-2 sentences quoting the comment and the code line", "suggestion": "optional replacement text"
+    "subject": "one line", "discussion": "1-2 sentences quoting the comment and the code line; otherwise at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional replacement text"
   }]
 }
 `label` is that one value on every finding; never emit any other label, blocking or
@@ -2731,7 +2749,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw — the grep, the traced caller, the line"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "authz-on-new-endpoint",
-    "model_authored_prose": "the one- or two-sentence comment the author will read",
+    "model_authored_prose": "the one- or two-sentence comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional replacement/patch text",
     "pre_merge_obligation": "optional: a condition that must hold before merge",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
@@ -2802,7 +2820,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "unmoderated-model-output",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -2870,7 +2888,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "bulk-send-without-audience-filter",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -2945,7 +2963,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "cache-key-missing-identifier",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -3015,7 +3033,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "non-nullable-column-without-default",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -3084,7 +3102,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "unawaited-async",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -3153,7 +3171,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "breaking-field-removal-or-retype",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -3226,7 +3244,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "serialized-shape-change",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -3297,7 +3315,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "flag-default-unsafe",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -3366,7 +3384,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "float-money",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
@@ -3438,7 +3456,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "hardcoded-user-facing-string",
-    "model_authored_prose": "the comment the author will read",
+    "model_authored_prose": "the comment the author will read: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor",
     "suggested_patch": "optional", "pre_merge_obligation": "optional",
     "rule_quote": "optional: for a skill finding, the exact rule text, verbatim"
   }],
