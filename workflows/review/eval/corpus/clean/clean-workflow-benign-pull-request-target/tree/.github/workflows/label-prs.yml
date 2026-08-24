@@ -31,4 +31,10 @@ jobs:
                   else
                       label="size/S"
                   fi
-                  gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "$label"
+                  case "$label" in
+                      size/S) remove="size/M,size/L" ;;
+                      size/M) remove="size/S,size/L" ;;
+                      *) remove="size/S,size/M" ;;
+                  esac
+                  gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                      --add-label "$label" --remove-label "$remove"

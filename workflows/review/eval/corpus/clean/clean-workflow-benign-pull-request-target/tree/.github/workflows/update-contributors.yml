@@ -28,6 +28,7 @@ jobs:
                   if [ -n "$(git status --porcelain)" ]; then
                       git config user.name "docs-bot"
                       git config user.email "docs-bot@example.com"
-                      git commit -am "Regenerate CONTRIBUTORS.md"
+                      git add CONTRIBUTORS.md
+                      git commit -m "Regenerate CONTRIBUTORS.md"
                       git push
                   fi
