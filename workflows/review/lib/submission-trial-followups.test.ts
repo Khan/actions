@@ -127,7 +127,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         );
         expect(plan.comments).toHaveLength(20);
         expect(plan.comments[0].body).toContain(
-            "Lower-confidence observations (2; top: a.ts:21 issue (blocking): finding 21)",
+            "Lower-confidence observations (2; top: `a.ts:21` issue (blocking): finding 21)",
         );
         expect(plan.comments[0].body).toContain("`a.ts:21`");
         expect(plan.comments[0].body).toContain("`a.ts:22`");
@@ -160,7 +160,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         expect(plan.comments).toHaveLength(4);
         expect(plan.comments[0].line).toBe(99);
         expect(plan.comments[0].body).toContain(
-            "Lower-confidence observations (17; top: a.ts:4 suggestion (non-blocking): finding 4)",
+            "Lower-confidence observations (17; top: `a.ts:4` suggestion (non-blocking): finding 4)",
         );
         expect(plan.notes).toContainEqual(
             "17 non-blocking claim(s) collapsed over the inline budget (non-blocking budget 3)",
@@ -214,7 +214,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         expect(plan.comments).toHaveLength(1);
         expect(plan.comments[0].line).toBe(2);
         expect(plan.comments[0].body).toContain(
-            "Lower-confidence observations (1; top: a.ts:1 nitpick (non-blocking): rename it)",
+            "Lower-confidence observations (1; top: `a.ts:1` nitpick (non-blocking): rename it)",
         );
     });
 
@@ -281,7 +281,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         );
         expect(plan.comments).toEqual([]);
         expect(plan.body).toContain(
-            "Lower-confidence observations (1; top: a.ts:2 thought (non-blocking): a hunch)",
+            "Lower-confidence observations (1; top: `a.ts:2` thought (non-blocking): a hunch)",
         );
         expect(plan.body).toContain("a hunch");
     });
@@ -398,7 +398,7 @@ describe("the nitpick posting rules", () => {
         // summary line built for the tail's best finding.
         expect(plan.comments).toEqual([]);
         expect(plan.body).toContain(
-            "Lower-confidence observations (2; top: a.ts:2 thought (non-blocking): a hunch)",
+            "Lower-confidence observations (2; top: `a.ts:2` thought (non-blocking): a hunch)",
         );
         expect(plan.notes).toContainEqual(
             "1 nitpick claim(s) collapsed (nitpick-class never posts inline)",
@@ -519,5 +519,44 @@ describe("the budget's spend order", () => {
         // The shed claim lands in the collapsed section riding the
         // top-ranked comment (this branch predates the always-in-body move).
         expect(plan.comments[0].body).toContain("`a.ts:1`");
+    });
+});
+
+describe("the named-top tag's escaping", () => {
+    it("escapes a model-authored subject and truncates a long one", () => {
+        const hostile = "Breaks out</summary></details> <b>of the block</b>";
+        const claims = [
+            claim({
+                id: "hostile",
+                line: 2,
+                label: "thought (non-blocking)",
+                confidence: 0.3,
+                subject: hostile,
+            }),
+            claim({
+                id: "long",
+                line: 3,
+                label: "thought (non-blocking)",
+                confidence: 0.2,
+                subject: "x".repeat(150),
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        // The hostile subject ranks first (higher confidence): the SUMMARY
+        // line carries entities, never the raw tag. (The list entries below
+        // it share the exposure but predate this PR; the finding's own
+        // scope note excludes them.)
+        const summaryLine = plan.body
+            .split("\n")
+            .find((line) => line.includes("Lower-confidence observations"));
+        expect(summaryLine).toContain(
+            "Breaks out&lt;/summary&gt;&lt;/details&gt; &lt;b&gt;of the block&lt;/b&gt;",
+        );
+        expect(summaryLine).not.toContain("out</summary>");
+        // The long subject keeps its full text in the list entry; only the
+        // summary tag truncates.
+        expect(plan.body).toContain("x".repeat(150));
     });
 });

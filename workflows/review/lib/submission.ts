@@ -60,7 +60,7 @@
  * under review.
  */
 
-import {renderAttributionFooter} from "./attribution";
+import {escapeHtml, renderAttributionFooter} from "./attribution";
 import {computeRisksPatternsKey, RISKS_PATTERNS_KEY_PATH} from "./cache-record";
 import type {Claim} from "./dispatch-contracts";
 import {DEFAULT_FINDERS, TRIAGE_DIMENSION} from "./dispatch-roster";
@@ -275,6 +275,9 @@ export const MAX_INLINE_COMMENTS = 20;
 
 /** The medium-confidence inline floor (the Step 5 posting bar). */
 const MIN_INLINE_CONFIDENCE = 0.5;
+
+/** The collapsed summary's named-top subject cap: one line, not a wall. */
+const TOP_SUBJECT_MAX_CHARS = 120;
 
 /* -------------------------------------------------------------------------- */
 /* The plan                                                                   */
@@ -730,12 +733,22 @@ export const runSubmissionCli = (
         // tail, pr-level included.
         // The subject rides the tag, not only the location and label: the
         // subject is the claim itself, and it is what tells a reader whether
-        // the expando is worth opening.
+        // the expando is worth opening. It is model-authored text landing
+        // inside a <summary>, so it is HTML-escaped (attribution.ts's rule:
+        // a literal </summary> would break the collapse open) and truncated
+        // to keep the summary one line; the full subject is the first list
+        // entry inside the block anyway. The location gets the same
+        // backticks the section's own lines use.
         const top = collapsed[0];
+        const topSubject = escapeHtml(
+            top.subject.length > TOP_SUBJECT_MAX_CHARS
+                ? `${top.subject.slice(0, TOP_SUBJECT_MAX_CHARS)}...`
+                : top.subject,
+        );
         const topTag =
             top.path !== undefined && top.line !== undefined
-                ? `; top: ${top.path}:${top.line} ${top.label}: ${top.subject}`
-                : `; top: ${top.label}: ${top.subject}`;
+                ? `; top: \`${top.path}:${top.line}\` ${top.label}: ${topSubject}`
+                : `; top: ${top.label}: ${topSubject}`;
         const summary =
             blockingOnly && collapsedNonBlockingOnly
                 ? `Non-blocking observations (${collapsed.length}${topTag})`
