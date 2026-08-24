@@ -272,9 +272,11 @@ jq '[.[] | select(.body
   measurement, re-derive the string from the checkout being audited. The
   `review-thumbs-followup` marker and the downvote-reason vocabulary were
   deleted from the lib with the follow-up retirement; when auditing a
-  pre-retirement window, re-derive them from a pre-retirement tag's
+  pre-retirement window, re-derive the marker from a pre-retirement tag's
   `lib/thumbs-sweep.ts` (the CHANGELOG entry describes the retirement but
-  does not quote the deleted strings).
+  does not quote the deleted strings). The downvote-reason vocabulary needs
+  no tag: it survives in the checkout as `DownvoteReason` in
+  `workflows/review/eval/judge.ts`.
 
 ## Step 4: report
 

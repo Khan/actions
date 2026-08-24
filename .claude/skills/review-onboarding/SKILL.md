@@ -334,9 +334,10 @@ Decide each explicitly and record the decision:
   read from the PR head at run time. Cheap to add later.
 - **`.github/NOTIFIED`**: honoured automatically if present; approval-time
   pings, not on-touch.
-- **Thumbs sweep and live counters**: two small scheduled plain-Actions
-  workflows that turn on the production feedback signal (see the README).
-  Reasonable to defer to a follow-up PR; say so rather than leaving it silent.
+- **Live counters**: one small scheduled plain-Actions workflow that turns on
+  the production feedback signal (see the README). Reasonable to defer to a
+  follow-up PR; say so rather than leaving it silent. (The thumbs sweep that
+  used to sit alongside it is retired; do not create `review-feedback.yml`.)
 - **The opt-out label** (`skip-ai-review`): the `if:` guard works without it,
   but the label must exist to be selectable in the UI.
 

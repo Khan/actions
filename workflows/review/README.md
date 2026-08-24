@@ -164,7 +164,8 @@ you can pick the one that says what you mean:
   suppresses; if you want to say why, reply in the thread: the reconciler and
   claim validation read replies as described above, and replies reach a
   feedback report when a maintainer runs the
-  `.claude/skills/review-feedback-audit` skill. Reactions on replies are
+  [`review-feedback-audit` skill](../../.claude/skills/review-feedback-audit/SKILL.md).
+  Reactions on replies are
   conversation, not adjudication. 👎 is the ONLY adjudicating reaction: a 😕
   does not suppress (😕 reads as "unclear", not "wrong", and ambiguity is
   worth a conversation, not a standing suppression). The bot's own seeded
@@ -746,7 +747,7 @@ nobody consumed the read-side tallies. A bare 👎 adjudicates directly since
 v1.17.0 (the staging reads thread-opener reactions itself, excluding the
 bot's own seeded nudges), so no scheduled collector is needed for feedback to
 act on the reviewer. A consumer still carrying the sweep's `review-feedback.yml`
-should delete it at its next bump (webapp#41685 is the reference deletion);
+should delete it at its next bump (Khan/webapp#41685 is the reference deletion);
 `review-counters.yml` stays.
 
 ### Relationship to the gh-aw outcome-collector
