@@ -2726,10 +2726,13 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   `action.yml`/`action.yaml` anywhere in the tree, or a workflow definition
   staged elsewhere for a later move into `.github/workflows/`. `found` only
   when one job combines all three of: a privileged trigger
-  (`pull_request_target`, `issue_comment`, or `workflow_run` startable by a
-  fork PR), untrusted content brought in (PR head checked out, or an artifact
-  from the triggering run), and execution of that content while holding secrets
-  or a write-capable token — a plain `pull_request` fork run holds neither.
+  (`pull_request_target`, `workflow_run` startable by a fork PR, or any
+  comment/issue/review trigger a fork author can fire — `issue_comment`,
+  `pull_request_review`, `pull_request_review_comment`, `issues`,
+  `discussion_comment`), untrusted content brought in (PR head checked out,
+  or an artifact from the triggering run), and execution of that content while
+  holding secrets or a write-capable token — a plain `pull_request` fork run
+  holds neither.
 - **`over-scoped-secret`** — same file gate as `pwn-request`: a workflow granting
   `secrets.GITHUB_TOKEN` or a custom org token a permission nothing in the
   workflow uses (e.g., `contents: write` when every step only reads, or a broad
@@ -2742,8 +2745,13 @@ Skills index for this repo (read only the entries relevant to this lens's domain
   A third-party action can receive `github.token` through an input default, so
   it makes a permission undecidable only when it could plausibly need that
   permission (checkout and toolchain-setup actions' own API use is read-only)
-  — otherwise not `found`. `found` names the unneeded permission and why no
-  step needs it.
+  — otherwise not `found`. A gh-aw authored `.md` workflow is the one case
+  where step-visibility does not settle it: its frontmatter `permissions:` are
+  consumed by the `safe-outputs:` jobs and the agent's `tools.github` toolsets,
+  both compiled into the stripped `.lock.yml`, so they appear as no step at all
+  — never treat a permission on a `.md` workflow as unused unless the
+  frontmatter's `safe-outputs:` and `tools:` blocks also fail to need it.
+  `found` names the unneeded permission and why no step needs it.
 
 ### Repo-specific rules and hunts (optional)
 Additional review rules and hunts the host repo defines for this lens, imported when

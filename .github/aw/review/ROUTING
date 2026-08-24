@@ -14,10 +14,14 @@
 # generic hunts (secrets, injection, dropped guards) on these files. Routing now
 # keeps activation automatic at the bump instead of depending on a hand edit to
 # that separate bump PR. Its rules below use actions/** rather than the README's
-# **/action.yml: the eval corpus stages deliberately-vulnerable fixture
-# workflows, and lenses cannot be un-routed by a later rule. No other lens is
-# routed — the rest target webapp's backend domains. The enable line turns on
-# the same reviewers webapp uses, chosen there by eval results.
+# **/action.yml so the eval corpus's deliberately-vulnerable fixture workflows
+# never *spawn* the lens (lenses cannot be un-routed by a later rule). Routing
+# scopes only spawning — a spawned lens reads the whole diff — so the fixture
+# carve-out itself lives in .github/aw/review/lenses/security-auth.md, which
+# names workflows/review/eval/corpus/** as intentionally-vulnerable fixtures.
+# No other lens is routed — the rest target webapp's backend domains. The
+# enable line turns on the same reviewers webapp uses, chosen there by eval
+# results.
 
 enable holistic,completeness,test-adequacy,first-principles,conventions,documentation
 

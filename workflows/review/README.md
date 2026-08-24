@@ -431,7 +431,10 @@ that shows no content diff).
 A repo that stages deliberately-vulnerable workflow fixtures (test corpora,
 training material) should scope these patterns to its real action directories
 instead of `**`: lenses cannot be un-routed by a later rule, so a broad
-pattern would route the fixtures to a live lens.
+pattern would route the fixtures to a live lens. Scoping controls only
+whether the lens spawns; a spawned lens still reads the whole change's diff,
+so such a repo should also name its fixture paths as intentionally vulnerable
+in its `.github/aw/review/lenses/security-auth.md` payload.
 
 ### The `documentation` reviewer (opt-in)
 
