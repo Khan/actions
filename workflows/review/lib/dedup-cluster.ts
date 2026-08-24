@@ -41,7 +41,7 @@ import {isBlockingLabel} from "./render-comment";
  * One member a proposed cluster named that did NOT merge, with the rule that
  * rejected it. Recorded per run because an empty rejection list and an empty
  * proposal list mean opposite things, and the module has already been burned
- * by that ambiguity once (see `dedup.ts`'s `stagedThreadShapeFailure`):
+ * by that ambiguity once (see `dedup-threads.ts`'s `stagedThreadShapeFailure`):
  * a clusterer naming ids that do not exist is a prompt or staging failure, and
  * it must not read as "no duplicates found".
  */
@@ -79,12 +79,30 @@ const isSalientToken = (raw: string): boolean =>
     raw.includes("_") ||
     /^\d{2,}$/.test(raw);
 
-/** The code-naming tokens in a text, lowercased for comparison. */
+/**
+ * One canonical form per code name: lowercased with underscores folded out, so
+ * `PreFlightModerationCheck` and `pre_flight_moderation_check` read as one
+ * token. Run 32390393344 (webapp#41609) is why: its two claims named the same
+ * config key in Go casing and JSON casing, and a comparison keyed on casing
+ * style tests how a name was spelled, not what it names. Salience is still
+ * judged on the RAW spelling above (the underscore or the interior case change
+ * is often the evidence of code-ness that folding would erase).
+ */
+const canonicalToken = (raw: string): string =>
+    raw.toLowerCase().replace(/_/g, "");
+
+/** The code-naming tokens in a text, canonicalized for comparison. */
 export const salientTokens = (text: string): Set<string> => {
     const tokens = new Set<string>();
     for (const raw of text.match(/[A-Za-z_$][A-Za-z0-9_$]*|\d+/g) ?? []) {
         if (isSalientToken(raw)) {
-            tokens.add(raw.toLowerCase());
+            const canonical = canonicalToken(raw);
+            // A token of underscores alone (`_`, `__`) is salient on its raw
+            // spelling but folds to the empty string, which would then ground
+            // any two claims that each quote one (e.g. Go's blank identifier).
+            if (canonical !== "") {
+                tokens.add(canonical);
+            }
         }
     }
     return tokens;
@@ -94,7 +112,7 @@ export const salientTokens = (text: string): Set<string> => {
 const claimText = (claim: Claim): string =>
     `${claim.subject} ${claim.discussion} ${claim.failure_scenario}`;
 
-export const sharesSalientToken = (
+const sharesSalientToken = (
     evidenceTokens: ReadonlySet<string>,
     claim: Claim,
 ): boolean => {
@@ -128,8 +146,9 @@ export const sharesSalientToken = (
  *   flagged blocking by two sources in different words still posts twice
  *   unless tier 1 reaches it.
  *
- * Deliberately absent: any line requirement, and any text-similarity floor.
- * Both are what tier 2 exists to get past.
+ * Deliberately absent: any line REQUIREMENT, and any text-similarity floor.
+ * Both are what tier 2 exists to get past. (An exactly shared line does count
+ * FOR a member, as grounding; see {@link clusterMemberRejection}.)
  */
 const structuralRejection = (
     reference: Claim,
@@ -153,19 +172,51 @@ const structuralRejection = (
  * proposal was made, so re-checking here rather than at parse time is what
  * keeps the guarantee honest): the structural rules above, plus
  *
- * - **grounded**: the cluster's evidence must name at least one code element
- *   ({@link isSalientToken}) and the member must mention one of them. This is
- *   the hallucination tripwire — a group whose members share no named code
- *   with the identity the model asserted is not an identity claim this module
- *   can check, so it does not merge.
+ * - **grounded**, by either of two paths:
+ *
+ *   An exactly shared anchor: the member sits on the survivor's own line (the
+ *   paths already match structurally). A cross-source pair on the identical
+ *   line is the one identity assertion this module can verify without any
+ *   vocabulary at all, and the vocabulary path cannot be the only one: the
+ *   evidence is model prose with free word choice, and run 32390393344
+ *   (webapp#41609) showed it grading the clusterer's phrasing rather than the
+ *   claims. There the clusterer correctly grouped two same-line copies of one
+ *   finding, wrote its evidence in the hunk's identifiers
+ *   (`_configIncludesModeration`), and both claims spoke config-side
+ *   (`pre_flight_moderation_check`), zero shared tokens, true merge vetoed.
+ *   Only claims the model PROPOSED reach this check, so a same-line neighbour
+ *   it never named cannot ride in on its anchor.
+ *
+ *   Failing that, the vocabulary tripwire as before: the cluster's evidence
+ *   must name at least one code element ({@link isSalientToken}), the SURVIVOR
+ *   must mention one (tier 1 can have elected a comment the proposal never
+ *   saw, and absorbing a member into an unrelated comment is the failure mode
+ *   this end catches), and the member must mention one too. A group whose
+ *   members share no named code with the identity the model asserted is not
+ *   an identity claim this module can check, so it does not merge. Grounding
+ *   the member against the survivor's own text instead would NOT be safe:
+ *   run 30587343777's cap survivor names `staleAfter` in a while-here aside,
+ *   and the distinct staleAfter finding would ground against it (the pinned
+ *   counterexample in dedup-cluster.test.ts).
  */
 export const clusterMemberRejection = (
     survivor: Claim,
     member: Claim,
     evidenceTokens: ReadonlySet<string>,
-): ClusterRejection["reason"] | undefined =>
-    structuralRejection(survivor, member) ??
-    (sharesSalientToken(evidenceTokens, member) ? undefined : "ungrounded");
+): ClusterRejection["reason"] | undefined => {
+    const structural = structuralRejection(survivor, member);
+    if (structural !== undefined) {
+        return structural;
+    }
+    if (member.line !== undefined && member.line === survivor.line) {
+        return undefined;
+    }
+    const evidenceUsable =
+        evidenceTokens.size > 0 && sharesSalientToken(evidenceTokens, survivor);
+    return evidenceUsable && sharesSalientToken(evidenceTokens, member)
+        ? undefined
+        : "ungrounded";
+};
 
 /**
  * Hold one proposal's members to the structural rules at parse time.

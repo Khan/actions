@@ -221,7 +221,8 @@ export type ProduceLiveOptions = {
     reReviewMode?: ReReviewMode;
 };
 
-const DEFAULT_MAX_TURNS = 30;
+/** Keep in sync with lib/dispatch.ts so trials reproduce prod behavior. */
+const DEFAULT_MAX_TURNS = 100;
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_CONCURRENCY = 4;
 
