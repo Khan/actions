@@ -362,6 +362,13 @@ export const checkConsumerConfig = (
     options: CheckOptions = {},
 ): ConsumerConfigReport => {
     const repoRoot = options.repoRoot ?? ".";
+    // `--repo` takes a path to the consumer checkout; an owner/name arg
+    // resolves as a relative path and every check would report missing.
+    if (repoRoot !== "." && !fs.existsSync(repoRoot)) {
+        throw new Error(
+            `--repo path does not exist: ${repoRoot} (a path to the consumer checkout, not an owner/name)`,
+        );
+    }
     const at = (p: string): string =>
         repoRoot === "." ? p : `${repoRoot}/${p}`;
     const issues: ConfigIssue[] = [];
@@ -875,25 +882,18 @@ export {renderReport};
 /* CLI                                                                       */
 /* -------------------------------------------------------------------------- */
 
-/** Parse `--flag value` arguments. Unknown flags are an error, not ignored. */
-export const parseArgs = (
-    argv: readonly string[],
-): {
+type CliArgs = {
     repoRoot?: string;
     filesFrom?: string;
     explainPath?: string;
     workflowPath?: string;
     json: boolean;
     strict: boolean;
-} => {
-    const out = {json: false, strict: false} as {
-        repoRoot?: string;
-        filesFrom?: string;
-        explainPath?: string;
-        workflowPath?: string;
-        json: boolean;
-        strict: boolean;
-    };
+};
+
+/** Parse `--flag value` arguments. Unknown flags are an error, not ignored. */
+export const parseArgs = (argv: readonly string[]): CliArgs => {
+    const out = {json: false, strict: false} as CliArgs;
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
         switch (arg) {
