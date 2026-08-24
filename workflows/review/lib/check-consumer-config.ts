@@ -537,7 +537,7 @@ export const checkConsumerConfig = (
         if (installed.source === undefined) {
             warn(
                 "source-missing",
-                `${workflowPath} carries no \`source:\` field, so \`gh aw update\` cannot find its upstream.`,
+                `${workflowPath} carries no \`source:\` field, so the manual bump flow cannot tell which upstream release this install was copied from.`,
             );
         } else if (installed.pinnedRef === undefined) {
             warn(
