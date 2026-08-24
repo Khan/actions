@@ -690,6 +690,7 @@ sub-agent models — this table is the human-facing summary:
 | `documentation` | `claude-opus-5` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
 | `first-principles` | `claude-opus-5` | high | Opt-in advisory-only; reviews the change's justification |
 | `claim-validator` | `claude-opus-5` | xhigh | Adversarial claim validation; stays Opus (the Fable arm did not improve precision) |
+| prose judge | `claude-opus-4-8` | (single completion) | In-session style gate on submitted finding prose (`judge-prose.ts`); haiku's verdicts flickered run to run, and opus-4-8 is proven invokable and curated-priced through the stable firewall |
 | specialist lenses | `claude-opus-5` | high | Opt-in via `lens=` in `ROUTING`; the security & auth lens is xhigh |
 
 Only the orchestrator and the default roster (`pattern-triage`,
@@ -779,6 +780,24 @@ Two known interactions:
 
 Optional:
 
+- `REVIEW_JIRA_BASE_URL` (repo **variable**), `REVIEW_JIRA_EMAIL` and
+  `REVIEW_JIRA_API_TOKEN` (repo **secrets**): the linked-ticket staging
+  (`lib/stage-ticket.ts`). When all three are set, the pre-agent staging
+  collects every Jira issue key the PR references (title, head branch, and
+  description, deduped; known key-shaped noise like `UTF-8`, `SHA-256`, and
+  `CVE-2024-1234` sinks to the back before the cap of 5 applies), fetches
+  each read-only on the host, and stages the ones that resolve as
+  `ticket-context.json` (a `tickets` array) for the intent-reading
+  sub-agents (completeness, first-principles). Noise and stale keys 404 and
+  drop silently. The disclosure
+  bound (which tickets author-written keys can pull into a review that
+  posts publicly) is the service account's own Jira permissions, enforced
+  server-side: use a dedicated service account granted Browse Projects on
+  only the projects reviews may quote, with a read-only API token. The
+  agent sandbox never sees the credentials and has no Jira egress. Without
+  these, the file stages `{available: false, reason: "not-configured"}` and
+  those sub-agents fall back to the PR description; a ticket is context,
+  never a prerequisite, so nothing else changes.
 - `REVIEW_BOT_LOGIN` — the account this workflow posts reviews as, default
   `github-actions[bot]`. Set it only in a repo that posts under its own GitHub
   App, in the installed `review.md`'s workflow-level `env:` block (the one

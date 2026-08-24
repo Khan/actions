@@ -8,9 +8,14 @@
  * (dispatch-gate.ts) stops trusting the orchestrator to have staged its own
  * rule inputs honestly.
  *
- * What it stages under /tmp/gh-aw/review/ (the Step 1 contract, unchanged):
+ * What it stages under /tmp/gh-aw/review/ (the Step 1 contract):
  *
  *   pr-context.json     PR metadata (untrusted author text included verbatim)
+ *   ticket-context.json the linked Jira tickets (stage-ticket.ts): every
+ *                       issue key the PR references, resolved and fetched
+ *                       read-only when the consumer configures credentials;
+ *                       otherwise (and when none resolve) {available: false,
+ *                       reason}. A ticket is context, never a prerequisite.
  *   files.json          path/status/hasPatch per changed file
  *   full.diff           standard unified diff rebuilt from the per-file
  *                       patches (diff --git + ---/+++ headers per file, which
@@ -88,6 +93,7 @@ import {
 } from "./diff";
 import {runProvenanceCli} from "./provenance";
 import type {StagedThread} from "./rereview";
+import {stageTicketContext, type TicketFetch} from "./stage-ticket";
 import {runRereviewPlanCli} from "./rereview-mode";
 import {runCli as runRouterCli} from "./router";
 import {
@@ -111,6 +117,7 @@ const CACHE_MEMORY_DIR = "/tmp/gh-aw/cache-memory";
  * reads it.
  */
 const PR_CONTEXT_OUT = `${REVIEW_DIR}/pr-context.json`;
+const TICKET_CONTEXT_OUT = `${REVIEW_DIR}/ticket-context.json`;
 const FILES_OUT = `${REVIEW_DIR}/files.json`;
 const FULL_DIFF_OUT = `${REVIEW_DIR}/full.diff`;
 const DIFF_FACTS_OUT = `${REVIEW_DIR}/diff-facts.json`;
@@ -365,6 +372,7 @@ export const runStagePrCli = async (
     fs: StagePrFs,
     ghGet: GhGet,
     ghGraphql: GhGraphql,
+    ticketFetch: TicketFetch,
     options: StagePrOptions,
 ): Promise<StagePrResult> => {
     const {repo, prNumber, repoRoot} = options;
@@ -386,7 +394,7 @@ export const runStagePrCli = async (
         body?: string | null;
         user?: {login?: string};
         base?: {ref?: string};
-        head?: {sha?: string};
+        head?: {sha?: string; ref?: string};
         draft?: boolean;
     };
     if (
@@ -420,6 +428,22 @@ export const runStagePrCli = async (
             2,
         ),
     );
+
+    // 1b. The linked Jira tickets → ticket-context.json (never a
+    // prerequisite: every degradation stages {available: false, reason} and
+    // the intent-reading sub-agents fall back to the PR description).
+    // stage-ticket.ts owns every degradation shape, including the
+    // unconfigured one, so an env without REVIEW_JIRA_* never fetches.
+    const ticket = await stageTicketContext(ticketFetch, {
+        baseUrl: env.REVIEW_JIRA_BASE_URL ?? "",
+        email: env.REVIEW_JIRA_EMAIL ?? "",
+        apiToken: env.REVIEW_JIRA_API_TOKEN ?? "",
+        title: pr.title ?? "",
+        headBranch: pr.head?.ref ?? "",
+        description: pr.body ?? "",
+    });
+    warnings.push(...ticket.warnings);
+    write(TICKET_CONTEXT_OUT, JSON.stringify(ticket.context, null, 2));
 
     // 2. Changed files → files.json + full.diff (hard prerequisite).
     const files = await fetchAllFiles(ghGet, repo, prNumber);
@@ -865,7 +889,25 @@ if (typeof require !== "undefined" && require.main === module) {
         );
         process.exit(2);
     }
-    void runStagePrCli(nodeFs, ghGet, ghGraphql, {
+    // The linked-ticket GET (stage-ticket.ts). Plain fetch, no retry, and a
+    // hard 10s bound per candidate, fetched in parallel (a blackholed Jira
+    // host must not stall staging until the job timeout): a ticket is
+    // context, not a prerequisite, and stage-ticket degrades every failure
+    // rather than failing the staging.
+    const ticketFetch = async (
+        url: string,
+        headers: Record<string, string>,
+    ): Promise<{status: number; json: unknown}> => {
+        const response = await fetch(url, {
+            headers,
+            signal: AbortSignal.timeout(10_000),
+        });
+        return {
+            status: response.status,
+            json: await response.json().catch(() => null),
+        };
+    };
+    void runStagePrCli(nodeFs, ghGet, ghGraphql, ticketFetch, {
         repo,
         prNumber,
         repoRoot,

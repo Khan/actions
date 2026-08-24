@@ -115,6 +115,9 @@ const baseRoutes = (): Record<string, unknown> => ({
 
 describe("review-thread staging (slice 1)", () => {
     const options = {repo: "o/r", prNumber: 7, repoRoot: "/work"};
+    // REVIEW_JIRA_* is unset here, so the ticket staging never fetches.
+    const noTicket = (): Promise<{status: number; json: unknown}> =>
+        Promise.reject(new Error("unexpected ticket fetch"));
     const routes = () => baseRoutes();
     const stage = async (pages: unknown[]) => {
         const fs = makeFakeFs();
@@ -122,6 +125,7 @@ describe("review-thread staging (slice 1)", () => {
             fs,
             ghGetFromMap(routes()),
             graphqlFromPages(pages),
+            noTicket,
             options,
         );
         return {
@@ -618,6 +622,7 @@ describe("review-thread staging (slice 1)", () => {
                 fs,
                 ghGetFromMap(routes()),
                 graphqlFromPages([{errors: [{type: "RATE_LIMITED"}]}]),
+                noTicket,
                 options,
             ),
         ).rejects.toThrow(/RATE_LIMITED/);
@@ -631,6 +636,7 @@ describe("review-thread staging (slice 1)", () => {
                 makeFakeFs(),
                 ghGetFromMap(routes()),
                 graphqlFromPages([{data: {repository: null}}]),
+                noTicket,
                 options,
             ),
         ).rejects.toThrow(/no reviewThreads connection/);
@@ -659,6 +665,7 @@ describe("review-thread staging (slice 1)", () => {
                 makeFakeFs(),
                 ghGetFromMap(routes()),
                 graphqlFromPages([noCursor]),
+                noTicket,
                 options,
             ),
         ).rejects.toThrow(/without an endCursor/);
