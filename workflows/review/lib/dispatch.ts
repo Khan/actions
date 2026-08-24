@@ -66,7 +66,16 @@ import {
     type Candidate,
     type Claim,
 } from "./dispatch-contracts";
-import {loadAgents, type DispatchFs} from "./dispatch-agents";
+import {loadAgents, type AgentRunner, type DispatchFs} from "./dispatch-agents";
+import {
+    buildProseJudgeArtifact,
+    createProseGate,
+    fallbackSkippedRecord,
+    stageProseJudgeArtifact,
+    type JudgeRecord,
+    type ProseJudgeArtifact,
+    type ProseRunner,
+} from "./judge-prose";
 
 import {computeRoster, TRIAGE_DIMENSION} from "./dispatch-roster";
 import type {RosterShed} from "./dispatch-roster";
@@ -125,72 +134,14 @@ export {type ClusterRejection} from "./dedup-cluster";
 /* Seams                                                                      */
 /* -------------------------------------------------------------------------- */
 
-/** One sub-agent dispatch request (mirrors the eval's LiveAgentRequest). */
-export type AgentRequest = {
-    name: string;
-    model: string;
-    prompt: string;
-    cwd: string;
-    maxTurns: number;
-    timeoutMs: number;
-    /**
-     * The structured-final contract check (trial suggestion h). When set,
-     * the runner exposes a `submit_result` tool whose input is validated by
-     * this function BEFORE it is accepted: null accepts the payload as the
-     * agent's result; a string rejects it back to the model, which corrects
-     * and re-calls in the same session (a few turns, not the $2-3 full
-     * re-dispatch the malformed-output retry costs). Free-text finals stay as
-     * the fallback for a model that never calls the tool.
-     */
-    validate?: (payload: Record<string, unknown>) => string | null;
-};
-
-export type AgentResult = {
-    /** The agent's final text (expected to be its JSON contract). */
-    output: string;
-    usd: number;
-    turns: number;
-    wallMs: number;
-    /**
-     * Tool calls the agent made. The harness-parity signal: a loop that
-     * investigates with fewer tool calls and scores lower has a toolbox
-     * problem, not a model problem. Optional because a runner that cannot
-     * count them reports nothing rather than a misleading zero.
-     */
-    toolCalls?: number;
-    /**
-     * The provider's stop reason for the agent's last assistant message, when
-     * the runner can see one. Load-bearing for one specific diagnosis: an
-     * EMPTY final on cyber-adjacent input is the signature of a refusal, which
-     * #294 documents as surfacing "as a missing agent result, not an error".
-     * Without this the empty result is indistinguishable from a dropped one.
-     */
-    stopReason?: string;
-    /**
-     * Why the call failed, when the runner can see it. `stopReason=error`
-     * alone does not distinguish an overloaded provider from a prompt that
-     * outgrew the context window, and those have opposite fixes (retries vs
-     * compaction). `tokensAtFailure` is the discriminator: near the model's
-     * context window means overflow.
-     */
-    errorMessage?: string;
-    /** The provider's own stop reason, before the runner normalizes it. */
-    rawStopReason?: string;
-    /** Input and total tokens on the last assistant message. */
-    tokensAtFailure?: {input: number; total: number};
-    /**
-     * The provider blocked the request under its usage policy. Distinct from
-     * every other failure because it is deterministic in the model, not
-     * transient: retrying the same pin returns the same refusal, so the only
-     * useful response is a different model.
-     */
-    refused?: boolean;
-    /** The output came through the structured-final tool, pre-validated. */
-    structured?: boolean;
-};
-
-/** The model seam; the SDK-backed production runner lives in the CLI entry. */
-export type AgentRunner = (request: AgentRequest) => Promise<AgentResult>;
+// The model-facing contract types live in dispatch-agents.ts (the same
+// max-lines split that placed agent loading there); re-exported so every
+// existing importer keeps this module as the one surface.
+export {
+    type AgentRequest,
+    type AgentResult,
+    type AgentRunner,
+} from "./dispatch-agents";
 
 /* -------------------------------------------------------------------------- */
 /* Fixed paths and contracts                                                  */
@@ -199,7 +150,8 @@ export type AgentRunner = (request: AgentRequest) => Promise<AgentResult>;
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const OUT_DIR = `${REVIEW_DIR}/out`;
 
-const DEFAULT_MAX_TURNS = 30;
+// 100, not 30: #295 held twice on error_max_turns (a loop guard only).
+const DEFAULT_MAX_TURNS = 100;
 /**
  * Per-sub-agent wall-clock cap. 15 minutes, not 5: trial run 29901690493
  * killed both default finders (correctness-reviewer, skill-auditor) at
@@ -278,6 +230,13 @@ export type DispatchResult = {
     threadSuppressionUnavailable?: {unusableThreads: number; warning: string};
     /** The reconciler's decision, when it ran and parsed. */
     reconciliation?: {resolve: string[]; keep: string[]; skipLines: unknown};
+    /**
+     * The prose judge's verdicts (judge-prose.ts), present when the run had
+     * a prose runner. Also staged standalone as judge-prose-verdicts.json;
+     * duplicated here so the artifact's one-file dispatch record carries the
+     * error-rate the fail-open design needs watched.
+     */
+    proseJudge?: ProseJudgeArtifact;
     /** correctness-reviewer `files[]` risk levels (Steps 7-8). */
     riskFiles?: unknown;
     /** pattern-triage patterns + excluded files (Step 7). */
@@ -297,6 +256,14 @@ export type DispatchOptions = {
     maxTurns?: number;
     timeoutMs?: number;
     concurrency?: number;
+    /**
+     * The prose judge's model call (PRA-45). When set, every dispatched
+     * agent gets a per-agent prose gate on its `submit_result` path and the
+     * run stages `judge-prose-verdicts.json`. Absent (unit tests, task
+     * mode), no gate exists and nothing is judged — the same fail-open
+     * default as every other optional model surface here.
+     */
+    proseRunner?: ProseRunner;
 };
 
 const readJson = (fs: DispatchFs, path: string): unknown => {
@@ -398,6 +365,7 @@ export const runDispatch = async (
                 : "finder",
         );
     const perAgent: PerAgentReport[] = [];
+    const proseVerdicts: JudgeRecord[] = [];
     const skippedDimensions: DispatchSkippedDimension[] = roster.shed.map(
         (shed) => ({
             dimension: shed.name,
@@ -437,6 +405,15 @@ export const runDispatch = async (
                     ? ""
                     : `\n\nYour previous reply could not be used (${malformedNote}). Submit again now, and this time deliver the complete corrected JSON object through the submit_result tool (or, if that tool is unavailable, as your ENTIRE message: no prose before or after it, no code fence).`;
             const model = modelOverride ?? definition.model;
+            // One prose gate per dispatch attempt: per-session bounce cap,
+            // records accumulate into the run artifact whatever the fate.
+            const proseGate =
+                options.proseRunner === undefined
+                    ? undefined
+                    : createProseGate({
+                          runner: options.proseRunner,
+                          source: name,
+                      });
             const result = await runner({
                 name,
                 model,
@@ -445,7 +422,16 @@ export const runDispatch = async (
                 maxTurns,
                 timeoutMs,
                 validate: validatorFor(name),
+                ...(proseGate === undefined
+                    ? {}
+                    : {judgeProse: proseGate.gate}),
             });
+            if (proseGate !== undefined) {
+                proseVerdicts.push(...proseGate.records);
+                if (result.structured !== true) {
+                    proseVerdicts.push(fallbackSkippedRecord(name));
+                }
+            }
             // A usage-policy refusal is intermittent (probe 30658862532 saw
             // the same pin clear cases it blocked in 30656579898), but the
             // contract-parse retry still cannot recover it: that retry appends
@@ -939,9 +925,17 @@ export const runDispatch = async (
         ...(riskFiles !== undefined ? {riskFiles} : {}),
         ...(patterns !== undefined ? {patterns} : {}),
         ...(excludedFiles !== undefined ? {excludedFiles} : {}),
+        ...(options.proseRunner === undefined
+            ? {}
+            : {proseJudge: buildProseJudgeArtifact(proseVerdicts)}),
         perAgent,
         totalUsd: perAgent.reduce((sum, agent) => sum + agent.usd, 0),
     };
+    stageProseJudgeArtifact(
+        (path, data) => fs.writeFileSync(path, data),
+        writeOut,
+        result.proseJudge,
+    );
     const serialized = JSON.stringify(result, null, 2);
     fs.writeFileSync(`${REVIEW_DIR}/dispatch-result.json`, serialized);
     // Also staged under out/ so the Step 9 artifact upload carries it: run
@@ -969,9 +963,16 @@ if (typeof require !== "undefined" && require.main === module) {
     void (async () => {
         const {createSdkRunner} = await import("./dispatch-runner");
         const runner = await createSdkRunner();
+        const {createDefaultProseRunner} = await import("./judge-prose-runner");
+        const proseRunner = await createDefaultProseRunner();
         const repoRoot =
             process.env.REVIEW_REPO_ROOT ?? process.env.GITHUB_WORKSPACE ?? ".";
-        const result = await runDispatch({fs: nodeFs, runner, repoRoot});
+        const result = await runDispatch({
+            fs: nodeFs,
+            runner,
+            repoRoot,
+            ...(proseRunner === undefined ? {} : {proseRunner}),
+        });
         // eslint-disable-next-line no-console
         console.log(
             JSON.stringify(
