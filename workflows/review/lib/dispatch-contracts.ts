@@ -116,14 +116,6 @@ const foldToken = (token: string): string => {
 };
 
 /**
- * Function words that carry no claim content; ignored on the SUBJECT side
- * of the restatement check so "turns are dropped" still matches "drops
- * turns" (the sentence has no "are"). Never filtered from the sentence
- * side — there they can only help containment, not hurt it. Distinct from
- * dedup-text.ts's STOPWORDS (near-identical list, different semantics:
- * that one filters both sides of a similarity score).
- */
-/**
  * Split point for "the discussion's first sentence": a sentence terminator
  * followed by whitespace. Shared by the restatement drop and buildClaims'
  * subject recovery, which must agree on what the first sentence IS: the
@@ -132,6 +124,14 @@ const foldToken = (token: string): string => {
  */
 const FIRST_SENTENCE_SPLIT = /(?<=[.!?])\s/;
 
+/**
+ * Function words that carry no claim content; ignored on the SUBJECT side
+ * of the restatement check so "turns are dropped" still matches "drops
+ * turns" (the sentence has no "are"). Never filtered from the sentence
+ * side — there they can only help containment, not hurt it. Distinct from
+ * dedup-text.ts's STOPWORDS (near-identical list, different semantics:
+ * that one filters both sides of a similarity score).
+ */
 const SUBJECT_STOPWORDS: ReadonlySet<string> = new Set([
     "a",
     "an",
