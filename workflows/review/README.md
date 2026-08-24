@@ -142,7 +142,9 @@ you can pick the one that says what you mean:
   (and blocking, if it was blocking).
 - **Resolve the thread.** "This is settled." The thread leaves the
   accountability recap, and the defect joins the adjudicated corpus: a later
-  run that re-derives the same defect (any wording, any nearby line) posts
+  run that re-derives the same defect (any wording, any line, and unlike the
+  open-thread corpus any file, since a settled defect's rephrasing often
+  re-anchors on the spec or the test rather than the implementation) posts
   nothing, unless it comes back at BLOCKING severity, which always posts (a
   regression worth stopping the PR for must never be silenced by an old
   resolution). Threads the bot resolved itself (because a push fixed them)

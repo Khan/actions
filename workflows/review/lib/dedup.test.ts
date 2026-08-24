@@ -1,11 +1,11 @@
 import {describe, it, expect} from "vitest";
 
+import {dedupeClaims} from "./dedup";
 import {
-    dedupeClaims,
     openThreadsFromStaged,
     stagedThreadShapeFailure,
     suppressOpenThreadDuplicates,
-} from "./dedup";
+} from "./dedup-threads";
 import type {Claim} from "./dispatch-contracts";
 
 /**
