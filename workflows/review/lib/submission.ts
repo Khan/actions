@@ -725,9 +725,9 @@ export const runSubmissionCli = (
         // never fires" behind "Non-blocking observations (6)" on an
         // approving review (Khan/actions#367), and a collapsed line only
         // costs near-zero attention if the summary line says when it is
-        // worth spending more. `collapsed` is in ranked order (the budget
-        // shed comes off the ranked list; pr-level claims append after), so
-        // entry 0 is the best of the tail.
+        // worth spending more. `collapsed` re-sorts with rankClaims after
+        // the pr-level claims join it, so entry 0 is the best of the whole
+        // tail, pr-level included.
         // The subject rides the tag, not only the location and label: the
         // subject is the claim itself, and it is what tells a reader whether
         // the expando is worth opening.

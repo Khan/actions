@@ -3,10 +3,11 @@ import {describe, it, expect} from "vitest";
 import {runSubmissionCli, type SubmissionFs} from "./submission";
 
 /**
- * Submission-plan tests for the post-trial follow-ups: risks/patterns key
- * staging, the inline posting bar, and the open-thread suppression verdict
- * floor. Split from submission.test.ts by the max-lines budget; the fixtures
- * below are small local copies of that file's helpers.
+ * Submission-plan tests for the post-trial follow-ups and the P1 posting
+ * budget: risks/patterns key staging, the inline posting bar, the
+ * non-blocking budget and nitpick rules, and the open-thread suppression
+ * verdict floor. Split from submission.test.ts by the max-lines budget; the
+ * fixtures below are small local copies of that file's helpers.
  */
 
 const REVIEW = "/tmp/gh-aw/review";
@@ -475,5 +476,46 @@ describe("the budget's edge values", () => {
         expect(plan.body).toContain(
             "Non-blocking observations (2; top: note (non-blocking): A cross-file observation.)",
         );
+    });
+});
+
+describe("the budget's spend order", () => {
+    it("spends the budget on the highest-confidence non-blocking claims", () => {
+        const claims = [
+            claim({
+                id: "weakest",
+                line: 1,
+                label: "suggestion (non-blocking)",
+                confidence: 0.55,
+            }),
+            claim({
+                id: "strongest",
+                line: 2,
+                label: "suggestion (non-blocking)",
+                confidence: 0.95,
+            }),
+            claim({
+                id: "middle",
+                line: 3,
+                label: "suggestion (non-blocking)",
+                confidence: 0.75,
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged(
+                    {depth: "full", claims},
+                    {
+                        [`${REVIEW}/routing.json`]: JSON.stringify({
+                            nonBlockingInlineBudget: 2,
+                        }),
+                    },
+                ),
+            ),
+        );
+        // The budget spends in ranked order, so the two strongest post and
+        // the weakest is the one collapsed.
+        expect(plan.comments.map((entry) => entry.line).sort()).toEqual([2, 3]);
+        expect(plan.body).toContain("`a.ts:1`");
     });
 });
