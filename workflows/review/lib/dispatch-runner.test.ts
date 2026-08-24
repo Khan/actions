@@ -467,6 +467,50 @@ describe("createSdkRunner Stop hook (the free-text fallback funnel)", () => {
         expect(await hook!()).toEqual({});
     });
 
+    it("names the mid-bounce state when a prose-gate-rejected submission exists", async () => {
+        session = async function* (tools) {
+            const bounced = await tools[0].handler(
+                {result: {findings: [{id: "pre-style"}]}},
+                undefined,
+            );
+            expect(bounced.isError).toBe(true);
+            yield success("free text");
+        };
+        await (
+            await createSdkRunner()
+        )(
+            request({
+                judgeProse: () => Promise.resolve("Result rejected: style"),
+            }),
+        );
+        const blocked = await stopHook()!();
+        expect(blocked).toMatchObject({decision: "block"});
+        // The contract-valid payload is mid-bounce: telling the agent it
+        // never delivered is the falsehood this branch removes.
+        expect(String(blocked["reason"])).toContain("was rejected");
+        expect(String(blocked["reason"])).not.toContain("have not delivered");
+    });
+
+    it("names the mid-bounce state for a CONTRACT bounce too (no provisional exists)", async () => {
+        // A contract bounce sets neither captured nor provisional; only the
+        // attempt counter knows the agent already called the tool.
+        session = async function* (tools) {
+            const bounced = await tools[0].handler(
+                {result: {finding: "singular, drifted"}},
+                undefined,
+            );
+            expect(bounced.isError).toBe(true);
+            yield success("free text");
+        };
+        await (
+            await createSdkRunner()
+        )(request());
+        const blocked = await stopHook()!();
+        expect(blocked).toMatchObject({decision: "block"});
+        expect(String(blocked["reason"])).toContain("was rejected");
+        expect(String(blocked["reason"])).not.toContain("have not delivered");
+    });
+
     it("lets a stop through once a payload was accepted", async () => {
         session = async function* (tools) {
             await tools[0].handler({result: {findings: []}}, undefined);

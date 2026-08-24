@@ -188,7 +188,16 @@ type OpenThreadScore = {
     sharedBigrams: number;
 };
 
-const openThreadScore = (claim: Claim, thread: OpenThread): OpenThreadScore => {
+/**
+ * Exported for the calibration tests: the adjudicated hard-negative fixture
+ * asserts its band (bigrams/overlap clearing, jaccard rejecting) against
+ * THIS function, so the assertion scores exactly what production scores
+ * (threadProse strip included) instead of re-deriving the formula.
+ */
+export const openThreadScore = (
+    claim: Claim,
+    thread: OpenThread,
+): OpenThreadScore => {
     const tokensA = contentTokens(
         `${claim.subject} ${claim.discussion} ${claim.failure_scenario}`,
     );

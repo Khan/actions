@@ -5,13 +5,8 @@ import {
     suppressAdjudicatedDuplicates,
     suppressTrackedDuplicates,
 } from "./dedup-adjudicated";
-import {
-    bigrams,
-    contentTokens,
-    intersectionSize,
-    OTHER_LINE_FLOOR,
-} from "./dedup-text";
-import {suppressOpenThreadDuplicates} from "./dedup-threads";
+import {OTHER_LINE_FLOOR} from "./dedup-text";
+import {openThreadScore, suppressOpenThreadDuplicates} from "./dedup-threads";
 import type {Claim} from "./dispatch-contracts";
 
 /**
@@ -350,26 +345,12 @@ describe("cross-file adjudicated suppression (the path key dropped)", () => {
         // Assert the calibration band, not just the outcome: a fixture that
         // quietly drifted out of the band (rejected on bigrams instead of
         // jaccard) would still pass the kept assertion while pinning
-        // nothing. Scored with the same primitives production scores with;
-        // the thread's prose is its body minus the label prefix, matching
-        // threadProse's strip.
-        const tokensA = contentTokens(
-            `${negative.subject} ${negative.discussion} ${negative.failure_scenario}`,
-        );
-        const tokensB = contentTokens(
-            adjudicatedThread().body.replace(
-                /^\*\*suggestion \(non-blocking\):\*\* /,
-                "",
-            ),
-        );
-        const setA = new Set(tokensA);
-        const setB = new Set(tokensB);
-        const shared = intersectionSize(setA, setB);
-        const jaccard = shared / (setA.size + setB.size - shared);
-        const overlap = shared / Math.min(setA.size, setB.size);
-        const sharedBigrams = intersectionSize(
-            bigrams(tokensA),
-            bigrams(tokensB),
+        // nothing. Scored through openThreadScore itself, so the assertion
+        // measures exactly what production measures (threadProse strip
+        // included).
+        const {jaccard, overlap, sharedBigrams} = openThreadScore(
+            negative,
+            adjudicatedThread(),
         );
         expect(sharedBigrams).toBeGreaterThanOrEqual(
             OTHER_LINE_FLOOR.sharedBigrams,

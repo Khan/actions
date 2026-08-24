@@ -98,6 +98,12 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
         // `captured ?? provisional` — the styled acceptance when one
         // happened, else the best contract-valid submission seen.
         let provisional: Record<string, unknown> | undefined;
+        // How many times the agent called submit_result at all, counted
+        // BEFORE the contract check: the Stop-hook reason branches on this,
+        // and a contract-bounced agent (validate non-null, so neither
+        // `captured` nor `provisional` is set) is still mid-correction, not
+        // an agent that never delivered.
+        let submitAttempts = 0;
         const validate = request.validate;
         if (validate !== undefined) {
             options.mcpServers = {
@@ -109,6 +115,7 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                             "Deliver your final structured result. Pass the entire output-contract JSON object as `result`.",
                             {result: z.record(z.string(), z.unknown())},
                             async (args) => {
+                                submitAttempts += 1;
                                 const payload = args["result"] as Record<
                                     string,
                                     unknown
@@ -177,9 +184,9 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
             // gets its genuine fallback rather than a loop, and dispatch.ts
             // records its findings as skipped by the gate. `captured` empty
             // does NOT mean "never called": a submission the contract or
-            // prose gate bounced leaves it empty too, so the reason names
-            // the state the agent is actually in (`provisional` set means a
-            // contract-valid submission is mid-bounce).
+            // prose gate bounced leaves it empty too, so the reason branches
+            // on whether submit_result was ever called (either bounce kind
+            // leaves the agent mid-correction, not undelivered).
             let stopBlocks = 0;
             options.hooks = {
                 Stop: [
@@ -194,7 +201,7 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                                     return {
                                         decision: "block" as const,
                                         reason:
-                                            provisional === undefined
+                                            submitAttempts === 0
                                                 ? "You have not delivered your result yet. Call the submit_result tool ONCE now, passing the ENTIRE JSON object your output contract specifies as its `result` argument; do not paste the JSON as a message."
                                                 : "Your submission was rejected and must be corrected. Rewrite what the rejection message named and call submit_result again with the full corrected result object; do not paste the JSON as a message.",
                                     };
