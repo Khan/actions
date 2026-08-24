@@ -48,6 +48,29 @@ The `total_count` guard is not decoration: the command reads a single
 100-item page, and without the check a rollout past 100 consumers silently
 drops the overflow.
 
+The `@review-v` phrase has a blind spot: an install whose `source:` pins a raw
+commit SHA instead of a tag does not match it. This is not hypothetical:
+Khan/frontend sat pinned to `54f804c` (the review-v1.1.1 tag commit) for 18
+minors and was invisible to this search, found 2026-08-24 only by the sweep
+below. A SHA pin is exactly what a `gh aw add ...@<tag>` records (it resolves
+the tag) and what the banned `gh aw update` writes, so expect more of them.
+After the phrase search, re-check with the pin-agnostic sweep: list the org's
+active repos and probe each one's installed file directly.
+
+```sh
+gh api --paginate 'orgs/Khan/repos?per_page=100' --jq '.[] | select(.archived==false) | .name' > /tmp/repos.txt
+while read -r r; do gh api "repos/Khan/$r/contents/.github/workflows/review.md" --jq '.content' </dev/null 2>/dev/null | base64 -d | grep -H --label="Khan/$r" '^source: Khan/actions/workflows/review/review.md@'; done < /tmp/repos.txt
+```
+
+The sweep is also the fallback when code search is unavailable at all (some
+sandbox brokers allowlist only owner-scoped REST endpoints and block
+`search/code` and the `gh search` verb; the sweep is plain GETs). Two traps,
+both hit live: under the Khan github broker, `gh api` paths must NOT start
+with a leading slash (`/orgs/Khan/repos` is rejected as not owner-scoped,
+`orgs/Khan/repos` passes), and the `gh` shim eats the `while read` loop's
+stdin, so the `</dev/null` on the inner call is what keeps the loop from
+exiting after one repo.
+
 The same search with the autofix phrase
 (`workflows%2Fautofix%2Fautofix.md%40autofix-v`, path
 `.github/workflows/autofix.md`) enumerates autofix installs, and the
@@ -56,7 +79,17 @@ rather than a bump. Code search has a low per-minute rate limit and indexes
 default branches only (an install sitting in an open PR will not appear), so
 pause between the two queries and sanity-check the result against the repos
 you expect. Read each consumer's current pin from its own `source:` line;
-consumers drift, so do not assume they are all on the same version.
+consumers drift, so do not assume they are all on the same version. Do not
+trust the pin blindly either: resolve it in a `Khan/actions` checkout
+(`git tag --points-at <sha>`, or `git describe --tags --match 'review-v*'`)
+and, for anything more than a couple of minors stale, diff the installed copy
+against the pinned content before choosing a merge base. Khan/frontend's pin
+named the review-v1.1.1 commit while the installed file carried 255 diff lines
+of unmarked local edits (a hand-authored re-review fast path, no LOCAL
+OVERRIDE markers anywhere); a merge based on the pin alone would have
+misattributed all of it. An install that stale, or one whose local edits
+upstream has since superseded, is an onboarding refresh
+(`.claude/skills/review-onboarding/SKILL.md`), not a bump.
 
 ## Do not use `gh aw update`
 
