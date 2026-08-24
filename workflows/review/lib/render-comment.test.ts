@@ -388,3 +388,15 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
         `);
     });
 });
+
+describe("renderReviewBody — the COMMENT verdict", () => {
+    it("always carries the middle verdict's head", () => {
+        const body = renderReviewBody({
+            event: "COMMENT",
+            hasInlineComments: true,
+        });
+        expect(body).toContain(
+            "Commented — medium-importance findings posted; nothing blocks.",
+        );
+    });
+});

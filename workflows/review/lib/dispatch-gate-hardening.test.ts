@@ -350,6 +350,21 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
         expect(result.violations.map((v) => v.code)).toEqual([
             "approve-with-blocking-comment",
         ]);
+        // The COMMENT verdict is checked the same way: it exists for the
+        // medium-and-below population, never for blocking findings.
+        const comment = evaluate({
+            ...conforming(),
+            items: [
+                commentItem(2, "**issue (blocking):** guard removed"),
+                submitItem(
+                    "COMMENT",
+                    "Commented — medium-importance findings posted; nothing blocks.",
+                ),
+            ],
+        });
+        expect(comment.violations.map((v) => v.code)).toEqual([
+            "approve-with-blocking-comment",
+        ]);
         // The same comment under REQUEST_CHANGES is the conforming shape.
         const rc = evaluate({
             ...conforming(),

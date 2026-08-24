@@ -601,6 +601,13 @@ describe("stampFromCacheMemory", () => {
         });
     });
 
+    it("accepts a COMMENT verdict record (the PRA-7 middle verdict)", () => {
+        const stamp = stampFromCacheMemory(
+            JSON.parse(cacheRecord({verdict: "COMMENT"})),
+        );
+        expect(stamp?.verdict).toBe("COMMENT");
+    });
+
     it.each([
         ["missing verdict", {verdict: undefined}],
         ["unknown verdict", {verdict: "COMMENTED"}],

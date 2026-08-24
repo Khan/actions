@@ -22,17 +22,24 @@ import type {Anchor, Finding, Lens} from "./finding-schema";
 
 /**
  * The review-outcome vocabulary. `APPROVE` / `REQUEST_CHANGES` are #194's
- * mechanical events; `HOLD_FOR_HUMAN` is the third outcome (missing-core
- * dimension gate + policy-named conflicts). It is not a GitHub review event —
- * `review.md` only allows `[APPROVE, REQUEST_CHANGES]` — so the orchestrator
- * surfaces a hold by pulling in a human rather than auto-submitting an approval.
+ * mechanical events. `COMMENT` is the middle verdict (PRA-7): the run found
+ * medium-importance findings and nothing blocking, so it neither vouches for
+ * the change nor demands another round; it IS a GitHub review event, and the
+ * findings post exactly as they would on an approval. `HOLD_FOR_HUMAN` is
+ * the coverage outcome (missing-core dimension gate + policy-named
+ * conflicts); it is NOT a GitHub review event, so the orchestrator surfaces
+ * a hold by pulling in a human rather than auto-submitting anything.
  *
  * Defined here (the rendering module) rather than in `verdict.ts` so the import
  * graph has a single direction (`verdict.ts` -> `render-comment.ts`) with no
  * cycle: rendering is the lower-level presentation vocabulary, verdict is the
  * policy computed on top of it.
  */
-export type VerdictEvent = "APPROVE" | "REQUEST_CHANGES" | "HOLD_FOR_HUMAN";
+export type VerdictEvent =
+    | "APPROVE"
+    | "COMMENT"
+    | "REQUEST_CHANGES"
+    | "HOLD_FOR_HUMAN";
 
 /**
  * The Conventional-Comment labels that drive REQUEST_CHANGES under #194's
@@ -323,6 +330,12 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             // body, and the inline comments post separately, so they never
             // make the event non-empty: the pointer line is unconditional.
             head = "Changes requested — see inline comments.";
+            break;
+        case "COMMENT":
+            // The middle verdict never has an empty body either: the head is
+            // what tells an author this is deliberately not an approval.
+            head =
+                "Commented — medium-importance findings posted; nothing blocks.";
             break;
         case "HOLD_FOR_HUMAN":
             head = HOLD_HEAD;

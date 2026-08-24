@@ -297,3 +297,68 @@ describe("computeVerdict — purity", () => {
         expect(conflicts).toEqual([{policy: "p", detail: "d"}]);
     });
 });
+
+describe("the COMMENT verdict (the PRA-7 middle outcome)", () => {
+    const assessed = {
+        correctness: "assessed",
+        skillSeverity: "assessed",
+        patternTriage: "assessed",
+    } as const;
+
+    it("mediums demote a would-be approval to COMMENT, with a reason", () => {
+        const verdict = computeVerdict({
+            postedLabels: ["note (non-blocking)"],
+            dimensions: assessed,
+            mediumCount: 2,
+        });
+        expect(verdict.event).toBe("COMMENT");
+        expect(verdict.reasons).toContainEqual({
+            code: "medium-importance",
+            count: 2,
+        });
+    });
+
+    it("blocking outranks medium", () => {
+        expect(
+            computeVerdict({
+                postedLabels: ["issue (blocking)"],
+                dimensions: assessed,
+                mediumCount: 1,
+            }).event,
+        ).toBe("REQUEST_CHANGES");
+    });
+
+    it("a kept blocking thread outranks medium too", () => {
+        expect(
+            computeVerdict({
+                postedLabels: [],
+                dimensions: assessed,
+                mediumCount: 1,
+                keptBlockingCount: 1,
+            }).event,
+        ).toBe("REQUEST_CHANGES");
+    });
+
+    it("COMMENT outranks the hold: a comment approves nothing, so the missing core pass is disclosed, not held on", () => {
+        const verdict = computeVerdict({
+            postedLabels: ["note (non-blocking)"],
+            dimensions: {...assessed, correctness: "unavailable"},
+            mediumCount: 1,
+        });
+        expect(verdict.event).toBe("COMMENT");
+        expect(verdict.reasons).toContainEqual({
+            code: "core-dimension-unavailable",
+            dimension: "correctness",
+        });
+    });
+
+    it("zero mediums keeps the approval", () => {
+        expect(
+            computeVerdict({
+                postedLabels: ["note (non-blocking)"],
+                dimensions: assessed,
+                mediumCount: 0,
+            }).event,
+        ).toBe("APPROVE");
+    });
+});

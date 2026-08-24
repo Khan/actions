@@ -96,7 +96,12 @@ describe("runSubmissionCli: re-review blocking-medium", () => {
             }),
         );
         const plan = runSubmissionCli(fs);
-        expect(plan.event).toBe("APPROVE");
+        // A posted medium demotes the would-be approval to the middle
+        // verdict (PRA-7): the run neither vouches nor demands a round.
+        expect(plan.event).toBe("COMMENT");
+        expect(plan.body).toContain(
+            "Commented — medium-importance findings posted; nothing blocks.",
+        );
         expect(plan.comments).toHaveLength(1);
         expect(plan.comments[0].line).toBe(2);
         expect(plan.body).toContain(
@@ -281,5 +286,56 @@ describe("the veto's diff sources", () => {
         expect(plan.notes).toContainEqual(
             "medium-importance claims this run: 0",
         );
+    });
+});
+
+describe("the COMMENT verdict", () => {
+    it("a vetoed medium does not demote the approval", () => {
+        // Line 40 is outside the diff: the tier is stripped, the medium
+        // count is 0, and the verdict stays APPROVE.
+        const fs = makeFakeFs(
+            staged({
+                depth: "scoped",
+                claims: [
+                    claim({id: "drifted", line: 40, importance: "medium"}),
+                ],
+            }),
+        );
+        expect(runSubmissionCli(fs).event).toBe("APPROVE");
+    });
+
+    it("a collapsed medium still demotes (the verdict follows what the run found)", () => {
+        // Strict blocking-only collapses the medium's surface, but the
+        // finding was verified and anchored: the verdict comments anyway,
+        // same invariant that keeps a collapsed blocking claim blocking.
+        const fs = makeFakeFs(
+            staged(
+                {
+                    depth: "scoped",
+                    claims: [claim({id: "medium", importance: "medium"})],
+                },
+                {reReviewBlockingOnly: true},
+            ),
+        );
+        const plan = runSubmissionCli(fs);
+        expect(plan.comments).toHaveLength(0);
+        expect(plan.event).toBe("COMMENT");
+    });
+
+    it("blocking still outranks medium", () => {
+        const fs = makeFakeFs(
+            staged({
+                depth: "scoped",
+                claims: [
+                    claim({id: "medium", importance: "medium"}),
+                    claim({
+                        id: "blocking",
+                        line: 9,
+                        label: "issue (blocking)",
+                    }),
+                ],
+            }),
+        );
+        expect(runSubmissionCli(fs).event).toBe("REQUEST_CHANGES");
     });
 });

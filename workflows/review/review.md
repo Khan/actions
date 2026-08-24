@@ -85,7 +85,7 @@ safe-outputs:
     side: "RIGHT"
   submit-pull-request-review:
     max: 1
-    allowed-events: [APPROVE, REQUEST_CHANGES]
+    allowed-events: [APPROVE, COMMENT, REQUEST_CHANGES]
     footer: false
   # Resolve this workflow's own earlier review threads once their issue is addressed
   # (Step 7), instead of replying. Uses the bot token because the default GITHUB_TOKEN
@@ -882,14 +882,18 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
 
 The verdict is computed by the plan CLI (Step 3), never by you: REQUEST_CHANGES
 iff a validated posted claim carries a blocking label, plus the reduced-depth
-flip floor over kept blocking threads and the open-thread suppression floor —
-all `lib/verdict.ts` / `lib/submission.ts` rules. A third outcome exists:
-HOLD_FOR_HUMAN, when a core review pass (`correctness-reviewer` or
-`skill-auditor`) produced no usable output this run and the run would
-otherwise have auto-approved — the automation never approves a change its
-core passes did not look at (a blocking finding still wins: it is actionable
-on its own, so the verdict stays REQUEST_CHANGES and the gap is disclosed in
-a note line). The plan's `event` IS the
+flip floor over kept blocking threads and the open-thread suppression floor;
+COMMENT when nothing blocks but at least one posted claim carries the medium
+importance tier (a verified finding worth fixing before merge should not ride
+under an approval, and the middle verdict says so without demanding another
+round); APPROVE otherwise — all `lib/verdict.ts` / `lib/submission.ts` rules.
+A fourth outcome exists: HOLD_FOR_HUMAN, when a core review pass
+(`correctness-reviewer` or `skill-auditor`) produced no usable output this
+run and the run would otherwise have auto-approved — the automation never
+approves a change its core passes did not look at (a blocking finding still
+wins, and a medium finding still comments: both are actionable on their own,
+so the hold only ever replaces a would-be APPROVE and the gap is disclosed
+in a note line). The plan's `event` IS the
 verdict; never recompute, second-guess, or override it. (The blocking-label
 vocabulary and the concrete-failing-scenario bar live in the sub-agent
 definitions and the shared lib.)
@@ -935,8 +939,8 @@ review, posts inline comments, resolves threads, or drops the comment.
 
 ## Step 7: On Approval — Post Risk and Patterns as a PR Comment
 
-**Only run this step when the verdict is APPROVE.** When requesting changes, skip
-it entirely and post no comment. Also skip it entirely on a reduced re-review
+**Only run this step when the verdict is APPROVE.** On REQUEST_CHANGES or
+COMMENT, skip it entirely and post no comment. Also skip it entirely on a reduced re-review
 depth (`scoped`, `flip-gated`, `fast`; Step 3): the reduced run computed no triage
 or risk data to compare, so the existing comment stands and `risksPatternsKey`
 carries forward unchanged (Step 9).
@@ -1137,8 +1141,8 @@ fully explained by a common pattern above:
 
 ## Step 8: On Approval — Request the Owning Teams as Reviewers
 
-**Only run this step when the verdict is APPROVE.** Skip it entirely when
-requesting changes. Also skip it entirely when `correctness-reviewer` did not run
+**Only run this step when the verdict is APPROVE.** Skip it entirely on
+REQUEST_CHANGES or COMMENT. Also skip it entirely when `correctness-reviewer` did not run
 this run (a `flip-gated` or `fast` re-review depth, Step 3): there are no fresh
 risk classifications to route on, and the anchoring full review already requested
 the owning teams.

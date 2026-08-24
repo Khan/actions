@@ -399,12 +399,13 @@ export const evaluateDispatchConformance = (
         }
     }
 
-    // Rule 4: an APPROVE cannot carry a blocking inline comment (Step 4 is a
-    // mechanical function of the labels: a surviving validated blocking
-    // finding means REQUEST_CHANGES at every depth). The inverse direction is
-    // legitimate (a REQUEST_CHANGES may ride entirely on kept prior threads),
-    // so only the APPROVE direction is enforced.
-    if (verdictEvent === "APPROVE") {
+    // Rule 4: neither an APPROVE nor a COMMENT can carry a blocking inline
+    // comment (Step 4 is a mechanical function of the labels: a surviving
+    // validated blocking finding means REQUEST_CHANGES at every depth; the
+    // COMMENT verdict exists only for the medium-and-below population). The
+    // inverse direction is legitimate (a REQUEST_CHANGES may ride entirely
+    // on kept prior threads), so only the non-blocking verdicts are checked.
+    if (verdictEvent === "APPROVE" || verdictEvent === "COMMENT") {
         for (const item of input.items) {
             if (item.type !== COMMENT_TYPE || typeof item.body !== "string") {
                 continue;
@@ -415,7 +416,7 @@ export const evaluateDispatchConformance = (
                     code: "approve-with-blocking-comment",
                     dimension: "verdict",
                     detail:
-                        `APPROVE queued alongside an inline comment labeled "${label}" ` +
+                        `${verdictEvent} queued alongside an inline comment labeled "${label}" ` +
                         `(a surviving blocking finding mechanically requires REQUEST_CHANGES)`,
                 });
                 break;

@@ -381,7 +381,11 @@ export const runCacheRecordCli = (
         }
         return dropRisksPatternsKey(fs, "hold");
     }
-    if (plan.event !== "APPROVE" && plan.event !== "REQUEST_CHANGES") {
+    if (
+        plan.event !== "APPROVE" &&
+        plan.event !== "COMMENT" &&
+        plan.event !== "REQUEST_CHANGES"
+    ) {
         return refuse("the staged plan carries no submittable event");
     }
 
