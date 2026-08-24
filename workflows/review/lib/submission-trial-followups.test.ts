@@ -404,3 +404,76 @@ describe("the nitpick posting rules", () => {
         );
     });
 });
+
+describe("the budget's edge values", () => {
+    it("a zero budget posts blocking and documentation claims only", () => {
+        const claims = [
+            claim({id: "blocking", line: 1, label: "issue (blocking)"}),
+            claim({
+                id: "doc",
+                line: 2,
+                label: "suggestion (non-blocking, documentation)",
+                confidence: 0.9,
+            }),
+            claim({
+                id: "sug",
+                line: 3,
+                label: "suggestion (non-blocking)",
+                confidence: 0.9,
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged(
+                    {depth: "full", claims},
+                    {
+                        [`${REVIEW}/routing.json`]: JSON.stringify({
+                            nonBlockingInlineBudget: 0,
+                        }),
+                    },
+                ),
+            ),
+        );
+        expect(plan.comments.map((entry) => entry.line).sort()).toEqual([1, 2]);
+        expect(plan.notes).toContainEqual(
+            "1 non-blocking claim(s) collapsed over the inline budget (non-blocking budget 0)",
+        );
+    });
+
+    it("a pr-level claim can be the tail's named top entry", () => {
+        const claims = [
+            claim({
+                id: "pr-level",
+                path: undefined,
+                line: undefined,
+                label: "note (non-blocking)",
+                confidence: 0.9,
+                subject: "A cross-file observation.",
+            }),
+            claim({
+                id: "weak",
+                line: 2,
+                label: "thought (non-blocking)",
+                confidence: 0.3,
+                subject: "a hunch",
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged(
+                    {depth: "scoped", claims},
+                    {
+                        [`${REVIEW}/routing.json`]: JSON.stringify({
+                            reReviewBlockingOnly: true,
+                        }),
+                    },
+                ),
+            ),
+        );
+        // Both collapse under blocking-only; the pr-level note outranks the
+        // low-confidence anchored thought for the summary slot.
+        expect(plan.body).toContain(
+            "Non-blocking observations (2; top: note (non-blocking): A cross-file observation.)",
+        );
+    });
+});

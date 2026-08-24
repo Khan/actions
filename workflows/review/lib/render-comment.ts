@@ -65,7 +65,7 @@ export const NON_BLOCKING_LABELS = [
     "suggestion (non-blocking)",
     "suggestion (non-blocking, best-practice)",
     DOCUMENTATION_LABEL,
-    "nitpick (non-blocking)",
+    NITPICK_LABEL,
     "question (non-blocking)",
     "thought (non-blocking)",
     "note (non-blocking)",

@@ -641,20 +641,23 @@ export const runSubmissionCli = (
             : DEFAULT_NON_BLOCKING_INLINE_BUDGET;
     const isNitpick = (claim: Claim): boolean =>
         labelToken(claim.label) === labelToken(NITPICK_LABEL);
-    const ranked = [...anchored].sort((a, b) => {
+    // Named so the collapsed list below can re-sort with the same rank
+    // once the pr-level claims join it: the disclosure names the tail's
+    // first entry, so the ordering IS the disclosure's selection rule.
+    const rankClaims = (a: Claim, b: Claim): number => {
         const blocking =
             Number(isBlockingLabel(b.label)) - Number(isBlockingLabel(a.label));
         if (blocking !== 0) {
             return blocking;
         }
         // Nitpicks rank last among non-blocking claims, whatever their
-        // confidence: `collapsed` keeps this order and the disclosure names
-        // its first entry, so without the demotion the class this surface
+        // confidence: without the demotion the class this surface
         // deliberately never posts would routinely win the summary slot
         // built for the tail's best finding.
         const nitpick = Number(isNitpick(a)) - Number(isNitpick(b));
         return nitpick !== 0 ? nitpick : b.confidence - a.confidence;
-    });
+    };
+    const ranked = [...anchored].sort(rankClaims);
     let budgetLeft = nonBlockingBudget;
     let budgetShed = 0;
     let nitpickShed = 0;
@@ -680,10 +683,13 @@ export const runSubmissionCli = (
         return false;
     });
     const inlineClaims = new Set(inlineWorthy.slice(0, MAX_INLINE_COMMENTS));
+    // Re-sorted rather than appended: a pr-level claim joins the tail at
+    // its rank, so the disclosure's named top entry is the tail's best
+    // claim, not merely its best ANCHORED claim.
     const collapsed = [
         ...ranked.filter((claim) => !inlineClaims.has(claim)),
         ...prLevelCollapsed,
-    ];
+    ].sort(rankClaims);
     const inlineList = [...inlineClaims];
     const inline: PlannedComment[] = inlineList.map((claim) => ({
         path: claim.path as string,

@@ -109,8 +109,11 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         expect(plan.comments[0].body).not.toContain(
             "Non-blocking observations",
         );
+        // The pr-level note outranks the nitpick for the summary slot
+        // (nitpicks rank last; the collapsed list re-sorts with pr-level
+        // claims included).
         expect(plan.body).toContain(
-            "Non-blocking observations (2; top: a.ts:9 nitpick (non-blocking): Rename the helper.)",
+            "Non-blocking observations (2; top: note (non-blocking): A cross-file observation.)",
         );
         expect(plan.body).toContain(
             "- `a.ts:9` nitpick (non-blocking): Rename the helper. " +
