@@ -1,5 +1,5 @@
-# gh-aw-metadata: {"schema_version":"v4","frontmatter_hash":"2697a35c593e8c4b5d4dc87c4d5ece790c4cf0ecf30ab17245b8cf8df137764e","body_hash":"9c724f09745cbf20d35a1d3b95a337a12c0c0149d5f35a5a497b44e3c91dad0e","compiler_version":"v0.85.4","strict":true,"agent_id":"claude","agent_model":"claude-opus-5","engine_versions":{"claude":"2.1.222"}}
-# gh-aw-manifest: {"version":1,"secrets":["ANTHROPIC_API_KEY","COPILOT_GITHUB_TOKEN","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GITHUB_TOKEN","KHAN_ACTIONS_BOT_TOKEN"],"actions":[{"repo":"actions/cache/restore","sha":"55cc8345863c7cc4c66a329aec7e433d2d1c52a9","version":"v6.1.0"},{"repo":"actions/cache/save","sha":"55cc8345863c7cc4c66a329aec7e433d2d1c52a9","version":"v6.1.0"},{"repo":"actions/checkout","sha":"3d3c42e5aac5ba805825da76410c181273ba90b1","version":"v7.0.1"},{"repo":"actions/checkout","sha":"93cb6efe18208431cddfb8368fd83d5badbf9bfd","version":"93cb6efe18208431cddfb8368fd83d5badbf9bfd"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"3a2844b7e9c422d3c10d287c895573f7108da1b3","version":"v9.0.0"},{"repo":"actions/setup-node","sha":"820762786026740c76f36085b0efc47a31fe5020","version":"v7.0.0"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7.0.1"},{"repo":"github/gh-aw-actions/setup","sha":"2709137ea6c5b0e19aa621454dc643ea8dc526b1","version":"v0.85.4"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.27.44","digest":"sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4","pinned_image":"ghcr.io/github/gh-aw-firewall/agent:0.27.44@sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44","digest":"sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7","pinned_image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44@sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.27.44","digest":"sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627","pinned_image":"ghcr.io/github/gh-aw-firewall/squid:0.27.44@sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.4.8","digest":"sha256:38bbea36cdb46a3c9d04d1db05e672966f5239b431a2022eb35881688e5721d8","pinned_image":"ghcr.io/github/gh-aw-mcpg:v0.4.8@sha256:38bbea36cdb46a3c9d04d1db05e672966f5239b431a2022eb35881688e5721d8"},{"image":"ghcr.io/github/gh-aw-node","digest":"sha256:0d9f1fb5fd6610c0ac1f5194a38e45a8a1e81f8a390d5142d8e4e6f26a4b3196","pinned_image":"ghcr.io/github/gh-aw-node@sha256:0d9f1fb5fd6610c0ac1f5194a38e45a8a1e81f8a390d5142d8e4e6f26a4b3196"},{"image":"ghcr.io/github/github-mcp-server:v1.8.0","digest":"sha256:d5a18c04b92714c309eb46a2305087e91a4dbd80420f6e462656699f95093520","pinned_image":"ghcr.io/github/github-mcp-server:v1.8.0@sha256:d5a18c04b92714c309eb46a2305087e91a4dbd80420f6e462656699f95093520"}],"has_pull_request":true}
+# gh-aw-metadata: {"schema_version":"v4","frontmatter_hash":"440b6a7a70150991e38e4bc64a8b6dcd53ff8d19bec9246cbed7690505b624e2","body_hash":"7950eb3d594a732455b3e39cc3830969953bffff1328686e0ad4ba3e1e73656d","compiler_version":"v0.85.4","strict":true,"agent_id":"claude","agent_model":"claude-opus-5","engine_versions":{"claude":"2.1.222"}}
+# gh-aw-manifest: {"version":1,"secrets":["ANTHROPIC_API_KEY","COPILOT_GITHUB_TOKEN","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GITHUB_TOKEN","KHAN_ACTIONS_BOT_TOKEN","REVIEW_JIRA_API_TOKEN","REVIEW_JIRA_EMAIL"],"actions":[{"repo":"actions/cache/restore","sha":"55cc8345863c7cc4c66a329aec7e433d2d1c52a9","version":"v6.1.0"},{"repo":"actions/cache/save","sha":"55cc8345863c7cc4c66a329aec7e433d2d1c52a9","version":"v6.1.0"},{"repo":"actions/checkout","sha":"3d3c42e5aac5ba805825da76410c181273ba90b1","version":"v7.0.1"},{"repo":"actions/checkout","sha":"93cb6efe18208431cddfb8368fd83d5badbf9bfd","version":"93cb6efe18208431cddfb8368fd83d5badbf9bfd"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"3a2844b7e9c422d3c10d287c895573f7108da1b3","version":"v9.0.0"},{"repo":"actions/setup-node","sha":"820762786026740c76f36085b0efc47a31fe5020","version":"v7.0.0"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7.0.1"},{"repo":"github/gh-aw-actions/setup","sha":"2709137ea6c5b0e19aa621454dc643ea8dc526b1","version":"v0.85.4"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.27.44","digest":"sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4","pinned_image":"ghcr.io/github/gh-aw-firewall/agent:0.27.44@sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44","digest":"sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7","pinned_image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44@sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.27.44","digest":"sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627","pinned_image":"ghcr.io/github/gh-aw-firewall/squid:0.27.44@sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.4.8","digest":"sha256:38bbea36cdb46a3c9d04d1db05e672966f5239b431a2022eb35881688e5721d8","pinned_image":"ghcr.io/github/gh-aw-mcpg:v0.4.8@sha256:38bbea36cdb46a3c9d04d1db05e672966f5239b431a2022eb35881688e5721d8"},{"image":"ghcr.io/github/gh-aw-node","digest":"sha256:0d9f1fb5fd6610c0ac1f5194a38e45a8a1e81f8a390d5142d8e4e6f26a4b3196","pinned_image":"ghcr.io/github/gh-aw-node@sha256:0d9f1fb5fd6610c0ac1f5194a38e45a8a1e81f8a390d5142d8e4e6f26a4b3196"},{"image":"ghcr.io/github/github-mcp-server:v1.8.0","digest":"sha256:d5a18c04b92714c309eb46a2305087e91a4dbd80420f6e462656699f95093520","pinned_image":"ghcr.io/github/github-mcp-server:v1.8.0@sha256:d5a18c04b92714c309eb46a2305087e91a4dbd80420f6e462656699f95093520"}],"has_pull_request":true}
 # This file was automatically generated by gh-aw (v0.85.4). DO NOT EDIT. To debug this workflow, load the skill at https://github.com/github/gh-aw/blob/main/debug.md
 #
 #    ___                   _   _
@@ -17,7 +17,7 @@
 #  \/  \/ \___/|_| |_|\_\|_| |_|\___/ \_/\_/ |___/
 #
 #
-# To update this file, edit Khan/actions/workflows/review/review.md@review-v1.17.1 and run:
+# To update this file, edit Khan/actions/workflows/review/review.md@review-v1.18.0 and run:
 #   gh aw compile
 # Not all edits will cause changes to this file.
 #
@@ -25,7 +25,7 @@
 #
 # Reviews PR code changes for correctness, conventions, and risk on every push. Leaves actionable per-line feedback, and on approval posts the risk summary and common patterns as a separate PR comment and requests the owning teams as reviewers.
 #
-# Source: Khan/actions/workflows/review/review.md@review-v1.17.1
+# Source: Khan/actions/workflows/review/review.md@review-v1.18.0
 #
 # Resolved workflow manifest:
 #   Imports:
@@ -41,6 +41,8 @@
 #   - GH_AW_GITHUB_TOKEN
 #   - GITHUB_TOKEN
 #   - KHAN_ACTIONS_BOT_TOKEN
+#   - REVIEW_JIRA_API_TOKEN
+#   - REVIEW_JIRA_EMAIL
 #
 # Custom actions used:
 #   - actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -144,7 +146,7 @@ jobs:
           GH_AW_INFO_AWF_VERSION: "v0.27.44"
           GH_AW_INFO_AWMG_VERSION: ""
           GH_AW_INFO_FIREWALL_TYPE: "squid"
-          GH_AW_INFO_FRONTMATTER_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.17.1"
+          GH_AW_INFO_FRONTMATTER_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.18.0"
           GH_AW_INFO_BODY_MODIFIED: "false"
           GH_AW_COMPILED_STRICT: "true"
           GH_AW_INFO_MODEL_COSTS: '{"providers":{"anthropic":{"models":{"claude-fable-5":{"cost":{"cache_read":"5e-07","cache_write":"6.25e-06","input":"5e-06","output":"2.5e-05"}},"claude-haiku-4-5":{"cost":{"cache_read":"5e-08","cache_write":"6.25e-07","input":"5e-07","output":"2.5e-06"}},"claude-opus-4-8":{"cost":{"cache_read":"2.5e-07","cache_write":"3.125e-06","input":"2.5e-06","output":"1.25e-05"}},"claude-opus-5":{"cost":{"cache_read":"2.5e-07","cache_write":"3.125e-06","input":"2.5e-06","output":"1.25e-05"}},"claude-sonnet-4-6":{"cost":{"cache_read":"1.5e-07","cache_write":"1.875e-06","input":"1.5e-06","output":"7.5e-06"}},"claude-sonnet-5":{"cost":{"cache_read":"1e-07","cache_write":"1.25e-06","input":"1e-06","output":"5e-06"}}}}}}'
@@ -540,10 +542,13 @@ jobs:
         with:
           path: gh-aw-review-lib
           persist-credentials: false
-          ref: review-v1.17.1
+          ref: review-v1.18.0
           repository: Khan/actions
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REVIEW_JIRA_API_TOKEN: ${{ secrets.REVIEW_JIRA_API_TOKEN }}
+          REVIEW_JIRA_BASE_URL: ${{ vars.REVIEW_JIRA_BASE_URL }}
+          REVIEW_JIRA_EMAIL: ${{ secrets.REVIEW_JIRA_EMAIL }}
           REVIEW_PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
         name: Stage the review context (deterministic)
         run: cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" npx -y tsx workflows/review/lib/stage-pr.ts
@@ -973,7 +978,7 @@ jobs:
         # - mcp__github__search_repositories
         # - mcp__github__search_users
         # - mcp__safeoutputs
-        timeout-minutes: 40
+        timeout-minutes: 50
         run: |
           set -o pipefail
           printf '%s' "$(date +%s%3N)" > /tmp/gh-aw/agent_cli_start_ms.txt
@@ -1005,7 +1010,7 @@ jobs:
           ANTHROPIC_MAX_RETRIES: 0
           ANTHROPIC_MODEL: claude-opus-5
           BASH_DEFAULT_TIMEOUT_MS: 60000
-          BASH_MAX_TIMEOUT_MS: 1200000
+          BASH_MAX_TIMEOUT_MS: 1800000
           CLAUDE_CODE_DISABLE_FAST_MODE: 1
           DISABLE_BUG_COMMAND: 1
           DISABLE_ERROR_REPORTING: 1
@@ -1058,12 +1063,14 @@ jobs:
             const { main } = require('${{ runner.temp }}/gh-aw/actions/redact_secrets.cjs');
             await main();
         env:
-          GH_AW_SECRET_NAMES: 'ANTHROPIC_API_KEY,GH_AW_GITHUB_MCP_SERVER_TOKEN,GH_AW_GITHUB_TOKEN,GITHUB_TOKEN,KHAN_ACTIONS_BOT_TOKEN'
+          GH_AW_SECRET_NAMES: 'ANTHROPIC_API_KEY,GH_AW_GITHUB_MCP_SERVER_TOKEN,GH_AW_GITHUB_TOKEN,GITHUB_TOKEN,KHAN_ACTIONS_BOT_TOKEN,REVIEW_JIRA_API_TOKEN,REVIEW_JIRA_EMAIL'
           SECRET_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SECRET_GH_AW_GITHUB_MCP_SERVER_TOKEN: ${{ secrets.GH_AW_GITHUB_MCP_SERVER_TOKEN }}
           SECRET_GH_AW_GITHUB_TOKEN: ${{ secrets.GH_AW_GITHUB_TOKEN }}
           SECRET_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SECRET_KHAN_ACTIONS_BOT_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
+          SECRET_REVIEW_JIRA_API_TOKEN: ${{ secrets.REVIEW_JIRA_API_TOKEN }}
+          SECRET_REVIEW_JIRA_EMAIL: ${{ secrets.REVIEW_JIRA_EMAIL }}
       - name: Append agent step summary
         if: always()
         run: bash "${RUNNER_TEMP}/gh-aw/actions/append_agent_step_summary.sh"
@@ -1304,8 +1311,8 @@ jobs:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
           GH_AW_NOOP_MAX: "1"
           GH_AW_WORKFLOW_NAME: "PR Reviewer"
-          GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.17.1"
-          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.17.1/workflows/review/review.md"
+          GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.18.0"
+          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.18.0/workflows/review/review.md"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_AGENT_CONCLUSION: ${{ needs.agent.result }}
           GH_AW_NOOP_REPORT_AS_ISSUE: "false"
@@ -1326,8 +1333,8 @@ jobs:
         env:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
           GH_AW_WORKFLOW_NAME: "PR Reviewer"
-          GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.17.1"
-          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.17.1/workflows/review/review.md"
+          GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.18.0"
+          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.18.0/workflows/review/review.md"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_DETECTION_CONCLUSION: ${{ needs.detection.outputs.detection_conclusion }}
           GH_AW_DETECTION_REASON: ${{ needs.detection.outputs.detection_reason }}
@@ -1345,8 +1352,8 @@ jobs:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
           GH_AW_MISSING_TOOL_CREATE_ISSUE: "true"
           GH_AW_WORKFLOW_NAME: "PR Reviewer"
-          GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.17.1"
-          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.17.1/workflows/review/review.md"
+          GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.18.0"
+          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.18.0/workflows/review/review.md"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -1361,8 +1368,8 @@ jobs:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
           GH_AW_REPORT_INCOMPLETE_CREATE_ISSUE: "true"
           GH_AW_WORKFLOW_NAME: "PR Reviewer"
-          GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.17.1"
-          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.17.1/workflows/review/review.md"
+          GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.18.0"
+          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.18.0/workflows/review/review.md"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -1377,8 +1384,8 @@ jobs:
         env:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
           GH_AW_WORKFLOW_NAME: "PR Reviewer"
-          GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.17.1"
-          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.17.1/workflows/review/review.md"
+          GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.18.0"
+          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.18.0/workflows/review/review.md"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_AGENT_CONCLUSION: ${{ needs.agent.result }}
           GH_AW_WORKFLOW_ID: "review"
@@ -1408,7 +1415,7 @@ jobs:
           GH_AW_FAILURE_REPORT_AS_ISSUE: "true"
           GH_AW_MISSING_TOOL_REPORT_AS_FAILURE: "true"
           GH_AW_MISSING_DATA_REPORT_AS_FAILURE: "true"
-          GH_AW_TIMEOUT_MINUTES: "40"
+          GH_AW_TIMEOUT_MINUTES: "50"
           GH_AW_CACHE_MEMORY_ENABLED: "true"
           GH_AW_CACHE_MEMORY_RESTORE_0_MATCHED_KEY: ${{ needs.agent.outputs.cache_memory_restore_0_matched_key || '' }}
           GH_AW_CACHE_MEMORY_RESTORE_0_CACHE_HIT: ${{ needs.agent.outputs.cache_memory_restore_0_cache_hit || 'false' }}
@@ -1426,8 +1433,8 @@ jobs:
         env:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
           GH_AW_WORKFLOW_NAME: "PR Reviewer"
-          GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.17.1"
-          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.17.1/workflows/review/review.md"
+          GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.18.0"
+          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.18.0/workflows/review/review.md"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_REPORT_FAILED_JOBS: "true"
         with:
@@ -1620,7 +1627,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_MODEL: claude-opus-5
           BASH_DEFAULT_TIMEOUT_MS: 60000
-          BASH_MAX_TIMEOUT_MS: 1200000
+          BASH_MAX_TIMEOUT_MS: 1800000
           CLAUDE_CODE_DISABLE_FAST_MODE: 1
           DISABLE_BUG_COMMAND: 1
           DISABLE_ERROR_REPORTING: 1
@@ -1720,8 +1727,8 @@ jobs:
       GH_AW_THREAT_DETECTION_AIC: ${{ needs.detection.outputs.aic }}
       GH_AW_WORKFLOW_ID: "review"
       GH_AW_WORKFLOW_NAME: "PR Reviewer"
-      GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.17.1"
-      GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.17.1/workflows/review/review.md"
+      GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.18.0"
+      GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.18.0/workflows/review/review.md"
     outputs:
       add_reviewer_reviewers_added: ${{ steps.process_safe_outputs.outputs.reviewers_added }}
       code_push_failure_count: ${{ steps.process_safe_outputs.outputs.code_push_failure_count }}
