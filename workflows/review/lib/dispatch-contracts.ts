@@ -123,7 +123,7 @@ const foldToken = (token: string): string => {
  * dedup-text.ts's STOPWORDS (near-identical list, different semantics:
  * that one filters both sides of a similarity score).
  */
-const SUBJECT_STOPWORDS = new Set([
+const SUBJECT_STOPWORDS: ReadonlySet<string> = new Set([
     "a",
     "an",
     "the",
@@ -205,6 +205,13 @@ const subjectRestatesDiscussion = (
         return false;
     }
     const firstSentence = discussion.split(/(?<=[.!?])\s/, 1)[0] ?? "";
+    // A "first sentence" spanning lines means the discussion opens with an
+    // unterminated line (a heading, a bullet list): dropping the subject
+    // would promote that whole block into `claim.subject` via buildClaims'
+    // identical split, and subjects print in one-line list contexts.
+    if (firstSentence.includes("\n")) {
+        return false;
+    }
     const sentenceTokens = new Set(proseTokens(firstSentence).map(foldToken));
     return subjectTokens.every((token) => sentenceTokens.has(token));
 };

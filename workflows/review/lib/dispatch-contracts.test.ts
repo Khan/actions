@@ -288,6 +288,31 @@ describe("label-contract enforcement (run 29897276810)", () => {
         ).toBe("counts.go recomputes the total on every call.");
     });
 
+    it("never drops against a multi-line 'first sentence' (an unterminated opening line)", () => {
+        // A discussion opening with an unterminated line plus a bullet list
+        // has no [.!?]-then-space split point, so the split returns the whole
+        // block. Dropping the subject would let buildClaims' identical split
+        // promote that block into claim.subject, which submission.ts prints
+        // inside one-line list items.
+        const block =
+            "The merger drops flagged turns\n- the filter runs first\n- a flagged turn never reaches the sink.";
+        expect(joinProse("The merger drops flagged turns.", block)).toBe(
+            `The merger drops flagged turns. ${block}`,
+        );
+    });
+
+    it("folds a bare form against its inflection (the trailing-e strip is what matches)", () => {
+        // "reuse" carries no strippable suffix; it meets "reuses" only
+        // because both sides fold to "reus" via the trailing-e strip. If
+        // that strip regresses, this drop stops firing.
+        expect(
+            joinProse(
+                "Stale cache reuse.",
+                "The run reuses a stale cache because the key never rotates.",
+            ),
+        ).toBe("The run reuses a stale cache because the key never rotates.");
+    });
+
     it("keeps a subject that carries information the opening sentence lacks", () => {
         // Restating a LATER sentence keeps the subject: dropping it would
         // make buildClaims recover the discussion's opening SETUP sentence
