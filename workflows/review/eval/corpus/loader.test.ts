@@ -230,6 +230,38 @@ describe("parseCase: the live block", () => {
         ).toMatch(/lineStart <= lineEnd/);
     });
 
+    it("parses a live.ticket block and rejects a malformed one", () => {
+        const withTicket = (ticket: unknown) =>
+            liveCase({
+                live: {
+                    prContext: {
+                        title: "A change",
+                        description: "",
+                        author: "octocat",
+                        baseBranch: "main",
+                    },
+                    ticket,
+                },
+            });
+        const parsed = parseCase(
+            withTicket({available: true, tickets: [{key: "KORE-1"}]}),
+            "test://case",
+        );
+        expect(parsed.live?.ticket).toEqual({
+            available: true,
+            tickets: [{key: "KORE-1"}],
+        });
+        // `available` is the only validated field: the shape is
+        // stage-ticket.ts's TicketContext, owned by lib, not re-specified
+        // here.
+        expect(parseErrors(withTicket({tickets: []}))).toMatch(
+            /live\.ticket: must be an object with a boolean `available`/,
+        );
+        expect(parseErrors(withTicket("KORE-1"))).toMatch(
+            /live\.ticket: must be an object/,
+        );
+    });
+
     it("requires a diff on a live case", () => {
         const raw = liveCase();
         delete (raw as Record<string, unknown>)["diff"];

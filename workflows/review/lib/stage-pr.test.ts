@@ -17,6 +17,7 @@ import {
     type GhGet,
     type StagePrFs,
 } from "./stage-pr";
+import type {TicketFetch} from "./stage-ticket";
 import type {GhGraphql} from "./threads";
 
 /**
@@ -62,6 +63,15 @@ const ghGetFromMap =
     };
 
 /**
+ * A ticket fetch that must never run: every test but the ticket-wiring ones
+ * leaves REVIEW_JIRA_* unset, and stage-ticket stages `not-configured`
+ * without fetching. The ticket staging itself is exercised in
+ * stage-ticket.test.ts.
+ */
+const noTicket = (): TicketFetch => () =>
+    Promise.reject(new Error("unexpected ticket fetch"));
+
+/**
  * A PR with no review threads: one well-formed, empty `reviewThreads` page.
  * The thread staging itself is exercised in stage-threads.test.ts.
  */
@@ -85,7 +95,7 @@ const PR_META = {
     body: "d",
     user: {login: "octo"},
     base: {ref: "main"},
-    head: {sha: "abc123"},
+    head: {sha: "abc123", ref: "feature/KORE-9"},
     draft: false,
 };
 
@@ -215,6 +225,72 @@ describe("computeDiffFingerprint", () => {
 describe("runStagePrCli", () => {
     const options = {repo: "o/r", prNumber: 7, repoRoot: "/work"};
 
+    it("wires the ticket staging through env and the PR's head branch", async () => {
+        const fs = makeFakeFs();
+        const fetched: string[] = [];
+        await runStagePrCli(
+            fs,
+            ghGetFromMap(
+                baseRoutes([
+                    {filename: "a.ts", status: "modified", patch: PATCH_ONE},
+                ]),
+            ),
+            noThreads(),
+            (url) => {
+                fetched.push(url);
+                return Promise.resolve({
+                    status: 200,
+                    json: {fields: {summary: "the ticket"}},
+                });
+            },
+            {
+                ...options,
+                env: {
+                    REVIEW_JIRA_BASE_URL: "https://khanacademy.atlassian.net",
+                    REVIEW_JIRA_EMAIL: "bot@khanacademy.org",
+                    REVIEW_JIRA_API_TOKEN: "tok",
+                },
+            },
+        );
+        // The key comes from the head branch (the title carries none).
+        expect(fetched).toEqual([
+            "https://khanacademy.atlassian.net/rest/api/2/issue/KORE-9?fields=summary,description,status,resolution,issuetype,labels,comment",
+        ]);
+        expect(JSON.parse(fs.files[`${REVIEW}/ticket-context.json`])).toEqual({
+            available: true,
+            tickets: [
+                expect.objectContaining({
+                    key: "KORE-9",
+                    summary: "the ticket",
+                }),
+            ],
+        });
+    });
+
+    it("forwards a failed ticket fetch as a staging warning", async () => {
+        const result = await runStagePrCli(
+            makeFakeFs(),
+            ghGetFromMap(
+                baseRoutes([
+                    {filename: "a.ts", status: "modified", patch: PATCH_ONE},
+                ]),
+            ),
+            noThreads(),
+            () => Promise.resolve({status: 401, json: null}),
+            {
+                ...options,
+                env: {
+                    REVIEW_JIRA_BASE_URL: "https://khanacademy.atlassian.net",
+                    REVIEW_JIRA_EMAIL: "bot@khanacademy.org",
+                    REVIEW_JIRA_API_TOKEN: "stale",
+                },
+            },
+        );
+        // The CLI turns result.warnings into ::warning annotations (the
+        // only place a broken Jira token becomes visible).
+        expect(result.warnings.join(" ")).toContain("ticket staging");
+    });
+
     it("stages the full Step 1 + Step 3 contract for a first review", async () => {
         const fs = makeFakeFs({
             "/tmp/gh-aw/aw-prompts/prompt.txt": [
@@ -232,6 +308,7 @@ describe("runStagePrCli", () => {
                 ]),
             ),
             noThreads(),
+            noTicket(),
             options,
         );
 
@@ -250,6 +327,13 @@ describe("runStagePrCli", () => {
             {path: "a.ts", status: "modified", hasPatch: true},
             {path: "bin.png", status: "modified", hasPatch: false},
         ]);
+        // ticket-context.json is ALWAYS written (readers never need an
+        // existence check); with REVIEW_JIRA_* unset it stages
+        // not-configured without fetching.
+        expect(JSON.parse(read("ticket-context.json"))).toEqual({
+            available: false,
+            reason: "not-configured",
+        });
         expect(read("full.diff")).toContain("diff --git a/a.ts b/a.ts");
         const facts = JSON.parse(read("diff-facts.json"));
         expect(Object.keys(facts.diffFingerprint)).toEqual(["a.ts", "bin.png"]);
@@ -294,6 +378,7 @@ describe("runStagePrCli", () => {
                 ]),
             ),
             noThreads(),
+            noTicket(),
             options,
         );
         expect(JSON.parse(fs.files[`${REVIEW}/new-scope.json`])).toEqual({
@@ -319,6 +404,7 @@ describe("runStagePrCli", () => {
             fs,
             ghGetFromMap(routes),
             noThreads(),
+            noTicket(),
             options,
         );
         expect(result.changedFileCount).toBe(101);
@@ -339,6 +425,7 @@ describe("runStagePrCli", () => {
             fs,
             ghGetFromMap(routes),
             noThreads(),
+            noTicket(),
             options,
         );
         expect(JSON.parse(fs.files[`${REVIEW}/prior-reviews.json`])).toEqual(
@@ -366,7 +453,13 @@ describe("runStagePrCli", () => {
             {user: {login: "human"}, body: "lgtm", state: "APPROVED"},
         ];
         const fs = makeFakeFs();
-        await runStagePrCli(fs, ghGetFromMap(routes), noThreads(), options);
+        await runStagePrCli(
+            fs,
+            ghGetFromMap(routes),
+            noThreads(),
+            noTicket(),
+            options,
+        );
         expect(JSON.parse(fs.files[`${REVIEW}/prior-reviews.json`])).toEqual([
             {body: "dismissed body", submittedAt: "2026-07-01T00:00:00Z"},
         ]);
@@ -413,6 +506,7 @@ describe("runStagePrCli", () => {
             fs,
             ghGetFromMap(routes),
             noThreads(),
+            noTicket(),
             options,
         );
 
@@ -431,7 +525,13 @@ describe("runStagePrCli", () => {
     it("fails hard when the PR metadata fetch fails (staging is a prerequisite)", async () => {
         const fs = makeFakeFs();
         await expect(
-            runStagePrCli(fs, ghGetFromMap({}), noThreads(), options),
+            runStagePrCli(
+                fs,
+                ghGetFromMap({}),
+                noThreads(),
+                noTicket(),
+                options,
+            ),
         ).rejects.toThrow("unexpected GET /repos/o/r/pulls/7");
         expect(fs.files[`${REVIEW}/pr-context.json`]).toBe(undefined);
     });
@@ -450,6 +550,7 @@ describe("review-feedback coverage (slice 1 hardening)", () => {
             fs,
             ghGetFromMap(oneFile()),
             noThreads(),
+            noTicket(),
             options,
         );
         expect(JSON.parse(fs.files[`${REVIEW}/new-scope.json`])).toEqual({
@@ -477,7 +578,13 @@ describe("review-feedback coverage (slice 1 hardening)", () => {
             },
         ];
         const fs = makeFakeFs();
-        await runStagePrCli(fs, ghGetFromMap(routes), noThreads(), options);
+        await runStagePrCli(
+            fs,
+            ghGetFromMap(routes),
+            noThreads(),
+            noTicket(),
+            options,
+        );
         const staged = JSON.parse(fs.files[`${REVIEW}/prior-reviews.json`]);
         expect(staged).toHaveLength(101);
         expect(staged.at(-1).body).toBe("newest");
@@ -488,7 +595,13 @@ describe("review-feedback coverage (slice 1 hardening)", () => {
         routes["/repos/o/r/pulls/7"] = {number: 7, title: "t"};
         const fs = makeFakeFs();
         await expect(
-            runStagePrCli(fs, ghGetFromMap(routes), noThreads(), options),
+            runStagePrCli(
+                fs,
+                ghGetFromMap(routes),
+                noThreads(),
+                noTicket(),
+                options,
+            ),
         ).rejects.toThrow(/load-bearing fields/);
         expect(fs.files[`${REVIEW}/pr-context.json`]).toBe(undefined);
     });
@@ -501,6 +614,7 @@ describe("review-feedback coverage (slice 1 hardening)", () => {
                 makeFakeFs(),
                 ghGetFromMap(routes),
                 noThreads(),
+                noTicket(),
                 options,
             ),
         ).rejects.toThrow(/non-array/);
@@ -542,6 +656,7 @@ describe("review-feedback coverage (slice 1 hardening)", () => {
             fs,
             ghGetFromMap(routes),
             noThreads(),
+            noTicket(),
             options,
         );
         expect(result.depth).toBe("scoped");
@@ -576,7 +691,13 @@ describe("review-feedback coverage (slice 1 hardening)", () => {
             {filename: "pkg/auth/x.ts", status: "modified", patch: PATCH_ONE},
             {filename: "yarn.lock", status: "modified", patch: PATCH_ONE},
         ]);
-        await runStagePrCli(fs, ghGetFromMap(routes), noThreads(), options);
+        await runStagePrCli(
+            fs,
+            ghGetFromMap(routes),
+            noThreads(),
+            noTicket(),
+            options,
+        );
         const first = JSON.parse(fs.files[`${REVIEW}/routing.json`]);
         // Second pass: answers staged, router re-run (as the orchestrator
         // does mid-run).
@@ -618,6 +739,7 @@ describe("disciplines extraction (slice 3, #247)", () => {
             fs,
             ghGetFromMap(routes()),
             noThreads(),
+            noTicket(),
             options,
         );
         expect(fs.files[`${REVIEW}/disciplines.md`]).toBe(`${disciplines}\n`);
@@ -636,6 +758,7 @@ describe("disciplines extraction (slice 3, #247)", () => {
             fs,
             ghGetFromMap(routes()),
             noThreads(),
+            noTicket(),
             options,
         );
         expect(fs.files[`${REVIEW}/disciplines.md`]).toBe(undefined);
@@ -648,6 +771,7 @@ describe("disciplines extraction (slice 3, #247)", () => {
             noPrompt,
             ghGetFromMap(routes()),
             noThreads(),
+            noTicket(),
             options,
         );
         expect(r1.warnings.join(" ")).toContain("rendered prompt not found");
@@ -656,6 +780,7 @@ describe("disciplines extraction (slice 3, #247)", () => {
             noMarkers,
             ghGetFromMap(routes()),
             noThreads(),
+            noTicket(),
             options,
         );
         expect(r2.warnings.join(" ")).toContain("markers not found");

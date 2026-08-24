@@ -200,18 +200,21 @@ describe("dedupeClaims with model-proposed clusters", () => {
                         label: "question (non-blocking)",
                         line: 9,
                         via: "clusterer",
+                        groundedBy: "evidence",
                     },
                     {
                         id: "conventions-1",
                         source: "conventions",
                         label: "nitpick (non-blocking)",
                         via: "clusterer",
+                        groundedBy: "anchor",
                     },
                     {
                         id: "documentation-1",
                         source: "documentation",
                         label: "suggestion (non-blocking, documentation)",
                         via: "clusterer",
+                        groundedBy: "anchor",
                     },
                 ],
                 path: "dev/af19_trial/window.go",
@@ -281,26 +284,59 @@ describe("dedupeClaims with model-proposed clusters", () => {
         ]);
     });
 
-    it("refuses a cluster whose evidence names no code element at all", () => {
-        // An identity claim this module cannot check is inert, not
-        // authoritative: "they are all about comments" grounds nothing, so the
-        // group falls back to tier 1 and stays four comments.
-        const {claims, clusterRejections} = dedupeClaims(wrongCapClaims(), [
+    it("holds a member off the survivor's line to the evidence, and inert evidence fails it", () => {
+        // An identity claim this module cannot check on either path is inert,
+        // not authoritative: "they are all about comments" grounds nothing, so
+        // the :9 member falls back to tier 1 and stays its own comment. The
+        // two members ON the survivor's line 8 no longer need the evidence at
+        // all; the exactly shared anchor is the grounding (and the run's own
+        // autofix discharged all four asks with one rewritten comment, so the
+        // merge is the true outcome, not a concession).
+        const {claims, merges, clusterRejections} = dedupeClaims(
+            wrongCapClaims(),
+            [
+                {
+                    evidence: "these are all about the same comment",
+                    ids: [
+                        "correctness-reviewer-3",
+                        "skill-auditor-ool-2",
+                        "conventions-1",
+                        "documentation-1",
+                    ],
+                },
+            ],
+        );
+        expect(claims.map((c) => c.id)).toEqual([
+            "correctness-reviewer-3",
+            "skill-auditor-ool-2",
+        ]);
+        expect(merges).toEqual([
             {
-                evidence: "these are all about the same comment",
-                ids: [
-                    "correctness-reviewer-3",
-                    "skill-auditor-ool-2",
-                    "conventions-1",
-                    "documentation-1",
+                survivor: "correctness-reviewer-3",
+                merged: [
+                    {
+                        id: "conventions-1",
+                        source: "conventions",
+                        label: "nitpick (non-blocking)",
+                        via: "clusterer",
+                        groundedBy: "anchor",
+                    },
+                    {
+                        id: "documentation-1",
+                        source: "documentation",
+                        label: "suggestion (non-blocking, documentation)",
+                        via: "clusterer",
+                        groundedBy: "anchor",
+                    },
                 ],
+                path: "dev/af19_trial/window.go",
+                line: 8,
+                via: "clusterer",
+                evidence: "these are all about the same comment",
             },
         ]);
-        expect(claims).toHaveLength(4);
         expect(clusterRejections).toEqual([
             {id: "skill-auditor-ool-2", reason: "ungrounded"},
-            {id: "conventions-1", reason: "ungrounded"},
-            {id: "documentation-1", reason: "ungrounded"},
         ]);
     });
 
@@ -547,13 +583,15 @@ describe("dedupeClaims with model-proposed clusters", () => {
             claim({...note, line: 8, ...over});
         const {claims, merges, clusterRejections} = dedupeClaims(
             [
-                // Out-ranks both on confidence, and worded too thinly for the
-                // text floor, so it is a cluster member and nothing else.
+                // Out-ranks both on confidence, worded too thinly for the
+                // text floor, and anchored one line off the copies so the
+                // shared-anchor grounding path stays out of this fixture: it
+                // is a cluster member and nothing else.
                 claim({
                     ...note,
                     id: "holistic-1",
                     source: "holistic",
-                    line: 8,
+                    line: 9,
                     confidence: 0.9,
                     subject: "the per-key cap disagrees with `maxSamples`",
                     discussion: "the per-key cap disagrees with `maxSamples`",
@@ -640,6 +678,7 @@ describe("dedupeClaims with model-proposed clusters", () => {
                 source: "documentation",
                 label: "note (non-blocking)",
                 via: "clusterer",
+                groundedBy: "anchor",
             },
             {
                 id: "conventions-1",
@@ -924,6 +963,7 @@ describe("dedupeClaims with model-proposed clusters", () => {
                 label: "note (non-blocking)",
                 line: 58,
                 via: "clusterer",
+                groundedBy: "evidence",
             },
         ]);
         // The record quotes only the copy tier 2 brought: the survivor's own

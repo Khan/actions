@@ -168,6 +168,7 @@ describe("the shared disciplines section", () => {
                         },
                     },
                 }),
+            () => Promise.reject(new Error("unexpected ticket fetch")),
             {repo: "o/r", prNumber: 1, repoRoot: "/work"},
         );
         const staged = files["/tmp/gh-aw/review/disciplines.md"];
