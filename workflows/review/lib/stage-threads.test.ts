@@ -1,6 +1,6 @@
 import {describe, it, expect} from "vitest";
 
-import {openThreadsFromStaged, stagedThreadShapeFailure} from "./dedup";
+import {openThreadsFromStaged, stagedThreadShapeFailure} from "./dedup-threads";
 import {adjudicatedThreadsFromStaged} from "./dedup-adjudicated";
 import {computeRoster} from "./dispatch-roster";
 import {runStagePrCli, type GhGet, type StagePrFs} from "./stage-pr";
@@ -17,8 +17,8 @@ import {
  * following the precedent dispatch-trial-followups.test.ts set; the fixtures
  * mirror that file's.
  *
- * These cases pin the producer against the consumers it feeds (`dedup.ts`'s
- * open-thread suppression and `dispatch-roster.ts`'s reconciler gate) rather
+ * These cases pin the producer against the consumers it feeds
+ * (`dedup-threads.ts`'s open-thread suppression and `dispatch-roster.ts`'s reconciler gate) rather
  * than only against the shape a reader of this file would expect, because
  * "each layer looked right on its own" is exactly how Khan/actions#302 shipped:
  * the prompt selected bot threads by one spelling of the login and the code

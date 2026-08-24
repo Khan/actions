@@ -158,7 +158,7 @@ network:
 # Both secrets are hard-required while this block is present: a missing one compiles to
 # an empty value that the MCP gateway's OTLP config schema rejects, so the agent job
 # dies at startup instead of skipping trace export. A repo without them must comment
-# this block out in its installed review.md (a local edit `gh aw update` preserves)
+# this block out in its installed review.md (a local edit the 3-way merge update flow preserves)
 # and recompile.
 observability:
   otlp:
@@ -1721,11 +1721,21 @@ Read from disk:
 including the author's replies, and weigh the author's reasoning before deciding:
 - **resolve** — the flagged code is fixed, removed, or no longer applies.
 - **keep** — the issue is still live in the code and unaddressed.
-- If the author has **conceded** the point in the chain (agreed it should change, or a
-  fix is under way) but the code is not yet changed, still **keep** the thread so the
-  acknowledgment stands — a conceded point must **never be re-raised** as a fresh
-  comment (the pipeline opens no duplicate for a kept thread). Likewise do
-  not re-litigate a point the author has already refuted with sound reasoning.
+- If the author has **conceded** the point in the chain (agreed it should change, a
+  fix is under way, or a TODO stands in for one) but the code is not yet changed, still
+  **keep** the thread so the acknowledgment stands — a conceded point must **never be
+  re-raised** as a fresh comment (the pipeline opens no duplicate for a kept thread).
+  Likewise do not re-litigate a point the author has already refuted with sound
+  reasoning.
+- Additionally list every such conceded-but-unfixed thread id in **acknowledged**
+  (always alongside its `keep` entry, never instead of it). Only the **author's own
+  reply** in the chain counts as a concession: never a bot reply (the thumbs-sweep
+  follow-ups and autofix replies sit on these threads), never a reply that pushes back,
+  and never a TODO you inferred from the code alone. The pipeline verifies each id
+  against the reply chain and renders those threads as "acknowledged (fix pending)"
+  in the accountability recap instead of counting them unaddressed. When in doubt,
+  leave the id out: a missed acknowledgment is one mislabeled recap line, a wrong one
+  marks a live disagreement settled.
 
 **Per-finding resolution on re-review.** On a re-review, every actionable finding
 the workflow raised in a prior run must reach one of three terminal resolutions — never
@@ -1748,8 +1758,9 @@ or `keep`.
 already open; the pipeline will not post a bot comment there. Do not
 resolve or otherwise touch human threads — they are input only.
 
-Return ONLY this JSON object (no prose, no code fence):
-{"resolve": ["thread_id", "..."], "keep": ["thread_id", "..."], "skipLines": [{"path": "...", "line": 0}]}
+Return ONLY this JSON object (no prose, no code fence; `acknowledged` may be empty or
+omitted, and every entry in it must also be in `keep`):
+{"resolve": ["thread_id", "..."], "keep": ["thread_id", "..."], "acknowledged": ["thread_id", "..."], "skipLines": [{"path": "...", "line": 0}]}
 
 ## agent: `claim-clusterer`
 ---

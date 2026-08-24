@@ -19,7 +19,7 @@
  * `reviewThreads` connection carries both.
  *
  * This module also owns the answer to "is this login our review bot", because
- * the producer's filter and the consumer's guard (`dedup.ts`'s open-thread
+ * the producer's filter and the consumer's guard (`dedup-threads.ts`'s open-thread
  * suppression) must not be able to disagree about it. Khan/actions#302 was
  * exactly that disagreement one layer up: the prompt selected threads by one
  * spelling of the bot's login and the code admitted another, so a conforming
@@ -48,7 +48,7 @@ export const DEFAULT_REVIEW_BOT_LOGIN = "github-actions[bot]";
  * The login this workflow's own review comments are authored by, and the
  * single source of truth for that identity across the producer
  * (`stage-pr.ts`, which selects the bot's threads) and the consumers
- * (`dedup.ts`'s suppression guard). Both layers read it here, which is the
+ * (`dedup-threads.ts`'s suppression guard). Both layers read it here, which is the
  * property #302 lost when each spelled the identity itself.
  *
  * Deployment config, not a compiled-in constant, because the identity is a
@@ -95,6 +95,16 @@ const baseLogin = (login: string): string => {
 /** Whether two logins name the same account across the bot-suffix split. */
 export const sameLogin = (a: string, b: string): boolean =>
     baseLogin(a) === baseLogin(b);
+
+/**
+ * Whether a login is ANY GitHub App (`[bot]`-suffixed), not just this
+ * workflow's review bot. Lives here so the suffix spelling stays in the one
+ * module that owns login identity ({@link baseLogin}); note this only sees
+ * the REST spelling (GraphQL reports the bare login), so callers needing
+ * "is this the review bot on either surface" want {@link isReviewBotAuthor}.
+ */
+export const isBotLogin = (login: string): boolean =>
+    login.toLowerCase().endsWith("[bot]");
 
 /** Whether a comment author is this workflow's review bot, either spelling. */
 export const isReviewBotAuthor = (login: string): boolean =>
@@ -253,7 +263,7 @@ const threadsConnectionOf = (
  * `resolved`/`resolvedBy` exist so ONE fetch can serve both the unresolved
  * partition (threads.json / human-threads.json) and the adjudicated corpus
  * (adjudicated-threads.json: bot threads a HUMAN resolved, which suppress
- * re-derivation of the defect they adjudicated — see dedup.ts's
+ * re-derivation of the defect they adjudicated — see dedup-adjudicated.ts's
  * `adjudicatedThreadsFromStaged`).
  */
 export type FetchedThread = StagedThread & {
@@ -346,7 +356,7 @@ export const collectReviewThreads = async (
                     ? str(comment["author"]["login"])
                     : "",
                 // Verbatim. The label parsers (`rereview.ts`'s recap,
-                // `dedup.ts`'s suppression) read the leading `**label:**`
+                // `dedup-threads.ts`'s suppression) read the leading `**label:**`
                 // template off this string; normalising it here is how a
                 // finding becomes unclassifiable.
                 body: str(comment["body"]),

@@ -10,7 +10,7 @@
  *     source;
  *   - the run summary (verdict, posted-comment count, model cost) -> comments/PR,
  *     verdict mix, cost/run;
- *   - the thumbs reactions the thumbs sweep collects -> thumbs agree rate.
+ *   - the thumbs reactions recorded in per-run artifacts -> thumbs agree rate.
  *
  * The module is split into a pure core and a thin, best-effort filesystem
  * loader. The core ({@link computeRunCounters}, {@link normalizeRunArtifacts})
@@ -48,7 +48,7 @@ export type ValidatorDecision = {
     decision: "keep" | "drop";
 };
 
-/** Thumbs reactions collected on a run's comments (thumbs sweep). */
+/** Thumbs reactions collected on a run's comments. */
 export type ThumbsTally = {
     /** 👍 count — a human agreed with the bot's comment. */
     up: number;

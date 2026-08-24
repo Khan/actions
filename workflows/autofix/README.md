@@ -435,14 +435,13 @@ by the command at all; the label is the only surface available to it.
 
 Per-comment triggering was considered and dropped for v1. GitHub emits **no
 webhook for reactions** — the feature request has been open since 2022 — which
-is why the review workflow's own thumbs sweep is a two-hourly cron. A
-reaction-triggered autofix would inherit that latency, or need a second poll to
-shave a delay it still could not bound. `pull_request: labeled` and
+is why the review workflow's since-deleted thumbs sweep had to be a two-hourly
+cron. A reaction-triggered autofix would inherit that latency, or need its own
+poll to shave a delay it still could not bound. `pull_request: labeled` and
 `issue_comment: created` both fire immediately.
 
-Note also that 🚀 is already live signal: `thumbs-sweep.ts` counts it as a
-positive reaction feeding the reviewer's tuning loop, so overloading it would
-corrupt that channel.
+Note also that 🚀 is already live signal: gh-aw's outcome evaluation counts it
+as a positive reaction, so overloading it would corrupt that channel.
 
 The command surface makes per-comment autofix nearly free when it lands: an
 `/autofix` posted as a **reply inside a review thread** fires
