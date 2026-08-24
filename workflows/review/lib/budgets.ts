@@ -10,8 +10,9 @@ import type {RiskTier} from "./routing-config";
 
 /**
  * Default budget table, originally sized inside the workflow's 20-minute /
- * $10 per-run ceiling. The job ceiling is 40 minutes as of 2026-07-21 (four
- * high-tier runs died at the old ceiling in one evening); the soft targets
+ * $10 per-run ceiling. The job ceiling is 50 minutes as of 2026-08-21 (40
+ * from 2026-07-21, after four high-tier runs died at the old ceiling in one
+ * evening); the soft targets
  * below were deliberately left unchanged, so `high`'s 20-minute wall-clock
  * target is now a genuine landing target with headroom instead of sitting
  * exactly on the kill line. Every field scales monotonically with the tier;
