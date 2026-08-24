@@ -25,6 +25,7 @@
 
 import {bodyItemId} from "./collapsed.ts";
 import type {CollapsedObservation} from "./collapsed.ts";
+import type {DiffChangedLines} from "../../review/lib/diff.ts";
 import {parseLeadingLabel} from "../../review/lib/rereview.ts";
 import type {StagedThread} from "../../review/lib/rereview.ts";
 
@@ -159,21 +160,34 @@ export const buildWorkList = (
  * Select the body-sourced observations in scope for this run (the collapsed
  * entries of the latest review body; see `collapsed.ts` for why those exist
  * and why latest-only). Same in-scope rule as {@link buildWorkList}, plus one
- * extra guard: an observation whose `path:line` an open thread already
- * covers is skipped as `thread-covered`, so one finding cannot become two
- * work items when a re-review posts what an earlier run collapsed. The
- * guard reads EVERY staged thread, human and out-of-scope bot threads
- * included, deliberately: a conversation already exists at that anchor, and
- * autofix editing under it uninvited is the same harm the reviewer's own
- * defer-to-open-human-threads rule exists to avoid; the cost is one skipped
- * body item at an anchor someone is already looking at. Body items carry a synthetic `review-body:` id ({@link
- * bodyItemId}); there is no thread to reply on, so the prompt reports their
- * fixes in the run summary instead (autofix.md Step 6).
+ * two extra guards:
+ *
+ *   - An observation whose `path:line` an open staged thread already covers
+ *     is skipped as `thread-covered`, so one finding cannot become two work
+ *     items when a re-review posts what an earlier run collapsed. Staged
+ *     threads are the reviewer's own unresolved threads (staging filters to
+ *     bot-opened ones), so this is a bot-thread dedup guard; deference to
+ *     open HUMAN conversations happens on the reviewer's side, at its
+ *     skip-lines rule, before a finding ever posts or collapses.
+ *   - The anchor must land on an ADDED line of the staged head diff
+ *     (`changedLines`). Threads get this for free from GitHub, which nulls
+ *     an outdated thread's line; a body item's line is a number parsed out
+ *     of review text with nothing else to invalidate it, and the file-level
+ *     stale-path check upstream runs only when review currency is
+ *     verifiable, which in production it usually is not (posted reviews
+ *     lose their fingerprint stamp). An anchor the current diff does not
+ *     vouch for is skipped as `outdated-anchor`, the same fail-closed
+ *     direction the thread path takes.
+ *
+ * Body items carry a synthetic `review-body:` id ({@link bodyItemId});
+ * there is no thread to reply on, so the prompt reports their fixes in the
+ * run summary instead (autofix.md Step 6).
  */
 export const buildBodyWorkList = (
     observations: readonly CollapsedObservation[],
     findingLabels: readonly string[],
     threads: readonly StagedThread[],
+    changedLines: DiffChangedLines,
 ): WorkList => {
     const inScope = new Set(findingLabels);
     const covered = new Set(
@@ -199,6 +213,19 @@ export const buildBodyWorkList = (
                 threadId: id,
                 path: observation.path,
                 reason: "thread-covered",
+                label: observation.label,
+            });
+            continue;
+        }
+        if (
+            !(changedLines[observation.path]?.added ?? []).includes(
+                observation.line,
+            )
+        ) {
+            skipped.push({
+                threadId: id,
+                path: observation.path,
+                reason: "outdated-anchor",
                 label: observation.label,
             });
             continue;

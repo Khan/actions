@@ -679,9 +679,9 @@ export const runSubmissionCli = (
     //     silently shrink a shipped feature's scope).
     //
     // Everything else collapses to one terse line each in a single
-    // <details> block riding the highest-ranked inline comment (or the
-    // review body when nothing posts inline), so it is surfaced without
-    // scattering noise. The verdict is computed from ALL claims, so a
+    // <details> block in the review body (always the body: the autofix's
+    // body-sourced work list reads the section back off posted reviews),
+    // so it is surfaced without scattering noise. The verdict is computed from ALL claims, so a
     // collapsed blocking claim (a 21st blocking finding) still blocks.
     const budgetRaw = routing?.nonBlockingInlineBudget;
     const nonBlockingBudget =

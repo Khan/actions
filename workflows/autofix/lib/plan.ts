@@ -25,6 +25,7 @@
  */
 
 import {parseCollapsedObservations} from "./collapsed.ts";
+import {computeChangedLines} from "../../review/lib/diff.ts";
 import {AUTOFIX_LABEL_PREFIX, resolveCommand, resolveScope} from "./scope.ts";
 import type {RequestSurface, ScopeResolution} from "./scope.ts";
 import {buildBodyWorkList, buildWorkList} from "./worklist.ts";
@@ -214,6 +215,10 @@ export const buildPlan = (input: PlanInput): AutofixPlan => {
         parseCollapsedObservations(input.priorReviews),
         resolution.request.findingLabels,
         input.threads,
+        // The per-item anchor check threads get from GitHub, rebuilt from
+        // the staged head diff: this runs on EVERY currency path, including
+        // the production-common unverifiable one where stalePaths is empty.
+        computeChangedLines(input.diffText),
     );
     const items = [...threadItems, ...bodyList.items];
     const skipped = [...threadSkipped, ...bodyList.skipped];

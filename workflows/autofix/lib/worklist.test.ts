@@ -198,11 +198,23 @@ describe("buildBodyWorkList", () => {
         ...over,
     });
 
+    /** src/a.ts line 12 is an added line of the staged head diff. */
+    const changed = {
+        "src/a.ts": {
+            added: [12],
+            removed: [],
+            removedAdjacent: [],
+            lastShownLine: 12,
+            textOverhead: 0,
+        },
+    };
+
     it("selects in-scope observations as review-body items", () => {
         const {items, skipped} = buildBodyWorkList(
             [observation()],
             ["suggestion (non-blocking, documentation)"],
             [],
+            changed,
         );
         expect(skipped).toEqual([]);
         expect(items).toEqual([
@@ -221,6 +233,7 @@ describe("buildBodyWorkList", () => {
             [observation({label: "question (non-blocking)"})],
             ["suggestion (non-blocking, documentation)"],
             [],
+            changed,
         );
         expect(items).toEqual([]);
         expect(skipped).toEqual([
@@ -238,8 +251,35 @@ describe("buildBodyWorkList", () => {
             [observation()],
             ["suggestion (non-blocking, documentation)"],
             [thread({body: "**suggestion (non-blocking):** same spot"})],
+            changed,
         );
         expect(items).toEqual([]);
         expect(skipped[0]).toMatchObject({reason: "thread-covered"});
+    });
+
+    it("skips an anchor the staged head diff does not vouch for", () => {
+        // Line 12 is not an added line of the current diff: the observation
+        // was written against an older head, and nothing else can
+        // invalidate a line parsed out of review text (threads get this
+        // from GitHub nulling outdated anchors).
+        const {items, skipped} = buildBodyWorkList(
+            [observation()],
+            ["suggestion (non-blocking, documentation)"],
+            [],
+            {
+                "src/a.ts": {
+                    added: [3],
+                    removed: [],
+                    removedAdjacent: [],
+                    lastShownLine: 3,
+                    textOverhead: 0,
+                },
+            },
+        );
+        expect(items).toEqual([]);
+        expect(skipped[0]).toMatchObject({
+            reason: "outdated-anchor",
+            threadId: "review-body:src/a.ts:12:suggestion",
+        });
     });
 });

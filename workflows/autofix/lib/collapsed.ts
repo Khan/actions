@@ -56,11 +56,12 @@ const SECTION_SUMMARY =
     /<summary>(?:Non-blocking|Lower-confidence) observations \(/;
 
 /**
- * Parse the collapsed observations from the latest review body that carries
- * a collapsed section. Reviews are taken in the input order `prior-reviews`
- * staging preserves (ascending submission), scanned from the end; bodies
- * with no collapsed section are skipped, so a bare re-approve does not erase
- * the scope the previous review stated.
+ * Parse the collapsed observations from the NEWEST review's body (ordered
+ * by submittedAt where present, staging order otherwise). A newest body
+ * with no collapsed section yields no observations; older bodies are never
+ * consulted (the module header carries the staleness reasoning). Only the
+ * text inside the section's own <details> block is parsed, so an
+ * entry-shaped line elsewhere in the body cannot mint a work item.
  */
 export const parseCollapsedObservations = (
     priorReviews: readonly PriorReview[],
@@ -77,11 +78,14 @@ export const parseCollapsedObservations = (
             : 0,
     );
     const body = ordered[ordered.length - 1]?.body ?? "";
-    if (!SECTION_SUMMARY.test(body)) {
+    const start = body.search(SECTION_SUMMARY);
+    if (start === -1) {
         return [];
     }
+    const end = body.indexOf("</details>", start);
+    const section = body.slice(start, end === -1 ? body.length : end);
     const observations: CollapsedObservation[] = [];
-    for (const raw of body.split("\n")) {
+    for (const raw of section.split("\n")) {
         const match = COLLAPSED_ENTRY_RE.exec(raw.trim());
         if (match === null) {
             continue;

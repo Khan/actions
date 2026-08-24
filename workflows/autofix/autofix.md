@@ -456,9 +456,11 @@ Actions workspace (the PR head is checked out; read from disk, not through the
 API). The item's `body` is the reviewer's statement of the problem, verbatim.
 For a body-sourced item (id starting `review-body:`, parsed off the latest
 review body's collapsed observations) the `body` is a one-line subject rather
-than a full finding, so the read-the-code step carries more of the weight:
-if the line does not make the problem evident, leave the item alone and say
-so in Step 7.
+than a full finding, and the collapsed section includes findings that never
+earned an inline comment (sub-medium-confidence ones among them), so the
+read-the-code step carries more of the weight and the bar for leaving one
+alone is lower: if the line does not make the problem evident, leave the
+item alone and say so in Step 7.
 
 Work out what the reviewer meant. If a finding is ambiguous, or you cannot
 determine what a correct fix would be, **leave it alone** and record it as
