@@ -538,16 +538,16 @@ describe("buildPlan: body-sourced items (the collapsed-section source)", () => {
         );
         expect(plan.status).toBe("armed");
         expect(plan.items.map((item) => item.threadId)).toEqual([
-            "review-body:src/a.ts:2",
+            "review-body:src/a.ts:2:suggestion",
         ]);
         // The out-of-scope question is recorded, not silently dropped.
         expect(plan.skipped).toContainEqual({
-            threadId: "review-body:src/b.ts:9",
+            threadId: "review-body:src/b.ts:9:question",
             path: "src/b.ts",
             reason: "out-of-scope",
             label: "question (non-blocking)",
         });
-        expect(plan.trailer).toContain("review-body:src/a.ts:2");
+        expect(plan.trailer).toContain("review-body:src/a.ts:2:suggestion");
     });
 
     it("thread items stay first and stale paths drop body items too", () => {
@@ -568,7 +568,33 @@ describe("buildPlan: body-sourced items (the collapsed-section source)", () => {
         expect(plan.status).toBe("armed");
         expect(plan.items.map((item) => item.threadId)).toEqual([
             "T-doc",
-            "review-body:src/a.ts:2",
+            "review-body:src/a.ts:2:suggestion",
         ]);
+    });
+
+    it("drops a body item whose file moved on after the review (stale-path)", () => {
+        const stamped = reviewStamped(DIFF);
+        // The head diff carries an src/a.ts hunk the stamped review never
+        // saw, so the body item anchored there drops the same way a thread
+        // item would.
+        const movedOn =
+            DIFF +
+            "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n" +
+            "@@ -1,1 +1,2 @@\n context\n+later edit\n";
+        const plan = buildPlan(
+            input({
+                labels: ["autofix: docs"],
+                threads: [],
+                diffText: movedOn,
+                priorReviews: [{...stamped, body: collapsedBody(stamped.body)}],
+            }),
+        );
+        expect(plan.status).toBe("no-op");
+        expect(plan.skipped).toContainEqual({
+            threadId: "review-body:src/a.ts:2:suggestion",
+            path: "src/a.ts",
+            reason: "stale-path",
+            label: "suggestion (non-blocking, documentation)",
+        });
     });
 });

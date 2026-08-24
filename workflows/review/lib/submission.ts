@@ -79,8 +79,8 @@ import {runRereviewCli, type RereviewCliFs} from "./rereview";
 import {
     labelToken,
     renderClaimComment,
+    renderCollapsedLine,
     renderPrLevelFold,
-    sourceTag,
 } from "./submission-render";
 import {normalizeBody} from "./sanitizer-normalize";
 import {
@@ -632,11 +632,7 @@ export const runSubmissionCli = (
                 notes.push(
                     `claim ${claim.id} folded into the hold comment (a hold posts no inline comments)`,
                 );
-                return claim.path !== undefined && claim.line !== undefined
-                    ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${
-                          claim.subject
-                      } ${sourceTag(claim)}`
-                    : `- ${claim.label}: ${claim.subject} ${sourceTag(claim)}`;
+                return renderCollapsedLine(claim);
             },
         );
         return stagePlan(fs, {
@@ -823,24 +819,19 @@ export const runSubmissionCli = (
             "<details>",
             `<summary>${summary}</summary>`,
             "",
-            ...collapsed.map((claim) =>
-                claim.path !== undefined && claim.line !== undefined
-                    ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${
-                          claim.subject
-                      } ${sourceTag(claim)}`
-                    : `- ${claim.label}: ${claim.subject} ${sourceTag(claim)}`,
-            ),
+            ...collapsed.map(renderCollapsedLine),
             "",
             "</details>",
         ].join("\n");
-        // Under a reduced surface the section always rides the review
-        // body: the point of either dial is less non-blocking noise on
-        // inline threads.
-        if (!reducedSurface && inline.length > 0) {
-            inline[0] = {...inline[0], body: `${inline[0].body}\n\n${section}`};
-        } else {
-            prLevelLines.push(section);
-        }
+        // The section ALWAYS lands in the review body, never riding an
+        // inline comment. It used to ride the top-ranked comment at full
+        // depth, but the body is the one surface that persists where the
+        // autofix's body-sourced work list can read it (both stagers map
+        // only `review.body` off /pulls/{n}/reviews), so the ride made that
+        // work list blind exactly where the budget sheds; the review-side
+        // README contract (the budget shrinks the notification surface,
+        // never the autofix scope) only holds with the section here.
+        prLevelLines.push(section);
         notes.push(
             reducedSurface && collapsedNonBlockingOnly
                 ? `${

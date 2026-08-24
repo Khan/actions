@@ -675,7 +675,7 @@ Write the body directly, in this order, including only the parts that apply:
    is the most important section in the comment; never omit or soften it.
 4. If `plan.skipped` contains entries whose reason is **not** `out-of-scope`:
    one line each with the reason (`outdated-anchor`, `unparseable-label`,
-   `stale-path`). Put any `out-of-scope` entries in a collapsed
+   `stale-path`, `thread-covered`). Put any `out-of-scope` entries in a collapsed
    `<details><summary>N thread(s) outside this run's scope</summary>` block, or
    omit them entirely when the comment already has more urgent content: they
    are the expected consequence of the scope the author picked.

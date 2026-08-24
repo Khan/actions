@@ -906,8 +906,9 @@ budget in ranked order (the ROUTING `non-blocking-budget` line, default 3;
 blocking claims never count against it, medium-importance claims rank ahead
 of minor ones, and `nitpick (non-blocking)` never posts inline), and folds
 the remainder plus
-any sub-medium-confidence claims into a single collapsed section riding the
-top-ranked comment (or the review body), so the plan never exceeds what the
+any sub-medium-confidence claims into a single collapsed section in the
+review body (always the body: the autofix's body-sourced work list reads the
+section back off posted reviews), so the plan never exceeds what the
 engine will emit. The collapsed section's summary line names its top-ranked
 entry, so an approving review cannot hide its best finding behind a bare
 count. Emit the plan's `comments` verbatim — one

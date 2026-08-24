@@ -159,10 +159,14 @@ export const buildWorkList = (
  * Select the body-sourced observations in scope for this run (the collapsed
  * entries of the latest review body; see `collapsed.ts` for why those exist
  * and why latest-only). Same in-scope rule as {@link buildWorkList}, plus one
- * extra guard: an observation whose `path:line` an open reviewer thread
- * already covers is skipped as `thread-covered`, so one finding cannot
- * become two work items when a re-review posts what an earlier run
- * collapsed. Body items carry a synthetic `review-body:` id ({@link
+ * extra guard: an observation whose `path:line` an open thread already
+ * covers is skipped as `thread-covered`, so one finding cannot become two
+ * work items when a re-review posts what an earlier run collapsed. The
+ * guard reads EVERY staged thread, human and out-of-scope bot threads
+ * included, deliberately: a conversation already exists at that anchor, and
+ * autofix editing under it uninvited is the same harm the reviewer's own
+ * defer-to-open-human-threads rule exists to avoid; the cost is one skipped
+ * body item at an anchor someone is already looking at. Body items carry a synthetic `review-body:` id ({@link
  * bodyItemId}); there is no thread to reply on, so the prompt reports their
  * fixes in the run summary instead (autofix.md Step 6).
  */

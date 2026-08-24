@@ -207,7 +207,7 @@ describe("buildBodyWorkList", () => {
         expect(skipped).toEqual([]);
         expect(items).toEqual([
             {
-                threadId: "review-body:src/a.ts:12",
+                threadId: "review-body:src/a.ts:12:suggestion",
                 path: "src/a.ts",
                 line: 12,
                 label: "suggestion (non-blocking, documentation)",
@@ -225,7 +225,7 @@ describe("buildBodyWorkList", () => {
         expect(items).toEqual([]);
         expect(skipped).toEqual([
             {
-                threadId: "review-body:src/a.ts:12",
+                threadId: "review-body:src/a.ts:12:question",
                 path: "src/a.ts",
                 reason: "out-of-scope",
                 label: "question (non-blocking)",

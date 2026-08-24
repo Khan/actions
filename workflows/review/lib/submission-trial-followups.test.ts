@@ -115,7 +115,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
             }),
         );
 
-    it("caps inline comments at 20, collapsing the overflow into the top comment", () => {
+    it("caps inline comments at 20, collapsing the overflow into the body", () => {
         // 22 blocking claims, confidence descending so the ranking is
         // deterministic: the two weakest collapse.
         const claims = manyClaims(22).map((entry, index) => ({
@@ -126,11 +126,14 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
             makeFakeFs(staged({depth: "full", claims})),
         );
         expect(plan.comments).toHaveLength(20);
-        expect(plan.comments[0].body).toContain(
+        // The section lands in the review body (never riding an inline
+        // comment: the body is what the autofix's body-sourced work list
+        // and both stagers can see).
+        expect(plan.body).toContain(
             "Lower-confidence observations (2; top: `a.ts:21` issue (blocking): finding 21)",
         );
-        expect(plan.comments[0].body).toContain("`a.ts:21`");
-        expect(plan.comments[0].body).toContain("`a.ts:22`");
+        expect(plan.body).toContain("`a.ts:21`");
+        expect(plan.body).toContain("`a.ts:22`");
         // A collapsed blocking claim still drives the verdict.
         expect(plan.event).toBe("REQUEST_CHANGES");
         expect(plan.notes).toContainEqual(
@@ -159,7 +162,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         // collapse with the budget-shed note.
         expect(plan.comments).toHaveLength(4);
         expect(plan.comments[0].line).toBe(99);
-        expect(plan.comments[0].body).toContain(
+        expect(plan.body).toContain(
             "Lower-confidence observations (17; top: `a.ts:4` suggestion (non-blocking): finding 4)",
         );
         expect(plan.notes).toContainEqual(
@@ -213,7 +216,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         // despite outranking it on confidence.
         expect(plan.comments).toHaveLength(1);
         expect(plan.comments[0].line).toBe(2);
-        expect(plan.comments[0].body).toContain(
+        expect(plan.body).toContain(
             "Lower-confidence observations (1; top: `a.ts:1` nitpick (non-blocking): rename it)",
         );
     });
@@ -239,9 +242,9 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         // reaches it (workflows/autofix/lib/collapsed.ts).
         expect(plan.comments).toHaveLength(3);
         expect(plan.comments.map((entry) => entry.line)).not.toContain(30);
-        // The collapsed section (riding the top comment at full depth)
-        // still carries the entry the body-sourced work list parses.
-        expect(plan.comments[0].body).toContain("`a.ts:30`");
+        // The collapsed section lands in the review body, where the
+        // body-sourced work list parses it.
+        expect(plan.body).toContain("`a.ts:30`");
     });
 
     it("collapses sub-medium-confidence non-blocking claims even under the cap", () => {
@@ -265,7 +268,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         );
         expect(plan.comments).toHaveLength(1);
         expect(plan.comments[0].line).toBe(1);
-        expect(plan.comments[0].body).toContain("a hunch");
+        expect(plan.body).toContain("a hunch");
         expect(plan.event).toBe("APPROVE");
     });
 
@@ -410,7 +413,7 @@ describe("the nitpick posting rules", () => {
 });
 
 describe("the budget's edge values", () => {
-    it("a zero budget posts blocking and documentation claims only", () => {
+    it("a zero budget posts blocking claims only (the doc exemption is gone)", () => {
         const claims = [
             claim({id: "blocking", line: 1, label: "issue (blocking)"}),
             claim({
@@ -438,9 +441,9 @@ describe("the budget's edge values", () => {
                 ),
             ),
         );
-        expect(plan.comments.map((entry) => entry.line).sort()).toEqual([1, 2]);
+        expect(plan.comments.map((entry) => entry.line)).toEqual([1]);
         expect(plan.notes).toContainEqual(
-            "1 non-blocking claim(s) collapsed over the inline budget (non-blocking budget 0)",
+            "2 non-blocking claim(s) collapsed over the inline budget (non-blocking budget 0)",
         );
     });
 
@@ -519,9 +522,8 @@ describe("the budget's spend order", () => {
         // The budget spends in ranked order, so the two strongest post and
         // the weakest is the one collapsed.
         expect(plan.comments.map((entry) => entry.line).sort()).toEqual([2, 3]);
-        // The shed claim lands in the collapsed section riding the
-        // top-ranked comment (this branch predates the always-in-body move).
-        expect(plan.comments[0].body).toContain("`a.ts:1`");
+        // The shed claim lands in the review body's collapsed section.
+        expect(plan.body).toContain("`a.ts:1`");
     });
 });
 

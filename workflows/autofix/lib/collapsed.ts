@@ -10,13 +10,17 @@
  * the label on posted threads). This module gives the plan a second, read-only
  * source: the collapsed entries of the LATEST bot review body.
  *
- * Latest-only is deliberate. Each review's collapsed section states that
- * run's still-unposted findings against that run's head; an entry from an
- * older review describes a tree the review currency machinery does not vouch
- * for, and the staleness check (fingerprint vs. current diff) is keyed to the
- * latest stamped review. An older unfixed observation drops out of scope
- * until a review re-derives it, which is the same self-healing bet the
- * reviewer's own corpus memory makes.
+ * Latest-review-only is deliberate, and strictly: only the NEWEST review's
+ * body is read (ordered by submittedAt where present, staging order
+ * otherwise), and a newest review with no collapsed section yields no body
+ * items at all. Each review's collapsed section states that run's
+ * still-unposted findings against that run's head; an entry from an older
+ * review describes a tree the review currency machinery does not vouch for
+ * (the staleness check is keyed to the latest stamped review, and stamps do
+ * not survive posting, so an older body cannot be re-validated here). An
+ * older unfixed observation drops out of scope until a review re-derives
+ * it, which is the same self-healing bet the reviewer's own corpus memory
+ * makes.
  *
  * The line grammar parsed here is `submission.ts`'s render, one entry per
  * line inside the `<details>` block:
@@ -29,6 +33,7 @@
  * degrade autofix's scope, not crash the run.
  */
 
+import {COLLAPSED_ENTRY_RE} from "../../review/lib/submission-render.ts";
 import type {PriorReview} from "../../review/lib/rereview-mode.ts";
 
 /** One collapsed observation, parsed off the latest review body. */
@@ -50,10 +55,6 @@ export type CollapsedObservation = {
 const SECTION_SUMMARY =
     /<summary>(?:Non-blocking|Lower-confidence) observations \(/;
 
-/** One collapsed entry line; the grammar `submission.ts` renders. */
-const ENTRY =
-    /^- `([^`\s:]+):(\d+)` ([a-z]+ \([^)]*\)): (.*?)(?: <sub>\(([^)]+)\)<\/sub>)?$/;
-
 /**
  * Parse the collapsed observations from the latest review body that carries
  * a collapsed section. Reviews are taken in the input order `prior-reviews`
@@ -64,38 +65,51 @@ const ENTRY =
 export const parseCollapsedObservations = (
     priorReviews: readonly PriorReview[],
 ): CollapsedObservation[] => {
-    for (let i = priorReviews.length - 1; i >= 0; i--) {
-        const body = priorReviews[i]?.body ?? "";
-        if (!SECTION_SUMMARY.test(body)) {
+    // Defensive ordering, shared semantics with rereview-mode's stamp scan:
+    // entries without a submittedAt keep their staging order.
+    const ordered = [...priorReviews].sort((a, b) =>
+        a.submittedAt === undefined || b.submittedAt === undefined
+            ? 0
+            : a.submittedAt < b.submittedAt
+            ? -1
+            : a.submittedAt > b.submittedAt
+            ? 1
+            : 0,
+    );
+    const body = ordered[ordered.length - 1]?.body ?? "";
+    if (!SECTION_SUMMARY.test(body)) {
+        return [];
+    }
+    const observations: CollapsedObservation[] = [];
+    for (const raw of body.split("\n")) {
+        const match = COLLAPSED_ENTRY_RE.exec(raw.trim());
+        if (match === null) {
             continue;
         }
-        const observations: CollapsedObservation[] = [];
-        for (const raw of body.split("\n")) {
-            const match = ENTRY.exec(raw.trim());
-            if (match === null) {
-                continue;
-            }
-            observations.push({
-                path: match[1],
-                line: Number(match[2]),
-                label: match[3],
-                subject: match[4],
-                ...(match[5] === undefined ? {} : {source: match[5]}),
-            });
-        }
-        return observations;
+        observations.push({
+            path: match[1],
+            line: Number(match[2]),
+            label: match[3],
+            subject: match[4],
+            ...(match[5] === undefined ? {} : {source: match[5]}),
+        });
     }
-    return [];
+    return observations;
 };
 
 /**
  * The synthetic work-item id for a body-sourced observation. Prefixed so
  * every consumer (the trailer ledger, the prompt's reply step) can tell it
  * from a GraphQL thread id: there is no thread to reply on, and the run
- * summary is where a body-sourced fix reports.
+ * summary is where a body-sourced fix reports. The label's base token rides
+ * the id because two distinct in-scope observations can share an anchor
+ * (dedup merges same-defect claims only) and the trailer ledger diffs these
+ * ids; same-label same-anchor collisions remain possible and are accepted.
  */
 export const bodyItemId = (observation: CollapsedObservation): string =>
-    `review-body:${observation.path}:${observation.line}`;
+    `review-body:${observation.path}:${observation.line}:${
+        observation.label.split(" ", 1)[0]
+    }`;
 
 /** Whether a work-item id names a body-sourced observation. */
 export const isBodyItemId = (id: string): boolean =>
