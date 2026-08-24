@@ -12,9 +12,14 @@
  * anything the sanitizer would not have done is still a mismatch (#244).
  *
  * Documented-not-absorbed residuals, each of which needs a pathological body
- * and fails red rather than silently: HTML entity decoding, the
+ * and fails red rather than silently: the
  * percent-decode side effect, homoglyph folds, the 65k truncation, markdown
- * link titles, and tilde fences. XML tag conversion is absorbed by
+ * link titles, and tilde fences. HTML entity decoding graduated out of this
+ * list the same way the `<skill>` placeholder did: run 32758584548 staged a
+ * footer quoting `&lt;STOP: ...&gt;` (the renderer escapes angle brackets it
+ * quotes), the sanitizer decoded it and convertXmlTags parenthesised the
+ * result, and rule 7 blocked a fully conforming review. Absorbed by
+ * {@link decodeHtmlEntities} below. XML tag conversion is absorbed by
  * {@link foldXmlTags} below; its remaining sub-residuals (dangerous-attribute
  * stripping inside a preserved allowed tag, CDATA marker rewriting) still
  * need a pathological body.
@@ -138,6 +143,47 @@ const foldDomainName = (host: string): string => {
 };
 
 /**
+ * Mirror the sanitizer's decodeHtmlEntities (sanitize_content_core.cjs,
+ * gh-aw v0.85.4, hardenUnicodeText step 2): named entities for @ and the
+ * angle-bracket/ampersand trio, the invisible-character names, then decimal
+ * and hex forms, each tolerating one `&amp;`-double-encoding. Decoding runs
+ * BEFORE the invisible strips so an entity-spelled zero-width character
+ * (`&shy;`, `&zwnj;`) decodes to the code point the next fold deletes,
+ * exactly as the sanitizer sequences it. Applied to both comparison sides:
+ * the plan is composed pre-sanitizer (a renderer that quotes `<STOP: ...>`
+ * escapes it to `&lt;STOP: ...&gt;`), the queued side arrives decoded.
+ */
+const decodeHtmlEntities = (text: string): string =>
+    text
+        .replace(/&(?:amp;)?commat;/gi, "@")
+        .replace(/&(?:amp;)?gt;/gi, ">")
+        .replace(/&(?:amp;)?lt;/gi, "<")
+        .replace(/&(?:amp;)?amp;/gi, "&")
+        .replace(/&(?:amp;)?shy;/gi, "\u00ad")
+        .replace(/&(?:amp;)?zwnj;/gi, "\u200c")
+        .replace(/&(?:amp;)?zwj;/gi, "\u200d")
+        .replace(/&(?:amp;)?lrm;/gi, "\u200e")
+        .replace(/&(?:amp;)?rlm;/gi, "\u200f")
+        .replace(/&(?:amp;)?ZeroWidthSpace;/gi, "\u200b")
+        .replace(/&(?:amp;)?NoBreak;/gi, "\u2060")
+        .replace(/&(?:amp;)?(?:af|ApplyFunction);/gi, "\u2061")
+        .replace(/&(?:amp;)?(?:it|InvisibleTimes);/gi, "\u2062")
+        .replace(/&(?:amp;)?(?:ic|InvisibleComma);/gi, "\u2063")
+        .replace(/&(?:amp;)?(?:ip|InvisiblePlus);/gi, "\u2064")
+        .replace(/&(?:amp;)?#(\d+);/g, (match, code: string) => {
+            const codePoint = parseInt(code, 10);
+            return codePoint >= 0 && codePoint <= 0x10ffff
+                ? String.fromCodePoint(codePoint)
+                : match;
+        })
+        .replace(/&(?:amp;)?#[xX]([0-9a-fA-F]+);/g, (match, code: string) => {
+            const codePoint = parseInt(code, 16);
+            return codePoint >= 0 && codePoint <= 0x10ffff
+                ? String.fromCodePoint(codePoint)
+                : match;
+        });
+
+/**
  * Fold one body to its sanitizer-tolerant comparison form. Applied to the
  * plan and the queued text alike; never to text that gets posted.
  */
@@ -152,8 +198,7 @@ export const normalizeBody = (text: string): string =>
     // hardened text on the queued side (run 31616001094: a stripped
     // U+034F turned `/\u034f/g` into `//g` before URL redaction saw it).
     foldXmlTags(
-        text
-            .normalize("NFKC")
+        decodeHtmlEntities(text.normalize("NFKC"))
             .replace(/\u034f/g, "")
             // Zero-width, bidi-control (sanitizer step 4), C0/DEL (its
             // control-strip): all deleted on the queued side only, so
