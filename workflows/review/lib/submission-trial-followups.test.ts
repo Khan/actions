@@ -516,6 +516,8 @@ describe("the budget's spend order", () => {
         // The budget spends in ranked order, so the two strongest post and
         // the weakest is the one collapsed.
         expect(plan.comments.map((entry) => entry.line).sort()).toEqual([2, 3]);
-        expect(plan.body).toContain("`a.ts:1`");
+        // The shed claim lands in the collapsed section riding the
+        // top-ranked comment (this branch predates the always-in-body move).
+        expect(plan.comments[0].body).toContain("`a.ts:1`");
     });
 });
