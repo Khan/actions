@@ -302,15 +302,32 @@ describe("label-contract enforcement (run 29897276810)", () => {
     });
 
     it("folds a bare form against its inflection (the trailing-e strip is what matches)", () => {
-        // "reuse" carries no strippable suffix; it meets "reuses" only
-        // because both sides fold to "reus" via the trailing-e strip. If
-        // that strip regresses, this drop stops firing.
+        // "reuses" folds to "reus" via the "es" suffix strip; "reuse"
+        // carries no strippable suffix and meets it only via the trailing-e
+        // strip. If the trailing-e strip regresses, the subject side stays
+        // "reuse", the pair stops folding together, and this drop stops
+        // firing.
         expect(
             joinProse(
                 "Stale cache reuse.",
                 "The run reuses a stale cache because the key never rotates.",
             ),
         ).toBe("The run reuses a stale cache because the key never rotates.");
+    });
+
+    it("still drops against a multi-line discussion whose FIRST sentence is one line", () => {
+        // The drop side of the newline guard: the guard rejects a
+        // multi-line first sentence, not any multi-line discussion. A
+        // terminated opening sentence on its own line is a safe drop target;
+        // buildClaims recovers exactly that line as claim.subject.
+        expect(
+            joinProse(
+                "The merger drops flagged turns.",
+                "The merger drops flagged turns on every stream.\nDetails:\n- the filter runs first",
+            ),
+        ).toBe(
+            "The merger drops flagged turns on every stream.\nDetails:\n- the filter runs first",
+        );
     });
 
     it("keeps a subject that carries information the opening sentence lacks", () => {

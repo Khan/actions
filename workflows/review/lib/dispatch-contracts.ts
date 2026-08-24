@@ -123,6 +123,15 @@ const foldToken = (token: string): string => {
  * dedup-text.ts's STOPWORDS (near-identical list, different semantics:
  * that one filters both sides of a similarity score).
  */
+/**
+ * Split point for "the discussion's first sentence": a sentence terminator
+ * followed by whitespace. Shared by the restatement drop and buildClaims'
+ * subject recovery, which must agree on what the first sentence IS: the
+ * drop's whole safety argument is that buildClaims recovers the same text
+ * the subject restated.
+ */
+const FIRST_SENTENCE_SPLIT = /(?<=[.!?])\s/;
+
 const SUBJECT_STOPWORDS: ReadonlySet<string> = new Set([
     "a",
     "an",
@@ -204,7 +213,7 @@ const subjectRestatesDiscussion = (
     if (subjectTokens.length === 0) {
         return false;
     }
-    const firstSentence = discussion.split(/(?<=[.!?])\s/, 1)[0] ?? "";
+    const firstSentence = discussion.split(FIRST_SENTENCE_SPLIT, 1)[0] ?? "";
     // A "first sentence" spanning lines means the discussion opens with an
     // unterminated line (a heading, a bullet list): dropping the subject
     // would promote that whole block into `claim.subject` via buildClaims'
@@ -668,7 +677,7 @@ export const buildClaims = (candidates: Candidate[]): Claim[] =>
         const {finding} = candidate;
         const {path, line} = anchorPathLine(finding.anchor);
         const prose = finding.model_authored_prose;
-        const firstSentence = prose.split(/(?<=[.!?])\s/, 1)[0] ?? prose;
+        const firstSentence = prose.split(FIRST_SENTENCE_SPLIT, 1)[0] ?? prose;
         return {
             id: finding.id,
             source: candidate.source,
