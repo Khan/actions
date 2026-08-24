@@ -711,6 +711,10 @@ describe("the repo root", () => {
             checkerVersion: "1.11.0",
         });
         expect(codes(report, "error")).toEqual([]);
+        // Warnings too: warning-only checks (the .gitattributes lookup)
+        // also resolve through the prefixed root, and an error-only
+        // assertion cannot observe them.
+        expect(codes(report, "warning")).toEqual([]);
     });
 });
 
