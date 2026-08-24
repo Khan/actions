@@ -16,7 +16,10 @@
  * write never reaches the saved cache; the write has to land where the
  * model's own Step 9 Write-tool call landed. Task mode is untouched: with
  * no staged submission plan the writer no-ops and the orchestrator's Step 9
- * write stands.
+ * write stands, with ONE exception: the dispatcher-death shape (no plan, no
+ * dispatch result, a lone queued death comment) drops `risksPatternsKey`
+ * from the prior record, because that comment collapses the standing
+ * guidance comment exactly like a hold comment does.
  *
  * What it refuses to write: anything it cannot corroborate. The record is
  * only written when the staged plan and the in-run safe-output queue
@@ -321,7 +324,13 @@ export const runCacheRecordCli = (
             );
             if (
                 deathReadable &&
-                !fs.existsSync(`${REVIEW_DIR}/dispatch-result.json`) &&
+                // Parseability, not existence: submission.ts treats an
+                // unparseable dispatch-result.json exactly like a missing
+                // one (readJson -> undefined -> no plan), so the death
+                // shape's "the dispatcher produced no result" means the
+                // same thing at every seam that asks.
+                readJson(fs, `${REVIEW_DIR}/dispatch-result.json`) ===
+                    undefined &&
                 !deathItems.some(
                     (item) => item["type"] === "submit_pull_request_review",
                 ) &&

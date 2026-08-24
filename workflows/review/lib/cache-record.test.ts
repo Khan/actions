@@ -405,6 +405,16 @@ describe("the in-run safe-output queue (GH_AW_SAFE_OUTPUTS)", () => {
     });
 });
 
+/** A prior run's record carrying the risksPatternsKey the drop paths target. */
+const priorRecord = JSON.stringify({
+    timestamp: "2026-07-01T00:00:00.000Z",
+    verdict: "APPROVE",
+    diffFingerprint: {"a.ts": "prior-sha"},
+    reviewedHunks: {"a.ts": ["prior-hunk"]},
+    risksPatternsKey: "risk:a.ts:t1",
+    requestedTeams: ["t1"],
+});
+
 describe("the hold record (HOLD_FOR_HUMAN plans)", () => {
     const holdStaged = (
         over: Record<string, string> = {},
@@ -418,15 +428,6 @@ describe("the hold record (HOLD_FOR_HUMAN plans)", () => {
             items: [{type: "add_comment", body: "Holding for human review."}],
         }),
         ...over,
-    });
-
-    const priorRecord = JSON.stringify({
-        timestamp: "2026-07-01T00:00:00.000Z",
-        verdict: "APPROVE",
-        diffFingerprint: {"a.ts": "prior-sha"},
-        reviewedHunks: {"a.ts": ["prior-hunk"]},
-        risksPatternsKey: "risk:a.ts:t1",
-        requestedTeams: ["t1"],
     });
 
     it("never records fingerprints for a hold (the next run reviews in full)", () => {
@@ -519,15 +520,6 @@ describe("the dispatcher-death record (no plan, death comment queued)", () => {
         return files;
     };
 
-    const priorRecord = JSON.stringify({
-        timestamp: "2026-07-01T00:00:00.000Z",
-        verdict: "APPROVE",
-        diffFingerprint: {"a.ts": "prior-sha"},
-        reviewedHunks: {"a.ts": ["prior-hunk"]},
-        risksPatternsKey: "risk:a.ts:t1",
-        requestedTeams: ["t1"],
-    });
-
     it("drops risksPatternsKey when the death comment queued with no plan", () => {
         const fs = makeFakeFs(
             deathStaged({[`${CACHE}/pr-41.json`]: priorRecord}),
@@ -577,11 +569,24 @@ describe("the dispatcher-death record (no plan, death comment queued)", () => {
         expect(fs.files[`${CACHE}/pr-41.json`]).toBe(priorRecord);
     });
 
+    it("an unparseable dispatch-result.json still reads as a death, like submission.ts reads it", () => {
+        // Parseability is the shared definition of "the dispatcher produced
+        // no result": submission.ts's readJson treats an unparseable file
+        // like a missing one, so the death guard must too.
+        const files = deathStaged({[`${CACHE}/pr-41.json`]: priorRecord});
+        files[`${REVIEW}/dispatch-result.json`] = "not json {";
+        const fs = makeFakeFs(files);
+        const result = runCacheRecordCli(fs, NOW);
+        expect(result.written).toBe(true);
+        const record = JSON.parse(fs.files[`${CACHE}/pr-41.json`] as string);
+        expect(record.risksPatternsKey).toBeUndefined();
+    });
+
     it("does not read a planless run as a death when dispatch-result.json exists or a review queued", () => {
         // The other two facts of the death shape (review.md Step 3): the
-        // dispatcher DID write its result, or a review submission queued
-        // alongside the comment. Either way this is not the death comment
-        // collapsing the guidance, so the prior record stands.
+        // dispatcher DID write its PARSEABLE result, or a review submission
+        // queued alongside the comment. Either way this is not the death
+        // comment collapsing the guidance, so the prior record stands.
         const withResult = deathStaged({
             [`${CACHE}/pr-41.json`]: priorRecord,
         });
