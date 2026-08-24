@@ -96,6 +96,16 @@ const baseLogin = (login: string): string => {
 export const sameLogin = (a: string, b: string): boolean =>
     baseLogin(a) === baseLogin(b);
 
+/**
+ * Whether a login is ANY GitHub App (`[bot]`-suffixed), not just this
+ * workflow's review bot. Lives here so the suffix spelling stays in the one
+ * module that owns login identity ({@link baseLogin}); note this only sees
+ * the REST spelling (GraphQL reports the bare login), so callers needing
+ * "is this the review bot on either surface" want {@link isReviewBotAuthor}.
+ */
+export const isBotLogin = (login: string): boolean =>
+    login.toLowerCase().endsWith("[bot]");
+
 /** Whether a comment author is this workflow's review bot, either spelling. */
 export const isReviewBotAuthor = (login: string): boolean =>
     sameLogin(login, reviewBotLogin());
