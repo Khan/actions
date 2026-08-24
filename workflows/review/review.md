@@ -853,11 +853,12 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    `reconciliation.skipLines` is already reflected in the plan. Steps 4-6
    below are the plan CLI's; continue at Step 7.
    Do not dispatch any sub-agent yourself in this mode, and do not re-run
-   the dispatcher; if its call failed but `dispatch-result.json` exists,
-   treat the run as over budget and land the review from whatever `out/`
-   evidence exists (the gate decides whether a verdict may post). If
-   `dispatch-result.json` is MISSING after the dispatcher call (the Bash
-   call was killed at the engine ceiling or crashed before writing it),
+   the dispatcher; if its call failed but `dispatch-result.json` exists
+   and parses, treat the run as over budget and land the review from
+   whatever `out/` evidence exists (the gate decides whether a verdict may
+   post). If `dispatch-result.json` is MISSING OR UNPARSEABLE after the
+   dispatcher call (the Bash call was killed at the engine ceiling, or
+   crashed part-way through writing it),
    there is no plan and you compose nothing by hand: post exactly one
    standalone PR comment with the `add-comment` safe output stating that
    the automated review died mid-dispatch and posted no review, linking

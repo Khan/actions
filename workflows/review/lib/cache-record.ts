@@ -14,9 +14,10 @@
  * `/tmp/gh-aw/cache-memory` (the `cache-memory` artifact the
  * `update_cache_memory` job persists) BEFORE post-steps run, so a post-step
  * write never reaches the saved cache; the write has to land where the
- * model's own Step 9 Write-tool call landed. Task mode is untouched: with
- * no staged submission plan the writer no-ops and the orchestrator's Step 9
- * write stands, with ONE exception: the dispatcher-death shape (no plan, no
+ * model's own Step 9 Write-tool call landed. With no staged submission plan
+ * the writer no-ops and the orchestrator's Step 9 write stands (scripted is
+ * the only dispatch mode since 237d540 removed task mode, so a planless run
+ * is a run that died, not a mode), with ONE exception: the dispatcher-death shape (no plan, no
  * dispatch result, a lone queued death comment) drops `risksPatternsKey`
  * from the prior record, because that comment collapses the standing
  * guidance comment exactly like a hold comment does.
@@ -317,6 +318,8 @@ export const runCacheRecordCli = (
         // SHOULD have queued, an unreadable queue is indistinguishable from
         // an ordinary early death, so that stays the benign skip rather
         // than the hold branch's loud refusal.
+        // When the gate blocks the run the queued comment never posts, so
+        // no guidance comment is hidden and the key must stay.
         if (!fs.existsSync(BLOCKED_SENTINEL_PATH)) {
             const {items: deathItems, readable: deathReadable} = readQueue(
                 fs,
