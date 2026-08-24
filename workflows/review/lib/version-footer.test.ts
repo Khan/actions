@@ -51,11 +51,28 @@ describe("renderVersionFooter", () => {
                 reReviewMode: "scoped",
                 blockingOnly: true,
                 enabledReviewers: ["holistic", "completeness"],
+                nonBlockingInlineBudget: 5,
             }),
         ).toBe(
             wrapped(
-                "review-v1.13.0 | schema 2 | depth scoped | re-review scoped blocking-only | enable holistic,completeness",
+                "review-v1.13.0 | schema 2 | depth scoped | re-review scoped blocking-only | enable holistic,completeness | non-blocking-budget 5",
             ),
+        );
+    });
+
+    it("omits the non-blocking budget at its default (the footer states configuration, not defaults)", () => {
+        expect(
+            renderVersionFooter({
+                version: "1.13.0",
+                schemaVersion: 2,
+                depth: "full",
+                reReviewMode: "full",
+                blockingOnly: false,
+                enabledReviewers: [],
+                nonBlockingInlineBudget: 3,
+            }),
+        ).toBe(
+            wrapped("review-v1.13.0 | schema 2 | depth full | re-review full"),
         );
     });
 
@@ -68,6 +85,7 @@ describe("renderVersionFooter", () => {
                 reReviewMode: "full",
                 blockingOnly: false,
                 enabledReviewers: [],
+                nonBlockingInlineBudget: null,
             }),
         ).toBe(
             wrapped("review-v1.13.0 | schema 2 | depth full | re-review full"),
@@ -83,6 +101,7 @@ describe("renderVersionFooter", () => {
                 reReviewMode: null,
                 blockingOnly: true,
                 enabledReviewers: [],
+                nonBlockingInlineBudget: null,
             }),
         ).toBe(wrapped("schema 2"));
     });

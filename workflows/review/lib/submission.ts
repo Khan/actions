@@ -66,12 +66,20 @@ import type {Claim} from "./dispatch-contracts";
 import {DEFAULT_FINDERS, TRIAGE_DIMENSION} from "./dispatch-roster";
 import {runCli as runNotifiedCli} from "./notified";
 import {
+    DOCUMENTATION_LABEL,
     HOLD_HEAD,
     HOLD_UNSTUCK_LINES,
     isBlockingLabel,
     renderReviewBody,
 } from "./render-comment";
+import {DEFAULT_NON_BLOCKING_INLINE_BUDGET} from "./routing-config";
 import {runRereviewCli, type RereviewCliFs} from "./rereview";
+import {
+    labelToken,
+    renderClaimComment,
+    renderPrLevelFold,
+    sourceTag,
+} from "./submission-render";
 import {normalizeBody} from "./sanitizer-normalize";
 import {
     findLatestStamp,
@@ -244,14 +252,16 @@ const readCacheMemoryRecord = (fs: SubmissionFs): unknown => {
 };
 
 /* -------------------------------------------------------------------------- */
-/* Rendering                                                                  */
+/* Rendering (submission-render.ts; re-exported for the existing consumers)    */
 /* -------------------------------------------------------------------------- */
 
-/**
- * How many lines a committable suggestion may replace the anchored line
- * with; anything longer is a sketch, not a drop-in.
- */
-const MAX_SUGGESTION_LINES = 8;
+export {
+    isDropInSuggestion,
+    labelAdmitsSketch,
+    MAX_VERBATIM_FOLD_CHARS,
+    renderClaimComment,
+    renderPrLevelFold,
+} from "./submission-render";
 
 /**
  * At most this many inline comments post; the rest collapse (the Step 5 cap,
@@ -264,155 +274,6 @@ export const MAX_INLINE_COMMENTS = 20;
 
 /** The medium-confidence inline floor (the Step 5 posting bar). */
 const MIN_INLINE_CONFIDENCE = 0.5;
-
-/**
- * A pr-level claim's discussion folds into the body verbatim only up to
- * this length; past it, the body carries the claim's subject line and the
- * full discussion moves into a <details> block. webapp#41290 review
- * 4867627688 folded a ~2,600-char single-paragraph finding directly into
- * the body, burying the accountability section and the note lines around
- * it; a short paragraph is the most a fold can carry without doing that.
- */
-export const MAX_VERBATIM_FOLD_CHARS = 400;
-
-/**
- * Render a pr-level claim for the review body: verbatim while it reads as
- * a short paragraph, subject line plus a collapsed full finding once it
- * does not.
- */
-export const renderPrLevelFold = (claim: Claim): string => {
-    if (claim.discussion.length <= MAX_VERBATIM_FOLD_CHARS) {
-        return `**${claim.label}:** ${claim.discussion}`;
-    }
-    return [
-        `**${claim.label}:** ${claim.subject}`,
-        "<details>",
-        "<summary>Full finding</summary>",
-        "",
-        claim.discussion,
-        "",
-        "</details>",
-    ].join("\n");
-};
-
-/**
- * The one-line source tag for collapsed/hold list entries: the same
- * attribution the full comments carry, in the smallest form that fits a
- * one-liner (a whole collapsed footer per list entry would bury the list).
- * `<sub>` is sanitizer-allowed, and attribution.ts's stripFooters removes
- * the span before any text-similarity comparison against posted bodies.
- */
-const sourceTag = (claim: Claim): string => `<sub>(${claim.source})</sub>`;
-
-const lineHasCodeSignal = (line: string): boolean =>
-    /\w\(/.test(line) || // a call
-    /[{};]/.test(line) || // block/statement punctuation
-    /:=|=>|->/.test(line) || // assignment/arrow operators
-    /^\s*(\/\/|#|\/\*|\*)/.test(line) || // a comment marker
-    /^\t/.test(line); // code-convention indentation
-
-const looksLikeProse = (line: string): boolean => {
-    // Deliberately NOT vetoed by lineHasCodeSignal: run 29901690493 posted
-    // "Use ctx.Time().Now().AddDate(0, 0, -MemoryTTLDays), and add a test
-    // that ..." as a committable fence because the embedded call defeated
-    // the prose check. A sentence that names code is still a sentence.
-    const words = line.trim().split(/\s+/);
-    if (words.length < 6) {
-        return false;
-    }
-    const plain = words.filter((word) =>
-        /^\(?[A-Za-z][A-Za-z']*[.,;:!?)]?$/.test(word),
-    );
-    return plain.length / words.length >= 0.75;
-};
-
-/**
- * Whether a claim's suggestion is plausibly a committable replacement of
- * the anchored line: small and code-shaped. Trial run 29897276810 posted an
- * English sentence and a 30-line test function inside `suggestion` fences
- * (Khan/webapp#41009 comments r3628128268 / r3628128224), both of which a
- * single click would have committed verbatim into the file.
- */
-export const isDropInSuggestion = (suggestion: string): boolean => {
-    const lines = suggestion.replace(/\n$/, "").split("\n");
-    const content = lines.filter((line) => line.trim() !== "");
-    if (content.length === 0 || lines.length > MAX_SUGGESTION_LINES) {
-        return false;
-    }
-    return content.some(lineHasCodeSignal) && !content.some(looksLikeProse);
-};
-
-/**
- * The base label tokens whose comments propose a fix, and so may carry a
- * sketch block. `issue` and `suggestion` are the fix-proposing labels;
- * `todo (blocking)` is verdict-equivalent to `issue (blocking)` (see
- * render-comment.ts), so stripping its fix would remove the sketch from a
- * blocking finding. `question`, `thought`, `note`, and `nitpick` raise a
- * point rather than propose a fix: measured on Khan/webapp (2026-08-11/12),
- * 31 of 57 posted comments carried a sketch, including questions and
- * thoughts whose sketch restated the prose without adding information.
- *
- * Deliberate consequence: a dispute-capped claim relabeled to
- * `question (non-blocking)` by applyVerifications keeps its `suggestion`
- * field but posts without the sketch block. The gate is about information
- * loss, not the label's tone: a sketch restates prose (the measured
- * sample), so dropping it under a non-fix label costs length, not content,
- * whereas a drop-in fence IS the fix in committable form and renders under
- * any label (see renderClaimComment). So a disputed claim keeps its
- * one-click fix and loses only the restatement.
- */
-const SKETCH_LABEL_TOKENS: ReadonlySet<string> = new Set([
-    "issue",
-    "todo",
-    "suggestion",
-]);
-
-/**
- * Whether a claim's label admits a sketch block. Matches on the base label
- * token so every variant counts (`suggestion (non-blocking, documentation)`
- * is a suggestion). An unparseable label is sketch-eligible: fail toward
- * more information, never toward silently dropping an authored fix.
- */
-export const labelAdmitsSketch = (label: string): boolean => {
-    const token = label.trim().split(/[\s(:]/, 1)[0] ?? "";
-    return token === "" || SKETCH_LABEL_TOKENS.has(token.toLowerCase());
-};
-
-/**
- * Render one claim as its Conventional Comment (the renderComment layout,
- * driven by the claim's post-validation label rather than a recomputed one).
- * A suggestion only becomes a committable `suggestion` fence when it is
- * plausibly drop-in; otherwise it renders as a plain fenced sketch, and only
- * under a fix-proposing label ({@link labelAdmitsSketch}): a question or
- * thought proposes no fix, so a sketch under it adds length, not
- * information.
- */
-export const renderClaimComment = (claim: Claim): string => {
-    const lines: string[] = [`**${claim.label}:** ${claim.discussion}`];
-    if (claim.rule_quote !== undefined) {
-        const [first, ...rest] = claim.rule_quote.split("\n");
-        lines.push(
-            "",
-            `> **Rule:** ${first}`,
-            ...rest.map((line) => (line === "" ? ">" : `> ${line}`)),
-        );
-    }
-    if (claim.suggestion !== undefined) {
-        if (isDropInSuggestion(claim.suggestion)) {
-            lines.push("", "```suggestion", claim.suggestion, "```");
-        } else if (labelAdmitsSketch(claim.label)) {
-            lines.push(
-                "",
-                "A sketch, not a committable replacement:",
-                "",
-                "````",
-                claim.suggestion,
-                "````",
-            );
-        }
-    }
-    return lines.join("\n");
-};
 
 /* -------------------------------------------------------------------------- */
 /* The plan                                                                   */
@@ -486,7 +347,11 @@ export const runSubmissionCli = (
         : [];
     const depth = typeof dispatch.depth === "string" ? dispatch.depth : "full";
     const routing = readJson(fs, `${REVIEW_DIR}/routing.json`) as
-        | {teams?: {owners?: unknown}; reReviewBlockingOnly?: unknown}
+        | {
+              teams?: {owners?: unknown};
+              reReviewBlockingOnly?: unknown;
+              nonBlockingInlineBudget?: unknown;
+          }
         | undefined;
     // The ROUTING `re-review <mode> blocking-only` modifier: a repeat review
     // at a reduced depth posts only blocking findings inline; validated
@@ -745,22 +610,61 @@ export const runSubmissionCli = (
     // MAX_INLINE_COMMENTS post inline: the frontmatter caps the
     // create-pull-request-review-comment safe output at the same number, so
     // a longer plan would have the engine reject the overflow and the
-    // conformance gate red the run after full spend. Everything else
-    // collapses to one terse line each in a single <details> block riding
-    // the highest-ranked inline comment (or the review body when nothing
-    // posts inline), so it is surfaced without scattering noise. The
-    // verdict is computed from ALL claims, so a collapsed blocking claim
-    // (a 21st blocking finding) still blocks.
+    // conformance gate red the run after full spend.
+    //
+    // Three further rules shape the non-blocking surface (the P1 comment
+    // budget, quiet-the-human-surface lane):
+    //   - `nitpick (non-blocking)` never posts inline: the label names the
+    //     class the lane demotes wholesale (naming, doc-comment nits).
+    //   - At most `nonBlockingInlineBudget` other non-blocking claims post
+    //     inline (routing.json's `non-blocking-budget` line, default 3);
+    //     the budget spends in ranked order, so what sheds is chosen.
+    //   - The documentation label is exempt from the budget: the
+    //     documentation reviewer self-caps at five per review, and the
+    //     documentation autofix selects its work by parsing that label off
+    //     posted threads, so budgeting those would silently shrink a
+    //     shipped feature's scope (until the autofix learns to read the
+    //     collapsed section, at which point the exemption goes).
+    //
+    // Everything else collapses to one terse line each in a single
+    // <details> block riding the highest-ranked inline comment (or the
+    // review body when nothing posts inline), so it is surfaced without
+    // scattering noise. The verdict is computed from ALL claims, so a
+    // collapsed blocking claim (a 21st blocking finding) still blocks.
+    const budgetRaw = routing?.nonBlockingInlineBudget;
+    const nonBlockingBudget =
+        typeof budgetRaw === "number" &&
+        Number.isInteger(budgetRaw) &&
+        budgetRaw >= 0
+            ? budgetRaw
+            : DEFAULT_NON_BLOCKING_INLINE_BUDGET;
     const ranked = [...anchored].sort((a, b) => {
         const blocking =
             Number(isBlockingLabel(b.label)) - Number(isBlockingLabel(a.label));
         return blocking !== 0 ? blocking : b.confidence - a.confidence;
     });
-    const inlineWorthy = ranked.filter(
-        (claim) =>
-            isBlockingLabel(claim.label) ||
-            (!blockingOnly && claim.confidence >= MIN_INLINE_CONFIDENCE),
-    );
+    let budgetLeft = nonBlockingBudget;
+    let budgetShed = 0;
+    const inlineWorthy = ranked.filter((claim) => {
+        if (isBlockingLabel(claim.label)) {
+            return true;
+        }
+        if (blockingOnly || claim.confidence < MIN_INLINE_CONFIDENCE) {
+            return false;
+        }
+        if (labelToken(claim.label) === "nitpick") {
+            return false;
+        }
+        if (claim.label === DOCUMENTATION_LABEL) {
+            return true;
+        }
+        if (budgetLeft > 0) {
+            budgetLeft--;
+            return true;
+        }
+        budgetShed++;
+        return false;
+    });
     const inlineClaims = new Set(inlineWorthy.slice(0, MAX_INLINE_COMMENTS));
     const collapsed = [
         ...ranked.filter((claim) => !inlineClaims.has(claim)),
@@ -796,10 +700,23 @@ export const runSubmissionCli = (
         const collapsedNonBlockingOnly = !collapsed.some((entry) =>
             isBlockingLabel(entry.label),
         );
+        // The disclosure names the tail's top-ranked entry, not only the
+        // count: today's collapsed sections hid, verbatim, "the reply guard
+        // never fires" behind "Non-blocking observations (6)" on an
+        // approving review (Khan/actions#367), and a collapsed line only
+        // costs near-zero attention if the summary line says when it is
+        // worth spending more. `collapsed` is in ranked order (the budget
+        // shed comes off the ranked list; pr-level claims append after), so
+        // entry 0 is the best of the tail.
+        const top = collapsed[0];
+        const topTag =
+            top.path !== undefined && top.line !== undefined
+                ? `; top: ${top.path}:${top.line} ${top.label}`
+                : `; top: ${top.label}`;
         const summary =
             blockingOnly && collapsedNonBlockingOnly
-                ? `Non-blocking observations (${collapsed.length})`
-                : `Lower-confidence observations (${collapsed.length})`;
+                ? `Non-blocking observations (${collapsed.length}${topTag})`
+                : `Lower-confidence observations (${collapsed.length}${topTag})`;
         const section = [
             "<details>",
             `<summary>${summary}</summary>`,
@@ -824,8 +741,13 @@ export const runSubmissionCli = (
         notes.push(
             blockingOnly && collapsedNonBlockingOnly
                 ? `${collapsed.length} non-blocking claim(s) collapsed into the body (re-review blocking-only)`
-                : `${collapsed.length} claim(s) collapsed below the inline bar (cap ${MAX_INLINE_COMMENTS}, medium-confidence floor)`,
+                : `${collapsed.length} claim(s) collapsed below the inline bar (cap ${MAX_INLINE_COMMENTS}, medium-confidence floor, non-blocking budget ${nonBlockingBudget})`,
         );
+        if (budgetShed > 0) {
+            notes.push(
+                `${budgetShed} non-blocking claim(s) collapsed over the inline budget (non-blocking budget ${nonBlockingBudget})`,
+            );
+        }
     }
 
     // The per-comment attribution footer (attribution.ts): which reviewer

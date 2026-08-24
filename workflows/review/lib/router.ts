@@ -44,6 +44,7 @@ import {
 } from "./lens-payloads";
 import {
     DEFAULT_DISPATCH_MODE,
+    DEFAULT_NON_BLOCKING_INLINE_BUDGET,
     DEFAULT_RE_REVIEW_MODE,
     ENABLEABLE_REVIEWERS,
     parseRoutingConfig,
@@ -65,6 +66,7 @@ import type {
 // entry point for routing vocabulary and the ROUTING parser.
 export {DEFAULT_MISROUTED_FLOOR_TIER, DEFAULT_TIER_BUDGETS};
 export {
+    DEFAULT_NON_BLOCKING_INLINE_BUDGET,
     DEFAULT_RE_REVIEW_MODE,
     ENABLEABLE_REVIEWERS,
     parseRoutingConfig,
@@ -753,6 +755,12 @@ export type RoutingJson = {
      */
     reReviewBlockingOnly: boolean;
     /**
+     * `non-blocking-budget` line in `ROUTING` (default 3): how many
+     * non-blocking findings may post inline per review; the overflow
+     * collapses into the review body (`submission.ts` reads this).
+     */
+    nonBlockingInlineBudget: number;
+    /**
      * The repo's dispatch mode (`dispatch` line in `ROUTING`; `task` when
      * absent). `scripted` opts the repo into the deterministic dispatcher
      * (`dispatch.ts`, orchestrator slice 2).
@@ -782,6 +790,7 @@ export const toRoutingJson = (
     reReviewMode: ReReviewMode = DEFAULT_RE_REVIEW_MODE,
     dispatchMode: DispatchMode = DEFAULT_DISPATCH_MODE,
     reReviewBlockingOnly = false,
+    nonBlockingInlineBudget: number = DEFAULT_NON_BLOCKING_INLINE_BUDGET,
 ): RoutingJson => {
     const owners: Record<string, string[]> = {};
     const generatedFiles: string[] = [];
@@ -808,6 +817,7 @@ export const toRoutingJson = (
         enabledReviewers,
         reReviewMode,
         reReviewBlockingOnly,
+        nonBlockingInlineBudget,
         dispatchMode,
         routingConfig,
     };
@@ -903,6 +913,7 @@ export const runCli = (
               enabledReviewers: [],
               reReviewMode: DEFAULT_RE_REVIEW_MODE,
               reReviewBlockingOnly: false,
+              nonBlockingInlineBudget: DEFAULT_NON_BLOCKING_INLINE_BUDGET,
               dispatchMode: DEFAULT_DISPATCH_MODE,
               warnings: [
                   `routing config missing (${ROUTING_CONFIG_PATH}): no ` +
@@ -968,6 +979,7 @@ export const runCli = (
         routingFileConfig.reReviewMode,
         routingFileConfig.dispatchMode,
         routingFileConfig.reReviewBlockingOnly,
+        routingFileConfig.nonBlockingInlineBudget,
     );
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});

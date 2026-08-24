@@ -1,0 +1,5 @@
+---
+"review": minor
+---
+
+The P1 non-blocking comment budget, plus a collapsed-tail disclosure that names its best finding. Four posting-surface changes, all deterministic (no model behavior changes): at most 3 non-blocking findings post inline per review (the ROUTING `non-blocking-budget` line tunes it; blocking findings are uncapped up to the engine's 20), `nitpick (non-blocking)` never posts inline, documentation-label findings are exempt from the budget (the documentation autofix selects its work by parsing that label off posted threads, so budgeting them would silently shrink a shipped feature's scope), and the collapsed section's summary line now names its top-ranked entry instead of a bare count. The motivating case for the disclosure: three 2026-08-24 approving re-reviews on this repo collapsed correctness findings behind "Non-blocking observations (N)", including Khan/actions#367's report that the acknowledgment feature's own reply guard never fires. Nothing is dropped and the verdict still counts every validated claim; a non-default budget shows in the version footer.

@@ -109,7 +109,9 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         expect(plan.comments[0].body).not.toContain(
             "Non-blocking observations",
         );
-        expect(plan.body).toContain("Non-blocking observations (2)");
+        expect(plan.body).toContain(
+            "Non-blocking observations (2; top: a.ts:9 nitpick (non-blocking))",
+        );
         expect(plan.body).toContain(
             "- `a.ts:9` nitpick (non-blocking): Rename the helper. " +
                 "<sub>(correctness-reviewer)</sub>",
@@ -160,8 +162,8 @@ describe("runSubmissionCli: re-review blocking-only", () => {
                     depth: "full",
                     claims: [
                         claim({
-                            id: "nit",
-                            label: "nitpick (non-blocking)",
+                            id: "sug",
+                            label: "suggestion (non-blocking)",
                             confidence: 0.9,
                         }),
                     ],
@@ -181,8 +183,8 @@ describe("runSubmissionCli: re-review blocking-only", () => {
                     depth: "scoped",
                     claims: [
                         claim({
-                            id: "nit",
-                            label: "nitpick (non-blocking)",
+                            id: "sug",
+                            label: "suggestion (non-blocking)",
                             confidence: 0.9,
                         }),
                     ],
@@ -215,7 +217,9 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         const plan = runSubmissionCli(fs);
         expect(plan.comments).toHaveLength(20);
         expect(plan.body).not.toContain("Non-blocking observations");
-        expect(plan.body).toContain("Lower-confidence observations (1)");
+        expect(plan.body).toContain(
+            "Lower-confidence observations (1; top: a.ts:21 issue (blocking))",
+        );
         expect(plan.body).toContain("issue (blocking)");
         expect(plan.notes.join(" ")).toContain(
             "1 claim(s) collapsed below the inline bar",
@@ -243,7 +247,9 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("APPROVE");
         expect(plan.comments).toEqual([]);
-        expect(plan.body).toContain("Non-blocking observations (1)");
+        expect(plan.body).toContain(
+            "Non-blocking observations (1; top: a.ts:2 nitpick (non-blocking))",
+        );
         // A body carrying the collapsed section is never the bare approve
         // line, so the redundant-approval skip cannot swallow it.
         expect(plan.skipSubmission).toBe(false);

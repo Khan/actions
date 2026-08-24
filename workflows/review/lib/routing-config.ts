@@ -108,6 +108,25 @@ export const DEFAULT_RE_REVIEW_MODE: ReReviewMode = "full";
 export const RE_REVIEW_MODIFIERS = ["blocking-only"] as const;
 
 /**
+ * How many non-blocking findings may post as inline comments per review (the
+ * P1 comment budget). Blocking findings never count against it, and two label
+ * classes sit outside it: `nitpick (non-blocking)` never posts inline at all,
+ * and the documentation label is exempt (the documentation reviewer
+ * self-caps at five per review, and the documentation autofix selects its
+ * work by parsing that label off posted threads, so collapsing those would
+ * silently empty the autofix scope). Everything over budget collapses into
+ * the review body's <details> block; nothing is dropped and the verdict
+ * still counts every claim.
+ *
+ * 3 is set by fiat (the quiet-the-human-surface lane's Q8 decision): at the
+ * measured 2.91 findings/run it binds rarely and acts as a backstop against
+ * the wall-of-comments failure mode (webapp#41440: 13 non-blocking inline
+ * comments in one review). Consumers tune it with a `non-blocking-budget`
+ * line in ROUTING.
+ */
+export const DEFAULT_NON_BLOCKING_INLINE_BUDGET = 3;
+
+/**
  * How Step 3 runs: the orchestrator invokes the deterministic dispatcher
  * (`lib/dispatch.ts`) once, which runs Step 3's phases as code. `scripted`
  * is the only mode; the constant survives as the type routing.json's
@@ -130,6 +149,9 @@ export type RoutingFileConfig = {
     /** `re-review <mode> blocking-only`: repeat reviews post only blocking
      * findings inline (see {@link RE_REVIEW_MODIFIERS}). */
     reReviewBlockingOnly: boolean;
+    /** `non-blocking-budget <n>`: how many non-blocking findings may post
+     * inline per review (see {@link DEFAULT_NON_BLOCKING_INLINE_BUDGET}). */
+    nonBlockingInlineBudget: number;
     /** The dispatch mode: always `scripted`. */
     dispatchMode: DispatchMode;
     /** Fixed-format parse warnings (unknown lens/tier, no-op rule). */
@@ -145,6 +167,7 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  *     <pattern> [lens=<lens>[,<lens>…]] [tier=trivial|low|medium|high] [direction-dependent]
  *     enable <reviewer>[,<reviewer>…]
  *     re-review full|scoped|flip-gated|fast [blocking-only]
+ *     non-blocking-budget <n>
  *
  * `lens=` names specialist lenses to spawn when the pattern is touched (multiple
  * matching rules union their lenses). `tier=` assigns a risk tier; when several
@@ -162,8 +185,12 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  * ({@link RE_REVIEW_MODIFIERS}) makes repeat reviews post only blocking
  * findings inline; an unknown modifier warns and is ignored (the mode still
  * applies), and `full blocking-only` warns that the modifier never applies
- * at full depth. A leftover `dispatch` line from the
- * retired dial warns and is ignored (scripted is the only mode).
+ * at full depth. `non-blocking-budget` sets how many non-blocking findings
+ * post inline per review ({@link DEFAULT_NON_BLOCKING_INLINE_BUDGET});
+ * a malformed value warns and keeps the previous value, and when several
+ * lines set it the last one wins (with a warning). A leftover `dispatch`
+ * line from the retired dial warns and is ignored (scripted is the only
+ * mode).
  *
  * Malformed fields and unknown lens/reviewer names produce a warning and skip
  * the lens or line rather than aborting the run: routing degrades to fewer
@@ -177,6 +204,8 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
     let reReviewMode: ReReviewMode = DEFAULT_RE_REVIEW_MODE;
     let reReviewBlockingOnly = false;
     let reReviewLineSeen = false;
+    let nonBlockingInlineBudget = DEFAULT_NON_BLOCKING_INLINE_BUDGET;
+    let budgetLineSeen = false;
     let dispatchLineSeen = false;
     const warnings: string[] = [];
 
@@ -263,6 +292,34 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
             reReviewMode = mode as ReReviewMode;
             reReviewBlockingOnly = blockingOnly;
             reReviewLineSeen = true;
+            continue;
+        }
+
+        if (pattern === "non-blocking-budget") {
+            if (fields.length !== 1) {
+                warnings.push(
+                    `ROUTING line ${lineNo}: non-blocking-budget takes ` +
+                        `exactly one number (line skipped)`,
+                );
+                continue;
+            }
+            const value = Number(fields[0]);
+            if (!Number.isInteger(value) || value < 0) {
+                warnings.push(
+                    `ROUTING line ${lineNo}: non-blocking-budget must be a ` +
+                        `non-negative integer, got "${fields[0]}" (kept ` +
+                        `${nonBlockingInlineBudget})`,
+                );
+                continue;
+            }
+            if (budgetLineSeen) {
+                warnings.push(
+                    `ROUTING line ${lineNo}: duplicate non-blocking-budget ` +
+                        `line (last one wins)`,
+                );
+            }
+            nonBlockingInlineBudget = value;
+            budgetLineSeen = true;
             continue;
         }
 
@@ -361,6 +418,7 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
         ),
         reReviewMode,
         reReviewBlockingOnly,
+        nonBlockingInlineBudget,
         dispatchMode: DEFAULT_DISPATCH_MODE,
         warnings,
     };

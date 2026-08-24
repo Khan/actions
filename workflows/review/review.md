@@ -899,10 +899,16 @@ per validated claim, rule quotes and suggestion fences included, human-thread
 skip lines and open-thread suppression already applied. The posting bar is
 code too: the plan ranks claims (blocking first, then confidence descending),
 posts at most 20 inline (matching this workflow's
-`create-pull-request-review-comment` `max:`), and folds the remainder plus
+`create-pull-request-review-comment` `max:`), spends the non-blocking inline
+budget in ranked order (the ROUTING `non-blocking-budget` line, default 3;
+blocking claims never count against it, `nitpick (non-blocking)` never posts
+inline, and the documentation label is exempt because the documentation
+autofix selects its work off posted threads), and folds the remainder plus
 any sub-medium-confidence claims into a single collapsed section riding the
 top-ranked comment (or the review body), so the plan never exceeds what the
-engine will emit. Emit the plan's `comments` verbatim — one
+engine will emit. The collapsed section's summary line names its top-ranked
+entry, so an approving review cannot hide its best finding behind a bare
+count. Emit the plan's `comments` verbatim — one
 `create-pull-request-review-comment` per entry, all in one batched turn;
 never add, drop, reword, or re-anchor one.
 

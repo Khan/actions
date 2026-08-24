@@ -126,14 +126,14 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         );
         expect(plan.comments).toHaveLength(20);
         expect(plan.comments[0].body).toContain(
-            "Lower-confidence observations (2)",
+            "Lower-confidence observations (2; top: a.ts:21 issue (blocking))",
         );
         expect(plan.comments[0].body).toContain("`a.ts:21`");
         expect(plan.comments[0].body).toContain("`a.ts:22`");
         // A collapsed blocking claim still drives the verdict.
         expect(plan.event).toBe("REQUEST_CHANGES");
         expect(plan.notes).toContainEqual(
-            "2 claim(s) collapsed below the inline bar (cap 20, medium-confidence floor)",
+            "2 claim(s) collapsed below the inline bar (cap 20, medium-confidence floor, non-blocking budget 3)",
         );
     });
 
@@ -153,13 +153,91 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         const plan = runSubmissionCli(
             makeFakeFs(staged({depth: "full", claims})),
         );
-        expect(plan.comments).toHaveLength(20);
-        // The blocking claim posts inline first; the weakest non-blocking
-        // claim is the one collapsed.
+        // The blocking claim posts inline first; the non-blocking budget
+        // (default 3) admits the next three in ranked order, and the rest
+        // collapse with the budget-shed note.
+        expect(plan.comments).toHaveLength(4);
         expect(plan.comments[0].line).toBe(99);
         expect(plan.comments[0].body).toContain(
-            "Lower-confidence observations (1)",
+            "Lower-confidence observations (17; top: a.ts:4 suggestion (non-blocking))",
         );
+        expect(plan.notes).toContainEqual(
+            "17 non-blocking claim(s) collapsed over the inline budget (non-blocking budget 3)",
+        );
+    });
+
+    it("reads the non-blocking budget from routing.json", () => {
+        const claims = manyClaims(3, {
+            label: "suggestion (non-blocking)",
+            confidence: 0.9,
+        });
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged(
+                    {depth: "full", claims},
+                    {
+                        [`${REVIEW}/routing.json`]: JSON.stringify({
+                            nonBlockingInlineBudget: 1,
+                        }),
+                    },
+                ),
+            ),
+        );
+        expect(plan.comments).toHaveLength(1);
+        expect(plan.notes).toContainEqual(
+            "2 non-blocking claim(s) collapsed over the inline budget (non-blocking budget 1)",
+        );
+    });
+
+    it("never posts a nitpick inline, budget or no budget", () => {
+        const claims = [
+            claim({
+                id: "nit",
+                line: 1,
+                label: "nitpick (non-blocking)",
+                confidence: 0.95,
+                subject: "rename it",
+            }),
+            claim({
+                id: "sug",
+                line: 2,
+                label: "suggestion (non-blocking)",
+                confidence: 0.6,
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        // The lower-confidence suggestion posts; the nitpick collapses
+        // despite outranking it on confidence.
+        expect(plan.comments).toHaveLength(1);
+        expect(plan.comments[0].line).toBe(2);
+        expect(plan.comments[0].body).toContain(
+            "Lower-confidence observations (1; top: a.ts:1 nitpick (non-blocking))",
+        );
+    });
+
+    it("exempts documentation-label claims from the budget (autofix selects by posted label)", () => {
+        const claims = [
+            ...manyClaims(3, {
+                label: "suggestion (non-blocking)",
+                confidence: 0.9,
+            }),
+            claim({
+                id: "doc",
+                line: 30,
+                label: "suggestion (non-blocking, documentation)",
+                confidence: 0.6,
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        // Three suggestions spend the whole budget; the documentation claim
+        // still posts inline (it must become a thread for the documentation
+        // autofix to see it).
+        expect(plan.comments).toHaveLength(4);
+        expect(plan.comments.map((entry) => entry.line)).toContain(30);
     });
 
     it("collapses sub-medium-confidence non-blocking claims even under the cap", () => {
@@ -201,7 +279,9 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
             makeFakeFs(staged({depth: "full", claims})),
         );
         expect(plan.comments).toEqual([]);
-        expect(plan.body).toContain("Lower-confidence observations (1)");
+        expect(plan.body).toContain(
+            "Lower-confidence observations (1; top: a.ts:2 thought (non-blocking))",
+        );
         expect(plan.body).toContain("a hunch");
     });
 });
