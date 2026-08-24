@@ -149,14 +149,15 @@ you can pick the one that says what you mean:
   do not join the corpus; a fixed defect that reappears is a fresh finding.
 - **👎 the finding's comment.** Same adjudication as resolving, through the
   reaction channel: a 👎 on a thread's OPENING comment puts its defect in the
-  adjudicated corpus whether or not you also resolve. The feedback sweep may
-  additionally ask one follow-up ("why?"), which calibrates the eval suite;
-  answering it is welcome but the 👎 alone is what suppresses. Reactions on
-  replies are conversation, not adjudication. 👎 is the ONLY adjudicating
-  reaction: a 😕 triggers the sweep's follow-up question like a 👎 does, but
-  it does not suppress (😕 reads as "unclear", not "wrong", and ambiguity is
-  worth a question, not a standing suppression). The bot's own seeded nudge
-  reactions never count as adjudication either.
+  adjudicated corpus whether or not you also resolve. The 👎 alone is what
+  suppresses; if you want to say why, reply in the thread: the reconciler and
+  claim validation read replies as described above, nothing prompts you for a
+  reason any more, and replies only reach a feedback report when a maintainer
+  runs the `review-feedback-audit` skill. Reactions on replies are
+  conversation, not adjudication. 👎 is the ONLY adjudicating reaction: a 😕
+  does not suppress (😕 reads as "unclear", not "wrong", and ambiguity is
+  worth a conversation, not a standing suppression). The bot's own seeded
+  nudge reactions never count as adjudication either.
 - **Hide the comment.** Reads as nothing. The reviewer does not see hidden
   state; resolve or 👎 instead.
 
@@ -712,42 +713,28 @@ analysis, and a refused security lens would be a silent coverage hole. Any
 further per-role promotion (or Sonnet step-down) earns its line through its
 own eval-suite arm.
 
-### Feedback signal: thumbs sweep and live counters
+### Feedback signal: live counters
 
-Two small scheduled workflows in each consumer repo turn on the tuning loop's
-production signal. Both are plain GitHub Actions YAML (not gh-aw), both check
-out this repo at the pinned `review-v*` tag and run lib scripts with
-`npx -y tsx`, and neither touches review semantics:
+One small scheduled workflow in each consumer repo turns on the tuning loop's
+production signal. It is plain GitHub Actions YAML (not gh-aw), checks out
+this repo at the pinned `review-v*` tag, runs a lib script with `npx -y tsx`,
+and never touches review semantics:
 
-- **Thumbs sweep** (`lib/run-thumbs-sweep.ts`, every 1-2 hours): collects
-  reactions on the reviewer's comments at both grains (inline review comments,
-  identified by the code-owned Conventional-Comment label prefixes; the
-  risks/patterns summary comment, identified by its hidden marker) and posts
-  exactly one "why?" follow-up per newly-downvoted comment, offering the closed
-  reason vocabulary (`incorrect` / `unimportant` / `unclear` / `duplicate`).
-  Reactions are tallied with the same sets gh-aw's outcome evaluation uses
-  (👍/❤️/🎉/🚀 positive, 👎/😕 negative; a 😕 triggers the follow-up like a 👎),
-  and resolved inline threads are counted as their own positive column: threads
-  also get resolved just to clear noise, so resolution is reported alongside
-  the reaction tallies rather than folded into them. Idempotent across restarts
-  via the hidden follow-up markers; bounded to PRs updated in the last 14 days
-  (`REVIEW_SWEEP_LOOKBACK_DAYS`), skipping PRs closed or merged more than 3
-  days ago (`REVIEW_SWEEP_CLOSED_GRACE_DAYS`; feedback lands around merge time,
-  after which a landed PR stops changing). Needs only `pull-requests: write`.
-  The sweep run needs `npm ci --omit=dev` in the checked-out
-  `workflows/review/` first (the sweep's `octokit` dependency is pinned exactly
-  in `package.json`, with the transitive tree locked by the committed
-  `package-lock.json`); the other lib scripts remain dependency-free. Each run's
-  `SweepResult` and API-request count land in the job summary.
 - **Live counters** (`lib/counters-report.ts`, weekly): the workflow downloads
   the review runs' per-run artifacts (bounded window), and the script
   aggregates them with `lib/counters.ts` into the job summary — verdict mix,
-  comments/run, validator drop rate, cost/run. Needs only `actions: read`.
+  comments/run, validator drop rate, cost/run. Needs only `actions: read`,
+  and no `npm ci`: the lib scripts consumers run are dependency-free.
 
-The reviewer posts as `github-actions[bot]` (gh-aw safe outputs use the
-workflow's own token), so that login is both the sweep's `botLogin` filter and
-the author of its follow-ups; every count in the sweep excludes that login's
-own reactions, so the seeded nudge pair (below) is never live signal.
+There used to be a second workflow here, the thumbs sweep (a 2-hourly poll
+that tallied reactions on the reviewer's comments and posted a "why?"
+follow-up per newly-downvoted comment). Both halves are retired: the
+2026-08-20 audit measured 2 reason replies across the 31 follow-ups ever
+posted, each follow-up also registered as an implicit empty review event, and
+nobody consumed the read-side tallies. A bare 👎 adjudicates directly since
+v1.17.0 (the staging reads thread-opener reactions itself, excluding the
+bot's own seeded nudges), so no scheduled collector is needed for feedback to
+act on the reviewer.
 
 ### Relationship to the gh-aw outcome-collector
 
@@ -756,29 +743,28 @@ classifies every agentic safe output as accepted / rejected / ignored /
 pending and exports the results to Sentry over OTLP. The two systems answer
 different questions and neither replaces the other:
 
-- **Outcome-collector**: passive fleet-wide acceptance telemetry. It never
-  writes to GitHub, so it can observe engagement but cannot ask *why* a
-  comment was downvoted. Its data lives in Sentry.
-- **Thumbs sweep**: active reason elicitation for the reviewer's tuning loop.
-  Its "why?" follow-ups produce the closed reason labels that calibrate the
-  eval-suite judge and feed dismissal learning. Its data lives in each run's
-  job summary and stdout JSON (not exported to OTel today).
+- **Outcome-collector**: passive fleet-wide acceptance telemetry across every
+  agentic workflow. Its data lives in Sentry. It counts any reaction with no
+  reactor identity, so it cannot exclude the seeded nudges.
+- **Reviewer-side signal**: the adjudication path reads thread-opener
+  reactions identity-filtered at review time, and the live-counters report
+  aggregates the per-run artifacts. Neither is exported to OTel today.
 
 Two known interactions:
 
 - **Nudge seeding** is planned as a post-time step in the consumer repos'
   review workflow (a custom safe-output job that reacts 👍/👎 to each posted
-  comment seconds after posting), not in the sweep: gh-aw cannot react to its
-  own safe outputs natively, and comments posted via `GITHUB_TOKEN` emit no
-  workflow events, so post-time is the only immediate option.
+  comment seconds after posting): gh-aw cannot react to its own safe outputs
+  natively, and comments posted via `GITHUB_TOKEN` emit no workflow events,
+  so post-time is the only immediate option.
 - Once seeding is live, the outcome-collector's `add_comment` metric for the
   review workflow is **inflated by design**: its evaluator counts any reaction
   as acceptance with no reactor identity, so every seeded summary comment
   reads as `accepted`. The inflation is bounded to that one metric (inline
-  comments and submitted reviews are evaluated by other means), and the sweep's
-  identity-filtered tallies are the authoritative reviewer-comment engagement
-  numbers. An upstream gh-aw change to identity-aware reaction counting would
-  retire this caveat.
+  comments and submitted reviews are evaluated by other means); the
+  adjudication path's identity-filtered reads are the authoritative
+  reviewer-comment engagement signal. An upstream gh-aw change to
+  identity-aware reaction counting would retire this caveat.
 
 ### Required secrets / variables
 
