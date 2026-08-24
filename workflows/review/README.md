@@ -194,7 +194,9 @@ plus the consumer config files below. Pull future updates with the 3-way merge
 flow in [`review-consumer-bump`](../../.claude/skills/review-consumer-bump/SKILL.md),
 **not** `gh aw update`: the tool does not recognize the `review-v<version>` tag
 scheme, repins to main's head SHA instead, and has emptied an installed
-`review.md` to 0 bytes.
+`review.md` to 0 bytes (both observed on gh-aw v0.85.4; neither failure is
+filed upstream yet, so re-test both on a scratch install before trusting a
+newer gh-aw release with this).
 
 The tag is self-consistent: the `review.md` inside each `review-v<version>` tag
 pins its own `pre-agent-steps` checkout `ref:` to that same version (the release

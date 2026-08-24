@@ -428,6 +428,7 @@ the diff shows what a version bump changed.
 cd <consumer-repo> && git switch -c bump-shared-pr-reviewer
 # 3-way merge per .claude/skills/review-consumer-bump/SKILL.md -- NOT `gh aw update`,
 # which repins review-v* tags to main's head SHA and once emptied review.md to 0 bytes
+# STOP HERE: run the 3-way merge from that skill and commit it, then return
 gh aw compile                    # --approve only after reviewing any new secret
 ```
 

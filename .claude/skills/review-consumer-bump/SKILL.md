@@ -70,6 +70,10 @@ It is the obvious tool and it fails twice, both observed live:
 
 The manual merge below is what the tool would do if it worked.
 
+Both failures were observed on gh-aw v0.85.4 and neither is filed upstream,
+so this ban carries no expiry: before trusting a newer gh-aw release with a
+bump, reproduce both failures on a scratch install first.
+
 ## Step 2: the merge
 
 Work in a fresh clone of the consumer, on a new branch. From a `Khan/actions`
