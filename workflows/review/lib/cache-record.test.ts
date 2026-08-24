@@ -560,6 +560,51 @@ describe("the dispatcher-death record (no plan, death comment queued)", () => {
         expect(fs.files[`${CACHE}/pr-41.json`]).toBe(priorRecord);
     });
 
+    it("stays a benign skip when a readable queue carries no death comment", () => {
+        // The guard's false branch with a READABLE queue: an early death
+        // that still flushed some other safe output (an artifact upload)
+        // posted nothing that could collapse the guidance comment.
+        const files = deathStaged({
+            [`${CACHE}/pr-41.json`]: priorRecord,
+            [QUEUE]: JSON.stringify({
+                items: [{type: "upload_artifact", path: "out"}],
+            }),
+        });
+        const fs = makeFakeFs(files);
+        const result = runCacheRecordCli(fs, NOW);
+        expect(result.written).toBe(false);
+        expect(result.reason).toMatch(/no submission plan staged/);
+        expect(fs.files[`${CACHE}/pr-41.json`]).toBe(priorRecord);
+    });
+
+    it("does not read a planless run as a death when dispatch-result.json exists or a review queued", () => {
+        // The other two facts of the death shape (review.md Step 3): the
+        // dispatcher DID write its result, or a review submission queued
+        // alongside the comment. Either way this is not the death comment
+        // collapsing the guidance, so the prior record stands.
+        const withResult = deathStaged({
+            [`${CACHE}/pr-41.json`]: priorRecord,
+        });
+        // Re-add AFTER the helper: deathStaged deletes it as the death
+        // shape's defining fact, and this case is exactly its negation.
+        withResult[`${REVIEW}/dispatch-result.json`] = "{}";
+        const withReview = deathStaged({
+            [`${CACHE}/pr-41.json`]: priorRecord,
+            [QUEUE]: JSON.stringify({
+                items: [
+                    {type: "submit_pull_request_review", event: "APPROVE"},
+                    {type: "add_comment", body: "guidance"},
+                ],
+            }),
+        });
+        for (const files of [withResult, withReview]) {
+            const fs = makeFakeFs(files);
+            const result = runCacheRecordCli(fs, NOW);
+            expect(result.written).toBe(false);
+            expect(fs.files[`${CACHE}/pr-41.json`]).toBe(priorRecord);
+        }
+    });
+
     it("leaves the prior record untouched when the gate blocked the run", () => {
         const fs = makeFakeFs(
             deathStaged({

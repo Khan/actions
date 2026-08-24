@@ -261,19 +261,19 @@ const refuse = (reason: string): CacheRecordResult => ({
  */
 const dropRisksPatternsKey = (
     fs: CacheRecordFs,
-    label: string,
+    cause: "hold" | "dispatcher-death",
 ): CacheRecordResult => {
     const pr = readJson(fs, `${REVIEW_DIR}/pr-context.json`) as
         | {number?: unknown}
         | undefined;
     if (typeof pr?.number !== "number") {
-        return skip(`${label}: no pr-context, nothing to update`);
+        return skip(`${cause}: no pr-context, nothing to update`);
     }
     const recordPath = `${CACHE_MEMORY_DIR}/pr-${pr.number}.json`;
     const prior = readJson(fs, recordPath);
     if (!isRecord(prior) || !("risksPatternsKey" in prior)) {
         return skip(
-            `${label}: no prior record or no risksPatternsKey to drop; the prior record stands`,
+            `${cause}: no prior record or no risksPatternsKey to drop; the prior record stands`,
         );
     }
     const {risksPatternsKey: _, ...kept} = prior;
@@ -281,7 +281,7 @@ const dropRisksPatternsKey = (
     fs.writeFileSync(recordPath, JSON.stringify(kept, null, 2));
     return {
         written: true,
-        reason: `${label}: dropped risksPatternsKey from ${recordPath} (the ${label} comment collapsed the standing guidance comment); fingerprints untouched`,
+        reason: `${cause}: dropped risksPatternsKey from ${recordPath} (the ${cause} comment collapsed the standing guidance comment); fingerprints untouched`,
         record: kept,
     };
 };
@@ -307,7 +307,10 @@ export const runCacheRecordCli = (
         // standalone add-comment queued with no plan staged at all, and it
         // collapses the standing guidance comment exactly like a hold
         // comment does, so the same compensation must run. Corroboration is
-        // the queued add_comment itself; with no plan asserting a comment
+        // the full death shape, not just the queued add_comment: the branch
+        // also requires `dispatch-result.json` absent and no queued review
+        // submission, so a run that reviewed normally but lost its plan
+        // cannot be misread as a death. With no plan asserting a comment
         // SHOULD have queued, an unreadable queue is indistinguishable from
         // an ordinary early death, so that stays the benign skip rather
         // than the hold branch's loud refusal.
@@ -318,6 +321,10 @@ export const runCacheRecordCli = (
             );
             if (
                 deathReadable &&
+                !fs.existsSync(`${REVIEW_DIR}/dispatch-result.json`) &&
+                !deathItems.some(
+                    (item) => item["type"] === "submit_pull_request_review",
+                ) &&
                 deathItems.some((item) => item["type"] === "add_comment")
             ) {
                 return dropRisksPatternsKey(fs, "dispatcher-death");
@@ -335,12 +342,10 @@ export const runCacheRecordCli = (
     if (plan.event === "HOLD_FOR_HUMAN") {
         // A hold reviewed nothing (its core lenses produced no output), so
         // the fingerprints/verdict of the prior record stand untouched and
-        // the next run reviews in full. ONE field does change: posting the
-        // hold comment made the engine's hide-older-comments collapse the
-        // standing risks/patterns guidance comment, and the next approving
-        // run would read the unchanged `risksPatternsKey` as "guidance
-        // already posted" and never restore it. Dropping the key here makes
-        // that run repost the guidance. Everything else carries verbatim.
+        // the next run reviews in full. ONE field does change:
+        // `risksPatternsKey`, dropped by the shared helper below (see
+        // `dropRisksPatternsKey`'s doc for why). Everything else carries
+        // verbatim.
         const {items: holdItems, readable: holdReadable} = readQueue(
             fs,
             queuePath,
