@@ -131,3 +131,43 @@ describe("normalizeBody URL folds (run 31616001094 incident shapes)", () => {
         expect(normalizeBody(plan)).not.toBe(normalizeBody(spliced));
     });
 });
+
+describe("normalizeBody HTML entity decoding (run 32758584548 incident shape)", () => {
+    it("matches a plan-side entity-escaped quote against its decoded queued form", () => {
+        // The incident: the renderer footer staged `&lt;STOP: ...&gt;`, the
+        // sanitizer decoded it and convertXmlTags parenthesised the result,
+        // and rule 7 blocked a fully conforming review.
+        const plan = "adds a `&lt;STOP: run the merge&gt;` pseudo-tag line";
+        const queued = "adds a `(STOP: run the merge)` pseudo-tag line";
+        expect(normalizeBody(plan)).toBe(normalizeBody(queued));
+    });
+
+    it("decodes decimal, hex, and double-encoded forms like the sanitizer", () => {
+        expect(normalizeBody("at &#64;user and &#x40;org")).toBe(
+            normalizeBody("at @user and @org"),
+        );
+        expect(normalizeBody("a &amp;gt; b &amp;amp; c")).toBe(
+            normalizeBody("a > b & c"),
+        );
+    });
+
+    it("folds entity-spelled invisible characters to nothing, matching the strip", () => {
+        // &shy; decodes to U+00AD, which the very next fold deletes; the
+        // ordering mirrors hardenUnicodeText (decode step 2, strip step 3).
+        expect(normalizeBody("so&shy;ft hy&zwnj;phen")).toBe(
+            normalizeBody("soft hyphen"),
+        );
+    });
+
+    it("leaves an out-of-range numeric entity alone, like the sanitizer", () => {
+        expect(normalizeBody("bad &#1114112; stays")).toBe(
+            normalizeBody("bad &#1114112; stays"),
+        );
+    });
+
+    it("still catches an entity-vs-literal splice that changes the text", () => {
+        expect(normalizeBody("size &lt; 10")).not.toBe(
+            normalizeBody("size 100"),
+        );
+    });
+});
