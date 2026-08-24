@@ -41,41 +41,76 @@ const ALLOWED = new Set([
     "workflows/review/gh-aw-update-ban.test.ts",
 ]);
 
+/**
+ * Whitespace-folded mention check: prose wraps at ~76 columns, so a wrapped
+ * "gh aw\nupdate" must still count as a mention. This is also why the sweep
+ * reads file contents instead of one `git grep -l` subprocess: git grep
+ * matches within a line, so the wrapped form would slip past it.
+ */
+const mentionsTool = (text: string): boolean =>
+    text.replace(/\s+/g, " ").includes("gh aw update");
+
+const sweptFiles = (): string[] => {
+    // Every tracked file, not an extension list: the ban's residue has
+    // already turned up in .md prose, .ts warning strings, and a compiled
+    // .lock.yml, so an extension filter is just a bet on where the next one
+    // lands. Reading a binary as utf8 cannot match the phrase, so no file
+    // type needs excluding for safety.
+    const ls = spawnSync("git", ["ls-files"], {
+        cwd: repoRoot,
+        encoding: "utf8",
+    });
+    expect(ls.status).toBe(0);
+    return ls.stdout.split("\n").filter(
+        (file) =>
+            file !== "" &&
+            !file.startsWith(".changeset/") &&
+            // `changeset version` copies each changeset body verbatim
+            // into the package CHANGELOG.md, so the released notes
+            // inherit whatever mentions .changeset/ was excused for.
+            !file.endsWith("CHANGELOG.md") &&
+            !file.startsWith("workflows/review/eval/corpus/"),
+    );
+};
+
 describe("the gh aw update ban", () => {
     it("is mentioned only where it is being banned", () => {
-        // Every tracked file, not an extension list: the ban's residue has
-        // already turned up in .md prose, .ts warning strings, and a
-        // compiled .lock.yml, so an extension filter is just a bet on where
-        // the next one lands. Reading a binary as utf8 cannot match the
-        // phrase, so no file type needs excluding for safety.
-        const ls = spawnSync("git", ["ls-files"], {
-            cwd: repoRoot,
-            encoding: "utf8",
-        });
-        expect(ls.status).toBe(0);
-        const offenders = ls.stdout.split("\n").filter(
+        const offenders = sweptFiles().filter(
             (file) =>
-                file !== "" &&
-                !file.startsWith(".changeset/") &&
-                // `changeset version` copies each changeset body verbatim
-                // into the package CHANGELOG.md, so the released notes
-                // inherit whatever mentions .changeset/ was excused for.
-                !file.endsWith("CHANGELOG.md") &&
-                !file.startsWith("workflows/review/eval/corpus/") &&
                 !ALLOWED.has(file) &&
-                fs
-                    .readFileSync(path.join(repoRoot, file), "utf8")
-                    .includes("gh aw update"),
+                mentionsTool(
+                    fs.readFileSync(path.join(repoRoot, file), "utf8"),
+                ),
         );
         expect(offenders).toEqual([]);
     });
 
+    it("positive control: the sweep sees the allowlisted mentions", () => {
+        // Without this, a broadened exclusion (or a broken read) would make
+        // the offenders sweep pass vacuously. The same sweep, WITHOUT the
+        // allowlist filter, must find every allowlisted file.
+        const found = sweptFiles().filter((file) =>
+            mentionsTool(fs.readFileSync(path.join(repoRoot, file), "utf8")),
+        );
+        for (const file of ALLOWED) {
+            expect(found, `sweep no longer reaches ${file}`).toContain(file);
+        }
+    });
+
     it("keeps every allowlisted file actually mentioning it (stale allowlist detector)", () => {
         for (const file of ALLOWED) {
+            // Existence first: readFileSync throwing ENOENT would swallow
+            // the prune-it message the assertion is meant to deliver.
             expect(
-                fs.readFileSync(path.join(repoRoot, file), "utf8"),
+                fs.existsSync(path.join(repoRoot, file)),
+                `${file} is gone; prune it from ALLOWED`,
+            ).toBe(true);
+            expect(
+                mentionsTool(
+                    fs.readFileSync(path.join(repoRoot, file), "utf8"),
+                ),
                 `${file} no longer mentions the tool; prune it from ALLOWED`,
-            ).toContain("gh aw update");
+            ).toBe(true);
         }
     });
 });

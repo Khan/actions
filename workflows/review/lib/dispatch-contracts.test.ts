@@ -330,6 +330,15 @@ describe("label-contract enforcement (run 29897276810)", () => {
         );
     });
 
+    it("keeps a subject made entirely of function words (empty token bag)", () => {
+        // The early return: with every subject token stopword-filtered away,
+        // containment would be vacuously true, so the guard must refuse to
+        // drop rather than treat an empty bag as a restatement.
+        expect(joinProse("It is as it was.", "The filter runs first.")).toBe(
+            "It is as it was. The filter runs first.",
+        );
+    });
+
     it("keeps a subject that carries information the opening sentence lacks", () => {
         // Restating a LATER sentence keeps the subject: dropping it would
         // make buildClaims recover the discussion's opening SETUP sentence
