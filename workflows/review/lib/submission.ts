@@ -63,6 +63,8 @@
 import {escapeHtml, renderAttributionFooter} from "./attribution";
 import {computeRisksPatternsKey, RISKS_PATTERNS_KEY_PATH} from "./cache-record";
 import type {Claim} from "./dispatch-contracts";
+import {applyMediumVeto} from "./dispatch-contracts";
+import {computeChangedLines} from "./diff";
 import {DEFAULT_FINDERS, TRIAGE_DIMENSION} from "./dispatch-roster";
 import {runCli as runNotifiedCli} from "./notified";
 import {
@@ -354,6 +356,7 @@ export const runSubmissionCli = (
         | {
               teams?: {owners?: unknown};
               reReviewBlockingOnly?: unknown;
+              reReviewBlockingMedium?: unknown;
               nonBlockingInlineBudget?: unknown;
           }
         | undefined;
@@ -379,6 +382,44 @@ export const runSubmissionCli = (
     // deserves its own change and its own eval.
     const blockingOnly =
         depth !== "full" && routing?.reReviewBlockingOnly === true;
+    // The `blocking-medium` sibling modifier: same reduced surface, but
+    // medium-importance claims keep posting inline (spending the
+    // non-blocking budget) while minor claims collapse. Same executed-depth
+    // key, same reasoning.
+    const blockingMedium =
+        depth !== "full" && routing?.reReviewBlockingMedium === true;
+    // The reduced posting surface either modifier arms; `blockingMedium`
+    // then decides whether medium claims punch through it.
+    const reducedSurface = blockingOnly || blockingMedium;
+
+    // The deterministic changed-lines veto on the medium tier (PRA-7):
+    // medium is defined over code this PR adds, so the tier is stripped
+    // (never the claim) from anything not anchored on an added line of the
+    // staged diff. Applied at the posting surface, after validation, so
+    // code has the last word over both the reviewer's proposal and a
+    // validator grant. The scoped diff wins when it exists for the same
+    // reason the dispatcher stages it: it is what this run's reviewers saw.
+    const vetoDiffPath =
+        depth === "scoped" && fs.existsSync(`${REVIEW_DIR}/scoped.diff`)
+            ? `${REVIEW_DIR}/scoped.diff`
+            : `${REVIEW_DIR}/full.diff`;
+    const vetoed = applyMediumVeto(
+        claims,
+        computeChangedLines(
+            fs.existsSync(vetoDiffPath)
+                ? fs.readFileSync(vetoDiffPath, "utf8")
+                : "",
+        ),
+    );
+    // The day-one calibration instrument (artifact-only): whether the
+    // roster uses the tier at all is unobservable from posted output alone
+    // (under-use looks exactly like the pre-tier surface), so every plan
+    // records its post-veto medium count, zero included.
+    notes.push(
+        `medium-importance claims this run: ${
+            vetoed.filter((claim) => claim.importance === "medium").length
+        }`,
+    );
 
     // Stage the code-computed risks/patterns signature (trial suggestion b):
     // Step 7 compares THIS string against cache memory's `risksPatternsKey`
@@ -453,15 +494,18 @@ export const runSubmissionCli = (
     }
 
     // Inline comments need a path and a line; a PR-level claim folds into
-    // the body instead (rare: a pr-anchored finding). Under blocking-only a
-    // non-blocking pr-level claim joins the collapsed section instead.
+    // the body instead (rare: a pr-anchored finding). Under a reduced
+    // surface a non-blocking pr-level claim joins the collapsed section
+    // instead (a pr-level claim can never carry medium: the changed-lines
+    // veto requires a line anchor, so no blocking-medium carve-out exists
+    // here by construction).
     const anchored: Claim[] = [];
     const prLevelLines: string[] = [];
     const prLevelCollapsed: Claim[] = [];
-    for (const claim of claims) {
+    for (const claim of vetoed) {
         if (claim.path !== undefined && claim.line !== undefined) {
             anchored.push(claim);
-        } else if (blockingOnly && !isBlockingLabel(claim.label)) {
+        } else if (reducedSurface && !isBlockingLabel(claim.label)) {
             prLevelCollapsed.push(claim);
         } else {
             // The fold carries the same collapsed attribution footer an
@@ -542,7 +586,11 @@ export const runSubmissionCli = (
         const mode = typeof plan.mode === "string" ? plan.mode : "full";
         depthNotes.push(
             `Note: re-review ran at ${depth} depth (re-review mode ${mode}${
-                blockingOnly ? ", blocking-only" : ""
+                blockingOnly
+                    ? ", blocking-only"
+                    : blockingMedium
+                    ? ", blocking-medium"
+                    : ""
             }).`,
         );
     }
@@ -653,6 +701,15 @@ export const runSubmissionCli = (
         if (blocking !== 0) {
             return blocking;
         }
+        // Medium outranks minor within the non-blocking population (the
+        // PRA-7 tier), so the budget spends on the findings a reviewer
+        // judged worth fixing before merge ahead of the rest.
+        const medium =
+            Number(b.importance === "medium") -
+            Number(a.importance === "medium");
+        if (medium !== 0) {
+            return medium;
+        }
         // Nitpicks rank last among non-blocking claims, whatever their
         // confidence: without the demotion the class this surface
         // deliberately never posts would routinely win the summary slot
@@ -669,6 +726,14 @@ export const runSubmissionCli = (
             return true;
         }
         if (blockingOnly || claim.confidence < MIN_INLINE_CONFIDENCE) {
+            return false;
+        }
+        // Under blocking-medium only medium claims may punch through the
+        // reduced surface; everything below still applies to them (the
+        // nitpick ban wins over the tier: a medium nitpick is a labeling
+        // contradiction, and the ban is the stricter rule; medium spends
+        // the budget like any other non-blocking claim).
+        if (blockingMedium && claim.importance !== "medium") {
             return false;
         }
         if (isNitpick(claim)) {
@@ -750,7 +815,7 @@ export const runSubmissionCli = (
                 ? `; top: \`${top.path}:${top.line}\` ${top.label}: ${topSubject}`
                 : `; top: ${top.label}: ${topSubject}`;
         const summary =
-            blockingOnly && collapsedNonBlockingOnly
+            reducedSurface && collapsedNonBlockingOnly
                 ? `Non-blocking observations (${collapsed.length}${topTag})`
                 : `Lower-confidence observations (${collapsed.length}${topTag})`;
         const section = [
@@ -767,16 +832,21 @@ export const runSubmissionCli = (
             "",
             "</details>",
         ].join("\n");
-        // Under blocking-only the section always rides the review body: the
-        // point of the dial is no non-blocking noise on inline threads.
-        if (!blockingOnly && inline.length > 0) {
+        // Under a reduced surface the section always rides the review
+        // body: the point of either dial is less non-blocking noise on
+        // inline threads.
+        if (!reducedSurface && inline.length > 0) {
             inline[0] = {...inline[0], body: `${inline[0].body}\n\n${section}`};
         } else {
             prLevelLines.push(section);
         }
         notes.push(
-            blockingOnly && collapsedNonBlockingOnly
-                ? `${collapsed.length} non-blocking claim(s) collapsed into the body (re-review blocking-only)`
+            reducedSurface && collapsedNonBlockingOnly
+                ? `${
+                      collapsed.length
+                  } non-blocking claim(s) collapsed into the body (re-review ${
+                      blockingOnly ? "blocking-only" : "blocking-medium"
+                  })`
                 : `${collapsed.length} claim(s) collapsed below the inline bar (cap ${MAX_INLINE_COMMENTS}, medium-confidence floor, non-blocking budget ${nonBlockingBudget})`,
         );
         if (budgetShed > 0) {

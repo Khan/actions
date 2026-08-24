@@ -129,6 +129,12 @@ const DOCUMENTATION_LENSES: ReadonlySet<Lens> = new Set<Lens>([
  *   - advisory  + documentation lens  -> `suggestion (non-blocking, documentation)`
  *   - advisory  + other lens          -> `suggestion (non-blocking)`
  *
+ * `medium` severity renders exactly as `advisory` does (the non-blocking
+ * rows above). That is the tier's design invariant, not an omission: medium
+ * is a posting-surface rank (which findings deserve the inline slots), and
+ * keeping it out of the label vocabulary is what leaves the verdict, the
+ * recap parser, dedup's blocking guards, and the flip gate untouched.
+ *
  * There is deliberately **no blocking documentation variant**. The
  * documentation reviewer is advisory-only (its definition permits it one
  * label), so the blocking row is unreachable for it in practice; and minting a

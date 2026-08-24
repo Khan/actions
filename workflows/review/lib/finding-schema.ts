@@ -74,8 +74,25 @@ export type Lens = typeof KNOWN_LENSES[number];
  * severities plus posted-comment labels into a run-level outcome. Kept
  * deliberately small — richer taxonomy lives in Conventional-Comment labels,
  * which are code-owned at render time, not here.
+ *
+ * `medium` is the middle tier (PRA-7): a verified defect or gap in code this
+ * PR adds, that a reasonable author would fix before merge, but that does
+ * not block. It is a POSTING-SURFACE tier, never a verdict input: a medium
+ * finding renders with the same non-blocking labels an advisory one does
+ * (`labelForFinding` treats them identically), so every label-keyed consumer
+ * (verdict, recap parser, dedup guards, flip gate) is untouched by
+ * construction. What medium buys is prominence: it ranks ahead of advisory
+ * findings for the non-blocking inline budget and posts inline on re-reviews
+ * under the ROUTING `blocking-medium` modifier, where advisory findings
+ * collapse. Motivating case: three 2026-08-24 approving re-reviews collapsed
+ * verified correctness findings behind a bare "Non-blocking observations
+ * (N)" count (Khan/actions#367, #371, #366).
+ *
+ * Added WITHOUT a schema_version bump: an enum value is additive — no
+ * previously-serialized finding is invalidated, and every consumer of the
+ * new value ships in the same release as the producers.
  */
-export const SEVERITIES = ["blocking", "advisory"] as const;
+export const SEVERITIES = ["blocking", "medium", "advisory"] as const;
 
 export type Severity = typeof SEVERITIES[number];
 

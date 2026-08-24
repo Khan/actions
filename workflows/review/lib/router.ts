@@ -754,11 +754,11 @@ export type RoutingJson = {
      * collapse into the review body (`submission.ts` reads this).
      */
     reReviewBlockingOnly: boolean;
-    /**
-     * `non-blocking-budget` line in `ROUTING` (default 3): how many
-     * non-blocking findings may post inline per review; the overflow
-     * collapses into the review body (`submission.ts` reads this).
-     */
+    /** `re-review <mode> blocking-medium`: reduced-depth repeats post
+     * blocking and medium findings inline (`submission.ts` reads this). */
+    reReviewBlockingMedium: boolean;
+    /** `non-blocking-budget` line (default 3): non-blocking inline cap per
+     * review; the overflow collapses (`submission.ts` reads this). */
     nonBlockingInlineBudget: number;
     /**
      * The repo's dispatch mode (`dispatch` line in `ROUTING`; `task` when
@@ -791,6 +791,7 @@ export const toRoutingJson = (
     dispatchMode: DispatchMode = DEFAULT_DISPATCH_MODE,
     reReviewBlockingOnly = false,
     nonBlockingInlineBudget: number = DEFAULT_NON_BLOCKING_INLINE_BUDGET,
+    reReviewBlockingMedium = false,
 ): RoutingJson => {
     const owners: Record<string, string[]> = {};
     const generatedFiles: string[] = [];
@@ -817,6 +818,7 @@ export const toRoutingJson = (
         enabledReviewers,
         reReviewMode,
         reReviewBlockingOnly,
+        reReviewBlockingMedium,
         nonBlockingInlineBudget,
         dispatchMode,
         routingConfig,
@@ -913,6 +915,7 @@ export const runCli = (
               enabledReviewers: [],
               reReviewMode: DEFAULT_RE_REVIEW_MODE,
               reReviewBlockingOnly: false,
+              reReviewBlockingMedium: false,
               nonBlockingInlineBudget: DEFAULT_NON_BLOCKING_INLINE_BUDGET,
               dispatchMode: DEFAULT_DISPATCH_MODE,
               warnings: [
@@ -980,6 +983,7 @@ export const runCli = (
         routingFileConfig.dispatchMode,
         routingFileConfig.reReviewBlockingOnly,
         routingFileConfig.nonBlockingInlineBudget,
+        routingFileConfig.reReviewBlockingMedium,
     );
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});

@@ -108,3 +108,45 @@ describe("runCli: the blocking-only flag in routing.json", () => {
         expect(json.reReviewBlockingOnly).toBe(true);
     });
 });
+
+describe("parseRoutingConfig: the blocking-medium modifier", () => {
+    it("parses the modifier on a reduced mode, warning-free", () => {
+        const config = parseRoutingConfig("re-review scoped blocking-medium");
+        expect(config.reReviewMode).toBe("scoped");
+        expect(config.reReviewBlockingMedium).toBe(true);
+        expect(config.reReviewBlockingOnly).toBe(false);
+        expect(config.warnings).toEqual([]);
+    });
+
+    it("the winning duplicate line swaps one modifier for the other", () => {
+        const config = parseRoutingConfig(
+            "re-review scoped blocking-only\nre-review scoped blocking-medium",
+        );
+        expect(config.reReviewBlockingOnly).toBe(false);
+        expect(config.reReviewBlockingMedium).toBe(true);
+        expect(config.warnings.join("\n")).toContain("duplicate re-review");
+    });
+
+    it("warns that blocking-medium never applies at full depth", () => {
+        const config = parseRoutingConfig("re-review full blocking-medium");
+        expect(config.reReviewMode).toBe("full");
+        expect(config.reReviewBlockingMedium).toBe(true);
+        expect(config.warnings.join("\n")).toContain(
+            "blocking-medium never applies at full re-review depth",
+        );
+    });
+});
+
+describe("runCli: the blocking-medium flag in routing.json", () => {
+    it("surfaces the configured modifier", () => {
+        const {fs} = fakeFs({
+            ["/tmp/gh-aw/review/files.json"]: JSON.stringify([
+                {path: "a.ts", status: "modified"},
+            ]),
+            [ROUTING_CONFIG_PATH]: "re-review scoped blocking-medium",
+        });
+        const json = runCli(fs);
+        expect(json.reReviewBlockingMedium).toBe(true);
+        expect(json.reReviewBlockingOnly).toBe(false);
+    });
+});
