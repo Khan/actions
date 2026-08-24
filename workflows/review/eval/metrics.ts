@@ -21,8 +21,9 @@
  *   5. **calibration** — do the model's `confidence` numbers mean anything? We
  *      bucket posted findings by confidence and compare each bucket's mean
  *      confidence to its empirical correctness, reporting the expected
- *      calibration error (ECE). The thumbs-sweep labels calibrate the same axis
- *      at runtime; here we measure it against the corpus ground truth.
+ *      calibration error (ECE). The historical thumbs-sweep labels calibrated
+ *      the same axis at runtime; here we measure it against the corpus ground
+ *      truth.
  *
  * Determinism boundary: this module reads structured findings and
  * case expectations and emits numbers. It authors no prose about code under

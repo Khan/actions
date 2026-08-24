@@ -1,7 +1,7 @@
 /**
  * LLM-judge: an Opus-4.8 judge that scores the *quality* of the
  * comments a run posted, a human-audit sample surfaced from its output, and a
- * calibration pass against the thumbs-sweep labels.
+ * calibration pass against the (historical) thumbs-sweep labels.
  *
  * Why a judge at all: the deterministic metrics (recall/precision/noise) score
  * whether the reviewer posted the *right findings* against corpus ground truth.
@@ -265,16 +265,12 @@ export const selectAuditSample = (
 /* -------------------------------------------------------------------------- */
 
 /**
- * The fixed downvote-reason vocabulary the thumbs sweep offers on a 👎.
- *
- * Declared locally rather than imported from `../lib/thumbs-sweep` on purpose:
- * the judge consumes thumbs labels as *data* (see {@link ThumbsLabel}) and never
- * needs the sweep module at build time, so importing its type would create a
- * build dependency on the thumbs sweep for a field this module only carries
- * through (calibration keys off `direction`, not `reason`). This union is
- * structurally identical to the thumbs sweep's `DownvoteReason`, so a value produced there
- * is assignable here and vice versa; keep the two in sync if the sweep's
- * vocabulary changes.
+ * The downvote-reason vocabulary the thumbs sweep USED to elicit via its
+ * "why?" follow-up, retired with that surface (the sweep no longer defines or
+ * produces it). Retained only to type historical thumbs labels: calibration
+ * keys off `direction`, so `reason` is carry-through data and stays
+ * permanently unpopulated for labels mined after the retirement. There is no
+ * longer a sweep-side counterpart to keep in sync with.
  */
 export type DownvoteReason =
     | "incorrect"
@@ -283,9 +279,10 @@ export type DownvoteReason =
     | "duplicate";
 
 /**
- * A human thumbs signal on a posted comment, mined by the thumbs sweep. `up`
- * means 👍 (the human agreed with the comment), `down` means 👎 (disagreed);
- * `reason` is the sweep's fixed downvote vocabulary when the human gave one.
+ * A human thumbs signal on a posted comment, mined by the (now deleted)
+ * thumbs sweep. `up` means 👍 (the human agreed with the comment), `down`
+ * means 👎 (disagreed); `reason` is set only on labels mined before the
+ * "why?" follow-up was retired (see {@link DownvoteReason}).
  */
 export type ThumbsLabel = {
     findingId: string;

@@ -104,7 +104,7 @@ const FOOTER_BLOCK_RE = new RegExp(
 
 /**
  * Drop footer boilerplate from a previously-posted bot comment before
- * text-similarity comparison (dedup.ts's `threadProse`). Every posted
+ * text-similarity comparison (dedup-threads.ts's `threadProse`). Every posted
  * comment carries the same summary chip, `found by <source>` prefix, and
  * version segments; tokens shared by ALL bot comments would inflate
  * similarity between unrelated findings, exactly like the label template
