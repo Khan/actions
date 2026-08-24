@@ -110,9 +110,15 @@ upstream comment).
 ## Step 3: autofix (if applicable)
 
 The `autofix-v<version>` tag file ships install-ready: the release flow writes
-its own `source:` and `ref:` lines into it. No consumer carries local autofix
+its own `source:` and `ref:` lines into it. No consumer carried local autofix
 edits as of 2026-08-20 (webapp's installed copy was byte-identical to its
-tag), so a bump or a fresh install is a verbatim `cp` of the tag file.
+tag), but confirm that still holds rather than assuming it: diff the installed
+`autofix.md` against its currently pinned tag and check it is clean apart from
+the pin lines. When it is, a bump or a fresh install is a verbatim `cp` of the
+tag file; when it is not, run the same base/theirs/ours `git merge-file` as
+Step 2, with the same override inventory before and after. Nothing downstream
+catches a clobbered autofix override (the pins test covers `review.md` only),
+and autofix pushes commits to consumer PRs, so the cheap diff is worth it.
 
 A fresh install additionally requires the review workflow already installed
 and the `ANTHROPIC_API_KEY` / `KHAN_ACTIONS_BOT_TOKEN` secrets. Both are
@@ -180,7 +186,11 @@ effects, each observed on v0.85.4:
 
 One per repo. Each body names: the version hop and what the release notes say
 it brings, the overrides that were kept, the compile side effects, the checker
-verdict with pre-existing warnings called out, and the jira link per the
-plans-repo convention. If a release lands mid-rollout, update open PRs in
+verdict with pre-existing warnings called out, and the jira link (the
+`~/khan/plans` convention: the body ends with
+`[KORE-nnn](https://khanacademy.atlassian.net/browse/KORE-nnn)`, keyed to the
+task in that repo's per-tree `tasks.md` that owns the rollout; the `gh`
+wrapper enforces this on `gh pr create` in Khan-org repos). If a release
+lands mid-rollout, update open PRs in
 place (force-push the rewritten commits) rather than stacking a second bump
 commit, and say so in a PR comment.
