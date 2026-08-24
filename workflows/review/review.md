@@ -1729,8 +1729,9 @@ including the author's replies, and weigh the author's reasoning before deciding
   reasoning.
 - Additionally list every such conceded-but-unfixed thread id in **acknowledged**
   (always alongside its `keep` entry, never instead of it). Only the **author's own
-  reply** in the chain counts as a concession: never a bot reply (the thumbs-sweep
-  follow-ups and autofix replies sit on these threads), never a reply that pushes back,
+  reply** in the chain counts as a concession: never a bot reply (autofix replies
+  sit on these threads, as do retired thumbs-sweep follow-ups on older ones),
+  never a reply that pushes back,
   and never a TODO you inferred from the code alone. The pipeline verifies each id
   against the reply chain and renders those threads as "acknowledged (fix pending)"
   in the accountability recap instead of counting them unaddressed. When in doubt,

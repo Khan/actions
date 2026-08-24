@@ -225,9 +225,9 @@ describe("renderCountersMarkdown", () => {
         expect(markdown).toContain("*1 run(s) submitted no review");
         expect(markdown).toContain("| (unknown) | 2 | 1 | 50.0% |");
         expect(markdown).toContain("$4.20 total");
-        expect(markdown).toContain(
-            "Thumbs: none recorded in per-run artifacts",
-        );
+        // The Thumbs line is gone with the sweep: the section is cost-only.
+        expect(markdown).toContain("### Cost");
+        expect(markdown).not.toContain("Thumbs");
     });
 });
 

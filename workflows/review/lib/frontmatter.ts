@@ -2,8 +2,8 @@
  * A minimal structural reader for gh-aw markdown frontmatter: indentation,
  * `key:` and `- item`, nothing else.
  *
- * Deliberately not a YAML parser. `lib/` carries no YAML dependency (its
- * `package.json` pins exactly what the thumbs sweep needs), and every question
+ * Deliberately not a YAML parser. `lib/` carries no YAML dependency (the
+ * scripts consumers run are dependency-free), and every question
  * asked of frontmatter here (is this key present, what scalar does it hold,
  * what list items sit under it) is answerable from the shape of gh-aw
  * frontmatter, which is plain block-style mappings.

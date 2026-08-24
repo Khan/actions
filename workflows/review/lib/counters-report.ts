@@ -324,13 +324,7 @@ export const renderCountersMarkdown = (
         }
     }
 
-    lines.push("", "### Thumbs and cost", "");
-    lines.push(
-        counters.thumbs.agreeRate === null
-            ? "- Thumbs: none recorded in per-run artifacts"
-            : `- Thumbs: ${counters.thumbs.up} 👍 / ${counters.thumbs.down} 👎` +
-                  ` (agree rate ${pct(counters.thumbs.agreeRate)})`,
-    );
+    lines.push("", "### Cost", "");
     lines.push(
         counters.cost.usdPerRun === null
             ? "- Cost: not recorded"

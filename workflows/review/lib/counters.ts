@@ -10,7 +10,6 @@
  *     source;
  *   - the run summary (verdict, posted-comment count, model cost) -> comments/PR,
  *     verdict mix, cost/run;
- *   - the thumbs reactions recorded in per-run artifacts -> thumbs agree rate.
  *
  * The module is split into a pure core and a thin, best-effort filesystem
  * loader. The core ({@link computeRunCounters}, {@link normalizeRunArtifacts})
@@ -48,14 +47,6 @@ export type ValidatorDecision = {
     decision: "keep" | "drop";
 };
 
-/** Thumbs reactions collected on a run's comments. */
-export type ThumbsTally = {
-    /** 👍 count — a human agreed with the bot's comment. */
-    up: number;
-    /** 👎 count — a human disagreed. */
-    down: number;
-};
-
 /** Model cost/usage for a run, mined from the run log / summary when present. */
 export type RunCost = {
     /** Dollar cost of the run, when the log records it. */
@@ -74,8 +65,6 @@ export type RunArtifacts = {
     postedCommentCount: number;
     /** Per-source `claim-validator` decisions for the run. */
     validatorDecisions: readonly ValidatorDecision[];
-    /** Thumbs reactions collected for the run's comments (absent if none). */
-    thumbs?: ThumbsTally;
     /** Model cost/usage for the run (absent when the log has none). */
     cost?: RunCost;
     /**
@@ -117,14 +106,6 @@ export type SourceDropRate = {
 /** Count of runs that ended in each verdict event. */
 export type VerdictMix = Record<VerdictEvent, number>;
 
-/** Thumbs agreement across the window. */
-export type ThumbsCounter = {
-    up: number;
-    down: number;
-    /** `up / (up + down)`, or `null` when no thumbs were collected. */
-    agreeRate: number | null;
-};
-
 /** Cost across the window; each field is `null` when no run reported it. */
 export type CostCounter = {
     totalUsd: number | null;
@@ -160,8 +141,6 @@ export type RunCounters = {
     totalComments: number;
     /** Verdict-event histogram; every event key is present (0 when unseen). */
     verdictMix: VerdictMix;
-    /** Thumbs agreement across the window. */
-    thumbs: ThumbsCounter;
     /** Cost across the window. */
     cost: CostCounter;
     /** Cost grouped by executed re-review depth, sorted by `depth`. */
@@ -191,11 +170,9 @@ export const emptyVerdictMix = (): VerdictMix => ({
  * Compute the live counters over a window of runs. Pure: identical input always
  * yields identical output.
  *
- * `dropRate` and `agreeRate` guard against division by zero (a source with no
- * judged claims reports `0`; a window with no thumbs reports `agreeRate: null`,
- * distinguishing "nobody reacted" from "everybody disagreed"). Cost fields are
- * `null` unless at least one run reported that dimension, so an all-unknown-cost
- * window is not silently reported as `$0`.
+ * `dropRate` guards against division by zero (a source with no judged claims
+ * reports `0`). Cost fields are `null` unless at least one run reported that
+ * dimension, so an all-unknown-cost window is not silently reported as `$0`.
  */
 export const computeRunCounters = (
     runs: readonly RunArtifacts[],
@@ -248,22 +225,6 @@ export const computeRunCounters = (
     for (const run of runs) {
         verdictMix[run.verdict] += 1;
     }
-
-    // Thumbs agree rate.
-    let up = 0;
-    let down = 0;
-    for (const run of runs) {
-        if (run.thumbs) {
-            up += run.thumbs.up;
-            down += run.thumbs.down;
-        }
-    }
-    const totalThumbs = up + down;
-    const thumbs: ThumbsCounter = {
-        up,
-        down,
-        agreeRate: totalThumbs === 0 ? null : up / totalThumbs,
-    };
 
     // Cost — track presence per dimension so "unknown" is not reported as 0.
     let usdSum = 0;
@@ -362,7 +323,6 @@ export const computeRunCounters = (
         commentsPerRun,
         totalComments,
         verdictMix,
-        thumbs,
         cost,
         costByRereviewDepth,
         refusalFallbacks,
@@ -402,7 +362,7 @@ export type RawRunArtifacts = {
      * keep/keep/drop for the drop-rate counter.
      */
     validator?: unknown;
-    /** The run summary: verdict, posted-comment count, thumbs, cost. */
+    /** The run summary: verdict, posted-comment count, cost. */
     summary?: unknown;
     /** `out/dispatch-result.json`: the scripted dispatcher's per-agent report. */
     dispatchResult?: unknown;
@@ -499,18 +459,6 @@ export const joinValidatorDecisions = (
     return decisions;
 };
 
-const normalizeThumbs = (
-    summary: Record<string, unknown>,
-): ThumbsTally | undefined => {
-    const thumbs = summary["thumbs"];
-    if (!isRecord(thumbs)) {
-        return undefined;
-    }
-    const up = asFiniteNumber(thumbs["up"]) ?? 0;
-    const down = asFiniteNumber(thumbs["down"]) ?? 0;
-    return {up, down};
-};
-
 const normalizeCost = (
     summary: Record<string, unknown>,
 ): RunCost | undefined => {
@@ -572,7 +520,6 @@ export const normalizeRunArtifacts = (
         fallbackSource,
     );
 
-    const thumbs = normalizeThumbs(summary);
     const cost = normalizeCost(summary);
 
     // The executed re-review depth: the staged plan artifact is
@@ -596,9 +543,6 @@ export const normalizeRunArtifacts = (
         postedCommentCount,
         validatorDecisions,
     };
-    if (thumbs !== undefined) {
-        run.thumbs = thumbs;
-    }
     if (cost !== undefined) {
         run.cost = cost;
     }
@@ -638,7 +582,7 @@ export type RunArtifactLayout = {
     claims: string;
     /** The `claim-validator.json` artifact, relative to the run dir. */
     validator: string;
-    /** The run summary (verdict, comments, thumbs, cost), relative to the run dir. */
+    /** The run summary (verdict, comments, cost), relative to the run dir. */
     summary: string;
     /** The executed re-review plan (mode dial), relative to the run dir. */
     rereviewPlan: string;
@@ -649,9 +593,9 @@ export type RunArtifactLayout = {
 /**
  * The default layout, matching `review.md` Step 9: per-sub-agent JSON under
  * `out/` and the claims list at the run root. `summary.json` is the run-level
- * roll-up (verdict, posted-comment count, thumbs, cost) the workflow writes
+ * roll-up (verdict, posted-comment count, cost) the workflow writes
  * alongside them; a run that predates it simply yields the fallback verdict and
- * zeroed comment/thumbs/cost dimensions.
+ * zeroed comment/cost dimensions.
  */
 export const DEFAULT_RUN_ARTIFACT_LAYOUT: RunArtifactLayout = {
     claims: "claims.json",
@@ -666,7 +610,7 @@ const readJsonIfPresent = (path: string): unknown => {
         return JSON.parse(readFileSync(path, "utf8")) as unknown;
     } catch {
         // Missing or malformed artifact -> treat as absent. The normalisation
-        // layer degrades the affected counter rather than failing the sweep.
+        // layer degrades the affected counter rather than failing the collection.
         return undefined;
     }
 };

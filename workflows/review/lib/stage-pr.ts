@@ -641,9 +641,8 @@ export const runStagePrCli = async (
     // fresh wording as a brand-new thread (webapp#41290: six resolved
     // variants of one concern at moderation_helpers.go:135, then a seventh
     // posted anyway). A 👎 on the opener is the same judgment delivered
-    // through the OTHER feedback channel the bot advertises (the thumbs
-    // sweep asks "why?" on exactly this signal), and before this it
-    // dead-ended in counters. dedup-adjudicated.ts's suppression reads this
+    // through the OTHER feedback channel the bot advertises, and before
+    // this it dead-ended in the retired thumbs sweep's counters. dedup-adjudicated.ts's suppression reads this
     // file; only non-blocking candidates are suppressed by it, so a genuine
     // regression re-flag at blocking severity always posts.
     //

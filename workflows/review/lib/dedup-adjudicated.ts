@@ -19,9 +19,9 @@
  * The corpus this module consumes is staged by stage-pr.ts (step 5b',
  * adjudicated-threads.json): bot-opened threads whose `resolvedBy` is a
  * human, plus bot-opened threads whose OPENING comment carries a 👎 (the
- * same judgment through the other feedback channel the bot advertises; the
- * thumbs sweep asks "why?" on exactly that signal, and until this module the
- * answer dead-ended in counters). The resolver identity is the resolution
+ * same judgment through the other feedback channel the bot advertises;
+ * until this module that signal dead-ended in the retired thumbs sweep's
+ * counters). The resolver identity is the resolution
  * membership rule, not resolution alone; a thread the BOT resolved is the
  * reconciler marking a defect FIXED, and a fixed defect that reappears is a
  * fresh finding that must post.
