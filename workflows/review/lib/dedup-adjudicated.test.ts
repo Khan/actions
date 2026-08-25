@@ -5,7 +5,8 @@ import {
     suppressAdjudicatedDuplicates,
     suppressTrackedDuplicates,
 } from "./dedup-adjudicated";
-import {suppressOpenThreadDuplicates} from "./dedup-threads";
+import {OTHER_LINE_FLOOR} from "./dedup-text";
+import {openThreadScore, suppressOpenThreadDuplicates} from "./dedup-threads";
 import type {Claim} from "./dispatch-contracts";
 
 /**
@@ -342,6 +343,21 @@ describe("cross-file adjudicated suppression (the path key dropped)", () => {
         );
         expect(kept).toEqual([negative]);
         expect(suppressed).toEqual([]);
+        // Assert the calibration band, not just the outcome: a fixture that
+        // quietly drifted out of the band (rejected on bigrams instead of
+        // jaccard) would still pass the kept assertion while pinning
+        // nothing. Scored through openThreadScore itself, so the assertion
+        // measures exactly what production measures (threadProse strip
+        // included).
+        const {jaccard, overlap, sharedBigrams} = openThreadScore(
+            negative,
+            adjudicatedThread(),
+        );
+        expect(sharedBigrams).toBeGreaterThanOrEqual(
+            OTHER_LINE_FLOOR.sharedBigrams,
+        );
+        expect(overlap).toBeGreaterThanOrEqual(OTHER_LINE_FLOOR.overlap);
+        expect(jaccard).toBeLessThan(OTHER_LINE_FLOOR.jaccard);
     });
 
     it("picks the best-scoring adjudicated thread across files, independent of staging order", () => {

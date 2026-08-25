@@ -170,8 +170,9 @@ reference deletion. `review-counters.yml` stays.
    whatever tag you had lying around: a version-skewed checker produces
    phantom warnings (checking 1.17.0 pins with the 1.16.0 checker added one
    spurious warning per repo). `--repo` takes a **path** to the consumer
-   checkout, not a repo name; a name silently resolves as a nonexistent path
-   and reports everything missing:
+   checkout, not a repo name; the checker fails loudly on a nonexistent path
+   (Khan/actions#372), so a name like `Khan/webapp` dies with an error naming
+   the path instead of reporting everything missing:
 
    ```sh
    git -C <consumer> ls-files | node -r @swc-node/register \
