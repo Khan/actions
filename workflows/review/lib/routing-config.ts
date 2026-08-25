@@ -122,14 +122,13 @@ export const RE_REVIEW_MODIFIERS = [
 
 /**
  * How many non-blocking findings may post as inline comments per review (the
- * P1 comment budget). Blocking findings never count against it, and two label
- * classes sit outside it: `nitpick (non-blocking)` never posts inline at all,
- * and the documentation label is exempt (the documentation reviewer
- * self-caps at five per review, and the documentation autofix selects its
- * work by parsing that label off posted threads, so collapsing those would
- * silently empty the autofix scope). Everything over budget collapses into
- * the review body's <details> block; nothing is dropped and the verdict
- * still counts every claim.
+ * P1 comment budget). Blocking findings never count against it, and
+ * `nitpick (non-blocking)` never posts inline at all. Everything over budget
+ * collapses into the review body's <details> block; nothing is dropped, the
+ * verdict still counts every claim, and the autofix still reaches collapsed
+ * findings through its body-sourced work list
+ * (workflows/autofix/lib/collapsed.ts), so the budget shrinks the
+ * notification surface, never a feature's scope.
  *
  * 3 is set by fiat (the quiet-the-human-surface lane's Q8 decision): at the
  * measured 2.91 findings/run it binds rarely and acts as a backstop against

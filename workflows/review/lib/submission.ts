@@ -68,7 +68,6 @@ import {computeChangedLines} from "./diff";
 import {DEFAULT_FINDERS, TRIAGE_DIMENSION} from "./dispatch-roster";
 import {runCli as runNotifiedCli} from "./notified";
 import {
-    DOCUMENTATION_LABEL,
     HOLD_HEAD,
     HOLD_UNSTUCK_LINES,
     isBlockingLabel,
@@ -80,8 +79,8 @@ import {runRereviewCli, type RereviewCliFs} from "./rereview";
 import {
     labelToken,
     renderClaimComment,
+    renderCollapsedLine,
     renderPrLevelFold,
-    sourceTag,
 } from "./submission-render";
 import {normalizeBody} from "./sanitizer-normalize";
 import {
@@ -633,11 +632,7 @@ export const runSubmissionCli = (
                 notes.push(
                     `claim ${claim.id} folded into the hold comment (a hold posts no inline comments)`,
                 );
-                return claim.path !== undefined && claim.line !== undefined
-                    ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${
-                          claim.subject
-                      } ${sourceTag(claim)}`
-                    : `- ${claim.label}: ${claim.subject} ${sourceTag(claim)}`;
+                return renderCollapsedLine(claim);
             },
         );
         return stagePlan(fs, {
@@ -678,17 +673,15 @@ export const runSubmissionCli = (
     //   - At most `nonBlockingInlineBudget` other non-blocking claims post
     //     inline (routing.json's `non-blocking-budget` line, default 3);
     //     the budget spends in ranked order, so what sheds is chosen.
-    //   - The documentation label is exempt from the budget: the
-    //     documentation reviewer self-caps at five per review, and the
-    //     documentation autofix selects its work by parsing that label off
-    //     posted threads, so budgeting those would silently shrink a
-    //     shipped feature's scope (until the autofix learns to read the
-    //     collapsed section, at which point the exemption goes).
+    //     Documentation-label claims are budgeted like any other since the
+    //     autofix learned to read the collapsed section (its selection used
+    //     to be posted threads only, which made collapsing a doc finding
+    //     silently shrink a shipped feature's scope).
     //
     // Everything else collapses to one terse line each in a single
-    // <details> block riding the highest-ranked inline comment (or the
-    // review body when nothing posts inline), so it is surfaced without
-    // scattering noise. The verdict is computed from ALL claims, so a
+    // <details> block in the review body (always the body: the autofix's
+    // body-sourced work list reads the section back off posted reviews),
+    // so it is surfaced without scattering noise. The verdict is computed from ALL claims, so a
     // collapsed blocking claim (a 21st blocking finding) still blocks.
     const budgetRaw = routing?.nonBlockingInlineBudget;
     const nonBlockingBudget =
@@ -746,9 +739,6 @@ export const runSubmissionCli = (
         if (isNitpick(claim)) {
             nitpickShed++;
             return false;
-        }
-        if (claim.label === DOCUMENTATION_LABEL) {
-            return true;
         }
         if (budgetLeft > 0) {
             budgetLeft--;
@@ -829,24 +819,19 @@ export const runSubmissionCli = (
             "<details>",
             `<summary>${summary}</summary>`,
             "",
-            ...collapsed.map((claim) =>
-                claim.path !== undefined && claim.line !== undefined
-                    ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${
-                          claim.subject
-                      } ${sourceTag(claim)}`
-                    : `- ${claim.label}: ${claim.subject} ${sourceTag(claim)}`,
-            ),
+            ...collapsed.map(renderCollapsedLine),
             "",
             "</details>",
         ].join("\n");
-        // Under a reduced surface the section always rides the review
-        // body: the point of either dial is less non-blocking noise on
-        // inline threads.
-        if (!reducedSurface && inline.length > 0) {
-            inline[0] = {...inline[0], body: `${inline[0].body}\n\n${section}`};
-        } else {
-            prLevelLines.push(section);
-        }
+        // The section ALWAYS lands in the review body, never riding an
+        // inline comment. It used to ride the top-ranked comment at full
+        // depth, but the body is the one surface that persists where the
+        // autofix's body-sourced work list can read it (both stagers map
+        // only `review.body` off /pulls/{n}/reviews), so the ride made that
+        // work list blind exactly where the budget sheds; the review-side
+        // README contract (the budget shrinks the notification surface,
+        // never the autofix scope) only holds with the section here.
+        prLevelLines.push(section);
         notes.push(
             reducedSurface && collapsedNonBlockingOnly
                 ? `${

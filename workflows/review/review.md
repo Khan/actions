@@ -904,11 +904,11 @@ posts at most 20 inline (matching this workflow's
 `create-pull-request-review-comment` `max:`), spends the non-blocking inline
 budget in ranked order (the ROUTING `non-blocking-budget` line, default 3;
 blocking claims never count against it, medium-importance claims rank ahead
-of minor ones, `nitpick (non-blocking)` never posts inline, and the
-documentation label is exempt because the documentation autofix selects its
-work off posted threads), and folds the remainder plus
-any sub-medium-confidence claims into a single collapsed section riding the
-top-ranked comment (or the review body), so the plan never exceeds what the
+of minor ones, and `nitpick (non-blocking)` never posts inline), and folds
+the remainder plus
+any sub-medium-confidence claims into a single collapsed section in the
+review body (always the body: the autofix's body-sourced work list reads the
+section back off posted reviews), so the plan never exceeds what the
 engine will emit. The collapsed section's summary line names its top-ranked
 entry, so an approving review cannot hide its best finding behind a bare
 count. Emit the plan's `comments` verbatim — one

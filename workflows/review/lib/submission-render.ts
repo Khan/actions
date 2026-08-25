@@ -173,3 +173,42 @@ export const renderClaimComment = (claim: Claim): string => {
     }
     return lines.join("\n");
 };
+
+/* -------------------------------------------------------------------------- */
+/* The collapsed-entry line grammar                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Render one claim as a collapsed-section (or hold-comment) list entry:
+ *
+ *     - `path:line` label: subject <sub>(source)</sub>
+ *
+ * (pr-level claims omit the backticked anchor). This line is a PARSED
+ * surface, not only a rendered one: the autofix's body-sourced work list
+ * reads these entries back off posted review bodies with
+ * {@link COLLAPSED_ENTRY_RE}, so the renderer and the regex live side by
+ * side and a round-trip test in workflows/autofix/lib/collapsed.test.ts
+ * pins the contract. Change one, change both.
+ */
+export const renderCollapsedLine = (claim: Claim): string =>
+    claim.path !== undefined && claim.line !== undefined
+        ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${
+              claim.subject
+          } ${sourceTag(claim)}`
+        : `- ${claim.label}: ${claim.subject} ${sourceTag(claim)}`;
+
+/**
+ * The parse of one {@link renderCollapsedLine} entry, anchored form only
+ * (the body-sourced work list needs a file and line to act on). Groups:
+ * path, line, label, subject, optional source.
+ */
+export const COLLAPSED_ENTRY_RE =
+    /^- `([^`\s:]+):(\d+)` ([a-z]+ \([^)]*\)): (.*?)(?: <sub>\(([^)]+)\)<\/sub>)?$/;
+
+/**
+ * The parse of the collapsed section's `<summary>` line (matched loosely,
+ * prefix only: the count and the named-top tag vary per run). Lives beside
+ * the renderer for the same no-drift reason as {@link COLLAPSED_ENTRY_RE}.
+ */
+export const COLLAPSED_SUMMARY_RE =
+    /<summary>(?:Non-blocking|Lower-confidence) observations \(/;
