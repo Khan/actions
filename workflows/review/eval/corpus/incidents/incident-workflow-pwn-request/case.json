@@ -118,7 +118,7 @@
                     {
                         "path": ".github/workflows/lint-workflows.yml",
                         "lineStart": 25,
-                        "lineEnd": 41
+                        "lineEnd": 31
                     }
                 ]
             },
