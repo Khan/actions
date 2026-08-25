@@ -87,8 +87,8 @@ export const isBlockingLabel = (label: string): boolean =>
 
 /**
  * Lenses whose findings render as *best-practice* labels rather than plain
- * correctness labels. The finding schema deliberately keeps only a two-value
- * `severity` (blocking/advisory); the richer Conventional taxonomy is applied
+ * correctness labels. The finding schema deliberately keeps a small three-value
+ * `severity` (blocking/medium/advisory); the richer Conventional taxonomy is applied
  * here at render time (schema comment on `SEVERITIES`). #194 maps skill/
  * best-practice findings to the `, best-practice` label variants, so among
  * schema findings only the conventions lens gets them (the skill-auditor's
@@ -129,6 +129,12 @@ const DOCUMENTATION_LENSES: ReadonlySet<Lens> = new Set<Lens>([
  *   - advisory  + documentation lens  -> `suggestion (non-blocking, documentation)`
  *   - advisory  + other lens          -> `suggestion (non-blocking)`
  *
+ * `medium` severity renders exactly as `advisory` does (the non-blocking
+ * rows above). That is the tier's design invariant, not an omission: medium
+ * is a posting-surface rank (which findings deserve the inline slots), and
+ * keeping it out of the label vocabulary is what leaves the verdict, the
+ * recap parser, dedup's blocking guards, and the flip gate untouched.
+ *
  * There is deliberately **no blocking documentation variant**. The
  * documentation reviewer is advisory-only (its definition permits it one
  * label), so the blocking row is unreachable for it in practice; and minting a
@@ -139,7 +145,7 @@ const DOCUMENTATION_LENSES: ReadonlySet<Lens> = new Set<Lens>([
  * safe direction (a blocking finding wants a human, not a scoped bulk fix).
  *
  * The finer labels a human reviewer might pick (`todo`, `nitpick`, `question`,
- * `thought`, `note`) are not expressible in the two-value schema, so lenses fold
+ * `thought`, `note`) are not expressible in the three-value schema, so lenses fold
  * them into the canonical issue/suggestion pair. `verdict.ts` and `review.md`
  * both treat `issue (blocking*)` and `todo (blocking)` identically, so the fold
  * is verdict-preserving.

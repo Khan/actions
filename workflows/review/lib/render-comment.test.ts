@@ -79,6 +79,21 @@ describe("labelForFinding — deterministic from severity + lens", () => {
         ).toBe("suggestion (non-blocking)");
     });
 
+    it("medium renders exactly as advisory does (the no-new-labels invariant)", () => {
+        // The tier's design rests on medium minting no label of its own:
+        // every label-keyed consumer (verdict, recap parser, dedup guards,
+        // flip gate) stays untouched only if this holds.
+        for (const lens of [
+            "security-auth",
+            "conventions",
+            "documentation",
+        ] as const) {
+            expect(
+                labelForFinding(makeFinding({severity: "medium", lens})),
+            ).toBe(labelForFinding(makeFinding({severity: "advisory", lens})));
+        }
+    });
+
     it("advisory + conventions lens -> suggestion (non-blocking, best-practice)", () => {
         expect(
             labelForFinding(

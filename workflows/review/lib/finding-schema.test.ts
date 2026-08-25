@@ -71,8 +71,13 @@ describe("exported canonical lists", () => {
         expect(KNOWN_LENSES).toContain("first-principles");
     });
 
-    it("SEVERITIES is exactly blocking + advisory (#194 axis)", () => {
-        expect([...SEVERITIES]).toEqual(["blocking", "advisory"]);
+    it("SEVERITIES is exactly blocking + medium + advisory (#194 axis plus the PRA-7 tier)", () => {
+        expect([...SEVERITIES]).toEqual(["blocking", "medium", "advisory"]);
+    });
+
+    it("accepts a medium-severity finding (the PRA-7 tier is additive, no version bump)", () => {
+        const result = validateFinding(makeValidFinding({severity: "medium"}));
+        expect(result.ok).toBe(true);
     });
 
     it("ANCHOR_TYPES includes the required PR-level anchor", () => {

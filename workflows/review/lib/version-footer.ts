@@ -52,6 +52,8 @@ export type VersionFooterInputs = {
     reReviewMode: string | null;
     /** The ROUTING `blocking-only` modifier. */
     blockingOnly: boolean;
+    /** The ROUTING `blocking-medium` modifier. */
+    blockingMedium: boolean;
     /** The ROUTING `enable` list (canonical order, from routing.json). */
     enabledReviewers: string[];
     /** The ROUTING `non-blocking-budget` value; null drops the segment, and
@@ -78,7 +80,11 @@ export const renderVersionFooter = (inputs: VersionFooterInputs): string => {
     if (inputs.reReviewMode !== null && inputs.reReviewMode !== "") {
         segments.push(
             `re-review ${inputs.reReviewMode}${
-                inputs.blockingOnly ? " blocking-only" : ""
+                inputs.blockingOnly
+                    ? " blocking-only"
+                    : inputs.blockingMedium
+                    ? " blocking-medium"
+                    : ""
             }`,
         );
     }
@@ -140,6 +146,7 @@ export const runVersionFooterCli = (
         | {
               reReviewMode?: unknown;
               reReviewBlockingOnly?: unknown;
+              reReviewBlockingMedium?: unknown;
               enabledReviewers?: unknown;
               nonBlockingInlineBudget?: unknown;
           }
@@ -158,6 +165,7 @@ export const runVersionFooterCli = (
                 ? routing.reReviewMode
                 : null,
         blockingOnly: routing?.reReviewBlockingOnly === true,
+        blockingMedium: routing?.reReviewBlockingMedium === true,
         enabledReviewers: Array.isArray(routing?.enabledReviewers)
             ? routing.enabledReviewers.filter(
                   (entry): entry is string => typeof entry === "string",

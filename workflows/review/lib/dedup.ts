@@ -240,6 +240,15 @@ const survivorFirst = (
     if (blockingA !== blockingB) {
         return blockingA > blockingB ? indexA : indexB;
     }
+    // The medium tier survives a merge: corroboration by a second reviewer
+    // must not strip a claim's prominence (or under-report the plan's
+    // medium-count instrument), so the copy carrying the tier wins before
+    // confidence breaks the tie.
+    const mediumA = a.importance === "medium" ? 1 : 0;
+    const mediumB = b.importance === "medium" ? 1 : 0;
+    if (mediumA !== mediumB) {
+        return mediumA > mediumB ? indexA : indexB;
+    }
     if (a.confidence !== b.confidence) {
         return a.confidence > b.confidence ? indexA : indexB;
     }

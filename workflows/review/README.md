@@ -366,7 +366,7 @@ rule per line:
 ```
 # <pattern> [lens=<lens>,…] [tier=trivial|low|medium|high] [direction-dependent]
 # enable <reviewer>[,<reviewer>…]
-# re-review full|scoped|flip-gated|fast [blocking-only]
+# re-review full|scoped|flip-gated|fast [blocking-only|blocking-medium]
 # non-blocking-budget <n>
 services/**/migrations/**  tier=high lens=data-migrations
 **/*.graphql               lens=api-federation-compat
@@ -395,8 +395,9 @@ re-review scoped
 - `re-review` sets the repo's re-review mode (see the next section). Default
   `full`; when several lines set it, the last one wins with a warning. An
   unknown mode degrades to `full`: toward more review, never less. The
-  optional `blocking-only` modifier changes the repeat review's posting
-  surface (see [Re-review modes](#re-review-modes-the-runs-per-pr-cost-lever));
+  optional `blocking-only` and `blocking-medium` modifiers change the repeat
+  review's posting surface (see
+  [Re-review modes](#re-review-modes-the-runs-per-pr-cost-lever));
   an unknown modifier warns and is ignored, and the mode still applies.
 - `non-blocking-budget` sets how many non-blocking findings may post as inline
   comments per review (default 3). Blocking findings never count against it;
@@ -602,6 +603,19 @@ Use it when re-review chatter is the complaint but whole-change coverage
 (`scoped`) is still wanted: `flip-gated` silences the noise by not running
 the whole-change reviewers at all, while `scoped blocking-only` keeps their
 blocking recall and their body-collapsed observations.
+
+**The `blocking-medium` modifier** (`re-review scoped blocking-medium`) is the
+recommended middle: same reduced surface as `blocking-only`, except findings
+carrying the medium importance tier (a verified defect or gap in code the PR
+adds, one a reasonable author would fix before merge; reviewer-proposed,
+validator-adjudicated, and code-vetoed against the diff's added lines) keep
+posting inline, spending the non-blocking budget. Motivating case for
+preferring it over strict `blocking-only`: three 2026-08-24 approving
+re-reviews on this repo collapsed verified correctness findings behind a bare
+"Non-blocking observations (N)" count (#367's "the reply guard never fires"
+among them). `blocking-only` stays available as the rollback dial if the
+medium tier inflates on a consumer. At most one modifier per `re-review`
+line; a later line replaces an earlier one.
 
 The dial is a measured change, not a default change: it ships `full`
 everywhere, so no consumer's behavior moves until its repo adds a `re-review`
@@ -890,7 +904,7 @@ run files (never composed by the model):
 
 ```
 <details><summary><sub>review details</sub></summary>
-<sub>review-v<major>.<minor>.<patch> | schema <n> | depth <depth> | re-review <mode> [blocking-only] | enable <reviewer,...> | non-blocking-budget <n></sub>
+<sub>review-v<major>.<minor>.<patch> | schema <n> | depth <depth> | re-review <mode> [blocking-only|blocking-medium] | enable <reviewer,...> | non-blocking-budget <n></sub>
 </details>
 ```
 

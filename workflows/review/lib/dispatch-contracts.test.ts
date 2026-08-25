@@ -1,6 +1,7 @@
 import {describe, it, expect} from "vitest";
 
 import {
+    applyMediumVeto,
     applyVerifications,
     buildClaims,
     contractValidator,
@@ -11,6 +12,7 @@ import {
     parseValidatorOutput,
     type Claim,
 } from "./dispatch-contracts";
+import {computeChangedLines} from "./diff";
 import {labelForFinding} from "./render-comment";
 
 /**
@@ -694,5 +696,182 @@ describe("parseJsonObject empty-vs-malformed", () => {
         expect(() =>
             parseJsonObject("I reviewed it and found nothing."),
         ).toThrow(/no parseable JSON object/);
+    });
+});
+
+describe("the medium importance tier (PRA-7)", () => {
+    const claim = (overrides: Partial<Claim>): Claim => ({
+        id: "c1",
+        source: "correctness-reviewer",
+        path: "a.ts",
+        line: 2,
+        label: "note (non-blocking)",
+        subject: "s",
+        discussion: "d",
+        failure_scenario: "f",
+        confidence: 0.7,
+        importance: "medium",
+        ...overrides,
+    });
+
+    const finderOut = (finding: Record<string, unknown>): string =>
+        JSON.stringify({
+            findings: [
+                {
+                    path: "a.ts",
+                    line: 2,
+                    label: "note (non-blocking)",
+                    failure_scenario: "the guard never fires",
+                    subject: "s",
+                    discussion: "The guard never fires on staged logins.",
+                    ...finding,
+                },
+            ],
+        });
+
+    it("maps importance: medium onto severity and through buildClaims", () => {
+        const {candidates} = parseFinderOutput(
+            "correctness-reviewer",
+            finderOut({importance: "medium"}),
+            new Set(),
+        );
+        expect(candidates[0].finding.severity).toBe("medium");
+        expect(buildClaims(candidates)[0].importance).toBe("medium");
+    });
+
+    it("reads anything but the literal medium as minor, without rejecting the finding", () => {
+        for (const value of ["high", "MEDIUM", 3, true, undefined]) {
+            const {candidates} = parseFinderOutput(
+                "correctness-reviewer",
+                finderOut(value === undefined ? {} : {importance: value}),
+                new Set(),
+            );
+            expect(candidates[0].finding.severity).toBe("advisory");
+            expect(buildClaims(candidates)[0].importance).toBeUndefined();
+        }
+    });
+
+    it("ignores importance on a blocking label (blocking always posts)", () => {
+        const {candidates} = parseFinderOutput(
+            "correctness-reviewer",
+            finderOut({label: "issue (blocking)", importance: "medium"}),
+            new Set(),
+        );
+        expect(candidates[0].finding.severity).toBe("blocking");
+        expect(buildClaims(candidates)[0].importance).toBeUndefined();
+    });
+
+    it("strips medium on a plausible verification (unverified fails the tier's test)", () => {
+        const result = applyVerifications([claim({})], {
+            c1: {verification: "plausible", confidence: 0.4},
+        });
+        expect(result[0].importance).toBeUndefined();
+    });
+
+    it("strips medium on the author-dispute cap", () => {
+        const result = applyVerifications(
+            [claim({author_dispute: "the author disagrees"})],
+            {},
+        );
+        expect(result[0].label).toBe("question (non-blocking)");
+        expect(result[0].importance).toBeUndefined();
+    });
+
+    it("applies corrected.importance both directions on confirmed claims", () => {
+        const granted = applyVerifications([claim({importance: undefined})], {
+            c1: {
+                verification: "confirmed",
+                corrected: {importance: "medium"},
+            },
+        });
+        expect(granted[0].importance).toBe("medium");
+        const stripped = applyVerifications([claim({})], {
+            c1: {verification: "confirmed", corrected: {importance: "minor"}},
+        });
+        expect(stripped[0].importance).toBeUndefined();
+    });
+
+    it("skips a corrected.importance grant onto a blocking label", () => {
+        const result = applyVerifications(
+            [claim({label: "issue (blocking)", importance: undefined})],
+            {
+                c1: {
+                    verification: "confirmed",
+                    corrected: {importance: "medium"},
+                },
+            },
+        );
+        expect(result[0].importance).toBeUndefined();
+    });
+
+    it("keeps medium on an unmentioned claim (missing-output retains whole claims)", () => {
+        const result = applyVerifications([claim({})], {});
+        expect(result[0].importance).toBe("medium");
+    });
+
+    const DIFF = [
+        "diff --git a/a.ts b/a.ts",
+        "--- a/a.ts",
+        "+++ b/a.ts",
+        "@@ -1,3 +1,4 @@",
+        " context line",
+        "+added line",
+        " more context",
+        " tail",
+    ].join("\n");
+
+    it("vetoes medium off anything not anchored on an added line", () => {
+        const changed = computeChangedLines(DIFF);
+        const result = applyMediumVeto(
+            [
+                claim({id: "on-added", line: 2}),
+                claim({id: "on-context", line: 1}),
+                claim({id: "off-diff", path: "b.ts", line: 2}),
+                claim({id: "pr-level", path: undefined, line: undefined}),
+            ],
+            changed,
+        );
+        expect(
+            result.map((entry) => [entry.id, entry.importance ?? "minor"]),
+        ).toEqual([
+            ["on-added", "medium"],
+            ["on-context", "minor"],
+            ["off-diff", "minor"],
+            ["pr-level", "minor"],
+        ]);
+        // The veto strips the tier, never the claim.
+        expect(result).toHaveLength(4);
+    });
+});
+
+describe("the medium veto's change-anchored line set", () => {
+    const DIFF_WITH_REMOVAL = [
+        "diff --git a/b.ts b/b.ts",
+        "--- a/b.ts",
+        "+++ b/b.ts",
+        "@@ -4,3 +4,2 @@",
+        " context above",
+        "-the removed guard",
+        " context below",
+    ].join("\n");
+
+    it("keeps medium on a removal-adjacent anchor (dropped-guard findings)", () => {
+        const changed = computeChangedLines(DIFF_WITH_REMOVAL);
+        const claims: Claim[] = [
+            {
+                id: "dropped-guard",
+                source: "correctness-reviewer",
+                path: "b.ts",
+                line: 4,
+                label: "note (non-blocking)",
+                subject: "s",
+                discussion: "d",
+                failure_scenario: "f",
+                confidence: 0.8,
+                importance: "medium",
+            },
+        ];
+        const result = applyMediumVeto(claims, changed);
+        expect(result[0].importance).toBe("medium");
     });
 });

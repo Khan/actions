@@ -12,6 +12,7 @@
  */
 
 import type {AlsoFlagged} from "./attribution";
+import type {DiffChangedLines} from "./diff";
 import {
     validateFinding,
     type Anchor,
@@ -286,6 +287,13 @@ const fromLabelShape = (
     const discussion =
         typeof raw["discussion"] === "string" ? raw["discussion"] : "";
     const label = typeof raw["label"] === "string" ? raw["label"] : "";
+    // The optional medium-importance tier (PRA-7): a reviewer marks a
+    // non-blocking finding it judges worth fixing before merge. Anything
+    // other than the literal "medium" reads as minor — fail quiet, never
+    // reject: an unknown value must not void a finding, and under-marking
+    // only reproduces the pre-tier surface. Blocking labels ignore the
+    // field (they always post inline).
+    const medium = raw["importance"] === "medium" && !isBlockingLabel(label);
     if (!KNOWN_LABELS.has(label)) {
         throw new Error(
             `findings[${index}] label ${JSON.stringify(
@@ -307,7 +315,11 @@ const fromLabelShape = (
                       line,
                       side: "RIGHT",
                   },
-        severity: isBlockingLabel(label) ? "blocking" : "advisory",
+        severity: isBlockingLabel(label)
+            ? "blocking"
+            : medium
+            ? "medium"
+            : "advisory",
         confidence: LABEL_SHAPE_CONFIDENCE,
         evidence_trace: [
             `${agentName} label: ${label}`,
@@ -667,6 +679,20 @@ export type Claim = {
     suggestion?: string;
     skill?: string;
     confidence: number;
+    /**
+     * The medium-importance tier (PRA-7): present (as `"medium"`) on a
+     * claim whose finding carried `severity: "medium"` — a verified defect
+     * or gap in code this PR adds, that a reasonable author would fix
+     * before merge, but that does not block. Absent means minor. Never a
+     * verdict input (the label carries blocking-ness); the posting surface
+     * (submission.ts) ranks medium claims ahead of minor ones for the
+     * non-blocking inline budget and posts them inline on `blocking-medium`
+     * re-reviews. The claim-validator adjudicates it (`corrected.importance`
+     * both directions), a `plausible` verification strips it (unconfirmed
+     * fails the tier's "verified" test), and {@link applyMediumVeto} strips
+     * it from any claim not anchored on a line this PR added.
+     */
+    importance?: "medium";
     author_dispute?: string;
     rule_quote?: string;
     /**
@@ -691,6 +717,10 @@ export const buildClaims = (candidates: Candidate[]): Claim[] =>
             ...(path !== undefined ? {path} : {}),
             ...(line !== undefined ? {line} : {}),
             label: candidateLabel(candidate),
+            ...(finding.severity === "medium" &&
+            !isBlockingLabel(candidateLabel(candidate))
+                ? {importance: "medium" as const}
+                : {}),
             subject: firstSentence,
             discussion: prose,
             failure_scenario: finding.failure_scenario,
@@ -706,6 +736,45 @@ export const buildClaims = (candidates: Candidate[]): Claim[] =>
                 ? {rule_quote: finding.rule_quote}
                 : {}),
         };
+    });
+
+/**
+ * The deterministic changed-lines veto on the medium tier (PRA-7): medium
+ * prominence is defined over "code this PR adds", so a medium claim must
+ * anchor on a line the staged diff changed: an ADDED line, or a line
+ * adjacent to a removal (the provenance gate's change-anchored set; a
+ * dropped-guard finding anchors on the line neighbouring the deletion, and
+ * review.md's removed-behavior audit tells reviewers to anchor exactly
+ * there). Anything else (other context lines, file-level or pr-level
+ * anchors, a path outside the diff) keeps the claim and loses only the
+ * tier. Runs at the posting surface, AFTER validation, so it has the last
+ * word over both a reviewer's proposal and a validator grant; code vetoes,
+ * models propose. Measured on the 08-24 collapsed-tail corpus the veto
+ * barely binds (86 of 91 entries anchored to added lines already), which is
+ * the point: it is a cheap floor against the drift case, not a filter that
+ * does daily work.
+ */
+export const applyMediumVeto = (
+    claims: Claim[],
+    changedLines: DiffChangedLines,
+): Claim[] =>
+    claims.map((claim) => {
+        if (claim.importance !== "medium") {
+            return claim;
+        }
+        const file =
+            claim.path !== undefined ? changedLines[claim.path] : undefined;
+        if (
+            claim.line !== undefined &&
+            file !== undefined &&
+            (file.added.includes(claim.line) ||
+                file.removedAdjacent.includes(claim.line))
+        ) {
+            return claim;
+        }
+        const stripped = {...claim};
+        delete stripped.importance;
+        return stripped;
     });
 
 /** The Phase 3 blocking→non-blocking downgrade map (review.md, mechanical). */
@@ -784,10 +853,14 @@ export const applyVerifications = (
             // never re-block on the same evidence without a confirmed
             // verification, validator or no validator.
             if (claim.author_dispute !== undefined) {
-                surviving.push({
+                const capped = {
                     ...claim,
                     label: "question (non-blocking)",
-                });
+                };
+                // The cap also strips the medium tier: an unconfirmed
+                // disputed claim is not "verified" in the tier's sense.
+                delete capped.importance;
+                surviving.push(capped);
             } else {
                 surviving.push(claim);
             }
@@ -858,8 +931,28 @@ export const applyVerifications = (
                     verdict.confidence,
                 );
             }
+            // The medium tier's definition is "a VERIFIED defect or gap";
+            // plausible means the validator could not verify it, so the
+            // claim keeps posting but loses its prominence claim. Same for
+            // the dispute cap above (it forces state to plausible).
+            delete updated.importance;
         } else if (verdict.confidence !== undefined) {
             updated.confidence = verdict.confidence;
+        }
+        // The validator adjudicates the tier on confirmed claims, both
+        // directions: `corrected.importance: "medium"` grants prominence a
+        // reviewer under-marked, `"minor"` strips an over-marked one. Only
+        // these two literals apply (anything else is ignored), and a grant
+        // onto a blocking label is meaningless (blocking always posts) so
+        // it is skipped. This is not the never-raise rule's territory:
+        // that rule is about blocking-ness, which importance never touches.
+        if (state === "confirmed" && verdict.corrected !== undefined) {
+            const importance = verdict.corrected["importance"];
+            if (importance === "medium" && !isBlockingLabel(updated.label)) {
+                updated.importance = "medium";
+            } else if (importance === "minor") {
+                delete updated.importance;
+            }
         }
         surviving.push(updated);
     }

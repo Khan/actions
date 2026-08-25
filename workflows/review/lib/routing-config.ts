@@ -96,16 +96,29 @@ export type ReReviewMode = typeof RE_REVIEW_MODES[number];
 export const DEFAULT_RE_REVIEW_MODE: ReReviewMode = "full";
 
 /**
- * The one modifier the `re-review` line accepts. `blocking-only` keeps the
- * configured depth's roster and staging but changes the REPEAT review's
- * posting surface: only blocking findings post inline; validated
- * non-blocking findings collapse into a <details> block in the review body
- * (the verdict still counts every claim, so nothing it suppresses can flip
- * an outcome). It applies exactly when a run executes at a reduced depth,
- * so the first full review of a ready PR, a divergence-tripwire re-arm, and
- * every guard that resolves to full depth still post everything.
+ * The modifiers the `re-review` line accepts (at most one per line; a later
+ * line replaces an earlier one). Both keep the configured depth's roster
+ * and staging and change only the REPEAT review's posting surface; the
+ * verdict still counts every claim, so nothing either suppresses can flip
+ * an outcome, and both apply exactly when a run executes at a reduced
+ * depth, so the first full review of a ready PR, a divergence-tripwire
+ * re-arm, and every guard that resolves to full depth still post
+ * everything.
+ *
+ *   - `blocking-only`: only blocking findings post inline; every validated
+ *     non-blocking finding collapses into a <details> block in the review
+ *     body. The strict dial, kept as the rollback if the medium tier
+ *     inflates on a consumer.
+ *   - `blocking-medium`: blocking findings AND medium-importance findings
+ *     post inline (medium spends the non-blocking inline budget); minor
+ *     findings collapse. The recommended dial: under `blocking-only`,
+ *     three 2026-08-24 approving re-reviews collapsed verified correctness
+ *     findings behind a bare count (Khan/actions#367, #371, #366).
  */
-export const RE_REVIEW_MODIFIERS = ["blocking-only"] as const;
+export const RE_REVIEW_MODIFIERS = [
+    "blocking-only",
+    "blocking-medium",
+] as const;
 
 /**
  * How many non-blocking findings may post as inline comments per review (the
@@ -149,6 +162,9 @@ export type RoutingFileConfig = {
     /** `re-review <mode> blocking-only`: repeat reviews post only blocking
      * findings inline (see {@link RE_REVIEW_MODIFIERS}). */
     reReviewBlockingOnly: boolean;
+    /** `re-review <mode> blocking-medium`: repeat reviews post blocking and
+     * medium-importance findings inline (see {@link RE_REVIEW_MODIFIERS}). */
+    reReviewBlockingMedium: boolean;
     /** `non-blocking-budget <n>`: how many non-blocking findings may post
      * inline per review (see {@link DEFAULT_NON_BLOCKING_INLINE_BUDGET}). */
     nonBlockingInlineBudget: number;
@@ -166,7 +182,7 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  *
  *     <pattern> [lens=<lens>[,<lens>…]] [tier=trivial|low|medium|high] [direction-dependent]
  *     enable <reviewer>[,<reviewer>…]
- *     re-review full|scoped|flip-gated|fast [blocking-only]
+ *     re-review full|scoped|flip-gated|fast [blocking-only|blocking-medium]
  *     non-blocking-budget <n>
  *
  * `lens=` names specialist lenses to spawn when the pattern is touched (multiple
@@ -203,6 +219,7 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
     const enabled = new Set<EnableableReviewer>();
     let reReviewMode: ReReviewMode = DEFAULT_RE_REVIEW_MODE;
     let reReviewBlockingOnly = false;
+    let reReviewBlockingMedium = false;
     let reReviewLineSeen = false;
     let nonBlockingInlineBudget = DEFAULT_NON_BLOCKING_INLINE_BUDGET;
     let budgetLineSeen = false;
@@ -260,18 +277,20 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
                 continue;
             }
             let blockingOnly = false;
+            let blockingMedium = false;
             if (fields.length === 2) {
                 if (
                     (RE_REVIEW_MODIFIERS as readonly string[]).includes(
                         fields[1],
                     )
                 ) {
-                    blockingOnly = true;
+                    blockingOnly = fields[1] === "blocking-only";
+                    blockingMedium = fields[1] === "blocking-medium";
                     if (mode === "full") {
                         // full never executes at a reduced depth, so the
                         // modifier never applies; the mode still does.
                         warnings.push(
-                            `ROUTING line ${lineNo}: blocking-only never ` +
+                            `ROUTING line ${lineNo}: ${fields[1]} never ` +
                                 `applies at full re-review depth (repeat ` +
                                 `reviews post everything)`,
                         );
@@ -291,6 +310,7 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
             }
             reReviewMode = mode as ReReviewMode;
             reReviewBlockingOnly = blockingOnly;
+            reReviewBlockingMedium = blockingMedium;
             reReviewLineSeen = true;
             continue;
         }
@@ -418,6 +438,7 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
         ),
         reReviewMode,
         reReviewBlockingOnly,
+        reReviewBlockingMedium,
         nonBlockingInlineBudget,
         dispatchMode: DEFAULT_DISPATCH_MODE,
         warnings,

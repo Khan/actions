@@ -50,12 +50,32 @@ describe("renderVersionFooter", () => {
                 depth: "scoped",
                 reReviewMode: "scoped",
                 blockingOnly: true,
+                blockingMedium: false,
                 enabledReviewers: ["holistic", "completeness"],
                 nonBlockingInlineBudget: 5,
             }),
         ).toBe(
             wrapped(
                 "review-v1.13.0 | schema 2 | depth scoped | re-review scoped blocking-only | enable holistic,completeness | non-blocking-budget 5",
+            ),
+        );
+    });
+
+    it("renders the blocking-medium modifier", () => {
+        expect(
+            renderVersionFooter({
+                version: "1.13.0",
+                schemaVersion: 2,
+                depth: "scoped",
+                reReviewMode: "scoped",
+                blockingOnly: false,
+                blockingMedium: true,
+                enabledReviewers: [],
+                nonBlockingInlineBudget: null,
+            }),
+        ).toBe(
+            wrapped(
+                "review-v1.13.0 | schema 2 | depth scoped | re-review scoped blocking-medium",
             ),
         );
     });
@@ -68,6 +88,7 @@ describe("renderVersionFooter", () => {
                 depth: "full",
                 reReviewMode: "full",
                 blockingOnly: false,
+                blockingMedium: false,
                 enabledReviewers: [],
                 nonBlockingInlineBudget: 3,
             }),
@@ -84,6 +105,7 @@ describe("renderVersionFooter", () => {
                 depth: "full",
                 reReviewMode: "full",
                 blockingOnly: false,
+                blockingMedium: false,
                 enabledReviewers: [],
                 nonBlockingInlineBudget: null,
             }),
@@ -100,6 +122,7 @@ describe("renderVersionFooter", () => {
                 depth: null,
                 reReviewMode: null,
                 blockingOnly: true,
+                blockingMedium: false,
                 enabledReviewers: [],
                 nonBlockingInlineBudget: null,
             }),
