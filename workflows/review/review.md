@@ -85,7 +85,7 @@ safe-outputs:
     side: "RIGHT"
   submit-pull-request-review:
     max: 1
-    allowed-events: [APPROVE, REQUEST_CHANGES]
+    allowed-events: [APPROVE, COMMENT, REQUEST_CHANGES]
     footer: false
   # Resolve this workflow's own earlier review threads once their issue is addressed
   # (Step 7), instead of replying. Uses the bot token because the default GITHUB_TOKEN
@@ -882,14 +882,22 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
 
 The verdict is computed by the plan CLI (Step 3), never by you: REQUEST_CHANGES
 iff a validated posted claim carries a blocking label, plus the reduced-depth
-flip floor over kept blocking threads and the open-thread suppression floor —
-all `lib/verdict.ts` / `lib/submission.ts` rules. A third outcome exists:
-HOLD_FOR_HUMAN, when a core review pass (`correctness-reviewer` or
-`skill-auditor`) produced no usable output this run and the run would
-otherwise have auto-approved — the automation never approves a change its
-core passes did not look at (a blocking finding still wins: it is actionable
-on its own, so the verdict stays REQUEST_CHANGES and the gap is disclosed in
-a note line). The plan's `event` IS the
+flip floor over kept blocking threads and the open-thread suppression floor;
+COMMENT when nothing blocks but at least one posted claim carries the medium
+importance tier (a verified finding worth fixing before merge should not ride
+under an approval, and the middle verdict says so without demanding another
+round); APPROVE otherwise — all `lib/verdict.ts` / `lib/submission.ts` rules.
+A fourth outcome exists: HOLD_FOR_HUMAN, when a core review pass
+(`correctness-reviewer` or `skill-auditor`) produced no usable output this
+run and the run would otherwise have auto-approved or commented — the
+automation never approves a change its core passes did not look at, and it
+never writes a fingerprint from a partial assessment either (a blocking
+finding still wins: it is actionable on its own; medium findings fold into
+the hold comment as claim lines). One more mechanical guard: a COMMENT that
+would leave this workflow's own prior REQUEST_CHANGES standing upgrades to
+APPROVE with a note, because GitHub only moves a reviewer's state on APPROVE
+or REQUEST_CHANGES and a stale block the author's fixes already earned back
+must not survive on a technicality. The plan's `event` IS the
 verdict; never recompute, second-guess, or override it. (The blocking-label
 vocabulary and the concrete-failing-scenario bar live in the sub-agent
 definitions and the shared lib.)
@@ -935,8 +943,8 @@ review, posts inline comments, resolves threads, or drops the comment.
 
 ## Step 7: On Approval — Post Risk and Patterns as a PR Comment
 
-**Only run this step when the verdict is APPROVE.** When requesting changes, skip
-it entirely and post no comment. Also skip it entirely on a reduced re-review
+**Only run this step when the verdict is APPROVE.** On REQUEST_CHANGES or
+COMMENT, skip it entirely and post no comment. Also skip it entirely on a reduced re-review
 depth (`scoped`, `flip-gated`, `fast`; Step 3): the reduced run computed no triage
 or risk data to compare, so the existing comment stands and `risksPatternsKey`
 carries forward unchanged (Step 9).
@@ -1135,10 +1143,12 @@ fully explained by a common pattern above:
   risky file and no pattern and no NOTIFIED match), post nothing at all (see
   above) — do not write a placeholder, even if files were excluded.
 
-## Step 8: On Approval — Request the Owning Teams as Reviewers
+## Step 8: On Approval or Comment — Request the Owning Teams as Reviewers
 
-**Only run this step when the verdict is APPROVE.** Skip it entirely when
-requesting changes. Also skip it entirely when `correctness-reviewer` did not run
+**Run this step when the verdict is APPROVE or COMMENT; skip it entirely on
+REQUEST_CHANGES.** A COMMENT run routes the owning teams too, deliberately: it
+found something worth a human's eyes and, unlike REQUEST_CHANGES, forces no
+later run that would route them. Also skip it entirely when `correctness-reviewer` did not run
 this run (a `flip-gated` or `fast` re-review depth, Step 3): there are no fresh
 risk classifications to route on, and the anchoring full review already requested
 the owning teams.
@@ -1333,10 +1343,11 @@ the diff's `NNN| ` prefix, never counted), `file` (with
 `path`), or `pr` (whole-PR, no path/line); `severity` is `blocking` for a genuine
 defect in your domain, `medium` for a verified non-blocking defect or gap in code
 this PR adds that a reasonable author would fix before merge, and `advisory`
-otherwise (or as the matched skill declares). `medium` is prominence, not
-severity: it never affects the verdict, and the claim-validator strips it from
-any claim it cannot confirm, so mark it only where your evidence already makes
-the case;
+otherwise (or as the matched skill declares). `medium` can never force
+REQUEST_CHANGES (it decides posting surface, and a run whose findings are at
+most medium submits a COMMENT review instead of an approval), and the
+claim-validator strips it from any claim it cannot confirm, so mark it only
+where your evidence already makes the case;
 `confidence` is a number in [0,1]; `evidence_trace` has at least one non-empty
 entry; `failure_scenario` names the concrete failing scenario (specific
 inputs/state, then the wrong outcome) — it is the specific claim the
@@ -1538,13 +1549,14 @@ Return ONLY this JSON object (no prose, no code fence):
 
 `importance: "medium"` is the optional middle tier: mark it only on a
 non-blocking finding that is a verified defect or gap in code this PR adds, one
-a reasonable author would fix before merge. It is prominence, not severity: it
-never affects the verdict; it decides which non-blocking findings post inline
-rather than collapse, and it is what keeps a finding visible on re-reviews
-under the `blocking-medium` dial. The claim-validator checks the marking and
-strips any it cannot confirm, and code strips it from any finding not anchored
-on a line this PR added, so an evidence-free medium costs the finding its
-prominence and buys nothing.
+a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
+what it does is decide which non-blocking findings post inline rather than
+collapse, keep a finding visible on re-reviews under the `blocking-medium`
+dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
+findings without vouching for the change). The claim-validator checks the
+marking and strips any it cannot confirm, and code strips it from any finding
+not anchored on a changed line of this PR, so an evidence-free medium costs
+the finding its prominence and buys nothing.
 
 `line` is a RIGHT-side (added/context) line number from the diff. Keep findings tight
 and high-signal; use a blocking label only for a defect CI would not catch.
@@ -1686,13 +1698,14 @@ Return ONLY this JSON object (no prose, no code fence):
 
 `importance: "medium"` is the optional middle tier: mark it only on a
 non-blocking finding that is a verified defect or gap in code this PR adds, one
-a reasonable author would fix before merge. It is prominence, not severity: it
-never affects the verdict; it decides which non-blocking findings post inline
-rather than collapse, and it is what keeps a finding visible on re-reviews
-under the `blocking-medium` dial. The claim-validator checks the marking and
-strips any it cannot confirm, and code strips it from any finding not anchored
-on a line this PR added, so an evidence-free medium costs the finding its
-prominence and buys nothing.
+a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
+what it does is decide which non-blocking findings post inline rather than
+collapse, keep a finding visible on re-reviews under the `blocking-medium`
+dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
+findings without vouching for the change). The claim-validator checks the
+marking and strips any it cannot confirm, and code strips it from any finding
+not anchored on a changed line of this PR, so an evidence-free medium costs
+the finding its prominence and buys nothing.
 
 `line` is a RIGHT-side diff line. `failure_scenario` is required on every finding:
 the concrete consequence of the breach, stated specifically enough for the
@@ -2078,8 +2091,9 @@ one a reasonable author would fix before merge. On a `confirmed` claim you may
 set `corrected.importance` in either direction: `"minor"` strips a marking
 whose evidence does not meet that bar, `"medium"` grants it to an unmarked
 claim whose evidence clearly does. This is not the never-raise rule's
-territory: importance is prominence (which non-blocking findings post inline),
-never severity, and it cannot affect the verdict. A `plausible` or `refuted`
+territory: importance can never force REQUEST_CHANGES; it decides which
+non-blocking findings post inline, and whether the run submits a COMMENT
+review instead of an approval. A `plausible` or `refuted`
 claim needs no importance call from you; code strips the tier from every
 claim you verify as plausible or refute (a claim your output never mentions
 keeps whatever it arrived with, per the missing-output rule).
@@ -2194,13 +2208,14 @@ Return ONLY this JSON object (no prose, no code fence):
 
 `importance: "medium"` is the optional middle tier: mark it only on a
 non-blocking finding that is a verified defect or gap in code this PR adds, one
-a reasonable author would fix before merge. It is prominence, not severity: it
-never affects the verdict; it decides which non-blocking findings post inline
-rather than collapse, and it is what keeps a finding visible on re-reviews
-under the `blocking-medium` dial. The claim-validator checks the marking and
-strips any it cannot confirm, and code strips it from any finding not anchored
-on a line this PR added, so an evidence-free medium costs the finding its
-prominence and buys nothing.
+a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
+what it does is decide which non-blocking findings post inline rather than
+collapse, keep a finding visible on re-reviews under the `blocking-medium`
+dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
+findings without vouching for the change). The claim-validator checks the
+marking and strips any it cannot confirm, and code strips it from any finding
+not anchored on a changed line of this PR, so an evidence-free medium costs
+the finding its prominence and buys nothing.
 
 Use a blocking label only for a whole-change defect that genuinely must be fixed before
 approval. `failure_scenario` is required on every finding: the concrete inputs/state
@@ -2279,13 +2294,14 @@ Return ONLY this JSON object (no prose, no code fence):
 
 `importance: "medium"` is the optional middle tier: mark it only on a
 non-blocking finding that is a verified defect or gap in code this PR adds, one
-a reasonable author would fix before merge. It is prominence, not severity: it
-never affects the verdict; it decides which non-blocking findings post inline
-rather than collapse, and it is what keeps a finding visible on re-reviews
-under the `blocking-medium` dial. The claim-validator checks the marking and
-strips any it cannot confirm, and code strips it from any finding not anchored
-on a line this PR added, so an evidence-free medium costs the finding its
-prominence and buys nothing.
+a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
+what it does is decide which non-blocking findings post inline rather than
+collapse, keep a finding visible on re-reviews under the `blocking-medium`
+dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
+findings without vouching for the change). The claim-validator checks the
+marking and strips any it cannot confirm, and code strips it from any finding
+not anchored on a changed line of this PR, so an evidence-free medium costs
+the finding its prominence and buys nothing.
 
 Use a blocking label only when the change genuinely fails to deliver required, stated work.
 `failure_scenario` is required on every finding: the concrete gap and what a user or
@@ -2354,13 +2370,14 @@ Return ONLY this JSON object (no prose, no code fence):
 
 `importance: "medium"` is the optional middle tier: mark it only on a
 non-blocking finding that is a verified defect or gap in code this PR adds, one
-a reasonable author would fix before merge. It is prominence, not severity: it
-never affects the verdict; it decides which non-blocking findings post inline
-rather than collapse, and it is what keeps a finding visible on re-reviews
-under the `blocking-medium` dial. The claim-validator checks the marking and
-strips any it cannot confirm, and code strips it from any finding not anchored
-on a line this PR added, so an evidence-free medium costs the finding its
-prominence and buys nothing.
+a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
+what it does is decide which non-blocking findings post inline rather than
+collapse, keep a finding visible on re-reviews under the `blocking-medium`
+dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
+findings without vouching for the change). The claim-validator checks the
+marking and strips any it cannot confirm, and code strips it from any finding
+not anchored on a changed line of this PR, so an evidence-free medium costs
+the finding its prominence and buys nothing.
 
 `failure_scenario` is required on every finding: name the untested path and the
 concrete regression that would slip through it unnoticed (the claim-validator

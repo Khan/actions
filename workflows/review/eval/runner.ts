@@ -465,6 +465,14 @@ export const runCase = (
         dimensions: toDimensionReport(corpusCase.dimensions),
         policyConflicts: corpusCase.policyConflicts,
         keptBlockingCount,
+        // The PRA-7 middle-verdict signal, mirrored from submission.ts so
+        // the offline replica plans the same event the shipped path would
+        // submit. The harness has no changed-lines veto (fixtures are
+        // hand-anchored), so this is the pre-veto count; a fixture that
+        // wants a vetoed medium models it as advisory.
+        mediumCount: postedCandidates.filter(
+            (candidate) => candidate.finding.severity === "medium",
+        ).length,
         ...(options.blockingThreshold !== undefined
             ? {blockingThreshold: options.blockingThreshold}
             : {}),

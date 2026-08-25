@@ -361,7 +361,11 @@ export const stampFromCacheMemory = (raw: unknown): ReReviewStamp | null => {
         reviewedHunks?: unknown;
         wasDraft?: unknown;
     };
-    if (record.verdict !== "APPROVE" && record.verdict !== "REQUEST_CHANGES") {
+    if (
+        record.verdict !== "APPROVE" &&
+        record.verdict !== "COMMENT" &&
+        record.verdict !== "REQUEST_CHANGES"
+    ) {
         return null;
     }
     if (typeof record.wasDraft !== "boolean") {

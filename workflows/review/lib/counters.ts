@@ -162,6 +162,7 @@ export type RefusalFallbackCounter = {
 /** A fresh verdict histogram with every event key initialised to `0`. */
 export const emptyVerdictMix = (): VerdictMix => ({
     APPROVE: 0,
+    COMMENT: 0,
     REQUEST_CHANGES: 0,
     HOLD_FOR_HUMAN: 0,
 });
@@ -341,6 +342,7 @@ const asFiniteNumber = (value: unknown): number | undefined =>
 
 const isVerdictEvent = (value: unknown): value is VerdictEvent =>
     value === "APPROVE" ||
+    value === "COMMENT" ||
     value === "REQUEST_CHANGES" ||
     value === "HOLD_FOR_HUMAN";
 

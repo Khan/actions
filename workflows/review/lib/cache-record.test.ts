@@ -202,6 +202,36 @@ describe("runCacheRecordCli", () => {
         });
     });
 
+    it("records a COMMENT verdict like any submittable event (the PRA-7 middle verdict)", () => {
+        const fs = makeFakeFs(
+            staged({
+                [`${REVIEW}/submission-plan.json`]: JSON.stringify({
+                    event: "COMMENT",
+                    comments: [{path: "a.ts", line: 2, body: "b"}],
+                }),
+                [QUEUE]: JSON.stringify({
+                    items: [
+                        {
+                            type: "submit_pull_request_review",
+                            event: "COMMENT",
+                        },
+                        {
+                            type: "create_pull_request_review_comment",
+                            path: "a.ts",
+                        },
+                    ],
+                }),
+            }),
+        );
+        const result = runCacheRecordCli(fs, NOW);
+        expect(result.written).toBe(true);
+        const record = JSON.parse(fs.files[`${CACHE}/pr-41.json`]);
+        // A COMMENT run still records its fingerprint, so the next run's
+        // depth planning is unaffected.
+        expect(record.verdict).toBe("COMMENT");
+        expect(record.reviewedHunks).toEqual(HUNKS);
+    });
+
     it("no-ops without a staged plan (the orchestrator's write stands)", () => {
         const fs = makeFakeFs();
         const result = runCacheRecordCli(fs, NOW);

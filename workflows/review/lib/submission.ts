@@ -133,7 +133,7 @@ export type SubmissionPlan = {
      * HOLD_FOR_HUMAN, which submits NO review — the orchestrator posts
      * `body` as one standalone PR comment instead (Step 6's hold branch).
      */
-    event: "APPROVE" | "REQUEST_CHANGES" | "HOLD_FOR_HUMAN";
+    event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES" | "HOLD_FOR_HUMAN";
     /**
      * The full text to post verbatim: the review body (stamp included) for
      * a review event, or the hold comment (never stamped) for a hold.
@@ -421,11 +421,10 @@ export const runSubmissionCli = (
     // roster uses the tier at all is unobservable from posted output alone
     // (under-use looks exactly like the pre-tier surface), so every plan
     // records its post-veto medium count, zero included.
-    notes.push(
-        `medium-importance claims this run: ${
-            vetoed.filter((claim) => claim.importance === "medium").length
-        }`,
-    );
+    const mediumCount = vetoed.filter(
+        (claim) => claim.importance === "medium",
+    ).length;
+    notes.push(`medium-importance claims this run: ${mediumCount}`);
 
     // Stage the code-computed risks/patterns signature (trial suggestion b):
     // Step 7 compares THIS string against cache memory's `risksPatternsKey`
@@ -581,6 +580,11 @@ export const runSubmissionCli = (
             patternTriage: dimensionStatus(TRIAGE_DIMENSION),
         },
         keptBlockingCount: keptBlockingFloor + suppressedBlocking,
+        // The middle verdict's signal (PRA-7): post-veto mediums, the same
+        // count the notes line records. Collapsed mediums count too; the
+        // verdict follows what the run FOUND, not which surface showed it
+        // (the same invariant that keeps a 21st blocking claim blocking).
+        mediumCount,
     });
 
     // The depth note (Step 3), when the run reduced.
@@ -873,8 +877,30 @@ export const runSubmissionCli = (
         };
     });
 
+    // A COMMENT cannot clear this workflow's own prior REQUEST_CHANGES:
+    // GitHub derives a reviewer's state only from its latest APPROVE or
+    // REQUEST_CHANGES, and nothing here dismisses reviews. So when the
+    // prior stamped verdict is REQUEST_CHANGES and this run's blocking
+    // objections are all resolved (a COMMENT verdict implies exactly that:
+    // zero blocking labels AND zero kept blocking threads), the run
+    // approves instead, or the author stays blocked by a stale state their
+    // fixes already earned back. The mediums still post; the note line
+    // below says what happened.
+    const commentWouldStrandPriorRc =
+        verdict.event === "COMMENT" &&
+        priorStamp !== null &&
+        priorStamp.verdict === "REQUEST_CHANGES";
+    if (commentWouldStrandPriorRc) {
+        notes.push(
+            "COMMENT verdict upgraded to APPROVE: a comment cannot clear the prior request-changes state, and every blocking objection is resolved",
+        );
+    }
     const event =
-        verdict.event === "REQUEST_CHANGES" ? "REQUEST_CHANGES" : "APPROVE";
+        verdict.event === "REQUEST_CHANGES"
+            ? "REQUEST_CHANGES"
+            : verdict.event === "COMMENT" && !commentWouldStrandPriorRc
+            ? "COMMENT"
+            : "APPROVE";
 
     const head = renderReviewBody({
         event,
