@@ -204,3 +204,11 @@ export const renderCollapsedLine = (claim: Claim): string =>
  */
 export const COLLAPSED_ENTRY_RE =
     /^- `([^`\s:]+):(\d+)` ([a-z]+ \([^)]*\)): (.*?)(?: <sub>\(([^)]+)\)<\/sub>)?$/;
+
+/**
+ * The parse of the collapsed section's `<summary>` line (matched loosely,
+ * prefix only: the count and the named-top tag vary per run). Lives beside
+ * the renderer for the same no-drift reason as {@link COLLAPSED_ENTRY_RE}.
+ */
+export const COLLAPSED_SUMMARY_RE =
+    /<summary>(?:Non-blocking|Lower-confidence) observations \(/;

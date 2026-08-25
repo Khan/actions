@@ -33,7 +33,10 @@
  * degrade autofix's scope, not crash the run.
  */
 
-import {COLLAPSED_ENTRY_RE} from "../../review/lib/submission-render.ts";
+import {
+    COLLAPSED_ENTRY_RE,
+    COLLAPSED_SUMMARY_RE,
+} from "../../review/lib/submission-render.ts";
 import type {PriorReview} from "../../review/lib/rereview-mode.ts";
 
 /** One collapsed observation, parsed off the latest review body. */
@@ -49,13 +52,6 @@ export type CollapsedObservation = {
 };
 
 /**
- * The collapsed-section summaries `submission.ts` renders. Matched loosely
- * (prefix only): the count and the top-entry tag vary per run.
- */
-const SECTION_SUMMARY =
-    /<summary>(?:Non-blocking|Lower-confidence) observations \(/;
-
-/**
  * Parse the collapsed observations from the NEWEST review's body (ordered
  * by submittedAt where present, staging order otherwise). A newest body
  * with no collapsed section yields no observations; older bodies are never
@@ -68,17 +64,17 @@ export const parseCollapsedObservations = (
 ): CollapsedObservation[] => {
     // Defensive ordering, shared semantics with rereview-mode's stamp scan:
     // entries without a submittedAt keep their staging order.
-    const ordered = [...priorReviews].sort((a, b) =>
-        a.submittedAt === undefined || b.submittedAt === undefined
-            ? 0
-            : a.submittedAt < b.submittedAt
-            ? -1
-            : a.submittedAt > b.submittedAt
-            ? 1
-            : 0,
-    );
+    // Undefined submittedAt sorts OLDEST (empty string precedes every ISO
+    // timestamp), which keeps the comparator total and transitive on a
+    // mixed array; the old both-defined-only comparison made "newest"
+    // implementation-defined under Array.prototype.sort.
+    const ordered = [...priorReviews].sort((a, b) => {
+        const left = a.submittedAt ?? "";
+        const right = b.submittedAt ?? "";
+        return left < right ? -1 : left > right ? 1 : 0;
+    });
     const body = ordered[ordered.length - 1]?.body ?? "";
-    const start = body.search(SECTION_SUMMARY);
+    const start = body.search(COLLAPSED_SUMMARY_RE);
     if (start === -1) {
         return [];
     }

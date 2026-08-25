@@ -159,7 +159,7 @@ export const buildWorkList = (
 /**
  * Select the body-sourced observations in scope for this run (the collapsed
  * entries of the latest review body; see `collapsed.ts` for why those exist
- * and why latest-only). Same in-scope rule as {@link buildWorkList}, plus one
+ * and why latest-only). Same in-scope rule as {@link buildWorkList}, plus
  * two extra guards:
  *
  *   - An observation whose `path:line` an open staged thread already covers
@@ -169,10 +169,13 @@ export const buildWorkList = (
  *     bot-opened ones), so this is a bot-thread dedup guard; deference to
  *     open HUMAN conversations happens on the reviewer's side, at its
  *     skip-lines rule, before a finding ever posts or collapses.
- *   - The anchor must land on an ADDED line of the staged head diff
- *     (`changedLines`). Threads get this for free from GitHub, which nulls
- *     an outdated thread's line; a body item's line is a number parsed out
- *     of review text with nothing else to invalidate it, and the file-level
+ *   - The anchor must land on a CHANGED line of the staged head diff:
+ *     added, or adjacent to a removal (the provenance gate's
+ *     change-anchored union; a deletion-anchored observation about a
+ *     dropped guard legitimately anchors beside the removal). Threads get
+ *     their invalidation for free from GitHub, which nulls an outdated
+ *     thread's line; a body item's line is a number parsed out of review
+ *     text with nothing else to invalidate it, and the file-level
  *     stale-path check upstream runs only when review currency is
  *     verifiable, which in production it usually is not (posted reviews
  *     lose their fingerprint stamp). An anchor the current diff does not
@@ -217,10 +220,10 @@ export const buildBodyWorkList = (
             });
             continue;
         }
+        const file = changedLines[observation.path];
         if (
-            !(changedLines[observation.path]?.added ?? []).includes(
-                observation.line,
-            )
+            !(file?.added ?? []).includes(observation.line) &&
+            !(file?.removedAdjacent ?? []).includes(observation.line)
         ) {
             skipped.push({
                 threadId: id,

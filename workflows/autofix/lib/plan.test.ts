@@ -598,3 +598,40 @@ describe("buildPlan: body-sourced items (the collapsed-section source)", () => {
         });
     });
 });
+
+describe("buildPlan: body items on the unverifiable currency path", () => {
+    it("the diff-anchored check still guards when the fingerprint is unreadable", () => {
+        // A review with a body but no stamp: currency is unverifiable (the
+        // production-common case; posted reviews lose their stamp), so
+        // stalePaths is empty and the per-item diff anchor is the only
+        // guard. The in-diff observation arms; the drifted one drops.
+        const body = [
+            "Approved — no blocking issues found.",
+            "<details>",
+            "<summary>Non-blocking observations (2; top: x)</summary>",
+            "",
+            "- `src/a.ts:2` suggestion (non-blocking, documentation): In the diff. <sub>(documentation)</sub>",
+            "- `src/a.ts:40` suggestion (non-blocking, documentation): Drifted. <sub>(documentation)</sub>",
+            "",
+            "</details>",
+        ].join("\n");
+        const plan = buildPlan(
+            input({
+                labels: ["autofix: docs"],
+                threads: [],
+                priorReviews: [{body}],
+            }),
+        );
+        expect(plan.status).toBe("armed");
+        expect(plan.degradedNote).not.toBe("");
+        expect(plan.items.map((item) => item.threadId)).toEqual([
+            "review-body:src/a.ts:2:suggestion",
+        ]);
+        expect(plan.skipped).toContainEqual({
+            threadId: "review-body:src/a.ts:40:suggestion",
+            path: "src/a.ts",
+            reason: "outdated-anchor",
+            label: "suggestion (non-blocking, documentation)",
+        });
+    });
+});

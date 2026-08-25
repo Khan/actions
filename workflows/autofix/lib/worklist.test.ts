@@ -282,4 +282,22 @@ describe("buildBodyWorkList", () => {
             threadId: "review-body:src/a.ts:12:suggestion",
         });
     });
+
+    it("keeps a removal-adjacent anchor (deletion-anchored observations)", () => {
+        const {items} = buildBodyWorkList(
+            [observation()],
+            ["suggestion (non-blocking, documentation)"],
+            [],
+            {
+                "src/a.ts": {
+                    added: [],
+                    removed: [12],
+                    removedAdjacent: [12],
+                    lastShownLine: 12,
+                    textOverhead: 0,
+                },
+            },
+        );
+        expect(items).toHaveLength(1);
+    });
 });
