@@ -95,6 +95,13 @@ export type Candidate = {
  * trailing "e" so "caches" -> "cach" meets "cache" -> "cach". Both sides
  * of every comparison fold identically, and a miss is safe — the subject
  * is kept and the body merely stays as long as it is today.
+ *
+ * The three length thresholds all protect stem recognizability: a token of
+ * 3 or fewer chars is returned whole (too short to carry a strippable
+ * suffix; "les" is a word, not "le"+s), a suffix strip must leave a stem of
+ * at least 3 chars ("goes" loses "es" only because "go"+es fails the floor
+ * and falls through to the "s" strip, keeping "goe"), and the trailing-e
+ * strip requires 4+ chars so 3-char words like "use" survive intact.
  */
 const foldToken = (token: string): string => {
     if (token.length <= 3) {
