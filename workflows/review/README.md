@@ -2,8 +2,8 @@
 
 A [GitHub Agentic Workflow](https://github.github.com/gh-aw/) that reviews pull
 request changes for correctness, conventions, and risk on every push. It leaves
-per-line Conventional Comments, and on approval posts a risk/patterns summary
-comment and requests the owning teams as reviewers.
+per-line Conventional Comments; on approval it posts a risk/patterns summary
+comment, and on approval or comment it requests the owning teams as reviewers.
 
 The flow here is **generic**; everything repo-specific (risk file patterns, the
 best-practice skill catalog, the CI-tooling exclusions, and the reviewer team

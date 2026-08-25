@@ -889,11 +889,15 @@ under an approval, and the middle verdict says so without demanding another
 round); APPROVE otherwise — all `lib/verdict.ts` / `lib/submission.ts` rules.
 A fourth outcome exists: HOLD_FOR_HUMAN, when a core review pass
 (`correctness-reviewer` or `skill-auditor`) produced no usable output this
-run and the run would otherwise have auto-approved — the automation never
-approves a change its core passes did not look at (a blocking finding still
-wins, and a medium finding still comments: both are actionable on their own,
-so the hold only ever replaces a would-be APPROVE and the gap is disclosed
-in a note line). The plan's `event` IS the
+run and the run would otherwise have auto-approved or commented — the
+automation never approves a change its core passes did not look at, and it
+never writes a fingerprint from a partial assessment either (a blocking
+finding still wins: it is actionable on its own; medium findings fold into
+the hold comment as claim lines). One more mechanical guard: a COMMENT that
+would leave this workflow's own prior REQUEST_CHANGES standing upgrades to
+APPROVE with a note, because GitHub only moves a reviewer's state on APPROVE
+or REQUEST_CHANGES and a stale block the author's fixes already earned back
+must not survive on a technicality. The plan's `event` IS the
 verdict; never recompute, second-guess, or override it. (The blocking-label
 vocabulary and the concrete-failing-scenario bar live in the sub-agent
 definitions and the shared lib.)

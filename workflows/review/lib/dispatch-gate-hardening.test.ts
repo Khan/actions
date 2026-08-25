@@ -422,6 +422,22 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
             rereviewAccounting: {keptBlockingCount: 2},
         });
         expect(full.conformant).toBe(true);
+        // A COMMENT flip is vetoed the same way: it cannot clear the prior
+        // REQUEST_CHANGES state, but the chokepoint mirrors verdict.ts's
+        // floor for the no-plan case regardless of the event flavor.
+        const commentFlip = evaluate({
+            ...base,
+            items: [
+                submitItem(
+                    "COMMENT",
+                    "Commented — medium-importance findings found; nothing blocks.",
+                ),
+            ],
+            rereviewAccounting: {keptBlockingCount: 2},
+        });
+        expect(commentFlip.violations.map((v) => v.code)).toEqual([
+            "flip-vetoed-kept-blocking",
+        ]);
     });
 
     it("vetoes the flip from a cache-memory stamp when posted bodies carry none (the production shape)", () => {

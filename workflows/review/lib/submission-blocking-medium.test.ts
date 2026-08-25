@@ -339,3 +339,26 @@ describe("the COMMENT verdict", () => {
         expect(runSubmissionCli(fs).event).toBe("REQUEST_CHANGES");
     });
 });
+
+describe("the COMMENT verdict's prior-state guard", () => {
+    it("upgrades COMMENT to APPROVE over a prior REQUEST_CHANGES stamp", () => {
+        // GitHub state only moves on APPROVE or REQUEST_CHANGES: a COMMENT
+        // would leave the bot's own prior block standing after the author
+        // fixed every blocking objection.
+        const files = staged({
+            depth: "scoped",
+            claims: [claim({id: "medium", importance: "medium"})],
+        });
+        files[`${REVIEW}/pr-context.json`] = JSON.stringify({number: 7});
+        files[`/tmp/gh-aw/cache-memory/pr-7.json`] = JSON.stringify({
+            verdict: "REQUEST_CHANGES",
+            wasDraft: false,
+            reviewedHunks: {"a.ts": ["h1"]},
+        });
+        const plan = runSubmissionCli(makeFakeFs(files));
+        expect(plan.event).toBe("APPROVE");
+        expect(plan.notes).toContainEqual(
+            "COMMENT verdict upgraded to APPROVE: a comment cannot clear the prior request-changes state, and every blocking objection is resolved",
+        );
+    });
+});

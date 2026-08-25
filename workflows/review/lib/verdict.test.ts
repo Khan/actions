@@ -339,16 +339,18 @@ describe("the COMMENT verdict (the PRA-7 middle outcome)", () => {
         ).toBe("REQUEST_CHANGES");
     });
 
-    it("COMMENT outranks the hold: a comment approves nothing, so the missing core pass is disclosed, not held on", () => {
+    it("the hold outranks COMMENT: a partial assessment must not write a fingerprint, whatever it found", () => {
         const verdict = computeVerdict({
             postedLabels: ["note (non-blocking)"],
             dimensions: {...assessed, correctness: "unavailable"},
             mediumCount: 1,
         });
-        expect(verdict.event).toBe("COMMENT");
+        expect(verdict.event).toBe("HOLD_FOR_HUMAN");
+        // The medium findings are still recorded; the hold comment folds
+        // them as claim lines, so the author sees them anyway.
         expect(verdict.reasons).toContainEqual({
-            code: "core-dimension-unavailable",
-            dimension: "correctness",
+            code: "medium-importance",
+            count: 1,
         });
     });
 

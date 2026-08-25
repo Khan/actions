@@ -156,7 +156,7 @@ export const DEFAULT_BLOCKING_THRESHOLD = 1;
  * input always yields the same verdict, which is what makes the determinism
  * boundary testable.
  *
- * Precedence is REQUEST_CHANGES > COMMENT > HOLD_FOR_HUMAN > APPROVE:
+ * Precedence is REQUEST_CHANGES > HOLD_FOR_HUMAN > COMMENT > APPROVE:
  *
  *   1. If the blocking-label count meets the threshold -> REQUEST_CHANGES. A
  *      blocking finding is actionable on its own: the author gets concrete
@@ -164,21 +164,20 @@ export const DEFAULT_BLOCKING_THRESHOLD = 1;
  *      after those changes retries the failed dimension anyway. Any missing
  *      core dimension or policy conflict is still recorded in `reasons` (and
  *      rendered into the body), so nothing is hidden.
- *   2. Otherwise, if any posted claim carries the medium tier -> COMMENT.
- *      The middle verdict outranks the hold deliberately: the hold exists
- *      to stop the automation APPROVING what its core passes never checked,
- *      and a COMMENT approves nothing, while the medium findings are
- *      actionable feedback the author can already use (a missing core
- *      dimension is still recorded in `reasons` and disclosed in the body's
- *      note lines).
- *   3. Otherwise, if any core dimension is unavailable or any policy conflict
- *      is present, the run must not resolve to an approval the automation
- *      cannot stand behind -> HOLD_FOR_HUMAN.
+ *   2. Otherwise, if any core dimension is unavailable or any policy conflict
+ *      is present -> HOLD_FOR_HUMAN, mediums or no mediums. An earlier
+ *      revision had COMMENT outrank the hold ("a COMMENT approves nothing"),
+ *      which reasoned about the approval half only: the hold's OTHER effect
+ *      is that no fingerprint stamp is written and the cache record is
+ *      refused, so the next run reviews in full rather than anchoring a
+ *      reduced re-review on a partial assessment. A COMMENT run writes both,
+ *      so letting it win would trade that away; medium findings still reach
+ *      the author as folded claim lines in the hold comment.
+ *   3. Otherwise, if any posted claim carries the medium tier -> COMMENT.
  *   4. Otherwise -> APPROVE.
  *
  * The hold therefore only ever replaces what would otherwise have been an
- * auto-approval; it never sits in front of feedback the author could already
- * act on.
+ * auto-approval or a comment; it never sits in front of blocking feedback.
  */
 export const computeVerdict = (input: VerdictInput): Verdict => {
     const threshold = Math.max(
@@ -245,17 +244,16 @@ export const computeVerdict = (input: VerdictInput): Verdict => {
         return {event: "REQUEST_CHANGES", reasons};
     }
 
-    // The middle verdict: verified worth-fixing findings, nothing blocking.
-    // Ahead of the hold on purpose (see the precedence note above): a
-    // COMMENT approves nothing, so the hold's never-approve-unchecked
-    // premise is not violated, and the author gets the findings.
-    if (mediumCount > 0) {
-        return {event: "COMMENT", reasons};
-    }
-
-    // The hold only ever replaces what would otherwise be an auto-approval.
+    // The hold outranks the comment (see the precedence note above): its
+    // no-stamp/no-record effect is what forces the next run to review in
+    // full, and a COMMENT run would write both from a partial assessment.
     if (missingCore.length > 0 || policyConflicts.length > 0) {
         return {event: "HOLD_FOR_HUMAN", reasons};
+    }
+
+    // The middle verdict: verified worth-fixing findings, nothing blocking.
+    if (mediumCount > 0) {
+        return {event: "COMMENT", reasons};
     }
 
     return {event: "APPROVE", reasons};

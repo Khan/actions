@@ -877,10 +877,28 @@ export const runSubmissionCli = (
         };
     });
 
+    // A COMMENT cannot clear this workflow's own prior REQUEST_CHANGES:
+    // GitHub derives a reviewer's state only from its latest APPROVE or
+    // REQUEST_CHANGES, and nothing here dismisses reviews. So when the
+    // prior stamped verdict is REQUEST_CHANGES and this run's blocking
+    // objections are all resolved (a COMMENT verdict implies exactly that:
+    // zero blocking labels AND zero kept blocking threads), the run
+    // approves instead, or the author stays blocked by a stale state their
+    // fixes already earned back. The mediums still post; the note line
+    // below says what happened.
+    const commentWouldStrandPriorRc =
+        verdict.event === "COMMENT" &&
+        priorStamp !== null &&
+        priorStamp.verdict === "REQUEST_CHANGES";
+    if (commentWouldStrandPriorRc) {
+        notes.push(
+            "COMMENT verdict upgraded to APPROVE: a comment cannot clear the prior request-changes state, and every blocking objection is resolved",
+        );
+    }
     const event =
         verdict.event === "REQUEST_CHANGES"
             ? "REQUEST_CHANGES"
-            : verdict.event === "COMMENT"
+            : verdict.event === "COMMENT" && !commentWouldStrandPriorRc
             ? "COMMENT"
             : "APPROVE";
 
