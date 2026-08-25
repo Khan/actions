@@ -14,12 +14,13 @@ jobs:
             contents: write
             pull-requests: write
         steps:
-            # We need the bot token here to be able to push fixes back, and
-            # an explicit ref so we lint the PR's code rather than the base.
+            # We need the bot token here to be able to push fixes back, and we
+            # check out the PR branch itself so the push lands on the PR.
             - name: Checking out the PR
               uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
               with:
-                  ref: ${{ github.event.pull_request.head.sha }}
+                  repository: ${{ github.event.pull_request.head.repo.full_name }}
+                  ref: ${{ github.event.pull_request.head.ref }}
                   token: ${{ secrets.CI_BOT_TOKEN }}
 
             - name: Setup
