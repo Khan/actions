@@ -58,7 +58,7 @@ export const renderCollapsedFooter = (content: string): string =>
  * non-greedy match. Escape the HTML-significant characters; GitHub renders
  * the entities back as the literal characters.
  */
-const escapeHtml = (text: string): string =>
+export const escapeHtml = (text: string): string =>
     text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 const flaggedBy = (entry: AlsoFlagged): string => {

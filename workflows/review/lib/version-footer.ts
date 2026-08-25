@@ -27,6 +27,7 @@
 
 import {renderCollapsedFooter} from "./attribution";
 import {FINDING_SCHEMA_VERSION} from "./finding-schema";
+import {DEFAULT_NON_BLOCKING_INLINE_BUDGET} from "./routing-config";
 
 const REVIEW_DIR = "/tmp/gh-aw/review";
 
@@ -53,6 +54,10 @@ export type VersionFooterInputs = {
     blockingOnly: boolean;
     /** The ROUTING `enable` list (canonical order, from routing.json). */
     enabledReviewers: string[];
+    /** The ROUTING `non-blocking-budget` value; null drops the segment, and
+     * the default value is omitted too (the footer states configuration,
+     * not defaults). */
+    nonBlockingInlineBudget: number | null;
 };
 
 /**
@@ -79,6 +84,12 @@ export const renderVersionFooter = (inputs: VersionFooterInputs): string => {
     }
     if (inputs.enabledReviewers.length > 0) {
         segments.push(`enable ${inputs.enabledReviewers.join(",")}`);
+    }
+    if (
+        typeof inputs.nonBlockingInlineBudget === "number" &&
+        inputs.nonBlockingInlineBudget !== DEFAULT_NON_BLOCKING_INLINE_BUDGET
+    ) {
+        segments.push(`non-blocking-budget ${inputs.nonBlockingInlineBudget}`);
     }
     return renderCollapsedFooter(segments.join(" | "));
 };
@@ -130,6 +141,7 @@ export const runVersionFooterCli = (
               reReviewMode?: unknown;
               reReviewBlockingOnly?: unknown;
               enabledReviewers?: unknown;
+              nonBlockingInlineBudget?: unknown;
           }
         | undefined;
     const footer = renderVersionFooter({
@@ -151,6 +163,10 @@ export const runVersionFooterCli = (
                   (entry): entry is string => typeof entry === "string",
               )
             : [],
+        nonBlockingInlineBudget:
+            typeof routing?.nonBlockingInlineBudget === "number"
+                ? routing.nonBlockingInlineBudget
+                : null,
     });
     fs.writeFileSync(FOOTER_OUT, footer);
     return footer;
