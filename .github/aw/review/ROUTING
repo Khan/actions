@@ -23,11 +23,15 @@ enable holistic,completeness,test-adequacy,first-principles,conventions,document
 # flip-gated once re-reviews here show scoped is overpaying (see
 # workflows/review/README.md for the dial).
 #
-# blocking-only: repeat reviews keep the full scoped roster (blocking recall
-# unchanged) but post only blocking findings inline; validated non-blocking
-# findings collapse to one line each in the review body. First full reviews,
-# tripwire re-arms, and guard-degraded full runs still post everything.
-re-review scoped blocking-only
+# blocking-medium: repeat reviews keep the full scoped roster (blocking recall
+# unchanged) but post only blocking and medium-importance findings inline;
+# other validated non-blocking findings collapse to one line each in the review
+# body. First full reviews, tripwire re-arms, and guard-degraded full runs
+# still post everything. Flipped from blocking-only at the v1.20.0 bump:
+# three 2026-08-24 approving re-reviews here collapsed verified correctness
+# findings behind a bare count; blocking-only stays the rollback dial for
+# the inline surface.
+re-review scoped blocking-medium
 
 # Shipped composite actions run inside consuming repos' CI with their credentials.
 actions/**                   tier=high
