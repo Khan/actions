@@ -242,7 +242,7 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: autofix-v0.3.0
+      ref: autofix-v0.4.0
       path: gh-aw-autofix-lib
       persist-credentials: false
 
@@ -336,7 +336,7 @@ env:
   GIT_CONFIG_KEY_1: remote.origin.partialclonefilter
   GIT_CONFIG_VALUE_1: "blob:none"
 
-source: Khan/actions/workflows/autofix/autofix.md@autofix-v0.3.0
+source: Khan/actions/workflows/autofix/autofix.md@autofix-v0.4.0
 ---
 
 # PR Autofixer
