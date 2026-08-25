@@ -55,7 +55,8 @@ describe("adjudicatedThreadsFromStaged", () => {
 
     it("admits a bot thread whose opener a reviewer downvoted, whatever its resolution state", () => {
         // The 👎 channel: the same judgment as resolving, delivered through
-        // the reaction the thumbs sweep advertises. Resolution state does not
+        // the reaction the retired thumbs sweep used to advertise. Resolution
+        // state does not
         // gate it; a still-open downvoted thread is also in the open corpus,
         // and the composed pass attributes a double match to the open thread.
         for (const state of [

@@ -56,8 +56,7 @@ export const DEFAULT_REVIEW_BOT_LOGIN = "github-actions[bot]";
  * GitHub App has a different login, and a login it cannot change would misfile
  * every one of its bot threads as human, which puts them in `skipLines` and
  * DROPS fresh findings on those lines. `REVIEW_BOT_LOGIN` matches the env its
- * siblings already take (autofix's `AUTOFIX_BOT_LOGIN`, the thumbs sweep's
- * `REVIEW_SWEEP_BOT_LOGIN`), same default.
+ * sibling already takes (autofix's `AUTOFIX_BOT_LOGIN`), same default.
  *
  * Read per call rather than captured at import so the value a CLI sets after
  * this module loads is still seen.
@@ -113,7 +112,7 @@ export const isReviewBotAuthor = (login: string): boolean =>
 /**
  * Review threads with their full reply chain.
  *
- * `comments(first: 100)` rather than the thumbs sweep's `first: 1`: the
+ * `comments(first: 100)` rather than an opener-only `first: 1`: the
  * reconciler contract wants the whole chain, because an author's reply is
  * often what says a finding is already handled. `isResolved` is fetched so
  * resolved threads are dropped here rather than downstream.
@@ -279,13 +278,13 @@ export type FetchedThread = StagedThread & {
     /**
      * How many 👎 reactions from ATTRIBUTABLE NON-BOT reactors the thread's
      * OPENING comment carries. The opener is the finding, so a downvote on it
-     * is a reviewer's judgment on the finding itself (the thumbs sweep reacts
-     * to exactly this signal); later comments' reactions are conversation,
+     * is a reviewer's judgment on the finding itself; later
+     * comments' reactions are conversation,
      * not adjudication, and are not counted. 0 when there is no opener or the
      * API returned no connection.
      *
      * Reactor identity is filtered, not merely counted, for the same reason
-     * the sweep's `countDownvotes` filters `r.user !== botLogin`: the review
+     * the retired sweep's `countDownvotes` filtered `r.user !== botLogin`: the review
      * workflow plans to seed the 👍/👎 nudge pair on its own comments at post
      * time (README, "Nudge seeding"), and a seeded 👎 is the presence of the
      * feedback widget, not a judgment on the finding. A raw `totalCount`
@@ -295,8 +294,8 @@ export type FetchedThread = StagedThread & {
      * An unattributable reactor (a deleted account, GraphQL `user: null`) is
      * excluded too, matching {@link FetchedThread.resolvedBy}'s rule that an
      * empty identity never reads as human adjudication. This is deliberately
-     * STRICTER than the sweep, whose `Reaction` doc treats a login-less
-     * reaction as a real user's: the sweep's worst case is one wasted "why?"
+     * STRICTER than the retired sweep, whose `Reaction` doc treated a login-less
+     * reaction as a real user's: that worst case was one wasted "why?"
      * question, while this count suppresses re-derivation of the defect, and
      * suppression on unverifiable authority is the expensive direction.
      */

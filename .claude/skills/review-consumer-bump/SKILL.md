@@ -151,6 +151,10 @@ effects, each observed on v0.85.4:
 - `'engine.model' is deprecated` warnings come from the shared file and are
   upstream's to fix. Do not run `gh aw fix` in a consumer.
 
+While in the consumer: if it still carries `review-feedback.yml` (the retired
+thumbs sweep), delete it in the same bump PR; Khan/webapp#41685 is the
+reference deletion. `review-counters.yml` stays.
+
 ## Step 5: verify
 
 1. No conflict markers: `grep -n "^<<<<<<<" .github/workflows/review.md`.

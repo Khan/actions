@@ -76,8 +76,8 @@ export type ReconcilerResult = {
  *   reconciler never decided is a fabrication.
  * - The staged thread must carry a REPLY (not the opener) whose author is
  *   the PR author. "Bot replies never count" is the #332 fail-closed rule
- *   this enforces mechanically: the thumbs sweep's follow-ups and autofix's
- *   replies sit on exactly these threads, and a reconciler hallucinating an
+ *   this enforces mechanically: autofix's replies (and, on older threads,
+ *   the retired thumbs sweep's follow-ups) sit on exactly these threads, and a reconciler hallucinating an
  *   acknowledgment out of one must contribute nothing. The author
  *   comparison is {@link sameLogin} (the REST/GraphQL bot-suffix split
  *   applies to human logins too, trivially), belt-and-suspendered by the

@@ -251,9 +251,9 @@ jq '[.[] | select(.body
   `gh-aw-agentic-workflow` marker is what identifies the guidance comment.
 - **GraphQL may be unavailable.** Under a GET-only gh broker, the GraphQL
   endpoint (needed for `reviewThreads` resolution state) is blocked. Thread
-  resolution is a positive signal column the thumbs sweep normally reports;
-  when GraphQL is blocked, state explicitly in the report that
-  thread-resolution counts are unavailable. Do not approximate them from
+  resolution is a positive signal column of this audit; when GraphQL is
+  blocked, state explicitly in the report that thread-resolution counts are
+  unavailable. Do not approximate them from
   reply activity.
 - **`since` is an `updated_at` filter.** Always re-filter on
   `created_at`/`submitted_at`; an old comment edited inside the window
@@ -272,9 +272,11 @@ jq '[.[] | select(.body
   measurement, re-derive the string from the checkout being audited. The
   `review-thumbs-followup` marker and the downvote-reason vocabulary were
   deleted from the lib with the follow-up retirement; when auditing a
-  pre-retirement window, re-derive them from the `workflows/review`
-  CHANGELOG entry for the retirement or from a pre-retirement tag's
-  `lib/thumbs-sweep.ts`.
+  pre-retirement window, re-derive the marker from a pre-retirement tag's
+  `lib/thumbs-sweep.ts` (the CHANGELOG entry describes the retirement but
+  does not quote the deleted strings). The downvote-reason vocabulary needs
+  no tag: it survives in the checkout as `DownvoteReason` in
+  `workflows/review/eval/judge.ts`.
 
 ## Step 4: report
 
