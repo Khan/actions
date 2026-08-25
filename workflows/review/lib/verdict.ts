@@ -6,9 +6,8 @@
  * (PRA-7: mediums demote a would-be approval to COMMENT), (3) which review
  * dimensions were assessed this run, and (4) any policy-named conflicts a
  * lens flagged. It emits one of four events with a machine-readable list of
- * reasons. No prose is
- * synthesised here: reasons are structured records, not
- * sentences about the code.
+ * reasons. No prose is synthesised here: reasons are structured records,
+ * not sentences about the code.
  *
  * Relationship to #194: #194 already established the *mechanical label model* —
  * REQUEST_CHANGES iff at least one posted comment carries a blocking label,
@@ -231,12 +230,14 @@ export const computeVerdict = (input: VerdictInput): Verdict => {
     // A run with zero blocking labels is never REQUEST_CHANGES (review.md
     // Step 4) — unless a prior review's blocking thread is still open, in
     // which case the earlier objection is the actionable feedback.
-    // (f) Medium-importance claims — the PRA-7 middle verdict's signal.
+    // (f) Medium-importance claims — the PRA-7 middle verdict's signal
+    // (post-veto count, from the caller).
     const mediumCount = input.mediumCount ?? 0;
     if (mediumCount > 0) {
         reasons.push({code: "medium-importance", count: mediumCount});
     }
 
+    // Precedence: a blocking finding is actionable on its own, so it wins.
     if (
         (blockingLabelCount > 0 && blockingLabelCount >= threshold) ||
         keptBlocking > 0

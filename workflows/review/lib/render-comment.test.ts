@@ -396,7 +396,7 @@ describe("renderReviewBody — the COMMENT verdict", () => {
             hasInlineComments: true,
         });
         expect(body).toContain(
-            "Commented — medium-importance findings posted; nothing blocks.",
+            "Commented — medium-importance findings found; nothing blocks.",
         );
     });
 });

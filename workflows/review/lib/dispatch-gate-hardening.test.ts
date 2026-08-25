@@ -358,7 +358,7 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
                 commentItem(2, "**issue (blocking):** guard removed"),
                 submitItem(
                     "COMMENT",
-                    "Commented — medium-importance findings posted; nothing blocks.",
+                    "Commented — medium-importance findings found; nothing blocks.",
                 ),
             ],
         });

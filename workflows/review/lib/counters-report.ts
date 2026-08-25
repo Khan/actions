@@ -110,7 +110,9 @@ export const synthesizeSummaryFromGhAw = (
         }
         const event = entry["event"];
         if (
-            (event === "APPROVE" || event === "REQUEST_CHANGES") &&
+            (event === "APPROVE" ||
+                event === "COMMENT" ||
+                event === "REQUEST_CHANGES") &&
             summary["verdict"] !== "REQUEST_CHANGES"
         ) {
             summary["verdict"] = event;
@@ -293,9 +295,9 @@ export const renderCountersMarkdown = (
         "",
         "### Verdict mix",
         "",
-        "| APPROVE | REQUEST_CHANGES | HOLD_FOR_HUMAN* |",
-        "| --- | --- | --- |",
-        `| ${counters.verdictMix.APPROVE} | ${counters.verdictMix.REQUEST_CHANGES} | ${counters.verdictMix.HOLD_FOR_HUMAN} |`,
+        "| APPROVE | COMMENT | REQUEST_CHANGES | HOLD_FOR_HUMAN* |",
+        "| --- | --- | --- | --- |",
+        `| ${counters.verdictMix.APPROVE} | ${counters.verdictMix.COMMENT} | ${counters.verdictMix.REQUEST_CHANGES} | ${counters.verdictMix.HOLD_FOR_HUMAN} |`,
         "",
         `*${runsWithoutVerdict} run(s) submitted no review this window (e.g. the` +
             " redundant-approval skip) and count under the HOLD_FOR_HUMAN fallback.",

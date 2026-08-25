@@ -72,9 +72,12 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
    about a mechanism that predates the diff is confirmed only when the diff materially
    amplifies its consequence and the finding says so.
 
-The workflow then posts the per-line Conventional Comments that survived validation,
-submits an approve / request-changes review, and on approval posts the risk/patterns
-summary and requests the owning teams. The config files below feed these sub-agents.
+The workflow then posts the per-line Conventional Comments that survived validation
+and submits an approve, comment, or request-changes review: changes are requested
+iff a blocking finding survived, the run comments (without approving) when its
+findings top out at the medium importance tier, and it approves only when it found
+nothing worth fixing before merge. On approval it also posts the risk/patterns
+summary; on approval or comment it requests the owning teams. The config files below feed these sub-agents.
 
 A mechanical gate and a budget guardrail sit between the reviewers and the PR. The
 **change-provenance gate** (enforced in code against the diff's parsed changed-line
@@ -98,7 +101,7 @@ every safe output during the agent run and executes the queue from a separate
 verdict and findings against the staged `out/` sub-agent outputs (per re-review
 depth: the correctness pass wherever the depth dispatches one, the
 claim-validator whenever findings post, a disclosure note for every planned
-shed, no blocking inline comment under an APPROVE, the reduced-depth flip veto
+shed, no blocking inline comment under an APPROVE or COMMENT, the reduced-depth flip veto
 over kept blocking threads, and every queued thread resolution backed by the
 reconciler's decision) and, on violation, strips the posting items from the
 queue and fails the job. A run that skipped its own dispatch protocol (observed in production:
@@ -614,8 +617,11 @@ posting inline, spending the non-blocking budget. Motivating case for
 preferring it over strict `blocking-only`: three 2026-08-24 approving
 re-reviews on this repo collapsed verified correctness findings behind a bare
 "Non-blocking observations (N)" count (#367's "the reply guard never fires"
-among them). `blocking-only` stays available as the rollback dial if the
-medium tier inflates on a consumer. At most one modifier per `re-review`
+among them). `blocking-only` stays available as the rollback dial for the
+inline surface if the medium tier inflates on a consumer; note it quiets the
+posting surface only — the verdict follows the medium count regardless, so
+sustained inflation is a calibration fix (reviewer prompts, validator
+adjudication), not a ROUTING dial. At most one modifier per `re-review`
 line; a later line replaces an earlier one.
 
 The dial is a measured change, not a default change: it ships `full`

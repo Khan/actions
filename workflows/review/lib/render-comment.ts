@@ -137,10 +137,12 @@ const DOCUMENTATION_LENSES: ReadonlySet<Lens> = new Set<Lens>([
  *   - advisory  + other lens          -> `suggestion (non-blocking)`
  *
  * `medium` severity renders exactly as `advisory` does (the non-blocking
- * rows above). That is the tier's design invariant, not an omission: medium
- * is a posting-surface rank (which findings deserve the inline slots), and
- * keeping it out of the label vocabulary is what leaves the verdict, the
- * recap parser, dedup's blocking guards, and the flip gate untouched.
+ * rows above). That is the tier's design invariant, not an omission:
+ * keeping medium out of the label vocabulary is what leaves the label-keyed
+ * machinery (the recap parser, dedup's blocking guards, the flip gate)
+ * untouched. The verdict DOES read the tier, but directly (`verdict.ts`
+ * consumes the post-veto medium count and demotes a would-be APPROVE to
+ * COMMENT), never through labels.
  *
  * There is deliberately **no blocking documentation variant**. The
  * documentation reviewer is advisory-only (its definition permits it one
@@ -335,7 +337,7 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             // The middle verdict never has an empty body either: the head is
             // what tells an author this is deliberately not an approval.
             head =
-                "Commented — medium-importance findings posted; nothing blocks.";
+                "Commented — medium-importance findings found; nothing blocks.";
             break;
         case "HOLD_FOR_HUMAN":
             head = HOLD_HEAD;

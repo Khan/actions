@@ -426,10 +426,13 @@ export const evaluateDispatchConformance = (
 
     // Rule 5: the re-review flip veto (Step 4, reduced depths only): at
     // flip-gated/fast depth, a prior REQUEST_CHANGES (read from the stamp,
-    // not the review state) may flip to APPROVE only when the code-rendered
-    // accountability result says every blocking thread was resolved.
+    // not the review state) may flip to APPROVE or COMMENT only when the
+    // code-rendered accountability result says every blocking thread was
+    // resolved (verdict.ts floors the verdict at REQUEST_CHANGES while a
+    // kept blocking thread exists, mediums or no mediums; this chokepoint
+    // mirrors that invariant for the no-plan case).
     if (
-        verdictEvent === "APPROVE" &&
+        (verdictEvent === "APPROVE" || verdictEvent === "COMMENT") &&
         (depth === "flip-gated" || depth === "fast")
     ) {
         const bodyStamp = Array.isArray(input.priorReviews)

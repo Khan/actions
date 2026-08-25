@@ -77,14 +77,16 @@ export type Lens = typeof KNOWN_LENSES[number];
  *
  * `medium` is the middle tier (PRA-7): a verified defect or gap in code this
  * PR adds, that a reasonable author would fix before merge, but that does
- * not block. It is a POSTING-SURFACE tier, never a verdict input: a medium
- * finding renders with the same non-blocking labels an advisory one does
- * (`labelForFinding` treats them identically), so every label-keyed consumer
- * (verdict, recap parser, dedup guards, flip gate) is untouched by
- * construction. What medium buys is prominence: it ranks ahead of advisory
- * findings for the non-blocking inline budget and posts inline on re-reviews
- * under the ROUTING `blocking-medium` modifier, where advisory findings
- * collapse. Motivating case: three 2026-08-24 approving re-reviews collapsed
+ * not block. It can never force REQUEST_CHANGES, and it mints no label: a
+ * medium finding renders with the same non-blocking labels an advisory one
+ * does (`labelForFinding` treats them identically), so every label-keyed
+ * consumer (recap parser, dedup guards, flip gate) is untouched by
+ * construction. What medium buys is prominence and honesty: it ranks ahead
+ * of advisory findings for the non-blocking inline budget, posts inline on
+ * re-reviews under the ROUTING `blocking-medium` modifier where advisory
+ * findings collapse, and demotes the run's verdict from APPROVE to COMMENT
+ * (verdict.ts reads the post-veto medium count directly, not through
+ * labels). Motivating case: three 2026-08-24 approving re-reviews collapsed
  * verified correctness findings behind a bare "Non-blocking observations
  * (N)" count (Khan/actions#367, #371, #366).
  *

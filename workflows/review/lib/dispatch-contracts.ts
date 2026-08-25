@@ -683,11 +683,12 @@ export type Claim = {
      * The medium-importance tier (PRA-7): present (as `"medium"`) on a
      * claim whose finding carried `severity: "medium"` — a verified defect
      * or gap in code this PR adds, that a reasonable author would fix
-     * before merge, but that does not block. Absent means minor. Never a
-     * verdict input (the label carries blocking-ness); the posting surface
-     * (submission.ts) ranks medium claims ahead of minor ones for the
-     * non-blocking inline budget and posts them inline on `blocking-medium`
-     * re-reviews. The claim-validator adjudicates it (`corrected.importance`
+     * before merge, but that does not block. Absent means minor. It can
+     * never force REQUEST_CHANGES (the label carries blocking-ness); the
+     * posting surface (submission.ts) ranks medium claims ahead of minor
+     * ones for the non-blocking inline budget and posts them inline on
+     * `blocking-medium` re-reviews, and a nonzero post-veto medium count
+     * demotes a would-be APPROVE to COMMENT (verdict.ts). The claim-validator adjudicates it (`corrected.importance`
      * both directions), a `plausible` verification strips it (unconfirmed
      * fails the tier's "verified" test), and {@link applyMediumVeto} strips
      * it from any claim not anchored on a line this PR added.

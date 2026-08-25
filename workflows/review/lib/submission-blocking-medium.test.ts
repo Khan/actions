@@ -100,7 +100,7 @@ describe("runSubmissionCli: re-review blocking-medium", () => {
         // verdict (PRA-7): the run neither vouches nor demands a round.
         expect(plan.event).toBe("COMMENT");
         expect(plan.body).toContain(
-            "Commented — medium-importance findings posted; nothing blocks.",
+            "Commented — medium-importance findings found; nothing blocks.",
         );
         expect(plan.comments).toHaveLength(1);
         expect(plan.comments[0].line).toBe(2);
