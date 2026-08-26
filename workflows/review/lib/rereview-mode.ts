@@ -228,6 +228,17 @@ const encodeSignature = (signature: HunkSignature): string => {
     return Buffer.from(JSON.stringify(sorted), "utf8").toString("base64url");
 };
 
+/** Shape check shared by the payload decoder and the stamp CLI's guard. */
+const isHunkSignature = (value: unknown): value is HunkSignature =>
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.values(value).every(
+        (hashes) =>
+            Array.isArray(hashes) &&
+            hashes.every((hash) => typeof hash === "string"),
+    );
+
 const decodeSignature = (encoded: string): HunkSignature | null => {
     let parsed: unknown;
     try {
@@ -235,24 +246,7 @@ const decodeSignature = (encoded: string): HunkSignature | null => {
     } catch {
         return null;
     }
-    if (
-        parsed === null ||
-        typeof parsed !== "object" ||
-        Array.isArray(parsed)
-    ) {
-        return null;
-    }
-    const signature: HunkSignature = {};
-    for (const [path, hashes] of Object.entries(parsed)) {
-        if (
-            !Array.isArray(hashes) ||
-            !hashes.every((hash) => typeof hash === "string")
-        ) {
-            return null;
-        }
-        signature[path] = hashes as string[];
-    }
-    return signature;
+    return isHunkSignature(parsed) ? parsed : null;
 };
 
 /** The summary chip the stamp's collapsed block renders under. */
@@ -354,18 +348,24 @@ export const parseRereviewStamp = (body: string): ReReviewStamp | null => {
 
 /**
  * The stamp's collapsed block. The wrapper is transcription-tolerant (the
- * `<sub>` tags and whitespace are optional, so a reflowed block still
- * strips), but the interior must be the stamp payload itself: it has to
- * open with the marker and stay inside `[^<]*` (which covers a
- * charset-garbled payload). A wildcard interior would let rule 7's fold
- * delete ARBITRARY text an orchestrator hid inside a fingerprint-labeled
- * block, exactly the splice (#244) the gate exists to catch; a non-stamp
- * interior must stay in the body and trip the comparison instead.
+ * `<sub>` tags and whitespace are optional, and a block truncated at the
+ * end of the body still strips, so a reflowed or clipped transcription
+ * leaves no residue for rule 7 to read as a body splice), but the interior
+ * must carry the stamp's full field skeleton: marker, `v=`, `depth=`,
+ * `verdict=`, `anchor-draft=`, `hunks=`. Only the `hunks=` tail admits
+ * whitespace, because the base64 payload is the field a transcription
+ * plausibly garbles or wraps. A looser interior (the marker alone, or a
+ * wildcard) would let rule 7's fold delete prose an orchestrator hid
+ * inside a fingerprint-labeled block, the splice (#244) the gate exists to
+ * catch; anything short of the skeleton stays in the body and trips the
+ * comparison instead, and the gate separately blocks EXTRA skeleton-shaped
+ * blocks by count ({@link countRereviewStampBlocks}).
  */
 const STAMP_BLOCK_RE = new RegExp(
     `<details>\\s*<summary>\\s*(?:<sub>\\s*)?${STAMP_SUMMARY}` +
         `\\s*(?:</sub>\\s*)?</summary>\\s*(?:<sub>\\s*)?${STAMP_MARKER}` +
-        `[^<]*(?:</sub>\\s*)?</details>`,
+        ` v=\\d+ depth=[^<\\s]* verdict=[^<\\s]* anchor-draft=[^<\\s]* ` +
+        `hunks=[^<]*(?:</sub>\\s*)?(?:</details>|$)`,
     "gi",
 );
 
@@ -383,6 +383,16 @@ const STAMP_BLOCK_RE = new RegExp(
  */
 export const stripRereviewStamp = (body: string): string =>
     body.replace(STAMP_BLOCK_RE, "").replace(STAMP_RE, "");
+
+/**
+ * How many stamp-shaped blocks a body carries. Rule 7 pairs this with the
+ * fold: stripping tolerates a garbled interior, so a body carrying MORE
+ * skeleton-shaped blocks than its plan is smuggling text through the fold
+ * (prose in a forged block's `hunks=` tail would strip before the
+ * comparison); fewer is the ordinary degrade path (a dropped stamp).
+ */
+export const countRereviewStampBlocks = (body: string): number =>
+    body.match(STAMP_BLOCK_RE)?.length ?? 0;
 
 /** A prior review of the PR, as the orchestrator stages it. */
 export type PriorReview = {
@@ -848,6 +858,12 @@ export const runRereviewStampCli = (
     // full (more review), where the render coercion alone would read
     // non-boolean garbage as `false`, the less-review direction.
     if (typeof plan.stampAnchorDraft !== "boolean") {
+        return null;
+    }
+    // And for stampHunks, the field that drives the next run's scoping: a
+    // shape that is neither "overflow" nor a hunk signature omits the stamp
+    // rather than encoding garbage the next run would anchor on.
+    if (plan.stampHunks !== "overflow" && !isHunkSignature(plan.stampHunks)) {
         return null;
     }
     return renderRereviewStamp({

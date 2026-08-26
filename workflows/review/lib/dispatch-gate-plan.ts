@@ -38,7 +38,11 @@
 
 import type {DispatchGateViolation, SafeOutputItem} from "./dispatch-gate";
 import {renderReviewBody} from "./render-comment";
-import {parseRereviewStamp, stripRereviewStamp} from "./rereview-mode";
+import {
+    countRereviewStampBlocks,
+    parseRereviewStamp,
+    stripRereviewStamp,
+} from "./rereview-mode";
 import {normalizeBody} from "./sanitizer-normalize";
 
 const COMMENT_TYPE = "create_pull_request_review_comment";
@@ -240,6 +244,20 @@ export const submissionPlanViolations = (
                     code: "submission-plan-mismatch",
                     dimension: "fingerprint stamp",
                     detail: "queued review body carries a fingerprint stamp that does not match the staged plan's (a corrupted stamp may degrade to none, never to a different one)",
+                });
+            }
+            // And never MORE stamp-shaped blocks than the plan staged: the
+            // fold tolerates a garbled interior, so an extra skeleton-shaped
+            // block is the one place text could ride through the comparison
+            // unchecked. Fewer is fine (a dropped stamp is the degrade path).
+            if (
+                countRereviewStampBlocks(body) >
+                countRereviewStampBlocks(planStaged.body)
+            ) {
+                violations.push({
+                    code: "submission-plan-mismatch",
+                    dimension: "fingerprint stamp",
+                    detail: "queued review body carries more fingerprint-shaped blocks than the staged plan (the fold would hide their contents from the body comparison)",
                 });
             }
         }
