@@ -536,6 +536,15 @@ export type ReReviewDecisionInput = {
     currentSignature: HunkSignature;
     /** Tripwire re-arm threshold; {@link DEFAULT_TRIPWIRE_THRESHOLD}. */
     tripwireThreshold?: number;
+    /**
+     * An explicit human ask for a review (a `/review` comment: the run's
+     * trigger event is `issue_comment`). Manual requests plan full depth
+     * regardless of the configured mode; the point of keeping a comment
+     * trigger on an auto-on-push consumer is "give me a real review now",
+     * and under `fast` the modes would otherwise answer it with a
+     * reconcile-only round.
+     */
+    manualRequest?: boolean;
 };
 
 /** Which sub-agents a depth dispatches (the prompt maps this to the roster). */
@@ -613,6 +622,9 @@ export const decideReReviewDepth = (
 ): ReReviewPlan => {
     const threshold = input.tripwireThreshold ?? DEFAULT_TRIPWIRE_THRESHOLD;
 
+    if (input.manualRequest === true) {
+        return fullPlan(input, ["manual-review-request"], null, false);
+    }
     if (input.mode === "full") {
         return fullPlan(input, ["mode-full"], null, false);
     }
@@ -756,11 +768,15 @@ export type RereviewPlanCliResult = {
 };
 
 /**
- * Stage the re-review plan. Factored out (fs injected) so it is testable
- * without touching the real filesystem. Returns what was written.
+ * Stage the re-review plan. Factored out (fs injected, the trigger event
+ * name likewise) so it is testable without touching the real filesystem or
+ * process env. A comment-triggered run (`issue_comment`: the `/review`
+ * command consumers with a manual trigger declare) is an explicit ask and
+ * plans full depth whatever the configured mode says.
  */
 export const runRereviewPlanCli = (
     fs: RereviewCliFs,
+    eventName: string | undefined = process.env.GITHUB_EVENT_NAME,
 ): RereviewPlanCliResult => {
     const warnings: string[] = [];
 
@@ -840,6 +856,9 @@ export const runRereviewPlanCli = (
         isDraft,
         priorStamp,
         currentSignature,
+        // GITHUB_EVENT_NAME is the runner's own event env; the CLI runs in
+        // pre-agent staging on the runner, never in the agent sandbox.
+        manualRequest: eventName === "issue_comment",
     });
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});

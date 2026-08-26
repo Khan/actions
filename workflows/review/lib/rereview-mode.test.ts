@@ -349,6 +349,22 @@ describe("decideReReviewDepth", () => {
         expect(plan.staging).toBe("whole-diff");
     });
 
+    it("a manual request runs full over any mode and a matching fingerprint", () => {
+        // The `/review` comment case: under fast, the mode would answer an
+        // explicit ask with a reconcile-only round.
+        const plan = decideReReviewDepth({
+            mode: "fast",
+            isDraft: false,
+            priorStamp: stampOf({anchorHunks: CURRENT}),
+            currentSignature: CURRENT,
+            manualRequest: true,
+        });
+        expect(plan.depth).toBe("full");
+        expect(plan.reasons).toEqual(["manual-review-request"]);
+        expect(plan.dispatch).toBe("all");
+        expect(plan.staging).toBe("whole-diff");
+    });
+
     it("no prior fingerprint runs full (first review, or pre-dial history)", () => {
         const plan = decideReReviewDepth({
             mode: "fast",
@@ -574,11 +590,21 @@ const stagedInputs = (
 describe("runRereviewPlanCli", () => {
     it("stages a fast plan when the fingerprint matches", () => {
         const fs = fakeFs(stagedInputs());
-        const {plan, warnings} = runRereviewPlanCli(fs);
+        const {plan, warnings} = runRereviewPlanCli(fs, "pull_request");
         expect(plan.depth).toBe("fast");
         expect(warnings).toEqual([]);
         expect(fs.files.has(`${REVIEW_DIR}/rereview-plan.json`)).toBe(true);
         expect(fs.files.has(`${REVIEW_DIR}/scoped.diff`)).toBe(false);
+    });
+
+    it("plans full on a comment-triggered run (the /review ask)", () => {
+        // Same staged inputs the fast plan above rides; only the trigger
+        // event differs, so the mode dial never answers a manual ask with
+        // a reconcile-only round.
+        const fs = fakeFs(stagedInputs());
+        const {plan} = runRereviewPlanCli(fs, "issue_comment");
+        expect(plan.depth).toBe("full");
+        expect(plan.reasons).toEqual(["manual-review-request"]);
     });
 
     it("writes scoped.diff for a new-hunks plan", () => {
