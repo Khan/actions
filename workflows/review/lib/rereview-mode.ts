@@ -18,9 +18,11 @@
  *      fingerprint stamped on a draft forces one more full review when the
  *      PR leaves draft.
  *   2. **Flip gate.** `flip-gated` dispatches the correctness pass alongside
- *      reconciliation, and a REQUEST_CHANGES→APPROVE flip is vetoed by any
- *      validated blocking finding from that pass; the findings gate the
- *      flip instead of being discarded.
+ *      reconciliation, and any validated blocking finding from that pass
+ *      still forces REQUEST_CHANGES; the findings gate the outcome instead
+ *      of being discarded. Neither reduced depth can approve at all
+ *      (submission.ts's full-roster approval rule): a block the
+ *      round earned back is cleared by dismissing the standing review.
  *   3. **Divergence tripwire.** Every full-depth review records a
  *      content-hashed hunk signature. Each later push compares its current
  *      signature against that last fully-reviewed fingerprint; when the

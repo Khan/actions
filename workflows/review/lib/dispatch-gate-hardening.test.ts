@@ -106,7 +106,7 @@ describe("fail-open ordering and disclosure precision (review feedback)", () => 
 
     it("flags a present-but-unparseable validator output with findings queued", () => {
         const result = evaluate({
-            items: [commentItem(), submitItem("APPROVE", "")],
+            items: [commentItem(), submitItem("COMMENT", "")],
             plan: {depth: "fast"},
             outFiles: {"claim-validator.json": "not json"},
         });
@@ -317,8 +317,8 @@ describe("third-round nits: keep-list survivors, template coupling, summary", ()
                 items: [
                     {
                         type: "submit_pull_request_review",
-                        event: "APPROVE",
-                        body: "Approved — no blocking issues found.",
+                        event: "COMMENT",
+                        body: "Reduced-depth round; nothing blocks.",
                     },
                 ],
             }),
@@ -391,8 +391,16 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
                 }),
             },
         ];
+        // COMMENT, not APPROVE: rule 5b blocks every reduced-depth APPROVE
+        // outright, so the kept-blocking veto's live surface is the COMMENT
+        // flip (the reduced-depth clearance path).
         const base = {
-            items: [submitItem("APPROVE", "")],
+            items: [
+                submitItem(
+                    "COMMENT",
+                    "Commented — medium-importance findings found; nothing blocks.",
+                ),
+            ],
             plan: {depth: "fast"},
             outFiles: {"thread-reconciler.json": "{}"},
             priorReviews: stampedPrior,
@@ -422,20 +430,15 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
             rereviewAccounting: {keptBlockingCount: 2},
         });
         expect(full.conformant).toBe(true);
-        // A COMMENT flip is vetoed the same way: it cannot clear the prior
-        // REQUEST_CHANGES state, but the chokepoint mirrors verdict.ts's
-        // floor for the no-plan case regardless of the event flavor.
-        const commentFlip = evaluate({
+        // An APPROVE at reduced depth trips the full-roster rule AND the
+        // kept-blocking veto: two independent chokepoints, both report.
+        const approveFlip = evaluate({
             ...base,
-            items: [
-                submitItem(
-                    "COMMENT",
-                    "Commented — medium-importance findings found; nothing blocks.",
-                ),
-            ],
+            items: [submitItem("APPROVE", "")],
             rereviewAccounting: {keptBlockingCount: 2},
         });
-        expect(commentFlip.violations.map((v) => v.code)).toEqual([
+        expect(approveFlip.violations.map((v) => v.code)).toEqual([
+            "approve-requires-full-roster",
             "flip-vetoed-kept-blocking",
         ]);
     });
@@ -445,7 +448,7 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
         // the flip rule anchors on the same cache-memory carrier the plan
         // CLI used.
         const vetoed = evaluate({
-            items: [submitItem("APPROVE", "")],
+            items: [submitItem("COMMENT", "")],
             plan: {depth: "fast"},
             outFiles: {"thread-reconciler.json": "{}"},
             priorReviews: [{body: "Changes requested — see inline comments."}],
@@ -461,7 +464,7 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
         ]);
         // An invalid cache record anchors nothing: fail-open, no veto.
         const open = evaluate({
-            items: [submitItem("APPROVE", "")],
+            items: [submitItem("COMMENT", "")],
             plan: {depth: "fast"},
             outFiles: {"thread-reconciler.json": "{}"},
             priorReviews: [{body: "no stamp"}],
@@ -526,7 +529,7 @@ describe("staged-input robustness (slice 3 re-review)", () => {
             anchorHunks: {},
         });
         const result = evaluate({
-            items: [submitItem("APPROVE", "")],
+            items: [submitItem("COMMENT", "")],
             plan: {depth: "fast"},
             outFiles: {},
             priorReviews: [null, 42, "junk", {nobody: true}, {body: stamp}],

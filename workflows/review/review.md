@@ -324,6 +324,22 @@ post-steps:
       fi
       echo "::warning title=dispatch-conformance gate::gate could not run (infra failure; review not blocked)"
       exit 0
+  # The reduced-depth clearance: when the plan CLI staged
+  # out/dismiss-decision.json (a flip-gated/fast round over a prior
+  # REQUEST_CHANGES whose blocking objections are all resolved), dismiss the
+  # standing review via the API instead of minting an approval no full
+  # roster stands behind. Default `if:` (success()), so a gate-blocked run
+  # never dismisses. Bot token for the same reason the resolve-thread safe
+  # output carries it: dismissal needs write access. Known window: this runs
+  # before the safe_outputs job posts the COMMENT review carrying the
+  # explanatory note, so a safe_outputs infra failure can leave a dismissal
+  # whose note never posted; the dismissal message itself renders in the PR
+  # timeline, so the gap is visible, and every failure here is a warning
+  # (the block stands: more review, never less).
+  - name: Clear the standing blocking review (reduced-depth dismissal)
+    env:
+      GH_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
+    run: cd gh-aw-review-lib && npx -y tsx workflows/review/lib/dismiss-review.ts
 
 # Anthropic pricing overlay, so an AI credit means $0.01 of what Khan actually
 # pays.
@@ -832,12 +848,12 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    entry (its `path`, `line`, and `body` verbatim), one
    `resolve-pull-request-review-thread` per `resolve` id (batched in one
    turn), and one `submit-pull-request-review` with the plan's `event` and
-   `body` verbatim. The redundant-approval skip is the plan's own decision,
+   `body` verbatim. The submission skip is the plan's own decision,
    not yours to derive: emit no submission at all **iff** the plan's
-   `skipSubmission` is `true` (the plan CLI sets it for an APPROVE with zero
-   `comments` whose body is the bare approve line, on a PR whose last stamped
-   verdict was already APPROVE; the gate reads the same field, so the two can
-   never disagree). When it is `false`, always submit. One exception outranks
+   `skipSubmission` is `true` (the plan CLI sets it for the redundant
+   approval and for a reduced-depth round with nothing to say; the exact
+   predicate lives in `lib/submission-clearance.ts`, and the gate reads the
+   same field, so the two can never disagree). When it is `false`, always submit. One exception outranks
    both: when the plan's `event` is `HOLD_FOR_HUMAN` (a core review pass
    produced no output on a run that would otherwise auto-approve), emit **no**
    review submission, **no** inline comments, and **no** thread resolutions
@@ -893,11 +909,16 @@ run and the run would otherwise have auto-approved or commented — the
 automation never approves a change its core passes did not look at, and it
 never writes a fingerprint from a partial assessment either (a blocking
 finding still wins: it is actionable on its own; medium findings fold into
-the hold comment as claim lines). One more mechanical guard: a COMMENT that
-would leave this workflow's own prior REQUEST_CHANGES standing upgrades to
-APPROVE with a note, because GitHub only moves a reviewer's state on APPROVE
-or REQUEST_CHANGES and a stale block the author's fixes already earned back
-must not survive on a technicality. The plan's `event` IS the
+the hold comment as claim lines). Two more mechanical guards: approval is a
+full-roster statement, so only full/scoped depth may resolve to APPROVE (at
+flip-gated/fast a would-be APPROVE demotes to COMMENT); and a stale block the
+author's fixes already earned back must not survive on a technicality, since
+GitHub only moves a reviewer's state on APPROVE or REQUEST_CHANGES. At
+full/scoped that means a COMMENT that would leave this workflow's own prior
+REQUEST_CHANGES standing upgrades to APPROVE with a note; at flip-gated/fast
+the plan CLI stages a dismissal decision instead
+(`out/dismiss-decision.json`), and the deterministic post-step dismisses the
+standing review after the run. The plan's `event` IS the
 verdict; never recompute, second-guess, or override it. (The blocking-label
 vocabulary and the concrete-failing-scenario bar live in the sub-agent
 definitions and the shared lib.)
@@ -932,8 +953,8 @@ head, the code-rendered re-review accountability section, every `Note:` line,
 the collapsed version/config footer, and the hidden fingerprint stamp are all
 already in the plan's `body`. Submit
 with **one** `submit-pull-request-review` call carrying the plan's `event` and
-`body` verbatim — except under the redundant-approval skip (Step 3), where you
-submit nothing. The dispatch-conformance gate blocks any deviation from the
+`body` verbatim — except when the plan's `skipSubmission` is `true` (Step 3),
+where you submit nothing. The dispatch-conformance gate blocks any deviation from the
 plan, so a mis-typed or "improved" body is a red run, never a posted one.
 
 When the plan's `event` is `HOLD_FOR_HUMAN`, there is no review to submit:

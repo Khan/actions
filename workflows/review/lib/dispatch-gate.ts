@@ -43,9 +43,15 @@
  *   4. An APPROVE cannot carry a blocking inline comment (Step 4's verdict
  *      is a mechanical function of the labels; slice 3).
  *   5. The reduced-depth flip veto (Step 4): at flip-gated/fast depth over a
- *      prior REQUEST_CHANGES stamp, APPROVE requires `rereview.json`'s
+ *      prior REQUEST_CHANGES stamp, a COMMENT flip requires `rereview.json`'s
  *      `keptBlockingCount` to be zero (slice 3; the #246 flip-gate
  *      chokepoint).
+ *   5b. The full-roster approval rule: an APPROVE at flip-gated or
+ *      fast depth is blocked outright, prior stamp or none. Those depths
+ *      dispatch at most reconciliation plus the correctness pass, and an
+ *      approval no full roster stands behind must not post; the plan CLI
+ *      demotes it to COMMENT and clears a standing block by dismissal
+ *      instead (submission.ts).
  *   6. Every queued thread resolution must be one the reconciler decided
  *      (`out/thread-reconciler.json` `resolve`); the deficit direction is
  *      reported as executed-vs-decided accounting, never blocked (slice 3;
@@ -111,6 +117,7 @@ export type DispatchGateViolationCode =
     | "validator-missing-with-findings"
     | "shed-undisclosed"
     | "approve-with-blocking-comment"
+    | "approve-requires-full-roster"
     | "flip-vetoed-kept-blocking"
     | "resolve-not-decided"
     | "submission-plan-mismatch";
@@ -424,9 +431,30 @@ export const evaluateDispatchConformance = (
         }
     }
 
+    // Rule 5b: the full-roster approval rule. An APPROVE at a
+    // reduced depth is blocked whatever the prior state: flip-gated and
+    // fast dispatch at most reconciliation plus the correctness pass, and
+    // approval is a full-roster statement. The plan CLI never plans one
+    // (it demotes to COMMENT and stages a dismissal decision for a
+    // standing block); this mirror catches an orchestrator that queues one
+    // anyway.
+    if (
+        verdictEvent === "APPROVE" &&
+        (depth === "flip-gated" || depth === "fast")
+    ) {
+        violations.push({
+            code: "approve-requires-full-roster",
+            dimension: "verdict",
+            detail:
+                `APPROVE queued at ${depth} depth; approval requires a depth that ` +
+                `dispatches the full roster (full/scoped), and a reduced-depth round ` +
+                `clears a standing block by dismissal instead`,
+        });
+    }
+
     // Rule 5: the re-review flip veto (Step 4, reduced depths only): at
     // flip-gated/fast depth, a prior REQUEST_CHANGES (read from the stamp,
-    // not the review state) may flip to APPROVE or COMMENT only when the
+    // not the review state) may flip to COMMENT only when the
     // code-rendered accountability result says every blocking thread was
     // resolved (verdict.ts floors the verdict at REQUEST_CHANGES while a
     // kept blocking thread exists, mediums or no mediums; this chokepoint
@@ -461,7 +489,7 @@ export const evaluateDispatchConformance = (
                     code: "flip-vetoed-kept-blocking",
                     dimension: "verdict",
                     detail:
-                        `APPROVE queued at ${depth} depth over a prior REQUEST_CHANGES stamp with ` +
+                        `${verdictEvent} queued at ${depth} depth over a prior REQUEST_CHANGES stamp with ` +
                         `${kept} kept blocking thread(s) (rereview.json keptBlockingCount); the flip rule requires zero`,
                 });
             } else if (typeof kept !== "number") {

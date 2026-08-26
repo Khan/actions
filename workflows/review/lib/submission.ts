@@ -47,6 +47,7 @@
  *   - The reduced-depth flip rule: at flip-gated/fast depth over a prior
  *     REQUEST_CHANGES stamp, `rereview.json`'s keptBlockingCount floors the
  *     verdict at REQUEST_CHANGES.
+ *   - Full-roster approval and reduced-depth clearance: submission-clearance.ts.
  *
  * Body rules encoded (review.md Step 6): the verdict head (empty-body
  * APPROVE with comments; the fixed REQUEST_CHANGES line), the code-rendered
@@ -76,6 +77,10 @@ import {
 } from "./render-comment";
 import {DEFAULT_NON_BLOCKING_INLINE_BUDGET} from "./routing-config";
 import {runRereviewCli, type RereviewCliFs} from "./rereview";
+import {
+    decideEventAndClearance,
+    decideSkipSubmission,
+} from "./submission-clearance";
 import {
     labelToken,
     renderClaimComment,
@@ -877,30 +882,26 @@ export const runSubmissionCli = (
         };
     });
 
-    // A COMMENT cannot clear this workflow's own prior REQUEST_CHANGES:
-    // GitHub derives a reviewer's state only from its latest APPROVE or
-    // REQUEST_CHANGES, and nothing here dismisses reviews. So when the
-    // prior stamped verdict is REQUEST_CHANGES and this run's blocking
-    // objections are all resolved (a COMMENT verdict implies exactly that:
-    // zero blocking labels AND zero kept blocking threads), the run
-    // approves instead, or the author stays blocked by a stale state their
-    // fixes already earned back. The mediums still post; the note line
-    // below says what happened.
-    const commentWouldStrandPriorRc =
-        verdict.event === "COMMENT" &&
-        priorStamp !== null &&
-        priorStamp.verdict === "REQUEST_CHANGES";
-    if (commentWouldStrandPriorRc) {
-        notes.push(
-            "COMMENT verdict upgraded to APPROVE: a comment cannot clear the prior request-changes state, and every blocking objection is resolved",
+    // The full-roster approval rule and the reduced-depth clearance:
+    // pure decision in submission-clearance.ts, writes here.
+    const clearance = decideEventAndClearance({
+        verdictEvent: verdict.event,
+        depth,
+        priorStamp,
+        priorReviewsRaw: priorRaw,
+        keptBlockingCount: rereview.keptBlockingCount,
+        suppressedBlocking,
+    });
+    notes.push(...clearance.notes);
+    const {event, approveDemoted, priorRcStands} = clearance;
+    if (clearance.dismissal !== null && clearance.bodyNote !== null) {
+        fs.mkdirSync(`${REVIEW_DIR}/out`, {recursive: true});
+        fs.writeFileSync(
+            `${REVIEW_DIR}/out/dismiss-decision.json`,
+            JSON.stringify(clearance.dismissal, null, 2),
         );
+        depthNotes.push(clearance.bodyNote);
     }
-    const event =
-        verdict.event === "REQUEST_CHANGES"
-            ? "REQUEST_CHANGES"
-            : verdict.event === "COMMENT" && !commentWouldStrandPriorRc
-            ? "COMMENT"
-            : "APPROVE";
 
     const head = renderReviewBody({
         event,
@@ -933,36 +934,35 @@ export const runSubmissionCli = (
         .concat(stamp === null ? "" : `\n${stamp}`)
         .replace(/^\n+/, "");
 
-    // The redundant-approval skip, code-owned so the prompt (Step 6) and the
-    // conformance gate share ONE predicate instead of two prose descriptions
-    // that can drift: they diverged once already, when the collapsed
-    // low-confidence `<details>` section started riding the body — it is
-    // neither a `Note:` line nor an accountability section, so the prompt's
-    // old wording let the orchestrator skip a submission the gate then
-    // red-flagged, withholding the approval AND the observations on every
-    // later run. Compared modulo the ingest sanitizer (`normalizeBody`), the
-    // same way the gate compares, so the fingerprint stamp is not a
-    // difference.
-    const skipSubmission =
-        event === "APPROVE" &&
-        inline.length === 0 &&
-        normalizeBody(coreBody) ===
+    // The skip predicate lives in submission-clearance.ts (prompt, gate,
+    // and this CLI share it); the bare-approve comparison happens here
+    // because it needs the rendered body, modulo the ingest sanitizer.
+    const resolveIds = Array.isArray(dispatch.reconciliation?.resolve)
+        ? dispatch.reconciliation.resolve.filter(
+              (id): id is string => typeof id === "string",
+          )
+        : [];
+    const skipSubmission = decideSkipSubmission({
+        event,
+        approveDemoted,
+        priorRcStands,
+        inlineCount: inline.length,
+        resolveCount: resolveIds.length,
+        bareApproveBody:
+            normalizeBody(coreBody) ===
             normalizeBody(
                 renderReviewBody({event: "APPROVE", hasInlineComments: false}),
-            ) &&
-        priorStamp !== null &&
-        priorStamp.verdict === "APPROVE";
+            ),
+        priorApproveStands:
+            priorStamp !== null && priorStamp.verdict === "APPROVE",
+    });
 
     return stagePlan(fs, {
         event,
         body,
         skipSubmission,
         comments: inline,
-        resolve: Array.isArray(dispatch.reconciliation?.resolve)
-            ? dispatch.reconciliation.resolve.filter(
-                  (id): id is string => typeof id === "string",
-              )
-            : [],
+        resolve: resolveIds,
         reasons: verdict.reasons,
         notes,
     });

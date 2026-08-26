@@ -26,9 +26,11 @@
  *   new-scope.json      {priorReview, inScope} against cache memory's
  *                       reviewedHunks (missing/unparseable cache degrades to
  *                       "everything in scope": more review, never less)
- *   prior-reviews.json  every github-actions[bot] review body, all states
- *                       (fetch failure degrades to [], which forces a full
- *                       review downstream, never a cheaper one)
+ *   prior-reviews.json  every github-actions[bot] review body, all states,
+ *                       with the numeric review id and state (the
+ *                       reduced-depth clearance dismisses by id; fetch
+ *                       failure degrades to [], which forces a full review
+ *                       downstream, never a cheaper one)
  *   threads.json        the unresolved review threads THIS bot opened, each
  *                       with its full reply chain verbatim, `resolved: false`,
  *                       and the opener's html_url
@@ -509,9 +511,16 @@ export const runStagePrCli = async (
     );
 
     // 5. Prior bot reviews (fetch failure degrades to []: full review).
-    let priorReviews: {body: string; submittedAt?: string}[] = [];
+    let priorReviews: {
+        body: string;
+        submittedAt?: string;
+        id?: number;
+        state?: string;
+    }[] = [];
     try {
         type RawReview = {
+            id?: number;
+            state?: string;
             user?: {login?: string};
             body?: string | null;
             submitted_at?: string;
@@ -539,6 +548,15 @@ export const runStagePrCli = async (
                 body: review.body ?? "",
                 ...(typeof review.submitted_at === "string"
                     ? {submittedAt: review.submitted_at}
+                    : {}),
+                // The numeric review id and state feed the reduced-depth
+                // clearance (submission.ts): a CHANGES_REQUESTED review's id
+                // is what the dismissal post-step dismisses. Optional so an
+                // older reader is unaffected; a staging without them skips
+                // the dismissal (the block stands).
+                ...(typeof review.id === "number" ? {id: review.id} : {}),
+                ...(typeof review.state === "string"
+                    ? {state: review.state}
                     : {}),
             }));
     } catch (error) {
