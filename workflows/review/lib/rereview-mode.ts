@@ -260,14 +260,13 @@ const STAMP_SUMMARY = "review fingerprint";
 
 /**
  * Render the stamp as a collapsed `<details>` block appended to the review
- * body. NOT an HTML comment: the ingest sanitizer
- * (sanitize_content_core.cjs) deletes every HTML comment before posting, so
- * the original hidden-comment stamp never reached production and every run
- * was `no-prior-fingerprint` (webapp#41742). `details`, `summary`,
- * and `sub` are on the sanitizer's allowed-tags list, so this form survives
- * the trip. The cache-memory fallback cannot substitute: GitHub's 2026-06-30
- * cache policy denies writes from issue_comment-triggered runs regardless of
- * job permissions, which is exactly the /review trigger.
+ * body; this is the primary carrier (the module header's "Fingerprint
+ * carriers" section has the full sanitizer and cache-policy rationale).
+ * `anchorDraft` is coerced to a strict boolean: the stamp CLI reads it off
+ * the agent-writable plan file, and interpolating a forged string like
+ * `false hunks=<payload>` verbatim would hand the delimiter-free parser a
+ * spliced fingerprint (the same boundary `runRereviewStampCli` holds
+ * `depth` to).
  */
 export const renderRereviewStamp = (stamp: ReReviewStamp): string => {
     let hunksField: string;
@@ -281,7 +280,7 @@ export const renderRereviewStamp = (stamp: ReReviewStamp): string => {
     const payload =
         `${STAMP_MARKER} v=${stamp.schemaVersion} ` +
         `depth=${stamp.depth} verdict=${stamp.verdict} ` +
-        `anchor-draft=${stamp.anchorDraft} hunks=${hunksField}`;
+        `anchor-draft=${stamp.anchorDraft === true} hunks=${hunksField}`;
     return [
         `<details><summary><sub>${STAMP_SUMMARY}</sub></summary>`,
         `<sub>${payload}</sub>`,
@@ -352,6 +351,32 @@ export const parseRereviewStamp = (body: string): ReReviewStamp | null => {
         anchorHunks,
     };
 };
+
+/**
+ * The stamp's collapsed block, matched by its wrapper rather than its
+ * payload so a garbled payload still strips (lazy up to the first
+ * `</details>`, so a following block is never swallowed).
+ */
+const STAMP_BLOCK_RE = new RegExp(
+    `<details>\\s*<summary>\\s*<sub>\\s*${STAMP_SUMMARY}\\s*</sub>` +
+        `\\s*</summary>[\\s\\S]*?</details>`,
+    "gi",
+);
+
+/**
+ * Strip the stamp (block form and bare payload) from a review body. For the
+ * dispatch gate's rule 7: it compares the queued body against the staged
+ * plan under `normalizeBody`, which dropped the legacy comment-form stamp
+ * from both sides, so the orchestrator's transcription of the payload was
+ * never load-tested. The block form survives that fold, and the payload is
+ * the largest opaque high-entropy string in the body; requiring it byte-
+ * exact would withhold the whole review over one garbled base64 character.
+ * The gate folds the stamp out of both sides instead, so a corrupted or
+ * dropped payload posts and degrades the NEXT run to `no-prior-fingerprint`
+ * (full depth), the same steady state as before the block form existed.
+ */
+export const stripRereviewStamp = (body: string): string =>
+    body.replace(STAMP_BLOCK_RE, "").replace(STAMP_RE, "");
 
 /** A prior review of the PR, as the orchestrator stages it. */
 export type PriorReview = {

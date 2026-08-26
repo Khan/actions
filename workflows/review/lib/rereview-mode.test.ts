@@ -14,6 +14,7 @@ import {
     runRereviewStampCli,
     STAMP_SCHEMA_VERSION,
     stampFromCacheMemory,
+    stripRereviewStamp,
 } from "./rereview-mode";
 import type {HunkSignature, ReReviewStamp} from "./rereview-mode";
 import {normalizeBody} from "./sanitizer-normalize";
@@ -221,19 +222,22 @@ describe("stamp render/parse", () => {
     // webapp#41742: the original stamp was an HTML comment and the
     // ingest sanitizer deletes every HTML comment, so no posted review ever
     // carried a fingerprint and every production run planned full depth as
-    // no-prior-fingerprint. These three pin the fix and the failure mode.
+    // no-prior-fingerprint. The tests below pin the fix and the failure
+    // mode.
     it("contains no HTML comment (the sanitizer deletes those)", () => {
         expect(renderRereviewStamp(stampOf())).not.toContain("<!--");
     });
 
     it("survives the sanitizer's structural transforms (comment removal, tag conversion)", () => {
-        // normalizeBody is the gate's comparison fold, not the posted text
-        // (it also case-folds, which the real sanitizer does not), so the
-        // assertion is whole-payload survival through the structural
-        // transforms, not a re-parse: a transform that redacted or rewrote
-        // the base64 field would still leave `hunks=` behind, so the marker
-        // alone pins nothing. The legacy-form test below shows the
-        // contrast: the same fold erases an HTML-comment stamp entirely.
+        // normalizeBody mirrors the sanitizer's transforms, standing in
+        // here for the posting trip (it also case-folds, which the real
+        // sanitizer does not; the gate's own comparison additionally folds
+        // the stamp out via stripRereviewStamp). The assertion is
+        // whole-payload survival through the structural transforms, not a
+        // re-parse: a transform that redacted or rewrote the base64 field
+        // would still leave `hunks=` behind, so the marker alone pins
+        // nothing. The legacy-form test below shows the contrast: the same
+        // fold erases an HTML-comment stamp entirely.
         const rendered = renderRereviewStamp(stampOf());
         const payload = rendered.split("\n")[1].replace(/<\/?sub>/g, "");
         const folded = normalizeBody(
@@ -272,6 +276,59 @@ describe("stamp render/parse", () => {
         const first = renderRereviewStamp(stampOf({depth: "full"}));
         const second = renderRereviewStamp(stampOf({depth: "fast"}));
         expect(parseRereviewStamp(`${first}\n${second}`)?.depth).toBe("fast");
+    });
+
+    it("coerces a forged anchorDraft string instead of splicing the payload", () => {
+        // The stamp CLI reads anchorDraft off the agent-writable plan file.
+        // Interpolated verbatim, a string like `false hunks=<forged>` put a
+        // second well-formed field pair ahead of the real one and the
+        // delimiter-free parser adopted the forged signature.
+        const forged = Buffer.from(
+            JSON.stringify({"evil.ts": ["0123456789abcdef"]}),
+            "utf8",
+        ).toString("base64url");
+        const rendered = renderRereviewStamp(
+            stampOf({
+                anchorDraft: `false hunks=${forged}` as unknown as boolean,
+            }),
+        );
+        const parsed = parseRereviewStamp(rendered);
+        expect(parsed?.anchorDraft).toBe(false);
+        expect(parsed?.anchorHunks).toEqual(
+            computeHunkSignature(TWO_HUNK_DIFF),
+        );
+    });
+});
+
+describe("stripRereviewStamp", () => {
+    it("strips the block even when the payload is garbled", () => {
+        // The gate's fold has to remove a stamp the orchestrator transcribed
+        // imperfectly, so the match keys on the wrapper, not the payload.
+        const garbled = renderRereviewStamp(stampOf()).replace(
+            /hunks=\S+/,
+            "hunks=!!not the payload!!",
+        );
+        expect(stripRereviewStamp(`Approved.\n${garbled}`).trim()).toBe(
+            "Approved.",
+        );
+    });
+
+    it("strips a bare payload that lost its wrapper", () => {
+        const payload = /<sub>(pr-reviewer:rereview[^<]*)<\/sub>/.exec(
+            renderRereviewStamp(stampOf()),
+        )?.[1];
+        expect(payload).toBeDefined();
+        expect(stripRereviewStamp(`Approved.\n${payload}`).trim()).toBe(
+            "Approved.",
+        );
+    });
+
+    it("leaves other collapsed blocks (the version footer) alone", () => {
+        const footer =
+            "<details><summary><sub>review details</sub></summary>\n" +
+            "<sub>review-v1.20.0 | schema 2</sub>\n</details>";
+        const body = `Approved.\n${footer}\n${renderRereviewStamp(stampOf())}`;
+        expect(stripRereviewStamp(body).trim()).toBe(`Approved.\n${footer}`);
     });
 });
 
