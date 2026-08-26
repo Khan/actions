@@ -323,6 +323,31 @@ describe("stripRereviewStamp", () => {
         );
     });
 
+    it("strips the block when the wrapper itself is garbled", () => {
+        // The orchestrator transcribes the whole 3-line block, not just the
+        // payload; a reflowed wrapper must not leave residue that rule 7
+        // then reads as a body splice.
+        const garbled = renderRereviewStamp(stampOf()).replace(
+            "<summary><sub>review fingerprint</sub></summary>",
+            "<summary>review fingerprint</summary>",
+        );
+        expect(stripRereviewStamp(`Approved.\n${garbled}`).trim()).toBe(
+            "Approved.",
+        );
+    });
+
+    it("leaves a fingerprint-labeled block whose interior is not the stamp", () => {
+        // The interior must open with the stamp marker: a wildcard interior
+        // would let rule 7's fold delete arbitrary spliced prose hidden
+        // inside a fingerprint-labeled block before the body comparison.
+        const fake =
+            "<details><summary><sub>review fingerprint</sub></summary>\n" +
+            "SPLICED PROSE the plan never staged.\n</details>";
+        expect(stripRereviewStamp(`Approved.\n${fake}`)).toContain(
+            "SPLICED PROSE the plan never staged.",
+        );
+    });
+
     it("leaves other collapsed blocks (the version footer) alone", () => {
         const footer =
             "<details><summary><sub>review details</sub></summary>\n" +
@@ -874,6 +899,23 @@ describe("runRereviewStampCli", () => {
             fs.files.get(`${REVIEW_DIR}/rereview-plan.json`) ?? "{}",
         ) as Record<string, unknown>;
         staged.depth = "weird stuff";
+        fs.files.set(
+            `${REVIEW_DIR}/rereview-plan.json`,
+            JSON.stringify(staged),
+        );
+        expect(runRereviewStampCli(fs, "APPROVE")).toBeNull();
+    });
+
+    it("returns null on a non-boolean stampAnchorDraft (agent-writable file)", () => {
+        // Held to the depth guard's bar: omitting the stamp degrades the
+        // next run to full (more review), where the render coercion alone
+        // would read garbage as `false`, the less-review direction.
+        const fs = fakeFs(stagedInputs());
+        runRereviewPlanCli(fs);
+        const staged = JSON.parse(
+            fs.files.get(`${REVIEW_DIR}/rereview-plan.json`) ?? "{}",
+        ) as Record<string, unknown>;
+        staged.stampAnchorDraft = "false hunks=forged";
         fs.files.set(
             `${REVIEW_DIR}/rereview-plan.json`,
             JSON.stringify(staged),

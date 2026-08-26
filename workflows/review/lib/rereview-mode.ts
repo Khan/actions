@@ -353,13 +353,19 @@ export const parseRereviewStamp = (body: string): ReReviewStamp | null => {
 };
 
 /**
- * The stamp's collapsed block, matched by its wrapper rather than its
- * payload so a garbled payload still strips (lazy up to the first
- * `</details>`, so a following block is never swallowed).
+ * The stamp's collapsed block. The wrapper is transcription-tolerant (the
+ * `<sub>` tags and whitespace are optional, so a reflowed block still
+ * strips), but the interior must be the stamp payload itself: it has to
+ * open with the marker and stay inside `[^<]*` (which covers a
+ * charset-garbled payload). A wildcard interior would let rule 7's fold
+ * delete ARBITRARY text an orchestrator hid inside a fingerprint-labeled
+ * block, exactly the splice (#244) the gate exists to catch; a non-stamp
+ * interior must stay in the body and trip the comparison instead.
  */
 const STAMP_BLOCK_RE = new RegExp(
-    `<details>\\s*<summary>\\s*<sub>\\s*${STAMP_SUMMARY}\\s*</sub>` +
-        `\\s*</summary>[\\s\\S]*?</details>`,
+    `<details>\\s*<summary>\\s*(?:<sub>\\s*)?${STAMP_SUMMARY}` +
+        `\\s*(?:</sub>\\s*)?</summary>\\s*(?:<sub>\\s*)?${STAMP_MARKER}` +
+        `[^<]*(?:</sub>\\s*)?</details>`,
     "gi",
 );
 
@@ -836,6 +842,12 @@ export const runRereviewStampCli = (
     // directory, and an unknown depth would render a stamp the parser
     // rejects anyway, so omit the stamp and let the next run plan full.
     if (!(RE_REVIEW_MODES as readonly string[]).includes(plan.depth)) {
+        return null;
+    }
+    // Same bar for anchorDraft: omitting the stamp degrades the NEXT run to
+    // full (more review), where the render coercion alone would read
+    // non-boolean garbage as `false`, the less-review direction.
+    if (typeof plan.stampAnchorDraft !== "boolean") {
         return null;
     }
     return renderRereviewStamp({

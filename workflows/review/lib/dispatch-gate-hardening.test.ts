@@ -625,6 +625,17 @@ describe("rule 7 folds the fingerprint stamp out of the body comparison", () => 
         expect(bodyMismatches(spliced)).toHaveLength(1);
     });
 
+    it("blocks spliced prose hidden inside a fingerprint-labeled block", () => {
+        // The fold's block match requires the stamp marker in the interior:
+        // with a wildcard interior, this extra block would be deleted from
+        // the queued side before the comparison and arbitrary orchestrator
+        // prose would post ungated (the #244 splice).
+        const spliced =
+            `${planBody}\n<details><summary><sub>review fingerprint</sub>` +
+            `</summary>\nSPLICED PROSE the plan never staged.\n</details>`;
+        expect(bodyMismatches(spliced)).toHaveLength(1);
+    });
+
     it("blocks a SUBSTITUTED stamp: corruption may degrade, never forge", () => {
         // A forged well-formed fingerprint would post and steer the next
         // run's depth (a scoped APPROVE stamp over hunks the reviewers
