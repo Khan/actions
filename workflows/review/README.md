@@ -586,7 +586,8 @@ Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministi
 - **Flip gate.** In `flip-gated` mode the dispatched correctness pass's
   validated blocking findings veto the approval flip.
 - **Divergence tripwire.** Every full-depth review stamps a content-hashed
-  hunk signature into its review body as a hidden comment (it survives cache
+  hunk signature into its review body as a collapsed `<details>` block (an
+  HTML comment would be deleted by the ingest sanitizer; it survives cache
   eviction and branch protection's dismiss-stale-approvals, and it (not the
   review state) is what marks a full review as having happened, so a
   COMMENTED-only or dismissed history never wedges the dial). Each push is
@@ -937,6 +938,13 @@ in `lib/rereview-mode.ts`), so the marker never reached a posted comment; `sub`,
 `details`, and `summary` are on the sanitizer's allowed-tag list and survive
 ingest. There is no separate config-hash or drift-stamp mechanism; the release
 tag plus the footer's config segments are the version surface.
+
+After the footer, a submitted review body ends with one more collapsed block:
+the re-review fingerprint stamp (summary chip `review fingerprint`, rendered
+by `lib/rereview-mode.ts`), the hunk-signature record the next run's re-review
+planner and autofix's currency check read back. It rides the same
+sanitizer-surviving `details`/`summary`/`sub` mechanism as the footer, so the
+footer is second-to-last and the stamp is the final block.
 
 Every inline review comment (and each pr-level finding folded into the review
 body) additionally ends with a per-comment attribution footer in the same

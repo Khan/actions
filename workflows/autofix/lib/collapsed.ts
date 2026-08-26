@@ -16,8 +16,9 @@
  * items at all. Each review's collapsed section states that run's
  * still-unposted findings against that run's head; an entry from an older
  * review describes a tree the review currency machinery does not vouch for
- * (the staleness check is keyed to the latest stamped review, and stamps do
- * not survive posting, so an older body cannot be re-validated here). An
+ * (the staleness check is keyed to the latest stamped review; older bodies
+ * are not re-validated here even now that stamps survive posting,
+ * webapp#41742, because the newest review supersedes them). An
  * older unfixed observation drops out of scope until a review re-derives
  * it, which is the same self-healing bet the reviewer's own corpus memory
  * makes.

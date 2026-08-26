@@ -53,7 +53,8 @@
  * accountability section spliced verbatim, one note line per shed / skipped
  * dimension / depth reduction (the dispatcher already rendered those), any
  * PR-level claims folded into the body (the inline-comment safe output needs
- * a path and line), and the hidden fingerprint stamp as the final line.
+ * a path and line), and the collapsed fingerprint stamp as the final block
+ * (a `<details>` wrapper, sanitizer-surviving; see renderRereviewStamp).
  *
  * Determinism boundary: pure composition of staged files through the same
  * lib functions the eval runner uses; no model call, no prose about the code
@@ -475,9 +476,8 @@ export const runSubmissionCli = (
 
     // The prior verdict, read once: the reduced-depth flip floor needs a
     // prior REQUEST_CHANGES, the redundant-approval skip needs a prior
-    // APPROVE. Posted bodies never keep their stamp (the ingest sanitizer
-    // strips HTML comments), so both anchor on the same cache-memory carrier
-    // gate rule 5 reads.
+    // APPROVE. Posted bodies carry the stamp since the collapsed details
+    // form (webapp#41742); cache-memory stays as the pre-move fallback.
     const priorRaw = readJson(fs, `${REVIEW_DIR}/prior-reviews.json`);
     const priors: PriorReview[] = Array.isArray(priorRaw)
         ? priorRaw.filter(
@@ -940,9 +940,9 @@ export const runSubmissionCli = (
     // neither a `Note:` line nor an accountability section, so the prompt's
     // old wording let the orchestrator skip a submission the gate then
     // red-flagged, withholding the approval AND the observations on every
-    // later run. Compared modulo the ingest sanitizer (`normalizeBody`), the
-    // same way the gate compares, so the fingerprint stamp is not a
-    // difference.
+    // later run. Compared modulo the ingest sanitizer (`normalizeBody`),
+    // the same way the gate compares; the stamp and footer never enter the
+    // comparison at all, since both ride `body`, not `coreBody`.
     const skipSubmission =
         event === "APPROVE" &&
         inline.length === 0 &&
