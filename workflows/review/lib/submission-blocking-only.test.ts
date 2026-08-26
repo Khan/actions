@@ -112,7 +112,8 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         // The pr-level note outranks the nitpick for the summary slot
         // (nitpicks rank last; the collapsed list re-sorts with pr-level
         // claims included). Asserted with the wrapper: N>=2 is the closed
-        // `<details>` arm, and this is the one rendered-body pin of it.
+        // `<details>` arm (also pinned off the renderer by collapsed.test.ts's
+        // N=2 round-trip case; this one covers the blocking-only wording).
         expect(plan.body).toContain(
             "<details>\n<summary>Non-blocking observations (2; top: note (non-blocking): A cross-file observation.)</summary>",
         );

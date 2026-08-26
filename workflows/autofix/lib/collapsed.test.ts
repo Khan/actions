@@ -122,6 +122,25 @@ describe("body item ids", () => {
     });
 });
 
+/**
+ * A minimal fs over an in-memory file map, enough for runSubmissionCli.
+ * Writes land back in the map so staged artifacts are inspectable.
+ */
+const makeFakeFs = (files: Record<string, string>) => ({
+    readFileSync: (p: string) => {
+        if (!(p in files)) {
+            throw new Error(`ENOENT: ${p}`);
+        }
+        return files[p];
+    },
+    writeFileSync: (p: string, data: string) => {
+        files[p] = data;
+    },
+    existsSync: (p: string) =>
+        p in files || Object.keys(files).some((f) => f.startsWith(`${p}/`)),
+    mkdirSync: () => {},
+});
+
 describe("the render/parse round trip", () => {
     it("parses what runSubmissionCli actually renders", async () => {
         // The one test that owns both ends of the grammar: a full-depth plan
@@ -167,22 +186,7 @@ describe("the render/parse round trip", () => {
                 stampHunks: {},
             }),
         };
-        const fakeFs = {
-            readFileSync: (p: string) => {
-                if (!(p in files)) {
-                    throw new Error(`ENOENT: ${p}`);
-                }
-                return files[p];
-            },
-            writeFileSync: (p: string, data: string) => {
-                files[p] = data;
-            },
-            existsSync: (p: string) =>
-                p in files ||
-                Object.keys(files).some((f) => f.startsWith(`${p}/`)),
-            mkdirSync: () => {},
-        };
-        const plan = runSubmissionCli(fakeFs);
+        const plan = runSubmissionCli(makeFakeFs(files));
         const observations = parseCollapsedObservations([{body: plan.body}]);
         expect(observations).toEqual([
             {
@@ -248,22 +252,7 @@ describe("the render/parse round trip", () => {
                 stampHunks: {},
             }),
         };
-        const fakeFs = {
-            readFileSync: (p: string) => {
-                if (!(p in files)) {
-                    throw new Error(`ENOENT: ${p}`);
-                }
-                return files[p];
-            },
-            writeFileSync: (p: string, data: string) => {
-                files[p] = data;
-            },
-            existsSync: (p: string) =>
-                p in files ||
-                Object.keys(files).some((f) => f.startsWith(`${p}/`)),
-            mkdirSync: () => {},
-        };
-        const plan = runSubmissionCli(fakeFs);
+        const plan = runSubmissionCli(makeFakeFs(files));
         // The closed wrapper and the named-top summary, off the renderer.
         // Prefix-only: the top entry's identity is ranking's business, the
         // arm shape is this test's.

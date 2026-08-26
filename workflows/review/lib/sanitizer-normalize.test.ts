@@ -37,6 +37,18 @@ describe("normalizeBody XML tag conversion", () => {
         expect(normalizeBody(body)).toContain("<details>");
     });
 
+    it("preserves an allowed tag carrying a safe attribute (`<details open>`)", () => {
+        // The N=1 collapsed section is the first renderer output whose tag
+        // carries an attribute. The real sanitizer preserves it verbatim:
+        // its stripDangerousAttributes removes only on*/style/title/data-*
+        // from allowed tags (sanitize_content_core.cjs v0.85.4, verified at
+        // gh-aw-actions 2709137e), and `open` is none of those. The mirror
+        // must agree, or rule 7 would red-flag every N=1 body.
+        expect(
+            normalizeBody("x <details open><summary>1</summary> y"),
+        ).toContain("<details open>");
+    });
+
     it("still catches a splice that parenthesises a preserved allowed tag", () => {
         // The sanitizer preserves `<p>`, so a queued `(p)` cannot be the
         // sanitizer's work; the fold must not absorb it.

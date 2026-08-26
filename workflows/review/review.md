@@ -920,7 +920,8 @@ section back off posted reviews), so the plan never exceeds what the
 engine will emit. At two or more entries the collapsed section's summary line
 names its top-ranked entry, so an approving review cannot hide its best
 finding behind a bare count; a one-entry section renders `<details open>`
-with a count-only summary, the entry visible without a click. Emit the plan's `comments` verbatim — one
+with a count-only summary, the entry visible without a click. Emit the
+plan's `comments` verbatim — one
 `create-pull-request-review-comment` per entry, all in one batched turn;
 never add, drop, reword, or re-anchor one.
 

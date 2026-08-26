@@ -406,9 +406,10 @@ re-review scoped
   comments per review (default 3). Blocking findings never count against it;
   `nitpick (non-blocking)` findings never post inline at all. Findings over
   budget collapse into a `<details>` block in the review body whose summary
-  names the top-ranked entry when it holds two or more; a one-entry section
-  renders `<details open>` with a count-only summary, since the entry is its
-  own preview (always the body, never riding an inline
+  names the top-ranked entry when it holds two or more; a one-entry
+  observation section renders `<details open>` with a count-only summary,
+  since the entry is its own preview (metadata chips such as the version
+  footer stay closed at any count; always the body, never riding an inline
   comment: the body is the surface the autofix's body-sourced work list
   reads back); nothing is dropped, the verdict counts every validated
   finding, and the autofix still reaches collapsed findings through that
