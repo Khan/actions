@@ -122,6 +122,25 @@ describe("body item ids", () => {
     });
 });
 
+/**
+ * A minimal fs over an in-memory file map, enough for runSubmissionCli.
+ * Writes land back in the map so staged artifacts are inspectable.
+ */
+const makeFakeFs = (files: Record<string, string>) => ({
+    readFileSync: (p: string) => {
+        if (!(p in files)) {
+            throw new Error(`ENOENT: ${p}`);
+        }
+        return files[p];
+    },
+    writeFileSync: (p: string, data: string) => {
+        files[p] = data;
+    },
+    existsSync: (p: string) =>
+        p in files || Object.keys(files).some((f) => f.startsWith(`${p}/`)),
+    mkdirSync: () => {},
+});
+
 describe("the render/parse round trip", () => {
     it("parses what runSubmissionCli actually renders", async () => {
         // The one test that owns both ends of the grammar: a full-depth plan
@@ -167,22 +186,7 @@ describe("the render/parse round trip", () => {
                 stampHunks: {},
             }),
         };
-        const fakeFs = {
-            readFileSync: (p: string) => {
-                if (!(p in files)) {
-                    throw new Error(`ENOENT: ${p}`);
-                }
-                return files[p];
-            },
-            writeFileSync: (p: string, data: string) => {
-                files[p] = data;
-            },
-            existsSync: (p: string) =>
-                p in files ||
-                Object.keys(files).some((f) => f.startsWith(`${p}/`)),
-            mkdirSync: () => {},
-        };
-        const plan = runSubmissionCli(fakeFs);
+        const plan = runSubmissionCli(makeFakeFs(files));
         const observations = parseCollapsedObservations([{body: plan.body}]);
         expect(observations).toEqual([
             {
@@ -193,5 +197,88 @@ describe("the render/parse round trip", () => {
                 source: "documentation",
             },
         ]);
+    });
+
+    it("round-trips the closed N>=2 form off a rendered body", async () => {
+        // The N=1 case above renders `<details open>` with a count-only
+        // summary, so it no longer exercises the closed `<details>` +
+        // named-top arm. This case sheds two claims so the renderer takes
+        // that arm, pins the wrapper on the rendered body (not a hand-built
+        // fixture), and parses both entries back.
+        const {runSubmissionCli} = await import(
+            "../../review/lib/submission.ts"
+        );
+        const REVIEW = "/tmp/gh-aw/review";
+        const shed = (
+            id: string,
+            path: string,
+            line: number,
+            subject: string,
+            confidence: number,
+        ) => ({
+            id,
+            source: "documentation",
+            path,
+            line,
+            label: "suggestion (non-blocking, documentation)",
+            subject,
+            discussion: subject,
+            failure_scenario: "f",
+            confidence,
+        });
+        const files: Record<string, string> = {
+            [`${REVIEW}/dispatch-result.json`]: JSON.stringify({
+                depth: "full",
+                claims: [
+                    {
+                        id: "kept",
+                        source: "correctness-reviewer",
+                        path: "lib/a.ts",
+                        line: 2,
+                        label: "suggestion (non-blocking)",
+                        subject: "Kept inline.",
+                        discussion: "Kept inline.",
+                        failure_scenario: "f",
+                        confidence: 0.9,
+                    },
+                    shed("shed-1", "lib/b.ts", 7, "Trim the doc comment.", 0.4),
+                    shed("shed-2", "lib/c.ts", 3, "Expand the example.", 0.3),
+                ],
+            }),
+            [`${REVIEW}/rereview-plan.json`]: JSON.stringify({
+                depth: "full",
+                mode: "full",
+                stampAnchorDraft: false,
+                stampHunks: {},
+            }),
+        };
+        const plan = runSubmissionCli(makeFakeFs(files));
+        // The closed wrapper and the named-top summary, off the renderer.
+        // Prefix-only: the top entry's identity is ranking's business, the
+        // arm shape is this test's.
+        expect(plan.body).toContain(
+            "<details>\n<summary>Lower-confidence observations (2; top: ",
+        );
+        expect(plan.body).not.toContain("<details open>");
+        const observations = parseCollapsedObservations([{body: plan.body}]);
+        expect(observations).toHaveLength(2);
+        expect(observations).toEqual(
+            expect.arrayContaining([
+                {
+                    path: "lib/b.ts",
+                    line: 7,
+                    label: "suggestion (non-blocking, documentation)",
+                    subject: "Trim the doc comment.",
+                    source: "documentation",
+                },
+                {
+                    path: "lib/c.ts",
+                    line: 3,
+                    label: "suggestion (non-blocking, documentation)",
+                    subject: "Expand the example.",
+                    source: "documentation",
+                },
+            ]),
+        );
     });
 });

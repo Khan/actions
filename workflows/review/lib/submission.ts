@@ -789,38 +789,38 @@ export const runSubmissionCli = (
         const collapsedNonBlockingOnly = !collapsed.some((entry) =>
             isBlockingLabel(entry.label),
         );
-        // The disclosure names the tail's top-ranked entry, not only the
-        // count: today's collapsed sections hid, verbatim, "the reply guard
-        // never fires" behind "Non-blocking observations (6)" on an
-        // approving review (Khan/actions#367), and a collapsed line only
-        // costs near-zero attention if the summary line says when it is
-        // worth spending more. `collapsed` re-sorts with rankClaims after
-        // the pr-level claims join it, so entry 0 is the best of the whole
-        // tail, pr-level included.
-        // The subject rides the tag, not only the location and label: the
-        // subject is the claim itself, and it is what tells a reader whether
-        // the expando is worth opening. It is model-authored text landing
-        // inside a <summary>, so it is HTML-escaped (attribution.ts's rule:
-        // a literal </summary> would break the collapse open) and truncated
-        // to keep the summary one line; the full subject is the first list
-        // entry inside the block anyway. The location gets the same
-        // backticks the section's own lines use.
+        // The disclosure names the tail's top-ranked entry, subject and
+        // all, not only the count: collapsed sections once hid "the reply
+        // guard never fires" behind "Non-blocking observations (6)" on an
+        // approving review (Khan/actions#367), and the subject is what
+        // tells a reader whether the expando is worth opening. `collapsed`
+        // re-sorts with rankClaims after the pr-level claims join it, so
+        // entry 0 is the best of the whole tail. The subject is
+        // model-authored text inside a <summary>, so it is HTML-escaped
+        // (a literal </summary> would break the collapse) and truncated.
+        // A one-entry tail: at N=1 the "preview" is the whole payload, so
+        // a closed <details> shows the observation twice and reads as a
+        // stray comment (Khan/actions#387). It renders <details open> with
+        // a count-only summary, still a <details> block for the autofix's
+        // section slicing (<summary> to </details>, collapsed.ts).
+        const singleEntry = collapsed.length === 1;
         const top = collapsed[0];
         const topSubject = escapeHtml(
             top.subject.length > TOP_SUBJECT_MAX_CHARS
                 ? `${top.subject.slice(0, TOP_SUBJECT_MAX_CHARS)}...`
                 : top.subject,
         );
-        const topTag =
-            top.path !== undefined && top.line !== undefined
-                ? `; top: \`${top.path}:${top.line}\` ${top.label}: ${topSubject}`
-                : `; top: ${top.label}: ${topSubject}`;
+        const topTag = singleEntry
+            ? ""
+            : top.path !== undefined && top.line !== undefined
+            ? `; top: \`${top.path}:${top.line}\` ${top.label}: ${topSubject}`
+            : `; top: ${top.label}: ${topSubject}`;
         const summary =
             reducedSurface && collapsedNonBlockingOnly
                 ? `Non-blocking observations (${collapsed.length}${topTag})`
                 : `Lower-confidence observations (${collapsed.length}${topTag})`;
         const section = [
-            "<details>",
+            singleEntry ? "<details open>" : "<details>",
             `<summary>${summary}</summary>`,
             "",
             ...collapsed.map(renderCollapsedLine),

@@ -216,8 +216,9 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         // despite outranking it on confidence.
         expect(plan.comments).toHaveLength(1);
         expect(plan.comments[0].line).toBe(2);
+        expect(plan.body).toContain("Lower-confidence observations (1)");
         expect(plan.body).toContain(
-            "Lower-confidence observations (1; top: `a.ts:1` nitpick (non-blocking): rename it)",
+            "- `a.ts:1` nitpick (non-blocking): rename it",
         );
     });
 
@@ -286,8 +287,9 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
             makeFakeFs(staged({depth: "full", claims})),
         );
         expect(plan.comments).toEqual([]);
+        // N=1: open section, count-only summary.
         expect(plan.body).toContain(
-            "Lower-confidence observations (1; top: `a.ts:2` thought (non-blocking): a hunch)",
+            "<details open>\n<summary>Lower-confidence observations (1)</summary>",
         );
         expect(plan.body).toContain("a hunch");
     });
