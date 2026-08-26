@@ -447,7 +447,7 @@ describe("the budget's edge values", () => {
         );
     });
 
-    it("a pr-level claim can be the tail's named top entry", () => {
+    it("a pr-level claim folds into the body; the tail names the anchored claim", () => {
         const claims = [
             claim({
                 id: "pr-level",
@@ -477,10 +477,14 @@ describe("the budget's edge values", () => {
                 ),
             ),
         );
-        // Both collapse under blocking-only; the pr-level note outranks the
-        // low-confidence anchored thought for the summary slot.
+        // The pr-level note folds into the body (the reduced-surface
+        // collapse bucket is gone, PRA-53); only the low-confidence
+        // anchored thought lands in the collapsed tail.
         expect(plan.body).toContain(
-            "Non-blocking observations (2; top: note (non-blocking): A cross-file observation.)",
+            "**note (non-blocking):** The guard was removed.",
+        );
+        expect(plan.body).toContain(
+            "Lower-confidence observations (1; top: `a.ts:2` thought (non-blocking): a hunch)",
         );
     });
 });

@@ -157,10 +157,10 @@ describe("the hold path (core dimension unavailable)", () => {
         ).toBe(true);
     });
 
-    it("carries blocking-only collapsed pr-level claims into the hold body", () => {
-        // The #329 blocking-only modifier diverts non-blocking pr-level
-        // claims into a collapsed bucket that only the normal path renders;
-        // a hold must fold them too, not drop them.
+    it("carries pr-level claims into the hold body as folds", () => {
+        // A pr-level claim folds into the hold body the same way it folds
+        // into a normal review body (the retired blocking-only modifier's
+        // collapsed bucket is gone, PRA-53); a hold must not drop it.
         const fs = makeFakeFs(
             staged(
                 {
@@ -192,8 +192,7 @@ describe("the hold path (core dimension unavailable)", () => {
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("HOLD_FOR_HUMAN");
         expect(plan.body).toContain(
-            "- suggestion (non-blocking): spanning concern " +
-                "<sub>(correctness-reviewer)</sub>",
+            "**suggestion (non-blocking):** The guard was removed.",
         );
     });
 

@@ -354,42 +354,15 @@ export const runSubmissionCli = (
     const routing = readJson(fs, `${REVIEW_DIR}/routing.json`) as
         | {
               teams?: {owners?: unknown};
-              reReviewBlockingOnly?: unknown;
-              reReviewBlockingMedium?: unknown;
               nonBlockingInlineBudget?: unknown;
           }
         | undefined;
-    // The ROUTING `re-review <mode> blocking-only` modifier: a repeat review
-    // at a reduced depth posts only blocking findings inline; validated
-    // non-blocking findings collapse into the review body below. Keyed on
-    // the EXECUTED depth, not the configured mode, so the first full review,
-    // a tripwire re-arm, and every guard that resolves to full depth still
-    // post everything. The verdict counts every claim either way.
-    //
-    // Executed depth is a DELIBERATE key, not a proxy for "is a repeat
-    // review" (rereview-plan.json is staged and could key that directly): a
-    // guard degrades to full exactly when the pipeline could not trust the
-    // reduced-depth state — a divergence re-arm, an unparseable plan, a
-    // missing staging — and a run whose premise is "start over, trust
-    // nothing" should not inherit a posting filter from the state it just
-    // declined to trust. Guard-degraded repeats therefore stay loud BY
-    // DESIGN, priced as: guards are rare, and when one fires the review is
-    // effectively a first review of the current tree. If the live A/B shows
-    // degrade-to-full repeats still generating the chatter complaint, the
-    // revisit is to key on plan presence, not to widen this condition
-    // quietly — that trade (filtering a run built on distrusted state)
-    // deserves its own change and its own eval.
-    const blockingOnly =
-        depth !== "full" && routing?.reReviewBlockingOnly === true;
-    // The `blocking-medium` sibling modifier: same reduced surface, but
-    // medium-importance claims keep posting inline (spending the
-    // non-blocking budget) while minor claims collapse. Same executed-depth
-    // key, same reasoning.
-    const blockingMedium =
-        depth !== "full" && routing?.reReviewBlockingMedium === true;
-    // The reduced posting surface either modifier arms; `blockingMedium`
-    // then decides whether medium claims punch through it.
-    const reducedSurface = blockingOnly || blockingMedium;
+    // Repeat reviews post the full surface: the blocking-only and
+    // blocking-medium posting filters were removed (PRA-53). Scoped staging
+    // already bounds a repeat round to new hunks, and the non-blocking
+    // budget, the nitpick ban, and the confidence floor are the posting
+    // filters; the modifiers contained a repetition problem that was
+    // actually the dead re-review fingerprint (PRA-52).
 
     // The deterministic changed-lines veto on the medium tier (PRA-7):
     // medium is defined over code this PR adds, so the tier is stripped
@@ -499,19 +472,12 @@ export const runSubmissionCli = (
     }
 
     // Inline comments need a path and a line; a PR-level claim folds into
-    // the body instead (rare: a pr-anchored finding). Under a reduced
-    // surface a non-blocking pr-level claim joins the collapsed section
-    // instead (a pr-level claim can never carry medium: the changed-lines
-    // veto requires a line anchor, so no blocking-medium carve-out exists
-    // here by construction).
+    // the body instead (rare: a pr-anchored finding).
     const anchored: Claim[] = [];
     const prLevelLines: string[] = [];
-    const prLevelCollapsed: Claim[] = [];
     for (const claim of vetoed) {
         if (claim.path !== undefined && claim.line !== undefined) {
             anchored.push(claim);
-        } else if (reducedSurface && !isBlockingLabel(claim.label)) {
-            prLevelCollapsed.push(claim);
         } else {
             // The fold carries the same collapsed attribution footer an
             // inline comment gets: a pr-level finding names its reviewer too.
@@ -595,13 +561,7 @@ export const runSubmissionCli = (
     if (plan !== undefined && depth !== "full") {
         const mode = typeof plan.mode === "string" ? plan.mode : "full";
         depthNotes.push(
-            `Note: re-review ran at ${depth} depth (re-review mode ${mode}${
-                blockingOnly
-                    ? ", blocking-only"
-                    : blockingMedium
-                    ? ", blocking-medium"
-                    : ""
-            }).`,
+            `Note: re-review ran at ${depth} depth (re-review mode ${mode}).`,
         );
     }
     if (plan?.tripwireRearmed === true) {
@@ -627,18 +587,14 @@ export const runSubmissionCli = (
     // threads standing), and no fingerprint stamp is written, so the cache
     // writer refuses the record and the next run reviews in full.
     if (verdict.event === "HOLD_FOR_HUMAN") {
-        // Both post-fold buckets ride the hold comment: anchored claims (no
-        // inline comments post on a hold) and the blocking-only collapsed
-        // pr-level claims (their collapsed section renders only on the
-        // normal path).
-        const heldClaimLines = [...anchored, ...prLevelCollapsed].map(
-            (claim) => {
-                notes.push(
-                    `claim ${claim.id} folded into the hold comment (a hold posts no inline comments)`,
-                );
-                return renderCollapsedLine(claim);
-            },
-        );
+        // Anchored claims ride the hold comment (no inline comments post on
+        // a hold).
+        const heldClaimLines = [...anchored].map((claim) => {
+            notes.push(
+                `claim ${claim.id} folded into the hold comment (a hold posts no inline comments)`,
+            );
+            return renderCollapsedLine(claim);
+        });
         return stagePlan(fs, {
             event: "HOLD_FOR_HUMAN",
             body: [
@@ -729,15 +685,7 @@ export const runSubmissionCli = (
         if (isBlockingLabel(claim.label)) {
             return true;
         }
-        if (blockingOnly || claim.confidence < MIN_INLINE_CONFIDENCE) {
-            return false;
-        }
-        // Under blocking-medium only medium claims may punch through the
-        // reduced surface; everything below still applies to them (the
-        // nitpick ban wins over the tier: a medium nitpick is a labeling
-        // contradiction, and the ban is the stricter rule; medium spends
-        // the budget like any other non-blocking claim).
-        if (blockingMedium && claim.importance !== "medium") {
+        if (claim.confidence < MIN_INLINE_CONFIDENCE) {
             return false;
         }
         if (isNitpick(claim)) {
@@ -757,7 +705,6 @@ export const runSubmissionCli = (
     // claim, not merely its best ANCHORED claim.
     const collapsed = [
         ...ranked.filter((claim) => !inlineClaims.has(claim)),
-        ...prLevelCollapsed,
     ].sort(rankClaims);
     const inlineList = [...inlineClaims];
     const inline: PlannedComment[] = inlineList.map((claim) => ({
@@ -780,15 +727,6 @@ export const runSubmissionCli = (
         // has not shown to matter. If it ever does, the dial belongs at the
         // validation-dispatch gate as its own evaluated change, with the
         // unvalidated lines marked as such — not as a silent widening here.
-        //
-        // The cap can push a 21st+ blocking claim into the collapse; a
-        // "Non-blocking" heading would mislabel it, so the blocking-only
-        // wording applies only when every collapsed claim is non-blocking
-        // (each line still carries its own label either way, and the
-        // verdict already counted every claim above).
-        const collapsedNonBlockingOnly = !collapsed.some((entry) =>
-            isBlockingLabel(entry.label),
-        );
         // The disclosure names the tail's top-ranked entry, not only the
         // count: today's collapsed sections hid, verbatim, "the reply guard
         // never fires" behind "Non-blocking observations (6)" on an
@@ -815,10 +753,7 @@ export const runSubmissionCli = (
             top.path !== undefined && top.line !== undefined
                 ? `; top: \`${top.path}:${top.line}\` ${top.label}: ${topSubject}`
                 : `; top: ${top.label}: ${topSubject}`;
-        const summary =
-            reducedSurface && collapsedNonBlockingOnly
-                ? `Non-blocking observations (${collapsed.length}${topTag})`
-                : `Lower-confidence observations (${collapsed.length}${topTag})`;
+        const summary = `Lower-confidence observations (${collapsed.length}${topTag})`;
         const section = [
             "<details>",
             `<summary>${summary}</summary>`,
@@ -837,13 +772,7 @@ export const runSubmissionCli = (
         // never the autofix scope) only holds with the section here.
         prLevelLines.push(section);
         notes.push(
-            reducedSurface && collapsedNonBlockingOnly
-                ? `${
-                      collapsed.length
-                  } non-blocking claim(s) collapsed into the body (re-review ${
-                      blockingOnly ? "blocking-only" : "blocking-medium"
-                  })`
-                : `${collapsed.length} claim(s) collapsed below the inline bar (cap ${MAX_INLINE_COMMENTS}, medium-confidence floor, non-blocking budget ${nonBlockingBudget})`,
+            `${collapsed.length} claim(s) collapsed below the inline bar (cap ${MAX_INLINE_COMMENTS}, medium-confidence floor, non-blocking budget ${nonBlockingBudget})`,
         );
         if (budgetShed > 0) {
             notes.push(

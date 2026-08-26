@@ -3,19 +3,18 @@ import {describe, it, expect} from "vitest";
 import {runSubmissionCli, type SubmissionFs} from "./submission";
 
 /**
- * The ROUTING `re-review <mode> blocking-medium` modifier's posting surface
- * and the medium tier's submission-side mechanics (PRA-7), in their own file
- * per the submission-blocking-only precedent (max-lines budget).
+ * The medium tier's submission-side mechanics (PRA-7), in their own file
+ * per the submission-rereview-surface precedent (max-lines budget). The
+ * blocking-medium posting modifier is retired (PRA-53: repeat reviews post
+ * the full surface), so nothing here keys on routing flags anymore.
  *
- * What these pin: at a reduced executed depth with `routing.json`'s
- * `reReviewBlockingMedium` set, blocking and medium-importance findings post
- * inline (medium spends the non-blocking budget) while minor findings
- * collapse; medium outranks minor for the budget at full depth; the
- * changed-lines veto strips the tier from claims not anchored on an added
- * diff line; and every plan notes its post-veto medium count, zero
- * included (the day-one calibration instrument). The fixtures are small
- * local copies of submission-blocking-only.test.ts's, plus a staged
- * `full.diff` whose added lines cover the medium claims' anchors.
+ * What these pin: medium outranks minor for the budget; the changed-lines
+ * veto strips the tier from claims not anchored on an added diff line; a
+ * posted or collapsed medium demotes the approval to COMMENT while a
+ * vetoed one does not; and every plan notes its post-veto medium count,
+ * zero included (the day-one calibration instrument). The fixtures are
+ * small local copies of submission-rereview-surface.test.ts's, plus a
+ * staged `full.diff` whose added lines cover the medium claims' anchors.
  */
 
 const REVIEW = "/tmp/gh-aw/review";
@@ -66,7 +65,7 @@ const DIFF = [
 
 const staged = (
     dispatchResult: Record<string, unknown>,
-    routing: Record<string, unknown> = {reReviewBlockingMedium: true},
+    routing: Record<string, unknown> = {},
 ): Record<string, string> => ({
     [`${REVIEW}/dispatch-result.json`]: JSON.stringify(dispatchResult),
     [`${REVIEW}/full.diff`]: DIFF,
@@ -79,8 +78,8 @@ const staged = (
     [`${REVIEW}/routing.json`]: JSON.stringify(routing),
 });
 
-describe("runSubmissionCli: re-review blocking-medium", () => {
-    it("posts medium inline and collapses minor at reduced depth", () => {
+describe("runSubmissionCli: the medium tier at reduced depth", () => {
+    it("posts medium and minor inline (full surface, PRA-53)", () => {
         const fs = makeFakeFs(
             staged({
                 depth: "scoped",
@@ -102,16 +101,12 @@ describe("runSubmissionCli: re-review blocking-medium", () => {
         expect(plan.body).toContain(
             "Commented — medium-importance findings found; nothing blocks.",
         );
-        expect(plan.comments).toHaveLength(1);
-        expect(plan.comments[0].line).toBe(2);
+        // Both post inline: the retired blocking-medium modifier no longer
+        // collapses the minor claim.
+        expect(plan.comments).toHaveLength(2);
+        expect(plan.comments.map((c) => c.line)).toEqual([2, 9]);
         expect(plan.body).toContain(
-            "Non-blocking observations (1; top: `a.ts:9` suggestion (non-blocking): Rename the helper.)",
-        );
-        expect(plan.notes.join(" ")).toContain(
-            "1 non-blocking claim(s) collapsed into the body (re-review blocking-medium)",
-        );
-        expect(plan.body).toContain(
-            "Note: re-review ran at scoped depth (re-review mode scoped, blocking-medium).",
+            "Note: re-review ran at scoped depth (re-review mode scoped).",
         );
         expect(plan.notes).toContainEqual(
             "medium-importance claims this run: 1",
@@ -136,14 +131,13 @@ describe("runSubmissionCli: re-review blocking-medium", () => {
                 depth: "scoped",
                 claims: [
                     // Line 40 is outside the diff's added lines: the tier is
-                    // stripped, so under blocking-medium the claim collapses.
+                    // stripped and the claim posts as an ordinary minor one.
                     claim({id: "drifted", line: 40, importance: "medium"}),
                 ],
             }),
         );
         const plan = runSubmissionCli(fs);
-        expect(plan.comments).toHaveLength(0);
-        expect(plan.body).toContain("Non-blocking observations (1");
+        expect(plan.comments).toHaveLength(1);
         expect(plan.notes).toContainEqual(
             "medium-importance claims this run: 0",
         );
@@ -185,7 +179,7 @@ describe("runSubmissionCli: re-review blocking-medium", () => {
         );
     });
 
-    it("strict blocking-only still collapses a medium claim (the rollback dial)", () => {
+    it("a leftover blocking-only routing flag no longer collapses anything", () => {
         const fs = makeFakeFs(
             staged(
                 {
@@ -196,8 +190,7 @@ describe("runSubmissionCli: re-review blocking-medium", () => {
             ),
         );
         const plan = runSubmissionCli(fs);
-        expect(plan.comments).toHaveLength(0);
-        expect(plan.body).toContain("Non-blocking observations (1");
+        expect(plan.comments).toHaveLength(1);
     });
 
     it("ranks medium ahead of higher-confidence minor claims at full depth", () => {
@@ -265,8 +258,9 @@ describe("the veto's diff sources", () => {
             "",
         ].join("\n");
         const plan = runSubmissionCli(makeFakeFs(files));
-        expect(plan.comments).toHaveLength(1);
-        expect(plan.comments[0].line).toBe(2);
+        // Both post inline (full surface); only the in-scoped one keeps
+        // the tier.
+        expect(plan.comments).toHaveLength(2);
         expect(plan.notes).toContainEqual(
             "medium-importance claims this run: 1",
         );
@@ -279,7 +273,8 @@ describe("the veto's diff sources", () => {
         });
         delete files[`${REVIEW}/full.diff`];
         const plan = runSubmissionCli(makeFakeFs(files));
-        expect(plan.comments).toHaveLength(0);
+        // The demoted claim posts as an ordinary minor one.
+        expect(plan.comments).toHaveLength(1);
         expect(plan.notes).toContainEqual(
             "medium veto ran with no staged diff (all medium claims demoted)",
         );
@@ -305,17 +300,20 @@ describe("the COMMENT verdict", () => {
     });
 
     it("a collapsed medium still demotes (the verdict follows what the run found)", () => {
-        // Strict blocking-only collapses the medium's surface, but the
+        // The confidence floor collapses the medium's surface, but the
         // finding was verified and anchored: the verdict comments anyway,
         // same invariant that keeps a collapsed blocking claim blocking.
         const fs = makeFakeFs(
-            staged(
-                {
-                    depth: "scoped",
-                    claims: [claim({id: "medium", importance: "medium"})],
-                },
-                {reReviewBlockingOnly: true},
-            ),
+            staged({
+                depth: "scoped",
+                claims: [
+                    claim({
+                        id: "medium",
+                        importance: "medium",
+                        confidence: 0.4,
+                    }),
+                ],
+            }),
         );
         const plan = runSubmissionCli(fs);
         expect(plan.comments).toHaveLength(0);

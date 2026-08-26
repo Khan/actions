@@ -369,7 +369,7 @@ rule per line:
 ```
 # <pattern> [lens=<lens>,…] [tier=trivial|low|medium|high] [direction-dependent]
 # enable <reviewer>[,<reviewer>…]
-# re-review full|scoped|flip-gated|fast [blocking-only|blocking-medium]
+# re-review full|scoped|flip-gated|fast
 # non-blocking-budget <n>
 services/**/migrations/**  tier=high lens=data-migrations
 **/*.graphql               lens=api-federation-compat
@@ -398,10 +398,9 @@ re-review scoped
 - `re-review` sets the repo's re-review mode (see the next section). Default
   `full`; when several lines set it, the last one wins with a warning. An
   unknown mode degrades to `full`: toward more review, never less. The
-  optional `blocking-only` and `blocking-medium` modifiers change the repeat
-  review's posting surface (see
-  [Re-review modes](#re-review-modes-the-runs-per-pr-cost-lever));
-  an unknown modifier warns and is ignored, and the mode still applies.
+  retired `blocking-only` and `blocking-medium` posting modifiers warn and
+  are ignored (repeat reviews post the full surface; see below), as does any
+  unknown modifier, and the mode still applies either way.
 - `non-blocking-budget` sets how many non-blocking findings may post as inline
   comments per review (default 3). Blocking findings never count against it;
   `nitpick (non-blocking)` findings never post inline at all. Findings over
@@ -593,36 +592,18 @@ Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministi
   rewrite-after-approval and sparse-PR-then-payload
   (`eval/lifecycle/`, replayed in `eval/lifecycle.test.ts`).
 
-**The `blocking-only` modifier** (`re-review scoped blocking-only`) composes
-with any mode: the depth's roster and staging are unchanged, but a repeat
-review posts only blocking findings inline; validated non-blocking findings
-collapse to one line each in a `<details>` block in the review body, and the
-depth note names the modifier. It applies exactly when the run executes at a
-reduced depth, so the first full review of a ready PR, a divergence-tripwire
-re-arm, and every guard that resolves to `full` still post everything (which
-is also why `full blocking-only` warns: it can never apply). The verdict is
-computed from every validated claim either way, so the modifier can never
-flip an outcome; it only moves non-blocking feedback off the inline surface.
-Use it when re-review chatter is the complaint but whole-change coverage
-(`scoped`) is still wanted: `flip-gated` silences the noise by not running
-the whole-change reviewers at all, while `scoped blocking-only` keeps their
-blocking recall and their body-collapsed observations.
-
-**The `blocking-medium` modifier** (`re-review scoped blocking-medium`) is the
-recommended middle: same reduced surface as `blocking-only`, except findings
-carrying the medium importance tier (a verified defect or gap in code the PR
-adds, one a reasonable author would fix before merge; reviewer-proposed,
-validator-adjudicated, and code-vetoed against the diff's added lines) keep
-posting inline, spending the non-blocking budget. Motivating case for
-preferring it over strict `blocking-only`: three 2026-08-24 approving
-re-reviews on this repo collapsed verified correctness findings behind a bare
-"Non-blocking observations (N)" count (#367's "the reply guard never fires"
-among them). `blocking-only` stays available as the rollback dial for the
-inline surface if the medium tier inflates on a consumer; note it quiets the
-posting surface only — the verdict follows the medium count regardless, so
-sustained inflation is a calibration fix (reviewer prompts, validator
-adjudication), not a ROUTING dial. At most one modifier per `re-review`
-line; a later line replaces an earlier one.
+**Repeat reviews post the full surface.** The `blocking-only` and
+`blocking-medium` posting modifiers were removed (PRA-53, after #382 added
+them): they filtered what a reduced-depth repeat review posted inline, to
+contain re-review chatter that turned out to be the dead re-review
+fingerprint re-running every round at full depth (see the stamp fix, #389).
+With the fingerprint working, `scoped` staging already bounds a repeat round
+to new hunks, and the non-blocking inline budget, the nitpick ban, and the
+confidence floor are the posting filters, same as a first review. A leftover
+modifier in a ROUTING file warns and is ignored. If a consumer's re-review
+chatter comes back, the dials are `non-blocking-budget` (inline count) and
+`flip-gated` (which silences the whole-change reviewers entirely), not a
+posting filter.
 
 The dial is a measured change, not a default change: it ships `full`
 everywhere, so no consumer's behavior moves until its repo adds a `re-review`
@@ -911,7 +892,7 @@ run files (never composed by the model):
 
 ```
 <details><summary><sub>review details</sub></summary>
-<sub>review-v<major>.<minor>.<patch> | schema <n> | depth <depth> | re-review <mode> [blocking-only|blocking-medium] | enable <reviewer,...> | non-blocking-budget <n></sub>
+<sub>review-v<major>.<minor>.<patch> | schema <n> | depth <depth> | re-review <mode> | enable <reviewer,...> | non-blocking-budget <n></sub>
 </details>
 ```
 

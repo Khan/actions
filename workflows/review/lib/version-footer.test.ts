@@ -49,33 +49,12 @@ describe("renderVersionFooter", () => {
                 schemaVersion: 2,
                 depth: "scoped",
                 reReviewMode: "scoped",
-                blockingOnly: true,
-                blockingMedium: false,
                 enabledReviewers: ["holistic", "completeness"],
                 nonBlockingInlineBudget: 5,
             }),
         ).toBe(
             wrapped(
-                "review-v1.13.0 | schema 2 | depth scoped | re-review scoped blocking-only | enable holistic,completeness | non-blocking-budget 5",
-            ),
-        );
-    });
-
-    it("renders the blocking-medium modifier", () => {
-        expect(
-            renderVersionFooter({
-                version: "1.13.0",
-                schemaVersion: 2,
-                depth: "scoped",
-                reReviewMode: "scoped",
-                blockingOnly: false,
-                blockingMedium: true,
-                enabledReviewers: [],
-                nonBlockingInlineBudget: null,
-            }),
-        ).toBe(
-            wrapped(
-                "review-v1.13.0 | schema 2 | depth scoped | re-review scoped blocking-medium",
+                "review-v1.13.0 | schema 2 | depth scoped | re-review scoped | enable holistic,completeness | non-blocking-budget 5",
             ),
         );
     });
@@ -87,27 +66,8 @@ describe("renderVersionFooter", () => {
                 schemaVersion: 2,
                 depth: "full",
                 reReviewMode: "full",
-                blockingOnly: false,
-                blockingMedium: false,
                 enabledReviewers: [],
                 nonBlockingInlineBudget: 3,
-            }),
-        ).toBe(
-            wrapped("review-v1.13.0 | schema 2 | depth full | re-review full"),
-        );
-    });
-
-    it("omits the blocking-only modifier when unset", () => {
-        expect(
-            renderVersionFooter({
-                version: "1.13.0",
-                schemaVersion: 2,
-                depth: "full",
-                reReviewMode: "full",
-                blockingOnly: false,
-                blockingMedium: false,
-                enabledReviewers: [],
-                nonBlockingInlineBudget: null,
             }),
         ).toBe(
             wrapped("review-v1.13.0 | schema 2 | depth full | re-review full"),
@@ -121,8 +81,6 @@ describe("renderVersionFooter", () => {
                 schemaVersion: 2,
                 depth: null,
                 reReviewMode: null,
-                blockingOnly: true,
-                blockingMedium: false,
                 enabledReviewers: [],
                 nonBlockingInlineBudget: null,
             }),
@@ -135,7 +93,6 @@ describe("renderVersionFooter", () => {
             schemaVersion: 2,
             depth: "full",
             reReviewMode: "scoped",
-            blockingOnly: true,
             enabledReviewers: ["holistic"],
         });
         expect(footer).not.toContain("<!--");
@@ -151,6 +108,8 @@ describe("runVersionFooterCli", () => {
         [`${REVIEW}/rereview-plan.json`]: JSON.stringify({depth: "full"}),
         [`${REVIEW}/routing.json`]: JSON.stringify({
             reReviewMode: "scoped",
+            // A leftover flag from the retired modifiers (PRA-53): the
+            // footer must not render it.
             reReviewBlockingOnly: true,
             enabledReviewers: ["holistic", "documentation"],
         }),
@@ -161,7 +120,7 @@ describe("runVersionFooterCli", () => {
         const footer = runVersionFooterCli(fs, LIB);
         expect(footer).toBe(
             wrapped(
-                `review-v1.13.0 | schema ${FINDING_SCHEMA_VERSION} | depth scoped | re-review scoped blocking-only | enable holistic,documentation`,
+                `review-v1.13.0 | schema ${FINDING_SCHEMA_VERSION} | depth scoped | re-review scoped | enable holistic,documentation`,
             ),
         );
         expect(fs.files[FOOTER_OUT]).toBe(footer);

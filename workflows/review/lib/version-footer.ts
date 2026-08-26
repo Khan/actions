@@ -50,10 +50,6 @@ export type VersionFooterInputs = {
     depth: string | null;
     /** The repo's `re-review` mode line from ROUTING (routing.json). */
     reReviewMode: string | null;
-    /** The ROUTING `blocking-only` modifier. */
-    blockingOnly: boolean;
-    /** The ROUTING `blocking-medium` modifier. */
-    blockingMedium: boolean;
     /** The ROUTING `enable` list (canonical order, from routing.json). */
     enabledReviewers: string[];
     /** The ROUTING `non-blocking-budget` value; null drops the segment, and
@@ -78,15 +74,7 @@ export const renderVersionFooter = (inputs: VersionFooterInputs): string => {
         segments.push(`depth ${inputs.depth}`);
     }
     if (inputs.reReviewMode !== null && inputs.reReviewMode !== "") {
-        segments.push(
-            `re-review ${inputs.reReviewMode}${
-                inputs.blockingOnly
-                    ? " blocking-only"
-                    : inputs.blockingMedium
-                    ? " blocking-medium"
-                    : ""
-            }`,
-        );
+        segments.push(`re-review ${inputs.reReviewMode}`);
     }
     if (inputs.enabledReviewers.length > 0) {
         segments.push(`enable ${inputs.enabledReviewers.join(",")}`);
@@ -145,8 +133,6 @@ export const runVersionFooterCli = (
     const routing = readJson(fs, `${REVIEW_DIR}/routing.json`) as
         | {
               reReviewMode?: unknown;
-              reReviewBlockingOnly?: unknown;
-              reReviewBlockingMedium?: unknown;
               enabledReviewers?: unknown;
               nonBlockingInlineBudget?: unknown;
           }
@@ -164,8 +150,6 @@ export const runVersionFooterCli = (
             typeof routing?.reReviewMode === "string"
                 ? routing.reReviewMode
                 : null,
-        blockingOnly: routing?.reReviewBlockingOnly === true,
-        blockingMedium: routing?.reReviewBlockingMedium === true,
         enabledReviewers: Array.isArray(routing?.enabledReviewers)
             ? routing.enabledReviewers.filter(
                   (entry): entry is string => typeof entry === "string",

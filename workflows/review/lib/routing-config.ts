@@ -96,26 +96,17 @@ export type ReReviewMode = typeof RE_REVIEW_MODES[number];
 export const DEFAULT_RE_REVIEW_MODE: ReReviewMode = "full";
 
 /**
- * The modifiers the `re-review` line accepts (at most one per line; a later
- * line replaces an earlier one). Both keep the configured depth's roster
- * and staging and change only the REPEAT review's posting surface; the
- * verdict still counts every claim, so nothing either suppresses can flip
- * an outcome, and both apply exactly when a run executes at a reduced
- * depth, so the first full review of a ready PR, a divergence-tripwire
- * re-arm, and every guard that resolves to full depth still post
- * everything.
- *
- *   - `blocking-only`: only blocking findings post inline; every validated
- *     non-blocking finding collapses into a <details> block in the review
- *     body. The strict dial, kept as the rollback if the medium tier
- *     inflates on a consumer.
- *   - `blocking-medium`: blocking findings AND medium-importance findings
- *     post inline (medium spends the non-blocking inline budget); minor
- *     findings collapse. The recommended dial: under `blocking-only`,
- *     three 2026-08-24 approving re-reviews collapsed verified correctness
- *     findings behind a bare count (Khan/actions#367, #371, #366).
+ * The retired `re-review` posting modifiers (`blocking-only`,
+ * `blocking-medium`), kept only so a leftover field in a consumer's ROUTING
+ * file warns instead of parsing as an unknown token. Both filtered what a
+ * reduced-depth repeat review posted inline; they were removed (PRA-53)
+ * because scoped staging already bounds repeat reviews to new hunks, and
+ * with the non-blocking budget, the nitpick ban, and the confidence floor
+ * the full surface is the posting filter. The modifiers existed to contain
+ * a repetition problem that turned out to be the dead re-review fingerprint
+ * (PRA-52), not the posting surface.
  */
-export const RE_REVIEW_MODIFIERS = [
+const RETIRED_RE_REVIEW_MODIFIERS = [
     "blocking-only",
     "blocking-medium",
 ] as const;
@@ -158,12 +149,6 @@ export type RoutingFileConfig = {
     enabledReviewers: EnableableReviewer[];
     /** The repo's re-review mode (`re-review` line; default `full`). */
     reReviewMode: ReReviewMode;
-    /** `re-review <mode> blocking-only`: repeat reviews post only blocking
-     * findings inline (see {@link RE_REVIEW_MODIFIERS}). */
-    reReviewBlockingOnly: boolean;
-    /** `re-review <mode> blocking-medium`: repeat reviews post blocking and
-     * medium-importance findings inline (see {@link RE_REVIEW_MODIFIERS}). */
-    reReviewBlockingMedium: boolean;
     /** `non-blocking-budget <n>`: how many non-blocking findings may post
      * inline per review (see {@link DEFAULT_NON_BLOCKING_INLINE_BUDGET}). */
     nonBlockingInlineBudget: number;
@@ -197,10 +182,10 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  * `re-review` sets the repo's re-review mode ({@link RE_REVIEW_MODES}); when
  * several lines set it the LAST one wins (with a warning), matching the
  * file's last-rule-wins convention. An optional `blocking-only` modifier
- * ({@link RE_REVIEW_MODIFIERS}) makes repeat reviews post only blocking
- * findings inline; an unknown modifier warns and is ignored (the mode still
- * applies), and `full blocking-only` warns that the modifier never applies
- * at full depth. `non-blocking-budget` sets how many non-blocking findings
+ * from the retired posting filter (`blocking-only`, `blocking-medium`)
+ * warns and is ignored: repeat reviews post the full surface (PRA-53), and
+ * an unknown modifier warns the same way (the mode still applies).
+ * `non-blocking-budget` sets how many non-blocking findings
  * post inline per review ({@link DEFAULT_NON_BLOCKING_INLINE_BUDGET});
  * a malformed value warns and keeps the previous value, and when several
  * lines set it the last one wins (with a warning). A leftover `dispatch`
@@ -217,8 +202,6 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
     const riskRules: RiskRule[] = [];
     const enabled = new Set<EnableableReviewer>();
     let reReviewMode: ReReviewMode = DEFAULT_RE_REVIEW_MODE;
-    let reReviewBlockingOnly = false;
-    let reReviewBlockingMedium = false;
     let reReviewLineSeen = false;
     let nonBlockingInlineBudget = DEFAULT_NON_BLOCKING_INLINE_BUDGET;
     let budgetLineSeen = false;
@@ -275,25 +258,17 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
                 );
                 continue;
             }
-            let blockingOnly = false;
-            let blockingMedium = false;
             if (fields.length === 2) {
                 if (
-                    (RE_REVIEW_MODIFIERS as readonly string[]).includes(
+                    (RETIRED_RE_REVIEW_MODIFIERS as readonly string[]).includes(
                         fields[1],
                     )
                 ) {
-                    blockingOnly = fields[1] === "blocking-only";
-                    blockingMedium = fields[1] === "blocking-medium";
-                    if (mode === "full") {
-                        // full never executes at a reduced depth, so the
-                        // modifier never applies; the mode still does.
-                        warnings.push(
-                            `ROUTING line ${lineNo}: ${fields[1]} never ` +
-                                `applies at full re-review depth (repeat ` +
-                                `reviews post everything)`,
-                        );
-                    }
+                    warnings.push(
+                        `ROUTING line ${lineNo}: ${fields[1]} is retired ` +
+                            `(repeat reviews post the full surface); ` +
+                            `modifier ignored`,
+                    );
                 } else {
                     warnings.push(
                         `ROUTING line ${lineNo}: unknown re-review ` +
@@ -308,8 +283,6 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
                 );
             }
             reReviewMode = mode as ReReviewMode;
-            reReviewBlockingOnly = blockingOnly;
-            reReviewBlockingMedium = blockingMedium;
             reReviewLineSeen = true;
             continue;
         }
@@ -436,8 +409,6 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
             enabled.has(reviewer),
         ),
         reReviewMode,
-        reReviewBlockingOnly,
-        reReviewBlockingMedium,
         nonBlockingInlineBudget,
         dispatchMode: DEFAULT_DISPATCH_MODE,
         warnings,

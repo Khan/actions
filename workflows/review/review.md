@@ -1075,7 +1075,7 @@ fully explained by a common pattern above:
 </details>
 
 <details><summary><sub>review details</sub></summary>
-<sub>review-v1.20.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
+<sub>review-v1.20.0 | schema 2 | depth full | re-review scoped | enable holistic,completeness</sub>
 </details>
 ````
 
@@ -1551,9 +1551,8 @@ Return ONLY this JSON object (no prose, no code fence):
 non-blocking finding that is a verified defect or gap in code this PR adds, one
 a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
 what it does is decide which non-blocking findings post inline rather than
-collapse, keep a finding visible on re-reviews under the `blocking-medium`
-dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
-findings without vouching for the change). The claim-validator checks the
+collapse, and demote the run's verdict from APPROVE to COMMENT (the run posts
+its findings without vouching for the change). The claim-validator checks the
 marking and strips any it cannot confirm, and code strips it from any finding
 not anchored on a changed line of this PR, so an evidence-free medium costs
 the finding its prominence and buys nothing.
@@ -1700,9 +1699,8 @@ Return ONLY this JSON object (no prose, no code fence):
 non-blocking finding that is a verified defect or gap in code this PR adds, one
 a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
 what it does is decide which non-blocking findings post inline rather than
-collapse, keep a finding visible on re-reviews under the `blocking-medium`
-dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
-findings without vouching for the change). The claim-validator checks the
+collapse, and demote the run's verdict from APPROVE to COMMENT (the run posts
+its findings without vouching for the change). The claim-validator checks the
 marking and strips any it cannot confirm, and code strips it from any finding
 not anchored on a changed line of this PR, so an evidence-free medium costs
 the finding its prominence and buys nothing.
@@ -2210,9 +2208,8 @@ Return ONLY this JSON object (no prose, no code fence):
 non-blocking finding that is a verified defect or gap in code this PR adds, one
 a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
 what it does is decide which non-blocking findings post inline rather than
-collapse, keep a finding visible on re-reviews under the `blocking-medium`
-dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
-findings without vouching for the change). The claim-validator checks the
+collapse, and demote the run's verdict from APPROVE to COMMENT (the run posts
+its findings without vouching for the change). The claim-validator checks the
 marking and strips any it cannot confirm, and code strips it from any finding
 not anchored on a changed line of this PR, so an evidence-free medium costs
 the finding its prominence and buys nothing.
@@ -2296,9 +2293,8 @@ Return ONLY this JSON object (no prose, no code fence):
 non-blocking finding that is a verified defect or gap in code this PR adds, one
 a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
 what it does is decide which non-blocking findings post inline rather than
-collapse, keep a finding visible on re-reviews under the `blocking-medium`
-dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
-findings without vouching for the change). The claim-validator checks the
+collapse, and demote the run's verdict from APPROVE to COMMENT (the run posts
+its findings without vouching for the change). The claim-validator checks the
 marking and strips any it cannot confirm, and code strips it from any finding
 not anchored on a changed line of this PR, so an evidence-free medium costs
 the finding its prominence and buys nothing.
@@ -2372,9 +2368,8 @@ Return ONLY this JSON object (no prose, no code fence):
 non-blocking finding that is a verified defect or gap in code this PR adds, one
 a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
 what it does is decide which non-blocking findings post inline rather than
-collapse, keep a finding visible on re-reviews under the `blocking-medium`
-dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
-findings without vouching for the change). The claim-validator checks the
+collapse, and demote the run's verdict from APPROVE to COMMENT (the run posts
+its findings without vouching for the change). The claim-validator checks the
 marking and strips any it cannot confirm, and code strips it from any finding
 not anchored on a changed line of this PR, so an evidence-free medium costs
 the finding its prominence and buys nothing.

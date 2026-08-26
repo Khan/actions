@@ -861,13 +861,12 @@ describe("parseRoutingConfig: re-review directive", () => {
         for (const mode of ["full", "scoped", "flip-gated", "fast"] as const) {
             const config = parseRoutingConfig(`re-review ${mode}`);
             expect(config.reReviewMode).toBe(mode);
-            expect(config.reReviewBlockingOnly).toBe(false);
             expect(config.warnings).toEqual([]);
         }
     });
 
-    // The blocking-only modifier's parse and CLI cases live in
-    // router-rereview-blocking-only.test.ts (max-lines budget).
+    // The retired posting modifiers' warn-and-ignore cases live in
+    // router-rereview-modifiers-retired.test.ts (max-lines budget).
 
     it("degrades an unknown mode to full with a warning; toward more review", () => {
         const config = parseRoutingConfig("re-review turbo");
