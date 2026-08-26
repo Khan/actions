@@ -537,8 +537,10 @@ budget on content you never act on.
   every run planned full depth (webapp#41742). Bodies from before that fix carry
   no stamp; the plan CLI then falls back to the Step 9 cache-memory record
   (`rereview-plan.json` records which carrier won as `stampSource`), though
-  cache writes are themselves denied on issue_comment triggers by GitHub's
-  2026-06-30 cache policy, so the body carrier is the one that works.
+  cache writes are denied on issue_comment triggers (the /review command
+  consumers declare) by GitHub's 2026-06-30 cache policy; pull_request
+  triggers can still save, so the body carrier is the one that works
+  everywhere.
 - `threads.json` and `human-threads.json`: this PR's unresolved review
   threads, split by who opened them; the ones this bot opened (with their full
   reply chains) and the `{path, line}` of everyone else's. Step 3 says what each

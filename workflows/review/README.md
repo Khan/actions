@@ -936,6 +936,13 @@ in `lib/rereview-mode.ts`), so the marker never reached a posted comment; `sub`,
 ingest. There is no separate config-hash or drift-stamp mechanism; the release
 tag plus the footer's config segments are the version surface.
 
+After the footer, a submitted review body ends with one more collapsed block:
+the re-review fingerprint stamp (summary chip `review fingerprint`, rendered
+by `lib/rereview-mode.ts`), the hunk-signature record the next run's re-review
+planner and autofix's currency check read back. It rides the same
+sanitizer-surviving `details`/`summary`/`sub` mechanism as the footer, so the
+footer is second-to-last and the stamp is the final block.
+
 Every inline review comment (and each pr-level finding folded into the review
 body) additionally ends with a per-comment attribution footer in the same
 collapsed block, naming the reviewer that produced the finding and, when

@@ -256,7 +256,7 @@ const decodeSignature = (encoded: string): HunkSignature | null => {
 };
 
 /** The summary chip the stamp's collapsed block renders under. */
-export const STAMP_SUMMARY = "review fingerprint";
+const STAMP_SUMMARY = "review fingerprint";
 
 /**
  * Render the stamp as a collapsed `<details>` block appended to the review
@@ -299,7 +299,11 @@ export const renderRereviewStamp = (stamp: ReReviewStamp): string => {
  * Delimiter-free also means a body QUOTING a stamp (a review discussing
  * this format, say) can match; last-wins plus the schema, depth, and
  * decode checks bound that to adopting a well-formed quoted fingerprint,
- * which the divergence tripwire then treats like any stale anchor.
+ * which the divergence tripwire then treats like any stale anchor. The
+ * depth and verdict charsets are exact by construction (`[a-z-]+` covers
+ * every RE_REVIEW_MODES value, `[A-Z_]+` every review event), and both
+ * stop at the space before the next field, so a mangled field ends the
+ * match instead of bleeding into the payload.
  */
 const STAMP_RE = new RegExp(
     `${STAMP_MARKER} v=(\\d+) depth=([a-z-]+) verdict=([A-Z_]+) ` +
@@ -800,6 +804,13 @@ export const runRereviewStampCli = (
 ): string | null => {
     const plan = readJsonIfPresent(fs, PLAN_OUT) as ReReviewPlan | undefined;
     if (plan === undefined) {
+        return null;
+    }
+    // The verdict is validated at the CLI boundary; hold depth to the same
+    // bar. The plan file is code-written but lives in an agent-writable
+    // directory, and an unknown depth would render a stamp the parser
+    // rejects anyway, so omit the stamp and let the next run plan full.
+    if (!(RE_REVIEW_MODES as readonly string[]).includes(plan.depth)) {
         return null;
     }
     return renderRereviewStamp({

@@ -940,9 +940,9 @@ export const runSubmissionCli = (
     // neither a `Note:` line nor an accountability section, so the prompt's
     // old wording let the orchestrator skip a submission the gate then
     // red-flagged, withholding the approval AND the observations on every
-    // later run. Compared modulo the ingest sanitizer (`normalizeBody`), the
-    // same way the gate compares, so the fingerprint stamp is not a
-    // difference.
+    // later run. Compared modulo the ingest sanitizer (`normalizeBody`),
+    // the same way the gate compares; the stamp and footer never enter the
+    // comparison at all, since both ride `body`, not `coreBody`.
     const skipSubmission =
         event === "APPROVE" &&
         inline.length === 0 &&

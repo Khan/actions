@@ -806,4 +806,21 @@ describe("runRereviewStampCli", () => {
     it("returns null when no plan is staged", () => {
         expect(runRereviewStampCli(fakeFs({}), "APPROVE")).toBeNull();
     });
+
+    it("returns null on a plan with an unknown depth (agent-writable file)", () => {
+        // The plan file is code-written but lives in an agent-writable
+        // directory; an unknown depth is held to the same bar as the CLI's
+        // verdict flag rather than interpolated into the posted body.
+        const fs = fakeFs(stagedInputs());
+        runRereviewPlanCli(fs);
+        const staged = JSON.parse(
+            fs.files.get(`${REVIEW_DIR}/rereview-plan.json`) ?? "{}",
+        ) as Record<string, unknown>;
+        staged.depth = "weird stuff";
+        fs.files.set(
+            `${REVIEW_DIR}/rereview-plan.json`,
+            JSON.stringify(staged),
+        );
+        expect(runRereviewStampCli(fs, "APPROVE")).toBeNull();
+    });
 });
