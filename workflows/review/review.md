@@ -531,11 +531,14 @@ budget on content you never act on.
   uses this to filter candidate comments.
 - `prior-reviews.json` — every prior `github-actions[bot]` review body,
   whatever its state (a dismissed or comment-only review still carries its
-  fingerprint stamp, which is why states are not filtered). In practice
-  gh-aw's safe-output sanitizer strips the stamp comment before a review
-  posts, so these bodies usually carry none; the plan CLI then anchors on
-  the Step 9 cache-memory record instead (its `rereview-plan.json` records
-  which carrier won as `stampSource`).
+  fingerprint stamp, which is why states are not filtered). The stamp is a
+  collapsed `<details>` block, not an HTML comment: the sanitizer deletes
+  comments, which is why the original comment-form stamp never posted and
+  every run planned full depth (PRA-52). Bodies from before that fix carry
+  no stamp; the plan CLI then falls back to the Step 9 cache-memory record
+  (`rereview-plan.json` records which carrier won as `stampSource`), though
+  cache writes are themselves denied on issue_comment triggers by GitHub's
+  2026-06-30 cache policy, so the body carrier is the one that works.
 - `threads.json` and `human-threads.json`: this PR's unresolved review
   threads, split by who opened them; the ones this bot opened (with their full
   reply chains) and the `{path, line}` of everyone else's. Step 3 says what each
@@ -927,7 +930,7 @@ never add, drop, reword, or re-anchor one.
 
 The review body and event are composed by the plan CLI (Step 3): the verdict
 head, the code-rendered re-review accountability section, every `Note:` line,
-the collapsed version/config footer, and the hidden fingerprint stamp are all
+the collapsed version/config footer, and the collapsed fingerprint stamp are all
 already in the plan's `body`. Submit
 with **one** `submit-pull-request-review` call carrying the plan's `event` and
 `body` verbatim — except under the redundant-approval skip (Step 3), where you

@@ -53,7 +53,8 @@
  * accountability section spliced verbatim, one note line per shed / skipped
  * dimension / depth reduction (the dispatcher already rendered those), any
  * PR-level claims folded into the body (the inline-comment safe output needs
- * a path and line), and the hidden fingerprint stamp as the final line.
+ * a path and line), and the collapsed fingerprint stamp as the final block
+ * (a `<details>` wrapper, sanitizer-surviving; see renderRereviewStamp).
  *
  * Determinism boundary: pure composition of staged files through the same
  * lib functions the eval runner uses; no model call, no prose about the code
@@ -475,9 +476,8 @@ export const runSubmissionCli = (
 
     // The prior verdict, read once: the reduced-depth flip floor needs a
     // prior REQUEST_CHANGES, the redundant-approval skip needs a prior
-    // APPROVE. Posted bodies never keep their stamp (the ingest sanitizer
-    // strips HTML comments), so both anchor on the same cache-memory carrier
-    // gate rule 5 reads.
+    // APPROVE. Posted bodies carry the stamp since the collapsed details
+    // form (PRA-52); cache-memory stays as the pre-move fallback.
     const priorRaw = readJson(fs, `${REVIEW_DIR}/prior-reviews.json`);
     const priors: PriorReview[] = Array.isArray(priorRaw)
         ? priorRaw.filter(

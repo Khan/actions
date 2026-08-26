@@ -130,8 +130,14 @@ describe("runSubmissionCli", () => {
             },
         ]);
         expect(plan.resolve).toEqual(["t1"]);
-        // The stamp is the final line (hidden HTML comment).
-        expect(plan.body.split("\n").at(-1)).toMatch(/^<!--.*-->$/);
+        // The stamp is the final block (collapsed details; the old hidden
+        // HTML comment never survived the ingest sanitizer, PRA-52).
+        const tail = plan.body.split("\n").slice(-3);
+        expect(tail[0]).toBe(
+            "<details><summary><sub>review fingerprint</sub></summary>",
+        );
+        expect(tail[1]).toMatch(/^<sub>pr-reviewer:rereview .*<\/sub>$/);
+        expect(tail[2]).toBe("</details>");
         // The plan is staged for the gate's plan-match rule.
         expect(
             JSON.parse(fs.files[`${REVIEW}/submission-plan.json`]).event,
@@ -419,11 +425,14 @@ describe("the gate's plan-match rule (slice 4)", () => {
         expect(result.violations).toEqual([]);
     });
 
-    it("passes when the ingest sanitizer stripped the plan's stamp comment from the queued body (run 29893634730)", () => {
+    it("passes when the ingest sanitizer strips an HTML comment from the queued body (run 29893634730)", () => {
         const plan = runSubmissionCli(plannedFs());
-        // The plan's body carries the hidden fingerprint stamp; what the
-        // gate sees queued is the POST-sanitizer body, comments deleted.
-        expect(plan.body).toContain("<!--");
+        // The stamp no longer rides as a comment (it never survived the
+        // sanitizer; PRA-52 moved it to a collapsed details block), so the
+        // comment-tolerance rule is pinned with a synthetic comment: a plan
+        // body carrying one, queued after the sanitizer deleted it.
+        expect(plan.body).not.toContain("<!--");
+        plan.body = `${plan.body}\n<!-- synthetic marker -->`;
         const sanitizedBody = plan.body.replace(/<!--[\s\S]*?-->/g, "");
         const result = evaluateDispatchConformance({
             items: queuedFromPlan({...plan, body: sanitizedBody}),
@@ -559,16 +568,20 @@ describe("the gate's plan-match rule (slice 4)", () => {
         );
         const plan = runSubmissionCli(fs);
         const lines = plan.body.split("\n");
-        // Stamp last (hidden), the collapsed footer block directly above it.
-        expect(lines.at(-1)).toMatch(/^<!--.*-->$/);
-        expect(lines.at(-2)).toBe("</details>");
-        expect(lines.at(-3)).toMatch(/^<sub>.*schema \d+.*<\/sub>$/);
-        expect(lines.at(-4)).toBe(
+        // Stamp block last, the collapsed footer block directly above it.
+        expect(lines.at(-1)).toBe("</details>");
+        expect(lines.at(-2)).toMatch(/^<sub>pr-reviewer:rereview .*<\/sub>$/);
+        expect(lines.at(-3)).toBe(
+            "<details><summary><sub>review fingerprint</sub></summary>",
+        );
+        expect(lines.at(-4)).toBe("</details>");
+        expect(lines.at(-5)).toMatch(/^<sub>.*schema \d+.*<\/sub>$/);
+        expect(lines.at(-6)).toBe(
             "<details><summary><sub>review details</sub></summary>",
         );
         // The CLI also staged the footer file Step 7 pastes.
         expect(fs.files["/tmp/gh-aw/review/version-footer.txt"]).toBe(
-            lines.slice(-4, -1).join("\n"),
+            lines.slice(-6, -3).join("\n"),
         );
     });
 

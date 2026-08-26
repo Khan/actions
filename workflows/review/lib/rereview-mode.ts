@@ -210,13 +210,20 @@ const STAMP_MARKER = "pr-reviewer:rereview";
  */
 export const MAX_STAMP_HUNKS_B64_CHARS = 20000;
 
-/** Stable serialization: sorted paths, so equal signatures encode equally. */
+/**
+ * Stable serialization: sorted paths, so equal signatures encode equally.
+ * base64url, not base64: the payload posts as visible body text, and the
+ * ingest sanitizer redacts anything that looks like a protocol-relative URL,
+ * which a standard-alphabet payload can produce (`//` is a legal base64
+ * bigram). The url-safe alphabet has no slashes. Node's base64 decoder
+ * accepts both alphabets, so decode is unchanged.
+ */
 const encodeSignature = (signature: HunkSignature): string => {
     const sorted: HunkSignature = {};
     for (const path of Object.keys(signature).sort()) {
         sorted[path] = signature[path];
     }
-    return Buffer.from(JSON.stringify(sorted), "utf8").toString("base64");
+    return Buffer.from(JSON.stringify(sorted), "utf8").toString("base64url");
 };
 
 const decodeSignature = (encoded: string): HunkSignature | null => {
@@ -246,7 +253,20 @@ const decodeSignature = (encoded: string): HunkSignature | null => {
     return signature;
 };
 
-/** Render the stamp as the hidden HTML comment the review body carries. */
+/** The summary chip the stamp's collapsed block renders under. */
+export const STAMP_SUMMARY = "review fingerprint";
+
+/**
+ * Render the stamp as a collapsed `<details>` block appended to the review
+ * body. NOT an HTML comment: the ingest sanitizer
+ * (sanitize_content_core.cjs) deletes every HTML comment before posting, so
+ * the original hidden-comment stamp never reached production and every run
+ * was `no-prior-fingerprint` (webapp#41742, PRA-52). `details`, `summary`,
+ * and `sub` are on the sanitizer's allowed-tags list, so this form survives
+ * the trip. The cache-memory fallback cannot substitute: GitHub's 2026-06-30
+ * cache policy denies writes from issue_comment-triggered runs regardless of
+ * job permissions, which is exactly the /review trigger.
+ */
 export const renderRereviewStamp = (stamp: ReReviewStamp): string => {
     let hunksField: string;
     if (stamp.anchorHunks === "overflow") {
@@ -256,16 +276,28 @@ export const renderRereviewStamp = (stamp: ReReviewStamp): string => {
         hunksField =
             encoded.length > MAX_STAMP_HUNKS_B64_CHARS ? "overflow" : encoded;
     }
-    return (
-        `<!-- ${STAMP_MARKER} v=${stamp.schemaVersion} ` +
+    const payload =
+        `${STAMP_MARKER} v=${stamp.schemaVersion} ` +
         `depth=${stamp.depth} verdict=${stamp.verdict} ` +
-        `anchor-draft=${stamp.anchorDraft} hunks=${hunksField} -->`
-    );
+        `anchor-draft=${stamp.anchorDraft} hunks=${hunksField}`;
+    return [
+        `<details><summary><sub>${STAMP_SUMMARY}</sub></summary>`,
+        `<sub>${payload}</sub>`,
+        "</details>",
+    ].join("\n");
 };
 
+/**
+ * Delimiter-free on purpose: the payload is matched wherever it appears, so
+ * the reader accepts both this block form and the legacy `<!-- ... -->`
+ * comment form (staged plans, cache fixtures, and any pre-fix body that
+ * never went through the sanitizer). The hunks charset is the base64url
+ * alphabet plus the legacy base64 characters, and it cannot match past the
+ * closing `</sub>` or ` -->` because neither `<` nor a space is in it.
+ */
 const STAMP_RE = new RegExp(
-    `<!-- ${STAMP_MARKER} v=(\\d+) depth=(\\S+) verdict=(\\S+) ` +
-        `anchor-draft=(true|false) hunks=(\\S+) -->`,
+    `${STAMP_MARKER} v=(\\d+) depth=([a-z-]+) verdict=([A-Z_]+) ` +
+        `anchor-draft=(true|false) hunks=([A-Za-z0-9+/=_-]+)`,
     "g",
 );
 

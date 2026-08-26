@@ -16,6 +16,7 @@ import {
     stampFromCacheMemory,
 } from "./rereview-mode";
 import type {HunkSignature, ReReviewStamp} from "./rereview-mode";
+import {normalizeBody} from "./sanitizer-normalize";
 
 /* -------------------------------------------------------------------------- */
 /* Diff fixtures                                                              */
@@ -211,6 +212,43 @@ describe("stamp render/parse", () => {
         expect(rendered).toContain("hunks=overflow");
         expect(rendered.length).toBeLessThan(MAX_STAMP_HUNKS_B64_CHARS);
         expect(parseRereviewStamp(rendered)?.anchorHunks).toBe("overflow");
+    });
+
+    // PRA-52 (webapp#41742): the original stamp was an HTML comment and the
+    // ingest sanitizer deletes every HTML comment, so no posted review ever
+    // carried a fingerprint and every production run planned full depth as
+    // no-prior-fingerprint. These three pin the fix and the failure mode.
+    it("contains no HTML comment (the sanitizer deletes those)", () => {
+        expect(renderRereviewStamp(stampOf())).not.toContain("<!--");
+    });
+
+    it("survives the sanitizer's structural transforms (comment removal, tag conversion)", () => {
+        // normalizeBody is the gate's comparison fold, not the posted text
+        // (it also case-folds, which the real sanitizer does not), so the
+        // assertion is marker survival through the structural transforms,
+        // not a re-parse. The legacy-form test below shows the contrast:
+        // the same fold erases an HTML-comment stamp entirely.
+        const folded = normalizeBody(
+            `Approved — no blocking issues found.\n\n${renderRereviewStamp(
+                stampOf(),
+            )}`,
+        );
+        expect(folded).toContain("pr-reviewer:rereview");
+        expect(folded).toContain("hunks=");
+    });
+
+    it("still parses the legacy HTML-comment form, which the sanitizer kills", () => {
+        const signature: HunkSignature = {"a.ts": ["0123456789abcdef"]};
+        const legacy =
+            `<!-- pr-reviewer:rereview v=1 depth=full verdict=APPROVE ` +
+            `anchor-draft=false hunks=${Buffer.from(
+                JSON.stringify(signature),
+                "utf8",
+            ).toString("base64")} -->`;
+        expect(parseRereviewStamp(legacy)?.anchorHunks).toEqual(signature);
+        // And the failure this task fixed: sanitize the legacy form and the
+        // fingerprint is gone.
+        expect(parseRereviewStamp(normalizeBody(legacy))).toBeNull();
     });
 
     it("takes the last stamp when a body carries more than one", () => {
