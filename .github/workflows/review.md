@@ -191,23 +191,24 @@ network:
 # waits for the whole sub-agent fan-out, which takes minutes, not seconds. The
 # job-level timeout-minutes still bounds the run.
 #
-# The ceiling is 30 minutes (with timeout-minutes at 50), not 20 (at 40). This
+# The ceiling is 60 minutes (with timeout-minutes at 80), not 30 (at 50). This
 # is a pragmatic cap sized to observed runs, not a bound: the dispatcher awaits
 # four sequential agent stages (triage, finder fan-out in waves of 4, the
 # clusterer, claim validation), each sub-agent capped at 15 minutes and
 # re-dispatched once on a parse failure, so the theoretical worst case exceeds
 # any ceiling worth setting. Run 32418662895 (Khan/actions#362) was killed
-# mid-claim-validation at the old 20-minute line, posting nothing, and the
-# turn cap raise to 100 lets agents run longer, so the ceiling moves in
-# lockstep; the job cap keeps ~20 minutes of headroom over the dispatcher call
-# so the two never collapse into the same kill line.
+# mid-claim-validation at the old 20-minute line, and run 32891345932
+# (Khan/webapp#41030, 52 files at full depth) at the 30-minute line with the
+# fan-out already done and only claim validation left, each posting nothing;
+# the job cap keeps ~20 minutes of headroom over the dispatcher call so the
+# two never collapse into the same kill line.
 engine:
   id: claude
   model: claude-opus-5
   env:
     BASH_DEFAULT_TIMEOUT_MS: "60000"
-    BASH_MAX_TIMEOUT_MS: "1800000"
-timeout-minutes: 50
+    BASH_MAX_TIMEOUT_MS: "3600000"
+timeout-minutes: 80
 
 # The awf sandbox stays declared (its api-proxy is what meters AI credits and
 # caps a runaway fan-out), but its version now floats with the gh-aw release
@@ -255,7 +256,7 @@ pre-agent-steps:
       # `source:` below, so the prompt and the lib it invokes come from one version.
       # Even though this IS Khan/actions, the reviewer runs the released lib, not
       # the PR head; a PR must not be able to change the code that reviews it.
-      ref: review-v1.20.0
+      ref: review-v1.21.0
       path: gh-aw-review-lib
       persist-credentials: false
 
@@ -506,7 +507,7 @@ env:
   # KHAN/ACTIONS LOCAL OVERRIDE: the mirror of the raised max-ai-credits above
   # (the two values must stay in sync per the upstream comment).
   REVIEW_MAX_AI_CREDITS: "2500"
-source: Khan/actions/workflows/review/review.md@review-v1.20.0
+source: Khan/actions/workflows/review/review.md@review-v1.21.0
 ---
 
 # PR Reviewer
@@ -557,11 +558,16 @@ budget on content you never act on.
   uses this to filter candidate comments.
 - `prior-reviews.json` — every prior `github-actions[bot]` review body,
   whatever its state (a dismissed or comment-only review still carries its
-  fingerprint stamp, which is why states are not filtered). In practice
-  gh-aw's safe-output sanitizer strips the stamp comment before a review
-  posts, so these bodies usually carry none; the plan CLI then anchors on
-  the Step 9 cache-memory record instead (its `rereview-plan.json` records
-  which carrier won as `stampSource`).
+  fingerprint stamp, which is why states are not filtered). The stamp is a
+  collapsed `<details>` block, not an HTML comment: the sanitizer deletes
+  comments, which is why the original comment-form stamp never posted and
+  every run planned full depth (webapp#41742). Bodies from before that fix carry
+  no stamp; the plan CLI then falls back to the Step 9 cache-memory record
+  (`rereview-plan.json` records which carrier won as `stampSource`), though
+  cache writes are denied on issue_comment triggers (the /review command
+  consumers declare) by GitHub's 2026-06-30 cache policy; pull_request
+  triggers can still save, so the body carrier is the one that works
+  everywhere.
 - `threads.json` and `human-threads.json`: this PR's unresolved review
   threads, split by who opened them; the ones this bot opened (with their full
   reply chains) and the `{path, line}` of everyone else's. Step 3 says what each
@@ -814,7 +820,7 @@ exactly this sequence:
    none. This is the only thread work left to you: what a reply chain concedes
    or refutes is a judgment, while fetching and classifying the threads is not.
 2. Invoke the dispatcher, once, as a single Bash call with `timeout` set to
-   `1800000` (it waits for the whole sub-agent fan-out; the engine's Bash
+   `3600000` (it waits for the whole sub-agent fan-out; the engine's Bash
    ceiling is raised for exactly this call):
 ```
 cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
@@ -943,9 +949,11 @@ the remainder plus
 any sub-medium-confidence claims into a single collapsed section in the
 review body (always the body: the autofix's body-sourced work list reads the
 section back off posted reviews), so the plan never exceeds what the
-engine will emit. The collapsed section's summary line names its top-ranked
-entry, so an approving review cannot hide its best finding behind a bare
-count. Emit the plan's `comments` verbatim — one
+engine will emit. At two or more entries the collapsed section's summary line
+names its top-ranked entry, so an approving review cannot hide its best
+finding behind a bare count; a one-entry section renders `<details open>`
+with a count-only summary, the entry visible without a click. Emit the
+plan's `comments` verbatim — one
 `create-pull-request-review-comment` per entry, all in one batched turn;
 never add, drop, reword, or re-anchor one.
 
@@ -953,7 +961,7 @@ never add, drop, reword, or re-anchor one.
 
 The review body and event are composed by the plan CLI (Step 3): the verdict
 head, the code-rendered re-review accountability section, every `Note:` line,
-the collapsed version/config footer, and the hidden fingerprint stamp are all
+the collapsed version/config footer, and the collapsed fingerprint stamp are all
 already in the plan's `body`. Submit
 with **one** `submit-pull-request-review` call carrying the plan's `event` and
 `body` verbatim — except under the redundant-approval skip (Step 3), where you
@@ -1101,7 +1109,7 @@ fully explained by a common pattern above:
 </details>
 
 <details><summary><sub>review details</sub></summary>
-<sub>review-v1.20.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
+<sub>review-v1.21.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
 </details>
 ````
 
