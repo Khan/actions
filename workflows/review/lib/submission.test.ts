@@ -131,7 +131,7 @@ describe("runSubmissionCli", () => {
         ]);
         expect(plan.resolve).toEqual(["t1"]);
         // The stamp is the final block (collapsed details; the old hidden
-        // HTML comment never survived the ingest sanitizer, PRA-52).
+        // HTML comment never survived the ingest sanitizer; webapp#41742).
         const tail = plan.body.split("\n").slice(-3);
         expect(tail[0]).toBe(
             "<details><summary><sub>review fingerprint</sub></summary>",
@@ -428,7 +428,7 @@ describe("the gate's plan-match rule (slice 4)", () => {
     it("passes when the ingest sanitizer strips an HTML comment from the queued body (run 29893634730)", () => {
         const plan = runSubmissionCli(plannedFs());
         // The stamp no longer rides as a comment (it never survived the
-        // sanitizer; PRA-52 moved it to a collapsed details block), so the
+        // sanitizer; webapp#41742 moved it to a collapsed details block), so the
         // comment-tolerance rule is pinned with a synthetic comment: a plan
         // body carrying one, queued after the sanitizer deleted it.
         expect(plan.body).not.toContain("<!--");

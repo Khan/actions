@@ -10,8 +10,9 @@
  *
  * The check reuses the reviewer's own fingerprint rather than inventing a
  * freshness signal. Every review stamps the hunk signature it reviewed into a
- * hidden comment in its body, precisely because that record survives when cache
- * memory does not (`review.md` Step 6; `rereview-mode.ts`). Comparing the
+ * collapsed `<details>` block in its body, precisely because that record
+ * survives when cache memory does not (`review.md` Step 6;
+ * `rereview-mode.ts`). Comparing the
  * current diff's signature against that stamp answers "has this code changed
  * since a review saw it" exactly, across force-pushes and rebases, because the
  * hashes cover added-line content rather than commit SHAs or line numbers.
@@ -23,19 +24,23 @@
  * items and fix the rest, so the guard degrades to partial work instead of
  * refusal.
  *
- * **The unstamped path is the NORMAL path, not an edge case.** gh-aw's
- * safe-output ingest sanitizer strips every XML/HTML comment before a review
- * posts (`removeXmlComments` in `sanitize_content_core.cjs`, a depth-tracking
- * scan with no allowlist), so the reviewer's body stamp is deleted on the way
- * out and has never reached a posted review. Khan/actions#287 documents this
- * end to end and gives the reviewer a second carrier, its cache-memory record.
+ * **Which reviews carry a stamp.** The stamp was an HTML comment for its
+ * whole pre-2026-08 history, and gh-aw's safe-output ingest sanitizer strips
+ * every XML/HTML comment before a review posts (`removeXmlComments` in
+ * `sanitize_content_core.cjs`, a depth-tracking scan with no allowlist), so
+ * no review posted in that window carries a fingerprint; Khan/actions#287
+ * documents it end to end. The stamp now posts as a collapsed `<details>`
+ * block (webapp#41742 was the failure; `rereview-mode.ts` has the carrier
+ * story), so reviews from that reviewer release on stamp normally and the
+ * fingerprint branch below is LIVE for them. Unstamped stays common, not
+ * exceptional: every pre-fix body, and any body a consumer's pinned older
+ * reviewer posts.
  *
- * That carrier is not available here: cache memory is scoped per workflow, and
- * autofix is a different workflow from the reviewer, so it cannot read the
- * reviewer's. Until that changes, {@link assessReviewCurrency} will return
- * `unverifiable` on essentially every real run, and the per-thread anchor check
- * is what autofix actually runs on. Treat the fingerprint branch below as the
- * optimisation, not the main path.
+ * The reviewer's second carrier, its cache-memory record, is not available
+ * here: cache memory is scoped per workflow, and autofix is a different
+ * workflow from the reviewer, so it cannot read the reviewer's. (It is dead
+ * on the reviewer's side too for /review-triggered runs: GitHub's 2026-06-30
+ * cache policy denies cache writes from issue_comment-triggered runs.)
  *
  * **Degrading, and why it is not a weakened guard.** An earlier version refused
  * outright whenever no fingerprint could be read, which given the above made

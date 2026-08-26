@@ -31,24 +31,25 @@
  * **Fingerprint carriers.** The signature is written to two places and read
  * back in priority order:
  *
- *   1. The hidden-comment stamp in the review body. This was designed as the
- *      durable carrier (it would survive cache eviction and branch
- *      protection's dismiss-stale-approvals), but gh-aw's safe-output ingest
- *      sanitizer strips ALL XML/HTML comments (`removeXmlComments` in
- *      gh-aw-actions `sanitize_content_core.cjs`), so a stamp posted through
- *      `submit_pull_request_review` never reaches the PR. Measured in
- *      production 2026-07-21 (Khan/webapp#40996: every re-review planned
- *      `no-prior-fingerprint` and escalated to full). The stamp is still
- *      emitted and still parsed first: it costs nothing, it documents the
- *      run, and it becomes load-bearing again the day the sanitizer allows
- *      it through or another submission path posts it verbatim.
+ *   1. The stamp in the review body, a collapsed `<details>` block
+ *      ({@link renderRereviewStamp}). This is the durable carrier: it
+ *      survives cache eviction and branch protection's
+ *      dismiss-stale-approvals. It was originally an HTML comment, which
+ *      gh-aw's safe-output ingest sanitizer strips (`removeXmlComments` in
+ *      gh-aw-actions `sanitize_content_core.cjs`), so no posted review ever
+ *      carried a stamp and every production re-review planned
+ *      `no-prior-fingerprint` (measured 2026-07-21 on Khan/webapp#40996,
+ *      and again on webapp#41742). `details`/`summary`/`sub` are on the
+ *      sanitizer's allowed-tags list, so the block form posts intact.
  *   2. The cache-memory record (`/tmp/gh-aw/cache-memory/pr-<n>.json`),
  *      whose Step 9 fields (`verdict`, `stampHunks` — falling back to
  *      `reviewedHunks` where a consumer's Step 9 wrote the code-computed
  *      signature there — and `wasDraft`) carry the same information. This
- *      is the carrier that works today. Cache eviction degrades to `full`
- *      (more review, never less), which is exactly the pre-fix steady
- *      state.
+ *      is the fallback for bodies posted before the block form existed,
+ *      and it cannot be the primary: GitHub's 2026-06-30 cache policy
+ *      denies cache writes from issue_comment-triggered runs regardless of
+ *      job permissions, which is exactly the /review trigger. Missing both
+ *      degrades to `full` (more review, never less).
  *
  * Two interactions are handled by construction:
  *
@@ -181,7 +182,8 @@ export const computeDivergence = (
 export type ReReviewDepth = ReReviewMode;
 
 /**
- * The hidden-comment stamp a review body carries. `anchorHunks` is the last
+ * The stamp a review body carries (a collapsed `<details>` block; see
+ * {@link renderRereviewStamp}). `anchorHunks` is the last
  * fully-reviewed fingerprint (refreshed by a `full`/`scoped` run, carried
  * forward verbatim by `flip-gated`/`fast`), or `"overflow"` when the
  * signature was too large to stamp; `anchorDraft` is whether the PR was a
@@ -261,7 +263,7 @@ export const STAMP_SUMMARY = "review fingerprint";
  * body. NOT an HTML comment: the ingest sanitizer
  * (sanitize_content_core.cjs) deletes every HTML comment before posting, so
  * the original hidden-comment stamp never reached production and every run
- * was `no-prior-fingerprint` (webapp#41742, PRA-52). `details`, `summary`,
+ * was `no-prior-fingerprint` (webapp#41742). `details`, `summary`,
  * and `sub` are on the sanitizer's allowed-tags list, so this form survives
  * the trip. The cache-memory fallback cannot substitute: GitHub's 2026-06-30
  * cache policy denies writes from issue_comment-triggered runs regardless of
@@ -294,6 +296,10 @@ export const renderRereviewStamp = (stamp: ReReviewStamp): string => {
  * never went through the sanitizer). The hunks charset is the base64url
  * alphabet plus the legacy base64 characters, and it cannot match past the
  * closing `</sub>` or ` -->` because neither `<` nor a space is in it.
+ * Delimiter-free also means a body QUOTING a stamp (a review discussing
+ * this format, say) can match; last-wins plus the schema, depth, and
+ * decode checks bound that to adopting a well-formed quoted fingerprint,
+ * which the divergence tripwire then treats like any stale anchor.
  */
 const STAMP_RE = new RegExp(
     `${STAMP_MARKER} v=(\\d+) depth=([a-z-]+) verdict=([A-Z_]+) ` +
@@ -636,8 +642,8 @@ export const buildScopedDiff = (
  * and never to a cheaper depth.
  *
  * `stamp --verdict <EVENT>` runs after the verdict is decided: it reads
- * `rereview-plan.json` back and prints the hidden-comment stamp line the
- * orchestrator appends to the review body it submits.
+ * `rereview-plan.json` back and prints the collapsed-details stamp block
+ * the orchestrator appends to the review body it submits.
  */
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const FULL_DIFF_PATH = `${REVIEW_DIR}/full.diff`;

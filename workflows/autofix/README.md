@@ -271,7 +271,8 @@ it does nothing, clears any label that armed it, and says why.
 - **No reviewer feedback at all.** Nothing to fix. This is the *only* currency
   state that refuses.
 - **The review does not match this head.** Currency is checked against the
-  reviewer's own hidden fingerprint stamp (`review.md` Step 6), which survives
+  reviewer's own fingerprint stamp, a collapsed `<details>` block in the
+  review body (`review.md` Step 6), which survives
   force-pushes and rebases because it hashes added-line content rather than
   SHAs. The check is **per file**: if the author pushed one unrelated fix after
   the review, findings in the files that did not change are still fixed, and
@@ -287,20 +288,23 @@ it does nothing, clears any label that armed it, and says why.
 - **The head moved while the run was working.** The edits are against a base
   that no longer exists, so the push is abandoned.
 
-### Degrading when there is no fingerprint (the normal case)
+### Degrading when there is no fingerprint
 
 If the reviewer's review carries no diff fingerprint, the file-level check
 cannot run. Autofix **degrades rather than refusing**, and says so in the
 summary.
 
-This is not an edge case. gh-aw's safe-output ingest strips every XML/HTML
-comment before a review posts (`removeXmlComments` in
-`sanitize_content_core.cjs`), so the reviewer's hidden stamp is deleted on the
-way out and has never reached a posted review; Khan/actions#287 documents it end
-to end and gives the reviewer a second carrier in its cache-memory record. That
-carrier is not reachable from here, because cache memory is scoped per workflow
-and autofix is a different workflow. So the per-thread anchor check is what
-autofix actually runs on, and the fingerprint branch is the optimisation.
+Unstamped reviews are common, not exceptional. The stamp was an HTML comment
+for its whole pre-2026-08 history, and gh-aw's safe-output ingest strips every
+XML/HTML comment before a review posts (`removeXmlComments` in
+`sanitize_content_core.cjs`), so no review posted in that window carries one;
+Khan/actions#287 documents it end to end. The stamp now posts as a collapsed
+`<details>` block (webapp#41742), so reviews from that reviewer release on
+stamp normally and the file-level check runs against them, while every
+pre-fix body and any body from a consumer's pinned older reviewer still has
+no stamp. The reviewer's second carrier, its cache-memory record, is not
+reachable from here either way, because cache memory is scoped per workflow
+and autofix is a different workflow.
 
 An earlier version refused outright, which made autofix unusable against the
 reviewer as actually deployed: on Khan/webapp#41130 the reviewer posted a correct

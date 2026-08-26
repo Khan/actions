@@ -196,9 +196,13 @@ describe("stamp render/parse", () => {
     });
 
     it("returns null when the fingerprint payload does not decode", () => {
+        // The payload must stay inside the hunks charset: a character like
+        // `!` makes the stamp regex not match at all, which exercises the
+        // no-match branch, not the decode failure this test owns. `abcd`
+        // base64-decodes to bytes that are not JSON.
         const body = renderRereviewStamp(stampOf()).replace(
             /hunks=\S+/,
-            "hunks=!!!not-base64!!!",
+            "hunks=abcd",
         );
         expect(parseRereviewStamp(body)).toBeNull();
     });
@@ -214,7 +218,7 @@ describe("stamp render/parse", () => {
         expect(parseRereviewStamp(rendered)?.anchorHunks).toBe("overflow");
     });
 
-    // PRA-52 (webapp#41742): the original stamp was an HTML comment and the
+    // webapp#41742: the original stamp was an HTML comment and the
     // ingest sanitizer deletes every HTML comment, so no posted review ever
     // carried a fingerprint and every production run planned full depth as
     // no-prior-fingerprint. These three pin the fix and the failure mode.
@@ -225,16 +229,29 @@ describe("stamp render/parse", () => {
     it("survives the sanitizer's structural transforms (comment removal, tag conversion)", () => {
         // normalizeBody is the gate's comparison fold, not the posted text
         // (it also case-folds, which the real sanitizer does not), so the
-        // assertion is marker survival through the structural transforms,
-        // not a re-parse. The legacy-form test below shows the contrast:
-        // the same fold erases an HTML-comment stamp entirely.
+        // assertion is whole-payload survival through the structural
+        // transforms, not a re-parse: a transform that redacted or rewrote
+        // the base64 field would still leave `hunks=` behind, so the marker
+        // alone pins nothing. The legacy-form test below shows the
+        // contrast: the same fold erases an HTML-comment stamp entirely.
+        const rendered = renderRereviewStamp(stampOf());
+        const payload = rendered.split("\n")[1].replace(/<\/?sub>/g, "");
         const folded = normalizeBody(
-            `Approved — no blocking issues found.\n\n${renderRereviewStamp(
-                stampOf(),
-            )}`,
+            `Approved — no blocking issues found.\n\n${rendered}`,
         );
-        expect(folded).toContain("pr-reviewer:rereview");
-        expect(folded).toContain("hunks=");
+        expect(folded).toContain(payload.toLowerCase());
+    });
+
+    it("encodes the fingerprint as base64url (no `=` padding, no `+` or `/`)", () => {
+        // The sanitizer's URL-redaction passes key on `/`, and plain base64
+        // also pads with `=`. TWO_HUNK_DIFF's signature JSON is not a
+        // multiple of 3 bytes, so a revert to plain base64 would emit `=`
+        // padding and fail this charset pin even though `+`/`/` are rare in
+        // signature payloads.
+        const rendered = renderRereviewStamp(stampOf());
+        const hunksField = /hunks=([^<\s]+)/.exec(rendered)?.[1];
+        expect(hunksField).toBeDefined();
+        expect(hunksField).toMatch(/^[A-Za-z0-9_-]+$/);
     });
 
     it("still parses the legacy HTML-comment form, which the sanitizer kills", () => {

@@ -583,7 +583,8 @@ Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministi
 - **Flip gate.** In `flip-gated` mode the dispatched correctness pass's
   validated blocking findings veto the approval flip.
 - **Divergence tripwire.** Every full-depth review stamps a content-hashed
-  hunk signature into its review body as a hidden comment (it survives cache
+  hunk signature into its review body as a collapsed `<details>` block (an
+  HTML comment would be deleted by the ingest sanitizer; it survives cache
   eviction and branch protection's dismiss-stale-approvals, and it (not the
   review state) is what marks a full review as having happened, so a
   COMMENTED-only or dismissed history never wedges the dial). Each push is

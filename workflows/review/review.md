@@ -534,7 +534,7 @@ budget on content you never act on.
   fingerprint stamp, which is why states are not filtered). The stamp is a
   collapsed `<details>` block, not an HTML comment: the sanitizer deletes
   comments, which is why the original comment-form stamp never posted and
-  every run planned full depth (PRA-52). Bodies from before that fix carry
+  every run planned full depth (webapp#41742). Bodies from before that fix carry
   no stamp; the plan CLI then falls back to the Step 9 cache-memory record
   (`rereview-plan.json` records which carrier won as `stampSource`), though
   cache writes are themselves denied on issue_comment triggers by GitHub's

@@ -82,6 +82,35 @@ describe("assessReviewCurrency", () => {
         ).toBe("unverifiable");
     });
 
+    it("runs the file-level check off a full posted-shape body (the stamp-survival flip)", () => {
+        // Until the reviewer moved its stamp from an HTML comment (which the
+        // ingest sanitizer deleted) to a collapsed <details> block
+        // (webapp#41742), no posted review carried a fingerprint and this
+        // branch was dead in production. This pins the flip end to end: a
+        // body shaped like a real posted review (verdict line, footer, stamp
+        // block last) drives the stale-path filter instead of degrading.
+        const anchor = diffFor({"a.ts": ["x"], "b.ts": ["y"]});
+        const stamped = stampedReview(computeHunkSignature(anchor));
+        const posted = {
+            body:
+                "Changes requested \u2014 see inline comments.\n" +
+                "<details><summary><sub>review details</sub></summary>\n" +
+                "<sub>review-v1.20.0 | schema 2 | depth full</sub>\n" +
+                "</details>\n" +
+                stamped.body.split("\n").slice(-3).join("\n"),
+            submittedAt: stamped.submittedAt,
+        };
+        const result = assessReviewCurrency(
+            [posted],
+            diffFor({"a.ts": ["x"], "b.ts": ["changed"]}),
+        );
+        expect(result).toEqual({
+            status: "current",
+            divergence: expect.anything(),
+            stalePaths: ["b.ts"],
+        });
+    });
+
     it("reports current with no stale paths when the head matches the review", () => {
         const diff = diffFor({"a.ts": ["x"], "b.ts": ["y"]});
         const result = assessReviewCurrency(

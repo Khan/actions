@@ -1,0 +1,5 @@
+---
+"autofix": minor
+---
+
+The review-currency fingerprint branch goes live. `staleness.ts` reads the reviewer's body stamp via the shared `findLatestStamp`, and until now that branch was dead in production: the stamp was an HTML comment the ingest sanitizer deleted before any review posted, so `assessReviewCurrency` returned `unverifiable` on essentially every real run and the per-thread anchor check was the only currency signal. The reviewer's stamp now posts as a collapsed `<details>` block (webapp#41742), so from the first autofix release built against that reviewer, reviews from current reviewer versions carry a parseable fingerprint and the per-path stale filter (`plan.ts` dropping work items on `stalePaths`) actually runs. Behavior for unstamped bodies (every pre-fix review, and reviews from a consumer's pinned older reviewer) is unchanged: degrade to anchors, never refuse. The staleness header, README, and autofix.md are rewritten to stop describing the unstamped path as the only real path, and a test pins the flip off a full posted-shape body.

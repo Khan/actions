@@ -477,7 +477,7 @@ export const runSubmissionCli = (
     // The prior verdict, read once: the reduced-depth flip floor needs a
     // prior REQUEST_CHANGES, the redundant-approval skip needs a prior
     // APPROVE. Posted bodies carry the stamp since the collapsed details
-    // form (PRA-52); cache-memory stays as the pre-move fallback.
+    // form (webapp#41742); cache-memory stays as the pre-move fallback.
     const priorRaw = readJson(fs, `${REVIEW_DIR}/prior-reviews.json`);
     const priors: PriorReview[] = Array.isArray(priorRaw)
         ? priorRaw.filter(
