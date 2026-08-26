@@ -9,7 +9,11 @@
  * the runs-per-PR cost lever: a per-repo `re-review` mode in the ROUTING file
  * (`full` | `scoped` | `flip-gated` | `fast`, default `full`) decides how
  * much of the roster a repeat review runs. See {@link ReReviewMode} in
- * `routing-config.ts` for what each mode does.
+ * `routing-config.ts` for what each mode does. The mode is a ceiling, not
+ * the whole decision: a `scoped`/`flip-gated` round whose every unreviewed
+ * hunk answers an open review thread drops to `fast` on its own (the
+ * respond-to-review drop below), so the push shape the author-answers-
+ * feedback loop produces most often runs at reconciler cost.
  *
  * Three guards keep the cheaper modes honest:
  *
@@ -428,6 +432,14 @@ export type ReReviewDecisionInput = {
     currentSignature: HunkSignature;
     /** Tripwire re-arm threshold; {@link DEFAULT_TRIPWIRE_THRESHOLD}. */
     tripwireThreshold?: number;
+    /**
+     * The unreviewed hunks' extents ({@link computeUnreviewedHunkRanges})
+     * and the open thread anchors, when the caller staged them; both absent
+     * disables the respond-to-review drop (older callers keep their exact
+     * behavior).
+     */
+    unreviewedHunkRanges?: readonly HunkRange[];
+    openThreadAnchors?: ThreadAnchors;
 };
 
 /** Which sub-agents a depth dispatches (the prompt maps this to the roster). */
@@ -529,6 +541,37 @@ export const decideReReviewDepth = (
         return fullPlan(input, ["tripwire-divergence"], divergence, true);
     }
 
+    // The respond-to-review drop (below the tripwire, deliberately: a
+    // divergent push re-arms full even when every hunk sits on a thread
+    // line, so a small PR whose response push moves a large hunk share
+    // still gets the full roster; every guard resolves toward more
+    // review). When the push's every unreviewed hunk answers an open
+    // thread, the configured scoped/flip-gated roster reviews nothing the
+    // conversation does not already track, so the round drops to fast:
+    // reconcile-only dispatch, and the full-roster approval rule plus the
+    // dismissal clearance (submission-clearance.ts) already govern what a
+    // fast round may do to the verdict.
+    if (
+        (input.mode === "scoped" || input.mode === "flip-gated") &&
+        input.unreviewedHunkRanges !== undefined &&
+        input.openThreadAnchors !== undefined &&
+        isRespondToReviewPush(
+            input.unreviewedHunkRanges,
+            input.openThreadAnchors,
+        )
+    ) {
+        return {
+            mode: input.mode,
+            depth: "fast",
+            ...DEPTH_SHAPE.fast,
+            reasons: ["respond-to-review", `mode-${input.mode}`],
+            divergence,
+            tripwireRearmed: false,
+            stampHunks: input.priorStamp.anchorHunks,
+            stampAnchorDraft: input.priorStamp.anchorDraft,
+        };
+    }
+
     const depth = input.mode;
     return {
         mode: input.mode,
@@ -580,6 +623,87 @@ export const buildScopedDiff = (
 };
 
 /* -------------------------------------------------------------------------- */
+/* The respond-to-review push                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** One unreviewed hunk's RIGHT-side extent. */
+export type HunkRange = {path: string; start: number; end: number};
+
+/** Open review thread anchors: `path → [line, …]` (RIGHT-side lines). */
+export type ThreadAnchors = Record<string, number[]>;
+
+/**
+ * How far (in lines) a hunk may sit from a thread anchor and still count as
+ * responding to it. A fix rarely lands exactly on the flagged line (the
+ * surrounding statement moves, a guard is added above it), and hunk extents
+ * already include context-free `+`/`-` runs only, so a small window covers
+ * the common shapes without letting an unrelated edit in the same file
+ * qualify. Exported so the eval suite can price other settings.
+ */
+export const RESPOND_TO_REVIEW_SLACK = 3;
+
+/**
+ * The RIGHT-side extents of the hunks the anchor fingerprint has not seen.
+ * A zero-new-count hunk (pure deletion) sits between new-side lines and is
+ * given the single line it deletes after, so a deletion responding to a
+ * thread still overlaps it.
+ */
+export const computeUnreviewedHunkRanges = (
+    diffText: string,
+    reviewed: HunkSignature,
+): HunkRange[] => {
+    const ranges: HunkRange[] = [];
+    for (const section of splitUnifiedDiff(diffText)) {
+        const seen = new Set(reviewed[section.path] ?? []);
+        for (const hunk of splitPatchHunks(section.text)) {
+            if (seen.has(hashHunk(hunk))) {
+                continue;
+            }
+            const header = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(hunk);
+            if (header === null) {
+                continue;
+            }
+            const start = Number(header[1]);
+            const count = Number(header[2] ?? "1");
+            ranges.push({
+                path: section.path,
+                start,
+                end: start + Math.max(count, 1) - 1,
+            });
+        }
+    }
+    return ranges;
+};
+
+/**
+ * Whether a push is the respond-to-review shape: at least one open thread
+ * exists, and EVERY unreviewed hunk sits within {@link
+ * RESPOND_TO_REVIEW_SLACK} lines of an open thread anchor in the same file.
+ * Zero unreviewed hunks (a content-stable rebase) qualifies: nothing new
+ * exists to review. Any hunk that matches no anchor disqualifies the whole
+ * push, so a mixed push (thread fixes plus fresh code) keeps the configured
+ * roster; the failure direction is always more review.
+ */
+export const isRespondToReviewPush = (
+    ranges: readonly HunkRange[],
+    anchors: ThreadAnchors,
+    slack: number = RESPOND_TO_REVIEW_SLACK,
+): boolean => {
+    const anchorCount = Object.values(anchors).reduce(
+        (sum, lines) => sum + lines.length,
+        0,
+    );
+    if (anchorCount === 0) {
+        return false;
+    }
+    return ranges.every((range) =>
+        (anchors[range.path] ?? []).some(
+            (line) => line >= range.start - slack && line <= range.end + slack,
+        ),
+    );
+};
+
+/* -------------------------------------------------------------------------- */
 /* CLI entrypoint (review.md invokes this after the router)                   */
 /* -------------------------------------------------------------------------- */
 
@@ -590,7 +714,9 @@ export const buildScopedDiff = (
  * `full-stripped.diff` (the provenance CLI's generated-stripped diff) over
  * `full.diff`, so generated churn (a lockfile push) neither enters the
  * fingerprint nor counts as divergence. It also reads `routing.json` (for
- * `reReviewMode`), `pr-context.json` (for `isDraft` and `number`), and
+ * `reReviewMode`), `pr-context.json` (for `isDraft` and `number`),
+ * `threads.json` and `human-threads.json` (the open thread anchors the
+ * respond-to-review drop matches unreviewed hunks against), and
  * `prior-reviews.json` (the bot's prior reviews of this PR, each
  * `{body, submittedAt?}`, every state included, DISMISSED and COMMENTED
  * too). When no prior-review body carries a stamp (in production none ever
@@ -615,6 +741,8 @@ const STRIPPED_DIFF_PATH = `${REVIEW_DIR}/full-stripped.diff`;
 const ROUTING_PATH = `${REVIEW_DIR}/routing.json`;
 const PR_CONTEXT_PATH = `${REVIEW_DIR}/pr-context.json`;
 const PRIOR_REVIEWS_PATH = `${REVIEW_DIR}/prior-reviews.json`;
+const BOT_THREADS_PATH = `${REVIEW_DIR}/threads.json`;
+const HUMAN_THREADS_PATH = `${REVIEW_DIR}/human-threads.json`;
 const CACHE_MEMORY_DIR = "/tmp/gh-aw/cache-memory";
 const PLAN_OUT = `${REVIEW_DIR}/rereview-plan.json`;
 const SCOPED_DIFF_OUT = `${REVIEW_DIR}/scoped.diff`;
@@ -727,11 +855,40 @@ export const runRereviewPlanCli = (
             stampSource = "cache-memory";
         }
     }
+    // The respond-to-review inputs: open thread anchors from the staged
+    // thread partition (both files land before this CLI runs, stage-pr.ts),
+    // and the unreviewed hunks' extents vs the anchor fingerprint. Either
+    // one unavailable (older staging, no usable anchor, line-less threads
+    // only) leaves the fields undefined and the drop disabled: the round
+    // runs at the configured mode, more review rather than less.
+    const anchors: ThreadAnchors = {};
+    for (const path of [BOT_THREADS_PATH, HUMAN_THREADS_PATH]) {
+        const raw = readJsonIfPresent(fs, path);
+        for (const entry of Array.isArray(raw) ? raw : []) {
+            const thread = entry as {path?: unknown; line?: unknown};
+            if (
+                typeof thread.path === "string" &&
+                typeof thread.line === "number"
+            ) {
+                (anchors[thread.path] ??= []).push(thread.line);
+            }
+        }
+    }
+    const anchorHunks = priorStamp?.anchorHunks;
+    const unreviewedHunkRanges =
+        diffText !== null &&
+        anchorHunks !== undefined &&
+        anchorHunks !== "overflow"
+            ? computeUnreviewedHunkRanges(diffText, anchorHunks)
+            : undefined;
     const plan = decideReReviewDepth({
         mode,
         isDraft,
         priorStamp,
         currentSignature,
+        ...(unreviewedHunkRanges !== undefined
+            ? {unreviewedHunkRanges, openThreadAnchors: anchors}
+            : {}),
     });
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});

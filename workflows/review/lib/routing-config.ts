@@ -86,6 +86,12 @@ export type EnableableReviewer = typeof ENABLEABLE_REVIEWERS[number];
  * resolved is cleared by dismissing the standing review, and the approval
  * waits for a round that dispatches the full roster.
  *
+ * `scoped` and `flip-gated` also drop single pushes to `fast` on their own:
+ * when every unreviewed hunk answers an open review thread (the
+ * respond-to-review push), the round runs reconcile-only regardless of the
+ * configured mode (rereview-mode.ts's respond-to-review drop). The dial
+ * sets the ceiling; the drop is per-push and decided in code.
+ *
  * `full` is the default everywhere: a repo pays for a cheaper mode only by
  * writing a `re-review` line in its ROUTING file.
  */
