@@ -41,6 +41,7 @@ import {renderReviewBody} from "./render-comment";
 import {
     countRereviewStampBlocks,
     parseRereviewStamp,
+    stampHunksChain,
     stripRereviewStamp,
 } from "./rereview-mode";
 import {normalizeBody} from "./sanitizer-normalize";
@@ -247,9 +248,10 @@ export const submissionPlanViolations = (
                 });
             }
             // And never MORE stamp-shaped blocks than the plan staged: the
-            // fold tolerates a garbled interior, so an extra skeleton-shaped
-            // block is the one place text could ride through the comparison
-            // unchecked. Fewer is fine (a dropped stamp is the degrade path).
+            // fold tolerates variation inside a matched block's payload
+            // region, so extra matched blocks would ride through the body
+            // comparison unchecked. Fewer is fine (a dropped stamp is the
+            // degrade path).
             if (
                 countRereviewStampBlocks(body) >
                 countRereviewStampBlocks(planStaged.body)
@@ -258,6 +260,24 @@ export const submissionPlanViolations = (
                     code: "submission-plan-mismatch",
                     dimension: "fingerprint stamp",
                     detail: "queued review body carries more fingerprint-shaped blocks than the staged plan (the fold would hide their contents from the body comparison)",
+                });
+            }
+            // The payload region is the fold's one tolerated variation, and
+            // its shape (newline-separated tokens) still fits prose, so
+            // bound its growth: a transcription garble may mangle or
+            // shorten the region, but prose smuggled after an intact
+            // payload (or a replacement longer than the plan's) grows it.
+            const queuedChain = stampHunksChain(body);
+            const planChain = stampHunksChain(planStaged.body);
+            if (
+                queuedChain !== null &&
+                planChain !== null &&
+                queuedChain.length > planChain.length
+            ) {
+                violations.push({
+                    code: "submission-plan-mismatch",
+                    dimension: "fingerprint stamp",
+                    detail: "queued fingerprint payload region is longer than the staged plan's (a transcription garble may shorten or mangle the payload, never grow it)",
                 });
             }
         }

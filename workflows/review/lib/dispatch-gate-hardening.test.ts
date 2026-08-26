@@ -648,15 +648,42 @@ describe("rule 7 folds the fingerprint stamp out of the body comparison", () => 
 
     it("blocks an EXTRA skeleton-shaped block by count", () => {
         // A forged block carrying the full field skeleton strips before the
-        // body comparison (prose could ride its hunks= tail), so the gate
-        // separately requires the queued body to carry no more stamp-shaped
-        // blocks than the plan staged.
+        // body comparison (newline-token prose fits its hunks= region), so
+        // the gate separately requires the queued body to carry no more
+        // stamp-shaped blocks than the plan staged.
         const spliced =
             `${planBody}\n<details><summary><sub>review fingerprint</sub>` +
             `</summary>\n<sub>pr-reviewer:rereview v=1 depth=scoped ` +
-            `verdict=APPROVE anchor-draft=false hunks=abcd SPLICED PROSE ` +
-            `the plan never staged.</sub>\n</details>`;
+            `verdict=APPROVE anchor-draft=false hunks=abcd\nSPLICED\nPROSE` +
+            `</sub>\n</details>`;
         expect(bodyMismatches(spliced)).toHaveLength(1);
+    });
+
+    it("blocks prose spliced into the staged stamp block's hunks tail", () => {
+        // Text appended after an intact payload keeps the block count and
+        // the parsed stamp equal; the space ends the payload region, so the
+        // block stops matching and the residue trips the body comparison.
+        const spliced = planBody.replace(
+            "</sub>\n</details>",
+            " SPLICED PROSE the plan never staged.</sub>\n</details>",
+        );
+        expect(bodyMismatches(spliced)).toHaveLength(1);
+    });
+
+    it("blocks the newline variant via the payload growth bound", () => {
+        // Newline-separated tokens fit the block shape and strip, the first
+        // token is the intact payload so the parsed stamps stay equal, and
+        // the count stays 1:1; only the region's length gives it away.
+        const spliced = planBody.replace(
+            "</sub>\n</details>",
+            "\nSPLICED\nPROSE\nthe\nplan\nnever\nstaged.</sub>\n</details>",
+        );
+        expect(bodyMismatches(spliced)).toHaveLength(1);
+    });
+
+    it("tolerates a line-wrapped payload (no growth)", () => {
+        const wrapped = planBody.replace(/hunks=(\S{4})/, "hunks=$1\n");
+        expect(bodyMismatches(wrapped)).toEqual([]);
     });
 
     it("blocks a SUBSTITUTED stamp: corruption may degrade, never forge", () => {
@@ -667,8 +694,10 @@ describe("rule 7 folds the fingerprint stamp out of the body comparison", () => 
             schemaVersion: STAMP_SCHEMA_VERSION,
             depth: "fast",
             verdict: "APPROVE",
+            // Same key and hash length as the plan's stamp, so the payload
+            // regions match in length and only the equality check fires.
             anchorDraft: false,
-            anchorHunks: {"other.ts": ["fedcba9876543210"]},
+            anchorHunks: {"b.ts": ["fedcba9876543210"]},
         });
         const swapped = planBody.replace(stamp, forged);
         expect(bodyMismatches(swapped)).toHaveLength(1);

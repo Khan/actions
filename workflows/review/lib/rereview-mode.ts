@@ -354,18 +354,25 @@ export const parseRereviewStamp = (body: string): ReReviewStamp | null => {
  * must carry the stamp's full field skeleton: marker, `v=`, `depth=`,
  * `verdict=`, `anchor-draft=`, `hunks=`. Only the `hunks=` tail admits
  * whitespace, because the base64 payload is the field a transcription
- * plausibly garbles or wraps. A looser interior (the marker alone, or a
- * wildcard) would let rule 7's fold delete prose an orchestrator hid
- * inside a fingerprint-labeled block, the splice (#244) the gate exists to
- * catch; anything short of the skeleton stays in the body and trips the
- * comparison instead, and the gate separately blocks EXTRA skeleton-shaped
- * blocks by count ({@link countRereviewStampBlocks}).
+ * plausibly garbles or wraps. Every field is a single space-free token
+ * except the `hunks=` region, which admits NEWLINE-separated tokens (a
+ * line-wrapped payload is the transcription failure worth tolerating); a
+ * space anywhere in the region ends the match, so space-separated prose
+ * leaves residue that trips rule 7's body comparison. Newline-separated
+ * prose still fits the shape, so the gate bounds the region's length
+ * against the plan's ({@link stampHunksChain}) and blocks extra blocks by
+ * count ({@link countRereviewStampBlocks}). The floor that remains: a
+ * replacement region no LONGER than the plan's own payload, which costs
+ * the orchestrator the fingerprint (the next run plans full) and renders
+ * inside the collapsed chip. A looser interior (the marker alone, or a
+ * wildcard) would let the fold delete arbitrary prose hidden inside a
+ * fingerprint-labeled block, the splice (#244) the gate exists to catch.
  */
 const STAMP_BLOCK_RE = new RegExp(
     `<details>\\s*<summary>\\s*(?:<sub>\\s*)?${STAMP_SUMMARY}` +
         `\\s*(?:</sub>\\s*)?</summary>\\s*(?:<sub>\\s*)?${STAMP_MARKER}` +
         ` v=\\d+ depth=[^<\\s]* verdict=[^<\\s]* anchor-draft=[^<\\s]* ` +
-        `hunks=[^<]*(?:</sub>\\s*)?(?:</details>|$)`,
+        `hunks=[^<\\s]*(?:\\n[^<\\s]*)*\\s*(?:</sub>\\s*)?(?:</details>|$)`,
     "gi",
 );
 
@@ -386,13 +393,33 @@ export const stripRereviewStamp = (body: string): string =>
 
 /**
  * How many stamp-shaped blocks a body carries. Rule 7 pairs this with the
- * fold: stripping tolerates a garbled interior, so a body carrying MORE
- * skeleton-shaped blocks than its plan is smuggling text through the fold
- * (prose in a forged block's `hunks=` tail would strip before the
- * comparison); fewer is the ordinary degrade path (a dropped stamp).
+ * fold: stripping tolerates variation inside a matched block's payload
+ * region, so a body carrying MORE skeleton-shaped blocks than its plan is
+ * smuggling text through the fold (a forged block's newline-token tail
+ * would strip before the comparison); fewer is the ordinary degrade path
+ * (a dropped stamp).
  */
 export const countRereviewStampBlocks = (body: string): number =>
     body.match(STAMP_BLOCK_RE)?.length ?? 0;
+
+/**
+ * The first stamp block's `hunks=` region with whitespace removed, or null
+ * when the body carries no stamp-shaped block. The region is the one part
+ * of a matched block the fold cannot pin to the plan byte-for-byte (that
+ * byte-exactness is what the fold exists to avoid), so rule 7 bounds its
+ * LENGTH instead: a transcription garble may mangle or shorten the region,
+ * but prose smuggled after an intact payload can only grow it.
+ */
+export const stampHunksChain = (body: string): string | null => {
+    STAMP_BLOCK_RE.lastIndex = 0;
+    const match = STAMP_BLOCK_RE.exec(body);
+    STAMP_BLOCK_RE.lastIndex = 0;
+    if (match === null) {
+        return null;
+    }
+    const region = /hunks=([^<]*)/.exec(match[0]);
+    return (region?.[1] ?? "").replace(/\s+/g, "");
+};
 
 /** A prior review of the PR, as the orchestrator stages it. */
 export type PriorReview = {

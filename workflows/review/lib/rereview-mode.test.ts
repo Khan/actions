@@ -14,9 +14,10 @@ import {
     runRereviewStampCli,
     STAMP_SCHEMA_VERSION,
     stampFromCacheMemory,
-    stripRereviewStamp,
-    countRereviewStampBlocks,
 } from "./rereview-mode";
+// The stamp fold's own suite (stripRereviewStamp's block matching,
+// countRereviewStampBlocks, stampHunksChain) lives in
+// rereview-stamp-fold.test.ts, split out by the max-lines budget.
 import type {HunkSignature, ReReviewStamp} from "./rereview-mode";
 import {normalizeBody} from "./sanitizer-normalize";
 
@@ -298,97 +299,6 @@ describe("stamp render/parse", () => {
         expect(parsed?.anchorHunks).toEqual(
             computeHunkSignature(TWO_HUNK_DIFF),
         );
-    });
-});
-
-describe("stripRereviewStamp", () => {
-    it("strips the block even when the payload is garbled", () => {
-        // The gate's fold has to remove a stamp the orchestrator transcribed
-        // imperfectly, so the match keys on the wrapper, not the payload.
-        const garbled = renderRereviewStamp(stampOf()).replace(
-            /hunks=\S+/,
-            "hunks=!!not the payload!!",
-        );
-        expect(stripRereviewStamp(`Approved.\n${garbled}`).trim()).toBe(
-            "Approved.",
-        );
-    });
-
-    it("strips a bare payload that lost its wrapper", () => {
-        const payload = /<sub>(pr-reviewer:rereview[^<]*)<\/sub>/.exec(
-            renderRereviewStamp(stampOf()),
-        )?.[1];
-        expect(payload).toBeDefined();
-        expect(stripRereviewStamp(`Approved.\n${payload}`).trim()).toBe(
-            "Approved.",
-        );
-    });
-
-    it("strips the block when the wrapper itself is garbled", () => {
-        // The orchestrator transcribes the whole 3-line block, not just the
-        // payload; a reflowed wrapper must not leave residue that rule 7
-        // then reads as a body splice.
-        const garbled = renderRereviewStamp(stampOf()).replace(
-            "<summary><sub>review fingerprint</sub></summary>",
-            "<summary>review fingerprint</summary>",
-        );
-        expect(stripRereviewStamp(`Approved.\n${garbled}`).trim()).toBe(
-            "Approved.",
-        );
-    });
-
-    it("leaves a fingerprint-labeled block whose interior is not the stamp", () => {
-        // The interior must carry the stamp's field skeleton: a looser
-        // match would let rule 7's fold delete spliced prose hidden inside
-        // a fingerprint-labeled block before the body comparison.
-        const fake =
-            "<details><summary><sub>review fingerprint</sub></summary>\n" +
-            "SPLICED PROSE the plan never staged.\n</details>";
-        expect(stripRereviewStamp(`Approved.\n${fake}`)).toContain(
-            "SPLICED PROSE the plan never staged.",
-        );
-    });
-
-    it("leaves a marker-prefixed block that lacks the field skeleton", () => {
-        // The marker alone must not be enough: `pr-reviewer:rereview` plus
-        // free prose is the one-token-cheaper variant of the same splice.
-        const fake =
-            "<details><summary><sub>review fingerprint</sub></summary>\n" +
-            "<sub>pr-reviewer:rereview SPLICED PROSE the plan never " +
-            "staged.</sub>\n</details>";
-        expect(stripRereviewStamp(`Approved.\n${fake}`)).toContain(
-            "SPLICED PROSE the plan never staged.",
-        );
-    });
-
-    it("strips the block when the closing tag is lost in transcription", () => {
-        // The stamp is appended last, so a clipped transcription loses the
-        // trailing `</details>` first; residue there would read as a splice
-        // and withhold the review.
-        const rendered = renderRereviewStamp(stampOf());
-        const truncated = rendered.slice(0, rendered.lastIndexOf("</details>"));
-        expect(stripRereviewStamp(`Approved.\n${truncated}`).trim()).toBe(
-            "Approved.",
-        );
-    });
-
-    it("counts skeleton-shaped blocks for the gate's extra-block check", () => {
-        const one = `Approved.\n${renderRereviewStamp(stampOf())}`;
-        expect(countRereviewStampBlocks(one)).toBe(1);
-        expect(
-            countRereviewStampBlocks(
-                `${one}\n${renderRereviewStamp(stampOf())}`,
-            ),
-        ).toBe(2);
-        expect(countRereviewStampBlocks("no stamp here")).toBe(0);
-    });
-
-    it("leaves other collapsed blocks (the version footer) alone", () => {
-        const footer =
-            "<details><summary><sub>review details</sub></summary>\n" +
-            "<sub>review-v1.20.0 | schema 2</sub>\n</details>";
-        const body = `Approved.\n${footer}\n${renderRereviewStamp(stampOf())}`;
-        expect(stripRereviewStamp(body).trim()).toBe(`Approved.\n${footer}`);
     });
 });
 
