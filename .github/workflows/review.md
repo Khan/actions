@@ -92,7 +92,7 @@ safe-outputs:
     side: "RIGHT"
   submit-pull-request-review:
     max: 1
-    allowed-events: [APPROVE, REQUEST_CHANGES]
+    allowed-events: [APPROVE, COMMENT, REQUEST_CHANGES]
     footer: false
   # Resolve this workflow's own earlier review threads once their issue is addressed
   # (Step 7), instead of replying. Uses the bot token because the default GITHUB_TOKEN
@@ -255,7 +255,7 @@ pre-agent-steps:
       # `source:` below, so the prompt and the lib it invokes come from one version.
       # Even though this IS Khan/actions, the reviewer runs the released lib, not
       # the PR head; a PR must not be able to change the code that reviews it.
-      ref: review-v1.19.0
+      ref: review-v1.20.0
       path: gh-aw-review-lib
       persist-credentials: false
 
@@ -506,7 +506,7 @@ env:
   # KHAN/ACTIONS LOCAL OVERRIDE: the mirror of the raised max-ai-credits above
   # (the two values must stay in sync per the upstream comment).
   REVIEW_MAX_AI_CREDITS: "2500"
-source: Khan/actions/workflows/review/review.md@review-v1.19.0
+source: Khan/actions/workflows/review/review.md@review-v1.20.0
 ---
 
 # PR Reviewer
@@ -889,11 +889,13 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    standalone PR comment with the `add-comment` safe output stating that
    the automated review died mid-dispatch and posted no review, linking
    this run (`${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`),
-   and noting that the next push triggers a fresh full review; then report
-   the run incomplete, skip Steps 4-8, and continue at Step 9 (the cache
-   CLI recognizes the no-plan death shape from the queued comment: it
-   drops `risksPatternsKey` so the next run reposts the guidance comment
-   your death notice collapsed, and leaves the prior fingerprints
+   and noting that the next push triggers a fresh full review; then skip
+   Steps 4-8, continue at Step 9, and report the run incomplete only AFTER
+   the Step 9 cache CLI has run (reporting incomplete can end the turn, and
+   the cache compensation must not be skipped with it: the CLI recognizes
+   the no-plan death shape from the queued comment, drops
+   `risksPatternsKey` so the next full-depth run reposts the guidance
+   comment your death notice collapsed, and leaves the prior fingerprints
    standing). Exists because run 32418662895 (Khan/actions#362) was killed
    at the Bash ceiling during claim validation and posted nothing: the run
    stayed green, and the incomplete report's fallback (filing an issue) is
@@ -906,14 +908,22 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
 
 The verdict is computed by the plan CLI (Step 3), never by you: REQUEST_CHANGES
 iff a validated posted claim carries a blocking label, plus the reduced-depth
-flip floor over kept blocking threads and the open-thread suppression floor —
-all `lib/verdict.ts` / `lib/submission.ts` rules. A third outcome exists:
-HOLD_FOR_HUMAN, when a core review pass (`correctness-reviewer` or
-`skill-auditor`) produced no usable output this run and the run would
-otherwise have auto-approved — the automation never approves a change its
-core passes did not look at (a blocking finding still wins: it is actionable
-on its own, so the verdict stays REQUEST_CHANGES and the gap is disclosed in
-a note line). The plan's `event` IS the
+flip floor over kept blocking threads and the open-thread suppression floor;
+COMMENT when nothing blocks but at least one posted claim carries the medium
+importance tier (a verified finding worth fixing before merge should not ride
+under an approval, and the middle verdict says so without demanding another
+round); APPROVE otherwise — all `lib/verdict.ts` / `lib/submission.ts` rules.
+A fourth outcome exists: HOLD_FOR_HUMAN, when a core review pass
+(`correctness-reviewer` or `skill-auditor`) produced no usable output this
+run and the run would otherwise have auto-approved or commented — the
+automation never approves a change its core passes did not look at, and it
+never writes a fingerprint from a partial assessment either (a blocking
+finding still wins: it is actionable on its own; medium findings fold into
+the hold comment as claim lines). One more mechanical guard: a COMMENT that
+would leave this workflow's own prior REQUEST_CHANGES standing upgrades to
+APPROVE with a note, because GitHub only moves a reviewer's state on APPROVE
+or REQUEST_CHANGES and a stale block the author's fixes already earned back
+must not survive on a technicality. The plan's `event` IS the
 verdict; never recompute, second-guess, or override it. (The blocking-label
 vocabulary and the concrete-failing-scenario bar live in the sub-agent
 definitions and the shared lib.)
@@ -925,10 +935,17 @@ per validated claim, rule quotes and suggestion fences included, human-thread
 skip lines and open-thread suppression already applied. The posting bar is
 code too: the plan ranks claims (blocking first, then confidence descending),
 posts at most 20 inline (matching this workflow's
-`create-pull-request-review-comment` `max:`), and folds the remainder plus
-any sub-medium-confidence claims into a single collapsed section riding the
-top-ranked comment (or the review body), so the plan never exceeds what the
-engine will emit. Emit the plan's `comments` verbatim — one
+`create-pull-request-review-comment` `max:`), spends the non-blocking inline
+budget in ranked order (the ROUTING `non-blocking-budget` line, default 3;
+blocking claims never count against it, medium-importance claims rank ahead
+of minor ones, and `nitpick (non-blocking)` never posts inline), and folds
+the remainder plus
+any sub-medium-confidence claims into a single collapsed section in the
+review body (always the body: the autofix's body-sourced work list reads the
+section back off posted reviews), so the plan never exceeds what the
+engine will emit. The collapsed section's summary line names its top-ranked
+entry, so an approving review cannot hide its best finding behind a bare
+count. Emit the plan's `comments` verbatim — one
 `create-pull-request-review-comment` per entry, all in one batched turn;
 never add, drop, reword, or re-anchor one.
 
@@ -952,8 +969,8 @@ review, posts inline comments, resolves threads, or drops the comment.
 
 ## Step 7: On Approval — Post Risk and Patterns as a PR Comment
 
-**Only run this step when the verdict is APPROVE.** When requesting changes, skip
-it entirely and post no comment. Also skip it entirely on a reduced re-review
+**Only run this step when the verdict is APPROVE.** On REQUEST_CHANGES or
+COMMENT, skip it entirely and post no comment. Also skip it entirely on a reduced re-review
 depth (`scoped`, `flip-gated`, `fast`; Step 3): the reduced run computed no triage
 or risk data to compare, so the existing comment stands and `risksPatternsKey`
 carries forward unchanged (Step 9).
@@ -1084,7 +1101,7 @@ fully explained by a common pattern above:
 </details>
 
 <details><summary><sub>review details</sub></summary>
-<sub>review-v1.19.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
+<sub>review-v1.20.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
 </details>
 ````
 
@@ -1152,10 +1169,12 @@ fully explained by a common pattern above:
   risky file and no pattern and no NOTIFIED match), post nothing at all (see
   above) — do not write a placeholder, even if files were excluded.
 
-## Step 8: On Approval — Request the Owning Teams as Reviewers
+## Step 8: On Approval or Comment — Request the Owning Teams as Reviewers
 
-**Only run this step when the verdict is APPROVE.** Skip it entirely when
-requesting changes. Also skip it entirely when `correctness-reviewer` did not run
+**Run this step when the verdict is APPROVE or COMMENT; skip it entirely on
+REQUEST_CHANGES.** A COMMENT run routes the owning teams too, deliberately: it
+found something worth a human's eyes and, unlike REQUEST_CHANGES, forces no
+later run that would route them. Also skip it entirely when `correctness-reviewer` did not run
 this run (a `flip-gated` or `fast` re-review depth, Step 3): there are no fresh
 risk classifications to route on, and the anchoring full review already requested
 the owning teams.
@@ -1348,7 +1367,13 @@ lens name; `id` is unique within your output; `anchor.type` is `line` (with
 `path`+`line`; `line` is a RIGHT-side added/context line number — read it off
 the diff's `NNN| ` prefix, never counted), `file` (with
 `path`), or `pr` (whole-PR, no path/line); `severity` is `blocking` for a genuine
-defect in your domain and `advisory` otherwise (or as the matched skill declares);
+defect in your domain, `medium` for a verified non-blocking defect or gap in code
+this PR adds that a reasonable author would fix before merge, and `advisory`
+otherwise (or as the matched skill declares). `medium` can never force
+REQUEST_CHANGES (it decides posting surface, and a run whose findings are at
+most medium submits a COMMENT review instead of an approval), and the
+claim-validator strips it from any claim it cannot confirm, so mark it only
+where your evidence already makes the case;
 `confidence` is a number in [0,1]; `evidence_trace` has at least one non-empty
 entry; `failure_scenario` names the concrete failing scenario (specific
 inputs/state, then the wrong outcome) — it is the specific claim the
@@ -1542,10 +1567,23 @@ Return ONLY this JSON object (no prose, no code fence):
   "findings": [{
     "path": "...", "line": 0,
     "label": "issue (blocking)|todo (blocking)|suggestion (non-blocking)|nitpick (non-blocking)|question (non-blocking)|thought (non-blocking)|note (non-blocking)",
+    "importance": "medium (optional; omit unless the finding meets the medium bar)",
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "subject": "one line", "discussion": "1-2 sentences, optional: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }]
 }
+
+`importance: "medium"` is the optional middle tier: mark it only on a
+non-blocking finding that is a verified defect or gap in code this PR adds, one
+a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
+what it does is decide which non-blocking findings post inline rather than
+collapse, keep a finding visible on re-reviews under the `blocking-medium`
+dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
+findings without vouching for the change). The claim-validator checks the
+marking and strips any it cannot confirm, and code strips it from any finding
+not anchored on a changed line of this PR, so an evidence-free medium costs
+the finding its prominence and buys nothing.
+
 `line` is a RIGHT-side (added/context) line number from the diff. Keep findings tight
 and high-signal; use a blocking label only for a defect CI would not catch.
 `failure_scenario` is required on **every** finding, not just blocking ones: one
@@ -1672,6 +1710,7 @@ Return ONLY this JSON object (no prose, no code fence):
   "findings": [{
     "skill": "skill name", "path": "...", "line": 0,
     "label": "issue (blocking, best-practice)|suggestion (non-blocking, best-practice)",
+    "importance": "medium (optional; omit unless the finding meets the medium bar)",
     "failure_scenario": "one sentence: the concrete consequence of the breach (what goes wrong, for whom)",
     "subject": "one line naming the skill area", "discussion": "the rule violated and the fix, quoting both; otherwise at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }],
@@ -1682,6 +1721,18 @@ Return ONLY this JSON object (no prose, no code fence):
     "suggested_lane": "correctness"
   }]
 }
+
+`importance: "medium"` is the optional middle tier: mark it only on a
+non-blocking finding that is a verified defect or gap in code this PR adds, one
+a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
+what it does is decide which non-blocking findings post inline rather than
+collapse, keep a finding visible on re-reviews under the `blocking-medium`
+dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
+findings without vouching for the change). The claim-validator checks the
+marking and strips any it cannot confirm, and code strips it from any finding
+not anchored on a changed line of this PR, so an evidence-free medium costs
+the finding its prominence and buys nothing.
+
 `line` is a RIGHT-side diff line. `failure_scenario` is required on every finding:
 the concrete consequence of the breach, stated specifically enough for the
 claim-validator to attack. `out_of_lane_observations` carries the hand-off rule
@@ -1772,8 +1823,9 @@ including the author's replies, and weigh the author's reasoning before deciding
   reasoning.
 - Additionally list every such conceded-but-unfixed thread id in **acknowledged**
   (always alongside its `keep` entry, never instead of it). Only the **author's own
-  reply** in the chain counts as a concession: never a bot reply (the thumbs-sweep
-  follow-ups and autofix replies sit on these threads), never a reply that pushes back,
+  reply** in the chain counts as a concession: never a bot reply (autofix replies
+  sit on these threads, as do retired thumbs-sweep follow-ups on older ones),
+  never a reply that pushes back,
   and never a TODO you inferred from the code alone. The pipeline verifies each id
   against the reply chain and renders those threads as "acknowledged (fix pending)"
   in the accountability recap instead of counting them unaddressed. When in doubt,
@@ -2059,6 +2111,19 @@ Do not invent new claims — validate only the ones given. Never "upgrade" a non
 claim to blocking or otherwise raise its severity; you may only confirm, downgrade to
 plausible, or (when you can cite the disproof) refute.
 
+You also adjudicate the medium-importance tier (the `importance` field on
+non-blocking claims). The bar: a verified defect or gap in code this PR adds,
+one a reasonable author would fix before merge. On a `confirmed` claim you may
+set `corrected.importance` in either direction: `"minor"` strips a marking
+whose evidence does not meet that bar, `"medium"` grants it to an unmarked
+claim whose evidence clearly does. This is not the never-raise rule's
+territory: importance can never force REQUEST_CHANGES; it decides which
+non-blocking findings post inline, and whether the run submits a COMMENT
+review instead of an approval. A `plausible` or `refuted`
+claim needs no importance call from you; code strips the tier from every
+claim you verify as plausible or refute (a claim your output never mentions
+keeps whatever it arrived with, per the missing-output rule).
+
 What this repo's CI and tooling already catch — a claim about any of
 these is a false positive, so drop it:
 {{#runtime-import .github/aw/review/ci-tooling.md}}
@@ -2085,7 +2150,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "verification": "confirmed|plausible|refuted",
     "confidence": 0.0,
     "reason": "one line: the line(s) that confirm it, the disproof that refutes it, or what stayed uncertain",
-    "corrected": {"line": 0, "label": "...", "subject": "...", "discussion": "... (corrected prose posts verbatim: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor)", "suggestion": "..."}
+    "corrected": {"line": 0, "label": "...", "importance": "medium|minor (optional: adjudicate the medium tier on a confirmed claim)", "subject": "...", "discussion": "... (corrected prose posts verbatim: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor)", "suggestion": "..."}
   }]
 }
 `confidence` in [0,1] is your confidence in the claim after verification — it becomes the
@@ -2161,10 +2226,23 @@ Return ONLY this JSON object (no prose, no code fence):
   "findings": [{
     "path": "...", "line": 0,
     "label": "issue (blocking)|todo (blocking)|suggestion (non-blocking)|nitpick (non-blocking)|question (non-blocking)|thought (non-blocking)|note (non-blocking)",
+    "importance": "medium (optional; omit unless the finding meets the medium bar)",
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "subject": "one line", "discussion": "1-2 sentences, optional: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }]
 }
+
+`importance: "medium"` is the optional middle tier: mark it only on a
+non-blocking finding that is a verified defect or gap in code this PR adds, one
+a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
+what it does is decide which non-blocking findings post inline rather than
+collapse, keep a finding visible on re-reviews under the `blocking-medium`
+dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
+findings without vouching for the change). The claim-validator checks the
+marking and strips any it cannot confirm, and code strips it from any finding
+not anchored on a changed line of this PR, so an evidence-free medium costs
+the finding its prominence and buys nothing.
+
 Use a blocking label only for a whole-change defect that genuinely must be fixed before
 approval. `failure_scenario` is required on every finding: the concrete inputs/state
 and the wrong outcome they produce (the claim-validator attacks exactly this
@@ -2234,10 +2312,23 @@ Return ONLY this JSON object (no prose, no code fence):
   "findings": [{
     "path": "...", "line": 0,
     "label": "issue (blocking)|todo (blocking)|suggestion (non-blocking)|nitpick (non-blocking)|question (non-blocking)|thought (non-blocking)|note (non-blocking)",
+    "importance": "medium (optional; omit unless the finding meets the medium bar)",
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "subject": "one line", "discussion": "1-2 sentences, optional: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }]
 }
+
+`importance: "medium"` is the optional middle tier: mark it only on a
+non-blocking finding that is a verified defect or gap in code this PR adds, one
+a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
+what it does is decide which non-blocking findings post inline rather than
+collapse, keep a finding visible on re-reviews under the `blocking-medium`
+dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
+findings without vouching for the change). The claim-validator checks the
+marking and strips any it cannot confirm, and code strips it from any finding
+not anchored on a changed line of this PR, so an evidence-free medium costs
+the finding its prominence and buys nothing.
+
 Use a blocking label only when the change genuinely fails to deliver required, stated work.
 `failure_scenario` is required on every finding: the concrete gap and what a user or
 caller hits because of it (the claim-validator attacks exactly this scenario).
@@ -2297,10 +2388,23 @@ Return ONLY this JSON object (no prose, no code fence):
   "findings": [{
     "path": "...", "line": 0,
     "label": "todo (blocking)|issue (blocking)|suggestion (non-blocking)|nitpick (non-blocking)|question (non-blocking)|thought (non-blocking)|note (non-blocking)",
+    "importance": "medium (optional; omit unless the finding meets the medium bar)",
     "failure_scenario": "one sentence: the untested path and the regression that slips through it",
     "subject": "one line", "discussion": "1-2 sentences, optional: at most one claim, one line of evidence, at most one question; name the mechanism plainly, no metaphor", "suggestion": "optional test code"
   }]
 }
+
+`importance: "medium"` is the optional middle tier: mark it only on a
+non-blocking finding that is a verified defect or gap in code this PR adds, one
+a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
+what it does is decide which non-blocking findings post inline rather than
+collapse, keep a finding visible on re-reviews under the `blocking-medium`
+dial, and demote the run's verdict from APPROVE to COMMENT (the run posts its
+findings without vouching for the change). The claim-validator checks the
+marking and strips any it cannot confirm, and code strips it from any finding
+not anchored on a changed line of this PR, so an evidence-free medium costs
+the finding its prominence and buys nothing.
+
 `failure_scenario` is required on every finding: name the untested path and the
 concrete regression that would slip through it unnoticed (the claim-validator
 attacks exactly this scenario). Include `suggestion` only on `issue`, `todo`, and
@@ -2782,7 +2886,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
     "id": "security-auth-1",
     "lens": "security-auth",
     "anchor": {"type": "line", "path": "path/to/file", "line": 0, "side": "RIGHT"},
-    "severity": "blocking|advisory",
+    "severity": "blocking|medium|advisory",
     "confidence": 0.0,
     "evidence_trace": ["what you checked and saw — the grep, the traced caller, the line"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
@@ -2854,7 +2958,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
   "findings": [{
     "schema_version": 2, "id": "ai-safety-moderation-1", "lens": "ai-safety-moderation",
     "anchor": {"type": "line", "path": "path/to/file", "line": 0, "side": "RIGHT"},
-    "severity": "blocking|advisory", "confidence": 0.0,
+    "severity": "blocking|medium|advisory", "confidence": 0.0,
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "unmoderated-model-output",
@@ -2922,7 +3026,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
   "findings": [{
     "schema_version": 2, "id": "mass-comms-coppa-1", "lens": "mass-comms-coppa",
     "anchor": {"type": "line", "path": "path/to/file", "line": 0, "side": "RIGHT"},
-    "severity": "blocking|advisory", "confidence": 0.0,
+    "severity": "blocking|medium|advisory", "confidence": 0.0,
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "bulk-send-without-audience-filter",
@@ -2997,7 +3101,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
   "findings": [{
     "schema_version": 2, "id": "caching-resource-1", "lens": "caching-resource",
     "anchor": {"type": "line", "path": "path/to/file", "line": 0, "side": "RIGHT"},
-    "severity": "blocking|advisory", "confidence": 0.0,
+    "severity": "blocking|medium|advisory", "confidence": 0.0,
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "cache-key-missing-identifier",
@@ -3067,7 +3171,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
   "findings": [{
     "schema_version": 2, "id": "data-migrations-1", "lens": "data-migrations",
     "anchor": {"type": "line", "path": "path/to/file", "line": 0, "side": "RIGHT"},
-    "severity": "blocking|advisory", "confidence": 0.0,
+    "severity": "blocking|medium|advisory", "confidence": 0.0,
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "non-nullable-column-without-default",
@@ -3136,7 +3240,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
   "findings": [{
     "schema_version": 2, "id": "concurrency-async-1", "lens": "concurrency-async",
     "anchor": {"type": "line", "path": "path/to/file", "line": 0, "side": "RIGHT"},
-    "severity": "blocking|advisory", "confidence": 0.0,
+    "severity": "blocking|medium|advisory", "confidence": 0.0,
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "unawaited-async",
@@ -3205,7 +3309,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
   "findings": [{
     "schema_version": 2, "id": "api-federation-compat-1", "lens": "api-federation-compat",
     "anchor": {"type": "line", "path": "path/to/file", "line": 0, "side": "RIGHT"},
-    "severity": "blocking|advisory", "confidence": 0.0,
+    "severity": "blocking|medium|advisory", "confidence": 0.0,
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "breaking-field-removal-or-retype",
@@ -3278,7 +3382,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
   "findings": [{
     "schema_version": 2, "id": "cross-deploy-serialization-1", "lens": "cross-deploy-serialization",
     "anchor": {"type": "line", "path": "path/to/file", "line": 0, "side": "RIGHT"},
-    "severity": "blocking|advisory", "confidence": 0.0,
+    "severity": "blocking|medium|advisory", "confidence": 0.0,
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "serialized-shape-change",
@@ -3349,7 +3453,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
   "findings": [{
     "schema_version": 2, "id": "deploy-infra-config-1", "lens": "deploy-infra-config",
     "anchor": {"type": "line", "path": "path/to/file", "line": 0, "side": "RIGHT"},
-    "severity": "blocking|advisory", "confidence": 0.0,
+    "severity": "blocking|medium|advisory", "confidence": 0.0,
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "flag-default-unsafe",
@@ -3418,7 +3522,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
   "findings": [{
     "schema_version": 2, "id": "money-payments-1", "lens": "money-payments",
     "anchor": {"type": "line", "path": "path/to/file", "line": 0, "side": "RIGHT"},
-    "severity": "blocking|advisory", "confidence": 0.0,
+    "severity": "blocking|medium|advisory", "confidence": 0.0,
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "float-money",
@@ -3490,7 +3594,7 @@ Conventional-Comment `label` is emitted (the orchestrator computes it from
   "findings": [{
     "schema_version": 2, "id": "content-i18n-1", "lens": "content-i18n",
     "anchor": {"type": "line", "path": "path/to/file", "line": 0, "side": "RIGHT"},
-    "severity": "blocking|advisory", "confidence": 0.0,
+    "severity": "blocking|medium|advisory", "confidence": 0.0,
     "evidence_trace": ["what you checked and saw"],
     "failure_scenario": "one sentence: the concrete inputs/state and the wrong outcome they produce",
     "producing_hunt": "hardcoded-user-facing-string",
