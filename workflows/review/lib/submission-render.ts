@@ -207,8 +207,10 @@ export const COLLAPSED_ENTRY_RE =
 
 /**
  * The parse of the collapsed section's `<summary>` line (matched loosely,
- * prefix only: the count and the named-top tag vary per run). Lives beside
- * the renderer for the same no-drift reason as {@link COLLAPSED_ENTRY_RE}.
+ * prefix only: the count and the named-top tag vary per run, and a
+ * one-entry section renders `<details open>` with a count-only summary;
+ * keying on the `<summary>` text matches both forms). Lives beside the
+ * renderer for the same no-drift reason as {@link COLLAPSED_ENTRY_RE}.
  */
 export const COLLAPSED_SUMMARY_RE =
     /<summary>(?:Non-blocking|Lower-confidence) observations \(/;

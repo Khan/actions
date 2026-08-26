@@ -220,9 +220,7 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         const plan = runSubmissionCli(fs);
         expect(plan.comments).toHaveLength(20);
         expect(plan.body).not.toContain("Non-blocking observations");
-        expect(plan.body).toContain(
-            "Lower-confidence observations (1; top: `a.ts:21` issue (blocking): s)",
-        );
+        expect(plan.body).toContain("Lower-confidence observations (1)");
         expect(plan.body).toContain("issue (blocking)");
         expect(plan.notes.join(" ")).toContain(
             "1 claim(s) collapsed below the inline bar",
@@ -250,8 +248,13 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("APPROVE");
         expect(plan.comments).toEqual([]);
+        // One entry: open section, count-only summary, the entry itself
+        // visible in the body.
         expect(plan.body).toContain(
-            "Non-blocking observations (1; top: `a.ts:2` nitpick (non-blocking): Rename the helper.)",
+            "<details open>\n<summary>Non-blocking observations (1)</summary>",
+        );
+        expect(plan.body).toContain(
+            "- `a.ts:2` nitpick (non-blocking): Rename the helper.",
         );
         // A body carrying the collapsed section is never the bare approve
         // line, so the redundant-approval skip cannot swallow it.
@@ -273,13 +276,24 @@ describe("the collapsed summary's pr-level arm", () => {
                             label: "note (non-blocking)",
                             subject: "A cross-file observation.",
                         }),
+                        // A second entry keeps the section above the N=1
+                        // count-only form, so the summary shows the top tag
+                        // this test pins.
+                        claim({
+                            id: "pr-thought",
+                            path: undefined,
+                            line: undefined,
+                            label: "thought (non-blocking)",
+                            confidence: 0.6,
+                            subject: "A weaker hunch.",
+                        }),
                     ],
                 },
                 true,
             ),
         );
         expect(runSubmissionCli(fs).body).toContain(
-            "Non-blocking observations (1; top: note (non-blocking): A cross-file observation.)",
+            "Non-blocking observations (2; top: note (non-blocking): A cross-file observation.)",
         );
     });
 });
