@@ -10,7 +10,10 @@
  *   - A review-event plan (APPROVE / REQUEST_CHANGES): the queued event,
  *     body, and inline comments must match the plan under a
  *     sanitizer-tolerant normalization (`normalizeBody`,
- *     sanitizer-normalize.ts, which documents every absorbed transform);
+ *     sanitizer-normalize.ts, which documents every absorbed transform),
+ *     with the fingerprint stamp folded out of both bodies first
+ *     (`stripRereviewStamp`: its payload is opaque high-entropy text a
+ *     transcription garble should not withhold a review over);
  *     anything beyond that is a splice (#244) and blocks. The rule also
  *     owns the NO-submission shapes: queued comments with no submit would
  *     land as an ungated COMMENT review, and a silently-dropped plan would
@@ -37,6 +40,12 @@
 
 import type {DispatchGateViolation, SafeOutputItem} from "./dispatch-gate";
 import {renderReviewBody} from "./render-comment";
+import {
+    countRereviewStampBlocks,
+    parseRereviewStamp,
+    stampHunksChain,
+    stripRereviewStamp,
+} from "./rereview-mode";
 import {normalizeBody} from "./sanitizer-normalize";
 
 const COMMENT_TYPE = "create_pull_request_review_comment";
@@ -153,8 +162,9 @@ export const submissionPlanViolations = (
             // review.md's redundant-approval skip is narrower than "APPROVE
             // with no comments": the body must ALSO carry no `Note:` lines
             // and no accountability section, i.e. it is exactly the bare
-            // comment-less-approve line (the fingerprint stamp is an HTML
-            // comment, which normalizeBody already drops). Without the body
+            // comment-less-approve line (the fingerprint stamp posts as a
+            // collapsed `<details>` block that survives normalizeBody, so
+            // it is folded out first). Without the body
             // check, an APPROVE that shed a lens (carrying a mandatory
             // "Note: <lens> not assessed this run" disclosure) could be
             // dropped on the floor and still pass the gate green, silently
@@ -174,7 +184,8 @@ export const submissionPlanViolations = (
                     ? planStaged.skipSubmission
                     : planStaged.event === "APPROVE" &&
                       planComments.length === 0 &&
-                      normalizeBody(planBody) === bareApprove;
+                      normalizeBody(stripRereviewStamp(planBody)) ===
+                          bareApprove;
             if (!planSkips) {
                 violations.push({
                     code: "submission-plan-mismatch",
@@ -205,13 +216,70 @@ export const submissionPlanViolations = (
         }
         if (
             typeof planStaged.body === "string" &&
-            normalizeBody(body) !== normalizeBody(planStaged.body)
+            // The stamp is folded out of both sides before the normalized
+            // comparison: a garbled or dropped payload degrades the next
+            // run to "no fingerprint" (full depth) instead of withholding
+            // this review (stripRereviewStamp documents the trade).
+            normalizeBody(stripRereviewStamp(body)) !==
+                normalizeBody(stripRereviewStamp(planStaged.body))
         ) {
             violations.push({
                 code: "submission-plan-mismatch",
                 dimension: "review body",
                 detail: "queued review body does not match the staged submission plan (normalized comparison)",
             });
+        }
+        if (typeof planStaged.body === "string") {
+            // The fold above tolerates a stamp the orchestrator garbled or
+            // dropped, but must not tolerate one it REPLACED: a forged
+            // well-formed fingerprint would post and steer the next run's
+            // depth. A queued stamp that parses must equal the plan's;
+            // corruption parses to null and stays on the degrade path.
+            const queuedStamp = parseRereviewStamp(body);
+            if (
+                queuedStamp !== null &&
+                JSON.stringify(queuedStamp) !==
+                    JSON.stringify(parseRereviewStamp(planStaged.body))
+            ) {
+                violations.push({
+                    code: "submission-plan-mismatch",
+                    dimension: "fingerprint stamp",
+                    detail: "queued review body carries a fingerprint stamp that does not match the staged plan's (a corrupted stamp may degrade to none, never to a different one)",
+                });
+            }
+            // And never MORE stamp-shaped blocks than the plan staged: the
+            // fold tolerates variation inside a matched block's payload
+            // region, so extra matched blocks would ride through the body
+            // comparison unchecked. Fewer is fine (a dropped stamp is the
+            // degrade path).
+            if (
+                countRereviewStampBlocks(body) >
+                countRereviewStampBlocks(planStaged.body)
+            ) {
+                violations.push({
+                    code: "submission-plan-mismatch",
+                    dimension: "fingerprint stamp",
+                    detail: "queued review body carries more fingerprint-shaped blocks than the staged plan (the fold would hide their contents from the body comparison)",
+                });
+            }
+            // The payload region is the fold's one tolerated variation, and
+            // its shape (newline-separated tokens) still fits prose, so
+            // bound its growth: a transcription garble may mangle or
+            // shorten the region, but prose smuggled after an intact
+            // payload (or a replacement longer than the plan's) grows it.
+            const queuedChain = stampHunksChain(body);
+            const planChain = stampHunksChain(planStaged.body);
+            if (
+                queuedChain !== null &&
+                planChain !== null &&
+                queuedChain.length > planChain.length
+            ) {
+                violations.push({
+                    code: "submission-plan-mismatch",
+                    dimension: "fingerprint stamp",
+                    detail: "queued fingerprint payload region is longer than the staged plan's (a transcription garble may shorten or mangle the payload, never grow it)",
+                });
+            }
         }
         if (Array.isArray(planStaged.comments)) {
             const planned = planStaged.comments

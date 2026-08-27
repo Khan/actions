@@ -178,23 +178,24 @@ observability:
 # waits for the whole sub-agent fan-out, which takes minutes, not seconds. The
 # job-level timeout-minutes still bounds the run.
 #
-# The ceiling is 30 minutes (with timeout-minutes at 50), not 20 (at 40). This
+# The ceiling is 60 minutes (with timeout-minutes at 80), not 30 (at 50). This
 # is a pragmatic cap sized to observed runs, not a bound: the dispatcher awaits
 # four sequential agent stages (triage, finder fan-out in waves of 4, the
 # clusterer, claim validation), each sub-agent capped at 15 minutes and
 # re-dispatched once on a parse failure, so the theoretical worst case exceeds
 # any ceiling worth setting. Run 32418662895 (Khan/actions#362) was killed
-# mid-claim-validation at the old 20-minute line, posting nothing, and the
-# turn cap raise to 100 lets agents run longer, so the ceiling moves in
-# lockstep; the job cap keeps ~20 minutes of headroom over the dispatcher call
-# so the two never collapse into the same kill line.
+# mid-claim-validation at the old 20-minute line, and run 32891345932
+# (Khan/webapp#41030, 52 files at full depth) at the 30-minute line with the
+# fan-out already done and only claim validation left, each posting nothing;
+# the job cap keeps ~20 minutes of headroom over the dispatcher call so the
+# two never collapse into the same kill line.
 engine:
   id: claude
   model: claude-opus-5
   env:
     BASH_DEFAULT_TIMEOUT_MS: "60000"
-    BASH_MAX_TIMEOUT_MS: "1800000"
-timeout-minutes: 50
+    BASH_MAX_TIMEOUT_MS: "3600000"
+timeout-minutes: 80
 
 # The awf sandbox stays declared (its api-proxy is what meters AI credits and
 # caps a runaway fan-out), but its version now floats with the gh-aw release
@@ -238,7 +239,7 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: review-v1.20.0
+      ref: review-v1.22.0
       path: gh-aw-review-lib
       persist-credentials: false
 
@@ -547,11 +548,16 @@ budget on content you never act on.
   uses this to filter candidate comments.
 - `prior-reviews.json` — every prior `github-actions[bot]` review body,
   whatever its state (a dismissed or comment-only review still carries its
-  fingerprint stamp, which is why states are not filtered). In practice
-  gh-aw's safe-output sanitizer strips the stamp comment before a review
-  posts, so these bodies usually carry none; the plan CLI then anchors on
-  the Step 9 cache-memory record instead (its `rereview-plan.json` records
-  which carrier won as `stampSource`).
+  fingerprint stamp, which is why states are not filtered). The stamp is a
+  collapsed `<details>` block, not an HTML comment: the sanitizer deletes
+  comments, which is why the original comment-form stamp never posted and
+  every run planned full depth (webapp#41742). Bodies from before that fix carry
+  no stamp; the plan CLI then falls back to the Step 9 cache-memory record
+  (`rereview-plan.json` records which carrier won as `stampSource`), though
+  cache writes are denied on issue_comment triggers (the /review command
+  consumers declare) by GitHub's 2026-06-30 cache policy; pull_request
+  triggers can still save, so the body carrier is the one that works
+  everywhere.
 - `threads.json` and `human-threads.json`: this PR's unresolved review
   threads, split by who opened them; the ones this bot opened (with their full
   reply chains) and the `{path, line}` of everyone else's. Step 3 says what each
@@ -760,7 +766,12 @@ in which case the staging step ALSO already overwrote `full-stripped.diff` with
 the scoped contents and refreshed its annotated sibling, so the whole-change
 surfaces you and the sub-agents read are pre-shrunk to the unseen hunks.
 Read the plan; it is deterministic and final: never deepen or shallow it yourself,
-and never run the CLI yourself. Its three guards are code, not your
+and never run the CLI yourself. A comment-triggered run whose `/review` a
+human posted always plans `full` (reason `manual-review-request`), whatever
+the mode dial says; a `/review` posted by our automation (a Bot-type account,
+or a `REVIEW_AUTOMATION_LOGINS` login, default `khan-actions-bot`, whose shim
+fires one per push in Khan/webapp) follows
+the mode dial like the push it stands in for. Its three guards are code, not your
 judgment: the one anchoring full review is taken at ready-for-review, a fingerprint
 overflow or a missing input forces `full`, and the divergence tripwire re-arms
 `full` when too much of the diff is unreviewed. The dispatcher implements each depth (the
@@ -804,7 +815,7 @@ exactly this sequence:
    none. This is the only thread work left to you: what a reply chain concedes
    or refutes is a judgment, while fetching and classifying the threads is not.
 2. Invoke the dispatcher, once, as a single Bash call with `timeout` set to
-   `1800000` (it waits for the whole sub-agent fan-out; the engine's Bash
+   `3600000` (it waits for the whole sub-agent fan-out; the engine's Bash
    ceiling is raised for exactly this call):
 ```
 cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" \
@@ -950,7 +961,7 @@ never add, drop, reword, or re-anchor one.
 
 The review body and event are composed by the plan CLI (Step 3): the verdict
 head, the code-rendered re-review accountability section, every `Note:` line,
-the collapsed version/config footer, and the hidden fingerprint stamp are all
+the collapsed version/config footer, and the collapsed fingerprint stamp are all
 already in the plan's `body`. Submit
 with **one** `submit-pull-request-review` call carrying the plan's `event` and
 `body` verbatim — except when the plan's `skipSubmission` is `true` (Step 3),
@@ -1098,7 +1109,7 @@ fully explained by a common pattern above:
 </details>
 
 <details><summary><sub>review details</sub></summary>
-<sub>review-v1.20.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
+<sub>review-v1.22.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
 </details>
 ````
 
@@ -2863,6 +2874,39 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`injection-sink`** — trace user-controlled input to a SQL/HTML/path/URL/shell/
   deserialization sink without validation or parameterization. `found` on an unguarded
   sink.
+- **`pwn-request`** — when workflow or action-definition files change:
+  `.github/workflows/*.{yml,yaml,md}` (a gh-aw authored `.md` workflow counts —
+  its frontmatter carries the trigger, permissions, and secrets; the compiled
+  `.lock.yml` beside it is generated output stripped from the diff),
+  `action.yml`/`action.yaml` anywhere in the tree, or a workflow definition
+  staged elsewhere for a later move into `.github/workflows/`. `found` only
+  when one job combines all three of: a privileged trigger
+  (`pull_request_target`, `workflow_run` startable by a fork PR, or any
+  comment/issue/review trigger a fork author can fire — `issue_comment`,
+  `pull_request_review`, `pull_request_review_comment`, `issues`,
+  `discussion_comment`), untrusted content brought in (PR head checked out,
+  or an artifact from the triggering run), and execution of that content while
+  holding secrets or a write-capable token — a plain `pull_request` fork run
+  holds neither.
+- **`over-scoped-secret`** — same file gate as `pwn-request`: a workflow granting
+  `secrets.GITHUB_TOKEN` or a custom org token a permission nothing in the
+  workflow uses (e.g., `contents: write` when every step only reads, or a broad
+  PAT where the default `GITHUB_TOKEN` suffices). Non-use must be decidable from
+  the file: every step's use of the token is visible (inline `run:` commands,
+  in-diff scripts and actions) and none needs the permission. The job token is
+  not ambient: a `run:` script (lifecycle scripts included) can consume it only
+  when a step passes it via `env:`/`with:` or `actions/checkout` persists it,
+  so an opaque script with no such path never makes a permission undecidable.
+  A third-party action can receive `github.token` through an input default, so
+  it makes a permission undecidable only when it could plausibly need that
+  permission (checkout and toolchain-setup actions' own API use is read-only)
+  — otherwise not `found`. A gh-aw authored `.md` workflow is the one case
+  where step-visibility does not settle it: its frontmatter `permissions:` are
+  consumed by the `safe-outputs:` jobs and the agent's `tools.github` toolsets,
+  both compiled into the stripped `.lock.yml`, so they appear as no step at all
+  — never treat a permission on a `.md` workflow as unused unless the
+  frontmatter's `safe-outputs:` and `tools:` blocks also fail to need it.
+  `found` names the unneeded permission and why no step needs it.
 
 ### Repo-specific rules and hunts (optional)
 Additional review rules and hunts the host repo defines for this lens, imported when

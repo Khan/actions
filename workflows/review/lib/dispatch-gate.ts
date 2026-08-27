@@ -157,9 +157,10 @@ export type DispatchGateInput = {
     priorReviews?: unknown;
     /**
      * Parsed cache-memory record (`pr-<n>.json`), the fallback stamp
-     * carrier: posted bodies never keep their stamp (the ingest sanitizer
-     * strips HTML comments), so the flip rule reads the same carrier the
-     * plan CLI anchored on.
+     * carrier for bodies posted before the stamp's collapsed-block form
+     * (the legacy comment-form stamp never survived the ingest sanitizer),
+     * so the flip rule reads the same carrier priority the plan CLI
+     * anchored on.
      */
     cacheMemory?: unknown;
     /** Parsed `rereview.json` (the accountability result; `keptBlockingCount`). */

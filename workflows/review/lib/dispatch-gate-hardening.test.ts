@@ -582,3 +582,127 @@ describe("staged-input robustness (slice 3 re-review)", () => {
         );
     });
 });
+
+describe("rule 7 folds the fingerprint stamp out of the body comparison", () => {
+    // The stamp's payload is the largest opaque string in a review body,
+    // and the orchestrator transcribes the body into the safe output. The
+    // legacy comment-form stamp was dropped from both comparison sides by
+    // normalizeBody, so transcription of the payload was never load-tested;
+    // the block form survives the fold, and without stripRereviewStamp one
+    // garbled base64 character would withhold the whole review. A garbled
+    // or dropped stamp must instead post and degrade the NEXT run to
+    // no-prior-fingerprint (full depth).
+    const stamp = renderRereviewStamp({
+        schemaVersion: STAMP_SCHEMA_VERSION,
+        depth: "scoped",
+        verdict: "APPROVE",
+        anchorDraft: false,
+        anchorHunks: {"a.ts": ["0123456789abcdef"]},
+    });
+    const planBody = `Approved.\nNote: x.\n${stamp}`;
+    const bodyMismatches = (queuedBody: string) =>
+        evaluate({
+            items: [submitItem("APPROVE", queuedBody)],
+            plan: {depth: "full"},
+            outFiles: conformingOutFiles(),
+            submissionPlan: {event: "APPROVE", body: planBody, comments: []},
+        }).violations.filter(
+            (v) =>
+                v.code === "submission-plan-mismatch" &&
+                (v.dimension === "review body" ||
+                    v.dimension === "fingerprint stamp"),
+        );
+
+    it("tolerates a transcription-garbled payload", () => {
+        const garbled = planBody.replace(/hunks=\S+/, "hunks=garbled!!");
+        expect(bodyMismatches(garbled)).toEqual([]);
+    });
+
+    it("tolerates a dropped stamp block", () => {
+        const dropped = planBody.slice(0, planBody.indexOf("<details>"));
+        expect(bodyMismatches(dropped)).toEqual([]);
+    });
+
+    it("still blocks a body that deviates outside the stamp", () => {
+        const spliced = planBody.replace("Note: x.", "Note: y.");
+        expect(bodyMismatches(spliced)).toHaveLength(1);
+    });
+
+    it("blocks spliced prose hidden inside a fingerprint-labeled block", () => {
+        // The fold's block match requires the stamp's field skeleton in the
+        // interior: with a wildcard interior, this extra block would be
+        // deleted from the queued side before the comparison and arbitrary
+        // orchestrator prose would post ungated (the #244 splice).
+        const spliced =
+            `${planBody}\n<details><summary><sub>review fingerprint</sub>` +
+            `</summary>\nSPLICED PROSE the plan never staged.\n</details>`;
+        expect(bodyMismatches(spliced)).toHaveLength(1);
+    });
+
+    it("blocks the marker-prefixed variant of the same splice", () => {
+        // `pr-reviewer:rereview` plus free prose, one token cheaper than a
+        // full forged stamp; the skeleton requirement keeps it in the body.
+        const spliced =
+            `${planBody}\n<details><summary><sub>review fingerprint</sub>` +
+            `</summary>\n<sub>pr-reviewer:rereview SPLICED PROSE the plan ` +
+            `never staged.</sub>\n</details>`;
+        expect(bodyMismatches(spliced)).toHaveLength(1);
+    });
+
+    it("blocks an EXTRA skeleton-shaped block by count", () => {
+        // A forged block carrying the full field skeleton strips before the
+        // body comparison (newline-token prose fits its hunks= region), so
+        // the gate separately requires the queued body to carry no more
+        // stamp-shaped blocks than the plan staged.
+        const spliced =
+            `${planBody}\n<details><summary><sub>review fingerprint</sub>` +
+            `</summary>\n<sub>pr-reviewer:rereview v=1 depth=scoped ` +
+            `verdict=APPROVE anchor-draft=false hunks=abcd\nSPLICED\nPROSE` +
+            `</sub>\n</details>`;
+        expect(bodyMismatches(spliced)).toHaveLength(1);
+    });
+
+    it("blocks prose spliced into the staged stamp block's hunks tail", () => {
+        // Text appended after an intact payload keeps the block count and
+        // the parsed stamp equal; the space ends the payload region, so the
+        // block stops matching and the residue trips the body comparison.
+        const spliced = planBody.replace(
+            "</sub>\n</details>",
+            " SPLICED PROSE the plan never staged.</sub>\n</details>",
+        );
+        expect(bodyMismatches(spliced)).toHaveLength(1);
+    });
+
+    it("blocks the newline variant via the payload growth bound", () => {
+        // Newline-separated tokens fit the block shape and strip, the first
+        // token is the intact payload so the parsed stamps stay equal, and
+        // the count stays 1:1; only the region's length gives it away.
+        const spliced = planBody.replace(
+            "</sub>\n</details>",
+            "\nSPLICED\nPROSE\nthe\nplan\nnever\nstaged.</sub>\n</details>",
+        );
+        expect(bodyMismatches(spliced)).toHaveLength(1);
+    });
+
+    it("tolerates a line-wrapped payload (no growth)", () => {
+        const wrapped = planBody.replace(/hunks=(\S{4})/, "hunks=$1\n");
+        expect(bodyMismatches(wrapped)).toEqual([]);
+    });
+
+    it("blocks a SUBSTITUTED stamp: corruption may degrade, never forge", () => {
+        // A forged well-formed fingerprint would post and steer the next
+        // run's depth (a scoped APPROVE stamp over hunks the reviewers
+        // never saw), so the fold-out tolerance must not extend to it.
+        const forged = renderRereviewStamp({
+            schemaVersion: STAMP_SCHEMA_VERSION,
+            depth: "fast",
+            verdict: "APPROVE",
+            // Same key and hash length as the plan's stamp, so the payload
+            // regions match in length and only the equality check fires.
+            anchorDraft: false,
+            anchorHunks: {"b.ts": ["fedcba9876543210"]},
+        });
+        const swapped = planBody.replace(stamp, forged);
+        expect(bodyMismatches(swapped)).toHaveLength(1);
+    });
+});

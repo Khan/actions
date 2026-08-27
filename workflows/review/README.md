@@ -428,6 +428,37 @@ and are skipped; routing degrades to fewer lenses, never to a crashed review.
 stays the model-facing prose about file *contents*; team ownership stays in
 `.github/REVIEWERS`, unchanged.
 
+### Routing the `security-auth` workflow hunts
+
+The `security-auth` lens's GitHub Actions workflow hunts (`pwn-request`,
+`over-scoped-secret`) run only when the lens spawns, so a repo that wants
+workflow changes reviewed must route the workflow paths:
+
+```
+.github/workflows/**       tier=high lens=security-auth
+**/action.yml              tier=high lens=security-auth
+**/action.yaml             tier=high lens=security-auth
+```
+
+`.github/workflows/**` covers gh-aw repos too: the authored `.md` workflow —
+whose frontmatter carries the trigger, permissions, and secrets — matches the
+pattern, and the hunts' own file gate includes it (the compiled `.lock.yml`
+beside it is generated output the reviewer skips).
+
+A repo that stages workflow files outside `.github/workflows/` pending a later
+move into it (e.g. a `.github-staging/` pen) should route that directory to the
+lens as well; the hunts' file gate covers staged workflow definitions by
+content, so they are reviewed before the move (the move itself is a rename
+that shows no content diff).
+
+A repo that stages deliberately-vulnerable workflow fixtures (test corpora,
+training material) should scope these patterns to its real action directories
+instead of `**`: lenses cannot be un-routed by a later rule, so a broad
+pattern would route the fixtures to a live lens. Scoping controls only
+whether the lens spawns; a spawned lens still reads the whole change's diff,
+so such a repo should also name its fixture paths as intentionally vulnerable
+in its `.github/aw/review/lenses/security-auth.md` payload.
+
 ### The `documentation` reviewer (opt-in)
 
 `enable documentation` turns on a reviewer that checks the **comments and prose docs
@@ -578,6 +609,15 @@ everything, whatever the mode:
 | `flip-gated` | Thread reconciliation plus the correctness pass over the new hunks. A REQUEST_CHANGES→APPROVE flip is vetoed by any validated blocking finding from that pass; the pass gates the flip instead of being discarded. | Cheap re-reviews that still cannot flip to approval over a fresh validated defect. |
 | `fast` | Thread reconciliation only. | Maximum savings; fresh code on a re-push is guarded only by the tripwire below. |
 
+The dial governs push-shaped triggers. A `/review` comment a human posts on a
+consumer that keeps the comment trigger always plans `full` (reason
+`manual-review-request`): the point of the manual ask is "give me a real
+review now", and a reduced mode would otherwise answer it with a cheaper
+round. A `/review` posted by our automation (a Bot-type account, or a login
+in the `REVIEW_AUTOMATION_LOGINS` env, comma-separated and defaulting to
+`khan-actions-bot`; Khan/webapp's shim posts one per push) is not a manual
+ask and follows the configured mode like the push it stands in for.
+
 Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministic):
 
 - **Ready-for-review anchor.** A fingerprint taken while the PR was a draft
@@ -586,7 +626,8 @@ Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministi
 - **Flip gate.** In `flip-gated` mode the dispatched correctness pass's
   validated blocking findings veto the approval flip.
 - **Divergence tripwire.** Every full-depth review stamps a content-hashed
-  hunk signature into its review body as a hidden comment (it survives cache
+  hunk signature into its review body as a collapsed `<details>` block (an
+  HTML comment would be deleted by the ingest sanitizer; it survives cache
   eviction and branch protection's dismiss-stale-approvals, and it (not the
   review state) is what marks a full review as having happened, so a
   COMMENTED-only or dismissed history never wedges the dial). Each push is
@@ -864,6 +905,13 @@ Optional:
   human ones, which puts their lines in `skipLines` and DROPS fresh findings
   there. Either spelling works (`name` or `name[bot]`); the comparison strips
   the suffix.
+- `REVIEW_AUTOMATION_LOGINS` — comma-separated logins whose `/review`
+  comments are automation, not a manual ask, default `khan-actions-bot`. Set
+  it in the same workflow-level `env:` block as `REVIEW_BOT_LOGIN` (the plan
+  CLI reads it in the pre-agent staging step) in a repo whose `/review` shim
+  posts under a different classic-PAT account. The list REPLACES the default
+  (an empty value restores it), the comparison is case-folded, and Bot-type
+  authors are treated as automation regardless of the list.
 
 ## Versioning
 
@@ -937,6 +985,13 @@ in `lib/rereview-mode.ts`), so the marker never reached a posted comment; `sub`,
 `details`, and `summary` are on the sanitizer's allowed-tag list and survive
 ingest. There is no separate config-hash or drift-stamp mechanism; the release
 tag plus the footer's config segments are the version surface.
+
+After the footer, a submitted review body ends with one more collapsed block:
+the re-review fingerprint stamp (summary chip `review fingerprint`, rendered
+by `lib/rereview-mode.ts`), the hunk-signature record the next run's re-review
+planner and autofix's currency check read back. It rides the same
+sanitizer-surviving `details`/`summary`/`sub` mechanism as the footer, so the
+footer is second-to-last and the stamp is the final block.
 
 Every inline review comment (and each pr-level finding folded into the review
 body) additionally ends with a per-comment attribution footer in the same

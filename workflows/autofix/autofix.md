@@ -242,7 +242,7 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: autofix-v0.4.0
+      ref: autofix-v0.5.0
       path: gh-aw-autofix-lib
       persist-credentials: false
 
@@ -336,7 +336,7 @@ env:
   GIT_CONFIG_KEY_1: remote.origin.partialclonefilter
   GIT_CONFIG_VALUE_1: "blob:none"
 
-source: Khan/actions/workflows/autofix/autofix.md@autofix-v0.4.0
+source: Khan/actions/workflows/autofix/autofix.md@autofix-v0.5.0
 ---
 
 # PR Autofixer
@@ -646,11 +646,14 @@ records that nothing has *checked* it. Item 8 below is the only place a reader
 learns that, so the comment carrying it cannot be optional.
 
 The quiet branch was therefore retracted deliberately, not lost. It was also
-unreachable in practice: it required `plan.degradedNote` to be empty, and the
-reviewer's hidden fingerprint stamp is stripped from every posted review (the
-README's "Degrading when there is no fingerprint" documents it), so that note is
-essentially always set. Do not reintroduce the branch without first answering
-where the pending-verification statement goes instead.
+unreachable in practice when retracted: it required `plan.degradedNote` to be
+empty, and the reviewer's fingerprint stamp of that era was an HTML comment
+stripped from every posted review (the README's "Degrading when there is no
+fingerprint" documents it), so that note was essentially always set. The
+stamp now posts (webapp#41742), so an empty note is a reachable state again;
+that strengthens the case for this comment, it does not weaken it. Do not
+reintroduce the branch without first answering where the pending-verification
+statement goes instead.
 
 Do **not** try to add a hidden HTML-comment marker of your own. gh-aw's
 safe-output ingest strips every XML/HTML comment before posting
