@@ -108,6 +108,42 @@ describe("computeUnreviewedChangedLines", () => {
             "a.ts": [6, 7],
         });
     });
+
+    it("a deletion charges one line per removed line, not just its brackets", () => {
+        // Bracket-only charging collapsed a 40-line removal to two charged
+        // lines, so one anchor licensed an unbounded deletion (the review's
+        // repro: map {18, 19}, qualifying against a single thread).
+        const bigDeletion = [
+            "diff --git a/src/handler.ts b/src/handler.ts",
+            "--- a/src/handler.ts",
+            "+++ b/src/handler.ts",
+            "@@ -20,40 +19,0 @@",
+            ...Array.from({length: 40}, (_, i) => `-line ${20 + i}`),
+        ].join("\n");
+        const map = computeUnreviewedChangedLines(bigDeletion, {});
+        expect(map["src/handler.ts"]).toHaveLength(41);
+        expect(map["src/handler.ts"][0]).toBe(18);
+        expect(map["src/handler.ts"][40]).toBe(58);
+        expect(isRespondToReviewPush(map, {"src/handler.ts": [20]})).toBe(
+            false,
+        );
+        // A deletion small enough for the window still qualifies.
+        const smallDeletion = [
+            "diff --git a/src/handler.ts b/src/handler.ts",
+            "--- a/src/handler.ts",
+            "+++ b/src/handler.ts",
+            "@@ -20,3 +19,0 @@",
+            "-line 20",
+            "-line 21",
+            "-line 22",
+        ].join("\n");
+        expect(
+            isRespondToReviewPush(
+                computeUnreviewedChangedLines(smallDeletion, {}),
+                {"src/handler.ts": [20]},
+            ),
+        ).toBe(true);
+    });
 });
 
 /* -------------------------------------------------------------------------- */

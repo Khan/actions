@@ -583,7 +583,8 @@ drops to `fast` on its own when it is the respond-to-review shape, where
 every changed line that is new since the last fully-reviewed fingerprint
 sits within 3 lines of an open review thread's anchor in the same file (so
 one isolated thread licenses at most 7 contiguous changed lines around its
-anchor; a larger rewrite keeps the roster). Bot and human threads both count
+anchor; a larger rewrite keeps the roster, and a deletion charges one line
+per removed line, so a large removal does too). Bot and human threads both count
 for the matching, but at least one line-anchored bot thread must be open on
 the PR (the `fast` roster is reconcile-only, and the reconciler works the
 bot's threads). Such a round dispatches reconcile-only, and its depth note

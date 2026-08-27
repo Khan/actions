@@ -8,7 +8,7 @@
  * config's 1000-line file cap.
  */
 
-import {computeChangedLines} from "./diff";
+import {splitUnifiedDiff} from "./diff";
 import {buildScopedDiff} from "./hunk-signature";
 import type {HunkSignature} from "./hunk-signature";
 
@@ -31,23 +31,69 @@ export const RESPOND_TO_REVIEW_SLACK = 3;
 
 /**
  * The changed lines inside the hunks the anchor fingerprint has not seen:
- * exact `+` lines plus the RIGHT-side lines bracketing each deletion
- * ({@link computeChangedLines}'s `added` and `removedAdjacent`), never a
- * hunk header's extent, which spans git's context lines and would let
- * fresh code ride within one hunk of a thread fix.
+ * exact `+` lines, never a hunk header's extent, which spans git's context
+ * lines and would let fresh code ride within one hunk of a thread fix. A
+ * deletion charges its REMOVED-line count at its RIGHT-side position (one
+ * charged line per removed line, from the bracketing line down), not just
+ * the two lines bracketing it: bracket-only charging collapsed a 40-line
+ * removal to two charged lines, and one thread anchor then licensed an
+ * unbounded deletion. Charged positions are what the slack window must
+ * cover; they need not exist in the new file.
  */
 export const computeUnreviewedChangedLines = (
     diffText: string,
     reviewed: HunkSignature,
 ): ChangedLineMap => {
     const map: ChangedLineMap = {};
-    const changed = computeChangedLines(buildScopedDiff(diffText, reviewed));
-    for (const [path, lines] of Object.entries(changed)) {
-        const merged = [
-            ...new Set([...lines.added, ...lines.removedAdjacent]),
-        ].sort((a, b) => a - b);
-        if (merged.length > 0) {
-            map[path] = merged;
+    const scoped = buildScopedDiff(diffText, reviewed);
+    for (const section of splitUnifiedDiff(scoped)) {
+        const charged = new Set<number>();
+        let newLine = 0;
+        let inHunk = false;
+        let deletionRun = 0; // length of the current `-` run
+        let deletionAt = 0; // RIGHT-side position where it started
+        const flushDeletion = () => {
+            if (deletionRun === 0) {
+                return;
+            }
+            if (deletionAt > 1) {
+                charged.add(deletionAt - 1);
+            }
+            for (let i = 0; i < deletionRun; i++) {
+                charged.add(deletionAt + i);
+            }
+            deletionRun = 0;
+        };
+        for (const line of section.text.split("\n")) {
+            const header = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+            if (header !== null) {
+                flushDeletion();
+                newLine = Number(header[1]);
+                inHunk = true;
+                continue;
+            }
+            if (!inHunk) {
+                continue;
+            }
+            if (line.startsWith("+")) {
+                flushDeletion();
+                charged.add(newLine);
+                newLine++;
+            } else if (line.startsWith("-")) {
+                if (deletionRun === 0) {
+                    deletionAt = newLine;
+                }
+                deletionRun++;
+            } else if (line.startsWith("\\")) {
+                // "\ No newline at end of file" consumes nothing.
+            } else {
+                flushDeletion();
+                newLine++;
+            }
+        }
+        flushDeletion();
+        if (charged.size > 0) {
+            map[section.path] = [...charged].sort((a, b) => a - b);
         }
     }
     return map;
@@ -93,10 +139,13 @@ export type RespondFs = {
     existsSync: (p: string) => boolean;
 };
 
-// The staged thread partition (stage-pr.ts writes both before the plan CLI
-// runs). The directory mirrors rereview-mode.ts's REVIEW_DIR.
-const BOT_THREADS_PATH = "/tmp/gh-aw/review/threads.json";
-const HUMAN_THREADS_PATH = "/tmp/gh-aw/review/human-threads.json";
+/**
+ * Where the staged thread partition lives in production (stage-pr.ts
+ * writes both before the plan CLI runs); mirrors rereview-mode.ts's
+ * REVIEW_DIR. The eval bench stages the same files under its own case
+ * directory and passes it to {@link collectRespondToReviewInputs}.
+ */
+const DEFAULT_REVIEW_DIR = "/tmp/gh-aw/review";
 
 const readJsonIfPresent = (fs: RespondFs, path: string): unknown => {
     if (!fs.existsSync(path)) {
@@ -131,6 +180,7 @@ export const collectRespondToReviewInputs = (
     fs: RespondFs,
     diffText: string | null,
     anchorHunks: HunkSignature | "overflow" | undefined,
+    reviewDir: string = DEFAULT_REVIEW_DIR,
 ):
     | {
           unreviewedChangedLines: ChangedLineMap;
@@ -139,7 +189,8 @@ export const collectRespondToReviewInputs = (
     | undefined => {
     const anchors: ThreadAnchors = {};
     let botAnchors = 0;
-    for (const path of [BOT_THREADS_PATH, HUMAN_THREADS_PATH]) {
+    const botThreadsPath = `${reviewDir}/threads.json`;
+    for (const path of [botThreadsPath, `${reviewDir}/human-threads.json`]) {
         const raw = readJsonIfPresent(fs, path);
         for (const entry of Array.isArray(raw) ? raw : []) {
             const thread = entry as {path?: unknown; line?: unknown};
@@ -148,7 +199,7 @@ export const collectRespondToReviewInputs = (
                 typeof thread.line === "number"
             ) {
                 (anchors[thread.path] ??= []).push(thread.line);
-                if (path === BOT_THREADS_PATH) {
+                if (path === botThreadsPath) {
                     botAnchors++;
                 }
             }
