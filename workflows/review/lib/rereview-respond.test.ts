@@ -2,7 +2,7 @@ import {describe, it, expect} from "vitest";
 
 import {
     computeHunkSignature,
-    computeUnreviewedChangedRuns,
+    computeUnreviewedChangedLines,
     decideReReviewDepth,
     isRespondToReviewPush,
     renderRereviewStamp,
@@ -17,8 +17,8 @@ import type {
 } from "./rereview-mode";
 
 /**
- * The respond-to-review drop: a scoped/flip-gated re-review whose every
- * unreviewed changed run answers an open thread runs at fast depth instead
+ * The respond-to-review drop: a scoped re-review whose every unreviewed
+ * changed line answers an open thread runs at fast depth instead
  * (reconcile-only dispatch), the per-push counterpart of the mode dial.
  * Split from rereview-mode.test.ts for the shared eslint config's
  * 1000-line file cap.
@@ -63,50 +63,23 @@ const stampOf = (anchorHunks: HunkSignature): ReReviewStamp => ({
 });
 
 /* -------------------------------------------------------------------------- */
-/* computeUnreviewedChangedRuns                                               */
+/* computeUnreviewedChangedLines                                              */
 /* -------------------------------------------------------------------------- */
 
-describe("computeUnreviewedChangedRuns", () => {
-    it("returns the exact changed runs of the unreviewed hunks, no context", () => {
+describe("computeUnreviewedChangedLines", () => {
+    it("returns the exact changed lines of the unreviewed hunks, no context", () => {
         expect(
-            computeUnreviewedChangedRuns(THREE_HUNK_DIFF, REVIEWED_FIRST_TWO),
-        ).toEqual([{path: "src/handler.ts", start: 23, end: 23}]);
+            computeUnreviewedChangedLines(THREE_HUNK_DIFF, REVIEWED_FIRST_TWO),
+        ).toEqual({"src/handler.ts": [23]});
         // Everything reviewed: nothing unreviewed.
         expect(
-            computeUnreviewedChangedRuns(THREE_HUNK_DIFF, FULL_SIGNATURE),
-        ).toEqual([]);
-        // Nothing reviewed: one run per added line (never the hunks'
+            computeUnreviewedChangedLines(THREE_HUNK_DIFF, FULL_SIGNATURE),
+        ).toEqual({});
+        // Nothing reviewed: the added lines only (never the hunks'
         // context-spanning extents 1-3, 11-13, 22-24).
-        expect(computeUnreviewedChangedRuns(THREE_HUNK_DIFF, {})).toEqual([
-            {path: "src/handler.ts", start: 2, end: 2},
-            {path: "src/handler.ts", start: 12, end: 12},
-            {path: "src/handler.ts", start: 23, end: 23},
-        ]);
-    });
-
-    it("a hunk mixing two separate edits yields one run per edit", () => {
-        // One hunk, a fix at new line 2 and fresh code at new line 9; the
-        // hunk header's extent (1-10) would have merged them.
-        const mixed = [
-            "diff --git a/a.ts b/a.ts",
-            "--- a/a.ts",
-            "+++ b/a.ts",
-            "@@ -1,8 +1,10 @@",
-            " a",
-            "+fix line",
-            " b",
-            " c",
-            " d",
-            " e",
-            " f",
-            " g",
-            "+fresh line",
-            " h",
-        ].join("\n");
-        expect(computeUnreviewedChangedRuns(mixed, {})).toEqual([
-            {path: "a.ts", start: 2, end: 2},
-            {path: "a.ts", start: 9, end: 9},
-        ]);
+        expect(computeUnreviewedChangedLines(THREE_HUNK_DIFF, {})).toEqual({
+            "src/handler.ts": [2, 12, 23],
+        });
     });
 
     it("gives a deletion-only hunk its bracketing RIGHT-side lines", () => {
@@ -117,12 +90,12 @@ describe("computeUnreviewedChangedRuns", () => {
             "@@ -5,1 +4,0 @@",
             "-gone",
         ].join("\n");
-        expect(computeUnreviewedChangedRuns(deletion, {})).toEqual([
-            {path: "a.ts", start: 3, end: 4},
-        ]);
+        expect(computeUnreviewedChangedLines(deletion, {})).toEqual({
+            "a.ts": [3, 4],
+        });
     });
 
-    it("merges a replacement's added and deletion-adjacent lines into one run", () => {
+    it("a replacement contributes its added and deletion-adjacent lines", () => {
         const single = [
             "diff --git a/a.ts b/a.ts",
             "--- a/a.ts",
@@ -131,9 +104,9 @@ describe("computeUnreviewedChangedRuns", () => {
             "-x",
             "+y",
         ].join("\n");
-        expect(computeUnreviewedChangedRuns(single, {})).toEqual([
-            {path: "a.ts", start: 6, end: 7},
-        ]);
+        expect(computeUnreviewedChangedLines(single, {})).toEqual({
+            "a.ts": [6, 7],
+        });
     });
 });
 
@@ -142,44 +115,76 @@ describe("computeUnreviewedChangedRuns", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("isRespondToReviewPush", () => {
-    const range = {path: "a.ts", start: 10, end: 12};
-
-    it("requires at least one anchor, then every run within slack of one", () => {
-        expect(isRespondToReviewPush([range], {})).toBe(false);
-        expect(isRespondToReviewPush([range], {"a.ts": [11]})).toBe(true);
-        // Zero unreviewed runs with open threads: nothing new to review.
-        expect(isRespondToReviewPush([], {"a.ts": [11]})).toBe(true);
+    it("requires at least one anchor, then every line within slack of one", () => {
+        expect(isRespondToReviewPush({"a.ts": [11]}, {})).toBe(false);
+        expect(isRespondToReviewPush({"a.ts": [11]}, {"a.ts": [11]})).toBe(
+            true,
+        );
+        // Zero unreviewed lines with open threads: nothing new to review.
+        expect(isRespondToReviewPush({}, {"a.ts": [11]})).toBe(true);
     });
 
     it("matches within the slack window and not beyond it", () => {
         expect(
-            isRespondToReviewPush([range], {
-                "a.ts": [10 - RESPOND_TO_REVIEW_SLACK],
-            }),
+            isRespondToReviewPush(
+                {"a.ts": [10]},
+                {
+                    "a.ts": [10 - RESPOND_TO_REVIEW_SLACK],
+                },
+            ),
         ).toBe(true);
         expect(
-            isRespondToReviewPush([range], {
-                "a.ts": [12 + RESPOND_TO_REVIEW_SLACK],
-            }),
+            isRespondToReviewPush(
+                {"a.ts": [10]},
+                {
+                    "a.ts": [10 + RESPOND_TO_REVIEW_SLACK],
+                },
+            ),
         ).toBe(true);
         expect(
-            isRespondToReviewPush([range], {
-                "a.ts": [10 - RESPOND_TO_REVIEW_SLACK - 1],
-            }),
+            isRespondToReviewPush(
+                {"a.ts": [10]},
+                {
+                    "a.ts": [10 - RESPOND_TO_REVIEW_SLACK - 1],
+                },
+            ),
         ).toBe(false);
         expect(
-            isRespondToReviewPush([range], {
-                "a.ts": [12 + RESPOND_TO_REVIEW_SLACK + 1],
-            }),
+            isRespondToReviewPush(
+                {"a.ts": [10]},
+                {
+                    "a.ts": [10 + RESPOND_TO_REVIEW_SLACK + 1],
+                },
+            ),
         ).toBe(false);
     });
 
-    it("never matches across files, and one unmatched run disqualifies the push", () => {
-        expect(isRespondToReviewPush([range], {"b.ts": [11]})).toBe(false);
+    it("never matches across files, and one uncovered line disqualifies", () => {
+        expect(isRespondToReviewPush({"a.ts": [11]}, {"b.ts": [11]})).toBe(
+            false,
+        );
+        expect(isRespondToReviewPush({"a.ts": [11, 90]}, {"a.ts": [11]})).toBe(
+            false,
+        );
+    });
+
+    it("an isolated anchor licenses at most 7 contiguous changed lines", () => {
+        // Every line of the rewrite must sit within slack of an anchor: one
+        // anchor at 23 covers 20-26 and nothing more, so "restructure this
+        // function" answered with a long contiguous replacement keeps the
+        // configured roster even though it touches the flagged line.
+        const lines = (from: number, to: number) =>
+            Array.from({length: to - from + 1}, (_, i) => from + i);
         expect(
-            isRespondToReviewPush([range, {path: "a.ts", start: 90, end: 95}], {
-                "a.ts": [11],
-            }),
+            isRespondToReviewPush({"a.ts": lines(20, 26)}, {"a.ts": [23]}),
+        ).toBe(true);
+        expect(
+            isRespondToReviewPush({"a.ts": lines(20, 27)}, {"a.ts": [23]}),
+        ).toBe(false);
+        // The 40-line replacement from the review's repro: anchor at its
+        // edge, run 23-62.
+        expect(
+            isRespondToReviewPush({"a.ts": lines(23, 62)}, {"a.ts": [23]}),
         ).toBe(false);
     });
 });
@@ -194,14 +199,14 @@ describe("decideReReviewDepth respond-to-review drop", () => {
         isDraft: false,
         priorStamp: stampOf(REVIEWED_FIRST_TWO),
         currentSignature: FULL_SIGNATURE,
-        unreviewedChangedRuns: computeUnreviewedChangedRuns(
+        unreviewedChangedLines: computeUnreviewedChangedLines(
             THREE_HUNK_DIFF,
             REVIEWED_FIRST_TWO,
         ),
         openThreadAnchors: anchors,
     } as const;
 
-    it("drops a scoped round to fast when every unreviewed run answers a thread", () => {
+    it("drops a scoped round to fast when every unreviewed line answers a thread", () => {
         const plan = decideReReviewDepth({...base, mode: "scoped"});
         expect(plan.depth).toBe("fast");
         expect(plan.dispatch).toBe("reconcile-only");
@@ -213,10 +218,14 @@ describe("decideReReviewDepth respond-to-review drop", () => {
         expect(plan.mode).toBe("scoped");
     });
 
-    it("drops flip-gated the same way, and never touches full or fast modes", () => {
-        expect(decideReReviewDepth({...base, mode: "flip-gated"}).depth).toBe(
-            "fast",
-        );
+    it("never drops flip-gated, full, or fast modes", () => {
+        // flip-gated keeps its correctness pass on exactly this push shape:
+        // an open thread tracks the old defect, not the code replacing it,
+        // and at fast depth a zero-kept-blocking round stages a dismissal
+        // of the standing block (submission-clearance.ts).
+        const flipGated = decideReReviewDepth({...base, mode: "flip-gated"});
+        expect(flipGated.depth).toBe("flip-gated");
+        expect(flipGated.reasons).toEqual(["mode-flip-gated"]);
         const full = decideReReviewDepth({...base, mode: "full"});
         expect(full.depth).toBe("full");
         expect(full.reasons).toEqual(["mode-full"]);
@@ -225,7 +234,7 @@ describe("decideReReviewDepth respond-to-review drop", () => {
         expect(fast.reasons).toEqual(["mode-fast"]);
     });
 
-    it("stays at the configured mode when a run matches no thread", () => {
+    it("stays at the configured mode when a line matches no thread", () => {
         const plan = decideReReviewDepth({
             ...base,
             mode: "scoped",
@@ -236,9 +245,9 @@ describe("decideReReviewDepth respond-to-review drop", () => {
     });
 
     it("stays at the configured mode when the inputs are not staged (older callers)", () => {
-        const {unreviewedChangedRuns, openThreadAnchors, ...withoutInputs} =
+        const {unreviewedChangedLines, openThreadAnchors, ...withoutInputs} =
             base;
-        expect(unreviewedChangedRuns).toBeDefined();
+        expect(unreviewedChangedLines).toBeDefined();
         expect(openThreadAnchors).toBeDefined();
         const plan = decideReReviewDepth({...withoutInputs, mode: "scoped"});
         expect(plan.depth).toBe("scoped");
@@ -269,7 +278,7 @@ describe("decideReReviewDepth respond-to-review drop", () => {
             isDraft: false,
             priorStamp: stampOf(reviewedFirstOnly),
             currentSignature: FULL_SIGNATURE,
-            unreviewedChangedRuns: computeUnreviewedChangedRuns(
+            unreviewedChangedLines: computeUnreviewedChangedLines(
                 THREE_HUNK_DIFF,
                 reviewedFirstOnly,
             ),

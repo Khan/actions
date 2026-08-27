@@ -578,15 +578,20 @@ everything, whatever the mode:
 | `flip-gated` | Thread reconciliation plus the correctness pass over the new hunks. A REQUEST_CHANGES→APPROVE flip is vetoed by any validated blocking finding from that pass; the pass gates the flip instead of being discarded. | Cheap re-reviews that still cannot flip to approval over a fresh validated defect. |
 | `fast` | Thread reconciliation only. | Maximum savings; fresh code on a re-push is guarded only by the tripwire below. |
 
-The mode is a ceiling, not the whole decision: under `scoped` and `flip-gated`,
-a single push drops to `fast` on its own when it is the respond-to-review
-shape, where every contiguous run of changed lines that is new since the last
-fully-reviewed fingerprint sits within 3 lines of an open review thread's
-anchor in the same file. Bot and human threads both count for the matching,
-but at least one line-anchored bot thread is required (the `fast` roster is
-reconcile-only, and the reconciler works the bot's threads). Such a round
-dispatches reconcile-only, and its depth note reads "ran at fast depth
-(re-review mode scoped)" so it is self-explaining on the PR.
+The mode is a ceiling, not the whole decision: under `scoped`, a single push
+drops to `fast` on its own when it is the respond-to-review shape, where
+every changed line that is new since the last fully-reviewed fingerprint
+sits within 3 lines of an open review thread's anchor in the same file (so
+one isolated thread licenses at most 7 contiguous changed lines around its
+anchor; a larger rewrite keeps the roster). Bot and human threads both count
+for the matching, but at least one line-anchored bot thread must be open on
+the PR (the `fast` roster is reconcile-only, and the reconciler works the
+bot's threads). Such a round dispatches reconcile-only, and its depth note
+reads "ran at fast depth (re-review mode scoped)" so it is self-explaining
+on the PR. `flip-gated` never drops: an open thread tracks the old defect on
+a line, not the new code replacing it, and the drop would strip the
+correctness pass on exactly the response push the flip gate exists to
+police.
 
 Four guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministic):
 
@@ -606,8 +611,8 @@ Four guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministic
   rewrite-after-approval and sparse-PR-then-payload
   (`eval/lifecycle/`, replayed in `eval/lifecycle.test.ts`). It also
   outranks the respond-to-review drop: a divergent push gets the whole
-  roster even when every changed run sits on a thread line.
-- **Mixed pushes never drop.** One changed run matching no open thread
+  roster even when every changed line sits on a thread line.
+- **Mixed pushes never drop.** One changed line matching no open thread
   keeps the configured mode, so a push carrying fresh code alongside thread
   fixes (in a separate hunk or the same one) still runs the configured
   roster; human-only threads and a staging without the thread files also
