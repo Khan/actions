@@ -2,7 +2,7 @@ import {describe, it, expect} from "vitest";
 
 import {
     computeHunkSignature,
-    computeUnreviewedHunkRanges,
+    computeUnreviewedChangedRuns,
     decideReReviewDepth,
     isRespondToReviewPush,
     renderRereviewStamp,
@@ -18,7 +18,7 @@ import type {
 
 /**
  * The respond-to-review drop: a scoped/flip-gated re-review whose every
- * unreviewed hunk answers an open thread runs at fast depth instead
+ * unreviewed changed run answers an open thread runs at fast depth instead
  * (reconcile-only dispatch), the per-push counterpart of the mode dial.
  * Split from rereview-mode.test.ts for the shared eslint config's
  * 1000-line file cap.
@@ -63,27 +63,53 @@ const stampOf = (anchorHunks: HunkSignature): ReReviewStamp => ({
 });
 
 /* -------------------------------------------------------------------------- */
-/* computeUnreviewedHunkRanges                                                */
+/* computeUnreviewedChangedRuns                                               */
 /* -------------------------------------------------------------------------- */
 
-describe("computeUnreviewedHunkRanges", () => {
-    it("returns the RIGHT-side extents of exactly the unreviewed hunks", () => {
+describe("computeUnreviewedChangedRuns", () => {
+    it("returns the exact changed runs of the unreviewed hunks, no context", () => {
         expect(
-            computeUnreviewedHunkRanges(THREE_HUNK_DIFF, REVIEWED_FIRST_TWO),
-        ).toEqual([{path: "src/handler.ts", start: 22, end: 24}]);
+            computeUnreviewedChangedRuns(THREE_HUNK_DIFF, REVIEWED_FIRST_TWO),
+        ).toEqual([{path: "src/handler.ts", start: 23, end: 23}]);
         // Everything reviewed: nothing unreviewed.
         expect(
-            computeUnreviewedHunkRanges(THREE_HUNK_DIFF, FULL_SIGNATURE),
+            computeUnreviewedChangedRuns(THREE_HUNK_DIFF, FULL_SIGNATURE),
         ).toEqual([]);
-        // Nothing reviewed: all three extents.
-        expect(computeUnreviewedHunkRanges(THREE_HUNK_DIFF, {})).toEqual([
-            {path: "src/handler.ts", start: 1, end: 3},
-            {path: "src/handler.ts", start: 11, end: 13},
-            {path: "src/handler.ts", start: 22, end: 24},
+        // Nothing reviewed: one run per added line (never the hunks'
+        // context-spanning extents 1-3, 11-13, 22-24).
+        expect(computeUnreviewedChangedRuns(THREE_HUNK_DIFF, {})).toEqual([
+            {path: "src/handler.ts", start: 2, end: 2},
+            {path: "src/handler.ts", start: 12, end: 12},
+            {path: "src/handler.ts", start: 23, end: 23},
         ]);
     });
 
-    it("gives a deletion-only hunk (new count 0) a one-line extent", () => {
+    it("a hunk mixing two separate edits yields one run per edit", () => {
+        // One hunk, a fix at new line 2 and fresh code at new line 9; the
+        // hunk header's extent (1-10) would have merged them.
+        const mixed = [
+            "diff --git a/a.ts b/a.ts",
+            "--- a/a.ts",
+            "+++ b/a.ts",
+            "@@ -1,8 +1,10 @@",
+            " a",
+            "+fix line",
+            " b",
+            " c",
+            " d",
+            " e",
+            " f",
+            " g",
+            "+fresh line",
+            " h",
+        ].join("\n");
+        expect(computeUnreviewedChangedRuns(mixed, {})).toEqual([
+            {path: "a.ts", start: 2, end: 2},
+            {path: "a.ts", start: 9, end: 9},
+        ]);
+    });
+
+    it("gives a deletion-only hunk its bracketing RIGHT-side lines", () => {
         const deletion = [
             "diff --git a/a.ts b/a.ts",
             "--- a/a.ts",
@@ -91,12 +117,12 @@ describe("computeUnreviewedHunkRanges", () => {
             "@@ -5,1 +4,0 @@",
             "-gone",
         ].join("\n");
-        expect(computeUnreviewedHunkRanges(deletion, {})).toEqual([
-            {path: "a.ts", start: 4, end: 4},
+        expect(computeUnreviewedChangedRuns(deletion, {})).toEqual([
+            {path: "a.ts", start: 3, end: 4},
         ]);
     });
 
-    it("defaults an omitted new count to 1", () => {
+    it("merges a replacement's added and deletion-adjacent lines into one run", () => {
         const single = [
             "diff --git a/a.ts b/a.ts",
             "--- a/a.ts",
@@ -105,8 +131,8 @@ describe("computeUnreviewedHunkRanges", () => {
             "-x",
             "+y",
         ].join("\n");
-        expect(computeUnreviewedHunkRanges(single, {})).toEqual([
-            {path: "a.ts", start: 7, end: 7},
+        expect(computeUnreviewedChangedRuns(single, {})).toEqual([
+            {path: "a.ts", start: 6, end: 7},
         ]);
     });
 });
@@ -118,10 +144,10 @@ describe("computeUnreviewedHunkRanges", () => {
 describe("isRespondToReviewPush", () => {
     const range = {path: "a.ts", start: 10, end: 12};
 
-    it("requires at least one anchor, then every hunk within slack of one", () => {
+    it("requires at least one anchor, then every run within slack of one", () => {
         expect(isRespondToReviewPush([range], {})).toBe(false);
         expect(isRespondToReviewPush([range], {"a.ts": [11]})).toBe(true);
-        // Zero unreviewed hunks with open threads: nothing new to review.
+        // Zero unreviewed runs with open threads: nothing new to review.
         expect(isRespondToReviewPush([], {"a.ts": [11]})).toBe(true);
     });
 
@@ -148,7 +174,7 @@ describe("isRespondToReviewPush", () => {
         ).toBe(false);
     });
 
-    it("never matches across files, and one unmatched hunk disqualifies the push", () => {
+    it("never matches across files, and one unmatched run disqualifies the push", () => {
         expect(isRespondToReviewPush([range], {"b.ts": [11]})).toBe(false);
         expect(
             isRespondToReviewPush([range, {path: "a.ts", start: 90, end: 95}], {
@@ -168,14 +194,14 @@ describe("decideReReviewDepth respond-to-review drop", () => {
         isDraft: false,
         priorStamp: stampOf(REVIEWED_FIRST_TWO),
         currentSignature: FULL_SIGNATURE,
-        unreviewedHunkRanges: computeUnreviewedHunkRanges(
+        unreviewedChangedRuns: computeUnreviewedChangedRuns(
             THREE_HUNK_DIFF,
             REVIEWED_FIRST_TWO,
         ),
         openThreadAnchors: anchors,
     } as const;
 
-    it("drops a scoped round to fast when every unreviewed hunk answers a thread", () => {
+    it("drops a scoped round to fast when every unreviewed run answers a thread", () => {
         const plan = decideReReviewDepth({...base, mode: "scoped"});
         expect(plan.depth).toBe("fast");
         expect(plan.dispatch).toBe("reconcile-only");
@@ -199,7 +225,7 @@ describe("decideReReviewDepth respond-to-review drop", () => {
         expect(fast.reasons).toEqual(["mode-fast"]);
     });
 
-    it("stays at the configured mode when a hunk matches no thread", () => {
+    it("stays at the configured mode when a run matches no thread", () => {
         const plan = decideReReviewDepth({
             ...base,
             mode: "scoped",
@@ -210,12 +236,25 @@ describe("decideReReviewDepth respond-to-review drop", () => {
     });
 
     it("stays at the configured mode when the inputs are not staged (older callers)", () => {
-        const {unreviewedHunkRanges, openThreadAnchors, ...withoutInputs} =
+        const {unreviewedChangedRuns, openThreadAnchors, ...withoutInputs} =
             base;
-        expect(unreviewedHunkRanges).toBeDefined();
+        expect(unreviewedChangedRuns).toBeDefined();
         expect(openThreadAnchors).toBeDefined();
         const plan = decideReReviewDepth({...withoutInputs, mode: "scoped"});
         expect(plan.depth).toBe("scoped");
+    });
+
+    it("carries the anchor's draft flag forward on a drop, not the current one", () => {
+        // The fixture's anchor has anchorDraft: false; making the current
+        // push a draft distinguishes the carry-forward from taking the
+        // run's own flag (a full plan stamps input.isDraft).
+        const plan = decideReReviewDepth({
+            ...base,
+            mode: "scoped",
+            isDraft: true,
+        });
+        expect(plan.depth).toBe("fast");
+        expect(plan.stampAnchorDraft).toBe(false);
     });
 
     it("the divergence tripwire outranks the drop", () => {
@@ -230,7 +269,7 @@ describe("decideReReviewDepth respond-to-review drop", () => {
             isDraft: false,
             priorStamp: stampOf(reviewedFirstOnly),
             currentSignature: FULL_SIGNATURE,
-            unreviewedHunkRanges: computeUnreviewedHunkRanges(
+            unreviewedChangedRuns: computeUnreviewedChangedRuns(
                 THREE_HUNK_DIFF,
                 reviewedFirstOnly,
             ),
@@ -304,7 +343,32 @@ describe("runRereviewPlanCli respond-to-review wiring", () => {
         ).toEqual(["respond-to-review", "mode-scoped"]);
     });
 
-    it("a human thread anchor qualifies too", () => {
+    it("a human anchor counts for matching when a bot thread also exists", () => {
+        // The bot thread anchors nothing near the new run; only the human
+        // anchor (line 24) matches it. The drop still fires: the bot thread
+        // gives the fast roster's reconciler its work.
+        const fs = fakeFs(
+            stagedRespond({
+                [`${REVIEW_DIR}/threads.json`]: JSON.stringify([
+                    {
+                        thread_id: "t1",
+                        path: "src/handler.ts",
+                        line: 80,
+                        comments: [],
+                    },
+                ]),
+                [`${REVIEW_DIR}/human-threads.json`]: JSON.stringify([
+                    {path: "src/handler.ts", line: 24},
+                ]),
+            }),
+        );
+        expect(runRereviewPlanCli(fs).plan.depth).toBe("fast");
+    });
+
+    it("human-only threads never drop: fast would dispatch an empty roster", () => {
+        // dispatch.ts derives hasThreads from threads.json (bot threads)
+        // alone, so a drop carried only by human anchors would dispatch no
+        // finders and give the reconciler nothing to reconcile.
         const fs = fakeFs(
             stagedRespond({
                 [`${REVIEW_DIR}/threads.json`]: JSON.stringify([]),
@@ -313,7 +377,64 @@ describe("runRereviewPlanCli respond-to-review wiring", () => {
                 ]),
             }),
         );
-        expect(runRereviewPlanCli(fs).plan.depth).toBe("fast");
+        const {plan} = runRereviewPlanCli(fs);
+        expect(plan.depth).toBe("scoped");
+        expect(plan.reasons).toEqual(["mode-scoped"]);
+    });
+
+    it("fresh code in the same hunk as a thread fix keeps the mode", () => {
+        // Three hunks, two reviewed (divergence 1/3, under the tripwire).
+        // The unreviewed hunk's header extent (22-31) spans both edits: the
+        // fix (new line 23) sits on the thread, the fresh code (new line
+        // 30) is beyond slack. Extent-based matching would have dropped
+        // this push to fast on the fix alone.
+        const mixed = [
+            "diff --git a/src/handler.ts b/src/handler.ts",
+            "--- a/src/handler.ts",
+            "+++ b/src/handler.ts",
+            "@@ -1,2 +1,3 @@",
+            " a",
+            "+first hunk line",
+            " b",
+            "@@ -10,2 +11,3 @@",
+            " c",
+            "+second hunk line",
+            " d",
+            "@@ -20,8 +22,10 @@",
+            " e",
+            "+fix line",
+            " f",
+            " g",
+            " h",
+            " i",
+            " j",
+            " k",
+            "+fresh line",
+            " l",
+        ].join("\n");
+        const mixedSignature = computeHunkSignature(mixed);
+        const reviewedFirstTwo: HunkSignature = {
+            "src/handler.ts": mixedSignature["src/handler.ts"].slice(0, 2),
+        };
+        const fs = fakeFs(
+            stagedRespond({
+                [`${REVIEW_DIR}/full.diff`]: mixed,
+                [`${REVIEW_DIR}/prior-reviews.json`]: JSON.stringify([
+                    {body: renderRereviewStamp(stampOf(reviewedFirstTwo))},
+                ]),
+                [`${REVIEW_DIR}/threads.json`]: JSON.stringify([
+                    {
+                        thread_id: "t1",
+                        path: "src/handler.ts",
+                        line: 23,
+                        comments: [],
+                    },
+                ]),
+            }),
+        );
+        const {plan} = runRereviewPlanCli(fs);
+        expect(plan.depth).toBe("scoped");
+        expect(plan.reasons).toEqual(["mode-scoped"]);
     });
 
     it("a line-less (outdated/file-level) thread anchors nothing", () => {
