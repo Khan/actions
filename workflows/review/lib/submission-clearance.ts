@@ -60,7 +60,10 @@ export const DISMISSAL_MESSAGE =
  *     APPROVED/CHANGES_REQUESTED review, so an entry a later (stamped)
  *     APPROVED superseded is NOT standing; every CHANGES_REQUESTED after
  *     the last APPROVED is (dismissing only the newest would let an older
- *     one resurface as the effective state).
+ *     one resurface as the effective state). A DISMISSED entry neither
+ *     stands nor resets: an approval dismiss-stale-approvals dismissed no
+ *     longer supersedes, so the older CHANGES_REQUESTED reads as standing
+ *     again, which errs toward posting and clearing over skipping.
  *
  * Entries without `id`/`state`/`body` (pre-upgrade staging) do not count.
  * Shared by the plan CLI, the dispatch gate's rule 5c, and the dismissal
@@ -260,11 +263,15 @@ export const stageDismissalDecision = (
  * gate then red-flagged, withholding the approval AND the observations on
  * every later run).
  *
- * Two shapes may queue nothing:
+ * Two shapes may queue nothing (neither while a standing block remains:
+ * both judge "does the prior state still stand" on the same stamp-plus-
+ * live-state evidence, and an APPROVE that would supersede a standing
+ * CHANGES_REQUESTED is never redundant):
  *
  *   - The redundant-approval skip: an APPROVE with no inline comments
  *     whose body is exactly the bare approve line, on a PR whose last
- *     stamped verdict was already APPROVE.
+ *     stamped verdict was already APPROVE and whose block is not
+ *     standing.
  *   - The demoted-COMMENT skip, its reduced-depth sibling: a
  *     flip-gated/fast round whose verdict would have been APPROVE, with no
  *     inline comments, no thread resolutions, no standing block to clear,
@@ -305,7 +312,8 @@ export const decideSkipSubmission = (input: {
     (input.event === "APPROVE" &&
         input.inlineCount === 0 &&
         input.bareApproveBody &&
-        input.priorApproveStands) ||
+        input.priorApproveStands &&
+        !input.priorRcStands) ||
     (input.approveDemoted &&
         input.inlineCount === 0 &&
         input.resolveCount === 0 &&

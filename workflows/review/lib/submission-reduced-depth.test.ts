@@ -3,6 +3,7 @@ import {describe, it, expect} from "vitest";
 import {renderRereviewStamp} from "./rereview-mode";
 import {
     decideEventAndClearance,
+    decideSkipSubmission,
     DISMISSAL_MESSAGE,
 } from "./submission-clearance";
 import {runSubmissionCli, type SubmissionFs} from "./submission";
@@ -541,6 +542,28 @@ describe("decideEventAndClearance (the pure decision)", () => {
             reviewIds: [3007],
             message: DISMISSAL_MESSAGE,
         });
+    });
+
+    it("the redundant-approval skip never fires over a standing block", () => {
+        // The dismissed-approval shape: the stamp says APPROVE, but that
+        // approval's review is DISMISSED (dismiss-stale-approvals), so the
+        // older CHANGES_REQUESTED stands again. Posting the APPROVE
+        // supersedes it; skipping would leave the author blocked.
+        const base = {
+            event: "APPROVE",
+            approveDemoted: false,
+            inlineCount: 0,
+            resolveCount: 0,
+            bareApproveBody: true,
+            priorApproveStands: true,
+            bodyCarriesOnlyDepthNote: true,
+        };
+        expect(decideSkipSubmission({...base, priorRcStands: true})).toBe(
+            false,
+        );
+        expect(decideSkipSubmission({...base, priorRcStands: false})).toBe(
+            true,
+        );
     });
 
     it("an unrecognized depth demotes but never stages a dismissal", () => {

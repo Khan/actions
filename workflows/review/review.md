@@ -350,6 +350,10 @@ post-steps:
   - name: Clear the standing blocking review (reduced-depth dismissal)
     env:
       GH_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
+      # Expression-expanded when the job starts (same convention as the
+      # staging step), so the agent cannot rewrite it the way it could the
+      # on-disk event payload the CLI otherwise falls back to.
+      REVIEW_PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
     run: |
       if ! (cd gh-aw-review-lib && npx -y tsx workflows/review/lib/dismiss-review.ts); then
         echo "::warning title=review dismissal::step could not run (infra failure; block stands)"

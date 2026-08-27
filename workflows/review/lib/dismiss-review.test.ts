@@ -2,6 +2,7 @@ import {describe, it, expect} from "vitest";
 
 import {renderRereviewStamp} from "./rereview-mode";
 import {
+    prCoordinatesFromEnv,
     runDismissReviewCli,
     type DismissGet,
     type DismissPut,
@@ -50,12 +51,19 @@ const liveReviews = (): unknown[] => [
         id: 3001,
         state: "CHANGES_REQUESTED",
         body: stampedBody("REQUEST_CHANGES", "r1"),
+        user: {login: "github-actions[bot]"},
     },
-    {id: 3002, state: "COMMENTED", body: "a foreign workflow's comment"},
+    {
+        id: 3002,
+        state: "COMMENTED",
+        body: "a foreign workflow's comment",
+        user: {login: "github-actions[bot]"},
+    },
     {
         id: 3003,
         state: "CHANGES_REQUESTED",
         body: stampedBody("REQUEST_CHANGES", "r3"),
+        user: {login: "github-actions[bot]"},
     },
 ];
 
@@ -94,6 +102,63 @@ const recordingPut = (
         },
     };
 };
+
+describe("prCoordinatesFromEnv", () => {
+    const eventFs = (payload: unknown): DismissReviewFs =>
+        makeFakeFs({"/tmp/event.json": JSON.stringify(payload)});
+
+    it("prefers the expression-expanded REVIEW_PR_NUMBER env", () => {
+        expect(
+            prCoordinatesFromEnv(
+                eventFs({pull_request: {number: 99}}),
+                "Khan/webapp",
+                "41007",
+                "/tmp/event.json",
+            ),
+        ).toEqual({repo: "Khan/webapp", prNumber: 41007});
+    });
+
+    it("falls back to the event payload (pull_request, then issue)", () => {
+        expect(
+            prCoordinatesFromEnv(
+                eventFs({pull_request: {number: 41007}}),
+                "Khan/webapp",
+                undefined,
+                "/tmp/event.json",
+            ),
+        ).toEqual({repo: "Khan/webapp", prNumber: 41007});
+        expect(
+            prCoordinatesFromEnv(
+                eventFs({issue: {number: 41007}}),
+                "Khan/webapp",
+                "",
+                "/tmp/event.json",
+            ),
+        ).toEqual({repo: "Khan/webapp", prNumber: 41007});
+    });
+
+    it("returns null without a repository or a usable number", () => {
+        expect(
+            prCoordinatesFromEnv(
+                eventFs({pull_request: {number: 41007}}),
+                undefined,
+                "41007",
+                "/tmp/event.json",
+            ),
+        ).toBe(null);
+        expect(
+            prCoordinatesFromEnv(
+                eventFs({}),
+                "Khan/webapp",
+                "not-a-number",
+                "/tmp/event.json",
+            ),
+        ).toBe(null);
+        expect(
+            prCoordinatesFromEnv(makeFakeFs({}), "Khan/webapp", undefined, ""),
+        ).toBe(null);
+    });
+});
 
 describe("runDismissReviewCli", () => {
     it("dismisses each staged review id with the shared message", async () => {
@@ -190,8 +255,37 @@ describe("runDismissReviewCli", () => {
                     id: 3001,
                     state: "CHANGES_REQUESTED",
                     body: stampedBody("REQUEST_CHANGES", "r1"),
+                    user: {login: "github-actions[bot]"},
                 },
-                {id: 3005, state: "APPROVED", body: stampedBody("APPROVE")},
+                {
+                    id: 3005,
+                    state: "APPROVED",
+                    body: stampedBody("APPROVE"),
+                    user: {login: "github-actions[bot]"},
+                },
+            ]).get,
+            COORDS,
+        );
+        expect(result.dismissed).toEqual([]);
+        expect(calls).toEqual([]);
+        expect(result.warnings.join(" ")).toContain("refused");
+    });
+
+    it("refuses a human review carrying a copied stamp (author and stamp intersect)", async () => {
+        // The stamp posts verbatim in every bot review body, so it is
+        // public and copyable; a review that is not the bot's must never
+        // become dismissable, stamp or no stamp.
+        const {put, calls} = recordingPut();
+        const result = await runDismissReviewCli(
+            makeFakeFs(stagedDecision([4001])),
+            put,
+            recordingGet([
+                {
+                    id: 4001,
+                    state: "CHANGES_REQUESTED",
+                    body: stampedBody("REQUEST_CHANGES", "copied"),
+                    user: {login: "some-human"},
+                },
             ]).get,
             COORDS,
         );
@@ -269,6 +363,37 @@ describe("runDismissReviewCli", () => {
         expect(result.dismissed).toEqual([3003]);
         expect(result.warnings).toEqual([
             "dismissal of review 3001 failed (HTTP 422): block stands",
+        ]);
+    });
+
+    it("a human APPROVED with a copied stamp does not supersede the bot's standing block", async () => {
+        // The bot-author filter applies before the latest-decisive-wins
+        // reduction, so a foreign APPROVED cannot reset the bot's standing
+        // CHANGES_REQUESTED out of the allowlist (or, worse, out of
+        // priorRcStands).
+        const {put, calls} = recordingPut();
+        const result = await runDismissReviewCli(
+            makeFakeFs(stagedDecision([3001])),
+            put,
+            recordingGet([
+                {
+                    id: 3001,
+                    state: "CHANGES_REQUESTED",
+                    body: stampedBody("REQUEST_CHANGES", "r1"),
+                    user: {login: "github-actions[bot]"},
+                },
+                {
+                    id: 4001,
+                    state: "APPROVED",
+                    body: stampedBody("APPROVE", "copied"),
+                    user: {login: "some-human"},
+                },
+            ]).get,
+            COORDS,
+        );
+        expect(result.dismissed).toEqual([3001]);
+        expect(calls.map((call) => call.path)).toEqual([
+            "/repos/Khan/webapp/pulls/41007/reviews/3001/dismissals",
         ]);
     });
 

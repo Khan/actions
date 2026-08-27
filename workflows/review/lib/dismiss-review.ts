@@ -15,11 +15,13 @@
  * authenticated write that removes a merge gate, so nothing staged may feed
  * it. The dismissable set is re-derived from a live
  * `GET /repos/{repo}/pulls/{n}/reviews` (the token this CLI already holds),
- * scoped to reviews carrying this workflow's own re-review stamp (the
+ * scoped to the intersection of the bot author ({@link isReviewBotAuthor};
+ * the stamp is public, posted verbatim in every review body, so a human
+ * reviewer could copy it) and this workflow's own re-review stamp (the
  * shared {@link standingChangesRequestedIds} predicate; the login alone is
  * every Actions workflow in the repo), and the repo/PR coordinates come
- * from the runner's own env (`GITHUB_REPOSITORY`, the event payload at
- * `GITHUB_EVENT_PATH`), not from staged JSON. The dispatch gate's rule 5c
+ * from the runner's own env (`GITHUB_REPOSITORY`, `REVIEW_PR_NUMBER`, the
+ * event payload as the fallback), not from staged JSON. The dispatch gate's rule 5c
  * mirrors the same predicate over the staged copy before this step runs;
  * that mirror is best-effort (same-directory input, documented fail-open),
  * this one is authoritative. A failed fetch dismisses nothing.
@@ -47,6 +49,7 @@ import {
     DISMISSAL_MESSAGE,
     standingChangesRequestedIds,
 } from "./submission-clearance";
+import {isReviewBotAuthor} from "./threads";
 
 export type DismissReviewFs = {
     readFileSync: (p: string, enc: "utf8") => string;
@@ -85,14 +88,25 @@ const readJsonIfPresent = (fs: DismissReviewFs, path: string): unknown => {
     }
 };
 
-/** The PR coordinates, from the runner's env (never from staged JSON). */
+/**
+ * The PR coordinates, from the runner's env (never from staged JSON).
+ * `REVIEW_PR_NUMBER` first: it is expression-expanded by Actions when the
+ * job starts (the same convention the staging step uses), so the agent
+ * cannot rewrite it the way it could a file; the event payload is the
+ * fallback for a step that predates the env line.
+ */
 export const prCoordinatesFromEnv = (
     fs: DismissReviewFs,
     repository: string | undefined = process.env["GITHUB_REPOSITORY"],
+    prNumberEnv: string | undefined = process.env["REVIEW_PR_NUMBER"],
     eventPath: string | undefined = process.env["GITHUB_EVENT_PATH"],
 ): {repo: string; prNumber: number} | null => {
     if (repository === undefined || repository === "") {
         return null;
+    }
+    const fromEnv = Number(prNumberEnv ?? "");
+    if (Number.isInteger(fromEnv) && fromEnv > 0) {
+        return {repo: repository, prNumber: fromEnv};
     }
     const event =
         eventPath === undefined || eventPath === ""
@@ -107,11 +121,15 @@ export const prCoordinatesFromEnv = (
 };
 
 /**
- * The live dismissable set: every review page fetched, then the shared
- * standing predicate (stamp-scoped, latest-decisive-wins) over the
- * chronological list. Throws on a failed page; the caller treats any throw
- * as "dismiss nothing".
+ * The live dismissable set: every review page fetched, filtered to the
+ * bot author (the stamp is public and copyable; the intersection of
+ * author and stamp is the identity, matching stage-pr.ts's staging
+ * filter), then the shared standing predicate (stamp-scoped,
+ * latest-decisive-wins) over the chronological list. Throws on a failed
+ * page or a list past the page cap; the caller treats any throw as
+ * "dismiss nothing".
  */
+const MAX_REVIEW_PAGES = 30;
 const fetchDismissableIds = async (
     get: DismissGet,
     repo: string,
@@ -119,6 +137,11 @@ const fetchDismissableIds = async (
 ): Promise<Set<number>> => {
     const reviews: unknown[] = [];
     for (let page = 1; ; page += 1) {
+        if (page > MAX_REVIEW_PAGES) {
+            throw new Error(
+                `review list exceeds ${MAX_REVIEW_PAGES} pages: refusing to derive an allowlist`,
+            );
+        }
         const response = await get(
             `/repos/${repo}/pulls/${prNumber}/reviews?per_page=100&page=${page}`,
         );
@@ -133,7 +156,11 @@ const fetchDismissableIds = async (
             break;
         }
     }
-    return new Set(standingChangesRequestedIds(reviews));
+    const botReviews = reviews.filter((entry) => {
+        const login = (entry as {user?: {login?: unknown}} | null)?.user?.login;
+        return typeof login === "string" && isReviewBotAuthor(login);
+    });
+    return new Set(standingChangesRequestedIds(botReviews));
 };
 
 /**
