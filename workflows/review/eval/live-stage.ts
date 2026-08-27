@@ -45,6 +45,7 @@ import {annotateDiffLineNumbers, splitUnifiedDiff} from "../lib/diff";
 import {computeDiffProvenance} from "../lib/provenance";
 import {
     buildScopedDiff,
+    collectRespondToReviewInputs,
     computeHunkSignature,
     decideReReviewDepth,
     renderRereviewStamp,
@@ -193,11 +194,20 @@ const stageRereview = (
         ),
     );
 
+    // The respond-to-review inputs come from the same constructor
+    // production's plan CLI uses, pointed at this case's staging dir (the
+    // threads were written above), so the bench prices the drop too.
     const plan = decideReReviewDepth({
         mode,
         isDraft: false,
         priorStamp,
         currentSignature: computeHunkSignature(currentDiff),
+        ...(collectRespondToReviewInputs(
+            fs,
+            currentDiff,
+            anchorHunks,
+            contextDir,
+        ) ?? {}),
     });
     fs.writeFileSync(
         `${contextDir}/rereview-plan.json`,
