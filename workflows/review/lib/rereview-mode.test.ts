@@ -587,24 +587,75 @@ const stagedInputs = (
     ...over,
 });
 
+/**
+ * The CLI under a pinned trigger event, so no test depends on the test
+ * runner's own GITHUB_EVENT_NAME/GITHUB_EVENT_PATH (node CI runs on
+ * `pull_request` today, which would mask every assertion here if the
+ * defaults leaked through).
+ */
+const planCli = (fs: FakeFs, eventName = "pull_request", eventPath?: string) =>
+    runRereviewPlanCli(fs, eventName, eventPath);
+
+const EVENT_PATH = "/tmp/fake-event.json";
+
+/** An issue_comment event payload with the given comment author. */
+const commentEvent = (login: string, type: string): string =>
+    JSON.stringify({comment: {user: {login, type}}});
+
 describe("runRereviewPlanCli", () => {
     it("stages a fast plan when the fingerprint matches", () => {
         const fs = fakeFs(stagedInputs());
-        const {plan, warnings} = runRereviewPlanCli(fs, "pull_request");
+        const {plan, warnings} = planCli(fs);
         expect(plan.depth).toBe("fast");
         expect(warnings).toEqual([]);
         expect(fs.files.has(`${REVIEW_DIR}/rereview-plan.json`)).toBe(true);
         expect(fs.files.has(`${REVIEW_DIR}/scoped.diff`)).toBe(false);
     });
 
-    it("plans full on a comment-triggered run (the /review ask)", () => {
+    it("plans full on a human /review comment", () => {
         // Same staged inputs the fast plan above rides; only the trigger
-        // event differs, so the mode dial never answers a manual ask with
-        // a reconcile-only round.
-        const fs = fakeFs(stagedInputs());
-        const {plan} = runRereviewPlanCli(fs, "issue_comment");
+        // differs, so the mode dial never answers a manual ask with a
+        // reconcile-only round.
+        const fs = fakeFs({
+            ...stagedInputs(),
+            [EVENT_PATH]: commentEvent("a-human", "User"),
+        });
+        const {plan} = planCli(fs, "issue_comment", EVENT_PATH);
         expect(plan.depth).toBe("full");
         expect(plan.reasons).toEqual(["manual-review-request"]);
+    });
+
+    it("plans full on a comment trigger whose event payload is unreadable", () => {
+        // No event file staged: the author is unknown, and the failure
+        // direction is more review, never a silently cheaper round.
+        const fs = fakeFs(stagedInputs());
+        const {plan} = planCli(fs, "issue_comment", EVENT_PATH);
+        expect(plan.depth).toBe("full");
+        expect(plan.reasons).toEqual(["manual-review-request"]);
+    });
+
+    it("an automation /review follows the mode dial (the webapp shim)", () => {
+        // khan-actions-bot is a classic-PAT machine account (type User),
+        // and review-kore-prs.yml posts /review with it on every push: on
+        // that consumer EVERY re-review arrives as issue_comment, so
+        // treating it as manual would make `re-review fast` dead config.
+        const fs = fakeFs({
+            ...stagedInputs(),
+            [EVENT_PATH]: commentEvent("khan-actions-bot", "User"),
+        });
+        const {plan} = planCli(fs, "issue_comment", EVENT_PATH);
+        expect(plan.depth).toBe("fast");
+        expect(plan.reasons).toEqual(["mode-fast"]);
+    });
+
+    it("a Bot-type comment author follows the mode dial too", () => {
+        const fs = fakeFs({
+            ...stagedInputs(),
+            [EVENT_PATH]: commentEvent("github-actions[bot]", "Bot"),
+        });
+        const {plan} = planCli(fs, "issue_comment", EVENT_PATH);
+        expect(plan.depth).toBe("fast");
+        expect(plan.reasons).toEqual(["mode-fast"]);
     });
 
     it("writes scoped.diff for a new-hunks plan", () => {
@@ -635,7 +686,7 @@ describe("runRereviewPlanCli", () => {
                 ]),
             }),
         );
-        const {plan} = runRereviewPlanCli(fs);
+        const {plan} = planCli(fs);
         expect(plan.depth).toBe("scoped");
         expect(plan.divergence?.unreviewedShare).toBeCloseTo(1 / 3);
         const scoped = fs.files.get(`${REVIEW_DIR}/scoped.diff`);
@@ -663,14 +714,14 @@ describe("runRereviewPlanCli", () => {
                 [`${REVIEW_DIR}/full-stripped.diff`]: TWO_HUNK_DIFF,
             }),
         );
-        const {plan} = runRereviewPlanCli(fs);
+        const {plan} = planCli(fs);
         expect(plan.divergence?.unreviewedShare).toBe(0);
         expect(plan.depth).toBe("fast");
     });
 
     it("degrades every missing input to a full plan with a warning, never a crash", () => {
         const fs = fakeFs({});
-        const {plan, warnings} = runRereviewPlanCli(fs);
+        const {plan, warnings} = planCli(fs);
         expect(plan.depth).toBe("full");
         expect(warnings.length).toBeGreaterThan(0);
     });
@@ -679,7 +730,7 @@ describe("runRereviewPlanCli", () => {
         const fs = fakeFs(
             stagedInputs({[`${REVIEW_DIR}/routing.json`]: "{not json"}),
         );
-        const {plan} = runRereviewPlanCli(fs);
+        const {plan} = planCli(fs);
         expect(plan.mode).toBe("full");
     });
 });
@@ -768,7 +819,7 @@ describe("runRereviewPlanCli cache-memory fallback", () => {
                 [CACHE_PATH]: cacheRecord(),
             }),
         );
-        const {plan, stampSource} = runRereviewPlanCli(fs);
+        const {plan, stampSource} = planCli(fs);
         expect(plan.depth).toBe("fast");
         expect(plan.reasons).toEqual(["mode-fast"]);
         expect(stampSource).toBe("cache-memory");
@@ -785,7 +836,7 @@ describe("runRereviewPlanCli cache-memory fallback", () => {
                 [CACHE_PATH]: cacheRecord({verdict: "REQUEST_CHANGES"}),
             }),
         );
-        const {stampSource} = runRereviewPlanCli(fs);
+        const {stampSource} = planCli(fs);
         expect(stampSource).toBe("review-body");
     });
 
@@ -798,7 +849,7 @@ describe("runRereviewPlanCli cache-memory fallback", () => {
                 ]),
             }),
         );
-        const {plan, stampSource} = runRereviewPlanCli(fs);
+        const {plan, stampSource} = planCli(fs);
         expect(plan.depth).toBe("full");
         expect(plan.reasons).toEqual(["no-prior-fingerprint"]);
         expect(stampSource).toBeNull();
@@ -812,7 +863,7 @@ describe("runRereviewPlanCli cache-memory fallback", () => {
                 [CACHE_PATH]: cacheRecord({wasDraft: true}),
             }),
         );
-        const {plan} = runRereviewPlanCli(fs);
+        const {plan} = planCli(fs);
         expect(plan.depth).toBe("full");
         expect(plan.reasons).toEqual(["ready-for-review-anchor"]);
     });
@@ -824,7 +875,7 @@ describe("runRereviewPlanCli cache-memory fallback", () => {
                 [CACHE_PATH]: cacheRecord(),
             }),
         );
-        const {plan, stampSource} = runRereviewPlanCli(fs);
+        const {plan, stampSource} = planCli(fs);
         expect(plan.depth).toBe("full");
         expect(stampSource).toBeNull();
     });
@@ -837,7 +888,7 @@ describe("runRereviewPlanCli cache-memory fallback", () => {
                 [CACHE_PATH]: "{not json",
             }),
         );
-        const {plan, stampSource} = runRereviewPlanCli(fs);
+        const {plan, stampSource} = planCli(fs);
         expect(plan.depth).toBe("full");
         expect(stampSource).toBeNull();
     });
@@ -846,7 +897,7 @@ describe("runRereviewPlanCli cache-memory fallback", () => {
 describe("runRereviewStampCli", () => {
     it("renders this run's stamp from the staged plan and the decided verdict", () => {
         const fs = fakeFs(stagedInputs());
-        runRereviewPlanCli(fs);
+        planCli(fs);
         const stamp = runRereviewStampCli(fs, "APPROVE");
         expect(stamp).not.toBeNull();
         const parsed = parseRereviewStamp(stamp ?? "");
@@ -865,7 +916,7 @@ describe("runRereviewStampCli", () => {
         // directory; an unknown depth is held to the same bar as the CLI's
         // verdict flag rather than interpolated into the posted body.
         const fs = fakeFs(stagedInputs());
-        runRereviewPlanCli(fs);
+        planCli(fs);
         const staged = JSON.parse(
             fs.files.get(`${REVIEW_DIR}/rereview-plan.json`) ?? "{}",
         ) as Record<string, unknown>;
@@ -882,7 +933,7 @@ describe("runRereviewStampCli", () => {
         // next run to full (more review), where the render coercion alone
         // would read garbage as `false`, the less-review direction.
         const fs = fakeFs(stagedInputs());
-        runRereviewPlanCli(fs);
+        planCli(fs);
         const staged = JSON.parse(
             fs.files.get(`${REVIEW_DIR}/rereview-plan.json`) ?? "{}",
         ) as Record<string, unknown>;
@@ -899,7 +950,7 @@ describe("runRereviewStampCli", () => {
         // "overflow" nor a hunk signature omits the stamp rather than
         // encoding garbage the next run would anchor on.
         const fs = fakeFs(stagedInputs());
-        runRereviewPlanCli(fs);
+        planCli(fs);
         const staged = JSON.parse(
             fs.files.get(`${REVIEW_DIR}/rereview-plan.json`) ?? "{}",
         ) as Record<string, unknown>;

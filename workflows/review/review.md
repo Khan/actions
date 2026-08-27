@@ -750,9 +750,11 @@ in which case the staging step ALSO already overwrote `full-stripped.diff` with
 the scoped contents and refreshed its annotated sibling, so the whole-change
 surfaces you and the sub-agents read are pre-shrunk to the unseen hunks.
 Read the plan; it is deterministic and final: never deepen or shallow it yourself,
-and never run the CLI yourself. A comment-triggered run (`issue_comment`, the
-manual `/review` ask on consumers that keep that trigger) always plans `full`
-(reason `manual-review-request`), whatever the mode dial says. Its three guards are code, not your
+and never run the CLI yourself. A comment-triggered run whose `/review` a
+human posted always plans `full` (reason `manual-review-request`), whatever
+the mode dial says; a `/review` posted by our automation (a Bot-type account,
+or `khan-actions-bot`, whose shim fires one per push in Khan/webapp) follows
+the mode dial like the push it stands in for. Its three guards are code, not your
 judgment: the one anchoring full review is taken at ready-for-review, a fingerprint
 overflow or a missing input forces `full`, and the divergence tripwire re-arms
 `full` when too much of the diff is unreviewed. The dispatcher implements each depth (the
