@@ -1,5 +1,15 @@
 # review
 
+## 1.22.0
+
+### Minor Changes
+
+-   1cdd680: A human `/review` comment plans full depth. Consumers that keep a manual `/review` trigger alongside (or instead of) the push trigger declare it as `issue_comment`, and the re-review planner never distinguished the trigger: under a reduced `re-review` mode, an explicit `/review` ask on a previously-reviewed PR planned the same reduced round as any push, which under `fast` means reconcile-only and nothing reviewed. The plan CLI now reads the runner's `GITHUB_EVENT_NAME` and the event payload's comment author, and plans `full` with reason `manual-review-request` for a comment-triggered run a human asked for, before every mode dial. Automation-posted `/review` comments follow the mode dial like the push they stand in for: a Bot-type author, or a login in `REVIEW_AUTOMATION_LOGINS` (comma-separated deployment config, same seam as `REVIEW_BOT_LOGIN`, case-folded, defaulting to `khan-actions-bot`, which posts the shim's `/review` on every push in Khan/webapp, where the reviewer's only trigger is `issue_comment`; treating those as manual would have made the configured mode dead config there). An unreadable event payload on a comment trigger counts as manual, so the failure direction is more review. Push-triggered runs are unchanged; consumers without a comment trigger see no difference.
+-   47931e7: security-auth lens: GitHub Actions workflow-security hunts (pwn-request,
+    over-scoped-secret), with a pwn-request incident case and a benign-workflow
+    precision case in the eval corpus. This repo's own ROUTING now routes workflow
+    and action files to security-auth.
+
 ## 1.21.0
 
 ### Minor Changes
