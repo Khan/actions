@@ -18,7 +18,10 @@ const REVIEW = "/tmp/gh-aw/review";
 
 const makeFakeFs = (
     files: Record<string, string> = {},
-): SubmissionFs & {files: Record<string, string>} => {
+): SubmissionFs & {
+    files: Record<string, string>;
+    rmSync: (p: string, opts: {force: boolean}) => void;
+} => {
     const state = {...files};
     return {
         files: state,
@@ -34,6 +37,9 @@ const makeFakeFs = (
         existsSync: (p: string) =>
             p in state || Object.keys(state).some((f) => f.startsWith(`${p}/`)),
         mkdirSync: () => {},
+        rmSync: (p: string) => {
+            delete state[p];
+        },
     };
 };
 
@@ -50,11 +56,13 @@ const stagedReduced = (
         priorVerdict?: string;
         keep?: unknown[];
         resolve?: string[];
+        noteLines?: string[];
     } = {},
 ): Record<string, string> => ({
     [`${REVIEW}/dispatch-result.json`]: JSON.stringify({
         depth,
         claims: [],
+        noteLines: overrides.noteLines ?? [],
         reconciliation: {
             resolve: overrides.resolve ?? ["t1"],
             keep: overrides.keep ?? [],
@@ -206,6 +214,59 @@ describe("the full-roster approval rule", () => {
         expect(plan.event).toBe("COMMENT");
         expect(plan.skipSubmission).toBe(false);
         expect(plan.resolve).toEqual(["t1"]);
+    });
+
+    it("posts (never skips) when a standing block is cleared, resolutions or none", () => {
+        // Standing REQUEST_CHANGES, nothing resolved this round (the
+        // objections were already resolved earlier): the dismissal still
+        // stages, and the COMMENT carrying its explanatory note must post
+        // (the !priorRcStands guard on the skip).
+        const fs = makeFakeFs(stagedReduced("fast", {resolve: []}));
+        const plan = runSubmissionCli(fs);
+        expect(plan.event).toBe("COMMENT");
+        expect(plan.skipSubmission).toBe(false);
+        expect(
+            JSON.parse(fs.files[`${REVIEW}/out/dismiss-decision.json`])
+                .reviewIds,
+        ).toEqual([3001]);
+        expect(plan.body).toContain("dismissed rather than approved");
+    });
+
+    it("posts (never skips) when a mandatory disclosure note rides the body", () => {
+        // Same nothing-to-say shape as the skip case, except the dispatcher
+        // rendered a shed/unavailable note: skipping would withhold the
+        // disclosure on every later run (the drift that shipped once over
+        // the collapsed section).
+        const fs = makeFakeFs(
+            stagedReduced("fast", {
+                priorVerdict: "APPROVE",
+                resolve: [],
+                noteLines: [
+                    "Note: claim validation not assessed this run (claim-validator output unavailable).",
+                ],
+            }),
+        );
+        const plan = runSubmissionCli(fs);
+        expect(plan.event).toBe("COMMENT");
+        expect(plan.skipSubmission).toBe(false);
+        expect(plan.body).toContain("not assessed this run");
+    });
+
+    it("clears a stale dismissal decision when the plan decides against one", () => {
+        // A decision staged by an earlier plan-CLI invocation in the same
+        // run must not survive a later invocation that kept the block: the
+        // executor would otherwise act on a dismissal the final plan never
+        // licensed.
+        const fs = makeFakeFs({
+            ...stagedReduced("fast", {resolve: [], keep: ["t1"]}),
+            [`${REVIEW}/out/dismiss-decision.json`]: JSON.stringify({
+                reviewIds: [3001],
+                message: DISMISSAL_MESSAGE,
+            }),
+        });
+        const plan = runSubmissionCli(fs);
+        expect(plan.event).toBe("REQUEST_CHANGES");
+        expect(fs.files[`${REVIEW}/out/dismiss-decision.json`]).toBe(undefined);
     });
 
     // The scoped-depth COMMENT-to-APPROVE upgrade (the full-roster path

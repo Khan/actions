@@ -148,6 +148,40 @@ export const decideEventAndClearance = (
     return {event, approveDemoted, priorRcStands, notes, bodyNote, dismissal};
 };
 
+/** The staged decision path (out/ is the one directory the run uploads). */
+export const DISMISS_DECISION_PATH =
+    "/tmp/gh-aw/review/out/dismiss-decision.json";
+
+/**
+ * Write the decision file (or clear a stale one). The decision itself is
+ * pure ({@link decideEventAndClearance}); this is its one write, kept
+ * beside it so the caller cannot half-apply it. The clear matters: the
+ * file is the dismissal executor's input and the gate's rule-5c subject,
+ * so a decision staged by an earlier plan-CLI invocation in the same run
+ * must not survive a later invocation that decided against it (it would
+ * execute a dismissal the final plan never licensed, or red-flag a
+ * conforming run at the gate).
+ */
+export const stageDismissalDecision = (
+    fs: {
+        writeFileSync: (p: string, data: string) => void;
+        mkdirSync: (p: string, opts: {recursive: boolean}) => void;
+        existsSync: (p: string) => boolean;
+        rmSync?: (p: string, opts: {force: boolean}) => void;
+    },
+    dismissal: ClearanceResult["dismissal"],
+): void => {
+    if (dismissal !== null) {
+        fs.mkdirSync("/tmp/gh-aw/review/out", {recursive: true});
+        fs.writeFileSync(
+            DISMISS_DECISION_PATH,
+            JSON.stringify(dismissal, null, 2),
+        );
+    } else if (fs.existsSync(DISMISS_DECISION_PATH)) {
+        fs.rmSync?.(DISMISS_DECISION_PATH, {force: true});
+    }
+};
+
 /**
  * The submission-skip predicate, code-owned so the prompt (Step 6) and the
  * conformance gate read one predicate rather than each describing it (they
@@ -164,12 +198,18 @@ export const decideEventAndClearance = (
  *     stamped verdict was already APPROVE.
  *   - The demoted-COMMENT skip, its reduced-depth sibling: a
  *     flip-gated/fast round whose verdict would have been APPROVE, with no
- *     inline comments, no thread resolutions, and no standing block to
- *     clear, has nothing to say that the prior review does not already
+ *     inline comments, no thread resolutions, no standing block to clear,
+ *     and nothing riding the body beyond the demoted head and the depth
+ *     note, has nothing to say that the prior review does not already
  *     say, and posting a near-empty COMMENT review on every such push is
  *     the noise the quiet-the-human-surface lane exists to prevent. The
- *     prior stamp stays the anchor (a fast round carries it forward
- *     verbatim anyway), so skipping loses nothing.
+ *     body check matters for the same reason the first branch guards on
+ *     `bareApproveBody`: the collapsed observations section and the
+ *     mandatory shed/unavailable disclosure notes are content, and
+ *     skipping a body that carries either withholds it on every later
+ *     run (the drift that already shipped once). The prior stamp stays
+ *     the anchor (a fast round carries it forward verbatim anyway), so
+ *     skipping loses nothing.
  */
 export const decideSkipSubmission = (input: {
     event: string;
@@ -181,6 +221,16 @@ export const decideSkipSubmission = (input: {
     bareApproveBody: boolean;
     /** Whether the last stamped verdict was APPROVE. */
     priorApproveStands: boolean;
+    /**
+     * Whether nothing rides the core body beyond the head and the depth
+     * note: no collapsed observations section, no shed/unavailable
+     * disclosure note (submission.ts passes
+     * `prLevelLines.length === 0 && noteLines.length === 0`). The
+     * demoted body always carries the COMMENT head and the depth note,
+     * so it can never equal the bare approve line; this is its own
+     * emptiness signal.
+     */
+    bodyCarriesOnlyDepthNote: boolean;
 }): boolean =>
     (input.event === "APPROVE" &&
         input.inlineCount === 0 &&
@@ -189,4 +239,5 @@ export const decideSkipSubmission = (input: {
     (input.approveDemoted &&
         input.inlineCount === 0 &&
         input.resolveCount === 0 &&
+        input.bodyCarriesOnlyDepthNote &&
         !input.priorRcStands);

@@ -38,6 +38,13 @@ const stagedDecision = (
         number: 41007,
         repo: "Khan/webapp",
     }),
+    // The executor's id allowlist: only CHANGES_REQUESTED entries here
+    // may dismiss (the decision file itself is agent-writable).
+    [`${REVIEW}/prior-reviews.json`]: JSON.stringify([
+        {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
+        {body: "r2", id: 3002, state: "COMMENTED"},
+        {body: "r3", id: 3003, state: "CHANGES_REQUESTED"},
+    ]),
 });
 
 const recordingPut = (
@@ -92,12 +99,38 @@ describe("runDismissReviewCli", () => {
             const result = await runDismissReviewCli(makeFakeFs(files), put);
             expect(result.dismissed).toEqual([]);
             expect(calls).toEqual([]);
-            // Unparseable JSON reads as no decision (nothing to warn
-            // about); a present-but-unusable decision warns.
-            if (files[`${REVIEW}/out/dismiss-decision.json`] !== "not json") {
-                expect(result.warnings.join(" ")).toContain("block stands");
-            }
+            // A present-but-unusable decision always warns, unparseable
+            // included: the failure posture is a warning, never silence.
+            expect(result.warnings.join(" ")).toContain("block stands");
         }
+    });
+
+    it("refuses ids that are not standing CHANGES_REQUESTED reviews and keeps the rest", async () => {
+        // 3002 is COMMENTED and 9999 is unknown: neither may dismiss,
+        // whatever the agent-writable decision file says. 3001 stands.
+        const {put, calls} = recordingPut();
+        const result = await runDismissReviewCli(
+            makeFakeFs(stagedDecision([3001, 3002, 9999])),
+            put,
+        );
+        expect(result.dismissed).toEqual([3001]);
+        expect(calls.map((call) => call.path)).toEqual([
+            "/repos/Khan/webapp/pulls/41007/reviews/3001/dismissals",
+        ]);
+        expect(result.warnings).toEqual([
+            `dismissal of review 3002 refused: not a CHANGES_REQUESTED id in ${REVIEW}/prior-reviews.json`,
+            `dismissal of review 9999 refused: not a CHANGES_REQUESTED id in ${REVIEW}/prior-reviews.json`,
+        ]);
+    });
+
+    it("refuses every id when prior-reviews.json is not staged (block stands)", async () => {
+        const files = stagedDecision([3001]);
+        delete files[`${REVIEW}/prior-reviews.json`];
+        const {put, calls} = recordingPut();
+        const result = await runDismissReviewCli(makeFakeFs(files), put);
+        expect(result.dismissed).toEqual([]);
+        expect(calls).toEqual([]);
+        expect(result.warnings.join(" ")).toContain("refused");
     });
 
     it("warns when pr-context is missing (block stands)", async () => {

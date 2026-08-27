@@ -52,6 +52,17 @@
  *      approval no full roster stands behind must not post; the plan CLI
  *      demotes it to COMMENT and clears a standing block by dismissal
  *      instead (submission.ts).
+ *   5c. The dismissal mirror: the reduced-depth clearance is the one write
+ *      this pipeline performs outside the safe-output queue (the pinned
+ *      gh-aw ships no dismiss output), and its decision file lives in the
+ *      agent-writable `out/` scratch directory, so a staged
+ *      `dismiss-decision.json` is conformant only at a reduced depth,
+ *      alongside a queued COMMENT verdict, carrying the shared
+ *      justification message verbatim, with every review id present among
+ *      `prior-reviews.json`'s CHANGES_REQUESTED ids. A violation blocks the
+ *      run before the dismissal step (default `if:`, so it never runs after
+ *      a gate exit 1); the executor re-derives the id check independently
+ *      (dismiss-review.ts), covering the gate's own fail-open path.
  *   6. Every queued thread resolution must be one the reconciler decided
  *      (`out/thread-reconciler.json` `resolve`); the deficit direction is
  *      reported as executed-vs-decided accounting, never blocked (slice 3;
@@ -89,6 +100,7 @@ import {submissionPlanViolations} from "./dispatch-gate-plan";
 import {isBlockingLabel} from "./render-comment";
 import {parseLeadingLabel} from "./rereview";
 import {findLatestStamp, stampFromCacheMemory} from "./rereview-mode";
+import {DISMISSAL_MESSAGE} from "./submission-clearance";
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -118,6 +130,7 @@ export type DispatchGateViolationCode =
     | "shed-undisclosed"
     | "approve-with-blocking-comment"
     | "approve-requires-full-roster"
+    | "dismiss-decision-nonconformant"
     | "flip-vetoed-kept-blocking"
     | "resolve-not-decided"
     | "submission-plan-mismatch";
@@ -451,6 +464,53 @@ export const evaluateDispatchConformance = (
                 `dispatches the full roster (full/scoped), and a reduced-depth round ` +
                 `clears a standing block by dismissal instead`,
         });
+    }
+
+    // Rule 5c: the dismissal mirror (module doc). Default-deny over the
+    // agent-writable decision file: unparseable, mis-depth, mis-verdict,
+    // message drift, and any id not standing as CHANGES_REQUESTED in
+    // prior-reviews.json all block. The executor re-checks the ids
+    // independently, so a gate that failed open still cannot be steered
+    // into dismissing a review the staging never licensed.
+    const rawDecision = input.outFiles["dismiss-decision.json"];
+    if (rawDecision !== undefined) {
+        const decision = parseJson(rawDecision) as
+            | {reviewIds?: unknown; message?: unknown}
+            | undefined;
+        const allowedIds = new Set(
+            (Array.isArray(input.priorReviews) ? input.priorReviews : [])
+                .filter(
+                    (review): review is {id: number; state: string} =>
+                        typeof (review as {id?: unknown}).id === "number" &&
+                        (review as {state?: unknown}).state ===
+                            "CHANGES_REQUESTED",
+                )
+                .map((review) => review.id),
+        );
+        const ids = Array.isArray(decision?.reviewIds)
+            ? decision.reviewIds
+            : null;
+        const conforms =
+            decision !== undefined &&
+            (depth === "flip-gated" || depth === "fast") &&
+            verdictEvent === "COMMENT" &&
+            decision.message === DISMISSAL_MESSAGE &&
+            ids !== null &&
+            ids.length > 0 &&
+            ids.every((id) => typeof id === "number" && allowedIds.has(id));
+        if (!conforms) {
+            violations.push({
+                code: "dismiss-decision-nonconformant",
+                dimension: "verdict",
+                detail:
+                    `out/dismiss-decision.json is staged but not licensed by the plan: a dismissal ` +
+                    `requires a reduced depth (this run: ${depth}), a queued COMMENT verdict ` +
+                    `(queued: ${
+                        verdictEvent ?? "none"
+                    }), the shared justification message, and ` +
+                    `only CHANGES_REQUESTED review ids from prior-reviews.json`,
+            });
+        }
     }
 
     // Rule 5: the re-review flip veto (Step 4, reduced depths only): at

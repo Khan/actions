@@ -329,18 +329,29 @@ post-steps:
   # out/dismiss-decision.json (a flip-gated/fast round over a prior
   # REQUEST_CHANGES whose blocking objections are all resolved), dismiss the
   # standing review via the API instead of minting an approval no full
-  # roster stands behind. Default `if:` (success()), so a gate-blocked run
-  # never dismisses. Bot token for the same reason the resolve-thread safe
-  # output carries it: dismissal needs write access. Known window: this runs
-  # before the safe_outputs job posts the COMMENT review carrying the
-  # explanatory note, so a safe_outputs infra failure can leave a dismissal
-  # whose note never posted; the dismissal message itself renders in the PR
-  # timeline, so the gap is visible, and every failure here is a warning
-  # (the block stands: more review, never less).
+  # roster stands behind. Default `if:` (success()), so a run the gate
+  # blocked (exit 1) never dismisses; the gate also checks the decision
+  # itself (rule 5c), and for the gate's own fail-open path (infra failure,
+  # exit 0 without deciding) the executor re-derives the id check from
+  # prior-reviews.json, so an unchecked decision still cannot dismiss a
+  # review the staging never licensed. Bot token for the same reason the
+  # resolve-thread safe output carries it: dismissal needs write access.
+  # Known window: this runs before the safe_outputs job posts the COMMENT
+  # review carrying the explanatory note, so a safe_outputs infra failure
+  # can leave a dismissal whose note never posted; the dismissal message
+  # itself renders in the PR timeline, so the gap is visible, and every
+  # failure here is a warning (the block stands: more review, never less).
+  # The wrapper makes that true of the step too: an npx/tsx bootstrap
+  # failure must not red a run the gate passed (the sibling gate step above
+  # takes the same posture for the same reason).
   - name: Clear the standing blocking review (reduced-depth dismissal)
     env:
       GH_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
-    run: cd gh-aw-review-lib && npx -y tsx workflows/review/lib/dismiss-review.ts
+    run: |
+      if ! (cd gh-aw-review-lib && npx -y tsx workflows/review/lib/dismiss-review.ts); then
+        echo "::warning title=review dismissal::step could not run (infra failure; block stands)"
+      fi
+      exit 0
 
 # Anthropic pricing overlay, so an AI credit means $0.01 of what Khan actually
 # pays.

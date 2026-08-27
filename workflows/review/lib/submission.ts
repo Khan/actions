@@ -81,6 +81,7 @@ import {runRereviewCli, type RereviewCliFs} from "./rereview";
 import {
     decideEventAndClearance,
     decideSkipSubmission,
+    stageDismissalDecision,
 } from "./submission-clearance";
 import {
     labelToken,
@@ -146,12 +147,13 @@ export type SubmissionPlan = {
      */
     body: string;
     /**
-     * Whether the orchestrator may emit NO submission at all (the
-     * redundant-approval skip). Code-owned so review.md's Step 6 and the
-     * dispatch-conformance gate read one predicate rather than each
-     * describing it: true only for an APPROVE plan with no inline comments
-     * whose body is the bare approve line (modulo the ingest sanitizer) on a
-     * PR whose last stamped verdict was already APPROVE.
+     * Whether the orchestrator may emit NO submission at all. Code-owned
+     * (decideSkipSubmission, submission-clearance.ts) so review.md's Step 6
+     * and the dispatch-conformance gate read one predicate rather than
+     * each describing it: the redundant-approval skip (a bare APPROVE
+     * re-affirming a stamped APPROVE) and its reduced-depth sibling, the
+     * demoted-COMMENT skip (a nothing-to-say flip-gated/fast round with
+     * no standing block); the doc on both lives with the predicate.
      */
     skipSubmission: boolean;
     /** The inline comments to post, one safe output each, verbatim. */
@@ -894,12 +896,8 @@ export const runSubmissionCli = (
     });
     notes.push(...clearance.notes);
     const {event, approveDemoted, priorRcStands} = clearance;
-    if (clearance.dismissal !== null && clearance.bodyNote !== null) {
-        fs.mkdirSync(`${REVIEW_DIR}/out`, {recursive: true});
-        fs.writeFileSync(
-            `${REVIEW_DIR}/out/dismiss-decision.json`,
-            JSON.stringify(clearance.dismissal, null, 2),
-        );
+    stageDismissalDecision(fs, clearance.dismissal);
+    if (clearance.bodyNote !== null) {
         depthNotes.push(clearance.bodyNote);
     }
 
@@ -955,6 +953,8 @@ export const runSubmissionCli = (
             ),
         priorApproveStands:
             priorStamp !== null && priorStamp.verdict === "APPROVE",
+        bodyCarriesOnlyDepthNote:
+            prLevelLines.length === 0 && noteLines.length === 0,
     });
 
     return stagePlan(fs, {

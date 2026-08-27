@@ -101,7 +101,10 @@ every safe output during the agent run and executes the queue from a separate
 verdict and findings against the staged `out/` sub-agent outputs (per re-review
 depth: the correctness pass wherever the depth dispatches one, the
 claim-validator whenever findings post, a disclosure note for every planned
-shed, no blocking inline comment under an APPROVE or COMMENT, the reduced-depth flip veto
+shed, no blocking inline comment under an APPROVE or COMMENT, no APPROVE at a
+reduced depth, a staged dismissal decision licensed by the plan (reduced
+depth, COMMENT verdict, only standing CHANGES_REQUESTED ids), the
+reduced-depth flip veto
 over kept blocking threads, and every queued thread resolution backed by the
 reconciler's decision) and, on violation, strips the posting items from the
 queue and fails the job. A run that skipped its own dispatch protocol (observed in production:
@@ -606,7 +609,7 @@ everything, whatever the mode:
 | --- | --- | --- |
 | `full` | The whole roster over the whole diff (today's behavior). **Default.** | Until the live A/B has priced a cheaper mode for the repo. |
 | `scoped` | The whole roster, staged only the hunks that are new since the last fully-reviewed fingerprint (`scoped.diff`); comments stay scoped to those hunks. | The recommended first step down: measured lifecycles caught fresh seeded defects on re-review pushes, which a reconcile-only path would miss. |
-| `flip-gated` | Thread reconciliation plus the correctness pass over the new hunks. A REQUEST_CHANGES→APPROVE flip is vetoed by any validated blocking finding from that pass; the pass gates the flip instead of being discarded. | Cheap re-reviews that still cannot flip to approval over a fresh validated defect. |
+| `flip-gated` | Thread reconciliation plus the correctness pass over the new hunks. Reduced depths never approve (approval requires a full-roster round): a standing REQUEST_CHANGES whose blocking objections are all resolved is cleared by dismissing it, and any validated blocking finding from the pass vetoes that clearance. | Cheap re-reviews that still cannot clear a standing block over a fresh validated defect. |
 | `fast` | Thread reconciliation only. | Maximum savings; fresh code on a re-push is guarded only by the tripwire below. |
 
 The dial governs push-shaped triggers. A `/review` comment a human posts on a
@@ -624,7 +627,10 @@ Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministi
   never anchors cheap re-reviews of the ready PR: the ready PR gets the one
   full review the cheaper modes lean on.
 - **Flip gate.** In `flip-gated` mode the dispatched correctness pass's
-  validated blocking findings veto the approval flip.
+  validated blocking findings veto the flip out of a standing
+  REQUEST_CHANGES. The flip's target is a dismissal, not an approval:
+  reduced depths never approve, so the cleared block waits for a
+  full-roster round to become one.
 - **Divergence tripwire.** Every full-depth review stamps a content-hashed
   hunk signature into its review body as a collapsed `<details>` block (an
   HTML comment would be deleted by the ingest sanitizer; it survives cache
