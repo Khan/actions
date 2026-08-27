@@ -119,11 +119,14 @@ describe("prCoordinatesFromEnv", () => {
     });
 
     it("falls back to the event payload (pull_request, then issue)", () => {
+        // "" rather than undefined throughout: an undefined argument
+        // re-enables the process.env default, which is populated on a CI
+        // runner (GITHUB_REPOSITORY et al) and empty locally.
         expect(
             prCoordinatesFromEnv(
                 eventFs({pull_request: {number: 41007}}),
                 "Khan/webapp",
-                undefined,
+                "",
                 "/tmp/event.json",
             ),
         ).toEqual({repo: "Khan/webapp", prNumber: 41007});
@@ -141,7 +144,7 @@ describe("prCoordinatesFromEnv", () => {
         expect(
             prCoordinatesFromEnv(
                 eventFs({pull_request: {number: 41007}}),
-                undefined,
+                "",
                 "41007",
                 "/tmp/event.json",
             ),
@@ -155,7 +158,7 @@ describe("prCoordinatesFromEnv", () => {
             ),
         ).toBe(null);
         expect(
-            prCoordinatesFromEnv(makeFakeFs({}), "Khan/webapp", undefined, ""),
+            prCoordinatesFromEnv(makeFakeFs({}), "Khan/webapp", "", ""),
         ).toBe(null);
     });
 });
