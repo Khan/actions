@@ -609,6 +609,15 @@ everything, whatever the mode:
 | `flip-gated` | Thread reconciliation plus the correctness pass over the new hunks. A REQUEST_CHANGES→APPROVE flip is vetoed by any validated blocking finding from that pass; the pass gates the flip instead of being discarded. | Cheap re-reviews that still cannot flip to approval over a fresh validated defect. |
 | `fast` | Thread reconciliation only. | Maximum savings; fresh code on a re-push is guarded only by the tripwire below. |
 
+The dial governs push-shaped triggers. A `/review` comment a human posts on a
+consumer that keeps the comment trigger always plans `full` (reason
+`manual-review-request`): the point of the manual ask is "give me a real
+review now", and a reduced mode would otherwise answer it with a cheaper
+round. A `/review` posted by our automation (a Bot-type account, or a login
+in the `REVIEW_AUTOMATION_LOGINS` env, comma-separated and defaulting to
+`khan-actions-bot`; Khan/webapp's shim posts one per push) is not a manual
+ask and follows the configured mode like the push it stands in for.
+
 Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministic):
 
 - **Ready-for-review anchor.** A fingerprint taken while the PR was a draft
@@ -896,6 +905,13 @@ Optional:
   human ones, which puts their lines in `skipLines` and DROPS fresh findings
   there. Either spelling works (`name` or `name[bot]`); the comparison strips
   the suffix.
+- `REVIEW_AUTOMATION_LOGINS` — comma-separated logins whose `/review`
+  comments are automation, not a manual ask, default `khan-actions-bot`. Set
+  it in the same workflow-level `env:` block as `REVIEW_BOT_LOGIN` (the plan
+  CLI reads it in the pre-agent staging step) in a repo whose `/review` shim
+  posts under a different classic-PAT account. The list REPLACES the default
+  (an empty value restores it), the comparison is case-folded, and Bot-type
+  authors are treated as automation regardless of the list.
 
 ## Versioning
 

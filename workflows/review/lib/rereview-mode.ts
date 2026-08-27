@@ -79,6 +79,7 @@
 import {createHash} from "node:crypto";
 
 import {splitPatchHunks, splitUnifiedDiff} from "./diff";
+import {commentAuthorFromEvent, isManualReviewRequest} from "./manual-request";
 import {DEFAULT_RE_REVIEW_MODE, RE_REVIEW_MODES} from "./routing-config";
 import type {ReReviewMode} from "./routing-config";
 
@@ -536,6 +537,17 @@ export type ReReviewDecisionInput = {
     currentSignature: HunkSignature;
     /** Tripwire re-arm threshold; {@link DEFAULT_TRIPWIRE_THRESHOLD}. */
     tripwireThreshold?: number;
+    /**
+     * An explicit human ask for a review (a `/review` comment posted by a
+     * person, `manual-request.ts`'s isManualReviewRequest). Manual requests plan full
+     * depth regardless of the configured mode; the point of keeping a
+     * comment trigger on an auto-on-push consumer is "give me a real
+     * review now", and under `fast` the modes would otherwise answer it
+     * with a reconcile-only round. Automation-posted `/review` comments
+     * (webapp's shim fires one on every push) are NOT manual: they follow
+     * the mode dial like the push they stand in for.
+     */
+    manualRequest?: boolean;
 };
 
 /** Which sub-agents a depth dispatches (the prompt maps this to the roster). */
@@ -613,6 +625,9 @@ export const decideReReviewDepth = (
 ): ReReviewPlan => {
     const threshold = input.tripwireThreshold ?? DEFAULT_TRIPWIRE_THRESHOLD;
 
+    if (input.manualRequest === true) {
+        return fullPlan(input, ["manual-review-request"], null, false);
+    }
     if (input.mode === "full") {
         return fullPlan(input, ["mode-full"], null, false);
     }
@@ -756,11 +771,18 @@ export type RereviewPlanCliResult = {
 };
 
 /**
- * Stage the re-review plan. Factored out (fs injected) so it is testable
- * without touching the real filesystem. Returns what was written.
+ * Stage the re-review plan. Factored out (fs injected, the trigger event
+ * name and event-payload path likewise) so it is testable without touching
+ * the real filesystem or process env. A comment-triggered run whose comment
+ * a human posted ({@link isManualReviewRequest}) is an explicit ask and
+ * plans full depth whatever the configured mode says; automation-posted
+ * `/review` comments (Khan/webapp's shim fires one per push) follow the
+ * mode dial like any push.
  */
 export const runRereviewPlanCli = (
     fs: RereviewCliFs,
+    eventName: string | undefined = process.env.GITHUB_EVENT_NAME,
+    eventPath: string | undefined = process.env.GITHUB_EVENT_PATH,
 ): RereviewPlanCliResult => {
     const warnings: string[] = [];
 
@@ -840,6 +862,13 @@ export const runRereviewPlanCli = (
         isDraft,
         priorStamp,
         currentSignature,
+        // GITHUB_EVENT_NAME/GITHUB_EVENT_PATH are the runner's own event
+        // env; the CLI runs in pre-agent staging on the runner, never in
+        // the agent sandbox.
+        manualRequest: isManualReviewRequest(
+            eventName,
+            commentAuthorFromEvent(fs, eventPath),
+        ),
     });
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});
