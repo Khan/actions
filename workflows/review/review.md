@@ -2848,6 +2848,39 @@ Skills index for this repo (read only the entries relevant to this lens's domain
 - **`injection-sink`** — trace user-controlled input to a SQL/HTML/path/URL/shell/
   deserialization sink without validation or parameterization. `found` on an unguarded
   sink.
+- **`pwn-request`** — when workflow or action-definition files change:
+  `.github/workflows/*.{yml,yaml,md}` (a gh-aw authored `.md` workflow counts —
+  its frontmatter carries the trigger, permissions, and secrets; the compiled
+  `.lock.yml` beside it is generated output stripped from the diff),
+  `action.yml`/`action.yaml` anywhere in the tree, or a workflow definition
+  staged elsewhere for a later move into `.github/workflows/`. `found` only
+  when one job combines all three of: a privileged trigger
+  (`pull_request_target`, `workflow_run` startable by a fork PR, or any
+  comment/issue/review trigger a fork author can fire — `issue_comment`,
+  `pull_request_review`, `pull_request_review_comment`, `issues`,
+  `discussion_comment`), untrusted content brought in (PR head checked out,
+  or an artifact from the triggering run), and execution of that content while
+  holding secrets or a write-capable token — a plain `pull_request` fork run
+  holds neither.
+- **`over-scoped-secret`** — same file gate as `pwn-request`: a workflow granting
+  `secrets.GITHUB_TOKEN` or a custom org token a permission nothing in the
+  workflow uses (e.g., `contents: write` when every step only reads, or a broad
+  PAT where the default `GITHUB_TOKEN` suffices). Non-use must be decidable from
+  the file: every step's use of the token is visible (inline `run:` commands,
+  in-diff scripts and actions) and none needs the permission. The job token is
+  not ambient: a `run:` script (lifecycle scripts included) can consume it only
+  when a step passes it via `env:`/`with:` or `actions/checkout` persists it,
+  so an opaque script with no such path never makes a permission undecidable.
+  A third-party action can receive `github.token` through an input default, so
+  it makes a permission undecidable only when it could plausibly need that
+  permission (checkout and toolchain-setup actions' own API use is read-only)
+  — otherwise not `found`. A gh-aw authored `.md` workflow is the one case
+  where step-visibility does not settle it: its frontmatter `permissions:` are
+  consumed by the `safe-outputs:` jobs and the agent's `tools.github` toolsets,
+  both compiled into the stripped `.lock.yml`, so they appear as no step at all
+  — never treat a permission on a `.md` workflow as unused unless the
+  frontmatter's `safe-outputs:` and `tools:` blocks also fail to need it.
+  `found` names the unneeded permission and why no step needs it.
 
 ### Repo-specific rules and hunts (optional)
 Additional review rules and hunts the host repo defines for this lens, imported when

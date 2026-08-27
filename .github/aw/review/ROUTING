@@ -7,9 +7,21 @@
 # matching rules. This file complements risk-classification.md (model-facing prose);
 # team ownership stays in .github/REVIEWERS.
 #
-# No specialist lenses are enabled: the eleven lens prompts target webapp's backend
-# domains (auth resolvers, migrations, federation, ...) and none maps to this repo's
-# supply-chain surface. Whole-change reviewers mirror webapp's eval-justified roster.
+# security-auth is routed over this repo's workflows and shipped actions. The
+# installed reviewer (.github/workflows/review.md) pins a released tag, so the
+# workflow hunts (pwn-request, over-scoped-secret) only run here once a release
+# carrying them ships and that pin is bumped; until then the lens runs its
+# generic hunts (secrets, injection, dropped guards) on these files. Routing now
+# keeps activation automatic at the bump instead of depending on a hand edit to
+# that separate bump PR. Its rules below use actions/** rather than the README's
+# **/action.yml so the eval corpus's deliberately-vulnerable fixture workflows
+# never *spawn* the lens (lenses cannot be un-routed by a later rule). Routing
+# scopes only spawning — a spawned lens reads the whole diff — so the fixture
+# carve-out itself lives in .github/aw/review/lenses/security-auth.md, which
+# names workflows/review/eval/corpus/** as intentionally-vulnerable fixtures.
+# No other lens is routed — the rest target webapp's backend domains. The
+# enable line turns on the same reviewers webapp uses, chosen there by eval
+# results.
 
 enable holistic,completeness,test-adequacy,first-principles,conventions,documentation
 
@@ -35,12 +47,14 @@ re-review scoped blocking-medium
 
 # Shipped composite actions run inside consuming repos' CI with their credentials.
 actions/**                   tier=high
+actions/**/action.yml        tier=high lens=security-auth
+actions/**/action.yaml       tier=high lens=security-auth
 # This repo's own CI, the publish pipeline, and the compiled agentic workflows.
-.github/workflows/**         tier=high
+.github/workflows/**         tier=high lens=security-auth
 utils/**                     tier=high
 # A workflow staged for a human `git mv` into .github/workflows/ is CI the moment
-# it moves, and it is reviewed here or nowhere.
-.github-staging/**           tier=high
+# it moves, and it is reviewed here or nowhere — so it gets the workflow hunts too.
+.github-staging/**           tier=high lens=security-auth
 # The shared reviewer's deterministic enforcement layer.
 workflows/review/lib/**      tier=high
 # The autofix workflow's enforcement layer. It PUSHES COMMITS to PRs in consuming

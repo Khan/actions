@@ -428,6 +428,37 @@ and are skipped; routing degrades to fewer lenses, never to a crashed review.
 stays the model-facing prose about file *contents*; team ownership stays in
 `.github/REVIEWERS`, unchanged.
 
+### Routing the `security-auth` workflow hunts
+
+The `security-auth` lens's GitHub Actions workflow hunts (`pwn-request`,
+`over-scoped-secret`) run only when the lens spawns, so a repo that wants
+workflow changes reviewed must route the workflow paths:
+
+```
+.github/workflows/**       tier=high lens=security-auth
+**/action.yml              tier=high lens=security-auth
+**/action.yaml             tier=high lens=security-auth
+```
+
+`.github/workflows/**` covers gh-aw repos too: the authored `.md` workflow —
+whose frontmatter carries the trigger, permissions, and secrets — matches the
+pattern, and the hunts' own file gate includes it (the compiled `.lock.yml`
+beside it is generated output the reviewer skips).
+
+A repo that stages workflow files outside `.github/workflows/` pending a later
+move into it (e.g. a `.github-staging/` pen) should route that directory to the
+lens as well; the hunts' file gate covers staged workflow definitions by
+content, so they are reviewed before the move (the move itself is a rename
+that shows no content diff).
+
+A repo that stages deliberately-vulnerable workflow fixtures (test corpora,
+training material) should scope these patterns to its real action directories
+instead of `**`: lenses cannot be un-routed by a later rule, so a broad
+pattern would route the fixtures to a live lens. Scoping controls only
+whether the lens spawns; a spawned lens still reads the whole change's diff,
+so such a repo should also name its fixture paths as intentionally vulnerable
+in its `.github/aw/review/lenses/security-auth.md` payload.
+
 ### The `documentation` reviewer (opt-in)
 
 `enable documentation` turns on a reviewer that checks the **comments and prose docs

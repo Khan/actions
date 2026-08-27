@@ -1,0 +1,41 @@
+name: Lint Workflows and Actions
+
+# pull_request_target so the autofix can push back to PRs opened from forks:
+# on the plain pull_request trigger those runs get no secrets.
+on:
+    pull_request_target:
+        paths:
+            - ".github/**/*.yml"
+
+jobs:
+    lint-workflows:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+            pull-requests: write
+        steps:
+            # We need the bot token here to be able to push fixes back, and we
+            # check out the PR branch itself so the push lands on the PR.
+            - name: Checking out the PR
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+              with:
+                  repository: ${{ github.event.pull_request.head.repo.full_name }}
+                  ref: ${{ github.event.pull_request.head.ref }}
+                  token: ${{ secrets.CI_BOT_TOKEN }}
+
+            - name: Setup
+              uses: ./.github/actions/setup
+
+            - name: Autofix checkout-followed-by-setup
+              shell: bash
+              run: pnpm fix-workflows
+
+            - name: Push autofixes
+              shell: bash
+              run: |
+                  if [ -n "$(git status --porcelain)" ]; then
+                      git config user.name "ci-bot"
+                      git config user.email "ci-bot@example.com"
+                      git commit -am "Apply workflow autofixes"
+                      git push
+                  fi

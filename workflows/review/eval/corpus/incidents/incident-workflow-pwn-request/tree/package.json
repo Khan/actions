@@ -1,0 +1,16 @@
+{
+    "name": "example-web",
+    "private": true,
+    "packageManager": "pnpm@10.0.0",
+    "scripts": {
+        "build": "turbo run build",
+        "lint": "eslint --ext .js,.ts .",
+        "test": "vitest",
+        "fix-workflows": "./dev/tools/fix-workflows.ts",
+        "prettier": "prettier"
+    },
+    "devDependencies": {
+        "prettier": "^3.3.3",
+        "yaml": "^2.5.1"
+    }
+}
