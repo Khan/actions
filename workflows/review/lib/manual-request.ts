@@ -33,7 +33,13 @@ export const DEFAULT_AUTOMATION_LOGINS = "khan-actions-bot";
  */
 export const automationCommentAuthors = (): ReadonlySet<string> =>
     new Set(
-        (process.env.REVIEW_AUTOMATION_LOGINS ?? DEFAULT_AUTOMATION_LOGINS)
+        // `||`, not `??`: an empty or whitespace-only value restores the
+        // default instead of emptying the carve-out, same as
+        // threads.ts's REVIEW_BOT_LOGIN and autofix's AUTOFIX_BOT_LOGIN.
+        (
+            process.env.REVIEW_AUTOMATION_LOGINS?.trim() ||
+            DEFAULT_AUTOMATION_LOGINS
+        )
             .split(",")
             .map((login) => login.trim().toLowerCase())
             .filter((login) => login !== ""),

@@ -874,6 +874,13 @@ Optional:
   human ones, which puts their lines in `skipLines` and DROPS fresh findings
   there. Either spelling works (`name` or `name[bot]`); the comparison strips
   the suffix.
+- `REVIEW_AUTOMATION_LOGINS` — comma-separated logins whose `/review`
+  comments are automation, not a manual ask, default `khan-actions-bot`. Set
+  it in the same workflow-level `env:` block as `REVIEW_BOT_LOGIN` (the plan
+  CLI reads it in the pre-agent staging step) in a repo whose `/review` shim
+  posts under a different classic-PAT account. The list REPLACES the default
+  (an empty value restores it), the comparison is case-folded, and Bot-type
+  authors are treated as automation regardless of the list.
 
 ## Versioning
 

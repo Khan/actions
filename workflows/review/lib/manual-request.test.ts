@@ -76,6 +76,16 @@ describe("isManualReviewRequest", () => {
                     type: "User",
                 }),
             ).toBe(true);
+            // An empty or whitespace-only value restores the default
+            // instead of emptying the carve-out (the REVIEW_BOT_LOGIN
+            // precedent: `?.trim() ||`, never `??`).
+            process.env.REVIEW_AUTOMATION_LOGINS = "  ";
+            expect(
+                isManualReviewRequest("issue_comment", {
+                    login: "khan-actions-bot",
+                    type: "User",
+                }),
+            ).toBe(false);
         } finally {
             if (previous === undefined) {
                 delete process.env.REVIEW_AUTOMATION_LOGINS;
