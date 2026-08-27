@@ -86,15 +86,6 @@ export type EnableableReviewer = typeof ENABLEABLE_REVIEWERS[number];
  * resolved is cleared by dismissing the standing review, and the approval
  * waits for a round that dispatches the full roster.
  *
- * `scoped` also drops single pushes to `fast` on its own: when every
- * unreviewed changed line sits within 3 lines of an open review thread's
- * anchor in the same file, and at least one line-anchored bot thread is
- * open anywhere on the PR (the respond-to-review push), the round runs
- * reconcile-only (rereview-mode.ts's respond-to-review drop). The dial
- * sets the ceiling; the drop is per-push and decided in code. `flip-gated`
- * never drops: the drop would strip its correctness pass on exactly the
- * response push the flip gate exists to police.
- *
  * `full` is the default everywhere: a repo pays for a cheaper mode only by
  * writing a `re-review` line in its ROUTING file.
  */
