@@ -658,6 +658,35 @@ describe("runRereviewPlanCli", () => {
         expect(plan.reasons).toEqual(["mode-fast"]);
     });
 
+    it("reads the trigger from the runner's env when none is passed", () => {
+        // The production call site (stage-pr.ts) passes nothing; pin the
+        // defaults so a wiring regression cannot hide behind the helper.
+        const prevName = process.env.GITHUB_EVENT_NAME;
+        const prevPath = process.env.GITHUB_EVENT_PATH;
+        process.env.GITHUB_EVENT_NAME = "issue_comment";
+        process.env.GITHUB_EVENT_PATH = EVENT_PATH;
+        try {
+            const fs = fakeFs({
+                ...stagedInputs(),
+                [EVENT_PATH]: commentEvent("a-human", "User"),
+            });
+            const {plan} = runRereviewPlanCli(fs);
+            expect(plan.depth).toBe("full");
+            expect(plan.reasons).toEqual(["manual-review-request"]);
+        } finally {
+            if (prevName === undefined) {
+                delete process.env.GITHUB_EVENT_NAME;
+            } else {
+                process.env.GITHUB_EVENT_NAME = prevName;
+            }
+            if (prevPath === undefined) {
+                delete process.env.GITHUB_EVENT_PATH;
+            } else {
+                process.env.GITHUB_EVENT_PATH = prevPath;
+            }
+        }
+    });
+
     it("writes scoped.diff for a new-hunks plan", () => {
         // Three hunks, one of them new since the fingerprint: share 1/3 stays
         // under the tripwire threshold, so the scoped path actually runs.

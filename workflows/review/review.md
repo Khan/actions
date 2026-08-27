@@ -753,7 +753,8 @@ Read the plan; it is deterministic and final: never deepen or shallow it yoursel
 and never run the CLI yourself. A comment-triggered run whose `/review` a
 human posted always plans `full` (reason `manual-review-request`), whatever
 the mode dial says; a `/review` posted by our automation (a Bot-type account,
-or `khan-actions-bot`, whose shim fires one per push in Khan/webapp) follows
+or a `REVIEW_AUTOMATION_LOGINS` login, default `khan-actions-bot`, whose shim
+fires one per push in Khan/webapp) follows
 the mode dial like the push it stands in for. Its three guards are code, not your
 judgment: the one anchoring full review is taken at ready-for-review, a fingerprint
 overflow or a missing input forces `full`, and the divergence tripwire re-arms

@@ -14,17 +14,30 @@
  * follows the mode dial like the push it stands in for.
  */
 
+/** The automation logins assumed when `REVIEW_AUTOMATION_LOGINS` is unset. */
+export const DEFAULT_AUTOMATION_LOGINS = "khan-actions-bot";
+
 /**
  * `/review` comment authors whose ask is automation, never a human.
  * `comment.user.type === "Bot"` covers GitHub Apps (github-actions[bot]),
  * but khan-actions-bot is a classic-PAT machine account whose type is
- * `User` (it posts the shim's `/review` because a GITHUB_TOKEN comment
- * triggers no workflows), so it is named here; the review workflow's
- * job-level `if:` already treats the same account as one of our bots.
+ * `User` (it posts the webapp shim's `/review` because a GITHUB_TOKEN
+ * comment triggers no workflows), so it must be named by login. Deployment
+ * config rather than a compiled-in constant, same as `threads.ts`'s
+ * `REVIEW_BOT_LOGIN`: which account fronts a consumer's automation is a
+ * property of that installation, and a comma-separated
+ * `REVIEW_AUTOMATION_LOGINS` env lets a consumer whose shim posts under a
+ * different account fix it in config instead of waiting on a release. The
+ * comparison is case-folded ({@link isManualReviewRequest}); logins are
+ * case-insensitive on GitHub.
  */
-export const AUTOMATION_COMMENT_AUTHORS: ReadonlySet<string> = new Set([
-    "khan-actions-bot",
-]);
+export const automationCommentAuthors = (): ReadonlySet<string> =>
+    new Set(
+        (process.env.REVIEW_AUTOMATION_LOGINS ?? DEFAULT_AUTOMATION_LOGINS)
+            .split(",")
+            .map((login) => login.trim().toLowerCase())
+            .filter((login) => login !== ""),
+    );
 
 /** The triggering comment's author, from the runner's event payload. */
 export type CommentAuthor = {login?: string; type?: string};
@@ -32,7 +45,7 @@ export type CommentAuthor = {login?: string; type?: string};
 /**
  * Whether this run is an explicit human ask for a review: an
  * `issue_comment`-triggered run whose comment author is neither a Bot-type
- * account nor a named machine account ({@link AUTOMATION_COMMENT_AUTHORS}).
+ * account nor a named machine account ({@link automationCommentAuthors}).
  * An unreadable event payload on a comment trigger counts as manual: the
  * failure direction is more review, never a silently cheaper round.
  */
@@ -49,7 +62,7 @@ export const isManualReviewRequest = (
     if (author.type === "Bot") {
         return false;
     }
-    return !AUTOMATION_COMMENT_AUTHORS.has(author.login ?? "");
+    return !automationCommentAuthors().has((author.login ?? "").toLowerCase());
 };
 
 /** The slice of `fs` the event-payload read needs (injectable for tests). */

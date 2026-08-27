@@ -582,7 +582,8 @@ The dial governs push-shaped triggers. A `/review` comment a human posts on a
 consumer that keeps the comment trigger always plans `full` (reason
 `manual-review-request`): the point of the manual ask is "give me a real
 review now", and a reduced mode would otherwise answer it with a cheaper
-round. A `/review` posted by our automation (a Bot-type account, or
+round. A `/review` posted by our automation (a Bot-type account, or a login
+in the `REVIEW_AUTOMATION_LOGINS` env, comma-separated and defaulting to
 `khan-actions-bot`; Khan/webapp's shim posts one per push) is not a manual
 ask and follows the configured mode like the push it stands in for.
 

@@ -41,6 +41,49 @@ describe("isManualReviewRequest", () => {
         expect(isManualReviewRequest("issue_comment", undefined)).toBe(true);
         expect(isManualReviewRequest("issue_comment", {})).toBe(true);
     });
+
+    it("matches automation logins case-folded", () => {
+        expect(
+            isManualReviewRequest("issue_comment", {
+                login: "Khan-Actions-Bot",
+                type: "User",
+            }),
+        ).toBe(false);
+    });
+
+    it("REVIEW_AUTOMATION_LOGINS overrides the default list", () => {
+        // Deployment config, same as REVIEW_BOT_LOGIN: which account fronts
+        // a consumer's automation is a property of that installation.
+        const previous = process.env.REVIEW_AUTOMATION_LOGINS;
+        process.env.REVIEW_AUTOMATION_LOGINS = "Other-Shim-Bot, second-bot";
+        try {
+            expect(
+                isManualReviewRequest("issue_comment", {
+                    login: "other-shim-bot",
+                    type: "User",
+                }),
+            ).toBe(false);
+            expect(
+                isManualReviewRequest("issue_comment", {
+                    login: "second-bot",
+                    type: "User",
+                }),
+            ).toBe(false);
+            // The default is REPLACED, not extended.
+            expect(
+                isManualReviewRequest("issue_comment", {
+                    login: "khan-actions-bot",
+                    type: "User",
+                }),
+            ).toBe(true);
+        } finally {
+            if (previous === undefined) {
+                delete process.env.REVIEW_AUTOMATION_LOGINS;
+            } else {
+                process.env.REVIEW_AUTOMATION_LOGINS = previous;
+            }
+        }
+    });
 });
 
 describe("commentAuthorFromEvent", () => {
