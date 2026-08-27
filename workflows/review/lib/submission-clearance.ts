@@ -30,6 +30,7 @@
  * prose about the code under review.
  */
 
+import {parseRereviewStamp} from "./rereview-mode";
 import type {ReReviewStamp} from "./rereview-mode";
 
 /**
@@ -42,23 +43,42 @@ export const DISMISSAL_MESSAGE =
     "All blocking review threads are resolved; approval still requires a full-roster review round.";
 
 /**
- * The bot's live standing CHANGES_REQUESTED review ids from
- * `prior-reviews.json` (staged pre-agent, already filtered to the bot's
- * own reviews, chronological). GitHub derives a reviewer's effective
- * state from its latest APPROVED/CHANGES_REQUESTED review, so an entry a
- * later APPROVED superseded is NOT standing; every CHANGES_REQUESTED
- * after the last APPROVED is (dismissing only the newest would let an
- * older one resurface as the effective state). Entries without
- * `id`/`state` (pre-upgrade staging) do not count. Shared with the
- * dispatch gate's rule 5c and the dismissal executor so the three
- * surfaces cannot drift.
+ * THIS workflow's live standing CHANGES_REQUESTED review ids from a
+ * chronological review list (`prior-reviews.json`, or the executor's live
+ * fetch). Two scoping rules, both restrictive:
+ *
+ *   - Identity is the body's re-review stamp ({@link parseRereviewStamp}),
+ *     not the login: every Actions workflow reviewing with the default
+ *     token posts as the same `github-actions[bot]` account, and this
+ *     predicate feeds an authenticated dismissal, so a foreign workflow's
+ *     review must neither count as our standing block nor become a
+ *     dismissal target. Only this workflow's CLI renders the stamp into
+ *     every submitted body; pre-stamp-form reviews stop counting, which
+ *     degrades toward more review (the block stands until a full round
+ *     supersedes it with a genuine verdict).
+ *   - GitHub derives a reviewer's effective state from its latest
+ *     APPROVED/CHANGES_REQUESTED review, so an entry a later (stamped)
+ *     APPROVED superseded is NOT standing; every CHANGES_REQUESTED after
+ *     the last APPROVED is (dismissing only the newest would let an older
+ *     one resurface as the effective state).
+ *
+ * Entries without `id`/`state`/`body` (pre-upgrade staging) do not count.
+ * Shared by the plan CLI, the dispatch gate's rule 5c, and the dismissal
+ * executor so the three surfaces cannot drift.
  */
 export const standingChangesRequestedIds = (
     priorReviewsRaw: unknown,
 ): number[] => {
     let standing: number[] = [];
     for (const entry of Array.isArray(priorReviewsRaw) ? priorReviewsRaw : []) {
-        const {id, state} = (entry ?? {}) as {id?: unknown; state?: unknown};
+        const {id, state, body} = (entry ?? {}) as {
+            id?: unknown;
+            state?: unknown;
+            body?: unknown;
+        };
+        if (typeof body !== "string" || parseRereviewStamp(body) === null) {
+            continue;
+        }
         if (state === "APPROVED") {
             standing = [];
         } else if (state === "CHANGES_REQUESTED" && typeof id === "number") {
@@ -173,8 +193,11 @@ export const decideEventAndClearance = (
         const dismissIds = standingRcIds;
         if (dismissIds.length > 0) {
             dismissal = {reviewIds: dismissIds, message: DISMISSAL_MESSAGE};
+            // Intent, not fact: the note posts from the safe_outputs job
+            // regardless of whether the agent job's best-effort dismissal
+            // post-step executed, so it must not assert the block cleared.
             bodyNote =
-                "Note: every blocking objection is resolved; the standing request-changes review is dismissed rather than approved (approval requires a full-roster review round).";
+                "Note: every blocking objection is resolved; the standing request-changes review is being dismissed rather than approved (approval requires a full-roster review round; if the dismissal did not take effect, the block stands).";
             notes.push(
                 `dismissal staged for prior request-changes review(s) ${dismissIds.join(
                     ", ",
@@ -195,17 +218,12 @@ const REVIEW_DIR = "/tmp/gh-aw/review";
 /** The staged decision path (out/ is the one directory the run uploads). */
 export const DISMISS_DECISION_PATH = `${REVIEW_DIR}/out/dismiss-decision.json`;
 
-/**
- * The write half's fs dependency. `rmSync` is optional because older
- * callers' injected fakes predate the stale-decision clear; production
- * always passes `node:fs`, which has it, so the clear is best-effort only
- * in tests that do not care about it.
- */
+/** The write half's fs dependency (production passes `node:fs`). */
 export type ClearanceFs = {
     writeFileSync: (p: string, data: string) => void;
     mkdirSync: (p: string, opts: {recursive: boolean}) => void;
     existsSync: (p: string) => boolean;
-    rmSync?: (p: string, opts: {force: boolean}) => void;
+    rmSync: (p: string, opts: {force: boolean}) => void;
 };
 
 /**
@@ -229,7 +247,7 @@ export const stageDismissalDecision = (
             JSON.stringify(dismissal, null, 2),
         );
     } else if (fs.existsSync(DISMISS_DECISION_PATH)) {
-        fs.rmSync?.(DISMISS_DECISION_PATH, {force: true});
+        fs.rmSync(DISMISS_DECISION_PATH, {force: true});
     }
 };
 

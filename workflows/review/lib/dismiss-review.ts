@@ -7,11 +7,22 @@
  * objections are all resolved stages `out/dismiss-decision.json`
  * (`{reviewIds, message}`) instead of minting an approval no full roster
  * stands behind. This CLI reads that decision back and executes it with
- * `PUT /repos/{repo}/pulls/{n}/reviews/{id}/dismissals`. The decision file
- * lives in the agent-writable `out/` scratch directory, so its ids are
- * never trusted verbatim: only ids present as CHANGES_REQUESTED entries in
- * the pre-agent-staged `prior-reviews.json` execute (the dispatch gate
- * mirrors the same check, rule 5c, before this step runs).
+ * `PUT /repos/{repo}/pulls/{n}/reviews/{id}/dismissals`.
+ *
+ * Trust boundary, and why the allowlist is fetched live: everything under
+ * `/tmp/gh-aw/review/` is writable by the orchestrator (the decision file,
+ * `prior-reviews.json`, `pr-context.json` alike), and this step performs an
+ * authenticated write that removes a merge gate, so nothing staged may feed
+ * it. The dismissable set is re-derived from a live
+ * `GET /repos/{repo}/pulls/{n}/reviews` (the token this CLI already holds),
+ * scoped to reviews carrying this workflow's own re-review stamp (the
+ * shared {@link standingChangesRequestedIds} predicate; the login alone is
+ * every Actions workflow in the repo), and the repo/PR coordinates come
+ * from the runner's own env (`GITHUB_REPOSITORY`, the event payload at
+ * `GITHUB_EVENT_PATH`), not from staged JSON. The dispatch gate's rule 5c
+ * mirrors the same predicate over the staged copy before this step runs;
+ * that mirror is best-effort (same-directory input, documented fail-open),
+ * this one is authoritative. A failed fetch dismisses nothing.
  *
  * Why a post-step and not a safe output: the pinned gh-aw (v0.85.4) ships
  * no dismiss output, and `supersede-older-reviews` dismisses on every
@@ -23,26 +34,19 @@
  * Failure posture: every failure is a warning, never a red run. A dismissal
  * that does not happen leaves the block standing, which is the safe
  * direction (more review, never less); the next full-roster round clears it
- * with a genuine verdict. The known ordering window is documented at the
- * step: this runs in the agent job, before the safe_outputs job posts the
- * COMMENT review carrying the explanatory note, so a safe_outputs infra
- * failure can leave a dismissal whose note never posted. The dismissal
- * message itself renders in the PR timeline, so even that window is not
- * silent.
+ * with a genuine verdict, and the posted body note states the dismissal as
+ * intent, not fact, for exactly this case.
  *
- * Determinism boundary: staged JSON in, one authenticated REST call per
- * review id out. No model call, no prose about the code under review.
+ * Determinism boundary: staged JSON and one authenticated list call in, one
+ * authenticated REST call per review id out. No model call, no prose about
+ * the code under review.
  */
 
 import {
+    DISMISS_DECISION_PATH,
     DISMISSAL_MESSAGE,
     standingChangesRequestedIds,
 } from "./submission-clearance";
-
-const REVIEW_DIR = "/tmp/gh-aw/review";
-const DECISION_PATH = `${REVIEW_DIR}/out/dismiss-decision.json`;
-const PR_CONTEXT_PATH = `${REVIEW_DIR}/pr-context.json`;
-const PRIOR_REVIEWS_PATH = `${REVIEW_DIR}/prior-reviews.json`;
 
 export type DismissReviewFs = {
     readFileSync: (p: string, enc: "utf8") => string;
@@ -54,6 +58,14 @@ export type DismissPut = (
     path: string,
     body: {message: string},
 ) => Promise<{ok: boolean; status: number}>;
+
+/**
+ * One authenticated REST GET returning parsed JSON; injected like
+ * {@link DismissPut}. Throws or `ok: false` on failure.
+ */
+export type DismissGet = (
+    path: string,
+) => Promise<{ok: boolean; status: number; body: unknown}>;
 
 export type DismissReviewResult = {
     /** Review ids successfully dismissed. */
@@ -73,19 +85,56 @@ const readJsonIfPresent = (fs: DismissReviewFs, path: string): unknown => {
     }
 };
 
+/** The PR coordinates, from the runner's env (never from staged JSON). */
+export const prCoordinatesFromEnv = (
+    fs: DismissReviewFs,
+    repository: string | undefined = process.env["GITHUB_REPOSITORY"],
+    eventPath: string | undefined = process.env["GITHUB_EVENT_PATH"],
+): {repo: string; prNumber: number} | null => {
+    if (repository === undefined || repository === "") {
+        return null;
+    }
+    const event =
+        eventPath === undefined || eventPath === ""
+            ? undefined
+            : readJsonIfPresent(fs, eventPath);
+    const payload = (event ?? {}) as {
+        pull_request?: {number?: unknown};
+        issue?: {number?: unknown};
+    };
+    const prNumber = payload.pull_request?.number ?? payload.issue?.number;
+    return typeof prNumber === "number" ? {repo: repository, prNumber} : null;
+};
+
 /**
- * The review ids this run may dismiss at all: `prior-reviews.json`'s
- * standing CHANGES_REQUESTED entries (the shared latest-decisive-wins
- * predicate, submission-clearance.ts). That file is staged pre-agent by
- * stage-pr.ts (already filtered to the bot's own reviews), while the
- * decision file lives in `out/`, the orchestrator's scratch directory, so
- * the decision's ids are cross-checked here rather than trusted verbatim;
- * the dispatch gate mirrors the same check before this step runs.
+ * The live dismissable set: every review page fetched, then the shared
+ * standing predicate (stamp-scoped, latest-decisive-wins) over the
+ * chronological list. Throws on a failed page; the caller treats any throw
+ * as "dismiss nothing".
  */
-const dismissableIds = (fs: DismissReviewFs): Set<number> =>
-    new Set(
-        standingChangesRequestedIds(readJsonIfPresent(fs, PRIOR_REVIEWS_PATH)),
-    );
+const fetchDismissableIds = async (
+    get: DismissGet,
+    repo: string,
+    prNumber: number,
+): Promise<Set<number>> => {
+    const reviews: unknown[] = [];
+    for (let page = 1; ; page += 1) {
+        const response = await get(
+            `/repos/${repo}/pulls/${prNumber}/reviews?per_page=100&page=${page}`,
+        );
+        if (!response.ok) {
+            throw new Error(
+                `review list fetch failed (HTTP ${response.status})`,
+            );
+        }
+        const items = Array.isArray(response.body) ? response.body : [];
+        reviews.push(...items);
+        if (items.length < 100) {
+            break;
+        }
+    }
+    return new Set(standingChangesRequestedIds(reviews));
+};
 
 /**
  * Execute the staged dismissal decision, when one exists. No decision file
@@ -95,17 +144,21 @@ const dismissableIds = (fs: DismissReviewFs): Set<number> =>
 export const runDismissReviewCli = async (
     fs: DismissReviewFs,
     put: DismissPut,
+    get: DismissGet,
+    coordinates: {repo: string; prNumber: number} | null = prCoordinatesFromEnv(
+        fs,
+    ),
 ): Promise<DismissReviewResult> => {
     const dismissed: number[] = [];
     const warnings: string[] = [];
 
-    if (!fs.existsSync(DECISION_PATH)) {
+    if (!fs.existsSync(DISMISS_DECISION_PATH)) {
         return {dismissed, warnings};
     }
     // Normalized like the gate's rule 5c: a JSON `null` (or any
     // non-object) parses fine and must warn as unusable, not throw on
     // member access.
-    const parsed = readJsonIfPresent(fs, DECISION_PATH);
+    const parsed = readJsonIfPresent(fs, DISMISS_DECISION_PATH);
     const decision =
         typeof parsed === "object" && parsed !== null
             ? (parsed as {reviewIds?: unknown; message?: unknown})
@@ -114,53 +167,59 @@ export const runDismissReviewCli = async (
         // Present but unparseable is not the common no-op: the stated
         // failure posture is a warning, never silence.
         warnings.push(
-            `dismiss decision staged but unparseable (${DECISION_PATH}): block stands`,
+            `dismiss decision staged but unparseable (${DISMISS_DECISION_PATH}): block stands`,
         );
         return {dismissed, warnings};
     }
-    const allowed = dismissableIds(fs);
     const stagedIds = Array.isArray(decision.reviewIds)
         ? decision.reviewIds.filter(
               (id): id is number => typeof id === "number",
           )
         : [];
-    const reviewIds = stagedIds.filter((id) => allowed.has(id));
-    for (const id of stagedIds) {
-        if (!allowed.has(id)) {
-            warnings.push(
-                `dismissal of review ${id} refused: not a CHANGES_REQUESTED id in ${PRIOR_REVIEWS_PATH}`,
-            );
-        }
-    }
     // The message is never sent verbatim from the agent-writable file:
     // only the shared constant posts to the timeline, and a drifted staged
     // message marks the decision unusable (the gate checks the same thing,
     // rule 5c; this covers its fail-open path independently).
-    if (reviewIds.length === 0 || decision.message !== DISMISSAL_MESSAGE) {
+    if (stagedIds.length === 0 || decision.message !== DISMISSAL_MESSAGE) {
         warnings.push(
-            `dismiss decision staged but unusable (${DECISION_PATH}): block stands`,
+            `dismiss decision staged but unusable (${DISMISS_DECISION_PATH}): block stands`,
         );
         return {dismissed, warnings};
     }
-    const message = DISMISSAL_MESSAGE;
 
-    const prContext = readJsonIfPresent(fs, PR_CONTEXT_PATH) as
-        | {number?: unknown; repo?: unknown}
-        | undefined;
-    const prNumber = prContext?.number;
-    const repo = prContext?.repo;
-    if (typeof prNumber !== "number" || typeof repo !== "string") {
+    if (coordinates === null) {
         warnings.push(
-            `pr context not staged (${PR_CONTEXT_PATH}): block stands`,
+            "pr coordinates unavailable (GITHUB_REPOSITORY / event payload): block stands",
         );
         return {dismissed, warnings};
+    }
+    const {repo, prNumber} = coordinates;
+
+    let allowed: Set<number>;
+    try {
+        allowed = await fetchDismissableIds(get, repo, prNumber);
+    } catch (error) {
+        warnings.push(
+            `standing-review fetch failed (${
+                error instanceof Error ? error.message : String(error)
+            }): block stands`,
+        );
+        return {dismissed, warnings};
+    }
+    const reviewIds = stagedIds.filter((id) => allowed.has(id));
+    for (const id of stagedIds) {
+        if (!allowed.has(id)) {
+            warnings.push(
+                `dismissal of review ${id} refused: not one of this workflow's standing CHANGES_REQUESTED reviews`,
+            );
+        }
     }
 
     for (const id of reviewIds) {
         try {
             const response = await put(
                 `/repos/${repo}/pulls/${prNumber}/reviews/${id}/dismissals`,
-                {message},
+                {message: DISMISSAL_MESSAGE},
             );
             if (response.ok) {
                 dismissed.push(id);
@@ -188,22 +247,35 @@ if (typeof require !== "undefined" && require.main === module) {
     // The runner's own API base (GHES-safe), same as the repo's other
     // callers; the public default is the fallback.
     const apiBase = process.env["GITHUB_API_URL"] ?? "https://api.github.com";
-    const put: DismissPut = async (path, body) => {
+    const headers = () => {
         if (token === undefined || token === "") {
             throw new Error("GH_TOKEN is not set");
         }
+        return {
+            authorization: `Bearer ${token}`,
+            accept: "application/vnd.github+json",
+            "content-type": "application/json",
+        };
+    };
+    const put: DismissPut = async (path, body) => {
         const response = await fetch(`${apiBase}${path}`, {
             method: "PUT",
-            headers: {
-                authorization: `Bearer ${token}`,
-                accept: "application/vnd.github+json",
-                "content-type": "application/json",
-            },
+            headers: headers(),
             body: JSON.stringify(body),
         });
         return {ok: response.ok, status: response.status};
     };
-    void runDismissReviewCli(fs, put)
+    const get: DismissGet = async (path) => {
+        const response = await fetch(`${apiBase}${path}`, {
+            headers: headers(),
+        });
+        return {
+            ok: response.ok,
+            status: response.status,
+            body: response.ok ? await response.json() : undefined,
+        };
+    };
+    void runDismissReviewCli(fs, put, get)
         .then((result) => {
             for (const id of result.dismissed) {
                 // eslint-disable-next-line no-console

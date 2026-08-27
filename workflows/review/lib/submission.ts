@@ -168,7 +168,9 @@ export type SubmissionPlan = {
     bodyStats: PlanBodyStats;
 };
 
-export type SubmissionFs = RereviewCliFs;
+export type SubmissionFs = RereviewCliFs & {
+    rmSync: (p: string, opts: {force: boolean}) => void;
+};
 
 /**
  * The reconciler's open-human-thread lines as `path:line` keys (review.md
@@ -637,8 +639,7 @@ export const runSubmissionCli = (
         // inline comments post on a hold) and the blocking-only collapsed
         // pr-level claims (their collapsed section renders only on the
         // normal path).
-        // A hold returns before the clearance decision below, so a prior
-        // invocation's staged dismissal is cleared here instead.
+        // A hold returns before the clearance decision: clear a stale one.
         stageDismissalDecision(fs, null);
         const heldClaimLines = [...anchored, ...prLevelCollapsed].map(
             (claim) => {
@@ -950,7 +951,6 @@ export const runSubmissionCli = (
             ),
         priorApproveStands:
             priorStamp !== null && priorStamp.verdict === "APPROVE",
-        // rereview.section rides `head` (non-empty on resolved OR kept).
         bodyCarriesOnlyDepthNote:
             prLevelLines.length === 0 &&
             noteLines.length === 0 &&

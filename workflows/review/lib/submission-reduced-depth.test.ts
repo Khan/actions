@@ -1,10 +1,26 @@
 import {describe, it, expect} from "vitest";
 
+import {renderRereviewStamp} from "./rereview-mode";
 import {
     decideEventAndClearance,
     DISMISSAL_MESSAGE,
 } from "./submission-clearance";
 import {runSubmissionCli, type SubmissionFs} from "./submission";
+
+/**
+ * A review body carrying this workflow's stamp: identity for the standing
+ * predicate (a foreign workflow's review shares the bot login but never
+ * the stamp) AND the prior-verdict anchor (findLatestStamp reads the
+ * latest body stamp before falling back to cache-memory).
+ */
+const stampedBody = (verdict: string, head = "review body"): string =>
+    `${head}\n${renderRereviewStamp({
+        schemaVersion: 1,
+        depth: "full",
+        verdict,
+        anchorDraft: false,
+        anchorHunks: {"a.ts": ["deadbeef00000000"]},
+    })}`;
 
 /**
  * The full-roster approval rule and the reduced-depth clearance:
@@ -80,10 +96,17 @@ const stagedReduced = (
     [`${REVIEW}/prior-reviews.json`]: JSON.stringify(
         overrides.priorReviews ?? [
             {
-                body: "Changes requested — see inline comments.",
+                body: stampedBody(
+                    overrides.priorVerdict ?? "REQUEST_CHANGES",
+                    "Changes requested — see inline comments.",
+                ),
                 submittedAt: "2026-08-25T00:00:00Z",
                 id: 3001,
-                state: "CHANGES_REQUESTED",
+                state:
+                    (overrides.priorVerdict ?? "REQUEST_CHANGES") ===
+                    "REQUEST_CHANGES"
+                        ? "CHANGES_REQUESTED"
+                        : "DISMISSED",
             },
         ],
     ),
@@ -147,7 +170,7 @@ describe("the full-roster approval rule", () => {
         // The explanatory note rides the posted body (the timeline's
         // dismissal message alone would leave the review unexplained).
         expect(plan.body).toContain(
-            "Note: every blocking objection is resolved; the standing request-changes review is dismissed rather than approved (approval requires a full-roster review round).",
+            "Note: every blocking objection is resolved; the standing request-changes review is being dismissed rather than approved (approval requires a full-roster review round; if the dismissal did not take effect, the block stands).",
         );
         // Resolutions still queue; the round posts (skip is for the
         // nothing-to-say shape only).
@@ -169,9 +192,17 @@ describe("the full-roster approval rule", () => {
         const fs = makeFakeFs(
             stagedReduced("fast", {
                 priorReviews: [
-                    {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
+                    {
+                        body: stampedBody("REQUEST_CHANGES", "r1"),
+                        id: 3001,
+                        state: "CHANGES_REQUESTED",
+                    },
                     {body: "r2", id: 3002, state: "COMMENTED"},
-                    {body: "r3", id: 3003, state: "CHANGES_REQUESTED"},
+                    {
+                        body: stampedBody("REQUEST_CHANGES", "r3"),
+                        id: 3003,
+                        state: "CHANGES_REQUESTED",
+                    },
                 ],
             }),
         );
@@ -180,6 +211,35 @@ describe("the full-roster approval rule", () => {
             JSON.parse(fs.files[`${REVIEW}/out/dismiss-decision.json`])
                 .reviewIds,
         ).toEqual([3001, 3003]);
+    });
+
+    it("keeps the block standing when the stamp says COMMENT and a blocking thread is kept", () => {
+        // Recovery shape: the stamp is COMMENT (a prior demoted round), so
+        // the flip floor does not apply; the live CHANGES_REQUESTED still
+        // stands, and keptBlockingCount is the only thing between this
+        // round and dismissing a review whose blocking objection the
+        // reconciler kept.
+        const fs = makeFakeFs(
+            stagedReduced("fast", {
+                resolve: [],
+                keep: ["t1"],
+                priorReviews: [
+                    {
+                        body: stampedBody("REQUEST_CHANGES", "r1"),
+                        id: 3001,
+                        state: "CHANGES_REQUESTED",
+                    },
+                    {
+                        body: stampedBody("COMMENT", "r2"),
+                        id: 3002,
+                        state: "COMMENTED",
+                    },
+                ],
+            }),
+        );
+        const plan = runSubmissionCli(fs);
+        expect(fs.files[`${REVIEW}/out/dismiss-decision.json`]).toBe(undefined);
+        expect(plan.body).not.toContain("dismissed rather than approved");
     });
 
     it("keeps the block standing when a kept blocking thread remains (no dismissal)", () => {
@@ -214,12 +274,9 @@ describe("the full-roster approval rule", () => {
         // dismiss-stale-approvals on commits nothing reviewed); the new
         // path demotes and queues nothing at all.
         const fs = makeFakeFs(
-            stagedReduced("fast", {
-                priorVerdict: "APPROVE",
-                resolve: [],
-                // The stamp and the live state agree: nothing stands.
-                priorReviews: [{body: "r1", id: 3001, state: "DISMISSED"}],
-            }),
+            // The default staging derives the live state from the stamp
+            // verdict: a prior APPROVE means nothing stands.
+            stagedReduced("fast", {priorVerdict: "APPROVE", resolve: []}),
         );
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("COMMENT");
@@ -228,12 +285,7 @@ describe("the full-roster approval rule", () => {
     });
 
     it("posts the demoted COMMENT when the round resolved threads (the accountability surface)", () => {
-        const fs = makeFakeFs(
-            stagedReduced("fast", {
-                priorVerdict: "APPROVE",
-                priorReviews: [{body: "r1", id: 3001, state: "DISMISSED"}],
-            }),
-        );
+        const fs = makeFakeFs(stagedReduced("fast", {priorVerdict: "APPROVE"}));
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("COMMENT");
         expect(plan.skipSubmission).toBe(false);
@@ -265,7 +317,6 @@ describe("the full-roster approval rule", () => {
             stagedReduced("fast", {
                 priorVerdict: "APPROVE",
                 resolve: [],
-                priorReviews: [{body: "r1", id: 3001, state: "DISMISSED"}],
                 noteLines: [
                     "Note: claim validation not assessed this run (claim-validator output unavailable).",
                 ],
@@ -287,7 +338,6 @@ describe("the full-roster approval rule", () => {
                 priorVerdict: "APPROVE",
                 resolve: [],
                 keep: ["t2"],
-                priorReviews: [{body: "r1", id: 3001, state: "DISMISSED"}],
             }),
         );
         const plan = runSubmissionCli(fs);
@@ -302,7 +352,21 @@ describe("the full-roster approval rule", () => {
         // state (prior-reviews.json) keeps priorRcStands true, so this
         // round retries the clearance instead of skipping past it.
         const fs = makeFakeFs(
-            stagedReduced("fast", {priorVerdict: "COMMENT", resolve: []}),
+            stagedReduced("fast", {
+                resolve: [],
+                priorReviews: [
+                    {
+                        body: stampedBody("REQUEST_CHANGES", "r1"),
+                        id: 3001,
+                        state: "CHANGES_REQUESTED",
+                    },
+                    {
+                        body: stampedBody("COMMENT", "r2"),
+                        id: 3002,
+                        state: "COMMENTED",
+                    },
+                ],
+            }),
         );
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("COMMENT");
@@ -359,7 +423,6 @@ describe("the full-roster approval rule", () => {
         const staged = stagedReduced("fast", {
             priorVerdict: "APPROVE",
             resolve: [],
-            priorReviews: [{body: "r1", id: 3001, state: "DISMISSED"}],
         });
         staged[`${REVIEW}/dispatch-result.json`] = JSON.stringify({
             depth: "fast",
@@ -387,13 +450,21 @@ describe("the full-roster approval rule", () => {
         // review: the [blocked, then cleared] history every approved PR
         // carries must not read as a standing block (it would re-stage
         // dismissals and upgrade full-round COMMENTs on stale evidence).
+        // The latest body stamp (APPROVE) also anchors the prior verdict.
         const fs = makeFakeFs(
             stagedReduced("fast", {
-                priorVerdict: "APPROVE",
                 resolve: [],
                 priorReviews: [
-                    {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
-                    {body: "r2", id: 3005, state: "APPROVED"},
+                    {
+                        body: stampedBody("REQUEST_CHANGES", "r1"),
+                        id: 3001,
+                        state: "CHANGES_REQUESTED",
+                    },
+                    {
+                        body: stampedBody("APPROVE", "r2"),
+                        id: 3005,
+                        state: "APPROVED",
+                    },
                 ],
             }),
         );
@@ -422,7 +493,11 @@ describe("decideEventAndClearance (the pure decision)", () => {
         const result = decideEventAndClearance({
             ...base,
             priorReviewsRaw: [
-                {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
+                {
+                    body: stampedBody("REQUEST_CHANGES"),
+                    id: 3001,
+                    state: "CHANGES_REQUESTED",
+                },
             ],
         });
         expect(result.event).toBe("APPROVE");
@@ -434,8 +509,12 @@ describe("decideEventAndClearance (the pure decision)", () => {
         const result = decideEventAndClearance({
             ...base,
             priorReviewsRaw: [
-                {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
-                {body: "r2", id: 3005, state: "APPROVED"},
+                {
+                    body: stampedBody("REQUEST_CHANGES"),
+                    id: 3001,
+                    state: "CHANGES_REQUESTED",
+                },
+                {body: stampedBody("APPROVE"), id: 3005, state: "APPROVED"},
             ],
         });
         expect(result.event).toBe("COMMENT");
@@ -449,8 +528,12 @@ describe("decideEventAndClearance (the pure decision)", () => {
             verdictEvent: "APPROVE",
             depth: "fast",
             priorReviewsRaw: [
-                {body: "r1", id: 3001, state: "APPROVED"},
-                {body: "r2", id: 3007, state: "CHANGES_REQUESTED"},
+                {body: stampedBody("APPROVE"), id: 3001, state: "APPROVED"},
+                {
+                    body: stampedBody("REQUEST_CHANGES"),
+                    id: 3007,
+                    state: "CHANGES_REQUESTED",
+                },
             ],
         });
         expect(result.event).toBe("COMMENT");
@@ -469,7 +552,11 @@ describe("decideEventAndClearance (the pure decision)", () => {
             verdictEvent: "APPROVE",
             depth: "warp",
             priorReviewsRaw: [
-                {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
+                {
+                    body: stampedBody("REQUEST_CHANGES"),
+                    id: 3001,
+                    state: "CHANGES_REQUESTED",
+                },
             ],
         });
         expect(result.event).toBe("COMMENT");

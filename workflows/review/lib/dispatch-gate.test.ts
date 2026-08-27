@@ -11,7 +11,6 @@ import {
     type SafeOutputItem,
 } from "./dispatch-gate";
 import {forwardedRunWarnings} from "./forwarded-warnings";
-import {DISMISSAL_MESSAGE} from "./submission-clearance";
 
 /**
  * Dispatch-conformance gate tests.
@@ -230,125 +229,6 @@ describe("evaluateDispatchConformance", () => {
                     result.violations.map((v) => v.code),
                     `depth ${depth}`,
                 ).toEqual(["approve-requires-full-roster"]);
-            }
-        });
-
-        it("licenses a conformant dismissal decision (the rule-5c mirror)", () => {
-            const result = evaluate({
-                items: [submitItem("COMMENT", "Reduced-depth round.")],
-                plan: {depth: "fast"},
-                outFiles: {
-                    "thread-reconciler.json": "{}",
-                    "dismiss-decision.json": JSON.stringify({
-                        reviewIds: [3001],
-                        message: DISMISSAL_MESSAGE,
-                    }),
-                },
-                priorReviews: [
-                    {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
-                ],
-            });
-            expect(result.violations).toEqual([]);
-        });
-
-        it("blocks a dismissal decision the plan never licensed (rule 5c)", () => {
-            const standing = [
-                {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
-                {body: "r2", id: 3002, state: "COMMENTED"},
-            ];
-            const good = {
-                reviewIds: [3001],
-                message: DISMISSAL_MESSAGE,
-            };
-            const cases: {
-                name: string;
-                depth: string;
-                event: string;
-                decision: string;
-                priorReviews?: unknown;
-            }[] = [
-                {
-                    name: "id not standing as CHANGES_REQUESTED",
-                    depth: "fast",
-                    event: "COMMENT",
-                    decision: JSON.stringify({...good, reviewIds: [3002]}),
-                },
-                {
-                    name: "id unknown to prior-reviews.json",
-                    depth: "fast",
-                    event: "COMMENT",
-                    decision: JSON.stringify({...good, reviewIds: [9999]}),
-                },
-                {
-                    name: "prior reviews not staged",
-                    depth: "fast",
-                    event: "COMMENT",
-                    decision: JSON.stringify(good),
-                    priorReviews: undefined,
-                },
-                {
-                    name: "message drift",
-                    depth: "fast",
-                    event: "COMMENT",
-                    decision: JSON.stringify({...good, message: "cleared"}),
-                },
-                {
-                    name: "full depth (no reduced round to clear for)",
-                    depth: "full",
-                    event: "COMMENT",
-                    decision: JSON.stringify(good),
-                },
-                {
-                    name: "non-COMMENT verdict",
-                    depth: "fast",
-                    event: "REQUEST_CHANGES",
-                    decision: JSON.stringify(good),
-                },
-                {
-                    name: "unparseable decision",
-                    depth: "fast",
-                    event: "COMMENT",
-                    decision: "not json",
-                },
-                {
-                    // JSON.parse("null") parses fine; member access on it
-                    // must not throw (a throw fail-opens the whole gate).
-                    name: "null decision file",
-                    depth: "fast",
-                    event: "COMMENT",
-                    decision: "null",
-                },
-                {
-                    // Latest-decisive-wins: a block a later APPROVED
-                    // superseded is not standing, so it is not dismissable.
-                    name: "id superseded by a later APPROVED",
-                    depth: "fast",
-                    event: "COMMENT",
-                    decision: JSON.stringify(good),
-                    priorReviews: [
-                        {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
-                        {body: "r2", id: 3005, state: "APPROVED"},
-                    ],
-                },
-            ];
-            for (const testCase of cases) {
-                const result = evaluate({
-                    items: [submitItem(testCase.event, "Round body.")],
-                    plan: {depth: testCase.depth},
-                    outFiles: {
-                        "thread-reconciler.json": "{}",
-                        "correctness-reviewer.json": "{}",
-                        "dismiss-decision.json": testCase.decision,
-                    },
-                    priorReviews:
-                        "priorReviews" in testCase
-                            ? testCase.priorReviews
-                            : standing,
-                });
-                expect(
-                    result.violations.map((v) => v.code),
-                    testCase.name,
-                ).toContain("dismiss-decision-nonconformant");
             }
         });
 

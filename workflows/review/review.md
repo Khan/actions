@@ -331,11 +331,14 @@ post-steps:
   # standing review via the API instead of minting an approval no full
   # roster stands behind. Default `if:` (success()), so a run the gate
   # blocked (exit 1) never dismisses; the gate also checks the decision
-  # itself (rule 5c), and for the gate's own fail-open path (infra failure,
-  # exit 0 without deciding) the executor re-derives the id check from
-  # prior-reviews.json, so an unchecked decision still cannot dismiss a
-  # review the staging never licensed. Bot token for the same reason the
-  # resolve-thread safe output carries it: dismissal needs write access.
+  # itself (rule 5c) over the staged copy, and the executor trusts nothing
+  # staged at all: it re-derives the dismissable set from a live
+  # GET /pulls/{n}/reviews scoped to reviews carrying this workflow's own
+  # re-review stamp (the login alone is every Actions workflow), with the
+  # repo/PR coordinates from the runner's env, so neither the gate's
+  # fail-open path nor a rewritten staging directory can steer it. Bot
+  # token for the same reason the resolve-thread safe output carries it:
+  # dismissal needs write access.
   # Known window: this runs before the safe_outputs job posts the COMMENT
   # review carrying the explanatory note, so a safe_outputs infra failure
   # can leave a dismissal whose note never posted; the dismissal message

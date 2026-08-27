@@ -1,7 +1,9 @@
 import {describe, it, expect} from "vitest";
 
+import {renderRereviewStamp} from "./rereview-mode";
 import {
     runDismissReviewCli,
+    type DismissGet,
     type DismissPut,
     type DismissReviewFs,
 } from "./dismiss-review";
@@ -10,11 +12,17 @@ import {DISMISSAL_MESSAGE} from "./submission-clearance";
 /**
  * The reduced-depth clearance's executor: the plan CLI stages the decision
  * (`out/dismiss-decision.json`, submission.ts), this CLI executes it via
- * the dismissals API. Every failure is a warning (the block stands: more
- * review, never less), and no decision file is the common no-op case.
+ * the dismissals API. Nothing staged feeds the write path: the allowlist
+ * is fetched live (`GET /pulls/{n}/reviews`) and scoped to reviews whose
+ * body carries this workflow's own re-review stamp, the coordinates come
+ * from the runner's env, and every failure is a warning (the block stands:
+ * more review, never less). No decision file is the common no-op case.
  */
 
 const REVIEW = "/tmp/gh-aw/review";
+const COORDS = {repo: "Khan/webapp", prNumber: 41007};
+const REVIEWS_PATH_PAGE_1 =
+    "/repos/Khan/webapp/pulls/41007/reviews?per_page=100&page=1";
 
 const makeFakeFs = (files: Record<string, string> = {}): DismissReviewFs => ({
     readFileSync: (p: string) => {
@@ -26,6 +34,31 @@ const makeFakeFs = (files: Record<string, string> = {}): DismissReviewFs => ({
     existsSync: (p: string) => p in files,
 });
 
+/** A review body carrying this workflow's stamp (the identity marker). */
+const stampedBody = (verdict: string, head = "review body"): string =>
+    `${head}\n${renderRereviewStamp({
+        schemaVersion: 1,
+        depth: "full",
+        verdict,
+        anchorDraft: false,
+        anchorHunks: {"a.ts": ["deadbeef00000000"]},
+    })}`;
+
+/** The live review list a clean clearance round sees. */
+const liveReviews = (): unknown[] => [
+    {
+        id: 3001,
+        state: "CHANGES_REQUESTED",
+        body: stampedBody("REQUEST_CHANGES", "r1"),
+    },
+    {id: 3002, state: "COMMENTED", body: "a foreign workflow's comment"},
+    {
+        id: 3003,
+        state: "CHANGES_REQUESTED",
+        body: stampedBody("REQUEST_CHANGES", "r3"),
+    },
+];
+
 const stagedDecision = (
     reviewIds: unknown = [3001],
     message: string = DISMISSAL_MESSAGE,
@@ -34,18 +67,20 @@ const stagedDecision = (
         reviewIds,
         message,
     }),
-    [`${REVIEW}/pr-context.json`]: JSON.stringify({
-        number: 41007,
-        repo: "Khan/webapp",
-    }),
-    // The executor's id allowlist: only CHANGES_REQUESTED entries here
-    // may dismiss (the decision file itself is agent-writable).
-    [`${REVIEW}/prior-reviews.json`]: JSON.stringify([
-        {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
-        {body: "r2", id: 3002, state: "COMMENTED"},
-        {body: "r3", id: 3003, state: "CHANGES_REQUESTED"},
-    ]),
 });
+
+const recordingGet = (
+    reviews: unknown[] = liveReviews(),
+): {get: DismissGet; paths: string[]} => {
+    const paths: string[] = [];
+    return {
+        paths,
+        get: async (path) => {
+            paths.push(path);
+            return {ok: true, status: 200, body: reviews};
+        },
+    };
+};
 
 const recordingPut = (
     responses: Record<string, {ok: boolean; status: number}> = {},
@@ -61,11 +96,13 @@ const recordingPut = (
 };
 
 describe("runDismissReviewCli", () => {
-    it("dismisses each staged review id with the staged message", async () => {
+    it("dismisses each staged review id with the shared message", async () => {
         const {put, calls} = recordingPut();
         const result = await runDismissReviewCli(
             makeFakeFs(stagedDecision([3001, 3003])),
             put,
+            recordingGet().get,
+            COORDS,
         );
         expect(result.dismissed).toEqual([3001, 3003]);
         expect(result.warnings).toEqual([]);
@@ -83,9 +120,17 @@ describe("runDismissReviewCli", () => {
 
     it("is a no-op when no decision is staged (every full/scoped round)", async () => {
         const {put, calls} = recordingPut();
-        const result = await runDismissReviewCli(makeFakeFs({}), put);
+        const {get, paths} = recordingGet();
+        const result = await runDismissReviewCli(
+            makeFakeFs({}),
+            put,
+            get,
+            COORDS,
+        );
         expect(result).toEqual({dismissed: [], warnings: []});
         expect(calls).toEqual([]);
+        // Not even the list fetch: nothing to check a decision against.
+        expect(paths).toEqual([]);
     });
 
     it("warns and dismisses nothing on an unusable decision", async () => {
@@ -97,66 +142,115 @@ describe("runDismissReviewCli", () => {
             // the gate's fail-open path: only the shared constant posts.
             stagedDecision([3001], "drifted justification"),
             {[`${REVIEW}/out/dismiss-decision.json`]: "not json"},
+            // JSON.parse("null") parses fine; member access on it must
+            // warn as unusable, not throw.
+            {[`${REVIEW}/out/dismiss-decision.json`]: "null"},
         ]) {
             const {put, calls} = recordingPut();
-            const result = await runDismissReviewCli(makeFakeFs(files), put);
+            const result = await runDismissReviewCli(
+                makeFakeFs(files),
+                put,
+                recordingGet().get,
+                COORDS,
+            );
             expect(result.dismissed).toEqual([]);
             expect(calls).toEqual([]);
-            // A present-but-unusable decision always warns, unparseable
-            // included: the failure posture is a warning, never silence.
             expect(result.warnings.join(" ")).toContain("block stands");
         }
     });
 
-    it("refuses ids that are not standing CHANGES_REQUESTED reviews and keeps the rest", async () => {
-        // 3002 is COMMENTED and 9999 is unknown: neither may dismiss,
+    it("refuses ids that are not this workflow's standing blocks and keeps the rest", async () => {
+        // 3002 carries no stamp (a foreign workflow shares the login,
+        // never the stamp) and 9999 is unknown: neither may dismiss,
         // whatever the agent-writable decision file says. 3001 stands.
         const {put, calls} = recordingPut();
         const result = await runDismissReviewCli(
             makeFakeFs(stagedDecision([3001, 3002, 9999])),
             put,
+            recordingGet().get,
+            COORDS,
         );
         expect(result.dismissed).toEqual([3001]);
         expect(calls.map((call) => call.path)).toEqual([
             "/repos/Khan/webapp/pulls/41007/reviews/3001/dismissals",
         ]);
         expect(result.warnings).toEqual([
-            `dismissal of review 3002 refused: not a CHANGES_REQUESTED id in ${REVIEW}/prior-reviews.json`,
-            `dismissal of review 9999 refused: not a CHANGES_REQUESTED id in ${REVIEW}/prior-reviews.json`,
+            "dismissal of review 3002 refused: not one of this workflow's standing CHANGES_REQUESTED reviews",
+            "dismissal of review 9999 refused: not one of this workflow's standing CHANGES_REQUESTED reviews",
         ]);
     });
 
-    it("refuses an id a later APPROVED superseded (not standing)", async () => {
-        const files = stagedDecision([3001]);
-        files[`${REVIEW}/prior-reviews.json`] = JSON.stringify([
-            {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
-            {body: "r2", id: 3005, state: "APPROVED"},
-        ]);
+    it("refuses an id a later stamped APPROVED superseded (not standing)", async () => {
         const {put, calls} = recordingPut();
-        const result = await runDismissReviewCli(makeFakeFs(files), put);
+        const result = await runDismissReviewCli(
+            makeFakeFs(stagedDecision([3001])),
+            put,
+            recordingGet([
+                {
+                    id: 3001,
+                    state: "CHANGES_REQUESTED",
+                    body: stampedBody("REQUEST_CHANGES", "r1"),
+                },
+                {id: 3005, state: "APPROVED", body: stampedBody("APPROVE")},
+            ]).get,
+            COORDS,
+        );
         expect(result.dismissed).toEqual([]);
         expect(calls).toEqual([]);
         expect(result.warnings.join(" ")).toContain("refused");
     });
 
-    it("refuses every id when prior-reviews.json is not staged (block stands)", async () => {
-        const files = stagedDecision([3001]);
-        delete files[`${REVIEW}/prior-reviews.json`];
-        const {put, calls} = recordingPut();
-        const result = await runDismissReviewCli(makeFakeFs(files), put);
-        expect(result.dismissed).toEqual([]);
-        expect(calls).toEqual([]);
-        expect(result.warnings.join(" ")).toContain("refused");
+    it("fetches the allowlist live, never from staged JSON", async () => {
+        const {put} = recordingPut();
+        const {get, paths} = recordingGet();
+        await runDismissReviewCli(
+            makeFakeFs(stagedDecision([3001])),
+            put,
+            get,
+            COORDS,
+        );
+        expect(paths).toEqual([REVIEWS_PATH_PAGE_1]);
     });
 
-    it("warns when pr-context is missing (block stands)", async () => {
-        const files = stagedDecision();
-        delete files[`${REVIEW}/pr-context.json`];
+    it("dismisses nothing when the live fetch fails (block stands)", async () => {
         const {put, calls} = recordingPut();
-        const result = await runDismissReviewCli(makeFakeFs(files), put);
+        for (const get of [
+            (async () => ({
+                ok: false,
+                status: 502,
+                body: undefined,
+            })) as DismissGet,
+            (async () => {
+                throw new Error("ECONNRESET");
+            }) as DismissGet,
+        ]) {
+            const result = await runDismissReviewCli(
+                makeFakeFs(stagedDecision([3001])),
+                put,
+                get,
+                COORDS,
+            );
+            expect(result.dismissed).toEqual([]);
+            expect(result.warnings.join(" ")).toContain(
+                "standing-review fetch failed",
+            );
+        }
+        expect(calls).toEqual([]);
+    });
+
+    it("warns when the pr coordinates are unavailable (block stands)", async () => {
+        const {put, calls} = recordingPut();
+        const result = await runDismissReviewCli(
+            makeFakeFs(stagedDecision()),
+            put,
+            recordingGet().get,
+            null,
+        );
         expect(result.dismissed).toEqual([]);
         expect(calls).toEqual([]);
-        expect(result.warnings.join(" ")).toContain("pr context not staged");
+        expect(result.warnings.join(" ")).toContain(
+            "pr coordinates unavailable",
+        );
     });
 
     it("warns per failed dismissal and keeps going (an HTTP error never reds the run)", async () => {
@@ -169,6 +263,8 @@ describe("runDismissReviewCli", () => {
         const result = await runDismissReviewCli(
             makeFakeFs(stagedDecision([3001, 3003])),
             put,
+            recordingGet().get,
+            COORDS,
         );
         expect(result.dismissed).toEqual([3003]);
         expect(result.warnings).toEqual([
@@ -183,6 +279,8 @@ describe("runDismissReviewCli", () => {
         const result = await runDismissReviewCli(
             makeFakeFs(stagedDecision()),
             put,
+            recordingGet().get,
+            COORDS,
         );
         expect(result.dismissed).toEqual([]);
         expect(result.warnings).toEqual([
