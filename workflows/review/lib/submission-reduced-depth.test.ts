@@ -96,6 +96,17 @@ const stagedReduced = (
                 },
             ],
         },
+        {
+            thread_id: "t2",
+            path: "a.ts",
+            line: 9,
+            comments: [
+                {
+                    author: "github-actions[bot]",
+                    body: "**suggestion (non-blocking):** style",
+                },
+            ],
+        },
     ]),
     [`${REVIEW}/out/thread-reconciler.json`]: JSON.stringify({
         resolve: overrides.resolve ?? ["t1"],
@@ -200,7 +211,12 @@ describe("the full-roster approval rule", () => {
         // dismiss-stale-approvals on commits nothing reviewed); the new
         // path demotes and queues nothing at all.
         const fs = makeFakeFs(
-            stagedReduced("fast", {priorVerdict: "APPROVE", resolve: []}),
+            stagedReduced("fast", {
+                priorVerdict: "APPROVE",
+                resolve: [],
+                // The stamp and the live state agree: nothing stands.
+                priorReviews: [{body: "r1", id: 3001, state: "DISMISSED"}],
+            }),
         );
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("COMMENT");
@@ -209,7 +225,12 @@ describe("the full-roster approval rule", () => {
     });
 
     it("posts the demoted COMMENT when the round resolved threads (the accountability surface)", () => {
-        const fs = makeFakeFs(stagedReduced("fast", {priorVerdict: "APPROVE"}));
+        const fs = makeFakeFs(
+            stagedReduced("fast", {
+                priorVerdict: "APPROVE",
+                priorReviews: [{body: "r1", id: 3001, state: "DISMISSED"}],
+            }),
+        );
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("COMMENT");
         expect(plan.skipSubmission).toBe(false);
@@ -241,6 +262,7 @@ describe("the full-roster approval rule", () => {
             stagedReduced("fast", {
                 priorVerdict: "APPROVE",
                 resolve: [],
+                priorReviews: [{body: "r1", id: 3001, state: "DISMISSED"}],
                 noteLines: [
                     "Note: claim validation not assessed this run (claim-validator output unavailable).",
                 ],
@@ -250,6 +272,64 @@ describe("the full-roster approval rule", () => {
         expect(plan.event).toBe("COMMENT");
         expect(plan.skipSubmission).toBe(false);
         expect(plan.body).toContain("not assessed this run");
+    });
+
+    it("posts (never skips) when a kept thread renders the accountability section", () => {
+        // A kept NON-blocking thread does not floor the verdict, but the
+        // accountability section it renders rides the head: skipping would
+        // withhold that record (the third body carrier, beside the
+        // collapsed section and the disclosure notes).
+        const fs = makeFakeFs(
+            stagedReduced("fast", {
+                priorVerdict: "APPROVE",
+                resolve: [],
+                keep: ["t2"],
+                priorReviews: [{body: "r1", id: 3001, state: "DISMISSED"}],
+            }),
+        );
+        const plan = runSubmissionCli(fs);
+        expect(plan.event).toBe("COMMENT");
+        expect(plan.skipSubmission).toBe(false);
+    });
+
+    it("re-stages the dismissal when the stamp says COMMENT but the block still stands", () => {
+        // The failed-executor shape: a prior reduced round demoted and
+        // stamped COMMENT, but its best-effort dismissal never executed,
+        // so GitHub still shows the CHANGES_REQUESTED review. The live
+        // state (prior-reviews.json) keeps priorRcStands true, so this
+        // round retries the clearance instead of skipping past it.
+        const fs = makeFakeFs(
+            stagedReduced("fast", {priorVerdict: "COMMENT", resolve: []}),
+        );
+        const plan = runSubmissionCli(fs);
+        expect(plan.event).toBe("COMMENT");
+        expect(plan.skipSubmission).toBe(false);
+        expect(
+            JSON.parse(fs.files[`${REVIEW}/out/dismiss-decision.json`])
+                .reviewIds,
+        ).toEqual([3001]);
+    });
+
+    it("clears a stale dismissal decision on the hold path (the early return)", () => {
+        // A skipped core dimension resolves to HOLD_FOR_HUMAN, which
+        // returns before the clearance decision: the stale decision from
+        // an earlier invocation must still be cleared.
+        const fs = makeFakeFs({
+            ...stagedReduced("full"),
+            [`${REVIEW}/dispatch-result.json`]: JSON.stringify({
+                depth: "full",
+                claims: [],
+                skippedDimensions: [{dimension: "correctness-reviewer"}],
+                reconciliation: {resolve: [], keep: []},
+            }),
+            [`${REVIEW}/out/dismiss-decision.json`]: JSON.stringify({
+                reviewIds: [3001],
+                message: DISMISSAL_MESSAGE,
+            }),
+        });
+        const plan = runSubmissionCli(fs);
+        expect(plan.event).toBe("HOLD_FOR_HUMAN");
+        expect(fs.files[`${REVIEW}/out/dismiss-decision.json`]).toBe(undefined);
     });
 
     it("clears a stale dismissal decision when the plan decides against one", () => {

@@ -34,6 +34,8 @@
  * review id out. No model call, no prose about the code under review.
  */
 
+import {DISMISSAL_MESSAGE} from "./submission-clearance";
+
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const DECISION_PATH = `${REVIEW_DIR}/out/dismiss-decision.json`;
 const PR_CONTEXT_PATH = `${REVIEW_DIR}/pr-context.json`;
@@ -129,14 +131,17 @@ export const runDismissReviewCli = async (
             );
         }
     }
-    const message =
-        typeof decision.message === "string" ? decision.message : "";
-    if (reviewIds.length === 0 || message === "") {
+    // The message is never sent verbatim from the agent-writable file:
+    // only the shared constant posts to the timeline, and a drifted staged
+    // message marks the decision unusable (the gate checks the same thing,
+    // rule 5c; this covers its fail-open path independently).
+    if (reviewIds.length === 0 || decision.message !== DISMISSAL_MESSAGE) {
         warnings.push(
             `dismiss decision staged but unusable (${DECISION_PATH}): block stands`,
         );
         return {dismissed, warnings};
     }
+    const message = DISMISSAL_MESSAGE;
 
     const prContext = readJsonIfPresent(fs, PR_CONTEXT_PATH) as
         | {number?: unknown; repo?: unknown}

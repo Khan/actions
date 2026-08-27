@@ -93,6 +93,9 @@ describe("runDismissReviewCli", () => {
             stagedDecision([]),
             stagedDecision(["not-a-number"]),
             stagedDecision([3001], ""),
+            // The message half of the gate's rule 5c, mirrored here for
+            // the gate's fail-open path: only the shared constant posts.
+            stagedDecision([3001], "drifted justification"),
             {[`${REVIEW}/out/dismiss-decision.json`]: "not json"},
         ]) {
             const {put, calls} = recordingPut();

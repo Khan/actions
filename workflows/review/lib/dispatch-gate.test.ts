@@ -310,6 +310,14 @@ describe("evaluateDispatchConformance", () => {
                     event: "COMMENT",
                     decision: "not json",
                 },
+                {
+                    // JSON.parse("null") parses fine; member access on it
+                    // must not throw (a throw fail-opens the whole gate).
+                    name: "null decision file",
+                    depth: "fast",
+                    event: "COMMENT",
+                    decision: "null",
+                },
             ];
             for (const testCase of cases) {
                 const result = evaluate({

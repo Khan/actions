@@ -41,6 +41,21 @@ import type {ReReviewStamp} from "./rereview-mode";
 export const DISMISSAL_MESSAGE =
     "All blocking review threads are resolved; approval still requires a full-roster review round.";
 
+/**
+ * The bot's live standing CHANGES_REQUESTED review ids from
+ * `prior-reviews.json` (staged pre-agent, already filtered to the bot's
+ * own reviews). Entries without `id`/`state` (pre-upgrade staging) simply
+ * do not count.
+ */
+const standingChangesRequestedIds = (priorReviewsRaw: unknown): number[] =>
+    (Array.isArray(priorReviewsRaw) ? priorReviewsRaw : [])
+        .filter(
+            (entry): entry is {id: number; state: string} =>
+                typeof (entry as {id?: unknown}).id === "number" &&
+                (entry as {state?: unknown}).state === "CHANGES_REQUESTED",
+        )
+        .map((entry) => entry.id);
+
 export type ClearanceInput = {
     /** computeVerdict's event (the hold path returns before this runs). */
     verdictEvent: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
@@ -85,10 +100,23 @@ export const decideEventAndClearance = (
     input: ClearanceInput,
 ): ClearanceResult => {
     const notes: string[] = [];
+    // An unrecognized depth reads as reduced here (demote: more review,
+    // never less) while the gate's resolveDepth defaults unrecognized to
+    // full, the strictest frame for ITS dispatch rules; each side degrades
+    // toward safety in its own direction, so the mismatch is deliberate.
     const fullRoster = input.depth === "full" || input.depth === "scoped";
+    // The stamp alone is not enough: a reduced round's demoted COMMENT
+    // stamps its own verdict inside the agent step, before the best-effort
+    // dismissal post-step runs, so a failed dismissal would otherwise erase
+    // the one signal that retries the clearance (or upgrades at full depth)
+    // while the block still stands on GitHub. The live review state joins
+    // the stamp; after a successful dismissal the entry reads DISMISSED and
+    // the stamp is again the only carrier.
+    const standingRcIds = standingChangesRequestedIds(input.priorReviewsRaw);
     const priorRcStands =
-        input.priorStamp !== null &&
-        input.priorStamp.verdict === "REQUEST_CHANGES";
+        (input.priorStamp !== null &&
+            input.priorStamp.verdict === "REQUEST_CHANGES") ||
+        standingRcIds.length > 0;
 
     const commentWouldStrandPriorRc =
         input.verdictEvent === "COMMENT" && priorRcStands && fullRoster;
@@ -120,15 +148,7 @@ export const decideEventAndClearance = (
         input.keptBlockingCount === 0 &&
         input.suppressedBlocking === 0;
     if (wantsRcDismissal) {
-        const dismissIds = (
-            Array.isArray(input.priorReviewsRaw) ? input.priorReviewsRaw : []
-        )
-            .filter(
-                (entry): entry is {id: number; state: string} =>
-                    typeof (entry as {id?: unknown}).id === "number" &&
-                    (entry as {state?: unknown}).state === "CHANGES_REQUESTED",
-            )
-            .map((entry) => entry.id);
+        const dismissIds = standingRcIds;
         if (dismissIds.length > 0) {
             dismissal = {reviewIds: dismissIds, message: DISMISSAL_MESSAGE};
             bodyNote =
@@ -148,9 +168,23 @@ export const decideEventAndClearance = (
     return {event, approveDemoted, priorRcStands, notes, bodyNote, dismissal};
 };
 
+const REVIEW_DIR = "/tmp/gh-aw/review";
+
 /** The staged decision path (out/ is the one directory the run uploads). */
-export const DISMISS_DECISION_PATH =
-    "/tmp/gh-aw/review/out/dismiss-decision.json";
+export const DISMISS_DECISION_PATH = `${REVIEW_DIR}/out/dismiss-decision.json`;
+
+/**
+ * The write half's fs dependency. `rmSync` is optional because older
+ * callers' injected fakes predate the stale-decision clear; production
+ * always passes `node:fs`, which has it, so the clear is best-effort only
+ * in tests that do not care about it.
+ */
+export type ClearanceFs = {
+    writeFileSync: (p: string, data: string) => void;
+    mkdirSync: (p: string, opts: {recursive: boolean}) => void;
+    existsSync: (p: string) => boolean;
+    rmSync?: (p: string, opts: {force: boolean}) => void;
+};
 
 /**
  * Write the decision file (or clear a stale one). The decision itself is
@@ -163,16 +197,11 @@ export const DISMISS_DECISION_PATH =
  * conforming run at the gate).
  */
 export const stageDismissalDecision = (
-    fs: {
-        writeFileSync: (p: string, data: string) => void;
-        mkdirSync: (p: string, opts: {recursive: boolean}) => void;
-        existsSync: (p: string) => boolean;
-        rmSync?: (p: string, opts: {force: boolean}) => void;
-    },
+    fs: ClearanceFs,
     dismissal: ClearanceResult["dismissal"],
 ): void => {
     if (dismissal !== null) {
-        fs.mkdirSync("/tmp/gh-aw/review/out", {recursive: true});
+        fs.mkdirSync(`${REVIEW_DIR}/out`, {recursive: true});
         fs.writeFileSync(
             DISMISS_DECISION_PATH,
             JSON.stringify(dismissal, null, 2),
@@ -224,11 +253,12 @@ export const decideSkipSubmission = (input: {
     /**
      * Whether nothing rides the core body beyond the head and the depth
      * note: no collapsed observations section, no shed/unavailable
-     * disclosure note (submission.ts passes
-     * `prLevelLines.length === 0 && noteLines.length === 0`). The
-     * demoted body always carries the COMMENT head and the depth note,
-     * so it can never equal the bare approve line; this is its own
-     * emptiness signal.
+     * disclosure note, and no re-review accountability section (which
+     * rides the head and renders non-empty whenever the round resolved or
+     * kept threads, kept non-blocking ones included; submission.ts passes
+     * all three checks). The demoted body always carries the COMMENT head
+     * and the depth note, so it can never equal the bare approve line;
+     * this is its own emptiness signal.
      */
     bodyCarriesOnlyDepthNote: boolean;
 }): boolean =>

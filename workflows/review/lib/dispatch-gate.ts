@@ -474,9 +474,15 @@ export const evaluateDispatchConformance = (
     // into dismissing a review the staging never licensed.
     const rawDecision = input.outFiles["dismiss-decision.json"];
     if (rawDecision !== undefined) {
-        const decision = parseJson(rawDecision) as
-            | {reviewIds?: unknown; message?: unknown}
-            | undefined;
+        // Normalized like dispatch-gate-plan.ts's planStaged guard: a JSON
+        // `null` (or any non-object) parses fine and must read as no
+        // decision, not throw on member access (a throw here escapes
+        // before the gate decides and fail-opens ALL rules).
+        const parsed = parseJson(rawDecision);
+        const decision =
+            typeof parsed === "object" && parsed !== null
+                ? (parsed as {reviewIds?: unknown; message?: unknown})
+                : undefined;
         const allowedIds = new Set(
             (Array.isArray(input.priorReviews) ? input.priorReviews : [])
                 .filter(
@@ -515,7 +521,7 @@ export const evaluateDispatchConformance = (
 
     // Rule 5: the re-review flip veto (Step 4, reduced depths only): at
     // flip-gated/fast depth, a prior REQUEST_CHANGES (read from the stamp,
-    // not the review state) may flip to COMMENT only when the
+    // not the review state) may flip to a non-blocking verdict only when the
     // code-rendered accountability result says every blocking thread was
     // resolved (verdict.ts floors the verdict at REQUEST_CHANGES while a
     // kept blocking thread exists, mediums or no mediums; this chokepoint
