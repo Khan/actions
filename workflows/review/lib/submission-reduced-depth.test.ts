@@ -1,6 +1,9 @@
 import {describe, it, expect} from "vitest";
 
-import {DISMISSAL_MESSAGE} from "./submission-clearance";
+import {
+    decideEventAndClearance,
+    DISMISSAL_MESSAGE,
+} from "./submission-clearance";
 import {runSubmissionCli, type SubmissionFs} from "./submission";
 
 /**
@@ -349,8 +352,128 @@ describe("the full-roster approval rule", () => {
         expect(fs.files[`${REVIEW}/out/dismiss-decision.json`]).toBe(undefined);
     });
 
+    it("posts (never skips) when a pr-level claim folds into the body", () => {
+        // The third-and-a-half carrier: a validated pr-level claim (no
+        // path/line anchor) folds into prLevelLines, and skipping would
+        // withhold it.
+        const staged = stagedReduced("fast", {
+            priorVerdict: "APPROVE",
+            resolve: [],
+            priorReviews: [{body: "r1", id: 3001, state: "DISMISSED"}],
+        });
+        staged[`${REVIEW}/dispatch-result.json`] = JSON.stringify({
+            depth: "fast",
+            claims: [
+                {
+                    id: "c1",
+                    source: "correctness-reviewer",
+                    label: "note (non-blocking)",
+                    subject: "The guard never fires.",
+                    discussion: "d",
+                    failure_scenario: "f",
+                    confidence: 0.9,
+                },
+            ],
+            reconciliation: {resolve: [], keep: []},
+        });
+        const fs = makeFakeFs(staged);
+        const plan = runSubmissionCli(fs);
+        expect(plan.event).toBe("COMMENT");
+        expect(plan.skipSubmission).toBe(false);
+    });
+
+    it("a CHANGES_REQUESTED superseded by a later APPROVED is not standing", () => {
+        // GitHub derives the effective state from the latest decisive
+        // review: the [blocked, then cleared] history every approved PR
+        // carries must not read as a standing block (it would re-stage
+        // dismissals and upgrade full-round COMMENTs on stale evidence).
+        const fs = makeFakeFs(
+            stagedReduced("fast", {
+                priorVerdict: "APPROVE",
+                resolve: [],
+                priorReviews: [
+                    {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
+                    {body: "r2", id: 3005, state: "APPROVED"},
+                ],
+            }),
+        );
+        const plan = runSubmissionCli(fs);
+        expect(plan.event).toBe("COMMENT");
+        expect(plan.skipSubmission).toBe(true);
+        expect(fs.files[`${REVIEW}/out/dismiss-decision.json`]).toBe(undefined);
+    });
+
     // The scoped-depth COMMENT-to-APPROVE upgrade (the full-roster path
     // the rule deliberately keeps) is pinned in
     // submission-blocking-medium.test.ts ("the COMMENT verdict's
     // prior-state guard").
+});
+
+describe("decideEventAndClearance (the pure decision)", () => {
+    const base = {
+        verdictEvent: "COMMENT" as const,
+        depth: "full",
+        priorStamp: null,
+        keptBlockingCount: 0,
+        suppressedBlocking: 0,
+    };
+
+    it("upgrades a full-round COMMENT over a live standing block (failed-dismissal recovery)", () => {
+        const result = decideEventAndClearance({
+            ...base,
+            priorReviewsRaw: [
+                {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
+            ],
+        });
+        expect(result.event).toBe("APPROVE");
+        expect(result.priorRcStands).toBe(true);
+        expect(result.dismissal).toBe(null);
+    });
+
+    it("keeps a full-round COMMENT when a later APPROVED superseded the block", () => {
+        const result = decideEventAndClearance({
+            ...base,
+            priorReviewsRaw: [
+                {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
+                {body: "r2", id: 3005, state: "APPROVED"},
+            ],
+        });
+        expect(result.event).toBe("COMMENT");
+        expect(result.priorRcStands).toBe(false);
+        expect(result.dismissal).toBe(null);
+    });
+
+    it("stands a CHANGES_REQUESTED posted after the last APPROVED", () => {
+        const result = decideEventAndClearance({
+            ...base,
+            verdictEvent: "APPROVE",
+            depth: "fast",
+            priorReviewsRaw: [
+                {body: "r1", id: 3001, state: "APPROVED"},
+                {body: "r2", id: 3007, state: "CHANGES_REQUESTED"},
+            ],
+        });
+        expect(result.event).toBe("COMMENT");
+        expect(result.dismissal).toEqual({
+            reviewIds: [3007],
+            message: DISMISSAL_MESSAGE,
+        });
+    });
+
+    it("an unrecognized depth demotes but never stages a dismissal", () => {
+        // The gate resolves an unrecognized depth to full and would block
+        // the decision as unlicensed (rule 5c): two safe defaults must not
+        // cancel into a red run.
+        const result = decideEventAndClearance({
+            ...base,
+            verdictEvent: "APPROVE",
+            depth: "warp",
+            priorReviewsRaw: [
+                {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
+            ],
+        });
+        expect(result.event).toBe("COMMENT");
+        expect(result.approveDemoted).toBe(true);
+        expect(result.dismissal).toBe(null);
+    });
 });

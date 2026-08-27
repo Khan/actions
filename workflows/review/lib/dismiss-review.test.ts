@@ -126,6 +126,19 @@ describe("runDismissReviewCli", () => {
         ]);
     });
 
+    it("refuses an id a later APPROVED superseded (not standing)", async () => {
+        const files = stagedDecision([3001]);
+        files[`${REVIEW}/prior-reviews.json`] = JSON.stringify([
+            {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
+            {body: "r2", id: 3005, state: "APPROVED"},
+        ]);
+        const {put, calls} = recordingPut();
+        const result = await runDismissReviewCli(makeFakeFs(files), put);
+        expect(result.dismissed).toEqual([]);
+        expect(calls).toEqual([]);
+        expect(result.warnings.join(" ")).toContain("refused");
+    });
+
     it("refuses every id when prior-reviews.json is not staged (block stands)", async () => {
         const files = stagedDecision([3001]);
         delete files[`${REVIEW}/prior-reviews.json`];

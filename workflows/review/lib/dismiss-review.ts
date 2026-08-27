@@ -34,7 +34,10 @@
  * review id out. No model call, no prose about the code under review.
  */
 
-import {DISMISSAL_MESSAGE} from "./submission-clearance";
+import {
+    DISMISSAL_MESSAGE,
+    standingChangesRequestedIds,
+} from "./submission-clearance";
 
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const DECISION_PATH = `${REVIEW_DIR}/out/dismiss-decision.json`;
@@ -72,24 +75,17 @@ const readJsonIfPresent = (fs: DismissReviewFs, path: string): unknown => {
 
 /**
  * The review ids this run may dismiss at all: `prior-reviews.json`'s
- * CHANGES_REQUESTED entries. That file is staged pre-agent by stage-pr.ts
- * (already filtered to the bot's own reviews), while the decision file
- * lives in `out/`, the orchestrator's scratch directory, so the decision's
- * ids are cross-checked here rather than trusted verbatim; the dispatch
- * gate mirrors the same check before this step runs.
+ * standing CHANGES_REQUESTED entries (the shared latest-decisive-wins
+ * predicate, submission-clearance.ts). That file is staged pre-agent by
+ * stage-pr.ts (already filtered to the bot's own reviews), while the
+ * decision file lives in `out/`, the orchestrator's scratch directory, so
+ * the decision's ids are cross-checked here rather than trusted verbatim;
+ * the dispatch gate mirrors the same check before this step runs.
  */
-const dismissableIds = (fs: DismissReviewFs): Set<number> => {
-    const prior = readJsonIfPresent(fs, PRIOR_REVIEWS_PATH);
-    return new Set(
-        (Array.isArray(prior) ? prior : [])
-            .filter(
-                (review): review is {id: number; state: string} =>
-                    typeof (review as {id?: unknown}).id === "number" &&
-                    (review as {state?: unknown}).state === "CHANGES_REQUESTED",
-            )
-            .map((review) => review.id),
+const dismissableIds = (fs: DismissReviewFs): Set<number> =>
+    new Set(
+        standingChangesRequestedIds(readJsonIfPresent(fs, PRIOR_REVIEWS_PATH)),
     );
-};
 
 /**
  * Execute the staged dismissal decision, when one exists. No decision file
@@ -106,9 +102,14 @@ export const runDismissReviewCli = async (
     if (!fs.existsSync(DECISION_PATH)) {
         return {dismissed, warnings};
     }
-    const decision = readJsonIfPresent(fs, DECISION_PATH) as
-        | {reviewIds?: unknown; message?: unknown}
-        | undefined;
+    // Normalized like the gate's rule 5c: a JSON `null` (or any
+    // non-object) parses fine and must warn as unusable, not throw on
+    // member access.
+    const parsed = readJsonIfPresent(fs, DECISION_PATH);
+    const decision =
+        typeof parsed === "object" && parsed !== null
+            ? (parsed as {reviewIds?: unknown; message?: unknown})
+            : undefined;
     if (decision === undefined) {
         // Present but unparseable is not the common no-op: the stated
         // failure posture is a warning, never silence.

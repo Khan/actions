@@ -100,7 +100,10 @@ import {submissionPlanViolations} from "./dispatch-gate-plan";
 import {isBlockingLabel} from "./render-comment";
 import {parseLeadingLabel} from "./rereview";
 import {findLatestStamp, stampFromCacheMemory} from "./rereview-mode";
-import {DISMISSAL_MESSAGE} from "./submission-clearance";
+import {
+    DISMISSAL_MESSAGE,
+    standingChangesRequestedIds,
+} from "./submission-clearance";
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -483,15 +486,10 @@ export const evaluateDispatchConformance = (
             typeof parsed === "object" && parsed !== null
                 ? (parsed as {reviewIds?: unknown; message?: unknown})
                 : undefined;
+        // The shared latest-decisive-wins predicate (an entry a later
+        // APPROVED superseded is not standing and must not be dismissable).
         const allowedIds = new Set(
-            (Array.isArray(input.priorReviews) ? input.priorReviews : [])
-                .filter(
-                    (review): review is {id: number; state: string} =>
-                        typeof (review as {id?: unknown}).id === "number" &&
-                        (review as {state?: unknown}).state ===
-                            "CHANGES_REQUESTED",
-                )
-                .map((review) => review.id),
+            standingChangesRequestedIds(input.priorReviews),
         );
         const ids = Array.isArray(decision?.reviewIds)
             ? decision.reviewIds
@@ -514,7 +512,7 @@ export const evaluateDispatchConformance = (
                     `(queued: ${
                         verdictEvent ?? "none"
                     }), the shared justification message, and ` +
-                    `only CHANGES_REQUESTED review ids from prior-reviews.json`,
+                    `only standing CHANGES_REQUESTED review ids from prior-reviews.json`,
             });
         }
     }

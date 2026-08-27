@@ -44,17 +44,29 @@ export const DISMISSAL_MESSAGE =
 /**
  * The bot's live standing CHANGES_REQUESTED review ids from
  * `prior-reviews.json` (staged pre-agent, already filtered to the bot's
- * own reviews). Entries without `id`/`state` (pre-upgrade staging) simply
- * do not count.
+ * own reviews, chronological). GitHub derives a reviewer's effective
+ * state from its latest APPROVED/CHANGES_REQUESTED review, so an entry a
+ * later APPROVED superseded is NOT standing; every CHANGES_REQUESTED
+ * after the last APPROVED is (dismissing only the newest would let an
+ * older one resurface as the effective state). Entries without
+ * `id`/`state` (pre-upgrade staging) do not count. Shared with the
+ * dispatch gate's rule 5c and the dismissal executor so the three
+ * surfaces cannot drift.
  */
-const standingChangesRequestedIds = (priorReviewsRaw: unknown): number[] =>
-    (Array.isArray(priorReviewsRaw) ? priorReviewsRaw : [])
-        .filter(
-            (entry): entry is {id: number; state: string} =>
-                typeof (entry as {id?: unknown}).id === "number" &&
-                (entry as {state?: unknown}).state === "CHANGES_REQUESTED",
-        )
-        .map((entry) => entry.id);
+export const standingChangesRequestedIds = (
+    priorReviewsRaw: unknown,
+): number[] => {
+    let standing: number[] = [];
+    for (const entry of Array.isArray(priorReviewsRaw) ? priorReviewsRaw : []) {
+        const {id, state} = (entry ?? {}) as {id?: unknown; state?: unknown};
+        if (state === "APPROVED") {
+            standing = [];
+        } else if (state === "CHANGES_REQUESTED" && typeof id === "number") {
+            standing.push(id);
+        }
+    }
+    return standing;
+};
 
 export type ClearanceInput = {
     /** computeVerdict's event (the hold path returns before this runs). */
@@ -76,7 +88,11 @@ export type ClearanceResult = {
     event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
     /** True when a reduced depth demoted a would-be APPROVE. */
     approveDemoted: boolean;
-    /** True when the prior stamped verdict is REQUEST_CHANGES. */
+    /**
+     * True when the prior stamped verdict is REQUEST_CHANGES, or a
+     * standing (unsuperseded) CHANGES_REQUESTED review is live on the PR
+     * (the failed-dismissal recovery; see the derivation comment).
+     */
     priorRcStands: boolean;
     /** Artifact-only observations for the plan's notes. */
     notes: string[];
@@ -103,8 +119,14 @@ export const decideEventAndClearance = (
     // An unrecognized depth reads as reduced here (demote: more review,
     // never less) while the gate's resolveDepth defaults unrecognized to
     // full, the strictest frame for ITS dispatch rules; each side degrades
-    // toward safety in its own direction, so the mismatch is deliberate.
+    // toward safety in its own direction, so the demote mismatch is
+    // deliberate. The dismissal is different: it requires an explicitly
+    // recognized reduced depth, because a decision staged at a depth the
+    // gate reads as full would be blocked as unlicensed (rule 5c), turning
+    // two safe defaults into a red run.
     const fullRoster = input.depth === "full" || input.depth === "scoped";
+    const reducedRoster =
+        input.depth === "flip-gated" || input.depth === "fast";
     // The stamp alone is not enough: a reduced round's demoted COMMENT
     // stamps its own verdict inside the agent step, before the best-effort
     // dismissal post-step runs, so a failed dismissal would otherwise erase
@@ -142,7 +164,7 @@ export const decideEventAndClearance = (
     let bodyNote: string | null = null;
     let dismissal: ClearanceResult["dismissal"] = null;
     const wantsRcDismissal =
-        !fullRoster &&
+        reducedRoster &&
         priorRcStands &&
         event === "COMMENT" &&
         input.keptBlockingCount === 0 &&

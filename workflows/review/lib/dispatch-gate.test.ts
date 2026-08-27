@@ -318,6 +318,18 @@ describe("evaluateDispatchConformance", () => {
                     event: "COMMENT",
                     decision: "null",
                 },
+                {
+                    // Latest-decisive-wins: a block a later APPROVED
+                    // superseded is not standing, so it is not dismissable.
+                    name: "id superseded by a later APPROVED",
+                    depth: "fast",
+                    event: "COMMENT",
+                    decision: JSON.stringify(good),
+                    priorReviews: [
+                        {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
+                        {body: "r2", id: 3005, state: "APPROVED"},
+                    ],
+                },
             ];
             for (const testCase of cases) {
                 const result = evaluate({
