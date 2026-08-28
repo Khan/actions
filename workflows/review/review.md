@@ -300,8 +300,10 @@ pre-agent-steps:
   # step, a poisoned tool cache). `gh-aw-review-lib/` above sits in the
   # workspace the agent container mounts rw (as does all of /tmp), so those
   # two steps run from this clone under $RUNNER_TEMP instead, which the
-  # agent cannot reach (only the gh-aw/safeoutputs subdir is shared into
-  # the container). That unreachability is the security property, not
+  # agent cannot write: the container shares only $RUNNER_TEMP/gh-aw
+  # (read-only, except its safeoutputs/upload-artifacts subdir), and the
+  # clone sits BESIDE gh-aw/, not under it (review-pins.test.ts pins those
+  # mounts). That unreachability is the security property, not
   # timing, so the clone is staged HERE, before the agent's turn: a fetch
   # failure fails the job before any AI spend (the posture of every
   # pre-agent step), instead of adding a fail-open path to the blocking

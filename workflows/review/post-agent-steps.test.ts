@@ -59,6 +59,9 @@ describe("the post-agent execution rule", () => {
         );
         expect(step).not.toMatch(/^\s*continue-on-error:/m);
         expect(step).not.toMatch(/^\s*if:/m);
+        // ...and the retry loop must still end in the fatal exit (the YAML
+        // keys alone would pass with a warn-and-exit-0 wrapper).
+        expect(step).toMatch(/\bdone\s*\n\s*exit 1\b/);
     });
 
     it("executes every post-steps lib invocation from the clone", () => {

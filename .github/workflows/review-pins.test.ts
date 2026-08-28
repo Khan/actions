@@ -59,19 +59,29 @@ describe("compiled review.lock.yml pins", () => {
         expect(new Set(literals)).toEqual(new Set([sourceRef]));
     });
 
-    it("never mounts $RUNNER_TEMP itself into the agent container", () => {
+    it("never mounts $RUNNER_TEMP itself into the agent containers", () => {
         // The post-agent execution rule (workflows/review/review.md,
         // backstopped by workflows/review/post-agent-steps.test.ts) rests on
-        // the premise that the agent cannot reach the clone under
-        // $RUNNER_TEMP. That premise is gh-aw's compiled mount list, so pin
-        // it here against toolchain bumps: every RUNNER_TEMP volume mount in
-        // the lock must be scoped to the gh-aw/safeoutputs subdir.
+        // the premise that the agent cannot write the clone at
+        // $RUNNER_TEMP/gh-aw-review-lib-postagent. That premise is gh-aw's
+        // compiled mount lists, so pin BOTH forms here against toolchain
+        // bumps: the awf sandbox's --mount flags (the container the premise
+        // is about) and the MCP gateway's docker -v flags. Every
+        // RUNNER_TEMP mount must stay inside gh-aw/ (the postagent clone
+        // sits beside it, never under it), and every writable one inside
+        // gh-aw/safeoutputs.
         const mounts = [
-            ...reviewLock.matchAll(/-v '"\$\{RUNNER_TEMP\}"'([^:]*):/g),
-        ].map((m) => m[1]);
-        expect(mounts.length).toBeGreaterThan(0);
+            ...reviewLock.matchAll(/-v '"\$\{RUNNER_TEMP\}"'([^:]*):([^ ]*)/g),
+            ...reviewLock.matchAll(
+                /--mount "\$\{RUNNER_TEMP\}([^:"]*):([^"]*)"/g,
+            ),
+        ];
+        expect(mounts.length).toBeGreaterThan(2);
         for (const mount of mounts) {
-            expect(mount).toMatch(/^\/gh-aw\/safeoutputs/);
+            expect(mount[1]).toMatch(/^\/gh-aw(\/|$)/);
+            if (mount[2].endsWith(":rw") || mount[2].endsWith("rw'")) {
+                expect(mount[1]).toMatch(/^\/gh-aw\/safeoutputs/);
+            }
         }
     });
 });
