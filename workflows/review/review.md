@@ -233,7 +233,11 @@ sandbox:
 # workflows/review/version-sync.test.ts fails CI if the ref ever diverges from
 # the `review` package version. Steps that run lib scripts invoke them from
 # `gh-aw-review-lib/` via `npx -y tsx <script>`; npx fetches the runner on first
-# use, so the checkout needs no install step.
+# use, so the checkout needs no install step. One exception: the two
+# post-agent steps (the conformance gate and the credentialed dismissal) run
+# from a pre-staged copy of this checkout under $RUNNER_TEMP, out of the
+# agent's reach, never from this agent-writable one (rationale at the copy
+# step below).
 pre-agent-steps:
   - name: Check out shared review lib (Khan/actions)
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -242,6 +246,31 @@ pre-agent-steps:
       ref: review-v1.23.0
       path: gh-aw-review-lib
       persist-credentials: false
+
+  # The post-agent lib: the dispatch-conformance gate and the reduced-depth
+  # dismissal (post-steps below) execute lib code on the host AFTER the
+  # agent's turn, and nothing the agent can write may execute on the host
+  # then (host execution of a rewritten file, credentialed or not, can
+  # bridge to a sibling step's credentials: a spawned process outliving its
+  # step, a poisoned tool cache). `gh-aw-review-lib/` above sits in the
+  # workspace the agent container mounts rw (as does all of /tmp), so those
+  # two steps run from this copy under $RUNNER_TEMP instead, which the
+  # agent cannot write: the container shares only $RUNNER_TEMP/gh-aw
+  # (read-only, except its safeoutputs/upload-artifacts subdir), and the
+  # copy sits BESIDE gh-aw/, not under it (review-pins.test.ts pins those
+  # mounts here, the consumer-config checker pins them per install).
+  # A local copy of the checkout above, not a second fetch: at this point
+  # in the job that tree IS the pinned ref, un-tampered (the agent has not
+  # run), so re-cloning it from the network would add a flake surface and
+  # nothing else. Taken directly after the checkout, before the staging and
+  # npm ci steps touch anything, so the copy is pristine. A failure here
+  # reds the job before any AI spend (the posture of every pre-agent step);
+  # the rm is belt and braces for runner reuse (the agent cannot create the
+  # path).
+  - name: Copy the review lib for post-agent execution
+    run: |
+      rm -rf "${RUNNER_TEMP}/gh-aw-review-lib-postagent"
+      cp -a "${GITHUB_WORKSPACE}/gh-aw-review-lib" "${RUNNER_TEMP}/gh-aw-review-lib-postagent"
 
   # Deterministic pre-agent staging (slice 1 of the deterministic-orchestrator
   # migration; lib/stage-pr.ts): fetches the PR metadata, changed files, prior
@@ -288,6 +317,7 @@ pre-agent-steps:
   - name: Install dispatcher dependencies
     run: cd gh-aw-review-lib/workflows/review && npm ci --ignore-scripts --no-audit --no-fund
 
+
 # The dispatch-conformance gate (workflows/review/lib/dispatch-gate.ts): a code
 # chokepoint between the agent and the review submission. gh-aw compiles
 # `post-steps` into the agent job after "Ingest agent output" (which finalizes
@@ -312,11 +342,19 @@ pre-agent-steps:
 # anyway. The gate writes the sentinel only after deciding a real violation
 # (and it strips the queue in the same code path).
 post-steps:
+  # POST-AGENT EXECUTION RULE: nothing the agent can write may execute on
+  # the host after its turn. Both steps below run from the pre-staged copy
+  # under $RUNNER_TEMP (the pre-agent copy step above; the agent cannot
+  # write it), never from the agent-writable workspace checkout. The copy
+  # is present whenever the agent ran at all (its step failing reds the job
+  # before AI spend); if it is somehow gone anyway, the gate's npx fails
+  # open and the dismissal skips into its warning, same as any bootstrap
+  # failure.
   - name: Dispatch-conformance gate
     if: always()
     run: |
       rm -f /tmp/gh-aw/dispatch-gate.blocked
-      if (cd gh-aw-review-lib && npx -y tsx workflows/review/lib/dispatch-gate.ts); then
+      if (cd "${RUNNER_TEMP}/gh-aw-review-lib-postagent" && npx -y tsx workflows/review/lib/dispatch-gate.ts); then
         exit 0
       fi
       if [ -f /tmp/gh-aw/dispatch-gate.blocked ]; then
@@ -339,6 +377,13 @@ post-steps:
   # fail-open path nor a rewritten staging directory can steer it. Bot
   # token for the same reason the resolve-thread safe output carries it:
   # dismissal needs write access.
+  # Those guards defend the executor's INPUTS; the post-agent execution
+  # rule above (pre-staged copy under $RUNNER_TEMP, out of the agent's
+  # reach) defends the EXECUTABLE, which matters most here: this is the one
+  # step handing a repo-write PAT with unfirewalled egress to lib code
+  # (gh-aw's own credentialed scripts run from $RUNNER_TEMP for the same
+  # reason). No install step: the executor's import chain is relative lib
+  # files plus node builtins, and npx fetches tsx itself.
   # Known window: this runs before the safe_outputs job posts the COMMENT
   # review carrying the explanatory note, so a safe_outputs infra failure
   # can leave a dismissal whose note never posted; the dismissal message
@@ -355,7 +400,7 @@ post-steps:
       # on-disk event payload the CLI otherwise falls back to.
       REVIEW_PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
     run: |
-      if ! (cd gh-aw-review-lib && npx -y tsx workflows/review/lib/dismiss-review.ts); then
+      if ! (cd "${RUNNER_TEMP}/gh-aw-review-lib-postagent" && npx -y tsx workflows/review/lib/dismiss-review.ts); then
         echo "::warning title=review dismissal::step could not run (infra failure; block stands)"
       fi
       exit 0
@@ -363,19 +408,17 @@ post-steps:
 # Anthropic pricing overlay, so an AI credit means $0.01 of what Khan actually
 # pays.
 #
-# INERT UNTIL gh-aw v0.84.x GOES STABLE. `apiProxy.providers` was added to
-# awf-config-schema.json in AWF v0.27.43, and gh-aw gates emitting it on that
-# floor (`AWFAPIProxyProvidersMinVersion`) because older AWF strict config
-# validation rejects unknown apiProxy properties. gh-aw v0.83.4 (the version
-# this lock was compiled with, and still `releases/latest`) defaults to AWF
-# v0.27.42, one patch below, so it SILENTLY DROPS this block: it compiles
-# clean, the rates land only in the informational `GH_AW_INFO_MODEL_COSTS` env
-# var, and metering stays at list price. gh-aw raises `DefaultFirewallVersion`
-# to v0.27.43 as of v0.84.0, but v0.83.5/v0.84.0/v0.84.1 are all prereleases,
-# so recompiling is blocked on that line going stable rather than on any edit
-# here. Do NOT pin the extension to a prerelease to force it: nothing in CI
-# runs `gh aw compile`, so the next compile on stable would silently drop
-# `providers` again with no test failure.
+# LIVE since the toolchain moved to gh-aw v0.85.4, which defaults the
+# firewall to v0.27.44. The history, kept because the failure mode is
+# silent: `apiProxy.providers` was added to awf-config-schema.json in AWF
+# v0.27.43, and gh-aw gates emitting it on that floor
+# (`AWFAPIProxyProvidersMinVersion`) because older AWF strict config
+# validation rejects unknown apiProxy properties. Through gh-aw v0.83.4
+# (default firewall v0.27.42, one patch below the floor) the block was
+# SILENTLY DROPPED: the compile came out clean, the rates landed only in the
+# informational `GH_AW_INFO_MODEL_COSTS` env var, and metering stayed at
+# list price. A recompile with an older gh-aw would drop it again with no
+# test failure (nothing in CI runs `gh aw compile`), hence:
 #
 # VERIFY AFTER ANY TOOLCHAIN BUMP: `providers` must appear inside the
 # `apiProxy` object of both awf-config payloads in review.lock.yml. Its
@@ -431,6 +474,10 @@ models:
   # the `providers` overlay below live (the higher-precedence source). Do NOT
   # reach for `sandbox.agent.version: v0.27.43` to get there early; a version
   # is pinned here only to hold a release BACK, never to move one forward.
+  # That condition is met as of gh-aw v0.85.4 (firewall v0.27.44), so this
+  # fallback is now inert (the live `providers` overlay outranks it) and
+  # removable; kept for the moment so the pricing change ships separately
+  # from unrelated work.
   #
   # MINIMUM COMPILER: gh-aw >= v0.83.0 for `models.default-ai-credits-pricing`.
   # $/1M tokens. `input` and `output` are the only rates the schema accepts,

@@ -31,6 +31,15 @@
  * that mirror is best-effort (same-directory input, documented fail-open),
  * this one is authoritative. A failed fetch dismisses nothing.
  *
+ * The guards above defend this CLI's inputs; the post-step defends the
+ * executable. The agent-job workspace checkout of this repo is writable
+ * under the agent's uid, so a prompt-injected agent could rewrite this
+ * file mid-run; the post-steps therefore run it (and the conformance gate,
+ * since host execution of any agent-writable code could bridge to this
+ * step's token) from a copy of the pinned checkout under $RUNNER_TEMP,
+ * which the agent container cannot write, staged by a pre-agent step
+ * (review.md). Never from the workspace copy.
+ *
  * Why a post-step and not a safe output: the pinned gh-aw (v0.85.4) ships
  * no dismiss output, and `supersede-older-reviews` dismisses on every
  * replacement review, kept-blocking rounds included. Why the bot token:

@@ -20,6 +20,8 @@ import * as os from "os";
 import * as path from "path";
 import {describe, expect, it} from "vitest";
 
+import {runnerTempMountViolations} from "../../workflows/review/lib/check-consumer-config";
+
 const reviewMd = fs.readFileSync(
     new URL("./review.md", import.meta.url),
     "utf-8",
@@ -57,6 +59,29 @@ describe("compiled review.lock.yml pins", () => {
         const literals = reviewLock.match(/review-v\d+\.\d+\.\d+/g) ?? [];
         expect(literals.length).toBeGreaterThan(0);
         expect(new Set(literals)).toEqual(new Set([sourceRef]));
+    });
+
+    it("never mounts $RUNNER_TEMP itself into the agent containers", () => {
+        // The post-agent execution rule (workflows/review/review.md,
+        // backstopped by workflows/review/post-agent-steps.test.ts) rests on
+        // the premise that the agent cannot write the copy at
+        // $RUNNER_TEMP/gh-aw-review-lib-postagent. The semantics live in the
+        // shared helper the consumer-config checker runs against every
+        // install's lock, this repo's included, HERE. What this test adds is
+        // the spelling canaries, one per mount form so either silently
+        // dropping out of a recompiled lock is caught: the awf sandbox's
+        // --mount flags (the container the premise is about) and the MCP
+        // gateway's docker -v flags. A toolchain that respells its mounts
+        // makes the helper scan nothing, and these counts red that bump.
+        const awfMounts = [
+            ...reviewLock.matchAll(/--mount "\$\{RUNNER_TEMP\}[^:"]*:/g),
+        ];
+        const gatewayMounts = [
+            ...reviewLock.matchAll(/-v '"\$\{RUNNER_TEMP\}"'[^:]*:/g),
+        ];
+        expect(awfMounts.length).toBeGreaterThan(1);
+        expect(gatewayMounts.length).toBeGreaterThan(0);
+        expect(runnerTempMountViolations(reviewLock)).toEqual([]);
     });
 });
 
