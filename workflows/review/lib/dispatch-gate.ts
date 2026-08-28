@@ -43,9 +43,26 @@
  *   4. An APPROVE cannot carry a blocking inline comment (Step 4's verdict
  *      is a mechanical function of the labels; slice 3).
  *   5. The reduced-depth flip veto (Step 4): at flip-gated/fast depth over a
- *      prior REQUEST_CHANGES stamp, APPROVE requires `rereview.json`'s
+ *      prior REQUEST_CHANGES stamp, a COMMENT flip requires `rereview.json`'s
  *      `keptBlockingCount` to be zero (slice 3; the #246 flip-gate
  *      chokepoint).
+ *   5b. The full-roster approval rule: an APPROVE at flip-gated or
+ *      fast depth is blocked outright, prior stamp or none. Those depths
+ *      dispatch at most reconciliation plus the correctness pass, and an
+ *      approval no full roster stands behind must not post; the plan CLI
+ *      demotes it to COMMENT and clears a standing block by dismissal
+ *      instead (submission.ts).
+ *   5c. The dismissal mirror: the reduced-depth clearance is the one write
+ *      this pipeline performs outside the safe-output queue (the pinned
+ *      gh-aw ships no dismiss output), and its decision file lives in the
+ *      agent-writable `out/` scratch directory, so a staged
+ *      `dismiss-decision.json` is conformant only at a reduced depth,
+ *      alongside a queued COMMENT verdict, carrying the shared
+ *      justification message verbatim, with every review id present among
+ *      `prior-reviews.json`'s CHANGES_REQUESTED ids. A violation blocks the
+ *      run before the dismissal step (default `if:`, so it never runs after
+ *      a gate exit 1); the executor re-derives the id check independently
+ *      (dismiss-review.ts), covering the gate's own fail-open path.
  *   6. Every queued thread resolution must be one the reconciler decided
  *      (`out/thread-reconciler.json` `resolve`); the deficit direction is
  *      reported as executed-vs-decided accounting, never blocked (slice 3;
@@ -83,6 +100,10 @@ import {submissionPlanViolations} from "./dispatch-gate-plan";
 import {isBlockingLabel} from "./render-comment";
 import {parseLeadingLabel} from "./rereview";
 import {findLatestStamp, stampFromCacheMemory} from "./rereview-mode";
+import {
+    DISMISSAL_MESSAGE,
+    standingChangesRequestedIds,
+} from "./submission-clearance";
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -111,6 +132,8 @@ export type DispatchGateViolationCode =
     | "validator-missing-with-findings"
     | "shed-undisclosed"
     | "approve-with-blocking-comment"
+    | "approve-requires-full-roster"
+    | "dismiss-decision-nonconformant"
     | "flip-vetoed-kept-blocking"
     | "resolve-not-decided"
     | "submission-plan-mismatch";
@@ -425,9 +448,78 @@ export const evaluateDispatchConformance = (
         }
     }
 
+    // Rule 5b: the full-roster approval rule. An APPROVE at a
+    // reduced depth is blocked whatever the prior state: flip-gated and
+    // fast dispatch at most reconciliation plus the correctness pass, and
+    // approval is a full-roster statement. The plan CLI never plans one
+    // (it demotes to COMMENT and stages a dismissal decision for a
+    // standing block); this mirror catches an orchestrator that queues one
+    // anyway.
+    if (
+        verdictEvent === "APPROVE" &&
+        (depth === "flip-gated" || depth === "fast")
+    ) {
+        violations.push({
+            code: "approve-requires-full-roster",
+            dimension: "verdict",
+            detail:
+                `APPROVE queued at ${depth} depth; approval requires a depth that ` +
+                `dispatches the full roster (full/scoped), and a reduced-depth round ` +
+                `clears a standing block by dismissal instead`,
+        });
+    }
+
+    // Rule 5c: the dismissal mirror (module doc). Default-deny over the
+    // agent-writable decision file: unparseable, mis-depth, mis-verdict,
+    // message drift, and any id not standing as CHANGES_REQUESTED in
+    // prior-reviews.json all block. The executor re-checks the ids
+    // independently, so a gate that failed open still cannot be steered
+    // into dismissing a review the staging never licensed.
+    const rawDecision = input.outFiles["dismiss-decision.json"];
+    if (rawDecision !== undefined) {
+        // Normalized like dispatch-gate-plan.ts's planStaged guard: a JSON
+        // `null` (or any non-object) parses fine and must read as no
+        // decision, not throw on member access (a throw here escapes
+        // before the gate decides and fail-opens ALL rules).
+        const parsed = parseJson(rawDecision);
+        const decision =
+            typeof parsed === "object" && parsed !== null
+                ? (parsed as {reviewIds?: unknown; message?: unknown})
+                : undefined;
+        // The shared latest-decisive-wins predicate (an entry a later
+        // APPROVED superseded is not standing and must not be dismissable).
+        const allowedIds = new Set(
+            standingChangesRequestedIds(input.priorReviews),
+        );
+        const ids = Array.isArray(decision?.reviewIds)
+            ? decision.reviewIds
+            : null;
+        const conforms =
+            decision !== undefined &&
+            (depth === "flip-gated" || depth === "fast") &&
+            verdictEvent === "COMMENT" &&
+            decision.message === DISMISSAL_MESSAGE &&
+            ids !== null &&
+            ids.length > 0 &&
+            ids.every((id) => typeof id === "number" && allowedIds.has(id));
+        if (!conforms) {
+            violations.push({
+                code: "dismiss-decision-nonconformant",
+                dimension: "verdict",
+                detail:
+                    `out/dismiss-decision.json is staged but not licensed by the plan: a dismissal ` +
+                    `requires a reduced depth (this run: ${depth}), a queued COMMENT verdict ` +
+                    `(queued: ${
+                        verdictEvent ?? "none"
+                    }), the shared justification message, and ` +
+                    `only standing CHANGES_REQUESTED review ids from prior-reviews.json`,
+            });
+        }
+    }
+
     // Rule 5: the re-review flip veto (Step 4, reduced depths only): at
     // flip-gated/fast depth, a prior REQUEST_CHANGES (read from the stamp,
-    // not the review state) may flip to APPROVE or COMMENT only when the
+    // not the review state) may flip to a non-blocking verdict only when the
     // code-rendered accountability result says every blocking thread was
     // resolved (verdict.ts floors the verdict at REQUEST_CHANGES while a
     // kept blocking thread exists, mediums or no mediums; this chokepoint
@@ -462,7 +554,7 @@ export const evaluateDispatchConformance = (
                     code: "flip-vetoed-kept-blocking",
                     dimension: "verdict",
                     detail:
-                        `APPROVE queued at ${depth} depth over a prior REQUEST_CHANGES stamp with ` +
+                        `${verdictEvent} queued at ${depth} depth over a prior REQUEST_CHANGES stamp with ` +
                         `${kept} kept blocking thread(s) (rereview.json keptBlockingCount); the flip rule requires zero`,
                 });
             } else if (typeof kept !== "number") {

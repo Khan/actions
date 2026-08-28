@@ -14,6 +14,7 @@ import {
     type SafeOutputItem,
 } from "./dispatch-gate";
 import {renderRereviewStamp, STAMP_SCHEMA_VERSION} from "./rereview-mode";
+import {DISMISSAL_MESSAGE} from "./submission-clearance";
 
 /**
  * Dispatch-conformance gate hardening tests: the review-feedback rounds
@@ -106,7 +107,7 @@ describe("fail-open ordering and disclosure precision (review feedback)", () => 
 
     it("flags a present-but-unparseable validator output with findings queued", () => {
         const result = evaluate({
-            items: [commentItem(), submitItem("APPROVE", "")],
+            items: [commentItem(), submitItem("COMMENT", "")],
             plan: {depth: "fast"},
             outFiles: {"claim-validator.json": "not json"},
         });
@@ -317,8 +318,8 @@ describe("third-round nits: keep-list survivors, template coupling, summary", ()
                 items: [
                     {
                         type: "submit_pull_request_review",
-                        event: "APPROVE",
-                        body: "Approved — no blocking issues found.",
+                        event: "COMMENT",
+                        body: "Reduced-depth round; nothing blocks.",
                     },
                 ],
             }),
@@ -391,8 +392,16 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
                 }),
             },
         ];
+        // COMMENT, not APPROVE: rule 5b blocks every reduced-depth APPROVE
+        // outright, so the kept-blocking veto's live surface is the COMMENT
+        // flip (the reduced-depth clearance path).
         const base = {
-            items: [submitItem("APPROVE", "")],
+            items: [
+                submitItem(
+                    "COMMENT",
+                    "Commented — medium-importance findings found; nothing blocks.",
+                ),
+            ],
             plan: {depth: "fast"},
             outFiles: {"thread-reconciler.json": "{}"},
             priorReviews: stampedPrior,
@@ -422,20 +431,15 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
             rereviewAccounting: {keptBlockingCount: 2},
         });
         expect(full.conformant).toBe(true);
-        // A COMMENT flip is vetoed the same way: it cannot clear the prior
-        // REQUEST_CHANGES state, but the chokepoint mirrors verdict.ts's
-        // floor for the no-plan case regardless of the event flavor.
-        const commentFlip = evaluate({
+        // An APPROVE at reduced depth trips the full-roster rule AND the
+        // kept-blocking veto: two independent chokepoints, both report.
+        const approveFlip = evaluate({
             ...base,
-            items: [
-                submitItem(
-                    "COMMENT",
-                    "Commented — medium-importance findings found; nothing blocks.",
-                ),
-            ],
+            items: [submitItem("APPROVE", "")],
             rereviewAccounting: {keptBlockingCount: 2},
         });
-        expect(commentFlip.violations.map((v) => v.code)).toEqual([
+        expect(approveFlip.violations.map((v) => v.code)).toEqual([
+            "approve-requires-full-roster",
             "flip-vetoed-kept-blocking",
         ]);
     });
@@ -445,7 +449,7 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
         // the flip rule anchors on the same cache-memory carrier the plan
         // CLI used.
         const vetoed = evaluate({
-            items: [submitItem("APPROVE", "")],
+            items: [submitItem("COMMENT", "")],
             plan: {depth: "fast"},
             outFiles: {"thread-reconciler.json": "{}"},
             priorReviews: [{body: "Changes requested — see inline comments."}],
@@ -461,7 +465,7 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
         ]);
         // An invalid cache record anchors nothing: fail-open, no veto.
         const open = evaluate({
-            items: [submitItem("APPROVE", "")],
+            items: [submitItem("COMMENT", "")],
             plan: {depth: "fast"},
             outFiles: {"thread-reconciler.json": "{}"},
             priorReviews: [{body: "no stamp"}],
@@ -526,7 +530,7 @@ describe("staged-input robustness (slice 3 re-review)", () => {
             anchorHunks: {},
         });
         const result = evaluate({
-            items: [submitItem("APPROVE", "")],
+            items: [submitItem("COMMENT", "")],
             plan: {depth: "fast"},
             outFiles: {},
             priorReviews: [null, 42, "junk", {nobody: true}, {body: stamp}],
@@ -701,5 +705,198 @@ describe("rule 7 folds the fingerprint stamp out of the body comparison", () => 
         });
         const swapped = planBody.replace(stamp, forged);
         expect(bodyMismatches(swapped)).toHaveLength(1);
+    });
+});
+
+describe("rule 7 honors the demoted-COMMENT skip (the reduced-depth sibling)", () => {
+    // The plan CLI owns the predicate (skipSubmission,
+    // submission-clearance.ts); the gate defers to the staged boolean, so
+    // an empty queue is conformant exactly when the plan says skip.
+    const skippedPlan = (skipSubmission: boolean) => ({
+        event: "COMMENT",
+        body: "Reduced-depth round.\nNote: re-review ran at fast depth (re-review mode fast).",
+        comments: [],
+        skipSubmission,
+    });
+
+    it("an empty queue is conformant when the demoted plan skips", () => {
+        const result = evaluate({
+            items: [{type: "upload_artifact", path: "out"} as SafeOutputItem],
+            plan: {depth: "fast"},
+            outFiles: {"thread-reconciler.json": "{}"},
+            submissionPlan: skippedPlan(true),
+        });
+        expect(result.violations).toEqual([]);
+    });
+
+    it("an empty queue over a non-skipping demoted plan is a mismatch", () => {
+        const result = evaluate({
+            items: [{type: "upload_artifact", path: "out"} as SafeOutputItem],
+            plan: {depth: "fast"},
+            outFiles: {"thread-reconciler.json": "{}"},
+            submissionPlan: skippedPlan(false),
+        });
+        expect(result.violations.map((v) => v.code)).toContain(
+            "submission-plan-mismatch",
+        );
+    });
+});
+
+describe("rule 5c: the dismissal-decision mirror", () => {
+    /** A body carrying this workflow's stamp (the standing identity). */
+    const stampedBody = (verdict: string, head = "review body"): string =>
+        `${head}\n${renderRereviewStamp({
+            schemaVersion: STAMP_SCHEMA_VERSION,
+            depth: "full",
+            verdict,
+            anchorDraft: false,
+            anchorHunks: {"a.ts": ["deadbeef00000000"]},
+        })}`;
+
+    it("licenses a conformant dismissal decision", () => {
+        const result = evaluate({
+            items: [submitItem("COMMENT", "Reduced-depth round.")],
+            plan: {depth: "fast"},
+            outFiles: {
+                "thread-reconciler.json": "{}",
+                "dismiss-decision.json": JSON.stringify({
+                    reviewIds: [3001],
+                    message: DISMISSAL_MESSAGE,
+                }),
+            },
+            priorReviews: [
+                {
+                    body: stampedBody("REQUEST_CHANGES", "r1"),
+                    id: 3001,
+                    state: "CHANGES_REQUESTED",
+                },
+            ],
+        });
+        expect(result.violations).toEqual([]);
+    });
+
+    it("blocks a dismissal decision the plan never licensed", () => {
+        const standing = [
+            {
+                body: stampedBody("REQUEST_CHANGES", "r1"),
+                id: 3001,
+                state: "CHANGES_REQUESTED",
+            },
+            {body: "r2", id: 3002, state: "COMMENTED"},
+        ];
+        const good = {
+            reviewIds: [3001],
+            message: DISMISSAL_MESSAGE,
+        };
+        const cases: {
+            name: string;
+            depth: string;
+            event: string;
+            decision: string;
+            priorReviews?: unknown;
+        }[] = [
+            {
+                name: "id not standing as CHANGES_REQUESTED",
+                depth: "fast",
+                event: "COMMENT",
+                decision: JSON.stringify({...good, reviewIds: [3002]}),
+            },
+            {
+                name: "id unknown to prior-reviews.json",
+                depth: "fast",
+                event: "COMMENT",
+                decision: JSON.stringify({...good, reviewIds: [9999]}),
+            },
+            {
+                name: "prior reviews not staged",
+                depth: "fast",
+                event: "COMMENT",
+                decision: JSON.stringify(good),
+                priorReviews: undefined,
+            },
+            {
+                name: "message drift",
+                depth: "fast",
+                event: "COMMENT",
+                decision: JSON.stringify({...good, message: "cleared"}),
+            },
+            {
+                name: "full depth (no reduced round to clear for)",
+                depth: "full",
+                event: "COMMENT",
+                decision: JSON.stringify(good),
+            },
+            {
+                name: "non-COMMENT verdict",
+                depth: "fast",
+                event: "REQUEST_CHANGES",
+                decision: JSON.stringify(good),
+            },
+            {
+                name: "unparseable decision",
+                depth: "fast",
+                event: "COMMENT",
+                decision: "not json",
+            },
+            {
+                // JSON.parse("null") parses fine; member access on it
+                // must not throw (a throw fail-opens the whole gate).
+                name: "null decision file",
+                depth: "fast",
+                event: "COMMENT",
+                decision: "null",
+            },
+            {
+                // Latest-decisive-wins: a block a later APPROVED
+                // superseded is not standing, so it is not dismissable.
+                name: "id superseded by a later APPROVED",
+                depth: "fast",
+                event: "COMMENT",
+                decision: JSON.stringify(good),
+                priorReviews: [
+                    {
+                        body: stampedBody("REQUEST_CHANGES", "r1"),
+                        id: 3001,
+                        state: "CHANGES_REQUESTED",
+                    },
+                    {
+                        body: stampedBody("APPROVE", "r2"),
+                        id: 3005,
+                        state: "APPROVED",
+                    },
+                ],
+            },
+            {
+                // The login is shared by every Actions workflow; only
+                // the stamp is ours. An unstamped CHANGES_REQUESTED is
+                // foreign and never dismissable.
+                name: "unstamped (foreign) CHANGES_REQUESTED id",
+                depth: "fast",
+                event: "COMMENT",
+                decision: JSON.stringify(good),
+                priorReviews: [
+                    {body: "r1", id: 3001, state: "CHANGES_REQUESTED"},
+                ],
+            },
+        ];
+        for (const testCase of cases) {
+            const result = evaluate({
+                items: [submitItem(testCase.event, "Round body.")],
+                plan: {depth: testCase.depth},
+                outFiles: {
+                    "thread-reconciler.json": "{}",
+                    "correctness-reviewer.json": "{}",
+                    "dismiss-decision.json": testCase.decision,
+                },
+                priorReviews:
+                    "priorReviews" in testCase
+                        ? testCase.priorReviews
+                        : standing,
+            });
+            expect(
+                result.violations.map((v) => v.code),
+                testCase.name,
+            ).toContain("dismiss-decision-nonconformant");
+        }
     });
 });

@@ -41,6 +41,9 @@ const makeFakeFs = (
         existsSync: (p: string) =>
             p in state || Object.keys(state).some((f) => f.startsWith(`${p}/`)),
         mkdirSync: () => {},
+        rmSync: (p: string) => {
+            delete state[p];
+        },
     };
 };
 

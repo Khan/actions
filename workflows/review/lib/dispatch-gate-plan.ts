@@ -17,9 +17,11 @@
  *     anything beyond that is a splice (#244) and blocks. The rule also
  *     owns the NO-submission shapes: queued comments with no submit would
  *     land as an ungated COMMENT review, and a silently-dropped plan would
- *     withhold a REQUEST_CHANGES verdict (or a disclosure), so only an
- *     APPROVE plan with no comments and a bare approve body may
- *     legitimately queue nothing (the Step 6 redundant-approval skip).
+ *     withhold a REQUEST_CHANGES verdict (or a disclosure), so nothing may
+ *     queue unless the plan's own `skipSubmission` says so (the plan CLI's
+ *     predicate, submission-clearance.ts: the redundant-approval skip and
+ *     its reduced-depth demoted-COMMENT sibling; for a plan staged before
+ *     the field existed, the bare-approve derivation below).
  *   - A HOLD_FOR_HUMAN plan (submission.ts's hold path: a core review pass
  *     produced no output on a would-be approval) is the inverse shape: no
  *     review submission, no inline comments, no thread resolutions, and
@@ -192,9 +194,7 @@ export const submissionPlanViolations = (
                         planStaged.event,
                     )} with ${
                         planComments.length
-                    } comment(s); only an APPROVE plan with no comments and a bare "${renderReviewBody(
-                        {event: "APPROVE", hasInlineComments: false},
-                    )}" body may skip the submission`,
+                    } comment(s); a submission may be skipped only when the plan's own skipSubmission is true (submission-clearance.ts)`,
                 });
             }
         }

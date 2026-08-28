@@ -439,18 +439,24 @@ describe("runStagePrCli", () => {
         );
     });
 
-    it("keeps only github-actions[bot] reviews, every state, body verbatim", async () => {
+    it("keeps only github-actions[bot] reviews, every state, body verbatim, id and state included", async () => {
         const routes = baseRoutes([
             {filename: "a.ts", status: "modified", patch: PATCH_ONE},
         ]);
         routes["/repos/o/r/pulls/7/reviews?per_page=100&page=1"] = [
             {
+                id: 3001,
                 user: {login: "github-actions[bot]"},
                 body: "dismissed body",
                 submitted_at: "2026-07-01T00:00:00Z",
                 state: "DISMISSED",
             },
-            {user: {login: "human"}, body: "lgtm", state: "APPROVED"},
+            {
+                id: 3002,
+                user: {login: "human"},
+                body: "lgtm",
+                state: "APPROVED",
+            },
         ];
         const fs = makeFakeFs();
         await runStagePrCli(
@@ -460,8 +466,15 @@ describe("runStagePrCli", () => {
             noTicket(),
             options,
         );
+        // The id and state ride along (the reduced-depth clearance
+        // dismisses a CHANGES_REQUESTED review by id).
         expect(JSON.parse(fs.files[`${REVIEW}/prior-reviews.json`])).toEqual([
-            {body: "dismissed body", submittedAt: "2026-07-01T00:00:00Z"},
+            {
+                body: "dismissed body",
+                submittedAt: "2026-07-01T00:00:00Z",
+                id: 3001,
+                state: "DISMISSED",
+            },
         ]);
     });
 

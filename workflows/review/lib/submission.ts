@@ -47,6 +47,7 @@
  *   - The reduced-depth flip rule: at flip-gated/fast depth over a prior
  *     REQUEST_CHANGES stamp, `rereview.json`'s keptBlockingCount floors the
  *     verdict at REQUEST_CHANGES.
+ *   - Full-roster approval and reduced-depth clearance: submission-clearance.ts.
  *
  * Body rules encoded (review.md Step 6): the verdict head (empty-body
  * APPROVE with comments; the fixed REQUEST_CHANGES line), the code-rendered
@@ -77,6 +78,11 @@ import {
 } from "./render-comment";
 import {DEFAULT_NON_BLOCKING_INLINE_BUDGET} from "./routing-config";
 import {runRereviewCli, type RereviewCliFs} from "./rereview";
+import {
+    decideEventAndClearance,
+    decideSkipSubmission,
+    stageDismissalDecision,
+} from "./submission-clearance";
 import {
     labelToken,
     renderClaimComment,
@@ -141,12 +147,13 @@ export type SubmissionPlan = {
      */
     body: string;
     /**
-     * Whether the orchestrator may emit NO submission at all (the
-     * redundant-approval skip). Code-owned so review.md's Step 6 and the
-     * dispatch-conformance gate read one predicate rather than each
-     * describing it: true only for an APPROVE plan with no inline comments
-     * whose body is the bare approve line (modulo the ingest sanitizer) on a
-     * PR whose last stamped verdict was already APPROVE.
+     * Whether the orchestrator may emit NO submission at all. Code-owned
+     * (decideSkipSubmission, submission-clearance.ts) so review.md's Step 6
+     * and the dispatch-conformance gate read one predicate rather than
+     * each describing it: the redundant-approval skip (a bare APPROVE
+     * re-affirming a stamped APPROVE) and its reduced-depth sibling, the
+     * demoted-COMMENT skip (a nothing-to-say flip-gated/fast round with
+     * no standing block); the doc on both lives with the predicate.
      */
     skipSubmission: boolean;
     /** The inline comments to post, one safe output each, verbatim. */
@@ -161,7 +168,9 @@ export type SubmissionPlan = {
     bodyStats: PlanBodyStats;
 };
 
-export type SubmissionFs = RereviewCliFs;
+export type SubmissionFs = RereviewCliFs & {
+    rmSync: (p: string, opts: {force: boolean}) => void;
+};
 
 /**
  * The reconciler's open-human-thread lines as `path:line` keys (review.md
@@ -474,10 +483,9 @@ export const runSubmissionCli = (
     // The accountability section (renders and stages rereview.json too).
     const rereview = runRereviewCli(fs);
 
-    // The prior verdict, read once: the reduced-depth flip floor needs a
-    // prior REQUEST_CHANGES, the redundant-approval skip needs a prior
-    // APPROVE. Posted bodies carry the stamp since the collapsed details
-    // form (webapp#41742); cache-memory stays as the pre-move fallback.
+    // The prior verdict, read once (flip floor, redundant-approval skip).
+    // Posted bodies carry the stamp since the collapsed details form
+    // (webapp#41742); cache-memory stays as the pre-move fallback.
     const priorRaw = readJson(fs, `${REVIEW_DIR}/prior-reviews.json`);
     const priors: PriorReview[] = Array.isArray(priorRaw)
         ? priorRaw.filter(
@@ -631,6 +639,8 @@ export const runSubmissionCli = (
         // inline comments post on a hold) and the blocking-only collapsed
         // pr-level claims (their collapsed section renders only on the
         // normal path).
+        // A hold returns before the clearance decision: clear a stale one.
+        stageDismissalDecision(fs, null);
         const heldClaimLines = [...anchored, ...prLevelCollapsed].map(
             (claim) => {
                 notes.push(
@@ -877,30 +887,22 @@ export const runSubmissionCli = (
         };
     });
 
-    // A COMMENT cannot clear this workflow's own prior REQUEST_CHANGES:
-    // GitHub derives a reviewer's state only from its latest APPROVE or
-    // REQUEST_CHANGES, and nothing here dismisses reviews. So when the
-    // prior stamped verdict is REQUEST_CHANGES and this run's blocking
-    // objections are all resolved (a COMMENT verdict implies exactly that:
-    // zero blocking labels AND zero kept blocking threads), the run
-    // approves instead, or the author stays blocked by a stale state their
-    // fixes already earned back. The mediums still post; the note line
-    // below says what happened.
-    const commentWouldStrandPriorRc =
-        verdict.event === "COMMENT" &&
-        priorStamp !== null &&
-        priorStamp.verdict === "REQUEST_CHANGES";
-    if (commentWouldStrandPriorRc) {
-        notes.push(
-            "COMMENT verdict upgraded to APPROVE: a comment cannot clear the prior request-changes state, and every blocking objection is resolved",
-        );
+    // The full-roster approval rule and the reduced-depth clearance:
+    // pure decision in submission-clearance.ts, writes here.
+    const clearance = decideEventAndClearance({
+        verdictEvent: verdict.event,
+        depth,
+        priorStamp,
+        priorReviewsRaw: priorRaw,
+        keptBlockingCount: rereview.keptBlockingCount,
+        suppressedBlocking,
+    });
+    notes.push(...clearance.notes);
+    const {event, approveDemoted, priorRcStands} = clearance;
+    stageDismissalDecision(fs, clearance.dismissal);
+    if (clearance.bodyNote !== null) {
+        depthNotes.push(clearance.bodyNote);
     }
-    const event =
-        verdict.event === "REQUEST_CHANGES"
-            ? "REQUEST_CHANGES"
-            : verdict.event === "COMMENT" && !commentWouldStrandPriorRc
-            ? "COMMENT"
-            : "APPROVE";
 
     const head = renderReviewBody({
         event,
@@ -908,22 +910,17 @@ export const runSubmissionCli = (
         rereviewSection: rereview.section,
     });
     const stamp = runRereviewStampCli(fs, event);
-    // The body minus the attribution footer: the redundant-approval skip
-    // below compares THIS against the bare approve line, because the footer
-    // rides every submitted body (a bare approve differs from the bare
-    // render by exactly the footer, and that difference is not a reason to
-    // post).
+    // The body minus the attribution footer: the skip below compares THIS
+    // against the bare approve line, because the footer rides every
+    // submitted body and is not a reason to post.
     const coreBody = [head, ...prLevelLines, ...noteLines, ...depthNotes]
         .filter((line) => line !== "")
         .join("\n");
     // The version/config footer (version-footer.ts): code-rendered,
-    // collapsed by default (attribution.ts's shared <details> wrapper), and
-    // sanitizer-surviving (details/summary/sub are all allowed tags; the old
-    // hidden HTML marker never posted). The CLI also stages version-footer.txt for
-    // Step 7's guidance comment. The depth override hands the footer this
-    // run's executed depth from the SAME read that keys the depth Note and
-    // blocking-only gating, so the two surfaces cannot contradict; null
-    // (unreadable dispatch result) drops the segment rather than guessing.
+    // collapsed, sanitizer-surviving; also staged as version-footer.txt for
+    // Step 7. The depth override comes from the SAME read that keys the
+    // depth Note, so the two surfaces cannot contradict; null (unreadable
+    // dispatch result) drops the segment rather than guessing.
     const footer = runVersionFooterCli(fs, undefined, {
         depth: typeof dispatch.depth === "string" ? dispatch.depth : null,
     });
@@ -933,36 +930,39 @@ export const runSubmissionCli = (
         .concat(stamp === null ? "" : `\n${stamp}`)
         .replace(/^\n+/, "");
 
-    // The redundant-approval skip, code-owned so the prompt (Step 6) and the
-    // conformance gate share ONE predicate instead of two prose descriptions
-    // that can drift: they diverged once already, when the collapsed
-    // low-confidence `<details>` section started riding the body — it is
-    // neither a `Note:` line nor an accountability section, so the prompt's
-    // old wording let the orchestrator skip a submission the gate then
-    // red-flagged, withholding the approval AND the observations on every
-    // later run. Compared modulo the ingest sanitizer (`normalizeBody`),
-    // the same way the gate compares; the stamp and footer never enter the
-    // comparison at all, since both ride `body`, not `coreBody`.
-    const skipSubmission =
-        event === "APPROVE" &&
-        inline.length === 0 &&
-        normalizeBody(coreBody) ===
+    // The skip predicate lives in submission-clearance.ts (prompt, gate, and
+    // this CLI share it); the bare-approve comparison happens here since it
+    // needs the rendered body, modulo the sanitizer (never stamp or footer).
+    const resolveIds = Array.isArray(dispatch.reconciliation?.resolve)
+        ? dispatch.reconciliation.resolve.filter(
+              (id): id is string => typeof id === "string",
+          )
+        : [];
+    const skipSubmission = decideSkipSubmission({
+        event,
+        approveDemoted,
+        priorRcStands,
+        inlineCount: inline.length,
+        resolveCount: resolveIds.length,
+        bareApproveBody:
+            normalizeBody(coreBody) ===
             normalizeBody(
                 renderReviewBody({event: "APPROVE", hasInlineComments: false}),
-            ) &&
-        priorStamp !== null &&
-        priorStamp.verdict === "APPROVE";
+            ),
+        priorApproveStands:
+            priorStamp !== null && priorStamp.verdict === "APPROVE",
+        bodyCarriesOnlyDepthNote:
+            prLevelLines.length === 0 &&
+            noteLines.length === 0 &&
+            rereview.section === "",
+    });
 
     return stagePlan(fs, {
         event,
         body,
         skipSubmission,
         comments: inline,
-        resolve: Array.isArray(dispatch.reconciliation?.resolve)
-            ? dispatch.reconciliation.resolve.filter(
-                  (id): id is string => typeof id === "string",
-              )
-            : [],
+        resolve: resolveIds,
         reasons: verdict.reasons,
         notes,
     });

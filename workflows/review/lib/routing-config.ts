@@ -75,11 +75,16 @@ export type EnableableReviewer = typeof ENABLEABLE_REVIEWERS[number];
  *                   those hunks. Catches fresh defects in new code at a
  *                   fraction of the input cost.
  *   - `flip-gated`: reconcile-only fast path, plus the correctness pass over
- *                   the new hunks; a REQUEST_CHANGES→APPROVE flip is vetoed
- *                   by any validated blocking finding from that pass.
+ *                   the new hunks; blocking findings from that pass still
+ *                   REQUEST_CHANGES.
  *   - `fast`:       reconcile-only: threads are verified and resolved,
  *                   nothing new is reviewed (the divergence tripwire is the
  *                   only fresh-code guard).
+ *
+ * Neither reduced depth can approve (submission.ts's full-roster approval
+ * rule): a prior REQUEST_CHANGES whose blocking objections are all
+ * resolved is cleared by dismissing the standing review, and the approval
+ * waits for a round that dispatches the full roster.
  *
  * `full` is the default everywhere: a repo pays for a cheaper mode only by
  * writing a `re-review` line in its ROUTING file.
