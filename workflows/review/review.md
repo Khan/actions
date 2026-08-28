@@ -233,7 +233,10 @@ sandbox:
 # workflows/review/version-sync.test.ts fails CI if the ref ever diverges from
 # the `review` package version. Steps that run lib scripts invoke them from
 # `gh-aw-review-lib/` via `npx -y tsx <script>`; npx fetches the runner on first
-# use, so the checkout needs no install step.
+# use, so the checkout needs no install step. One exception: the credentialed
+# dismissal post-step runs from `gh-aw-review-lib-postagent/`, a second
+# checkout of the same ref made after the agent's turn, never from this
+# agent-writable copy (rationale at that step).
 pre-agent-steps:
   - name: Check out shared review lib (Khan/actions)
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -339,7 +342,7 @@ post-steps:
   # fail-open path nor a rewritten staging directory can steer it. Bot
   # token for the same reason the resolve-thread safe output carries it:
   # dismissal needs write access.
-  # Those guards defend the executor's INPUTS; the checkout below defends
+  # Those guards defend the executor's INPUTS; the two steps below defend
   # the EXECUTABLE. `gh-aw-review-lib/` sits in the workspace the agent job
   # mounts, writable under the agent's uid, so a prompt-injected agent
   # could rewrite dismiss-review.ts during its turn and this step would
@@ -361,6 +364,19 @@ post-steps:
   # The wrapper makes that true of the step too: an npx/tsx bootstrap
   # failure must not red a run the gate passed (the sibling gate step above
   # takes the same posture for the same reason).
+
+  # The path is removed before the checkout because actions/checkout REUSES
+  # a pre-existing directory whose fetch URL matches (its `clean` input:
+  # `git clean -ffdx && git reset --hard`, which never touches .git config
+  # or hooks), and the workspace is agent-writable: a pre-created poisoned
+  # clone (fsmonitor, hooks) would survive the "fresh" checkout. Nothing
+  # legitimate creates this path, so on a clean run the rm has no work to
+  # do, and a failure here (default fail-the-job, unlike the siblings) is
+  # tampering evidence rather than infra flake: the dismissal is skipped
+  # and the block stands.
+  - name: Clear any pre-existing post-agent lib path (the workspace is agent-writable)
+    run: rm -rf "${GITHUB_WORKSPACE}/gh-aw-review-lib-postagent"
+
   # `continue-on-error` keeps the sibling posture (a checkout failure must
   # not red a run the gate passed): on failure the dismissal step's cd
   # falls into its own warning and the block stands. Default `if:`
