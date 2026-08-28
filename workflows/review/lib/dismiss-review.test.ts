@@ -297,6 +297,61 @@ describe("runDismissReviewCli", () => {
         expect(result.warnings.join(" ")).toContain("refused");
     });
 
+    it("pages through the review list (the standing block can sit past page 1)", async () => {
+        // 100 filler reviews on page 1 (a review per push adds up), the
+        // standing block on page 2: the allowlist must span every page.
+        const pages: unknown[][] = [
+            Array.from({length: 100}, (_, i) => ({
+                id: i + 1,
+                state: "COMMENTED",
+                body: "filler",
+                user: {login: "github-actions[bot]"},
+            })),
+            [
+                {
+                    id: 3001,
+                    state: "CHANGES_REQUESTED",
+                    body: stampedBody("REQUEST_CHANGES", "r1"),
+                    user: {login: "github-actions[bot]"},
+                },
+            ],
+        ];
+        const paths: string[] = [];
+        const get: DismissGet = async (path) => {
+            paths.push(path);
+            return {ok: true, status: 200, body: pages[paths.length - 1]};
+        };
+        const {put} = recordingPut();
+        const result = await runDismissReviewCli(
+            makeFakeFs(stagedDecision([3001])),
+            put,
+            get,
+            COORDS,
+        );
+        expect(paths).toHaveLength(2);
+        expect(result.dismissed).toEqual([3001]);
+    });
+
+    it("refuses on a non-array page (a lying API is a failed fetch)", async () => {
+        const get: DismissGet = async () => ({
+            ok: true,
+            status: 200,
+            body: {message: "not a list"},
+        });
+        const {put, calls} = recordingPut();
+        const result = await runDismissReviewCli(
+            makeFakeFs(stagedDecision([3001])),
+            put,
+            get,
+            COORDS,
+        );
+        expect(result.dismissed).toEqual([]);
+        expect(calls).toEqual([]);
+        expect(result.warnings.join(" ")).toContain(
+            "standing-review fetch failed",
+        );
+    });
+
     it("fetches the allowlist live, never from staged JSON", async () => {
         const {put} = recordingPut();
         const {get, paths} = recordingGet();

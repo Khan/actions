@@ -708,6 +708,40 @@ describe("rule 7 folds the fingerprint stamp out of the body comparison", () => 
     });
 });
 
+describe("rule 7 honors the demoted-COMMENT skip (the reduced-depth sibling)", () => {
+    // The plan CLI owns the predicate (skipSubmission,
+    // submission-clearance.ts); the gate defers to the staged boolean, so
+    // an empty queue is conformant exactly when the plan says skip.
+    const skippedPlan = (skipSubmission: boolean) => ({
+        event: "COMMENT",
+        body: "Reduced-depth round.\nNote: re-review ran at fast depth (re-review mode fast).",
+        comments: [],
+        skipSubmission,
+    });
+
+    it("an empty queue is conformant when the demoted plan skips", () => {
+        const result = evaluate({
+            items: [{type: "upload_artifact", path: "out"} as SafeOutputItem],
+            plan: {depth: "fast"},
+            outFiles: {"thread-reconciler.json": "{}"},
+            submissionPlan: skippedPlan(true),
+        });
+        expect(result.violations).toEqual([]);
+    });
+
+    it("an empty queue over a non-skipping demoted plan is a mismatch", () => {
+        const result = evaluate({
+            items: [{type: "upload_artifact", path: "out"} as SafeOutputItem],
+            plan: {depth: "fast"},
+            outFiles: {"thread-reconciler.json": "{}"},
+            submissionPlan: skippedPlan(false),
+        });
+        expect(result.violations.map((v) => v.code)).toContain(
+            "submission-plan-mismatch",
+        );
+    });
+});
+
 describe("rule 5c: the dismissal-decision mirror", () => {
     /** A body carrying this workflow's stamp (the standing identity). */
     const stampedBody = (verdict: string, head = "review body"): string =>

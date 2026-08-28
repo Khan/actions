@@ -21,7 +21,12 @@
  * shared {@link standingChangesRequestedIds} predicate; the login alone is
  * every Actions workflow in the repo), and the repo/PR coordinates come
  * from the runner's own env (`GITHUB_REPOSITORY`, `REVIEW_PR_NUMBER`, the
- * event payload as the fallback), not from staged JSON. The dispatch gate's rule 5c
+ * event payload as the fallback), not from staged JSON. What the executor
+ * verifies is the TARGET SET, never the license: whether this round's plan
+ * licensed a dismissal at all is the gate's rule 5c (fail-open on infra
+ * failure), so the residual on that path is a forged decision that can
+ * still only dismiss this workflow's genuine standing blocks on this PR,
+ * with the fixed message; the effect equals the legitimate clearance. The dispatch gate's rule 5c
  * mirrors the same predicate over the staged copy before this step runs;
  * that mirror is best-effort (same-directory input, documented fail-open),
  * this one is authoritative. A failed fetch dismisses nothing.
@@ -97,9 +102,9 @@ const readJsonIfPresent = (fs: DismissReviewFs, path: string): unknown => {
  */
 export const prCoordinatesFromEnv = (
     fs: DismissReviewFs,
-    repository: string | undefined = process.env["GITHUB_REPOSITORY"],
-    prNumberEnv: string | undefined = process.env["REVIEW_PR_NUMBER"],
-    eventPath: string | undefined = process.env["GITHUB_EVENT_PATH"],
+    repository: string | undefined = process.env.GITHUB_REPOSITORY,
+    prNumberEnv: string | undefined = process.env.REVIEW_PR_NUMBER,
+    eventPath: string | undefined = process.env.GITHUB_EVENT_PATH,
 ): {repo: string; prNumber: number} | null => {
     if (repository === undefined || repository === "") {
         return null;
@@ -126,8 +131,14 @@ export const prCoordinatesFromEnv = (
  * author and stamp is the identity, matching stage-pr.ts's staging
  * filter), then the shared standing predicate (stamp-scoped,
  * latest-decisive-wins) over the chronological list. Throws on a failed
- * page or a list past the page cap; the caller treats any throw as
- * "dismiss nothing".
+ * page, a non-array page (sibling readers throw on shape violations too),
+ * or a list past the page cap; the caller treats any throw as "dismiss
+ * nothing".
+ *
+ * The cap bounds the loop against a pathological or lying API (30 pages =
+ * 3,000 reviews; this workflow posts roughly one review per push, so any
+ * real PR sits orders of magnitude below it, and a list that large means
+ * something is wrong enough that refusing is the right answer).
  */
 const MAX_REVIEW_PAGES = 30;
 const fetchDismissableIds = async (
@@ -150,7 +161,10 @@ const fetchDismissableIds = async (
                 `review list fetch failed (HTTP ${response.status})`,
             );
         }
-        const items = Array.isArray(response.body) ? response.body : [];
+        if (!Array.isArray(response.body)) {
+            throw new Error("review list page is not an array");
+        }
+        const items = response.body;
         reviews.push(...items);
         if (items.length < 100) {
             break;
@@ -270,10 +284,10 @@ export const runDismissReviewCli = async (
 // (tests).
 if (typeof require !== "undefined" && require.main === module) {
     const fs = require("node:fs") as DismissReviewFs;
-    const token = process.env["GH_TOKEN"];
+    const token = process.env.GH_TOKEN;
     // The runner's own API base (GHES-safe), same as the repo's other
     // callers; the public default is the fallback.
-    const apiBase = process.env["GITHUB_API_URL"] ?? "https://api.github.com";
+    const apiBase = process.env.GITHUB_API_URL ?? "https://api.github.com";
     const headers = () => {
         if (token === undefined || token === "") {
             throw new Error("GH_TOKEN is not set");

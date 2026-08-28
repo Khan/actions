@@ -63,7 +63,14 @@ export const DISMISSAL_MESSAGE =
  *     one resurface as the effective state). A DISMISSED entry neither
  *     stands nor resets: an approval dismiss-stale-approvals dismissed no
  *     longer supersedes, so the older CHANGES_REQUESTED reads as standing
- *     again, which errs toward posting and clearing over skipping.
+ *     again. Whether GitHub itself resurfaces that older block is not
+ *     something we have verified in both directions, so the direction is
+ *     chosen on asymmetric costs: if it does resurface and we reset, an
+ *     author stays stranded behind a block no round clears; if it does
+ *     not and we stand, the worst outcomes are a full-roster COMMENT
+ *     round (zero blocking findings by construction) upgrading to the
+ *     APPROVE that same roster stands behind, and a reduced round
+ *     dismissing an inert review, which changes nothing.
  *
  * Entries without `id`/`state`/`body` (pre-upgrade staging) do not count.
  * Shared by the plan CLI, the dispatch gate's rule 5c, and the dismissal
