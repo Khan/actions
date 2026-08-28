@@ -22,11 +22,16 @@ const pkg = JSON.parse(
 );
 
 describe("review.md version surface", () => {
-    it("pins the Khan/actions checkout ref to this release's version", () => {
+    it("pins every Khan/actions checkout ref to this release's version", () => {
         const refs = [...reviewMd.matchAll(/^\s*ref:\s*(\S+)\s*$/gm)].map(
             (m) => m[1],
         );
-        expect(refs).toEqual([`review-v${pkg.version}`]);
+        // Two checkouts of the same ref: the pre-agent lib checkout and the
+        // post-agent one the dismissal executor runs from.
+        expect(refs).toEqual([
+            `review-v${pkg.version}`,
+            `review-v${pkg.version}`,
+        ]);
     });
 
     it("matches every review-v<semver> literal to the package version", () => {

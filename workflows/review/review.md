@@ -339,6 +339,20 @@ post-steps:
   # fail-open path nor a rewritten staging directory can steer it. Bot
   # token for the same reason the resolve-thread safe output carries it:
   # dismissal needs write access.
+  # Those guards defend the executor's INPUTS; the checkout below defends
+  # the EXECUTABLE. `gh-aw-review-lib/` sits in the workspace the agent job
+  # mounts, writable under the agent's uid, so a prompt-injected agent
+  # could rewrite dismiss-review.ts during its turn and this step would
+  # hand the rewritten file a repo-write PAT with unfirewalled egress (the
+  # first workspace script in the agent job to hold one; gh-aw's own
+  # credentialed scripts run from $RUNNER_TEMP). So the executor never runs
+  # from the workspace copy: a sibling post-step re-fetches the same pinned
+  # ref AFTER the agent's turn has ended, and the dismissal runs from
+  # there. The gate step above stays on the workspace copy deliberately: it
+  # holds no credential, its inputs are the agent-writable staging either
+  # way, and moving it would add a checkout-failure fail-open path to a
+  # blocking control in exchange for no bound the executor's live
+  # re-derivation doesn't already provide.
   # Known window: this runs before the safe_outputs job posts the COMMENT
   # review carrying the explanatory note, so a safe_outputs infra failure
   # can leave a dismissal whose note never posted; the dismissal message
@@ -347,6 +361,21 @@ post-steps:
   # The wrapper makes that true of the step too: an npx/tsx bootstrap
   # failure must not red a run the gate passed (the sibling gate step above
   # takes the same posture for the same reason).
+  # `continue-on-error` keeps the sibling posture (a checkout failure must
+  # not red a run the gate passed): on failure the dismissal step's cd
+  # falls into its own warning and the block stands. Default `if:`
+  # (success()), so a gate-blocked run fetches nothing. No install step:
+  # the executor's import chain is relative lib files plus node builtins,
+  # and npx fetches tsx itself.
+  - name: Check out the review lib for post-agent execution (Khan/actions)
+    continue-on-error: true
+    uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+    with:
+      repository: Khan/actions
+      ref: review-v1.23.0
+      path: gh-aw-review-lib-postagent
+      persist-credentials: false
+
   - name: Clear the standing blocking review (reduced-depth dismissal)
     env:
       GH_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
@@ -355,7 +384,7 @@ post-steps:
       # on-disk event payload the CLI otherwise falls back to.
       REVIEW_PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
     run: |
-      if ! (cd gh-aw-review-lib && npx -y tsx workflows/review/lib/dismiss-review.ts); then
+      if ! (cd gh-aw-review-lib-postagent && npx -y tsx workflows/review/lib/dismiss-review.ts); then
         echo "::warning title=review dismissal::step could not run (infra failure; block stands)"
       fi
       exit 0
@@ -363,19 +392,17 @@ post-steps:
 # Anthropic pricing overlay, so an AI credit means $0.01 of what Khan actually
 # pays.
 #
-# INERT UNTIL gh-aw v0.84.x GOES STABLE. `apiProxy.providers` was added to
-# awf-config-schema.json in AWF v0.27.43, and gh-aw gates emitting it on that
-# floor (`AWFAPIProxyProvidersMinVersion`) because older AWF strict config
-# validation rejects unknown apiProxy properties. gh-aw v0.83.4 (the version
-# this lock was compiled with, and still `releases/latest`) defaults to AWF
-# v0.27.42, one patch below, so it SILENTLY DROPS this block: it compiles
-# clean, the rates land only in the informational `GH_AW_INFO_MODEL_COSTS` env
-# var, and metering stays at list price. gh-aw raises `DefaultFirewallVersion`
-# to v0.27.43 as of v0.84.0, but v0.83.5/v0.84.0/v0.84.1 are all prereleases,
-# so recompiling is blocked on that line going stable rather than on any edit
-# here. Do NOT pin the extension to a prerelease to force it: nothing in CI
-# runs `gh aw compile`, so the next compile on stable would silently drop
-# `providers` again with no test failure.
+# LIVE since the toolchain moved to gh-aw v0.85.4, which defaults the
+# firewall to v0.27.44. The history, kept because the failure mode is
+# silent: `apiProxy.providers` was added to awf-config-schema.json in AWF
+# v0.27.43, and gh-aw gates emitting it on that floor
+# (`AWFAPIProxyProvidersMinVersion`) because older AWF strict config
+# validation rejects unknown apiProxy properties. Through gh-aw v0.83.4
+# (default firewall v0.27.42, one patch below the floor) the block was
+# SILENTLY DROPPED: the compile came out clean, the rates landed only in the
+# informational `GH_AW_INFO_MODEL_COSTS` env var, and metering stayed at
+# list price. A recompile with an older gh-aw would drop it again with no
+# test failure (nothing in CI runs `gh aw compile`), hence:
 #
 # VERIFY AFTER ANY TOOLCHAIN BUMP: `providers` must appear inside the
 # `apiProxy` object of both awf-config payloads in review.lock.yml. Its
@@ -431,6 +458,10 @@ models:
   # the `providers` overlay below live (the higher-precedence source). Do NOT
   # reach for `sandbox.agent.version: v0.27.43` to get there early; a version
   # is pinned here only to hold a release BACK, never to move one forward.
+  # That condition is met as of gh-aw v0.85.4 (firewall v0.27.44), so this
+  # fallback is now inert (the live `providers` overlay outranks it) and
+  # removable; kept for the moment so the pricing change ships separately
+  # from unrelated work.
   #
   # MINIMUM COMPILER: gh-aw >= v0.83.0 for `models.default-ai-credits-pricing`.
   # $/1M tokens. `input` and `output` are the only rates the schema accepts,
