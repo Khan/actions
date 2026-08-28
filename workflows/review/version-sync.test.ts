@@ -43,25 +43,37 @@ describe("review.md version surface", () => {
 
 describe("the credentialed dismissal step", () => {
     // The security property the post-agent checkout buys: the step holding
-    // KHAN_ACTIONS_BOT_TOKEN executes from the checkout made after the
-    // agent's turn, never from the agent-writable workspace copy. The
+    // KHAN_ACTIONS_BOT_TOKEN executes from a checkout fetched AFTER the
+    // agent's turn (inside post-steps), into a path cleared first (checkout
+    // reuses a pre-existing directory, and clean/reset never touch .git
+    // config or hooks), never from the agent-writable workspace copy. The
     // step's warning wrapper makes a broken path green at runtime, so this
-    // is the only backstop.
-    it("runs from the post-agent checkout, not the workspace copy", () => {
-        const checkoutPath = reviewMd.match(
-            /^\s*path:\s*(gh-aw-review-lib-\S+)\s*$/m,
-        )?.[1];
-        expect(checkoutPath).toBeDefined();
-        const dismissalCwd = reviewMd.match(
-            /cd (\S+) && npx -y tsx workflows\/review\/lib\/dismiss-review\.ts/,
-        )?.[1];
-        expect(dismissalCwd).toBe(checkoutPath);
-        expect(dismissalCwd).not.toBe("gh-aw-review-lib");
-    });
-
-    it("clears the checkout path before fetching (checkout reuses a pre-existing dir)", () => {
-        expect(reviewMd).toMatch(
-            /rm -rf "\$\{GITHUB_WORKSPACE\}\/gh-aw-review-lib-postagent"/,
+    // ordering test is the only backstop. Position-sensitive on purpose:
+    // indexOf/search bind to the FIRST occurrence, so any earlier copy of
+    // these lines (say, one drifting into pre-agent-steps) breaks the
+    // ordering chain rather than passing on a name match.
+    it("clears, fetches, and executes in order, inside post-steps", () => {
+        const preAt = reviewMd.indexOf("\npre-agent-steps:");
+        const postAt = reviewMd.indexOf("\npost-steps:");
+        expect(preAt).toBeGreaterThan(-1);
+        expect(postAt).toBeGreaterThan(preAt);
+        // No step before post-steps fetches or enters the post-agent path
+        // (the pre-agent orientation comment may name it in prose).
+        expect(reviewMd.slice(0, postAt)).not.toMatch(
+            /^\s*path:\s*gh-aw-review-lib-postagent\s*$/m,
         );
+
+        const rmAt = reviewMd.indexOf(
+            'rm -rf "${GITHUB_WORKSPACE}/gh-aw-review-lib-postagent"',
+        );
+        const checkoutAt = reviewMd.search(
+            /^\s*path:\s*gh-aw-review-lib-postagent\s*$/m,
+        );
+        const dismissalAt = reviewMd.indexOf(
+            "cd gh-aw-review-lib-postagent && npx -y tsx workflows/review/lib/dismiss-review.ts",
+        );
+        expect(rmAt).toBeGreaterThan(postAt);
+        expect(checkoutAt).toBeGreaterThan(rmAt);
+        expect(dismissalAt).toBeGreaterThan(checkoutAt);
     });
 });

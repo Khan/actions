@@ -328,7 +328,39 @@ post-steps:
       fi
       echo "::warning title=dispatch-conformance gate::gate could not run (infra failure; review not blocked)"
       exit 0
-  # The reduced-depth clearance: when the plan CLI staged
+  # The reduced-depth clearance, steps 1-3 of 3: clear the post-agent lib
+  # path, fetch it fresh, execute the dismissal from it. What the clearance
+  # is and why the executor never runs from the agent-writable workspace
+  # copy: the rationale block at the dismissal step below.
+
+  # Step 1 of 3. The path is removed before the checkout because actions/checkout REUSES
+  # a pre-existing directory whose fetch URL matches (its `clean` input:
+  # `git clean -ffdx && git reset --hard`, which never touches .git config
+  # or hooks), and the workspace is agent-writable: a pre-created poisoned
+  # clone (fsmonitor, hooks) would survive the "fresh" checkout. Nothing
+  # legitimate creates this path, so on a clean run the rm has no work to
+  # do, and a failure here (default fail-the-job, unlike the siblings) is
+  # tampering evidence rather than infra flake: the dismissal is skipped
+  # and the block stands.
+  - name: Clear any pre-existing post-agent lib path (the workspace is agent-writable)
+    run: rm -rf "${GITHUB_WORKSPACE}/gh-aw-review-lib-postagent"
+
+  # Step 2 of 3. `continue-on-error` keeps the sibling posture (a checkout
+  # failure must not red a run the gate passed): on failure the dismissal
+  # step's cd falls into its own warning and the block stands. Default
+  # `if:` (success()), so a gate-blocked run fetches nothing. No install
+  # step: the executor's import chain is relative lib files plus node
+  # builtins, and npx fetches tsx itself.
+  - name: Check out the review lib for post-agent execution (Khan/actions)
+    continue-on-error: true
+    uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+    with:
+      repository: Khan/actions
+      ref: review-v1.23.0
+      path: gh-aw-review-lib-postagent
+      persist-credentials: false
+
+  # Step 3 of 3, the clearance itself: when the plan CLI staged
   # out/dismiss-decision.json (a flip-gated/fast round over a prior
   # REQUEST_CHANGES whose blocking objections are all resolved), dismiss the
   # standing review via the API instead of minting an approval no full
@@ -342,20 +374,19 @@ post-steps:
   # fail-open path nor a rewritten staging directory can steer it. Bot
   # token for the same reason the resolve-thread safe output carries it:
   # dismissal needs write access.
-  # Those guards defend the executor's INPUTS; the two steps below defend
+  # Those guards defend the executor's INPUTS; steps 1 and 2 above defend
   # the EXECUTABLE. `gh-aw-review-lib/` sits in the workspace the agent job
   # mounts, writable under the agent's uid, so a prompt-injected agent
   # could rewrite dismiss-review.ts during its turn and this step would
   # hand the rewritten file a repo-write PAT with unfirewalled egress (the
   # first workspace script in the agent job to hold one; gh-aw's own
   # credentialed scripts run from $RUNNER_TEMP). So the executor never runs
-  # from the workspace copy: a sibling post-step re-fetches the same pinned
-  # ref AFTER the agent's turn has ended, and the dismissal runs from
-  # there. The gate step above stays on the workspace copy deliberately: it
-  # holds no credential, its inputs are the agent-writable staging either
-  # way, and moving it would add a checkout-failure fail-open path to a
-  # blocking control in exchange for no bound the executor's live
-  # re-derivation doesn't already provide.
+  # from the workspace copy: it runs from the checkout step 2 fetched
+  # AFTER the agent's turn ended. The gate step above stays on the
+  # workspace copy deliberately: it holds no credential, its inputs are
+  # the agent-writable staging either way, and moving it would add a
+  # checkout-failure fail-open path to a blocking control in exchange for
+  # no bound the executor's live re-derivation doesn't already provide.
   # Known window: this runs before the safe_outputs job posts the COMMENT
   # review carrying the explanatory note, so a safe_outputs infra failure
   # can leave a dismissal whose note never posted; the dismissal message
@@ -364,34 +395,6 @@ post-steps:
   # The wrapper makes that true of the step too: an npx/tsx bootstrap
   # failure must not red a run the gate passed (the sibling gate step above
   # takes the same posture for the same reason).
-
-  # The path is removed before the checkout because actions/checkout REUSES
-  # a pre-existing directory whose fetch URL matches (its `clean` input:
-  # `git clean -ffdx && git reset --hard`, which never touches .git config
-  # or hooks), and the workspace is agent-writable: a pre-created poisoned
-  # clone (fsmonitor, hooks) would survive the "fresh" checkout. Nothing
-  # legitimate creates this path, so on a clean run the rm has no work to
-  # do, and a failure here (default fail-the-job, unlike the siblings) is
-  # tampering evidence rather than infra flake: the dismissal is skipped
-  # and the block stands.
-  - name: Clear any pre-existing post-agent lib path (the workspace is agent-writable)
-    run: rm -rf "${GITHUB_WORKSPACE}/gh-aw-review-lib-postagent"
-
-  # `continue-on-error` keeps the sibling posture (a checkout failure must
-  # not red a run the gate passed): on failure the dismissal step's cd
-  # falls into its own warning and the block stands. Default `if:`
-  # (success()), so a gate-blocked run fetches nothing. No install step:
-  # the executor's import chain is relative lib files plus node builtins,
-  # and npx fetches tsx itself.
-  - name: Check out the review lib for post-agent execution (Khan/actions)
-    continue-on-error: true
-    uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-    with:
-      repository: Khan/actions
-      ref: review-v1.23.0
-      path: gh-aw-review-lib-postagent
-      persist-credentials: false
-
   - name: Clear the standing blocking review (reduced-depth dismissal)
     env:
       GH_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}

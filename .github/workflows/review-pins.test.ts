@@ -42,7 +42,7 @@ describe("installed review.md pins", () => {
     });
 
     it("checks out the lib at exactly the source: release", () => {
-        // Count-agnostic: releases past review-v1.23.x carry a second
+        // Count-agnostic: review-v1.23.1 and later carry a second
         // checkout (the post-agent one the dismissal executor runs from),
         // pinned to the same ref.
         expect(checkoutRefs.length).toBeGreaterThan(0);
