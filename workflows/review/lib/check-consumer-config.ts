@@ -114,7 +114,7 @@ export const INSTALLED_LOCK_PATH = ".github/workflows/review.lock.yml";
  */
 export const runnerTempMountViolations = (lock: string): string[] => {
     const mounts = [
-        ...lock.matchAll(/-v '"\$\{RUNNER_TEMP\}"'([^:]*):([^ ]*)/g),
+        ...lock.matchAll(/-v '"\$\{RUNNER_TEMP\}"'([^:]*):(\S*)/g),
         ...lock.matchAll(/--mount "\$\{RUNNER_TEMP\}([^:"]*):([^"]*)"/g),
     ];
     const violations: string[] = [];
@@ -938,8 +938,11 @@ export {renderReport};
 // the same max-lines split as the report rendering. parseArgs is re-exported
 // for its contract tests, and the require.main guard stays HERE so the
 // documented `npx -y tsx check-consumer-config.ts` invocation keeps working.
-// The require is lazy: the CLI module imports this one back, and deferring
-// the edge until the guard fires keeps the cycle out of module load.
+// The re-export makes the module cycle (the CLI imports this checker back)
+// load-time, not deferred; that is safe because the CLI body only declares
+// functions and first dereferences checkConsumerConfig inside runCli, after
+// both modules finish evaluating. The lazy require below just avoids a
+// second static edge for importers that never run the CLI.
 export {parseArgs} from "./check-consumer-config-cli";
 
 // Run only when invoked directly, never on import (tests).

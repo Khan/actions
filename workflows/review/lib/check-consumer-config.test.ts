@@ -422,6 +422,15 @@ describe("the compiled lock", () => {
         ]);
     });
 
+    it("accepts a read-only -v RUNNER_TEMP mount at end of line", () => {
+        // The -v form's mode capture must stop at the newline; `[^ ]*` ran
+        // past it and mis-read a line-terminating `:ro` as writable.
+        const inputs = validInstall();
+        inputs[INSTALLED_LOCK_PATH] =
+            "# compiled\n          -v '\"${RUNNER_TEMP}\"'/gh-aw:'\"${RUNNER_TEMP}\"'/gh-aw:ro\n";
+        expect(codes(check(inputs), "error")).toEqual([]);
+    });
+
     it("treats a modeless RUNNER_TEMP mount as writable (docker's default)", () => {
         const inputs = validInstall();
         inputs[INSTALLED_LOCK_PATH] =

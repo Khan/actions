@@ -82,6 +82,38 @@ describe("the post-agent execution rule", () => {
         expect(postSteps).not.toMatch(/gh-aw-review-lib(?!-postagent)/);
     });
 
+    it("keeps the entrypoints' import closure to relative files and node builtins", () => {
+        // The copy step ships no install (the cp happens before npm ci), so
+        // an external dependency anywhere in the entrypoints' import graph
+        // would only surface at runtime, inside the steps' fail-open
+        // warning wrappers. Walk the closure statically instead.
+        const libDir = new URL("./lib/", import.meta.url);
+        const seen = new Set<string>();
+        const queue = ["dispatch-gate.ts", "dismiss-review.ts"];
+        while (queue.length > 0) {
+            const name = queue.pop() as string;
+            if (seen.has(name)) {
+                continue;
+            }
+            seen.add(name);
+            const source = fs.readFileSync(new URL(name, libDir), "utf-8");
+            const specifiers = [
+                ...source.matchAll(
+                    /(?:^|\n)(?:import|export)[^"']*from\s*["']([^"']+)["']/g,
+                ),
+            ].map((m) => m[1]);
+            for (const spec of specifiers) {
+                if (spec.startsWith("node:")) {
+                    continue;
+                }
+                expect(spec).toMatch(/^\.\//);
+                queue.push(`${spec.slice(2)}.ts`);
+            }
+        }
+        // The walk actually traversed the graph, not just the two roots.
+        expect(seen.size).toBeGreaterThan(2);
+    });
+
     it("keeps the failure posture: always-run gate, default-if dismissal, no continue-on-error", () => {
         expect(postSteps).not.toMatch(/^\s*continue-on-error:/m);
         const gateAt = postSteps.indexOf("- name: Dispatch-conformance gate");
