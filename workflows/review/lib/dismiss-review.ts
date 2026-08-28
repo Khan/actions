@@ -34,9 +34,11 @@
  * The guards above defend this CLI's inputs; the post-step defends the
  * executable. The agent-job workspace checkout of this repo is writable
  * under the agent's uid, so a prompt-injected agent could rewrite this
- * file mid-run; the post-step therefore runs it from a fresh checkout of
- * the pinned ref made after the agent's turn ends (review.md post-steps),
- * never from the workspace copy.
+ * file mid-run; the post-steps therefore run it (and the conformance gate,
+ * since host execution of any agent-writable code could bridge to this
+ * step's token) from a fresh clone of the pinned ref under $RUNNER_TEMP,
+ * outside the agent container's mounts, fetched after the agent's turn
+ * ends (review.md post-steps). Never from the workspace copy.
  *
  * Why a post-step and not a safe output: the pinned gh-aw (v0.85.4) ships
  * no dismiss output, and `supersede-older-reviews` dismisses on every

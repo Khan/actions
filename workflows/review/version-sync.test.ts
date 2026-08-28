@@ -22,16 +22,15 @@ const pkg = JSON.parse(
 );
 
 describe("review.md version surface", () => {
-    it("pins every Khan/actions checkout ref to this release's version", () => {
+    it("pins the Khan/actions checkout ref to this release's version", () => {
         const refs = [...reviewMd.matchAll(/^\s*ref:\s*(\S+)\s*$/gm)].map(
             (m) => m[1],
         );
-        // Two checkouts of the same ref: the pre-agent lib checkout and the
-        // post-agent one the dismissal executor runs from.
-        expect(refs).toEqual([
-            `review-v${pkg.version}`,
-            `review-v${pkg.version}`,
-        ]);
+        // One `ref:` line (the pre-agent checkout); the post-agent clone
+        // pins the same release via its `--branch` literal, covered by the
+        // every-literal test below and asserted structurally in the
+        // post-agent describe block.
+        expect(refs).toEqual([`review-v${pkg.version}`]);
     });
 
     it("matches every review-v<semver> literal to the package version", () => {
@@ -41,39 +40,71 @@ describe("review.md version surface", () => {
     });
 });
 
-describe("the credentialed dismissal step", () => {
-    // The security property the post-agent checkout buys: the step holding
-    // KHAN_ACTIONS_BOT_TOKEN executes from a checkout fetched AFTER the
-    // agent's turn (inside post-steps), into a path cleared first (checkout
-    // reuses a pre-existing directory, and clean/reset never touch .git
-    // config or hooks), never from the agent-writable workspace copy. The
-    // step's warning wrapper makes a broken path green at runtime, so this
-    // ordering test is the only backstop. Position-sensitive on purpose:
-    // indexOf/search bind to the FIRST occurrence, so any earlier copy of
-    // these lines (say, one drifting into pre-agent-steps) breaks the
-    // ordering chain rather than passing on a name match.
-    it("clears, fetches, and executes in order, inside post-steps", () => {
+describe("the post-agent steps", () => {
+    // The security property: nothing the agent can write may execute on
+    // the host after its turn, so the conformance gate and the credentialed
+    // dismissal both run from a fresh clone under $RUNNER_TEMP (outside the
+    // agent container's mounts) fetched after the turn ends. The dismissal
+    // step's warning wrapper makes a broken path green at runtime, so these
+    // position-sensitive assertions are the only backstop: indexOf binds to
+    // the FIRST occurrence, so a copy of any of these lines drifting
+    // earlier (say, into pre-agent-steps) breaks the ordering chain rather
+    // than passing on a name match.
+    const POSTAGENT = '"${RUNNER_TEMP}/gh-aw-review-lib-postagent"';
+    const postAt = reviewMd.indexOf("\npost-steps:");
+    const postSteps = reviewMd.slice(
+        postAt,
+        reviewMd.indexOf("\n# Anthropic pricing overlay"),
+    );
+
+    it("clears, clones, gates, and dismisses in order, inside post-steps", () => {
         const preAt = reviewMd.indexOf("\npre-agent-steps:");
-        const postAt = reviewMd.indexOf("\npost-steps:");
         expect(preAt).toBeGreaterThan(-1);
         expect(postAt).toBeGreaterThan(preAt);
-        // No step before post-steps fetches or enters the post-agent path
-        // (the pre-agent orientation comment may name it in prose).
-        expect(reviewMd.slice(0, postAt)).not.toMatch(
-            /^\s*path:\s*gh-aw-review-lib-postagent\s*$/m,
-        );
 
-        const rmAt = reviewMd.indexOf(
-            'rm -rf "${GITHUB_WORKSPACE}/gh-aw-review-lib-postagent"',
+        const rmAt = reviewMd.indexOf(`rm -rf ${POSTAGENT}`);
+        const cloneAt = reviewMd.indexOf(
+            `git clone --quiet --depth 1 --branch review-v${pkg.version}`,
         );
-        const checkoutAt = reviewMd.search(
-            /^\s*path:\s*gh-aw-review-lib-postagent\s*$/m,
+        const gateAt = reviewMd.indexOf(
+            `cd ${POSTAGENT} && npx -y tsx workflows/review/lib/dispatch-gate.ts`,
         );
         const dismissalAt = reviewMd.indexOf(
-            "cd gh-aw-review-lib-postagent && npx -y tsx workflows/review/lib/dismiss-review.ts",
+            `cd ${POSTAGENT} && npx -y tsx workflows/review/lib/dismiss-review.ts`,
         );
         expect(rmAt).toBeGreaterThan(postAt);
-        expect(checkoutAt).toBeGreaterThan(rmAt);
-        expect(dismissalAt).toBeGreaterThan(checkoutAt);
+        expect(cloneAt).toBeGreaterThan(rmAt);
+        expect(gateAt).toBeGreaterThan(cloneAt);
+        expect(dismissalAt).toBeGreaterThan(gateAt);
+    });
+
+    it("never executes the agent-writable workspace copy after the agent's turn", () => {
+        expect(postSteps).not.toContain("cd gh-aw-review-lib ");
+        expect(postSteps).not.toContain("cd gh-aw-review-lib/");
+    });
+
+    it("keeps the failure posture: always-run fetch and gate, default-if dismissal, nothing continue-on-error", () => {
+        expect(postSteps).not.toMatch(/^\s*continue-on-error:/m);
+
+        const fetchAt = postSteps.indexOf("- name: Fetch the review lib");
+        const gateAt = postSteps.indexOf("- name: Dispatch-conformance gate");
+        const dismissAt = postSteps.indexOf(
+            "- name: Clear the standing blocking review",
+        );
+        expect(fetchAt).toBeGreaterThan(-1);
+        expect(gateAt).toBeGreaterThan(fetchAt);
+        expect(dismissAt).toBeGreaterThan(gateAt);
+
+        // The fetch and the gate run even when the agent job failed partway
+        // (the safe_outputs job executes the queue regardless)...
+        expect(postSteps.slice(fetchAt, gateAt)).toMatch(
+            /^\s*if: always\(\)\s*$/m,
+        );
+        expect(postSteps.slice(gateAt, dismissAt)).toMatch(
+            /^\s*if: always\(\)\s*$/m,
+        );
+        // ...while the dismissal keeps its default `if:` (success()), so a
+        // gate-blocked run (exit 1) never dismisses.
+        expect(postSteps.slice(dismissAt)).not.toMatch(/^\s*if:/m);
     });
 });
