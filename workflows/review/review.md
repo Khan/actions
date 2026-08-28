@@ -309,11 +309,22 @@ pre-agent-steps:
   # targets paths inside the agent-writable workspace, and it reuses a
   # pre-existing directory whose fetch URL matches (its clean/reset never
   # touch .git config or hooks). The rm is belt and braces for runner
-  # reuse; the agent cannot create the path.
+  # reuse; the agent cannot create the path. Three attempts before the
+  # fatal exit, since a bare git clone has none of the internal fetch
+  # retries actions/checkout gives the sibling checkout above, and a flake
+  # here now costs the whole run; the rm re-runs per attempt so a partial
+  # clone never survives into the next one.
   - name: Fetch the review lib for post-agent execution (Khan/actions)
     run: |
-      rm -rf "${RUNNER_TEMP}/gh-aw-review-lib-postagent"
-      git clone --quiet --depth 1 --branch review-v1.23.0 https://github.com/Khan/actions.git "${RUNNER_TEMP}/gh-aw-review-lib-postagent"
+      for attempt in 1 2 3; do
+        rm -rf "${RUNNER_TEMP}/gh-aw-review-lib-postagent"
+        if git clone --quiet --depth 1 --branch review-v1.23.0 https://github.com/Khan/actions.git "${RUNNER_TEMP}/gh-aw-review-lib-postagent"; then
+          exit 0
+        fi
+        echo "::warning title=post-agent lib fetch::clone attempt ${attempt} failed"
+        sleep 10
+      done
+      exit 1
 
 # The dispatch-conformance gate (workflows/review/lib/dispatch-gate.ts): a code
 # chokepoint between the agent and the review submission. gh-aw compiles

@@ -44,6 +44,23 @@ describe("the post-agent execution rule", () => {
         expect(cloneAt).toBeLessThan(postAt);
     });
 
+    it("keeps the pre-agent fetch fatal (no continue-on-error, no if:)", () => {
+        // A fetch failure must red the job before the agent runs; that
+        // fatality is what guarantees the clone exists post-agent.
+        const preSteps = reviewMd.slice(preAt, postAt);
+        const fetchAt = preSteps.indexOf(
+            "- name: Fetch the review lib for post-agent execution",
+        );
+        expect(fetchAt).toBeGreaterThan(-1);
+        const nextAt = preSteps.indexOf("\n  - name:", fetchAt + 1);
+        const step = preSteps.slice(
+            fetchAt,
+            nextAt === -1 ? undefined : nextAt,
+        );
+        expect(step).not.toMatch(/^\s*continue-on-error:/m);
+        expect(step).not.toMatch(/^\s*if:/m);
+    });
+
     it("executes every post-steps lib invocation from the clone", () => {
         const invocations = [
             ...postSteps.matchAll(/cd ("[^"]+"|\S+) && npx -y tsx ([^\s);]+)/g),
@@ -55,6 +72,10 @@ describe("the post-agent execution rule", () => {
         for (const invocation of invocations) {
             expect(invocation[1]).toBe(POSTAGENT);
         }
+        // A bare `npx -y tsx gh-aw-review-lib/...` (no `cd`) would be
+        // invisible to the regex above, so also assert the workspace copy
+        // is never named anywhere under post-steps.
+        expect(postSteps).not.toMatch(/gh-aw-review-lib(?!-postagent)/);
     });
 
     it("keeps the failure posture: always-run gate, default-if dismissal, no continue-on-error", () => {

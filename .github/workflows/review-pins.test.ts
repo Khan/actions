@@ -58,6 +58,22 @@ describe("compiled review.lock.yml pins", () => {
         expect(literals.length).toBeGreaterThan(0);
         expect(new Set(literals)).toEqual(new Set([sourceRef]));
     });
+
+    it("never mounts $RUNNER_TEMP itself into the agent container", () => {
+        // The post-agent execution rule (workflows/review/review.md,
+        // backstopped by workflows/review/post-agent-steps.test.ts) rests on
+        // the premise that the agent cannot reach the clone under
+        // $RUNNER_TEMP. That premise is gh-aw's compiled mount list, so pin
+        // it here against toolchain bumps: every RUNNER_TEMP volume mount in
+        // the lock must be scoped to the gh-aw/safeoutputs subdir.
+        const mounts = [
+            ...reviewLock.matchAll(/-v '"\$\{RUNNER_TEMP\}"'([^:]*):/g),
+        ].map((m) => m[1]);
+        expect(mounts.length).toBeGreaterThan(0);
+        for (const mount of mounts) {
+            expect(mount).toMatch(/^\/gh-aw\/safeoutputs/);
+        }
+    });
 });
 
 /**
