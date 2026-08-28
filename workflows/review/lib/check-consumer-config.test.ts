@@ -9,6 +9,7 @@ import {
     parseArgs,
     REQUIRED_RUNTIME_IMPORTS,
     renderReport,
+    runnerTempMountViolations,
 } from "./check-consumer-config.ts";
 import type {ConsumerConfigFs} from "./check-consumer-config.ts";
 import {ROUTING_CONFIG_PATH} from "./routing-config.ts";
@@ -396,6 +397,41 @@ describe("the compiled lock", () => {
         expect(codes(check(inputs), "warning")).toEqual([
             "lock-not-marked-generated",
         ]);
+    });
+
+    // The post-agent execution rule's premise, per install: the agent
+    // container must not be able to write the post-agent lib copy at
+    // $RUNNER_TEMP/gh-aw-review-lib-postagent.
+    it("accepts the shipped RUNNER_TEMP mount shape", () => {
+        const inputs = validInstall();
+        inputs[INSTALLED_LOCK_PATH] =
+            "# compiled\n" +
+            '          awf --mount "${RUNNER_TEMP}/gh-aw:${RUNNER_TEMP}/gh-aw:ro" ' +
+            '--mount "${RUNNER_TEMP}/gh-aw:/host${RUNNER_TEMP}/gh-aw:ro" ' +
+            '--mount "${RUNNER_TEMP}/gh-aw/safeoutputs/upload-artifacts:${RUNNER_TEMP}/gh-aw/safeoutputs/upload-artifacts:rw"\n' +
+            "          -v '\"${RUNNER_TEMP}\"'/gh-aw/safeoutputs:'\"${RUNNER_TEMP}\"'/gh-aw/safeoutputs:rw\n";
+        expect(codes(check(inputs), "error")).toEqual([]);
+    });
+
+    it("errors when the lock mounts RUNNER_TEMP outside gh-aw/", () => {
+        const inputs = validInstall();
+        inputs[INSTALLED_LOCK_PATH] =
+            '# compiled\n          awf --mount "${RUNNER_TEMP}:${RUNNER_TEMP}:ro"\n';
+        expect(codes(check(inputs), "error")).toEqual([
+            "lock-mounts-runner-temp-escape",
+        ]);
+    });
+
+    it("treats a modeless RUNNER_TEMP mount as writable (docker's default)", () => {
+        const inputs = validInstall();
+        inputs[INSTALLED_LOCK_PATH] =
+            '# compiled\n          awf --mount "${RUNNER_TEMP}/gh-aw:${RUNNER_TEMP}/gh-aw"\n';
+        expect(codes(check(inputs), "error")).toEqual([
+            "lock-mounts-runner-temp-escape",
+        ]);
+        expect(
+            runnerTempMountViolations(inputs[INSTALLED_LOCK_PATH])[0],
+        ).toContain("writable outside gh-aw/safeoutputs");
     });
 
     // The gap the documented `*.lock.yml` marker leaves: gh-aw's maintenance

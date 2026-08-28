@@ -20,6 +20,8 @@ import * as os from "os";
 import * as path from "path";
 import {describe, expect, it} from "vitest";
 
+import {runnerTempMountViolations} from "../../workflows/review/lib/check-consumer-config";
+
 const reviewMd = fs.readFileSync(
     new URL("./review.md", import.meta.url),
     "utf-8",

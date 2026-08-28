@@ -2,14 +2,14 @@
  * CI backstop for review.md's post-agent execution rule.
  *
  * Nothing the agent can write may execute on the host after its turn: the
- * dispatch-conformance gate and the credentialed dismissal run from a clone
- * under $RUNNER_TEMP (outside the agent container's mounts), staged by a
- * pre-agent step whose failure reds the job before any AI spend. The
- * dismissal step's warning wrapper makes a broken path green at runtime, so
- * these structural assertions are the only backstop. They are
- * position-sensitive on purpose: indexOf binds to the FIRST occurrence, so a
- * copy of any of these lines drifting into the wrong section breaks the
- * ordering chain rather than passing on a name match.
+ * dispatch-conformance gate and the credentialed dismissal run from a copy
+ * of the pinned checkout under $RUNNER_TEMP (which the agent container
+ * cannot write), staged by a pre-agent step whose failure reds the job
+ * before any AI spend. The dismissal step's warning wrapper makes a broken
+ * path green at runtime, so these structural assertions are the only
+ * backstop. They are position-sensitive on purpose: indexOf binds to the
+ * FIRST occurrence, so a copy of any of these lines drifting into the wrong
+ * section breaks the ordering chain rather than passing on a name match.
  */
 import * as fs from "fs";
 import {describe, expect, it} from "vitest";
@@ -18,50 +18,51 @@ const reviewMd = fs.readFileSync(
     new URL("./review.md", import.meta.url),
     "utf-8",
 );
-const pkg = JSON.parse(
-    fs.readFileSync(new URL("./package.json", import.meta.url), "utf-8"),
-);
 
 const POSTAGENT = '"${RUNNER_TEMP}/gh-aw-review-lib-postagent"';
 const preAt = reviewMd.indexOf("\npre-agent-steps:");
 const postAt = reviewMd.indexOf("\npost-steps:");
+// The post-steps sequence ends at the next column-0 line (a top-level key
+// or full-line comment), not at a named heading that could move or be
+// reworded.
+const afterKey = postAt + "\npost-steps:".length;
+const postEndRel = reviewMd.slice(afterKey).search(/\n\S/);
 const postSteps = reviewMd.slice(
     postAt,
-    reviewMd.indexOf("\n# Anthropic pricing overlay"),
+    postEndRel === -1 ? undefined : afterKey + postEndRel,
 );
 
 describe("the post-agent execution rule", () => {
-    it("stages the clone before the agent's turn, cleared first", () => {
+    it("stages the copy before the agent's turn, cleared first", () => {
         expect(preAt).toBeGreaterThan(-1);
         expect(postAt).toBeGreaterThan(preAt);
         const rmAt = reviewMd.indexOf(`rm -rf ${POSTAGENT}`);
-        const cloneAt = reviewMd.indexOf(
-            `git clone --quiet --depth 1 --branch review-v${pkg.version} ` +
-                `https://github.com/Khan/actions.git ${POSTAGENT}`,
+        const copyAt = reviewMd.indexOf(
+            'cp -a "${GITHUB_WORKSPACE}/gh-aw-review-lib" ' + POSTAGENT,
         );
         expect(rmAt).toBeGreaterThan(preAt);
-        expect(cloneAt).toBeGreaterThan(rmAt);
-        expect(cloneAt).toBeLessThan(postAt);
+        expect(copyAt).toBeGreaterThan(rmAt);
+        expect(copyAt).toBeLessThan(postAt);
     });
 
-    it("keeps the pre-agent fetch fatal (no continue-on-error, no if:)", () => {
-        // A fetch failure must red the job before the agent runs; that
-        // fatality is what guarantees the clone exists post-agent.
+    it("keeps the pre-agent copy fatal (no continue-on-error, no if:, no wrapper)", () => {
+        // A copy failure must red the job before the agent runs; that
+        // fatality is what guarantees the copy exists post-agent.
         const preSteps = reviewMd.slice(preAt, postAt);
-        const fetchAt = preSteps.indexOf(
-            "- name: Fetch the review lib for post-agent execution",
+        const copyStepAt = preSteps.indexOf(
+            "- name: Copy the review lib for post-agent execution",
         );
-        expect(fetchAt).toBeGreaterThan(-1);
-        const nextAt = preSteps.indexOf("\n  - name:", fetchAt + 1);
+        expect(copyStepAt).toBeGreaterThan(-1);
+        const nextAt = preSteps.indexOf("\n  - name:", copyStepAt + 1);
         const step = preSteps.slice(
-            fetchAt,
+            copyStepAt,
             nextAt === -1 ? undefined : nextAt,
         );
         expect(step).not.toMatch(/^\s*continue-on-error:/m);
         expect(step).not.toMatch(/^\s*if:/m);
-        // ...and the retry loop must still end in the fatal exit (the YAML
-        // keys alone would pass with a warn-and-exit-0 wrapper).
-        expect(step).toMatch(/\bdone\s*\n\s*exit 1\b/);
+        // ...and no shell-level softening either (a `|| true` or `exit 0`
+        // would pass the YAML-key checks while defeating the fatality).
+        expect(step).not.toMatch(/\|\||exit 0/);
     });
 
     it("executes every post-steps lib invocation from the clone", () => {

@@ -235,9 +235,9 @@ sandbox:
 # `gh-aw-review-lib/` via `npx -y tsx <script>`; npx fetches the runner on first
 # use, so the checkout needs no install step. One exception: the two
 # post-agent steps (the conformance gate and the credentialed dismissal) run
-# from a fresh clone of the same ref under $RUNNER_TEMP made after the
-# agent's turn, never from this agent-writable copy (rationale at
-# post-steps).
+# from a pre-staged copy of this checkout under $RUNNER_TEMP, out of the
+# agent's reach, never from this agent-writable one (rationale at the copy
+# step below).
 pre-agent-steps:
   - name: Check out shared review lib (Khan/actions)
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -246,6 +246,31 @@ pre-agent-steps:
       ref: review-v1.23.0
       path: gh-aw-review-lib
       persist-credentials: false
+
+  # The post-agent lib: the dispatch-conformance gate and the reduced-depth
+  # dismissal (post-steps below) execute lib code on the host AFTER the
+  # agent's turn, and nothing the agent can write may execute on the host
+  # then (host execution of a rewritten file, credentialed or not, can
+  # bridge to a sibling step's credentials: a spawned process outliving its
+  # step, a poisoned tool cache). `gh-aw-review-lib/` above sits in the
+  # workspace the agent container mounts rw (as does all of /tmp), so those
+  # two steps run from this copy under $RUNNER_TEMP instead, which the
+  # agent cannot write: the container shares only $RUNNER_TEMP/gh-aw
+  # (read-only, except its safeoutputs/upload-artifacts subdir), and the
+  # copy sits BESIDE gh-aw/, not under it (review-pins.test.ts pins those
+  # mounts here, the consumer-config checker pins them per install).
+  # A local copy of the checkout above, not a second fetch: at this point
+  # in the job that tree IS the pinned ref, un-tampered (the agent has not
+  # run), so re-cloning it from the network would add a flake surface and
+  # nothing else. Taken directly after the checkout, before the staging and
+  # npm ci steps touch anything, so the copy is pristine. A failure here
+  # reds the job before any AI spend (the posture of every pre-agent step);
+  # the rm is belt and braces for runner reuse (the agent cannot create the
+  # path).
+  - name: Copy the review lib for post-agent execution
+    run: |
+      rm -rf "${RUNNER_TEMP}/gh-aw-review-lib-postagent"
+      cp -a "${GITHUB_WORKSPACE}/gh-aw-review-lib" "${RUNNER_TEMP}/gh-aw-review-lib-postagent"
 
   # Deterministic pre-agent staging (slice 1 of the deterministic-orchestrator
   # migration; lib/stage-pr.ts): fetches the PR metadata, changed files, prior
@@ -292,41 +317,6 @@ pre-agent-steps:
   - name: Install dispatcher dependencies
     run: cd gh-aw-review-lib/workflows/review && npm ci --ignore-scripts --no-audit --no-fund
 
-  # The post-agent lib: the dispatch-conformance gate and the reduced-depth
-  # dismissal (post-steps below) execute lib code on the host AFTER the
-  # agent's turn, and nothing the agent can write may execute on the host
-  # then (host execution of a rewritten file, credentialed or not, can
-  # bridge to a sibling step's credentials: a spawned process outliving its
-  # step, a poisoned tool cache). `gh-aw-review-lib/` above sits in the
-  # workspace the agent container mounts rw (as does all of /tmp), so those
-  # two steps run from this clone under $RUNNER_TEMP instead, which the
-  # agent cannot write: the container shares only $RUNNER_TEMP/gh-aw
-  # (read-only, except its safeoutputs/upload-artifacts subdir), and the
-  # clone sits BESIDE gh-aw/, not under it (review-pins.test.ts pins those
-  # mounts). That unreachability is the security property, not
-  # timing, so the clone is staged HERE, before the agent's turn: a fetch
-  # failure fails the job before any AI spend (the posture of every
-  # pre-agent step), instead of adding a fail-open path to the blocking
-  # gate. Plain git clone rather than actions/checkout: checkout only
-  # targets paths inside the agent-writable workspace, and it reuses a
-  # pre-existing directory whose fetch URL matches (its clean/reset never
-  # touch .git config or hooks). The rm is belt and braces for runner
-  # reuse; the agent cannot create the path. Three attempts before the
-  # fatal exit, since a bare git clone has none of the internal fetch
-  # retries actions/checkout gives the sibling checkout above, and a flake
-  # here now costs the whole run; the rm re-runs per attempt so a partial
-  # clone never survives into the next one.
-  - name: Fetch the review lib for post-agent execution (Khan/actions)
-    run: |
-      for attempt in 1 2 3; do
-        rm -rf "${RUNNER_TEMP}/gh-aw-review-lib-postagent"
-        if git clone --quiet --depth 1 --branch review-v1.23.0 https://github.com/Khan/actions.git "${RUNNER_TEMP}/gh-aw-review-lib-postagent"; then
-          exit 0
-        fi
-        echo "::warning title=post-agent lib fetch::clone attempt ${attempt} failed"
-        sleep 10
-      done
-      exit 1
 
 # The dispatch-conformance gate (workflows/review/lib/dispatch-gate.ts): a code
 # chokepoint between the agent and the review submission. gh-aw compiles
@@ -353,10 +343,10 @@ pre-agent-steps:
 # (and it strips the queue in the same code path).
 post-steps:
   # POST-AGENT EXECUTION RULE: nothing the agent can write may execute on
-  # the host after its turn. Both steps below run from the pre-staged clone
-  # under $RUNNER_TEMP (the pre-agent fetch step above; the agent cannot
-  # reach it), never from the agent-writable workspace copy. The clone is
-  # present whenever the agent ran at all (its fetch failing reds the job
+  # the host after its turn. Both steps below run from the pre-staged copy
+  # under $RUNNER_TEMP (the pre-agent copy step above; the agent cannot
+  # write it), never from the agent-writable workspace checkout. The copy
+  # is present whenever the agent ran at all (its step failing reds the job
   # before AI spend); if it is somehow gone anyway, the gate's npx fails
   # open and the dismissal skips into its warning, same as any bootstrap
   # failure.
@@ -388,7 +378,7 @@ post-steps:
   # token for the same reason the resolve-thread safe output carries it:
   # dismissal needs write access.
   # Those guards defend the executor's INPUTS; the post-agent execution
-  # rule above (pre-staged clone under $RUNNER_TEMP, out of the agent's
+  # rule above (pre-staged copy under $RUNNER_TEMP, out of the agent's
   # reach) defends the EXECUTABLE, which matters most here: this is the one
   # step handing a repo-write PAT with unfirewalled egress to lib code
   # (gh-aw's own credentialed scripts run from $RUNNER_TEMP for the same

@@ -97,6 +97,44 @@ export const INSTALLED_WORKFLOW_PATH = ".github/workflows/review.md";
 export const INSTALLED_LOCK_PATH = ".github/workflows/review.lock.yml";
 
 /**
+ * RUNNER_TEMP mount escapes in a compiled lock.
+ *
+ * The post-agent execution rule (review.md's pre-agent copy step) rests on
+ * the agent container not being able to write
+ * `$RUNNER_TEMP/gh-aw-review-lib-postagent`, and the mounts that decide that
+ * are each install's compiled lock, not the shared source. Scans both mount
+ * spellings gh-aw emits (the MCP gateway's docker `-v` flags and the awf
+ * sandbox's `--mount` flags) and returns one line per violation: a
+ * RUNNER_TEMP mount outside `gh-aw/` (the copy sits beside `gh-aw/`, never
+ * under it), or a writable one outside `gh-aw/safeoutputs`. A mount with no
+ * explicit mode counts as writable (docker's default). A toolchain that
+ * changes the mount SPELLING makes this scan see nothing; Khan/actions' own
+ * review-pins.test.ts asserts the current spellings still match, so drift is
+ * caught at the toolchain bump there.
+ */
+export const runnerTempMountViolations = (lock: string): string[] => {
+    const mounts = [
+        ...lock.matchAll(/-v '"\$\{RUNNER_TEMP\}"'([^:]*):([^ ]*)/g),
+        ...lock.matchAll(/--mount "\$\{RUNNER_TEMP\}([^:"]*):([^"]*)"/g),
+    ];
+    const violations: string[] = [];
+    for (const mount of mounts) {
+        const source = mount[1];
+        const writable = !mount[2].endsWith(":ro");
+        if (!/^\/gh-aw(\/|$)/.test(source)) {
+            violations.push(
+                `\${RUNNER_TEMP}${source} is mounted outside gh-aw/`,
+            );
+        } else if (writable && !/^\/gh-aw\/safeoutputs/.test(source)) {
+            violations.push(
+                `\${RUNNER_TEMP}${source} is mounted writable outside gh-aw/safeoutputs`,
+            );
+        }
+    }
+    return violations;
+};
+
+/**
  * gh-aw's scheduled housekeeping workflow (gh-aw v0.83+). Generated like a lock
  * file but NOT named `*.lock.yml`, so the documented marker misses it.
  */
@@ -677,6 +715,20 @@ export const checkConsumerConfig = (
     // be told to mark a nonexistent file as generated — the report reads
     // cause-then-effect, and under --strict the extra warning would flip the
     // exit code.
+    // The post-agent execution rule's premise, checked per install: the
+    // mounts live in this repo's compiled lock, so the shared source cannot
+    // pin them for its consumers.
+    if (installed.lockPresent) {
+        for (const violation of runnerTempMountViolations(
+            fs.readFileSync(at(lockPath), "utf8"),
+        )) {
+            error(
+                "lock-mounts-runner-temp-escape",
+                `${lockPath}: ${violation}, so the agent can tamper with the post-agent lib copy the dispatch gate and the review dismissal execute.`,
+                "Recompile with a gh-aw release that scopes RUNNER_TEMP mounts to gh-aw/ (a wholesale mount voids the post-agent execution rule).",
+            );
+        }
+    }
     if (installed.lockPresent && !isGenerated(lockPath, generatedRules)) {
         warn(
             "lock-not-marked-generated",
@@ -882,119 +934,16 @@ export {renderReport};
 /* CLI                                                                       */
 /* -------------------------------------------------------------------------- */
 
-type CliArgs = {
-    repoRoot?: string;
-    filesFrom?: string;
-    explainPath?: string;
-    workflowPath?: string;
-    json: boolean;
-    strict: boolean;
-};
-
-/** Parse `--flag value` arguments. Unknown flags are an error, not ignored. */
-export const parseArgs = (argv: readonly string[]): CliArgs => {
-    const out = {json: false, strict: false} as CliArgs;
-    for (let i = 0; i < argv.length; i++) {
-        const arg = argv[i];
-        switch (arg) {
-            case "--repo":
-                out.repoRoot = argv[++i];
-                break;
-            case "--files-from":
-                out.filesFrom = argv[++i];
-                break;
-            case "--explain":
-                out.explainPath = argv[++i];
-                break;
-            case "--workflow":
-                out.workflowPath = argv[++i];
-                break;
-            case "--json":
-                out.json = true;
-                break;
-            case "--strict":
-                out.strict = true;
-                break;
-            default:
-                throw new Error(`unknown argument: ${arg}`);
-        }
-    }
-    return out;
-};
-
-const main = (): void => {
-    /* eslint-disable-next-line no-undef */
-    const nodeFs = require("node:fs") as ConsumerConfigFs & {
-        readFileSync: (p: string | number, enc: "utf8") => string;
-    };
-    const args = parseArgs(process.argv.slice(2));
-
-    const files =
-        args.filesFrom === undefined
-            ? undefined
-            : nodeFs
-                  .readFileSync(
-                      args.filesFrom === "-" ? 0 : args.filesFrom,
-                      "utf8",
-                  )
-                  .split("\n")
-                  .map((line) => line.trim())
-                  .filter((line) => line !== "");
-
-    // The version this checker ships with, so a consumer pinned elsewhere is
-    // told the semantics validated here are not the ones its reviews run.
-    let checkerVersion: string | undefined;
-    try {
-        checkerVersion = JSON.parse(
-            nodeFs.readFileSync(`${__dirname}/../package.json`, "utf8"),
-        ).version;
-    } catch {
-        checkerVersion = undefined;
-    }
-
-    // The ceiling the shared workflow ships, read from this checkout's own
-    // review.md so a release that raises it cannot strand the hardcoded
-    // fallback constant.
-    let shippedMaxAiCredits: number | undefined;
-    try {
-        const shipped = frontmatterBlock(
-            nodeFs.readFileSync(`${__dirname}/../review.md`, "utf8"),
-        );
-        const raw =
-            shipped === undefined
-                ? undefined
-                : scalar(yamlLines(shipped), "max-ai-credits");
-        const parsed = raw === undefined ? NaN : Number(raw);
-        shippedMaxAiCredits = Number.isFinite(parsed) ? parsed : undefined;
-    } catch {
-        shippedMaxAiCredits = undefined;
-    }
-
-    const report = checkConsumerConfig(nodeFs, {
-        repoRoot: args.repoRoot,
-        files,
-        explainPath: args.explainPath,
-        workflowPath: args.workflowPath,
-        checkerVersion,
-        shippedMaxAiCredits,
-    });
-
-    process.stdout.write(
-        args.json
-            ? `${JSON.stringify(report, null, 2)}\n`
-            : renderReport(report),
-    );
-
-    const errors = report.issues.filter((issue) => issue.severity === "error");
-    const warnings = report.issues.filter(
-        (issue) => issue.severity === "warning",
-    );
-    if (errors.length > 0 || (args.strict && warnings.length > 0)) {
-        process.exitCode = 1;
-    }
-};
+// The CLI (parseArgs and the direct-run entry point) lives in its own module,
+// the same max-lines split as the report rendering. parseArgs is re-exported
+// for its contract tests, and the require.main guard stays HERE so the
+// documented `npx -y tsx check-consumer-config.ts` invocation keeps working.
+// The require is lazy: the CLI module imports this one back, and deferring
+// the edge until the guard fires keeps the cycle out of module load.
+export {parseArgs} from "./check-consumer-config-cli";
 
 // Run only when invoked directly, never on import (tests).
 if (typeof require !== "undefined" && require.main === module) {
-    main();
+    /* eslint-disable-next-line no-undef */
+    (require("./check-consumer-config-cli") as {runCli: () => void}).runCli();
 }
