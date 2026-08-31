@@ -770,10 +770,18 @@ export const runSubmissionCli = (
         ...prLevelCollapsed,
     ].sort(rankClaims);
     const inlineList = [...inlineClaims];
+    // Attribution composes at render time (attribution.ts's line, inside
+    // the context fold when the claim folds, the classic collapsed footer
+    // when it does not): which reviewer produced the finding, plus dedup's
+    // `also_flagged_by` record of every other reviewer that flagged the
+    // same defect.
     const inline: PlannedComment[] = inlineList.map((claim) => ({
         path: claim.path as string,
         line: claim.line as number,
-        body: renderClaimComment(claim),
+        body: renderClaimComment(claim, {
+            source: claim.source,
+            alsoFlaggedBy: claim.also_flagged_by,
+        }),
     }));
     if (collapsed.length > 0) {
         // Why collapsed one-liners still cost full validation: the modifier
@@ -869,23 +877,6 @@ export const runSubmissionCli = (
             );
         }
     }
-
-    // The per-comment attribution footer (attribution.ts): which reviewer
-    // produced the finding, plus dedup's `also_flagged_by` record of every
-    // other reviewer that flagged the same defect. Appended here, after the
-    // collapsed-observations section ride, so the footer is each comment's
-    // final block; appended at the plan surface rather than inside
-    // renderClaimComment so the claim renderer stays byte-identical to
-    // renderComment on the same finding (the layout parity the tests pin).
-    inlineList.forEach((claim, index) => {
-        inline[index] = {
-            ...inline[index],
-            body: `${inline[index].body}\n\n${renderAttributionFooter(
-                claim.source,
-                claim.also_flagged_by,
-            )}`,
-        };
-    });
 
     // The full-roster approval rule and the reduced-depth clearance:
     // pure decision in submission-clearance.ts, writes here.

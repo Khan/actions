@@ -149,16 +149,21 @@ describe("extractProseUnits", () => {
                 {verification: "confirmed", corrected: {discussion: "x"}},
             ],
         });
+        // The unit mirrors the posting surface: corrected.discussion is
+        // the body, corrected.subject the visible line, never a join the
+        // renderer would not emit.
         expect(units).toEqual([
             {
                 key: "c-2.corrected",
                 label: "question (non-blocking)",
-                prose: "Corrected subject. Corrected discussion.",
+                prose: "Corrected discussion.",
+                summary: "Corrected subject.",
             },
             {
                 key: "claims[2].corrected",
                 label: "suggestion (non-blocking)",
                 prose: "x",
+                summary: "x",
             },
         ]);
     });
@@ -177,6 +182,7 @@ describe("extractProseUnits", () => {
                 key: "out_of_lane_observations[0]",
                 label: "question (non-blocking)",
                 prose: "The sibling test asserts the wrong constant.",
+                summary: "The sibling test asserts the wrong constant.",
             },
         ]);
     });
@@ -203,7 +209,10 @@ describe("createProseGate", () => {
         expect(rejection).toContain("Result rejected");
         expect(rejection).toContain("judge: metaphor");
         expect(rejection).toContain(
-            "at most one claim, one line of evidence, and at most one question",
+            "at most one claim and at most one question per finding",
+        );
+        expect(rejection).toContain(
+            "evidence chain complete enough to check the claim",
         );
         expect(rejection).toContain("call submit_result again");
         expect(records[0]).toMatchObject({state: "fail", bounced: true});
@@ -418,5 +427,41 @@ describe("buildProseJudgeArtifact", () => {
             bounces: 1,
         });
         expect(artifact.model).toBe(PINNED_PROSE_JUDGE_MODEL);
+    });
+});
+
+describe("buildJudgePrompt context fold", () => {
+    const longProse =
+        "The enrichment tool computes the offensive-terms signal on the " +
+        "last user message only, so the baked metadata cannot reproduce " +
+        "the packaged-summary behavior the loop cases exercised. The " +
+        "validation arm therefore lands at the same rate either way.";
+
+    it("judges a folding unit in its posted shape", () => {
+        const prompt = buildJudgePrompt(
+            longProse,
+            "thought (non-blocking)",
+            "The baked-metadata arm cannot reach the modeled rate.",
+        );
+        expect(prompt).toContain(
+            "**thought (non-blocking):** The baked-metadata arm cannot reach the modeled rate.",
+        );
+        expect(prompt).toContain(
+            "<details><summary><sub>context</sub></summary>",
+        );
+        expect(prompt).toContain("</details>");
+    });
+
+    it("judges a short unit in the flat shape (no fold under the bar)", () => {
+        const prompt = buildJudgePrompt(
+            "Short claim.",
+            "thought (non-blocking)",
+            "Short claim.",
+        );
+        expect(prompt).toContain("**thought (non-blocking):** Short claim.");
+        // The rubric text itself names the fold tags, so scope the
+        // assertion to the MESSAGE block.
+        const message = prompt.slice(prompt.indexOf("MESSAGE:"));
+        expect(message).not.toContain("<details>");
     });
 });

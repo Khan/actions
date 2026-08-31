@@ -875,3 +875,76 @@ describe("the medium veto's change-anchored line set", () => {
         expect(result[0].importance).toBe("medium");
     });
 });
+
+describe("the summary passthrough (fold visible line)", () => {
+    it("prefers a finding's authored summary as the claim subject", () => {
+        const claims = buildClaims([
+            {
+                finding: {
+                    schema_version: 2,
+                    id: "f-1",
+                    lens: "correctness",
+                    anchor: {
+                        type: "line",
+                        path: "a.ts",
+                        line: 3,
+                        side: "RIGHT",
+                    },
+                    severity: "advisory",
+                    confidence: 0.9,
+                    evidence_trace: ["e"],
+                    failure_scenario: "f",
+                    producing_hunt: "h",
+                    model_authored_prose:
+                        "First sentence of the prose. Second sentence with the detail.",
+                    summary: "The authored one-liner.",
+                } as never,
+                source: "correctness-reviewer",
+            } as never,
+        ]);
+        expect(claims[0].subject).toBe("The authored one-liner.");
+        expect(claims[0].discussion).toBe(
+            "First sentence of the prose. Second sentence with the detail.",
+        );
+    });
+
+    it("passes a label shape's subject through as the finding summary", () => {
+        const result = parseFinderOutput(
+            "reviewer-1",
+            JSON.stringify({
+                findings: [
+                    {
+                        path: "a.ts",
+                        line: 3,
+                        label: "thought (non-blocking)",
+                        subject: "A distinct authored subject.",
+                        discussion:
+                            "The discussion opens differently and carries the mechanism detail.",
+                    },
+                ],
+            }),
+            new Set(),
+        );
+        expect(result.candidates[0]?.finding.summary).toBe(
+            "A distinct authored subject.",
+        );
+        // The restatement case keeps the mechanical fallback: no summary.
+        const restated = parseFinderOutput(
+            "reviewer-1",
+            JSON.stringify({
+                findings: [
+                    {
+                        path: "a.ts",
+                        line: 3,
+                        label: "thought (non-blocking)",
+                        subject: "The merger drops flagged turns.",
+                        discussion:
+                            "Flagged turns are dropped by the merger. The retry path never re-adds them.",
+                    },
+                ],
+            }),
+            new Set(),
+        );
+        expect(restated.candidates[0]?.finding.summary).toBeUndefined();
+    });
+});

@@ -175,6 +175,78 @@ export const labelForFinding = (finding: Finding): ConventionalLabel => {
 };
 
 /**
+ * Split point for "the prose's first sentence": a sentence terminator
+ * followed by whitespace. Owned here (the lowest rendering module) and
+ * consumed by dispatch-contracts.ts's restatement drop and buildClaims'
+ * subject recovery, which must agree with the renderer on what the first
+ * sentence IS: the fold's visible line and the claim's `subject` are the
+ * same text.
+ */
+export const FIRST_SENTENCE_SPLIT = /(?<=[.!?])\s/;
+
+/** The prose's first sentence, whole prose when no terminator splits it. */
+export const firstSentence = (prose: string): string =>
+    prose.split(FIRST_SENTENCE_SPLIT, 1)[0] ?? prose;
+
+/**
+ * The context fold (PR feedback on webapp#41843: a long comment front-loads
+ * its whole mechanism; compressing it after the fact drops exactly the
+ * detail a reader needs to check the claim). The posted shape becomes a
+ * 1-2 line visible summary plus one collapsed block carrying the full
+ * prose, rule quote, sketch, and attribution, verbatim. The summary chip is
+ * deliberately NOT attribution.ts's `review details`: stripFooters removes
+ * that block wholesale before dedup-threads' text-similarity comparison,
+ * and the context block's prose must stay comparable (only the wrapper
+ * lines are stripped, see stripFooters).
+ */
+export const CONTEXT_FOLD_SUMMARY = "context";
+
+/** The context fold's fixed opening line (stripFooters strips it by shape). */
+export const CONTEXT_FOLD_OPEN = `<details><summary><sub>${CONTEXT_FOLD_SUMMARY}</sub></summary>`;
+
+/**
+ * The shortness threshold: prose under this never folds, it just posts as
+ * today (a two-line comment behind an expando is pure friction). 200 chars
+ * is roughly two sentences; code-owned, tuned by eye, not measured.
+ */
+export const CONTEXT_FOLD_MIN_CHARS = 200;
+
+/**
+ * Whether a summary/prose pair renders as the context fold. Requires a
+ * summary that actually stands apart (prose equal to its own summary has
+ * no context to fold) and prose past the shortness threshold.
+ */
+export const shouldFoldContext = (summary: string, prose: string): boolean =>
+    summary.trim() !== "" &&
+    prose.trim() !== summary.trim() &&
+    prose.trim().length >= CONTEXT_FOLD_MIN_CHARS;
+
+/**
+ * Assemble the context fold: the visible `**label:** summary` line, then
+ * one details block with the full prose and every inside-the-fold extra
+ * (rule quote, sketch, attribution line), each separated by blank lines so
+ * GitHub renders the markdown inside the HTML block. The prose restating
+ * the visible line is fine by design: the fold reads self-contained.
+ */
+export const renderContextFold = (input: {
+    label: string;
+    summary: string;
+    prose: string;
+    insideFold?: readonly string[];
+    outsideFold?: readonly string[];
+}): string => {
+    const inside = (input.insideFold ?? []).filter((block) => block !== "");
+    const outside = (input.outsideFold ?? []).filter((block) => block !== "");
+    return [
+        `**${input.label}:** ${input.summary}`,
+        ...outside,
+        [CONTEXT_FOLD_OPEN, "", input.prose, ...inside, "", "</details>"].join(
+            "\n",
+        ),
+    ].join("\n\n");
+};
+
+/**
  * Render a single finding as a Conventional-Comment body. Shape (per
  * conventionalcomments.org and `review.md` Step 5):
  *
@@ -185,6 +257,12 @@ export const labelForFinding = (finding: Finding): ConventionalLabel => {
  *     ```suggestion
  *     <suggested_patch>
  *     ```
+ *
+ * When the prose clears the context-fold bar ({@link shouldFoldContext},
+ * against the finding's `summary` or its first sentence), the body opens
+ * with the visible summary line instead and the prose plus rule quote move
+ * inside the collapsed block; a committable suggestion fence stays outside
+ * the fold (the one-click apply must not hide).
  *
  * The label and the `**…:**` wrapping are code-owned; the prose after it is the
  * model's `model_authored_prose` copied verbatim (it already carries the subject
@@ -199,18 +277,35 @@ export const labelForFinding = (finding: Finding): ConventionalLabel => {
  */
 export const renderComment = (finding: Finding): string => {
     const label = labelForFinding(finding);
+    const summary =
+        finding.summary ?? firstSentence(finding.model_authored_prose);
+
+    if (shouldFoldContext(summary, finding.model_authored_prose)) {
+        return renderContextFold({
+            label,
+            summary,
+            prose: finding.model_authored_prose,
+            insideFold:
+                finding.rule_quote !== undefined
+                    ? ["", renderRuleQuote(finding.rule_quote)]
+                    : [],
+            outsideFold:
+                finding.suggested_patch !== undefined
+                    ? [
+                          [
+                              "```suggestion",
+                              finding.suggested_patch,
+                              "```",
+                          ].join("\n"),
+                      ]
+                    : [],
+        });
+    }
+
     const lines: string[] = [`**${label}:** ${finding.model_authored_prose}`];
 
     if (finding.rule_quote !== undefined) {
-        // Prefix every line of the quote so a multi-line rule (including one
-        // with a blank line) stays inside a single blockquote; an unprefixed
-        // line would escape it.
-        const [first, ...rest] = finding.rule_quote.split("\n");
-        lines.push(
-            "",
-            `> **Rule:** ${first}`,
-            ...rest.map((line) => (line === "" ? ">" : `> ${line}`)),
-        );
+        lines.push("", renderRuleQuote(finding.rule_quote));
     }
 
     if (finding.suggested_patch !== undefined) {
@@ -218,6 +313,20 @@ export const renderComment = (finding: Finding): string => {
     }
 
     return lines.join("\n");
+};
+
+/**
+ * The `> **Rule:** …` blockquote: every line of the quote is prefixed so a
+ * multi-line rule (including one with a blank line) stays inside a single
+ * blockquote; an unprefixed line would escape it. Shared by both render
+ * shapes and by renderClaimComment.
+ */
+export const renderRuleQuote = (quote: string): string => {
+    const [first, ...rest] = quote.split("\n");
+    return [
+        `> **Rule:** ${first}`,
+        ...rest.map((line) => (line === "" ? ">" : `> ${line}`)),
+    ].join("\n");
 };
 
 /** A core/optional dimension that could not be assessed this run (#194 Step 6). */

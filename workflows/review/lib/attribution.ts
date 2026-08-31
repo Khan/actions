@@ -82,6 +82,19 @@ const flaggedBy = (entry: AlsoFlagged): string => {
 export const renderAttributionFooter = (
     source: string,
     alsoFlaggedBy: readonly AlsoFlagged[] = [],
+): string => renderCollapsedFooter(attributionLine(source, alsoFlaggedBy));
+
+/**
+ * The bare attribution text, without the collapsed-footer wrapper: a
+ * context-folded comment (submission-render.ts) carries it as a `<sub>`
+ * line INSIDE its own fold instead of appending a second details block
+ * (two stacked expandos per comment read as clutter). stripFooters'
+ * whole-line `<sub>` strip removes that form too, so the boilerplate stays
+ * out of text-similarity comparisons either way.
+ */
+export const attributionLine = (
+    source: string,
+    alsoFlaggedBy: readonly AlsoFlagged[] = [],
 ): string => {
     const segments = [`found by ${source}`];
     if (alsoFlaggedBy.length > 0) {
@@ -89,7 +102,7 @@ export const renderAttributionFooter = (
             `also flagged by ${alsoFlaggedBy.map(flaggedBy).join("; ")}`,
         );
     }
-    return renderCollapsedFooter(segments.join(" | "));
+    return segments.join(" | ");
 };
 
 /**
@@ -101,6 +114,15 @@ const FOOTER_BLOCK_RE = new RegExp(
     `<details>\\s*<summary>\\s*<sub>${FOOTER_SUMMARY}</sub>\\s*</summary>[\\s\\S]*?</details>`,
     "gi",
 );
+
+/**
+ * The context fold's wrapper pair (render-comment.ts's CONTEXT_FOLD_OPEN
+ * line through the first closing tag on its own line), capturing the inner
+ * content so {@link stripFooters} can unwrap rather than delete it. A fold
+ * never nests another details block, so the non-greedy close is its own.
+ */
+const CONTEXT_FOLD_RE =
+    /^<details><summary><sub>context<\/sub><\/summary>[ \t]*\n([\s\S]*?)\n<\/details>[ \t]*$/gm;
 
 /**
  * Drop footer boilerplate from a previously-posted bot comment before
@@ -120,5 +142,13 @@ const FOOTER_BLOCK_RE = new RegExp(
 export const stripFooters = (body: string): string =>
     body
         .replace(FOOTER_BLOCK_RE, "")
+        // The context fold's WRAPPER lines only (render-comment.ts's
+        // CONTEXT_FOLD_OPEN through its own closing tag, non-greedy): the
+        // prose inside the fold is review content and must stay
+        // comparable, which is exactly why the fold does not reuse the
+        // `review details` chip this function removes wholesale. Other
+        // details blocks (the review body's collapsed-observations
+        // section) keep their wrappers: only the context chip matches.
+        .replace(CONTEXT_FOLD_RE, "$1")
         .replace(/^[ \t]*<sub>[^<]*<\/sub>[ \t]*$/gm, "")
         .replace(/<sub>\([^<]*\)<\/sub>[ \t]*$/gm, "");

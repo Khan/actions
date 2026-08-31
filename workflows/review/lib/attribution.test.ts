@@ -127,3 +127,32 @@ describe("stripFooters", () => {
         expect(stripped).toContain("prose");
     });
 });
+
+describe("stripFooters context fold", () => {
+    it("unwraps the fold's wrapper lines and keeps the prose inside", () => {
+        const body = [
+            "**thought (non-blocking):** The visible line.",
+            "",
+            "<details><summary><sub>context</sub></summary>",
+            "",
+            "The collapsed mechanism detail a dedup comparison must see.",
+            "",
+            "<sub>found by first-principles</sub>",
+            "",
+            "</details>",
+        ].join("\n");
+        const stripped = stripFooters(body);
+        expect(stripped).toContain(
+            "The collapsed mechanism detail a dedup comparison must see.",
+        );
+        expect(stripped).not.toContain("<details>");
+        expect(stripped).not.toContain("</details>");
+        expect(stripped).not.toContain("found by first-principles");
+    });
+
+    it("leaves the review body's observations section alone", () => {
+        const section =
+            "<details>\n<summary>Lower-confidence observations (2)</summary>\n\n- a\n\n</details>";
+        expect(stripFooters(section)).toBe(section);
+    });
+});

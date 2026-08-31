@@ -400,3 +400,91 @@ describe("renderReviewBody — the COMMENT verdict", () => {
         );
     });
 });
+
+describe("renderComment context fold", () => {
+    const longProse =
+        "User input flows unsanitized into a shell command. The request " +
+        "param reaches exec() through buildArgs without passing " +
+        "shellEscape, and the only caller that sanitizes is the CLI " +
+        "entrypoint, so every HTTP path hits the raw join. Verified by " +
+        "tracing buildArgs callers in src/app.ts and src/cli.ts.";
+
+    it("folds long prose behind the authored summary", () => {
+        const body = renderComment(
+            makeFinding({
+                model_authored_prose: longProse,
+                summary: "Request params reach exec() unescaped.",
+            }),
+        );
+        expect(body).toBe(
+            [
+                "**issue (blocking):** Request params reach exec() unescaped.",
+                "",
+                "<details><summary><sub>context</sub></summary>",
+                "",
+                longProse,
+                "",
+                "</details>",
+            ].join("\n"),
+        );
+    });
+
+    it("falls back to the first sentence when no summary is authored", () => {
+        const body = renderComment(
+            makeFinding({model_authored_prose: longProse}),
+        );
+        expect(
+            body.startsWith(
+                "**issue (blocking):** User input flows unsanitized into a shell command.",
+            ),
+        ).toBe(true);
+        expect(body).toContain(
+            "<details><summary><sub>context</sub></summary>",
+        );
+    });
+
+    it("keeps short prose unfolded (the pre-fold shape, byte for byte)", () => {
+        expect(renderComment(makeFinding())).toBe(
+            "**issue (blocking):** User input flows unsanitized into a shell command.",
+        );
+    });
+
+    it("keeps the committable fence outside, the rule quote inside", () => {
+        const body = renderComment(
+            makeFinding({
+                model_authored_prose: longProse,
+                summary: "Request params reach exec() unescaped.",
+                suggested_patch: "exec(shellEscape(args))",
+                rule_quote: "Never pass raw input to exec.",
+            }),
+        );
+        const foldAt = body.indexOf("<details>");
+        expect(body.indexOf("```suggestion")).toBeLessThan(foldAt);
+        expect(
+            body.indexOf("> **Rule:** Never pass raw input to exec."),
+        ).toBeGreaterThan(foldAt);
+    });
+
+    it("stays byte-identical to renderClaimComment on the folded shape", async () => {
+        // The layout-parity contract: buildClaims turns this finding into a
+        // claim whose subject is the summary and whose discussion is the
+        // prose, and the two renderers must agree on the posted body.
+        const {renderClaimComment} = await import("./submission-render.ts");
+        const finding = makeFinding({
+            model_authored_prose: longProse,
+            summary: "Request params reach exec() unescaped.",
+        });
+        const claimBody = renderClaimComment({
+            id: "finding-1",
+            source: "security-auth-reviewer",
+            path: "src/app.ts",
+            line: 42,
+            label: "issue (blocking)",
+            subject: "Request params reach exec() unescaped.",
+            discussion: longProse,
+            failure_scenario: "f",
+            confidence: 0.9,
+        });
+        expect(renderComment(finding)).toBe(claimBody);
+    });
+});

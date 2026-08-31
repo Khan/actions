@@ -177,3 +177,111 @@ describe("renderClaimComment", () => {
         expect(labelAdmitsSketch("todo (blocking)")).toBe(true);
     });
 });
+
+describe("renderClaimComment context fold", () => {
+    // Long enough to clear CONTEXT_FOLD_MIN_CHARS, with a distinct subject.
+    const longDiscussion =
+        "The enrichment tool computes the offensive-terms signal on the " +
+        "last user message only, so the baked metadata cannot reproduce " +
+        "the packaged-summary behavior the loop cases exercised. The " +
+        "validation arm therefore lands at the same rate either way.";
+    const folded = (overrides: Record<string, unknown> = {}) =>
+        claim({
+            label: "thought (non-blocking)",
+            subject: "The baked-metadata arm cannot reach the modeled rate.",
+            discussion: longDiscussion,
+            ...overrides,
+        });
+
+    it("posts the subject visible and the discussion collapsed", () => {
+        const body = renderClaimComment(folded() as never);
+        expect(body).toBe(
+            [
+                "**thought (non-blocking):** The baked-metadata arm cannot reach the modeled rate.",
+                "",
+                "<details><summary><sub>context</sub></summary>",
+                "",
+                longDiscussion,
+                "",
+                "</details>",
+            ].join("\n"),
+        );
+    });
+
+    it("keeps short discussions in today's shape (no fold under the bar)", () => {
+        const body = renderClaimComment(
+            claim({
+                subject: "Short.",
+                discussion: "Short but different.",
+            }) as never,
+        );
+        expect(body).toBe("**issue (blocking):** Short but different.");
+    });
+
+    it("never folds when the discussion IS the subject", () => {
+        const text = longDiscussion;
+        const body = renderClaimComment(
+            claim({subject: text, discussion: text}) as never,
+        );
+        expect(body).toBe(`**issue (blocking):** ${text}`);
+    });
+
+    it("keeps the committable fence outside the fold, the sketch inside", () => {
+        const withFence = renderClaimComment(
+            folded({
+                label: "suggestion (non-blocking)",
+                suggestion: "fixed()",
+            }) as never,
+        );
+        const fenceAt = withFence.indexOf("```suggestion");
+        const foldAt = withFence.indexOf("<details>");
+        expect(fenceAt).toBeGreaterThan(-1);
+        expect(fenceAt).toBeLessThan(foldAt);
+
+        const sketchSource = "if (x) {\n    guard();\n}\n".repeat(4);
+        const withSketch = renderClaimComment(
+            folded({
+                label: "suggestion (non-blocking)",
+                suggestion: sketchSource,
+            }) as never,
+        );
+        const sketchAt = withSketch.indexOf(
+            "A sketch, not a committable replacement:",
+        );
+        expect(sketchAt).toBeGreaterThan(withSketch.indexOf("<details>"));
+        expect(sketchAt).toBeLessThan(withSketch.indexOf("</details>"));
+    });
+
+    it("puts the rule quote and attribution inside the fold", () => {
+        const body = renderClaimComment(
+            folded({rule_quote: "Always guard."}) as never,
+            {source: "correctness-reviewer"},
+        );
+        const foldAt = body.indexOf("<details>");
+        expect(body.indexOf("> **Rule:** Always guard.")).toBeGreaterThan(
+            foldAt,
+        );
+        const attributionAt = body.indexOf(
+            "<sub>found by correctness-reviewer</sub>",
+        );
+        expect(attributionAt).toBeGreaterThan(foldAt);
+        expect(attributionAt).toBeLessThan(body.indexOf("</details>"));
+        // Exactly one details block: attribution merged, not stacked.
+        expect(body.match(/<details>/g)).toHaveLength(1);
+    });
+
+    it("appends the classic collapsed footer when the claim does not fold", () => {
+        const body = renderClaimComment(claim() as never, {
+            source: "correctness-reviewer",
+        });
+        expect(body).toBe(
+            [
+                "**issue (blocking):** The guard was removed.",
+                "",
+                "<details><summary><sub>review details</sub></summary>",
+                "<sub>found by correctness-reviewer</sub>",
+                "</details>",
+            ].join("\n"),
+        );
+    });
+});
