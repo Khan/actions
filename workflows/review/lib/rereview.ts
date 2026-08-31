@@ -222,7 +222,12 @@ export const excerptOpeningComment = (body: string): string => {
     const sliced = neutralizeStructuralTags(
         firstLine.slice(0, EXCERPT_MAX).trimEnd(),
     );
-    return `${sliced.replace(/<\/?[A-Za-z!][^>]*$/, "").trimEnd()}...`;
+    return `${sliced
+        .replace(
+            /(?:<|&(?:amp;)?(?:lt|#0*60|#[xX]0*3c);)\/?[A-Za-z!][^>]*$/,
+            "",
+        )
+        .trimEnd()}...`;
 };
 
 /** A kept thread joined with its staged data, ready to render. */

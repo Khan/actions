@@ -70,6 +70,17 @@ describe("neutralizeThenEscape", () => {
         );
         expect(capped).toBe(`${"y".repeat(115)}...`);
     });
+
+    it("drops an entity-spelled tag the cap severed", () => {
+        // A sliced `&lt;blo` survives escapeHtml as `&amp;lt;blo`, which
+        // the sanitizer's decode collapses straight back to a live `<blo`,
+        // so the drop has to match every spelling, not just the bracket.
+        const capped = neutralizeThenEscape(
+            `${"y".repeat(112)} &lt;blockquote&gt;tail`,
+            120,
+        );
+        expect(capped).toBe(`${"y".repeat(112)}...`);
+    });
 });
 
 describe("renderCollapsedFooter", () => {

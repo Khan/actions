@@ -132,7 +132,8 @@ export const neutralizeStructuralTags = (text: string): string => {
  * the enclosing block's own closer, while a sliced `(/details)` is inert.
  * The rewrite only touches `details`/`summary`, so the slice can still
  * sever some OTHER tag; the fragment drop after it removes a trailing
- * `<x` remnant (the same guard excerptOpeningComment carries).
+ * `<x` remnant in any spelling the decode collapses to `<` (the same
+ * guard excerptOpeningComment carries).
  */
 export const neutralizeThenEscape = (
     text: string,
@@ -143,7 +144,10 @@ export const neutralizeThenEscape = (
         maxChars !== undefined && neutral.length > maxChars
             ? `${neutral
                   .slice(0, maxChars)
-                  .replace(/<\/?[A-Za-z!][^>]*$/, "")
+                  .replace(
+                      /(?:<|&(?:amp;)?(?:lt|#0*60|#[xX]0*3c);)\/?[A-Za-z!][^>]*$/,
+                      "",
+                  )
                   .trimEnd()}...`
             : neutral,
     );
