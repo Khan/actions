@@ -62,7 +62,7 @@
  * under review.
  */
 
-import {escapeHtml, renderAttributionFooter} from "./attribution";
+import {neutralizeThenEscape, renderAttributionFooter} from "./attribution";
 import {computeRisksPatternsKey, RISKS_PATTERNS_KEY_PATH} from "./cache-record";
 import type {Claim} from "./dispatch-contracts";
 import {applyMediumVeto} from "./dispatch-contracts";
@@ -806,8 +806,8 @@ export const runSubmissionCli = (
         // tells a reader whether the expando is worth opening. `collapsed`
         // re-sorts with rankClaims after the pr-level claims join it, so
         // entry 0 is the best of the whole tail. The subject is
-        // model-authored text inside a <summary>, so it is HTML-escaped
-        // (a literal </summary> would break the collapse) and truncated.
+        // model-authored text inside a <summary>, so it is truncated and
+        // run through neutralizeThenEscape (a </details> breaks the collapse).
         // A one-entry tail: at N=1 the "preview" is the whole payload, so
         // a closed <details> shows the observation twice and reads as a
         // stray comment (Khan/actions#387). It renders <details open> with
@@ -815,7 +815,7 @@ export const runSubmissionCli = (
         // section slicing (<summary> to </details>, collapsed.ts).
         const singleEntry = collapsed.length === 1;
         const top = collapsed[0];
-        const topSubject = escapeHtml(
+        const topSubject = neutralizeThenEscape(
             top.subject.length > TOP_SUBJECT_MAX_CHARS
                 ? `${top.subject.slice(0, TOP_SUBJECT_MAX_CHARS)}...`
                 : top.subject,

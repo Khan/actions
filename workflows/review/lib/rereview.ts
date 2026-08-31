@@ -25,6 +25,7 @@
  * substitute.
  */
 
+import {neutralizeStructuralTags} from "./attribution";
 import {isBlockingLabel} from "./render-comment";
 import {isBotLogin, isReviewBotAuthor, sameLogin} from "./threads";
 
@@ -193,14 +194,21 @@ const EXCERPT_MAX = 120;
 /**
  * The first prose line of a previously-posted comment, with the `**label:**`
  * prefix (or its markdown-stripped plain form, {@link PLAIN_LABEL_RE})
- * stripped and a hard length cap. Quoted verbatim otherwise: this text was
- * already posted to the PR by an earlier run of this workflow.
+ * stripped and a hard length cap. Quoted verbatim otherwise, except that
+ * `details`/`summary` tags are neutralized (neutralizeStructuralTags): the
+ * non-blocking excerpts render inside the recap's collapsed block, where a
+ * bare `</details>` quoted from an old comment would close the block early
+ * (the same breakage Khan/actions#401's collapsed-observations section
+ * hit). previouslyRecapped keys on the thread URL, not this text, so the
+ * damping is unaffected.
  */
 export const excerptOpeningComment = (body: string): string => {
     const withoutBold = body.replace(BOLD_LABEL_RE, "");
     const withoutLabel =
         withoutBold !== body ? withoutBold : body.replace(PLAIN_LABEL_RE, "");
-    const firstLine = withoutLabel.split("\n", 1)[0].trim();
+    const firstLine = neutralizeStructuralTags(
+        withoutLabel.split("\n", 1)[0].trim(),
+    );
     if (firstLine.length <= EXCERPT_MAX) {
         return firstLine;
     }

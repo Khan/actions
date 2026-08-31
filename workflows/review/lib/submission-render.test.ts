@@ -5,6 +5,7 @@ import {
     labelAdmitsSketch,
     renderClaimComment,
 } from "./submission";
+import {COLLAPSED_ENTRY_RE, renderCollapsedLine} from "./submission-render";
 
 /**
  * Claim-rendering tests, split out of submission.test.ts (max-lines): the
@@ -175,5 +176,30 @@ describe("renderClaimComment", () => {
         expect(labelAdmitsSketch("issue")).toBe(true);
         expect(labelAdmitsSketch("Issue (blocking)")).toBe(true);
         expect(labelAdmitsSketch("todo (blocking)")).toBe(true);
+    });
+});
+
+describe("renderCollapsedLine", () => {
+    it("neutralizes structural tags in the model-authored subject", () => {
+        const line = renderCollapsedLine(
+            claim({
+                label: "suggestion (non-blocking)",
+                subject:
+                    "No test pins the blank line between </details> and the fence.",
+            }) as never,
+        );
+        // A bare </details> in any entry closes the collapsed section at
+        // that bullet (Khan/actions#401's re-review); the parenthesised
+        // form posts inert. A backticked tag would pass through: code
+        // spans are not parsed as HTML.
+        expect(line).toBe(
+            "- `a.ts:2` suggestion (non-blocking): No test pins the blank line between (/details) and the fence. <sub>(correctness-reviewer)</sub>",
+        );
+        // The neutralized entry still parses back off the posted body
+        // (the autofix's body-sourced work list contract).
+        const match = COLLAPSED_ENTRY_RE.exec(line.trim());
+        expect(match?.[4]).toBe(
+            "No test pins the blank line between (/details) and the fence.",
+        );
     });
 });

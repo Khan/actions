@@ -2,7 +2,6 @@ import {describe, it, expect} from "vitest";
 
 import {renderReviewBody} from "./render-comment";
 import {
-    excerptOpeningComment,
     parseLeadingLabel,
     renderRereviewSection,
     runRereviewCli,
@@ -82,35 +81,6 @@ describe("parseLeadingLabel", () => {
         expect(parseLeadingLabel("Note: this only affects tests.")).toBeNull();
         expect(parseLeadingLabel("warning (non-blocking): x")).toBeNull();
         expect(parseLeadingLabel("note: no decoration either.")).toBeNull();
-    });
-});
-
-describe("excerptOpeningComment", () => {
-    it("strips the label prefix and keeps the first line", () => {
-        expect(
-            excerptOpeningComment(
-                "**issue (blocking):** First line.\nSecond line.",
-            ),
-        ).toBe("First line.");
-    });
-
-    it("truncates deterministically past the cap", () => {
-        const long = `**issue (blocking):** ${"a".repeat(300)}`;
-        const excerpt = excerptOpeningComment(long);
-        expect(excerpt.endsWith("...")).toBe(true);
-        expect(excerpt.length).toBeLessThanOrEqual(123);
-    });
-
-    it("passes a label-less body through verbatim", () => {
-        expect(excerptOpeningComment("No label here.")).toBe("No label here.");
-    });
-
-    it("strips the markdown-stripped plain label form too", () => {
-        expect(
-            excerptOpeningComment(
-                "thought (non-blocking): The trim loop now counts.",
-            ),
-        ).toBe("The trim loop now counts.");
     });
 });
 

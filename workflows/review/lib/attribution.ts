@@ -53,13 +53,56 @@ export const renderCollapsedFooter = (content: string): string =>
 
 /**
  * A merged copy's `subject` is model-authored text interpolated into the
- * footer's HTML. Unescaped, a subject containing a literal `</details>`
- * closes the collapsed block early and truncates {@link stripFooters}'s
- * non-greedy match. Escape the HTML-significant characters; GitHub renders
- * the entities back as the literal characters.
+ * footer's HTML. Escape the HTML-significant characters so the plan-side
+ * artifact stays inert; GitHub renders the entities back as the literal
+ * characters. NOT a structural defense on its own: gh-aw's ingest sanitizer
+ * decodes HTML entities in everything the agent queues (mirrored by
+ * sanitizer-normalize.ts's decodeHtmlEntities), so an escaped tag posts as
+ * a live one. {@link neutralizeStructuralTags} must run first on any text
+ * this escape is supposed to keep from closing a block.
  */
 export const escapeHtml = (text: string): string =>
     text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/**
+ * Rewrite a `details`/`summary` tag in model-authored text to the ingest
+ * sanitizer's parenthesised form (`</details>` becomes `(/details)`, the
+ * shape foldXmlTags gives every DISALLOWED tag). Entity-escaping cannot
+ * protect a posted surface from these two tags: the sanitizer decodes
+ * `&lt;/details&gt;` back to the literal tag, and both tags are on its
+ * allowed list, so the tag posts live and closes the enclosing collapsed
+ * block right there (Khan/actions#401's re-review posted its whole
+ * collapsed-observations list outside the block this way: the top-ranked
+ * subject quoted a bare `</details>`).
+ *
+ * Backtick code spans pass through verbatim: a code span is not parsed as
+ * HTML on GitHub, and `` `</details>` `` is how a finding legitimately
+ * names the tag. Unbalanced backticks leave every segment eligible for the
+ * rewrite, which fails safe (neutralized, never live). Scoped to the two
+ * structure-closing tags on purpose: other allowed tags (`sub`, `b`) can
+ * only mis-style text, and rewriting them would mangle far more legitimate
+ * prose than they endanger.
+ */
+export const neutralizeStructuralTags = (text: string): string =>
+    text
+        .split(/(`+[^`]*`+)/)
+        .map((segment, index) =>
+            index % 2 === 1
+                ? segment
+                : segment.replace(
+                      /<(\/?\s*(?:details|summary)\b[^>]*)>/gi,
+                      "($1)",
+                  ),
+        )
+        .join("");
+
+/**
+ * The composed treatment for model-authored text interpolated into a
+ * collapsed block's HTML: {@link neutralizeStructuralTags} first (the part
+ * that survives ingest), then {@link escapeHtml} (plan-side inertness).
+ */
+export const neutralizeThenEscape = (text: string): string =>
+    escapeHtml(neutralizeStructuralTags(text));
 
 const flaggedBy = (entry: AlsoFlagged): string => {
     const anchor =
@@ -68,7 +111,7 @@ const flaggedBy = (entry: AlsoFlagged): string => {
             : `${entry.source} (at line ${entry.line})`;
     return entry.subject === undefined
         ? anchor
-        : `${anchor}: ${escapeHtml(entry.subject)}`;
+        : `${anchor}: ${neutralizeThenEscape(entry.subject)}`;
 };
 
 /**

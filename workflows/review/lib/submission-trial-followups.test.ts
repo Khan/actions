@@ -533,7 +533,7 @@ describe("the budget's spend order", () => {
 });
 
 describe("the named-top tag's escaping", () => {
-    it("escapes a model-authored subject and truncates a long one", () => {
+    it("neutralizes a model-authored subject and truncates a long one", () => {
         const hostile = "Breaks out</summary></details> <b>of the block</b>";
         const claims = [
             claim({
@@ -555,16 +555,23 @@ describe("the named-top tag's escaping", () => {
             makeFakeFs(staged({depth: "full", claims})),
         );
         // The hostile subject ranks first (higher confidence): the SUMMARY
-        // line carries entities, never the raw tag. (The list entries below
-        // it share the exposure but predate this PR; the finding's own
-        // scope note excludes them.)
+        // line parenthesises the structural tags (entities alone do not
+        // survive the ingest sanitizer, which decodes them back to live
+        // tags; the Khan/actions#401 re-review broke exactly there) and
+        // escapes the rest.
         const summaryLine = plan.body
             .split("\n")
             .find((line) => line.includes("Lower-confidence observations"));
         expect(summaryLine).toContain(
-            "Breaks out&lt;/summary&gt;&lt;/details&gt; &lt;b&gt;of the block&lt;/b&gt;",
+            "Breaks out(/summary)(/details) &lt;b&gt;of the block&lt;/b&gt;",
         );
         expect(summaryLine).not.toContain("out</summary>");
+        // The list entries get the same neutralization: a bare </details>
+        // in ANY entry closes the section at that bullet and spills the
+        // rest of the list out of the collapse.
+        expect(plan.body).toContain(
+            "thought (non-blocking): Breaks out(/summary)(/details)",
+        );
         // The long subject keeps its full text in the list entry; only the
         // summary tag truncates.
         expect(plan.body).toContain("x".repeat(150));

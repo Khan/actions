@@ -8,6 +8,7 @@
  * verbatim.
  */
 
+import {neutralizeStructuralTags} from "./attribution";
 import type {Claim} from "./dispatch-contracts";
 
 /**
@@ -189,13 +190,22 @@ export const renderClaimComment = (claim: Claim): string => {
  * {@link COLLAPSED_ENTRY_RE}, so the renderer and the regex live side by
  * side and a round-trip test in workflows/autofix/lib/collapsed.test.ts
  * pins the contract. Change one, change both.
+ *
+ * The subject is model-authored text inside the section's <details>
+ * block, so it is structurally neutralized: a bare `</details>` in any
+ * entry closes the section at that bullet and spills the rest of the
+ * list out of the collapse (Khan/actions#401's re-review), and escaping
+ * cannot help because the ingest sanitizer decodes entities
+ * ({@link neutralizeStructuralTags}).
  */
 export const renderCollapsedLine = (claim: Claim): string =>
     claim.path !== undefined && claim.line !== undefined
-        ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${
-              claim.subject
-          } ${sourceTag(claim)}`
-        : `- ${claim.label}: ${claim.subject} ${sourceTag(claim)}`;
+        ? `- \`${claim.path}:${claim.line}\` ${
+              claim.label
+          }: ${neutralizeStructuralTags(claim.subject)} ${sourceTag(claim)}`
+        : `- ${claim.label}: ${neutralizeStructuralTags(
+              claim.subject,
+          )} ${sourceTag(claim)}`;
 
 /**
  * The parse of one {@link renderCollapsedLine} entry, anchored form only

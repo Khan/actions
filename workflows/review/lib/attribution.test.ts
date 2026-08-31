@@ -57,7 +57,7 @@ describe("renderAttributionFooter", () => {
         );
     });
 
-    it("escapes HTML in a merged copy's model-authored subject", () => {
+    it("neutralizes structural tags in a merged copy's model-authored subject", () => {
         const footer = renderAttributionFooter("correctness-reviewer", [
             {
                 source: "conventions",
@@ -65,10 +65,27 @@ describe("renderAttributionFooter", () => {
             },
         ]);
         expect(footer).not.toContain("Unbalanced </details>");
+        // The details tag is parenthesised, not escaped: the ingest
+        // sanitizer decodes entities, so `&lt;/details&gt;` would post as
+        // the live tag and close the footer block early anyway. `<sub>`
+        // only mis-styles text, so it keeps the escape-only treatment.
         expect(footer).toContain(
-            "Unbalanced &lt;/details&gt; &amp; a &lt;sub&gt; tag.",
+            "Unbalanced (/details) &amp; a &lt;sub&gt; tag.",
         );
         // The block still strips cleanly: the subject cannot close it early.
+        expect(stripFooters(`prose\n${footer}`)).toBe("prose\n");
+    });
+
+    it("leaves a backticked tag in a merged copy's subject verbatim", () => {
+        const footer = renderAttributionFooter("correctness-reviewer", [
+            {
+                source: "conventions",
+                subject: "The `</details>` guard skips the sketch.",
+            },
+        ]);
+        // A code span is not parsed as HTML on GitHub, so the quoted tag
+        // is safe and stays readable as code.
+        expect(footer).toContain("The `&lt;/details&gt;` guard");
         expect(stripFooters(`prose\n${footer}`)).toBe("prose\n");
     });
 });
