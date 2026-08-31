@@ -104,6 +104,7 @@ import {
     withGraphqlRateLimitRetry,
     type GhGraphql,
 } from "./threads";
+import {hasCanaryFooter} from "./version-footer";
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -567,6 +568,16 @@ export const runStagePrCli = async (
             // and the suppression guard cannot drift apart on the identity
             // (threads.ts, and the #302 postmortem it carries).
             .filter((review) => isReviewBotAuthor(review.user?.login ?? ""))
+            // The canary reviewer posts as the same bot identity, so its
+            // reviews would otherwise stage as THIS workflow's history: its
+            // stamp would anchor the next re-review plan and its verdict
+            // would read as this reviewer's standing state. The footer's
+            // canary segment is the discriminator (hasCanaryFooter lives
+            // beside the renderer). Emission is also gated canary-side
+            // (runRereviewStampCli, COMMENT-only submission), but that gate
+            // runs unreleased code by definition; this filter is the
+            // production half.
+            .filter((review) => !hasCanaryFooter(review.body ?? ""))
             .map((review) => ({
                 body: review.body ?? "",
                 ...(typeof review.submitted_at === "string"
@@ -767,7 +778,11 @@ export const runStagePrCli = async (
     staged.push(ROUTING_OUT);
     runProvenanceCli(fs, repoRoot);
     staged.push(PROVENANCE_OUT, STRIPPED_DIFF_OUT, ANNOTATED_DIFF_OUT);
-    const {plan, warnings: planWarnings, stampSource} = runRereviewPlanCli(fs);
+    const {
+        plan,
+        warnings: planWarnings,
+        stampSource,
+    } = runRereviewPlanCli(fs, undefined, undefined, canary);
     warnings.push(...planWarnings);
     staged.push(PLAN_OUT);
     // Mirror the staged plan verbatim, stampSource included, so the run

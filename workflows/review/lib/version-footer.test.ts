@@ -4,6 +4,7 @@ import {renderCollapsedFooter} from "./attribution";
 import {FINDING_SCHEMA_VERSION} from "./finding-schema";
 import {
     FOOTER_OUT,
+    hasCanaryFooter,
     renderVersionFooter,
     runVersionFooterCli,
     type VersionFooterFs,
@@ -185,6 +186,58 @@ describe("runVersionFooterCli", () => {
         ).toContain("canary abc123def456");
         // Unset (every production run): no segment.
         expect(runVersionFooterCli(fs, LIB, {}, {})).not.toContain("canary");
+    });
+
+    it("reads REVIEW_CANARY_SHA from process.env by default (the production wiring)", () => {
+        const fs = makeFakeFs(fullStaging());
+        const prior = process.env.REVIEW_CANARY_SHA;
+        process.env.REVIEW_CANARY_SHA = "fedcba9876543210";
+        try {
+            expect(runVersionFooterCli(fs, LIB)).toContain(
+                "canary fedcba987654",
+            );
+        } finally {
+            if (prior === undefined) {
+                delete process.env.REVIEW_CANARY_SHA;
+            } else {
+                process.env.REVIEW_CANARY_SHA = prior;
+            }
+        }
+    });
+
+    it("hasCanaryFooter matches the rendered footer and not prose quoting it", () => {
+        const canaryFooter = renderVersionFooter({
+            version: "1.21.0",
+            schemaVersion: 2,
+            depth: "full",
+            reReviewMode: null,
+            blockingOnly: false,
+            blockingMedium: false,
+            enabledReviewers: [],
+            nonBlockingInlineBudget: null,
+            canarySha: "0123456789abcdef",
+        });
+        expect(hasCanaryFooter(`review body\n${canaryFooter}`)).toBe(true);
+        // A production footer (no canary segment).
+        const productionFooter = renderVersionFooter({
+            version: "1.21.0",
+            schemaVersion: 2,
+            depth: "full",
+            reReviewMode: null,
+            blockingOnly: false,
+            blockingMedium: false,
+            enabledReviewers: [],
+            nonBlockingInlineBudget: null,
+        });
+        expect(hasCanaryFooter(`review body\n${productionFooter}`)).toBe(false);
+        // Prose QUOTING the segment outside a <sub> line is not a canary
+        // review (the misfiling direction would drop a production review
+        // from the reviewer's own history).
+        expect(
+            hasCanaryFooter(
+                `The footer says canary 0123456789ab now.\n${productionFooter}`,
+            ),
+        ).toBe(false);
     });
 
     it("composes from the staged files and stages the footer file", () => {

@@ -111,6 +111,20 @@ export const renderVersionFooter = (inputs: VersionFooterInputs): string => {
     return renderCollapsedFooter(segments.join(" | "));
 };
 
+/**
+ * Whether a posted body carries the canary footer segment. The production
+ * staging (stage-pr.ts) drops such reviews from prior-reviews.json before
+ * anything downstream reads them: both workflows post as the same bot
+ * identity, and a canary review admitted as reviewer history would anchor
+ * the production re-review plan on a stamp unreleased code produced (and
+ * make its clearance treat a canary verdict as its own standing state).
+ * Matched inside a `<sub>` line so a review that merely QUOTES the segment
+ * in prose is not misfiled; the emission side (renderVersionFooter above)
+ * and this predicate live in one module so they cannot drift.
+ */
+export const hasCanaryFooter = (body: string): boolean =>
+    /<sub>[^<]*\bcanary [0-9a-f]{7,40}\b[^<]*<\/sub>/.test(body);
+
 const readJson = (fs: VersionFooterFs, path: string): unknown => {
     if (!fs.existsSync(path)) {
         return undefined;
@@ -136,7 +150,9 @@ const readJson = (fs: VersionFooterFs, path: string): unknown => {
  *     field). The submission CLI passes its canonical executed depth in
  *     `overrides` so the footer and the depth Note cannot contradict;
  *   - `routing.json` for the re-review mode, the blocking-only modifier,
- *     and the enable list.
+ *     and the enable list;
+ *   - the env (injectable; production reads `process.env`) for
+ *     `REVIEW_CANARY_SHA`, the canary workflow's head-sha stamp.
  *
  * Every read fails toward omission: a missing or malformed file drops its
  * segments and the footer still renders (schema is a compile-time constant,

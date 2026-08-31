@@ -19,6 +19,7 @@ import {
 } from "./stage-pr";
 import type {TicketFetch} from "./stage-ticket";
 import type {GhGraphql} from "./threads";
+import {renderVersionFooter} from "./version-footer";
 
 /**
  * Pre-agent staging tests (deterministic-orchestrator slice 1).
@@ -846,6 +847,51 @@ describe("canary staging (REVIEW_CANARY=1)", () => {
         expect(result.botThreadCount).toBe(0);
         expect(result.humanThreadCount).toBe(1);
         expect(result.warnings.join(" ")).toContain("canary staging");
+    });
+
+    it("production runs drop canary-footer reviews from prior-reviews.json", async () => {
+        // The other direction of the isolation: a PRODUCTION (non-canary)
+        // staging must not read the canary's posted reviews as its own
+        // history, or its next round would anchor on a stamp unreleased
+        // code produced. The discriminator is the footer's canary segment.
+        const canaryBody = `looks good\n${renderVersionFooter({
+            version: "1.21.0",
+            schemaVersion: 2,
+            depth: "full",
+            reReviewMode: null,
+            blockingOnly: false,
+            blockingMedium: false,
+            enabledReviewers: [],
+            nonBlockingInlineBudget: null,
+            canarySha: "0123456789abcdef",
+        })}`;
+        const routes = {
+            "/repos/o/r/pulls/7": PR_META,
+            "/repos/o/r/pulls/7/files?per_page=100&page=1": [
+                {filename: "a.ts", status: "modified", patch: PATCH_ONE},
+            ],
+            "/repos/o/r/pulls/7/reviews?per_page=100&page=1": [
+                {
+                    user: {login: "github-actions[bot]"},
+                    body: canaryBody,
+                    submitted_at: "2026-07-02T00:00:00Z",
+                },
+                {
+                    user: {login: "github-actions[bot]"},
+                    body: "production review",
+                    submitted_at: "2026-07-01T00:00:00Z",
+                },
+            ],
+        };
+        const fs = makeFakeFs();
+        await runStagePrCli(fs, ghGetFromMap(routes), noThreads(), noTicket(), {
+            repo: "o/r",
+            prNumber: 7,
+            repoRoot: "/work",
+        });
+        const staged = JSON.parse(fs.files[`${REVIEW}/prior-reviews.json`]);
+        expect(staged).toHaveLength(1);
+        expect(staged[0].body).toBe("production review");
     });
 
     it("is inert unless REVIEW_CANARY is exactly '1'", async () => {

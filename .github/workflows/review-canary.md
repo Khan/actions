@@ -79,9 +79,17 @@ safe-outputs:
   create-pull-request-review-comment:
     max: 20
     side: "RIGHT"
+  # COMMENT only: GitHub moves a reviewer's state on APPROVE or
+  # REQUEST_CHANGES, and both workflows submit as the same bot identity, so
+  # a canary APPROVE would supersede the pinned reviewer's standing
+  # REQUEST_CHANGES and a canary REQUEST_CHANGES would stand with no
+  # dismissal path (the canary stages its own priors empty). The plan CLI
+  # demotes every canary verdict to COMMENT and posts the would-be verdict
+  # as a body Note (submission-clearance.ts); this allowlist is the hard
+  # enforcement if that code regresses.
   submit-pull-request-review:
     max: 1
-    allowed-events: [APPROVE, COMMENT, REQUEST_CHANGES]
+    allowed-events: [COMMENT]
     footer: false
   # No resolve-pull-request-review-thread: the open bot threads on a labeled
   # PR belong to the PINNED reviewer, and unreleased code adjudicating (and
@@ -507,6 +515,13 @@ env:
   # KHAN/ACTIONS LOCAL OVERRIDE: the mirror of the raised max-ai-credits above
   # (the two values must stay in sync per the upstream comment).
   REVIEW_MAX_AI_CREDITS: "2500"
+  # The canary flag for the agent-side CLIs (the staging step sets its own
+  # copy): the submission plan demotes every verdict to COMMENT, the
+  # re-review stamp is never emitted (production would anchor its next
+  # round's scoping on it, since both workflows post as the same bot), and
+  # the dispatch gate checks the COMMENT-only rule instead of the
+  # blocking-comment one.
+  REVIEW_CANARY: "1"
   # The sha this canary ran, stamped into the version footer
   # (lib/version-footer.ts): package.json still carries the last released
   # version on a head checkout, so without the stamp a canary review would be
@@ -520,7 +535,7 @@ source: Khan/actions/workflows/review/review.md@review-v1.21.0
 **Canary run.** This workflow runs the reviewer from this PR's own head
 commit instead of the pinned release, on a PR a human labeled `review-canary`.
 The pinned reviewer also runs on this PR, separately; you have no knowledge of
-its output and must not manage it. Three standing overrides, which take
+its output and must not manage it. Four standing overrides, which take
 precedence over anything the steps below say:
 
 - Skip Step 7's thread-resolution pass entirely. The
@@ -529,6 +544,11 @@ precedence over anything the steps below say:
   (Step 7's risks/patterns comment still applies.)
 - Skip Step 8 (reviewer requests) entirely. The `add_reviewer` tool is not
   available in this workflow; a canary review must never page owning teams.
+- Submit the review with the event the submission plan stages, which on a
+  canary run is always COMMENT: the safe output accepts nothing else, and a
+  canary must never move the bot's review state (`APPROVE`/`REQUEST_CHANGES`
+  would supersede or stand over the pinned reviewer's verdict). The plan's
+  body Note states the verdict the round would have posted.
 - The staging deliberately carries no reviewer history (prior reviews, bot
   threads, adjudicated threads, and cache memory are staged empty), so review
   the whole diff at full depth as a first encounter. Do not infer earlier

@@ -99,6 +99,20 @@ describe("review-canary.md deltas", () => {
         expect(canaryMd).toContain(
             "REVIEW_CANARY_SHA: ${{ github.event.pull_request.head.sha }}",
         );
+        // The agent-side CLIs (submission demotion, stamp suppression, the
+        // gate's canary rule) read the WORKFLOW-level env, not the staging
+        // step's copy; both must carry the flag.
+        const workflowEnv = frontmatterCode(canaryMd).match(
+            /^env:\n(?:^ {2}\S.*\n?)+/m,
+        )?.[0];
+        expect(workflowEnv).toBeDefined();
+        expect(workflowEnv).toContain('REVIEW_CANARY: "1"');
+    });
+
+    it("submits COMMENT only (a canary must never move the bot's review state)", () => {
+        expect(frontmatterCode(canaryMd)).toContain(
+            "allowed-events: [COMMENT]",
+        );
     });
 
     it("is gated on the review-canary label with the fork guard intact", () => {
@@ -137,9 +151,12 @@ describe("compiled review-canary.lock.yml", () => {
             "REVIEW_CANARY_SHA: ${{ github.event.pull_request.head.sha }}",
         );
         expect(canaryLock).toContain("- labeled");
+        expect(canaryLock).toContain("- synchronize");
         expect(canaryLock).toContain(
             "contains(github.event.pull_request.labels.*.name, 'review-canary')",
         );
+        expect(canaryLock).toContain('"allowed_events":["COMMENT"]');
+        expect(canaryLock).toContain('REVIEW_CANARY: "1"');
         expect(canaryLock).not.toContain("resolve_pull_request_review_thread");
         expect(canaryLock).not.toContain("add_reviewer");
         expect(canaryLock).not.toContain("cache-memory");

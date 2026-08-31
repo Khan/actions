@@ -313,6 +313,7 @@ export const runSubmissionCli = (
     repoRoot: string = process.env.REVIEW_REPO_ROOT ??
         process.env.GITHUB_WORKSPACE ??
         ".",
+    canary: boolean = process.env.REVIEW_CANARY === "1",
 ): SubmissionPlan => {
     const notes: string[] = [];
     const dispatch = readJson(fs, `${REVIEW_DIR}/dispatch-result.json`) as
@@ -896,6 +897,7 @@ export const runSubmissionCli = (
         priorReviewsRaw: priorRaw,
         keptBlockingCount: rereview.keptBlockingCount,
         suppressedBlocking,
+        canary,
     });
     notes.push(...clearance.notes);
     const {event, approveDemoted, priorRcStands} = clearance;
@@ -911,16 +913,14 @@ export const runSubmissionCli = (
     });
     const stamp = runRereviewStampCli(fs, event);
     // The body minus the attribution footer: the skip below compares THIS
-    // against the bare approve line, because the footer rides every
-    // submitted body and is not a reason to post.
+    // against the bare approve line (the footer is not a reason to post).
     const coreBody = [head, ...prLevelLines, ...noteLines, ...depthNotes]
         .filter((line) => line !== "")
         .join("\n");
     // The version/config footer (version-footer.ts): code-rendered,
-    // collapsed, sanitizer-surviving; also staged as version-footer.txt for
-    // Step 7. The depth override comes from the SAME read that keys the
-    // depth Note, so the two surfaces cannot contradict; null (unreadable
-    // dispatch result) drops the segment rather than guessing.
+    // collapsed, sanitizer-surviving; also staged as version-footer.txt
+    // for Step 7. The depth override comes from the SAME read that keys
+    // the depth Note, so the two cannot contradict; null drops the segment.
     const footer = runVersionFooterCli(fs, undefined, {
         depth: typeof dispatch.depth === "string" ? dispatch.depth : null,
     });

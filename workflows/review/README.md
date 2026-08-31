@@ -1024,7 +1024,8 @@ reviewer with the lib checked out at the PR's own head, in addition to the
 pinned reviewer, on that push and every push after while the label stays on.
 Pull the label to stop.
 
-The canary is posting-only and history-blind, by construction:
+The canary is posting-only and history-blind, in both directions, by
+construction:
 
 1. Its lib checkout is `ref: ${{ github.event.pull_request.head.sha }}`. This
    is not a new capability for an attacker: on `pull_request` events GitHub
@@ -1040,17 +1041,35 @@ The canary is posting-only and history-blind, by construction:
    output and no cache memory, so it cannot close the production reviewer's
    threads, page owning teams, or write a cache record the production
    workflow would restore.
-4. Its posted footer stamps `canary <sha>` (`REVIEW_CANARY_SHA`, rendered by
+4. It submits every review as COMMENT (`allowed-events: [COMMENT]`, and the
+   plan CLI demotes the verdict with a body Note stating what it would have
+   posted): GitHub moves a reviewer's state on APPROVE or REQUEST_CHANGES,
+   and under the shared bot identity a canary APPROVE would supersede the
+   pinned reviewer's standing block while a canary REQUEST_CHANGES would
+   stand with no dismissal path.
+5. It never emits the re-review fingerprint stamp (`runRereviewStampCli`
+   returns null under `REVIEW_CANARY=1`): a canary stamp would be the newest
+   parseable one in the production reviewer's prior-reviews staging, and its
+   next round would scope to a fingerprint unreleased code produced. As the
+   production-side half, `lib/stage-pr.ts` drops reviews carrying the canary
+   footer segment from `prior-reviews.json` (`hasCanaryFooter`, exported
+   beside the footer renderer), effective once a release carrying it is
+   pinned.
+6. Its posted footer stamps `canary <sha>` (`REVIEW_CANARY_SHA`, rendered by
    `lib/version-footer.ts`), because `package.json` still carries the last
    released version on a head checkout and the version segment alone would
    misattribute the run.
 
-Scope caveat: the canary dogfoods the LIB at head. The prompt body is
-runtime-imported from the workspace, and gh-aw restores `.github` from the
-base branch before the agent starts, so prompt changes (this file's `review.md`
-source, or the installed copy) do not ride a canary run; the eval workflows
-(`review-eval-ab.yml`) remain the live surface for those. The canary's own
-prompt and pins are held in sync with the installed `review.md` by
+Scope note: the canary dogfoods the lib at head via the explicit `ref:`
+checkout, and the PROMPT rides the PR as well, because gh-aw snapshots
+`.github` in the activation job whose checkout has no `ref:` and so lands on
+the `pull_request` merge ref (the restore step's "from base branch" name
+notwithstanding), which is also what lets the canary bootstrap on the PR that
+introduces it. Changes to the shared SOURCE prompt (this directory's
+`review.md`) still do not ride, since the installed copy is what
+runtime-imports; `review-eval-ab.yml` remains the measured surface for those
+until a bump PR copies them into the install. The canary's own prompt and
+pins are held in sync with the installed `review.md` by
 `.github/workflows/review-canary.test.ts` (body byte-identical after the
 canary preamble, same `source:` line), so a release bump PR that updates the
 install must re-derive the canary body and recompile its lock in the same
