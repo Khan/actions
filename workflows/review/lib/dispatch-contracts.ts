@@ -124,10 +124,6 @@ const foldToken = (token: string): string => {
         : folded;
 };
 
-// firstSentence lives in render-comment.ts: the context fold's visible
-// line and the claim's `subject` are the same text, so the renderer and
-// the restatement drop share one split.
-
 /**
  * Function words that carry no claim content; ignored on the SUBJECT side
  * of the restatement check so "turns are dropped" still matches "drops

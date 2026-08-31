@@ -12,6 +12,7 @@ import type {Claim} from "./dispatch-contracts";
 import type {AlsoFlagged} from "./attribution";
 import {attributionLine, renderAttributionFooter} from "./attribution";
 import {
+    containsBlockClose,
     renderContextFold,
     renderRuleQuote,
     shouldFoldContext,
@@ -188,7 +189,15 @@ export const renderClaimComment = (
               ].join("\n")
             : undefined;
 
-    if (shouldFoldContext(claim.subject, claim.discussion)) {
+    if (
+        shouldFoldContext(claim.subject, claim.discussion) &&
+        // The rule quote and sketch land inside the block, so they get the
+        // same block-close guard the prose does (attribution is escaped by
+        // construction).
+        (claim.rule_quote === undefined ||
+            !containsBlockClose(claim.rule_quote)) &&
+        (sketch === undefined || !containsBlockClose(sketch))
+    ) {
         return renderContextFold({
             label: claim.label,
             summary: claim.subject,

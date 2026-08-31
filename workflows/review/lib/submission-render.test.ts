@@ -234,9 +234,10 @@ describe("renderClaimComment context fold", () => {
             }) as never,
         );
         // Below the block (threadProse truncates at the first fence, so a
-        // fence above it would hide the discussion from open-thread dedup).
-        const fenceAt = withFence.indexOf("```suggestion");
-        expect(fenceAt).toBeGreaterThan(withFence.indexOf("</details>"));
+        // fence above it would hide the discussion from open-thread dedup),
+        // with a blank line between so GitHub parses the fence as its own
+        // markdown block rather than HTML-block continuation.
+        expect(withFence).toContain("</details>\n\n```suggestion");
 
         const sketchSource = "if (x) {\n    guard();\n}\n".repeat(4);
         const withSketch = renderClaimComment(

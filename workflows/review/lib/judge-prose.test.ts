@@ -443,13 +443,17 @@ describe("buildJudgePrompt context fold", () => {
             "thought (non-blocking)",
             "The baked-metadata arm cannot reach the modeled rate.",
         );
-        expect(prompt).toContain(
+        // Sliced to the MESSAGE block: the rubric text itself contains the
+        // fold tags verbatim, so whole-prompt toContain proves nothing
+        // (PR #401 round 3 caught exactly that).
+        const message = prompt.slice(prompt.indexOf("MESSAGE:"));
+        expect(message).toContain(
             "**thought (non-blocking):** The baked-metadata arm cannot reach the modeled rate.",
         );
-        expect(prompt).toContain(
+        expect(message).toContain(
             "<details><summary><sub>context</sub></summary>",
         );
-        expect(prompt).toContain("</details>");
+        expect(message).toContain(`${longProse}\n\n</details>`);
     });
 
     it("judges a short unit in the flat shape (no fold under the bar)", () => {

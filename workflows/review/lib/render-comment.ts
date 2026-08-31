@@ -218,6 +218,13 @@ export const CONTEXT_FOLD_MIN_CHARS = 200;
  */
 export const shouldFoldContext = (summary: string, prose: string): boolean =>
     summary.trim() !== "" &&
+    // A multi-line summary defeats the stand-alone-visible-line goal. The
+    // authored field is newline-rejected by the schema, but the
+    // first-sentence fallback (every lens today) recovers a whole opening
+    // block when the prose starts without a sentence terminator (a
+    // heading, a bullet list), the same case the restatement drop refuses
+    // (dispatch-contracts.ts).
+    !summary.includes("\n") &&
     prose.trim() !== summary.trim() &&
     prose.trim().length >= CONTEXT_FOLD_MIN_CHARS &&
     // Model-authored text interpolates into the block unescaped (it is
@@ -226,8 +233,18 @@ export const shouldFoldContext = (summary: string, prose: string): boolean =>
     // early and desyncing stripFooters' unwrap, so such prose posts flat.
     // Escaping only the unfenced occurrences would need a markdown parse
     // this module deliberately does not have.
-    !/<\/details>/i.test(prose) &&
-    !/<\/details>/i.test(summary);
+    !containsBlockClose(prose) &&
+    !containsBlockClose(summary);
+
+/**
+ * Whether model-supplied text would end the context block early. Applied
+ * to everything the renderers place INSIDE the block (prose, summary, rule
+ * quote, sketch): one occurrence anywhere posts the comment flat.
+ * Attribution is exempt by construction (attribution.ts HTML-escapes the
+ * interpolated subjects).
+ */
+export const containsBlockClose = (text: string): boolean =>
+    /<\/details>/i.test(text);
 
 /**
  * Assemble the context fold: the visible `**label:** summary` line, then
@@ -301,7 +318,13 @@ export const renderComment = (finding: Finding): string => {
     const summary =
         finding.summary ?? firstSentence(finding.model_authored_prose);
 
-    if (shouldFoldContext(summary, finding.model_authored_prose)) {
+    if (
+        shouldFoldContext(summary, finding.model_authored_prose) &&
+        // The rule quote lands inside the block, so it gets the same
+        // block-close guard the prose does.
+        (finding.rule_quote === undefined ||
+            !containsBlockClose(finding.rule_quote))
+    ) {
         return renderContextFold({
             label,
             summary,
