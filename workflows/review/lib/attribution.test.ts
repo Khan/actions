@@ -2,6 +2,7 @@ import {describe, it, expect} from "vitest";
 
 import {
     neutralizeStructuralTags,
+    neutralizeThenEscape,
     renderAttributionFooter,
     renderCollapsedFooter,
     stripFooters,
@@ -42,6 +43,32 @@ describe("neutralizeStructuralTags", () => {
         expect(neutralizeStructuralTags("a &amp;lt;/details&amp;gt; b")).toBe(
             "a (/details) b",
         );
+    });
+
+    it("neutralizes numeric character references, decimal and hex", () => {
+        // The sanitizer's decode covers `&#60;` and `&#x3c;` too, so a
+        // numerically-spelled tag posts just as live as a named one.
+        expect(neutralizeStructuralTags("a &#60;/details&#62; b")).toBe(
+            "a (/details) b",
+        );
+        expect(neutralizeStructuralTags("a &#x3c;/details&#x3E; b")).toBe(
+            "a (/details) b",
+        );
+        // A bare comparison stays untouched.
+        expect(neutralizeStructuralTags("a<b")).toBe("a<b");
+    });
+});
+
+describe("neutralizeThenEscape", () => {
+    it("drops a non-details tag the cap severed", () => {
+        // The pre-slice rewrite only touches details/summary, so another
+        // tag straddling maxChars would leave a live `<x` fragment after
+        // the sanitizer's decode; the fragment drop removes it.
+        const capped = neutralizeThenEscape(
+            `${"y".repeat(115)} <blockquote>tail`,
+            120,
+        );
+        expect(capped).toBe(`${"y".repeat(115)}...`);
     });
 });
 

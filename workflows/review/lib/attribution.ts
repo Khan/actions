@@ -67,12 +67,13 @@ export const escapeHtml = (text: string): string =>
 /**
  * The two structure-closing tags, open or close form, any attributes,
  * bracket-spelled or entity-spelled: the ingest sanitizer's decode
- * collapses `&lt;` AND double-encoded `&amp;lt;` to `<` in one pass
- * (sanitizer-normalize.ts mirrors it), so an entity-spelled tag in model
- * prose posts live on every surface, escaped or not.
+ * collapses the named (`&lt;`), decimal (`&#60;`), and hex (`&#x3c;`)
+ * spellings to `<` in one pass, each tolerating one `&amp;` double
+ * encoding (sanitizer-normalize.ts mirrors it), so any of those
+ * spellings in model prose posts live on every surface, escaped or not.
  */
 const STRUCTURAL_TAG_RE =
-    /(?:<|&(?:amp;)?lt;)(\/?\s*(?:details|summary)\b[^>]*?)(?:>|&(?:amp;)?gt;)/gi;
+    /(?:<|&(?:amp;)?(?:lt|#0*60|#[xX]0*3c);)(\/?\s*(?:details|summary)\b[^>]*?)(?:>|&(?:amp;)?(?:gt|#0*62|#[xX]0*3e);)/gi;
 
 /**
  * A GFM code span: two backtick runs of EXACTLY equal length (the
@@ -129,6 +130,9 @@ export const neutralizeStructuralTags = (text: string): string => {
  * the rewrite and before the escape: slicing the raw text can cut a tag
  * in half, and the sanitizer's tag fold then eats from the fragment to
  * the enclosing block's own closer, while a sliced `(/details)` is inert.
+ * The rewrite only touches `details`/`summary`, so the slice can still
+ * sever some OTHER tag; the fragment drop after it removes a trailing
+ * `<x` remnant (the same guard excerptOpeningComment carries).
  */
 export const neutralizeThenEscape = (
     text: string,
@@ -137,7 +141,10 @@ export const neutralizeThenEscape = (
     const neutral = text.replace(STRUCTURAL_TAG_RE, "($1)");
     return escapeHtml(
         maxChars !== undefined && neutral.length > maxChars
-            ? `${neutral.slice(0, maxChars)}...`
+            ? `${neutral
+                  .slice(0, maxChars)
+                  .replace(/<\/?[A-Za-z!][^>]*$/, "")
+                  .trimEnd()}...`
             : neutral,
     );
 };
