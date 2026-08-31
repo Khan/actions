@@ -32,6 +32,17 @@ describe("neutralizeStructuralTags", () => {
             "(details open) and (/summary)",
         );
     });
+
+    it("neutralizes entity-spelled tags, single or double encoded", () => {
+        // The ingest sanitizer decodes `&lt;` AND `&amp;lt;` straight to
+        // `<` in one pass, so both spellings post as live tags if left.
+        expect(neutralizeStructuralTags("a &lt;/details&gt; b")).toBe(
+            "a (/details) b",
+        );
+        expect(neutralizeStructuralTags("a &amp;lt;/details&amp;gt; b")).toBe(
+            "a (/details) b",
+        );
+    });
 });
 
 describe("renderCollapsedFooter", () => {

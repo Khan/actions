@@ -58,14 +58,21 @@ export const renderCollapsedFooter = (content: string): string =>
  * characters. NOT a structural defense on its own: gh-aw's ingest sanitizer
  * decodes HTML entities in everything the agent queues (mirrored by
  * sanitizer-normalize.ts's decodeHtmlEntities), so an escaped tag posts as
- * a live one. {@link neutralizeStructuralTags} must run first on any text
- * this escape is supposed to keep from closing a block.
+ * a live one. {@link neutralizeThenEscape} is the composition that
+ * actually protects a raw-HTML line; this escape is only its second half.
  */
 export const escapeHtml = (text: string): string =>
     text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-/** The two structure-closing tags, open or close form, any attributes. */
-const STRUCTURAL_TAG_RE = /<(\/?\s*(?:details|summary)\b[^>]*)>/gi;
+/**
+ * The two structure-closing tags, open or close form, any attributes,
+ * bracket-spelled or entity-spelled: the ingest sanitizer's decode
+ * collapses `&lt;` AND double-encoded `&amp;lt;` to `<` in one pass
+ * (sanitizer-normalize.ts mirrors it), so an entity-spelled tag in model
+ * prose posts live on every surface, escaped or not.
+ */
+const STRUCTURAL_TAG_RE =
+    /(?:<|&(?:amp;)?lt;)(\/?\s*(?:details|summary)\b[^>]*?)(?:>|&(?:amp;)?gt;)/gi;
 
 /**
  * A GFM code span: two backtick runs of EXACTLY equal length (the
