@@ -46,4 +46,25 @@ describe("excerptOpeningComment", () => {
             ),
         ).toBe("A bare (/details) breaks out, a quoted `</details>` is safe.");
     });
+
+    it("re-neutralizes when the cap severs a preserved code span", () => {
+        // The full first line keeps the span (markdown surface), but the
+        // cap cuts its closing backtick off: the sliced text has no span
+        // anymore, so the tag must be rewritten, not left live.
+        const severedSpan = `${"x".repeat(105)} \`</details> and\` tail`;
+        const excerpt = excerptOpeningComment(severedSpan);
+        expect(excerpt).toContain("(/details)");
+        expect(excerpt).not.toContain("</details>");
+        expect(excerpt.endsWith("...")).toBe(true);
+    });
+
+    it("drops a tag fragment when the cap severs the tag itself", () => {
+        // A sliced "</detai" has no ">", so the tag regex cannot rewrite
+        // it, and posted as-is the sanitizer's tag fold would match from
+        // the fragment through the recap's own closing tag.
+        const severedTag = `${"x".repeat(112)} \`</details>\` tail`;
+        const excerpt = excerptOpeningComment(severedTag);
+        expect(excerpt).not.toMatch(/<\/?[A-Za-z]/);
+        expect(excerpt.endsWith("...")).toBe(true);
+    });
 });

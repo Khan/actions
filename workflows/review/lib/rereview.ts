@@ -212,7 +212,17 @@ export const excerptOpeningComment = (body: string): string => {
     if (firstLine.length <= EXCERPT_MAX) {
         return firstLine;
     }
-    return `${firstLine.slice(0, EXCERPT_MAX).trimEnd()}...`;
+    // The cap can sever a code span the neutralize pass preserved, leaving
+    // its backtick unbalanced (no span forms, the tag inside is live) or
+    // the tag itself cut mid-way (a "<" fragment the sanitizer's tag fold
+    // matches through to the recap's own closing tag). Re-neutralize the
+    // sliced text and drop a trailing tag fragment (the fragment shape is
+    // foldXmlTags's opener: "<" then [A-Za-z!/], so a bare "a < b" tail
+    // survives). Cosmetic loss on a pathological line, never a live tag.
+    const sliced = neutralizeStructuralTags(
+        firstLine.slice(0, EXCERPT_MAX).trimEnd(),
+    );
+    return `${sliced.replace(/<\/?[A-Za-z!][^>]*$/, "").trimEnd()}...`;
 };
 
 /** A kept thread joined with its staged data, ready to render. */
