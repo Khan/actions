@@ -135,6 +135,15 @@ export const buildJudgePrompt = (
                   "",
                   "</details>",
               ].join("\n")
+            : summary !== undefined &&
+              summary.trim() !== firstSentence(prose).trim()
+            ? // An authored line distinct from the prose's opening posts
+              // even when the inline body does not fold (claim.subject
+              // feeds the review body's collapsed list entries), so it
+              // must reach the judge: without this branch a validator's
+              // corrected.subject on an under-bar pair is judged by
+              // nothing (PR #401 round 2).
+              [`**${label}:** ${summary}`, "", prose].join("\n")
             : `**${label}:** ${prose}`;
     return [
         PLAIN_PROSE_RUBRIC,

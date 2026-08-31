@@ -556,3 +556,21 @@ describe("createProseGate summary memo", () => {
         expect(calls).toBe(2);
     });
 });
+
+describe("buildJudgePrompt unfolded distinct summary", () => {
+    it("still judges an authored line that posts without a fold", () => {
+        // corrected.subject posts via the collapsed list entries even when
+        // the inline body is under the fold bar, so the judge must see it.
+        const prompt = buildJudgePrompt(
+            "The discussion is short.",
+            "question (non-blocking)",
+            "A distinct corrected subject.",
+        );
+        const message = prompt.slice(prompt.indexOf("MESSAGE:"));
+        expect(message).toContain(
+            "**question (non-blocking):** A distinct corrected subject.",
+        );
+        expect(message).toContain("The discussion is short.");
+        expect(message).not.toContain("<details>");
+    });
+});

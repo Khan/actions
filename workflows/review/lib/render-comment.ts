@@ -219,7 +219,15 @@ export const CONTEXT_FOLD_MIN_CHARS = 200;
 export const shouldFoldContext = (summary: string, prose: string): boolean =>
     summary.trim() !== "" &&
     prose.trim() !== summary.trim() &&
-    prose.trim().length >= CONTEXT_FOLD_MIN_CHARS;
+    prose.trim().length >= CONTEXT_FOLD_MIN_CHARS &&
+    // Model-authored text interpolates into the block unescaped (it is
+    // markdown, so entity-escaping would corrupt code spans); a literal
+    // closing tag anywhere in it, fenced or not, risks ending the block
+    // early and desyncing stripFooters' unwrap, so such prose posts flat.
+    // Escaping only the unfenced occurrences would need a markdown parse
+    // this module deliberately does not have.
+    !/<\/details>/i.test(prose) &&
+    !/<\/details>/i.test(summary);
 
 /**
  * Assemble the context fold: the visible `**label:** summary` line, then

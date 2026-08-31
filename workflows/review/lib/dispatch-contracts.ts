@@ -22,7 +22,6 @@ import {
 import {extractJsonObject} from "./agent-json";
 import {
     BLOCKING_LABELS,
-    FIRST_SENTENCE_SPLIT,
     NON_BLOCKING_LABELS,
     firstSentence,
     isBlockingLabel,
@@ -125,9 +124,9 @@ const foldToken = (token: string): string => {
         : folded;
 };
 
-// FIRST_SENTENCE_SPLIT and firstSentence live in render-comment.ts: the
-// context fold's visible line and the claim's `subject` are the same text,
-// so the renderer and the restatement drop share one split.
+// firstSentence lives in render-comment.ts: the context fold's visible
+// line and the claim's `subject` are the same text, so the renderer and
+// the restatement drop share one split.
 
 /**
  * Function words that carry no claim content; ignored on the SUBJECT side
@@ -218,15 +217,15 @@ export const subjectRestatesDiscussion = (
     if (subjectTokens.length === 0) {
         return false;
     }
-    const firstSentence = discussion.split(FIRST_SENTENCE_SPLIT, 1)[0] ?? "";
+    const opening = firstSentence(discussion);
     // A "first sentence" spanning lines means the discussion opens with an
     // unterminated line (a heading, a bullet list): dropping the subject
     // would promote that whole block into `claim.subject` via buildClaims'
     // identical split, and subjects print in one-line list contexts.
-    if (firstSentence.includes("\n")) {
+    if (opening.includes("\n")) {
         return false;
     }
-    const sentenceTokens = new Set(proseTokens(firstSentence).map(foldToken));
+    const sentenceTokens = new Set(proseTokens(opening).map(foldToken));
     return subjectTokens.every((token) => sentenceTokens.has(token));
 };
 

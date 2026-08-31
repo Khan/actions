@@ -7,6 +7,7 @@ import {
     labelForFinding,
     renderComment,
     renderReviewBody,
+    shouldFoldContext,
     type ReviewBodyInput,
 } from "./render-comment.ts";
 import {
@@ -15,6 +16,7 @@ import {
     type Finding,
     type Lens,
 } from "./finding-schema.ts";
+import {renderClaimComment} from "./submission-render.ts";
 
 /**
  * Rendering tests. The renderer sits on the determinism
@@ -471,11 +473,10 @@ describe("renderComment context fold", () => {
         expect(ruleAt).toBeLessThan(closeAt);
     });
 
-    it("stays byte-identical to renderClaimComment on the folded shape", async () => {
+    it("stays byte-identical to renderClaimComment on the folded shape", () => {
         // The layout-parity contract: buildClaims turns this finding into a
         // claim whose subject is the summary and whose discussion is the
         // prose, and the two renderers must agree on the posted body.
-        const {renderClaimComment} = await import("./submission-render.ts");
         const finding = makeFinding({
             model_authored_prose: longProse,
             summary: "Request params reach exec() unescaped.",
@@ -492,5 +493,23 @@ describe("renderComment context fold", () => {
             confidence: 0.9,
         });
         expect(renderComment(finding)).toBe(claimBody);
+    });
+});
+
+describe("shouldFoldContext block-close refusal", () => {
+    it("posts flat when the prose carries a literal closing tag", () => {
+        const prose =
+            "A discussion long enough to clear the two-hundred-character bar " +
+            "that quotes the `</details>` tag in backticks, which would still " +
+            "end the surrounding block early on GitHub's HTML-block parse, " +
+            "so this body must render in the flat shape instead.";
+        expect(shouldFoldContext("The visible line.", prose)).toBe(false);
+        const body = renderComment(
+            makeFinding({
+                model_authored_prose: prose,
+                summary: "The visible line.",
+            }),
+        );
+        expect(body).toBe(`**issue (blocking):** ${prose}`);
     });
 });
