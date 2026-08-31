@@ -226,17 +226,17 @@ describe("renderClaimComment context fold", () => {
         expect(body).toBe(`**issue (blocking):** ${text}`);
     });
 
-    it("keeps the committable fence outside the fold, the sketch inside", () => {
+    it("keeps the committable fence outside the block, the sketch inside", () => {
         const withFence = renderClaimComment(
             folded({
                 label: "suggestion (non-blocking)",
                 suggestion: "fixed()",
             }) as never,
         );
+        // Below the block (threadProse truncates at the first fence, so a
+        // fence above it would hide the discussion from open-thread dedup).
         const fenceAt = withFence.indexOf("```suggestion");
-        const foldAt = withFence.indexOf("<details>");
-        expect(fenceAt).toBeGreaterThan(-1);
-        expect(fenceAt).toBeLessThan(foldAt);
+        expect(fenceAt).toBeGreaterThan(withFence.indexOf("</details>"));
 
         const sketchSource = "if (x) {\n    guard();\n}\n".repeat(4);
         const withSketch = renderClaimComment(

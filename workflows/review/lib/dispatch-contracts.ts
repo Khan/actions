@@ -24,6 +24,7 @@ import {
     BLOCKING_LABELS,
     FIRST_SENTENCE_SPLIT,
     NON_BLOCKING_LABELS,
+    firstSentence,
     isBlockingLabel,
     labelForFinding,
 } from "./render-comment";
@@ -124,9 +125,9 @@ const foldToken = (token: string): string => {
         : folded;
 };
 
-// FIRST_SENTENCE_SPLIT moved to render-comment.ts (imported above): the
+// FIRST_SENTENCE_SPLIT and firstSentence live in render-comment.ts: the
 // context fold's visible line and the claim's `subject` are the same text,
-// so the renderer and the restatement drop must share one split.
+// so the renderer and the restatement drop share one split.
 
 /**
  * Function words that carry no claim content; ignored on the SUBJECT side
@@ -207,7 +208,7 @@ const proseTokens = (text: string): string[] =>
  * dropped too; accepted, since the audited failure mode is restatement and
  * the sentence carrying that vocabulary still posts.
  */
-const subjectRestatesDiscussion = (
+export const subjectRestatesDiscussion = (
     subject: string,
     discussion: string,
 ): boolean => {
@@ -721,8 +722,7 @@ export const buildClaims = (candidates: Candidate[]): Claim[] =>
         const prose = finding.model_authored_prose;
         // The authored summary wins; the first-sentence split is the
         // fallback for lenses that have not adopted the field.
-        const subject =
-            finding.summary ?? prose.split(FIRST_SENTENCE_SPLIT, 1)[0] ?? prose;
+        const subject = finding.summary ?? firstSentence(prose);
         return {
             id: finding.id,
             source: candidate.source,

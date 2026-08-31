@@ -449,7 +449,11 @@ describe("renderComment context fold", () => {
         );
     });
 
-    it("keeps the committable fence outside, the rule quote inside", () => {
+    it("keeps the committable fence outside and BELOW the block", () => {
+        // Below, not between the summary and the block: dedup-threads'
+        // threadProse truncates a posted body at its first ``` fence, so
+        // a fence above the block would hide the discussion from
+        // open-thread dedup (PR #401 review).
         const body = renderComment(
             makeFinding({
                 model_authored_prose: longProse,
@@ -458,11 +462,13 @@ describe("renderComment context fold", () => {
                 rule_quote: "Never pass raw input to exec.",
             }),
         );
-        const foldAt = body.indexOf("<details>");
-        expect(body.indexOf("```suggestion")).toBeLessThan(foldAt);
-        expect(
-            body.indexOf("> **Rule:** Never pass raw input to exec."),
-        ).toBeGreaterThan(foldAt);
+        const closeAt = body.indexOf("</details>");
+        expect(body.indexOf("```suggestion")).toBeGreaterThan(closeAt);
+        const ruleAt = body.indexOf(
+            "> **Rule:** Never pass raw input to exec.",
+        );
+        expect(ruleAt).toBeGreaterThan(body.indexOf("<details>"));
+        expect(ruleAt).toBeLessThan(closeAt);
     });
 
     it("stays byte-identical to renderClaimComment on the folded shape", async () => {

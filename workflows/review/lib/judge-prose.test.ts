@@ -465,3 +465,94 @@ describe("buildJudgePrompt context fold", () => {
         expect(message).not.toContain("<details>");
     });
 });
+
+describe("extractProseUnits summary derivation", () => {
+    it("prefers a schema finding's authored summary, falling back for blank or multi-line", () => {
+        const units = extractProseUnits({
+            findings: [
+                {
+                    id: "f-a",
+                    severity: "advisory",
+                    model_authored_prose: "First sentence. Second sentence.",
+                    summary: "The authored one-liner.",
+                },
+                {
+                    id: "f-b",
+                    severity: "advisory",
+                    model_authored_prose: "First sentence. Second sentence.",
+                    summary: "two\nlines",
+                },
+                {
+                    id: "f-c",
+                    severity: "advisory",
+                    model_authored_prose: "First sentence. Second sentence.",
+                },
+            ],
+        });
+        expect(units.map((unit) => unit.summary)).toEqual([
+            "The authored one-liner.",
+            "First sentence.",
+            "First sentence.",
+        ]);
+    });
+
+    it("skips a restating label-shape subject, like the renderer does", () => {
+        // The restatement drop discards this subject from the posted body
+        // (buildClaims falls back to the discussion's opening), so the
+        // judge must not treat it as the visible line.
+        const units = extractProseUnits({
+            findings: [
+                {
+                    id: "f-r",
+                    label: "thought (non-blocking)",
+                    subject: "The merger drops flagged turns.",
+                    discussion:
+                        "Flagged turns are dropped by the merger. The retry path never re-adds them.",
+                },
+                {
+                    id: "f-k",
+                    label: "thought (non-blocking)",
+                    subject: "A distinct authored subject.",
+                    discussion:
+                        "The discussion opens differently and carries the mechanism detail.",
+                },
+            ],
+        });
+        expect(units[0].summary).toBe(
+            "Flagged turns are dropped by the merger.",
+        );
+        expect(units[1].summary).toBe("A distinct authored subject.");
+    });
+});
+
+describe("createProseGate summary memo", () => {
+    it("re-judges a finding whose summary alone changed", async () => {
+        let calls = 0;
+        const countingRunner = async () => {
+            calls += 1;
+            return JSON.stringify({pass: true, problems: []});
+        };
+        const {gate} = createProseGate({
+            runner: countingRunner,
+            source: "correctness-reviewer",
+        });
+        const payload = (summary: string) => ({
+            findings: [
+                {
+                    id: "f-1",
+                    severity: "advisory",
+                    model_authored_prose: "First sentence. Second sentence.",
+                    summary,
+                },
+            ],
+        });
+        expect(await gate(payload("Line one."))).toBeNull();
+        expect(calls).toBe(1);
+        // Same prose, new visible line: the memo must not swallow it.
+        expect(await gate(payload("A different line."))).toBeNull();
+        expect(calls).toBe(2);
+        // Fully unchanged: memoized, no third judge call.
+        expect(await gate(payload("A different line."))).toBeNull();
+        expect(calls).toBe(2);
+    });
+});

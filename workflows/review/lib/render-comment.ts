@@ -239,7 +239,6 @@ export const renderContextFold = (input: {
     const outside = (input.outsideFold ?? []).filter((block) => block !== "");
     return [
         `**${input.label}:** ${input.summary}`,
-        ...outside,
         [
             CONTEXT_FOLD_OPEN,
             "",
@@ -251,6 +250,12 @@ export const renderContextFold = (input: {
             "",
             "</details>",
         ].join("\n"),
+        // Below the block, never between the summary and the block:
+        // dedup-threads' threadProse reads a posted opener as everything
+        // before the FIRST ``` fence, so a fence above the block would
+        // hide the whole discussion from open-thread dedup (PR #401
+        // review). The one-click apply still never collapses.
+        ...outside,
     ].join("\n\n");
 };
 

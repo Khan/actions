@@ -78,7 +78,11 @@ const main = async (): Promise<void> => {
     const missedPins: number[] = [];
     for (const fixture of [...FIXTURES_41609, ...FIXTURES_RULE2]) {
         const reply = await callModel(
-            buildJudgePrompt(fixture.discussion, fixture.label),
+            buildJudgePrompt(
+                fixture.discussion,
+                fixture.label,
+                fixture.summary,
+            ),
         );
         const verdict = parseJudgeVerdict(reply);
         console.log(
@@ -116,7 +120,11 @@ const main = async (): Promise<void> => {
     for (const control of CLEAN_CONTROLS) {
         const verdict = parseJudgeVerdict(
             await callModel(
-                buildJudgePrompt(control.discussion, control.label),
+                buildJudgePrompt(
+                    control.discussion,
+                    control.label,
+                    control.summary,
+                ),
             ),
         );
         console.log(`\n=== clean control (${control.label})`);

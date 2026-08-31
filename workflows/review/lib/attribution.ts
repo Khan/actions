@@ -25,6 +25,8 @@
  * the code under review is synthesised.
  */
 
+import {CONTEXT_FOLD_OPEN} from "./render-comment";
+
 /**
  * One duplicate copy dedup folded into a surviving claim: the reviewer that
  * produced it, its own anchor line when it differs from the survivor's, and
@@ -120,9 +122,16 @@ const FOOTER_BLOCK_RE = new RegExp(
  * line through the first closing tag on its own line), capturing the inner
  * content so {@link stripFooters} can unwrap rather than delete it. A fold
  * never nests another details block, so the non-greedy close is its own.
+ * Interpolates the renderer's own constant, like FOOTER_BLOCK_RE above, so
+ * a chip rename cannot silently desync the strip.
  */
-const CONTEXT_FOLD_RE =
-    /^<details><summary><sub>context<\/sub><\/summary>[ \t]*\n([\s\S]*?)\n<\/details>[ \t]*$/gm;
+const CONTEXT_FOLD_RE = new RegExp(
+    `^${CONTEXT_FOLD_OPEN.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&",
+    )}[ \\t]*\\n([\\s\\S]*?)\\n</details>[ \\t]*$`,
+    "gm",
+);
 
 /**
  * Drop footer boilerplate from a previously-posted bot comment before

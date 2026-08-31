@@ -65,6 +65,7 @@ import {
     firstSentence,
     shouldFoldContext,
 } from "./render-comment.ts";
+import {subjectRestatesDiscussion} from "./dispatch-contracts.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Rubric and prompts                                                         */
@@ -272,7 +273,10 @@ export const extractProseUnits = (
             // `corrected.discussion` in the body and `corrected.subject`
             // on the visible line, so the unit judges discussion as prose
             // with the subject as its summary (the old subject+discussion
-            // join judged a body shape that never posts).
+            // join judged a body shape that never posts). Known
+            // approximation: a discussion-only correction posts under the
+            // claim's ORIGINAL subject, which this payload cannot see, so
+            // the first-sentence fallback stands in for it.
             units.push({
                 key,
                 label:
@@ -325,17 +329,31 @@ export const extractProseUnits = (
             .filter((part) => part.trim() !== "")
             .join(" ");
         if (joined !== "") {
+            // Mirror the renderer's visible line and prose: a subject the
+            // restatement drop discards never posts (joinProse drops it
+            // from the prose, and buildClaims' visible line falls back to
+            // the discussion's own opening), so judging it could bounce
+            // on text the author cannot fix by editing what posts. The
+            // fallback reads the DISCUSSION's first sentence, not the
+            // joined text's, because the join opens with the very subject
+            // being dropped.
+            const restates =
+                discussion.trim() !== "" &&
+                subjectRestatesDiscussion(subject, discussion);
+            const postsAsSubject =
+                subject.trim() !== "" && !subject.includes("\n") && !restates;
             units.push({
                 key,
                 label:
                     typeof entry["label"] === "string" && entry["label"] !== ""
                         ? entry["label"]
                         : "suggestion (non-blocking)",
-                prose: joined,
-                summary:
-                    subject.trim() !== "" && !subject.includes("\n")
-                        ? subject
-                        : firstSentence(joined),
+                prose: restates ? discussion : joined,
+                summary: postsAsSubject
+                    ? subject
+                    : firstSentence(
+                          discussion.trim() !== "" ? discussion : joined,
+                      ),
             });
         }
     });
