@@ -60,6 +60,14 @@ export type VersionFooterInputs = {
      * the default value is omitted too (the footer states configuration,
      * not defaults). */
     nonBlockingInlineBudget: number | null;
+    /**
+     * The PR head sha a canary run executed (REVIEW_CANARY_SHA, set only by
+     * the canary workflow). The version segment alone would lie on a canary
+     * run: package.json still carries the last released version while the
+     * code is the PR head, so the footer names the sha that actually ran.
+     * Absent or empty drops the segment (every production run).
+     */
+    canarySha?: string | null;
 };
 
 /**
@@ -72,6 +80,9 @@ export const renderVersionFooter = (inputs: VersionFooterInputs): string => {
     const segments: string[] = [];
     if (inputs.version !== null && inputs.version !== "") {
         segments.push(`review-v${inputs.version}`);
+    }
+    if (typeof inputs.canarySha === "string" && inputs.canarySha !== "") {
+        segments.push(`canary ${inputs.canarySha.slice(0, 12)}`);
     }
     segments.push(`schema ${inputs.schemaVersion}`);
     if (inputs.depth !== null && inputs.depth !== "") {
@@ -135,6 +146,7 @@ export const runVersionFooterCli = (
     fs: VersionFooterFs,
     libDir: string = __dirname,
     overrides: {depth?: string | null} = {},
+    env: {REVIEW_CANARY_SHA?: string} = process.env,
 ): string => {
     const pkg = readJson(fs, `${libDir}/../package.json`) as
         | {version?: unknown}
@@ -175,6 +187,7 @@ export const runVersionFooterCli = (
             typeof routing?.nonBlockingInlineBudget === "number"
                 ? routing.nonBlockingInlineBudget
                 : null,
+        canarySha: env.REVIEW_CANARY_SHA ?? null,
     });
     fs.writeFileSync(FOOTER_OUT, footer);
     return footer;

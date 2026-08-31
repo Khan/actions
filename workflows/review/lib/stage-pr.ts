@@ -380,8 +380,24 @@ export const runStagePrCli = async (
     const {repo, prNumber, repoRoot} = options;
     const env = options.env ?? {};
     const cacheDir = options.cacheMemoryDir ?? CACHE_MEMORY_DIR;
+    // Canary staging (REVIEW_CANARY=1, set only by the canary workflow that
+    // dogfoods an unreleased reviewer on a labeled PR): every carrier of the
+    // production reviewer's own history is staged empty, so the run reviews
+    // like a first encounter with the PR. Both workflows post as the same bot
+    // identity, so without this the canary would read the production run's
+    // reviews, threads, and stamps as its own: its re-review plan would scope
+    // to hunks the PRODUCTION reviewer covered, and its reconciler would
+    // adjudicate threads the production reviewer opened. Human threads stay
+    // staged; they are PR context any first review would see, not reviewer
+    // history.
+    const canary = env.REVIEW_CANARY === "1";
     const staged: string[] = [];
     const warnings: string[] = [];
+    if (canary) {
+        warnings.push(
+            "canary staging (REVIEW_CANARY=1): prior bot reviews, bot threads, adjudicated threads, and cache memory staged empty; depth degrades to full",
+        );
+    }
     const write = (path: string, data: string): void => {
         fs.writeFileSync(path, data);
         staged.push(path);
@@ -489,10 +505,11 @@ export const runStagePrCli = async (
         ),
     );
 
-    // 4. new-scope.json against cache memory's reviewedHunks.
+    // 4. new-scope.json against cache memory's reviewedHunks. A canary run
+    // ignores the cache record: its scope is always the whole diff.
     let reviewedHunks: unknown;
     const cachePath = `${cacheDir}/pr-${prNumber}.json`;
-    if (fs.existsSync(cachePath)) {
+    if (!canary && fs.existsSync(cachePath)) {
         try {
             reviewedHunks = (
                 JSON.parse(fs.readFileSync(cachePath, "utf8")) as {
@@ -510,7 +527,9 @@ export const runStagePrCli = async (
         JSON.stringify(computeNewScope(files, reviewedHunks), null, 2),
     );
 
-    // 5. Prior bot reviews (fetch failure degrades to []: full review).
+    // 5. Prior bot reviews (fetch failure degrades to []: full review). A
+    // canary run stages [] without fetching: the reviews on the PR are the
+    // production reviewer's, not this code's.
     let priorReviews: {
         body: string;
         submittedAt?: string;
@@ -526,16 +545,20 @@ export const runStagePrCli = async (
             submitted_at?: string;
         };
         const reviews: RawReview[] = [];
-        for (let page = 1; ; page++) {
-            const batch = (await ghGet(
-                `/repos/${repo}/pulls/${prNumber}/reviews?per_page=100&page=${page}`,
-            )) as RawReview[];
-            if (!Array.isArray(batch)) {
-                throw new Error("GET /pulls/{n}/reviews returned a non-array");
-            }
-            reviews.push(...batch);
-            if (batch.length < 100) {
-                break;
+        if (!canary) {
+            for (let page = 1; ; page++) {
+                const batch = (await ghGet(
+                    `/repos/${repo}/pulls/${prNumber}/reviews?per_page=100&page=${page}`,
+                )) as RawReview[];
+                if (!Array.isArray(batch)) {
+                    throw new Error(
+                        "GET /pulls/{n}/reviews returned a non-array",
+                    );
+                }
+                reviews.push(...batch);
+                if (batch.length < 100) {
+                    break;
+                }
             }
         }
         priorReviews = reviews
@@ -633,7 +656,7 @@ export const runStagePrCli = async (
         const author = openerAuthor(thread);
         return author !== undefined && !isReviewBotAuthor(author);
     };
-    const botThreads = allThreads.filter(openedByBot);
+    const botThreads = canary ? [] : allThreads.filter(openedByBot);
     write(
         THREADS_OUT,
         JSON.stringify(
@@ -676,6 +699,7 @@ export const runStagePrCli = async (
     // the OPEN thread, whose blocking state floors the verdict.
     const adjudicatedThreads = fetchedThreads.filter(
         (thread) =>
+            !canary &&
             openedByBot(thread) &&
             ((thread.resolved &&
                 thread.resolvedBy !== "" &&

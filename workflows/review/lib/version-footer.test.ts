@@ -156,6 +156,37 @@ describe("runVersionFooterCli", () => {
         }),
     });
 
+    it("stamps the canary sha after the version segment (REVIEW_CANARY_SHA)", () => {
+        expect(
+            renderVersionFooter({
+                version: "1.13.0",
+                schemaVersion: 2,
+                depth: "full",
+                reReviewMode: null,
+                blockingOnly: false,
+                blockingMedium: false,
+                enabledReviewers: [],
+                nonBlockingInlineBudget: null,
+                canarySha: "0123456789abcdef0123456789abcdef01234567",
+            }),
+        ).toBe(
+            wrapped(
+                "review-v1.13.0 | canary 0123456789ab | schema 2 | depth full",
+            ),
+        );
+        const fs = makeFakeFs(fullStaging());
+        expect(
+            runVersionFooterCli(
+                fs,
+                LIB,
+                {},
+                {REVIEW_CANARY_SHA: "abc123def456789"},
+            ),
+        ).toContain("canary abc123def456");
+        // Unset (every production run): no segment.
+        expect(runVersionFooterCli(fs, LIB, {}, {})).not.toContain("canary");
+    });
+
     it("composes from the staged files and stages the footer file", () => {
         const fs = makeFakeFs(fullStaging());
         const footer = runVersionFooterCli(fs, LIB);

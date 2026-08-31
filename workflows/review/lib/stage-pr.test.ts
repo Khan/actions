@@ -727,6 +727,157 @@ describe("review-feedback coverage (slice 1 hardening)", () => {
     });
 });
 
+describe("canary staging (REVIEW_CANARY=1)", () => {
+    const options = {
+        repo: "o/r",
+        prNumber: 7,
+        repoRoot: "/work",
+        env: {REVIEW_CANARY: "1"},
+    };
+
+    /** One page: a bot-opened open thread, a human thread, and a bot thread
+     * a human resolved (the adjudicated shape). */
+    const mixedThreads = (): GhGraphql => () =>
+        Promise.resolve({
+            data: {
+                repository: {
+                    pullRequest: {
+                        reviewThreads: {
+                            pageInfo: {hasNextPage: false},
+                            nodes: [
+                                {
+                                    id: "PRRT_bot",
+                                    isResolved: false,
+                                    path: "a.ts",
+                                    line: 2,
+                                    comments: {
+                                        nodes: [
+                                            {
+                                                author: {
+                                                    login: "github-actions",
+                                                },
+                                                body: "**issue (blocking):** bot finding",
+                                                url: "https://github.com/o/r/pull/7#discussion_r1",
+                                            },
+                                        ],
+                                    },
+                                },
+                                {
+                                    id: "PRRT_human",
+                                    isResolved: false,
+                                    path: "a.ts",
+                                    line: 3,
+                                    comments: {
+                                        nodes: [
+                                            {
+                                                author: {login: "octo"},
+                                                body: "human question",
+                                                url: "https://github.com/o/r/pull/7#discussion_r2",
+                                            },
+                                        ],
+                                    },
+                                },
+                                {
+                                    id: "PRRT_adjudicated",
+                                    isResolved: true,
+                                    resolvedBy: {login: "octo"},
+                                    path: "a.ts",
+                                    line: 4,
+                                    comments: {
+                                        nodes: [
+                                            {
+                                                author: {
+                                                    login: "github-actions",
+                                                },
+                                                body: "**nit (non-blocking):** settled",
+                                                url: "https://github.com/o/r/pull/7#discussion_r3",
+                                            },
+                                        ],
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
+        });
+
+    it("stages reviewer history empty, keeps human threads, ignores the cache, and never fetches reviews", async () => {
+        // The routes deliberately OMIT the reviews endpoint: ghGetFromMap
+        // rejects unexpected paths, so a canary staging that still fetched
+        // prior reviews would fail this test, not just stage differently.
+        const routes: Record<string, unknown> = {
+            "/repos/o/r/pulls/7": PR_META,
+            "/repos/o/r/pulls/7/files?per_page=100&page=1": [
+                {filename: "a.ts", status: "modified", patch: PATCH_ONE},
+            ],
+        };
+        // A cache record that would scope the diff to nothing on a
+        // production run: the canary must not read it.
+        const fs = makeFakeFs({
+            "/tmp/gh-aw/cache-memory/pr-7.json": JSON.stringify({
+                reviewedHunks: {
+                    "a.ts": [hashHunkAddedLines(PATCH_ONE)],
+                },
+            }),
+        });
+        const result = await runStagePrCli(
+            fs,
+            ghGetFromMap(routes),
+            mixedThreads(),
+            noTicket(),
+            options,
+        );
+        expect(JSON.parse(fs.files[`${REVIEW}/prior-reviews.json`])).toEqual(
+            [],
+        );
+        expect(JSON.parse(fs.files[`${REVIEW}/threads.json`])).toEqual([]);
+        expect(
+            JSON.parse(fs.files[`${REVIEW}/adjudicated-threads.json`]),
+        ).toEqual([]);
+        expect(JSON.parse(fs.files[`${REVIEW}/human-threads.json`])).toEqual([
+            {path: "a.ts", line: 3},
+        ]);
+        expect(JSON.parse(fs.files[`${REVIEW}/new-scope.json`])).toEqual({
+            priorReview: false,
+            inScope: {},
+        });
+        expect(result.depth).toBe("full");
+        expect(result.botThreadCount).toBe(0);
+        expect(result.humanThreadCount).toBe(1);
+        expect(result.warnings.join(" ")).toContain("canary staging");
+    });
+
+    it("is inert unless REVIEW_CANARY is exactly '1'", async () => {
+        const routes = {
+            "/repos/o/r/pulls/7": PR_META,
+            "/repos/o/r/pulls/7/files?per_page=100&page=1": [
+                {filename: "a.ts", status: "modified", patch: PATCH_ONE},
+            ],
+            "/repos/o/r/pulls/7/reviews?per_page=100&page=1": [
+                {
+                    user: {login: "github-actions[bot]"},
+                    body: "prior",
+                    submitted_at: "2026-07-01T00:00:00Z",
+                },
+            ],
+        };
+        const fs = makeFakeFs();
+        const result = await runStagePrCli(
+            fs,
+            ghGetFromMap(routes),
+            mixedThreads(),
+            noTicket(),
+            {...options, env: {REVIEW_CANARY: "true"}},
+        );
+        expect(
+            JSON.parse(fs.files[`${REVIEW}/prior-reviews.json`]),
+        ).toHaveLength(1);
+        expect(JSON.parse(fs.files[`${REVIEW}/threads.json`])).toHaveLength(1);
+        expect(result.warnings.join(" ")).not.toContain("canary staging");
+    });
+});
+
 describe("disciplines extraction (slice 3, #247)", () => {
     const PROMPT = "/tmp/gh-aw/aw-prompts/prompt.txt";
     const options = {

@@ -1011,3 +1011,47 @@ hold comment's claim list) carry the short form, a trailing
 previously-posted bodies (open-thread suppression, the adjudicated corpus)
 strip these footers first, so the shared boilerplate cannot inflate similarity
 between unrelated findings.
+
+### The canary reviewer (dogfooding an unreleased reviewer, Khan/actions only)
+
+The pinned `ref:` means a Khan/actions PR that changes this workflow is itself
+reviewed by the released lib, never by the code it carries. That is the right
+default (the evaluated release is the reviewer of record), but it also means
+nothing exercises a reviewer change on a live PR until after it has shipped.
+The canary closes that gap as an explicit opt-in: apply the `review-canary`
+label to a Khan/actions PR and `.github/workflows/review-canary.md` runs the
+reviewer with the lib checked out at the PR's own head, in addition to the
+pinned reviewer, on that push and every push after while the label stays on.
+Pull the label to stop.
+
+The canary is posting-only and history-blind, by construction:
+
+1. Its lib checkout is `ref: ${{ github.event.pull_request.head.sha }}`. This
+   is not a new capability for an attacker: on `pull_request` events GitHub
+   already runs the lock from the PR's merge ref, so a same-repo writer
+   controls the workflow either way, and the fork guard plus the
+   triage-access requirement to apply a label gate who can start a run.
+2. Staging runs with `REVIEW_CANARY=1` (`lib/stage-pr.ts`): prior bot
+   reviews, bot threads, adjudicated threads, and cache memory are staged
+   empty. Both workflows post as the same bot identity, so without this the
+   canary would read the production reviewer's output as its own history and
+   scope its round accordingly. Every canary run is a full-depth first look.
+3. It has no `resolve-pull-request-review-thread` or `add-reviewer` safe
+   output and no cache memory, so it cannot close the production reviewer's
+   threads, page owning teams, or write a cache record the production
+   workflow would restore.
+4. Its posted footer stamps `canary <sha>` (`REVIEW_CANARY_SHA`, rendered by
+   `lib/version-footer.ts`), because `package.json` still carries the last
+   released version on a head checkout and the version segment alone would
+   misattribute the run.
+
+Scope caveat: the canary dogfoods the LIB at head. The prompt body is
+runtime-imported from the workspace, and gh-aw restores `.github` from the
+base branch before the agent starts, so prompt changes (this file's `review.md`
+source, or the installed copy) do not ride a canary run; the eval workflows
+(`review-eval-ab.yml`) remain the live surface for those. The canary's own
+prompt and pins are held in sync with the installed `review.md` by
+`.github/workflows/review-canary.test.ts` (body byte-identical after the
+canary preamble, same `source:` line), so a release bump PR that updates the
+install must re-derive the canary body and recompile its lock in the same
+change.
