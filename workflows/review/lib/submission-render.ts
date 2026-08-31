@@ -195,11 +195,11 @@ export const renderClaimComment = (
             prose: claim.discussion,
             insideFold: [
                 ...(claim.rule_quote !== undefined
-                    ? ["", renderRuleQuote(claim.rule_quote)]
+                    ? [renderRuleQuote(claim.rule_quote)]
                     : []),
-                ...(sketch !== undefined ? ["", sketch] : []),
+                ...(sketch !== undefined ? [sketch] : []),
                 ...(attributionText !== undefined
-                    ? ["", `<sub>${attributionText}</sub>`]
+                    ? [`<sub>${attributionText}</sub>`]
                     : []),
             ],
             outsideFold: dropIn

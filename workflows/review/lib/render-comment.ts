@@ -240,9 +240,17 @@ export const renderContextFold = (input: {
     return [
         `**${input.label}:** ${input.summary}`,
         ...outside,
-        [CONTEXT_FOLD_OPEN, "", input.prose, ...inside, "", "</details>"].join(
-            "\n",
-        ),
+        [
+            CONTEXT_FOLD_OPEN,
+            "",
+            input.prose,
+            // Each inside block gets its own blank-line separation (the
+            // join owns it; callers pass bare blocks) so GitHub renders
+            // them as paragraphs, not soft-wrapped continuations.
+            ...inside.flatMap((block) => ["", block]),
+            "",
+            "</details>",
+        ].join("\n"),
     ].join("\n\n");
 };
 
@@ -287,7 +295,7 @@ export const renderComment = (finding: Finding): string => {
             prose: finding.model_authored_prose,
             insideFold:
                 finding.rule_quote !== undefined
-                    ? ["", renderRuleQuote(finding.rule_quote)]
+                    ? [renderRuleQuote(finding.rule_quote)]
                     : [],
             outsideFold:
                 finding.suggested_patch !== undefined

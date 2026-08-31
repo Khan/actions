@@ -252,6 +252,17 @@ describe("renderClaimComment context fold", () => {
         expect(sketchAt).toBeLessThan(withSketch.indexOf("</details>"));
     });
 
+    it("separates fold blocks with blank lines (paragraphs, not soft wraps)", () => {
+        const body = renderClaimComment(folded() as never, {
+            source: "first-principles",
+        });
+        // The attribution line is its own paragraph inside the fold; a
+        // single-newline join would soft-wrap it onto the prose.
+        expect(body).toContain(
+            `${longDiscussion}\n\n<sub>found by first-principles</sub>\n\n</details>`,
+        );
+    });
+
     it("puts the rule quote and attribution inside the fold", () => {
         const body = renderClaimComment(
             folded({rule_quote: "Always guard."}) as never,
