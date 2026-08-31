@@ -576,4 +576,69 @@ describe("the named-top tag's escaping", () => {
         // summary tag truncates.
         expect(plan.body).toContain("x".repeat(150));
     });
+
+    it("neutralizes a backticked tag in the summary but not the entry", () => {
+        const claims = [
+            claim({
+                id: "spanned",
+                line: 2,
+                label: "thought (non-blocking)",
+                confidence: 0.3,
+                subject: "The `</details>` guard skips the sketch.",
+            }),
+            claim({
+                id: "plain",
+                line: 3,
+                label: "thought (non-blocking)",
+                confidence: 0.2,
+                subject: "Second.",
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        // The <summary> is raw HTML (backticks render literally, no code
+        // span forms), so the tag is rewritten even inside backticks; the
+        // list entry below the blank line is markdown, where the code
+        // span is real and the quoted tag is safe.
+        const summaryLine = plan.body
+            .split("\n")
+            .find((line) => line.includes("Lower-confidence observations"));
+        expect(summaryLine).toContain("The `(/details)` guard");
+        expect(summaryLine).not.toContain("</details>");
+        expect(plan.body).toContain(
+            "thought (non-blocking): The `</details>` guard skips the sketch.",
+        );
+    });
+
+    it("cannot post a live fragment when the cap lands mid-tag", () => {
+        // Truncation runs AFTER neutralization: slicing the raw subject
+        // could cut </details> in half, and the ingest sanitizer's tag
+        // fold then matches from the fragment to the section's own
+        // closing tag. A sliced "(/details)" is inert.
+        const claims = [
+            claim({
+                id: "straddler",
+                line: 2,
+                label: "thought (non-blocking)",
+                confidence: 0.3,
+                subject: `${"y".repeat(115)} </details> and more trailing text`,
+            }),
+            claim({
+                id: "plain",
+                line: 3,
+                label: "thought (non-blocking)",
+                confidence: 0.2,
+                subject: "Second.",
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        const summaryLine = plan.body
+            .split("\n")
+            .find((line) => line.includes("Lower-confidence observations"));
+        expect(summaryLine).toContain(`${"y".repeat(115)} (/de...`);
+        expect(summaryLine).not.toContain("</det");
+    });
 });

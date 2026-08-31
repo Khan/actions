@@ -5,7 +5,10 @@
  * body fold, the drop-in-suggestion gate, and the label-token vocabulary
  * helpers. Everything here sits inside the determinism boundary: CODE owns
  * the wrapping and the gates, MODELS own the prose, which is copied
- * verbatim.
+ * verbatim with one exception: `details`/`summary` tags in a collapsed
+ * entry's subject are rewritten to their parenthesised form
+ * (neutralizeStructuralTags, attribution.ts), since a live one closes the
+ * section's collapse at that bullet.
  */
 
 import {neutralizeStructuralTags} from "./attribution";

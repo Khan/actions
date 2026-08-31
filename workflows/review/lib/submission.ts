@@ -805,9 +805,10 @@ export const runSubmissionCli = (
         // approving review (Khan/actions#367), and the subject is what
         // tells a reader whether the expando is worth opening. `collapsed`
         // re-sorts with rankClaims after the pr-level claims join it, so
-        // entry 0 is the best of the whole tail. The subject is
-        // model-authored text inside a <summary>, so it is truncated and
-        // run through neutralizeThenEscape (a </details> breaks the collapse).
+        // entry 0 is the best of the whole tail. The subject is model
+        // text inside a <summary>, a raw-HTML line where backticks stay
+        // literal, so neutralizeThenEscape rewrites tags unconditionally
+        // and truncates only after the rewrite (a sliced tag posts live).
         // A one-entry tail: at N=1 the "preview" is the whole payload, so
         // a closed <details> shows the observation twice and reads as a
         // stray comment (Khan/actions#387). It renders <details open> with
@@ -816,9 +817,8 @@ export const runSubmissionCli = (
         const singleEntry = collapsed.length === 1;
         const top = collapsed[0];
         const topSubject = neutralizeThenEscape(
-            top.subject.length > TOP_SUBJECT_MAX_CHARS
-                ? `${top.subject.slice(0, TOP_SUBJECT_MAX_CHARS)}...`
-                : top.subject,
+            top.subject,
+            TOP_SUBJECT_MAX_CHARS,
         );
         const topTag = singleEntry
             ? ""

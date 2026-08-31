@@ -1,10 +1,38 @@
 import {describe, it, expect} from "vitest";
 
 import {
+    neutralizeStructuralTags,
     renderAttributionFooter,
     renderCollapsedFooter,
     stripFooters,
 } from "./attribution";
+
+describe("neutralizeStructuralTags", () => {
+    it("leaves a real code span verbatim", () => {
+        expect(neutralizeStructuralTags("a `</details>` b")).toBe(
+            "a `</details>` b",
+        );
+    });
+
+    it("neutralizes a tag inside mismatched backtick runs", () => {
+        // GFM forms a code span only when the opening and closing backtick
+        // runs are the same length, so neither of these tags sits in one
+        // and both must be rewritten (a naive backtick pairing would pass
+        // them through live).
+        expect(neutralizeStructuralTags("a `</details>`` b")).toBe(
+            "a `(/details)`` b",
+        );
+        expect(neutralizeStructuralTags("``</details>` mismatched")).toBe(
+            "``(/details)` mismatched",
+        );
+    });
+
+    it("neutralizes open tags and attribute-carrying forms", () => {
+        expect(neutralizeStructuralTags("<details open> and </summary>")).toBe(
+            "(details open) and (/summary)",
+        );
+    });
+});
 
 describe("renderCollapsedFooter", () => {
     it("wraps one <sub> line in the shared collapsed block", () => {
@@ -76,16 +104,18 @@ describe("renderAttributionFooter", () => {
         expect(stripFooters(`prose\n${footer}`)).toBe("prose\n");
     });
 
-    it("leaves a backticked tag in a merged copy's subject verbatim", () => {
+    it("neutralizes a backticked tag in a merged copy's subject too", () => {
         const footer = renderAttributionFooter("correctness-reviewer", [
             {
                 source: "conventions",
                 subject: "The `</details>` guard skips the sketch.",
             },
         ]);
-        // A code span is not parsed as HTML on GitHub, so the quoted tag
-        // is safe and stays readable as code.
-        expect(footer).toContain("The `&lt;/details&gt;` guard");
+        // The footer's <sub> line is raw HTML (no preceding blank line),
+        // so backticks render literally and form no code span: a
+        // backticked tag there is live HTML and gets rewritten anyway.
+        expect(footer).toContain("The `(/details)` guard");
+        expect(footer).not.toContain("</details> guard");
         expect(stripFooters(`prose\n${footer}`)).toBe("prose\n");
     });
 });
