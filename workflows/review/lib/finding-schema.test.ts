@@ -177,6 +177,21 @@ describe("validateFinding — well-formed findings", () => {
         expect(result.ok).toBe(true);
     });
 
+    it("accepts a single-line summary and rejects empty or multi-line ones", () => {
+        expect(
+            validateFinding(makeValidFinding({summary: "One line."})).ok,
+        ).toBe(true);
+        for (const bad of ["", 42, "two\nlines"]) {
+            const result = validateFinding(makeValidFinding({summary: bad}));
+            expect(result.ok).toBe(false);
+            if (!result.ok) {
+                expect(
+                    result.errors.some((e) => e.startsWith("summary:")),
+                ).toBe(true);
+            }
+        }
+    });
+
     it("rejects an empty or non-string rule_quote", () => {
         for (const bad of ["", 42]) {
             const result = validateFinding(makeValidFinding({rule_quote: bad}));

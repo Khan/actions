@@ -20,6 +20,13 @@ export type ProseFixture = {
     commentId: number;
     path: string;
     label: string;
+    /**
+     * The visible line when the discussion folds (renderClaimComment's
+     * subject). Optional so pre-fold fixtures judge in the flat shape they
+     * actually posted in; set it on new fixtures that exercise the
+     * fold-shape rubric lines.
+     */
+    summary?: string;
     discussion: string;
     /** What the live judge must say about it. */
     expected: "fail" | "unpinned";

@@ -23,6 +23,7 @@ import {extractJsonObject} from "./agent-json";
 import {
     BLOCKING_LABELS,
     NON_BLOCKING_LABELS,
+    firstSentence,
     isBlockingLabel,
     labelForFinding,
 } from "./render-comment";
@@ -124,15 +125,6 @@ const foldToken = (token: string): string => {
 };
 
 /**
- * Split point for "the discussion's first sentence": a sentence terminator
- * followed by whitespace. Shared by the restatement drop and buildClaims'
- * subject recovery, which must agree on what the first sentence IS: the
- * drop's whole safety argument is that buildClaims recovers the same text
- * the subject restated.
- */
-const FIRST_SENTENCE_SPLIT = /(?<=[.!?])\s/;
-
-/**
  * Function words that carry no claim content; ignored on the SUBJECT side
  * of the restatement check so "turns are dropped" still matches "drops
  * turns" (the sentence has no "are"). Never filtered from the sentence
@@ -211,7 +203,7 @@ const proseTokens = (text: string): string[] =>
  * dropped too; accepted, since the audited failure mode is restatement and
  * the sentence carrying that vocabulary still posts.
  */
-const subjectRestatesDiscussion = (
+export const subjectRestatesDiscussion = (
     subject: string,
     discussion: string,
 ): boolean => {
@@ -221,15 +213,15 @@ const subjectRestatesDiscussion = (
     if (subjectTokens.length === 0) {
         return false;
     }
-    const firstSentence = discussion.split(FIRST_SENTENCE_SPLIT, 1)[0] ?? "";
+    const opening = firstSentence(discussion);
     // A "first sentence" spanning lines means the discussion opens with an
     // unterminated line (a heading, a bullet list): dropping the subject
     // would promote that whole block into `claim.subject` via buildClaims'
     // identical split, and subjects print in one-line list contexts.
-    if (firstSentence.includes("\n")) {
+    if (opening.includes("\n")) {
         return false;
     }
-    const sentenceTokens = new Set(proseTokens(firstSentence).map(foldToken));
+    const sentenceTokens = new Set(proseTokens(opening).map(foldToken));
     return subjectTokens.every((token) => sentenceTokens.has(token));
 };
 
@@ -346,6 +338,18 @@ const fromLabelShape = (
                 : discussion),
         producing_hunt: `dispatch:${agentName}`,
         model_authored_prose: joinProse(subject, discussion),
+        // The authored subject rides through as the fold's visible line,
+        // EXCEPT when joinProse drops it as a restatement: then
+        // buildClaims' first-sentence fallback must recover the
+        // discussion's own opening (the same text, differently inflected),
+        // because dedup's comparedText prefix-matches failure_scenario
+        // against claim.subject and the salvaged failure_scenario is the
+        // discussion in exactly that case.
+        ...(subject !== "" &&
+        !subject.includes("\n") &&
+        !subjectRestatesDiscussion(subject, discussion)
+            ? {summary: subject}
+            : {}),
         // Suggestion salvage, like the anchor/subject salvage above: run
         // 29943085279's correctness pass drifted into the ReportFindings
         // shape with the AddDate one-line fix under `suggested_patch`, and
@@ -711,7 +715,9 @@ export const buildClaims = (candidates: Candidate[]): Claim[] =>
         const {finding} = candidate;
         const {path, line} = anchorPathLine(finding.anchor);
         const prose = finding.model_authored_prose;
-        const firstSentence = prose.split(FIRST_SENTENCE_SPLIT, 1)[0] ?? prose;
+        // The authored summary wins; the first-sentence split is the
+        // fallback for lenses that have not adopted the field.
+        const subject = finding.summary ?? firstSentence(prose);
         return {
             id: finding.id,
             source: candidate.source,
@@ -722,7 +728,7 @@ export const buildClaims = (candidates: Candidate[]): Claim[] =>
             !isBlockingLabel(candidateLabel(candidate))
                 ? {importance: "medium" as const}
                 : {}),
-            subject: firstSentence,
+            subject,
             discussion: prose,
             failure_scenario: finding.failure_scenario,
             ...(finding.suggested_patch !== undefined

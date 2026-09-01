@@ -13,6 +13,14 @@
 
 import {neutralizeStructuralTags} from "./attribution";
 import type {Claim} from "./dispatch-contracts";
+import type {AlsoFlagged} from "./attribution";
+import {attributionLine, renderAttributionFooter} from "./attribution";
+import {
+    containsBlockClose,
+    renderContextFold,
+    renderRuleQuote,
+    shouldFoldContext,
+} from "./render-comment";
 
 /**
  * How many lines a committable suggestion may replace the anchored line
@@ -150,30 +158,92 @@ export const labelAdmitsSketch = (label: string): boolean => {
  * under a fix-proposing label ({@link labelAdmitsSketch}): a question or
  * thought proposes no fix, so a sketch under it adds length, not
  * information.
+ *
+ * A claim whose discussion clears the context-fold bar posts as the
+ * summary-plus-fold shape instead ({@link shouldFoldContext} over the
+ * claim's `subject`): the visible line is the subject, and the discussion,
+ * rule quote, sketch, and attribution collapse into one details block. The
+ * committable suggestion fence stays outside the fold either way, so the
+ * one-click apply never hides. `attribution` is optional so the eval
+ * renderer and tests can pin the bare layout; when present it lands inside
+ * the fold as a `<sub>` line, or (unfolded) as the classic collapsed
+ * footer, keeping every posted comment attributed through exactly one of
+ * the two shapes.
  */
-export const renderClaimComment = (claim: Claim): string => {
+export const renderClaimComment = (
+    claim: Claim,
+    attribution?: {source: string; alsoFlaggedBy?: readonly AlsoFlagged[]},
+): string => {
+    const attributionText =
+        attribution === undefined
+            ? undefined
+            : attributionLine(attribution.source, attribution.alsoFlaggedBy);
+    const dropIn =
+        claim.suggestion !== undefined && isDropInSuggestion(claim.suggestion);
+    const sketch =
+        claim.suggestion !== undefined &&
+        !dropIn &&
+        labelAdmitsSketch(claim.label)
+            ? [
+                  "A sketch, not a committable replacement:",
+                  "",
+                  "````",
+                  claim.suggestion,
+                  "````",
+              ].join("\n")
+            : undefined;
+
+    if (
+        shouldFoldContext(claim.subject, claim.discussion) &&
+        // The rule quote and sketch land inside the block, so they get the
+        // same block-close guard the prose does (attribution is escaped by
+        // construction).
+        (claim.rule_quote === undefined ||
+            !containsBlockClose(claim.rule_quote)) &&
+        (sketch === undefined || !containsBlockClose(sketch))
+    ) {
+        return renderContextFold({
+            label: claim.label,
+            summary: claim.subject,
+            prose: claim.discussion,
+            insideFold: [
+                ...(claim.rule_quote !== undefined
+                    ? [renderRuleQuote(claim.rule_quote)]
+                    : []),
+                ...(sketch !== undefined ? [sketch] : []),
+                ...(attributionText !== undefined
+                    ? [`<sub>${attributionText}</sub>`]
+                    : []),
+            ],
+            outsideFold: dropIn
+                ? [
+                      ["```suggestion", claim.suggestion as string, "```"].join(
+                          "\n",
+                      ),
+                  ]
+                : [],
+        });
+    }
+
     const lines: string[] = [`**${claim.label}:** ${claim.discussion}`];
     if (claim.rule_quote !== undefined) {
-        const [first, ...rest] = claim.rule_quote.split("\n");
-        lines.push(
-            "",
-            `> **Rule:** ${first}`,
-            ...rest.map((line) => (line === "" ? ">" : `> ${line}`)),
-        );
+        lines.push("", renderRuleQuote(claim.rule_quote));
     }
     if (claim.suggestion !== undefined) {
-        if (isDropInSuggestion(claim.suggestion)) {
+        if (dropIn) {
             lines.push("", "```suggestion", claim.suggestion, "```");
-        } else if (labelAdmitsSketch(claim.label)) {
-            lines.push(
-                "",
-                "A sketch, not a committable replacement:",
-                "",
-                "````",
-                claim.suggestion,
-                "````",
-            );
+        } else if (sketch !== undefined) {
+            lines.push("", sketch);
         }
+    }
+    if (attribution !== undefined) {
+        lines.push(
+            "",
+            renderAttributionFooter(
+                attribution.source,
+                attribution.alsoFlaggedBy,
+            ),
+        );
     }
     return lines.join("\n");
 };
