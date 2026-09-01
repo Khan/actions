@@ -137,7 +137,8 @@ export type ClearanceResult = {
     priorRcStands: boolean;
     /** Artifact-only observations for the plan's notes. */
     notes: string[];
-    /** A `Note:` line for the review body when a dismissal stages. */
+    /** A `Note:` line for the review body when a dismissal stages, or
+     * when a canary run demotes its verdict. */
     bodyNote: string | null;
     /** The dismissal decision to stage, or null (the common case). */
     dismissal: {reviewIds: number[]; message: string} | null;

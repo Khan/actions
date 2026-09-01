@@ -79,6 +79,15 @@ const flaggedBy = (entry: AlsoFlagged): string => {
  * footer; merged entries join with `; ` because a quoted subject can carry
  * commas.
  */
+/**
+ * The canary footer segment, spelled once for every emitter: the version
+ * footer (version-footer.ts), the inline-comment attribution footer below,
+ * and the production-side filter's expectations (hasCanaryFooter in
+ * version-footer.ts documents the match).
+ */
+export const canarySegment = (sha: string): string =>
+    `canary ${sha.slice(0, 12)}`;
+
 export const renderAttributionFooter = (
     source: string,
     alsoFlaggedBy: readonly AlsoFlagged[] = [],
@@ -98,7 +107,7 @@ export const renderAttributionFooter = (
     // floor the production verdict). hasCanaryFooter (version-footer.ts)
     // matches this segment and the version footer's with one predicate.
     if (typeof canarySha === "string" && canarySha !== "") {
-        segments.push(`canary ${canarySha.slice(0, 12)}`);
+        segments.push(canarySegment(canarySha));
     }
     return renderCollapsedFooter(segments.join(" | "));
 };

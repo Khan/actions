@@ -25,7 +25,7 @@
  * the fingerprint stamp emission stays (rereview-mode.ts explains why).
  */
 
-import {renderCollapsedFooter} from "./attribution";
+import {canarySegment, renderCollapsedFooter} from "./attribution";
 import {FINDING_SCHEMA_VERSION} from "./finding-schema";
 import {DEFAULT_NON_BLOCKING_INLINE_BUDGET} from "./routing-config";
 
@@ -82,7 +82,7 @@ export const renderVersionFooter = (inputs: VersionFooterInputs): string => {
         segments.push(`review-v${inputs.version}`);
     }
     if (typeof inputs.canarySha === "string" && inputs.canarySha !== "") {
-        segments.push(`canary ${inputs.canarySha.slice(0, 12)}`);
+        segments.push(canarySegment(inputs.canarySha));
     }
     segments.push(`schema ${inputs.schemaVersion}`);
     if (inputs.depth !== null && inputs.depth !== "") {
