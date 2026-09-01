@@ -5,9 +5,13 @@
  * body fold, the drop-in-suggestion gate, and the label-token vocabulary
  * helpers. Everything here sits inside the determinism boundary: CODE owns
  * the wrapping and the gates, MODELS own the prose, which is copied
- * verbatim.
+ * verbatim with one exception: `details`/`summary` tags in a collapsed
+ * entry's subject are rewritten to their parenthesised form
+ * (neutralizeStructuralTags, attribution.ts), since a live one closes the
+ * section's collapse at that bullet.
  */
 
+import {neutralizeStructuralTags} from "./attribution";
 import type {Claim} from "./dispatch-contracts";
 
 /**
@@ -189,13 +193,22 @@ export const renderClaimComment = (claim: Claim): string => {
  * {@link COLLAPSED_ENTRY_RE}, so the renderer and the regex live side by
  * side and a round-trip test in workflows/autofix/lib/collapsed.test.ts
  * pins the contract. Change one, change both.
+ *
+ * The subject is model-authored text inside the section's <details>
+ * block, so it is structurally neutralized: a bare `</details>` in any
+ * entry closes the section at that bullet and spills the rest of the
+ * list out of the collapse (Khan/actions#401's re-review), and escaping
+ * cannot help because the ingest sanitizer decodes entities
+ * ({@link neutralizeStructuralTags}).
  */
 export const renderCollapsedLine = (claim: Claim): string =>
     claim.path !== undefined && claim.line !== undefined
-        ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${
-              claim.subject
-          } ${sourceTag(claim)}`
-        : `- ${claim.label}: ${claim.subject} ${sourceTag(claim)}`;
+        ? `- \`${claim.path}:${claim.line}\` ${
+              claim.label
+          }: ${neutralizeStructuralTags(claim.subject)} ${sourceTag(claim)}`
+        : `- ${claim.label}: ${neutralizeStructuralTags(
+              claim.subject,
+          )} ${sourceTag(claim)}`;
 
 /**
  * The parse of one {@link renderCollapsedLine} entry, anchored form only

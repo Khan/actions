@@ -53,13 +53,105 @@ export const renderCollapsedFooter = (content: string): string =>
 
 /**
  * A merged copy's `subject` is model-authored text interpolated into the
- * footer's HTML. Unescaped, a subject containing a literal `</details>`
- * closes the collapsed block early and truncates {@link stripFooters}'s
- * non-greedy match. Escape the HTML-significant characters; GitHub renders
- * the entities back as the literal characters.
+ * footer's HTML. Escape the HTML-significant characters so the plan-side
+ * artifact stays inert; GitHub renders the entities back as the literal
+ * characters. NOT a structural defense on its own: gh-aw's ingest sanitizer
+ * decodes HTML entities in everything the agent queues (mirrored by
+ * sanitizer-normalize.ts's decodeHtmlEntities), so an escaped tag posts as
+ * a live one. {@link neutralizeThenEscape} is the composition that
+ * actually protects a raw-HTML line; this escape is only its second half.
  */
 export const escapeHtml = (text: string): string =>
     text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/**
+ * The two structure-closing tags, open or close form, any attributes,
+ * bracket-spelled or entity-spelled: the ingest sanitizer's decode
+ * collapses the named (`&lt;`), decimal (`&#60;`), and hex (`&#x3c;`)
+ * spellings to `<` in one pass, each tolerating one `&amp;` double
+ * encoding (sanitizer-normalize.ts mirrors it), so any of those
+ * spellings in model prose posts live on every surface, escaped or not.
+ */
+const STRUCTURAL_TAG_RE =
+    /(?:<|&(?:amp;)?(?:lt|#0*60|#[xX]0*3c);)(\/?\s*(?:details|summary)\b[^>]*?)(?:>|&(?:amp;)?(?:gt|#0*62|#[xX]0*3e);)/gi;
+
+/**
+ * A GFM code span: two backtick runs of EXACTLY equal length (the
+ * lookarounds pin both ends of both runs, so an opener can neither start
+ * mid-run nor close against a longer run's tail).
+ */
+const CODE_SPAN_RE = /(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g;
+
+/**
+ * Rewrite a `details`/`summary` tag in model-authored text to the ingest
+ * sanitizer's parenthesised form (`</details>` becomes `(/details)`, the
+ * shape foldXmlTags gives every DISALLOWED tag). Entity-escaping cannot
+ * protect a posted surface from these two tags: the sanitizer decodes
+ * `&lt;/details&gt;` back to the literal tag, and both tags are on its
+ * allowed list, so the tag posts live and closes the enclosing collapsed
+ * block right there (Khan/actions#401's re-review posted its whole
+ * collapsed-observations list outside the block this way: the top-ranked
+ * subject quoted a bare `</details>`).
+ *
+ * MARKDOWN surfaces only (the collapsed list entries, the recap's kept
+ * lines): there, a backtick code span is not parsed as HTML on GitHub, so
+ * `` `</details>` `` is how a finding legitimately names the tag and
+ * passes through verbatim. The span match mirrors GFM's rule, an opening
+ * backtick run closes only against a run of the SAME length, so a
+ * mismatched pair (`` a `</details>`` b ``) forms no code span and its tag
+ * is rewritten (never left live). Raw-HTML surfaces must use
+ * {@link neutralizeThenEscape} instead: inside a `<summary>` or the
+ * footer's `<sub>` line no markdown is processed at all, backticks render
+ * literally, and a "code span" there is live HTML. Scoped to the two
+ * structure-closing tags on purpose: other allowed tags (`sub`, `b`) can
+ * only mis-style text, and rewriting them would mangle far more legitimate
+ * prose than they endanger.
+ */
+export const neutralizeStructuralTags = (text: string): string => {
+    let out = "";
+    let last = 0;
+    for (const match of text.matchAll(CODE_SPAN_RE)) {
+        out +=
+            text.slice(last, match.index).replace(STRUCTURAL_TAG_RE, "($1)") +
+            match[0];
+        last = match.index + match[0].length;
+    }
+    return out + text.slice(last).replace(STRUCTURAL_TAG_RE, "($1)");
+};
+
+/**
+ * The composed treatment for model-authored text interpolated into a
+ * RAW-HTML line (the collapsed section's `<summary>`, the attribution
+ * footer's `<sub>`, both emitted with no preceding blank line, so GitHub
+ * processes no markdown inside them): every `details`/`summary` tag is
+ * rewritten, code spans included, because backticks there are literal
+ * characters, not spans (Khan/actions#402 review 5071533178), then
+ * {@link escapeHtml} for plan-side inertness. `maxChars` truncates AFTER
+ * the rewrite and before the escape: slicing the raw text can cut a tag
+ * in half, and the sanitizer's tag fold then eats from the fragment to
+ * the enclosing block's own closer, while a sliced `(/details)` is inert.
+ * The rewrite only touches `details`/`summary`, so the slice can still
+ * sever some OTHER tag; the fragment drop after it removes a trailing
+ * `<x` remnant in any spelling the decode collapses to `<` (the same
+ * guard excerptOpeningComment carries).
+ */
+export const neutralizeThenEscape = (
+    text: string,
+    maxChars?: number,
+): string => {
+    const neutral = text.replace(STRUCTURAL_TAG_RE, "($1)");
+    return escapeHtml(
+        maxChars !== undefined && neutral.length > maxChars
+            ? `${neutral
+                  .slice(0, maxChars)
+                  .replace(
+                      /(?:<|&(?:amp;)?(?:lt|#0*60|#[xX]0*3c);)\/?[A-Za-z!][^>]*$/,
+                      "",
+                  )
+                  .trimEnd()}...`
+            : neutral,
+    );
+};
 
 const flaggedBy = (entry: AlsoFlagged): string => {
     const anchor =
@@ -68,7 +160,7 @@ const flaggedBy = (entry: AlsoFlagged): string => {
             : `${entry.source} (at line ${entry.line})`;
     return entry.subject === undefined
         ? anchor
-        : `${anchor}: ${escapeHtml(entry.subject)}`;
+        : `${anchor}: ${neutralizeThenEscape(entry.subject)}`;
 };
 
 /**
