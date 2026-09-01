@@ -62,7 +62,7 @@
  * under review.
  */
 
-import {escapeHtml, renderAttributionFooter} from "./attribution";
+import {neutralizeThenEscape, renderAttributionFooter} from "./attribution";
 import {computeRisksPatternsKey, RISKS_PATTERNS_KEY_PATH} from "./cache-record";
 import type {Claim} from "./dispatch-contracts";
 import {applyMediumVeto} from "./dispatch-contracts";
@@ -813,9 +813,10 @@ export const runSubmissionCli = (
         // approving review (Khan/actions#367), and the subject is what
         // tells a reader whether the expando is worth opening. `collapsed`
         // re-sorts with rankClaims after the pr-level claims join it, so
-        // entry 0 is the best of the whole tail. The subject is
-        // model-authored text inside a <summary>, so it is HTML-escaped
-        // (a literal </summary> would break the collapse) and truncated.
+        // entry 0 is the best of the whole tail. The subject is model
+        // text inside a <summary>, a raw-HTML line where backticks stay
+        // literal, so neutralizeThenEscape rewrites tags unconditionally
+        // and truncates only after the rewrite (a sliced tag posts live).
         // A one-entry tail: at N=1 the "preview" is the whole payload, so
         // a closed <details> shows the observation twice and reads as a
         // stray comment (Khan/actions#387). It renders <details open> with
@@ -823,10 +824,9 @@ export const runSubmissionCli = (
         // section slicing (<summary> to </details>, collapsed.ts).
         const singleEntry = collapsed.length === 1;
         const top = collapsed[0];
-        const topSubject = escapeHtml(
-            top.subject.length > TOP_SUBJECT_MAX_CHARS
-                ? `${top.subject.slice(0, TOP_SUBJECT_MAX_CHARS)}...`
-                : top.subject,
+        const topSubject = neutralizeThenEscape(
+            top.subject,
+            TOP_SUBJECT_MAX_CHARS,
         );
         const topTag = singleEntry
             ? ""

@@ -533,7 +533,7 @@ describe("the budget's spend order", () => {
 });
 
 describe("the named-top tag's escaping", () => {
-    it("escapes a model-authored subject and truncates a long one", () => {
+    it("neutralizes a model-authored subject and truncates a long one", () => {
         const hostile = "Breaks out</summary></details> <b>of the block</b>";
         const claims = [
             claim({
@@ -555,18 +555,90 @@ describe("the named-top tag's escaping", () => {
             makeFakeFs(staged({depth: "full", claims})),
         );
         // The hostile subject ranks first (higher confidence): the SUMMARY
-        // line carries entities, never the raw tag. (The list entries below
-        // it share the exposure but predate this PR; the finding's own
-        // scope note excludes them.)
+        // line parenthesises the structural tags (entities alone do not
+        // survive the ingest sanitizer, which decodes them back to live
+        // tags; the Khan/actions#401 re-review broke exactly there) and
+        // escapes the rest.
         const summaryLine = plan.body
             .split("\n")
             .find((line) => line.includes("Lower-confidence observations"));
         expect(summaryLine).toContain(
-            "Breaks out&lt;/summary&gt;&lt;/details&gt; &lt;b&gt;of the block&lt;/b&gt;",
+            "Breaks out(/summary)(/details) &lt;b&gt;of the block&lt;/b&gt;",
         );
         expect(summaryLine).not.toContain("out</summary>");
+        // The list entries get the same neutralization: a bare </details>
+        // in ANY entry closes the section at that bullet and spills the
+        // rest of the list out of the collapse.
+        expect(plan.body).toContain(
+            "thought (non-blocking): Breaks out(/summary)(/details)",
+        );
         // The long subject keeps its full text in the list entry; only the
         // summary tag truncates.
         expect(plan.body).toContain("x".repeat(150));
+    });
+
+    it("neutralizes a backticked tag in the summary but not the entry", () => {
+        const claims = [
+            claim({
+                id: "spanned",
+                line: 2,
+                label: "thought (non-blocking)",
+                confidence: 0.3,
+                subject: "The `</details>` guard skips the sketch.",
+            }),
+            claim({
+                id: "plain",
+                line: 3,
+                label: "thought (non-blocking)",
+                confidence: 0.2,
+                subject: "Second.",
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        // The <summary> is raw HTML (backticks render literally, no code
+        // span forms), so the tag is rewritten even inside backticks; the
+        // list entry below the blank line is markdown, where the code
+        // span is real and the quoted tag is safe.
+        const summaryLine = plan.body
+            .split("\n")
+            .find((line) => line.includes("Lower-confidence observations"));
+        expect(summaryLine).toContain("The `(/details)` guard");
+        expect(summaryLine).not.toContain("</details>");
+        expect(plan.body).toContain(
+            "thought (non-blocking): The `</details>` guard skips the sketch.",
+        );
+    });
+
+    it("cannot post a live fragment when the cap lands mid-tag", () => {
+        // Truncation runs AFTER neutralization: slicing the raw subject
+        // could cut </details> in half, and the ingest sanitizer's tag
+        // fold then matches from the fragment to the section's own
+        // closing tag. A sliced "(/details)" is inert.
+        const claims = [
+            claim({
+                id: "straddler",
+                line: 2,
+                label: "thought (non-blocking)",
+                confidence: 0.3,
+                subject: `${"y".repeat(115)} </details> and more trailing text`,
+            }),
+            claim({
+                id: "plain",
+                line: 3,
+                label: "thought (non-blocking)",
+                confidence: 0.2,
+                subject: "Second.",
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        const summaryLine = plan.body
+            .split("\n")
+            .find((line) => line.includes("Lower-confidence observations"));
+        expect(summaryLine).toContain(`${"y".repeat(115)} (/de...`);
+        expect(summaryLine).not.toContain("</det");
     });
 });
