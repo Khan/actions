@@ -82,12 +82,23 @@ const flaggedBy = (entry: AlsoFlagged): string => {
 export const renderAttributionFooter = (
     source: string,
     alsoFlaggedBy: readonly AlsoFlagged[] = [],
+    canarySha: string | undefined = process.env.REVIEW_CANARY_SHA,
 ): string => {
     const segments = [`found by ${source}`];
     if (alsoFlaggedBy.length > 0) {
         segments.push(
             `also flagged by ${alsoFlaggedBy.map(flaggedBy).join("; ")}`,
         );
+    }
+    // The canary marker on inline comments, mirroring the version footer's
+    // segment: an inline comment's body becomes a review THREAD's opening
+    // comment, and the production staging (stage-pr.ts) needs a
+    // discriminator to keep canary threads out of its own thread history
+    // (a canary blocking thread would otherwise feed keptBlockingCount and
+    // floor the production verdict). hasCanaryFooter (version-footer.ts)
+    // matches this segment and the version footer's with one predicate.
+    if (typeof canarySha === "string" && canarySha !== "") {
+        segments.push(`canary ${canarySha.slice(0, 12)}`);
     }
     return renderCollapsedFooter(segments.join(" | "));
 };

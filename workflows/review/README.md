@@ -358,8 +358,10 @@ contracts would never reach the reviewer. Repos without `REVIEW.md` files need n
 the sub-agents skip the step.
 
 Note the trust boundary: unlike `.github/` and the agent config folders (which gh-aw
-restores from the base branch before the agent runs), `REVIEW.md` files are read from
-the PR head. The prompts therefore treat contract text as guidance that can adjust
+snapshots in the activation job and restores before the agent runs; the snapshot
+checkout has no `ref:`, so on `pull_request` events it is the merge ref, per the
+canary section's Scope note below), `REVIEW.md` files are read from the PR head
+checkout directly. The prompts treat contract text as guidance that can adjust
 emphasis but never override the workflow's own rules, and an edit to a `REVIEW.md` in
 the diff is reviewed on its merits like any other change.
 
@@ -1052,9 +1054,14 @@ construction:
    parseable one in the production reviewer's prior-reviews staging, and its
    next round would scope to a fingerprint unreleased code produced. As the
    production-side half, `lib/stage-pr.ts` drops reviews carrying the canary
-   footer segment from `prior-reviews.json` (`hasCanaryFooter`, exported
-   beside the footer renderer), effective once a release carrying it is
-   pinned.
+   footer segment from `prior-reviews.json`, and keeps canary-opened threads
+   out of both thread partitions (canary inline comments carry the same
+   segment in their attribution footer, so a canary blocking thread never
+   feeds `keptBlockingCount` and floors the production verdict). One
+   predicate covers both surfaces (`hasCanaryFooter`, exported beside the
+   footer renderer), effective once a release carrying it is pinned.
+   Production also never RESOLVES canary threads as a result: a human
+   closes them, or unlabels and addresses.
 6. Its posted footer stamps `canary <sha>` (`REVIEW_CANARY_SHA`, rendered by
    `lib/version-footer.ts`), because `package.json` still carries the last
    released version on a head checkout and the version segment alone would

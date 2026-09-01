@@ -911,7 +911,7 @@ export const runSubmissionCli = (
         hasInlineComments: inline.length > 0,
         rereviewSection: rereview.section,
     });
-    const stamp = runRereviewStampCli(fs, event);
+    const stamp = runRereviewStampCli(fs, event, canary);
     // The body minus the attribution footer: the skip below compares THIS
     // against the bare approve line (the footer is not a reason to post).
     const coreBody = [head, ...prLevelLines, ...noteLines, ...depthNotes]

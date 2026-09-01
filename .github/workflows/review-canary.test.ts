@@ -155,6 +155,12 @@ describe("compiled review-canary.lock.yml", () => {
         expect(canaryLock).toContain(
             "contains(github.event.pull_request.labels.*.name, 'review-canary')",
         );
+        // The fork guard is the workflow's only actor gate (roles: all
+        // disables gh-aw's own), so a lock compiled without it is a
+        // security regression, not a cosmetic drift.
+        expect(canaryLock).toContain(
+            "github.event.pull_request.head.repo.full_name == github.repository",
+        );
         expect(canaryLock).toContain('"allowed_events":["COMMENT"]');
         expect(canaryLock).toContain('REVIEW_CANARY: "1"');
         expect(canaryLock).not.toContain("resolve_pull_request_review_thread");

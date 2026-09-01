@@ -384,13 +384,11 @@ export const runStagePrCli = async (
     // Canary staging (REVIEW_CANARY=1, set only by the canary workflow that
     // dogfoods an unreleased reviewer on a labeled PR): every carrier of the
     // production reviewer's own history is staged empty, so the run reviews
-    // like a first encounter with the PR. Both workflows post as the same bot
-    // identity, so without this the canary would read the production run's
-    // reviews, threads, and stamps as its own: its re-review plan would scope
-    // to hunks the PRODUCTION reviewer covered, and its reconciler would
-    // adjudicate threads the production reviewer opened. Human threads stay
-    // staged; they are PR context any first review would see, not reviewer
-    // history.
+    // like a first encounter. Both workflows post as the same bot identity,
+    // so without this the canary would read the production run's reviews,
+    // threads, and stamps as its own history and scope its round to hunks
+    // the PRODUCTION reviewer covered. Human threads stay staged: PR
+    // context, not reviewer history.
     const canary = env.REVIEW_CANARY === "1";
     const staged: string[] = [];
     const warnings: string[] = [];
@@ -569,14 +567,12 @@ export const runStagePrCli = async (
             // (threads.ts, and the #302 postmortem it carries).
             .filter((review) => isReviewBotAuthor(review.user?.login ?? ""))
             // The canary reviewer posts as the same bot identity, so its
-            // reviews would otherwise stage as THIS workflow's history: its
-            // stamp would anchor the next re-review plan and its verdict
-            // would read as this reviewer's standing state. The footer's
-            // canary segment is the discriminator (hasCanaryFooter lives
-            // beside the renderer). Emission is also gated canary-side
-            // (runRereviewStampCli, COMMENT-only submission), but that gate
-            // runs unreleased code by definition; this filter is the
-            // production half.
+            // reviews would otherwise stage as THIS workflow's history (its
+            // stamp anchoring the next re-review plan, its verdict reading
+            // as this reviewer's standing state). The footer's canary
+            // segment is the discriminator; emission is also gated
+            // canary-side, but that gate runs unreleased code by
+            // definition, and this filter is the production half.
             .filter((review) => !hasCanaryFooter(review.body ?? ""))
             .map((review) => ({
                 body: review.body ?? "",
@@ -659,9 +655,24 @@ export const runStagePrCli = async (
         const author = thread.comments[0]?.author;
         return author === undefined || author === "" ? undefined : author;
     };
+    // A canary-opened thread (the opener body carries the attribution
+    // footer's canary segment) is in NEITHER partition: not the bot's own
+    // history (a canary blocking thread would feed keptBlockingCount and
+    // floor this reviewer's verdict on findings unreleased code authored),
+    // and not human (the author IS the bot login, and a skipLines entry
+    // there would drop fresh findings). The cost is accepted and the
+    // reverse of dangerous: this reviewer may re-derive a defect the
+    // canary already flagged (a duplicate comment) and never resolves
+    // canary threads (a human closes them, or unlabels and addresses).
+    const openedByCanary = (thread: StagedThread): boolean =>
+        hasCanaryFooter(thread.comments[0]?.body ?? "");
     const openedByBot = (thread: StagedThread): boolean => {
         const author = openerAuthor(thread);
-        return author !== undefined && isReviewBotAuthor(author);
+        return (
+            author !== undefined &&
+            isReviewBotAuthor(author) &&
+            !openedByCanary(thread)
+        );
     };
     const openedByHuman = (thread: StagedThread): boolean => {
         const author = openerAuthor(thread);

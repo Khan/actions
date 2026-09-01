@@ -512,6 +512,26 @@ describe("decideEventAndClearance (the pure decision)", () => {
         expect(comment.bodyNote).toBeNull();
     });
 
+    it("canary: never stages a dismissal of a standing block, even at reduced depth", () => {
+        // Degenerate like the upgrade case below (the canary plans full
+        // depth and stages empty priors), but the dismissal moves review
+        // state, so the pure function must refuse it on any input.
+        const result = decideEventAndClearance({
+            ...base,
+            canary: true,
+            depth: "fast",
+            priorReviewsRaw: [
+                {
+                    id: 7,
+                    state: "CHANGES_REQUESTED",
+                    body: stampedBody("REQUEST_CHANGES"),
+                },
+            ],
+        });
+        expect(result.event).toBe("COMMENT");
+        expect(result.dismissal).toBeNull();
+    });
+
     it("canary: never takes the COMMENT-to-APPROVE upgrade over a standing block", () => {
         // Degenerate by construction (canary staging writes priors empty),
         // but the pure function must not upgrade to APPROVE on any input.

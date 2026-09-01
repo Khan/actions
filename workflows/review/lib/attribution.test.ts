@@ -27,6 +27,26 @@ describe("renderAttributionFooter", () => {
         );
     });
 
+    it("appends the canary marker on canary runs (the thread-partition discriminator)", () => {
+        // Explicit sha argument: the default reads process.env, exercised
+        // for the version footer's sibling in version-footer.test.ts.
+        expect(
+            renderAttributionFooter(
+                "correctness-reviewer",
+                [],
+                "0123456789abcdef",
+            ),
+        ).toBe(
+            renderCollapsedFooter(
+                "found by correctness-reviewer | canary 0123456789ab",
+            ),
+        );
+        // Unset (every production run): byte-identical to before.
+        expect(
+            renderAttributionFooter("correctness-reviewer", [], undefined),
+        ).toBe(renderCollapsedFooter("found by correctness-reviewer"));
+    });
+
     it("appends the merged copies with their differing anchors", () => {
         expect(
             renderAttributionFooter("correctness-reviewer", [
