@@ -242,7 +242,7 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: autofix-v0.0.0
+      ref: autofix-v0.5.0
       path: gh-aw-autofix-lib
       persist-credentials: false
 
@@ -336,7 +336,7 @@ env:
   GIT_CONFIG_KEY_1: remote.origin.partialclonefilter
   GIT_CONFIG_VALUE_1: "blob:none"
 
-source: Khan/actions/workflows/autofix/autofix.md@autofix-v0.0.0
+source: Khan/actions/workflows/autofix/autofix.md@autofix-v0.5.0
 ---
 
 # PR Autofixer
@@ -454,6 +454,13 @@ widen someone's `/autofix blocking`. `plan.surface` records which one won.
 For every item in `plan.items`, read the file at `path` around `line` from the
 Actions workspace (the PR head is checked out; read from disk, not through the
 API). The item's `body` is the reviewer's statement of the problem, verbatim.
+For a body-sourced item (id starting `review-body:`, parsed off the latest
+review body's collapsed observations) the `body` is a one-line subject rather
+than a full finding, and the collapsed section includes findings that never
+earned an inline comment (sub-medium-confidence ones among them), so the
+read-the-code step carries more of the weight and the bar for leaving one
+alone is lower: if the line does not make the problem evident, leave the
+item alone and say so in Step 7.
 
 Work out what the reviewer meant. If a finding is ambiguous, or you cannot
 determine what a correct fix would be, **leave it alone** and record it as
@@ -476,16 +483,60 @@ Edit the files directly in the workspace. Rules, all hard:
 - **A documentation item changes text, never code.** An item labelled
   `suggestion (non-blocking, documentation)` is a finding about a comment or a
   prose doc, and the whole reason its scope exists is that its edits cannot
-  alter behaviour. Deleting a comment the finding calls redundant is the
-  expected fix, not an overreach, and such a finding often carries no
-  suggestion block precisely because a deletion cannot be expressed as one. But
-  if the honest fix would touch an executable line — renaming the symbol the
-  comment misdescribes, changing the constant the comment contradicts — that is
-  a code change wearing a documentation label: leave the item unfixed and say
-  why in Step 7. Fix the sentence, or fix nothing.
-- **Do not touch files no item points at.** The one exception is a change that
-  is mechanically forced by a fix (a caller that must be updated for a changed
-  signature); note any such file in Step 7.
+  alter behaviour. Such a finding often carries no suggestion block precisely
+  because the fix is a deletion, which cannot be expressed as one. But if the
+  honest fix would touch an executable line — renaming the symbol the comment
+  misdescribes, changing the constant the comment contradicts — that is a code
+  change wearing a documentation label: leave the item unfixed and say why in
+  Step 7. Fix the sentence, or fix nothing.
+- **On a documentation item, rewrite before you delete.** Deleting a comment the
+  finding calls redundant is a legitimate fix and not an overreach, but it is
+  the *second* choice. If the code the comment sits on has a non-obvious reason
+  to be the way it is — a magic value, a timeout, a retry count, an ordering
+  requirement, a workaround — and that reason is recoverable from the diff, the
+  surrounding code, or the reviewer's own thread, replace the restatement with
+  the reason. Deleting is right when the comment is pure restatement of
+  something that needs no explanation. What makes the difference is whether the
+  reason is *recoverable*, not whether it would be nice to have: **never invent
+  a rationale.** A plausible-sounding reason you cannot source is worse than no
+  comment, because the next reader will trust it and the reviewer cannot tell
+  the difference.
+- **A readability item is fixed with the reviewer's own words.** A documentation
+  finding may flag prose readability (a metaphor that hides the mechanism, a
+  paragraph restating an earlier one, shorthand the document never defines)
+  rather than comment content, and it carries the plain rewrite, quoted in its
+  body or as a suggestion block. Apply that rewrite verbatim: it survived claim
+  validation, which checked that it preserves the original sentence's meaning,
+  and a paraphrase you improvise did not. If the file has drifted and the quoted
+  rewrite no longer fits the text, leave the item unfixed and say so in Step 7
+  rather than composing your own.
+- **On a says-the-same-thing-twice item, delete; never mint a third phrasing.**
+  The rewrite-before-delete bias above is calibrated for a restated comment
+  sitting on unexplained code. A duplicated paragraph is the opposite case: the
+  content already exists in the copy that stays, so the fix is deleting the copy
+  the finding names, and rewording the duplicate into different words is the
+  failure mode the finding exists to stop, not a fix for it.
+- **Say when a deletion left a hole.** If you delete a comment off a constant,
+  magic value, or workaround without being able to state why the value is what
+  it is, the thread is fixed and the code is still unexplained. Report both in
+  Step 7, naming the symbol, so the author knows there is a sentence only they
+  can write (`staleAfter`'s restating comment is gone; nothing records why the
+  window is that long). Reporting it as plainly fixed hides the one thing a
+  human still needs to do.
+- **Do not touch files no item points at.** Two exceptions. First, a change
+  mechanically forced by a fix (a caller that must be updated for a changed
+  signature). Second, the instances a batched documentation item quotes: the
+  documentation reviewer caps readability at one thread per review and
+  enumerates up to three further instances, verbatim, in that thread's body, so
+  each **quoted** instance is part of the finding wherever it lives; fix those
+  too. An instance the body merely alludes to without quoting is not part of
+  the finding. The verbatim-rewrite rule above still governs each quoted
+  instance: the reviewer is only required to quote it, not to rewrite it, so
+  fix a quoted instance when its fix needs no words of yours (a duplicated
+  paragraph: delete the quoted copy) or when the thread body carries a rewrite
+  for that instance; a quoted metaphor or coinage with no rewrite of its own is
+  left unfixed and reported in Step 7, exactly like a drifted quote. Note any
+  file either exception led you into in Step 7.
 - **Do not amend, rebase, or force-push.** You produce working-tree changes;
   the push is a safe output.
 - If a fix would require a design decision the reviewer did not make for you,
@@ -565,6 +616,12 @@ that item's thread, stating what you changed in one or two sentences. Be
 specific: "Renamed to `parsedConfig` and updated the three call sites" beats
 "Fixed".
 
+**Exception: body-sourced items.** An item whose id starts `review-body:` came
+from the latest review body's collapsed observations, not from a thread; there
+is nothing to reply on. Skip it here and report what you did (fixed, left
+unfixed and why) in the Step 7 summary instead, one line per body-sourced
+item: `` `path:line`: <what changed, or why not> ``.
+
 Do **not** resolve any thread. The next review decides whether the fix settled
 the finding; that is the whole verification story for this workflow, it is
 best-effort (see Step 7), and resolving here would erase it.
@@ -589,11 +646,14 @@ records that nothing has *checked* it. Item 8 below is the only place a reader
 learns that, so the comment carrying it cannot be optional.
 
 The quiet branch was therefore retracted deliberately, not lost. It was also
-unreachable in practice: it required `plan.degradedNote` to be empty, and the
-reviewer's hidden fingerprint stamp is stripped from every posted review (the
-README's "Degrading when there is no fingerprint" documents it), so that note is
-essentially always set. Do not reintroduce the branch without first answering
-where the pending-verification statement goes instead.
+unreachable in practice when retracted: it required `plan.degradedNote` to be
+empty, and the reviewer's fingerprint stamp of that era was an HTML comment
+stripped from every posted review (the README's "Degrading when there is no
+fingerprint" documents it), so that note was essentially always set. The
+stamp now posts (webapp#41742), so an empty note is a reachable state again;
+that strengthens the case for this comment, it does not weaken it. Do not
+reintroduce the branch without first answering where the pending-verification
+statement goes instead.
 
 Do **not** try to add a hidden HTML-comment marker of your own. gh-aw's
 safe-output ingest strips every XML/HTML comment before posting
@@ -611,12 +671,16 @@ Write the body directly, in this order, including only the parts that apply:
    tense and the plural right; the work is already done by the time anyone
    reads this.
 2. If anything was fixed: a list, one line per finding, `path:line` plus what
-   changed. Link each to its thread `url` when the item has one.
+   changed. Link each to its thread `url` when the item has one. When a
+   documentation fix **deleted** a comment without being able to record why the
+   code is the way it is (Step 4), say so on that line and name the symbol: the
+   thread is fixed and the value is still unexplained, and this is the only
+   place a human learns there is a sentence only they can write.
 3. If anything was left unfixed: a list, one line each, with the reason. This
    is the most important section in the comment; never omit or soften it.
 4. If `plan.skipped` contains entries whose reason is **not** `out-of-scope`:
    one line each with the reason (`outdated-anchor`, `unparseable-label`,
-   `stale-path`). Put any `out-of-scope` entries in a collapsed
+   `stale-path`, `thread-covered`). Put any `out-of-scope` entries in a collapsed
    `<details><summary>N thread(s) outside this run's scope</summary>` block, or
    omit them entirely when the comment already has more urgent content: they
    are the expected consequence of the scope the author picked.

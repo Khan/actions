@@ -3,10 +3,11 @@ import {describe, it, expect} from "vitest";
 import {runSubmissionCli, type SubmissionFs} from "./submission";
 
 /**
- * Submission-plan tests for the post-trial follow-ups: risks/patterns key
- * staging, the inline posting bar, and the open-thread suppression verdict
- * floor. Split from submission.test.ts by the max-lines budget; the fixtures
- * below are small local copies of that file's helpers.
+ * Submission-plan tests for the post-trial follow-ups and the P1 posting
+ * budget: risks/patterns key staging, the inline posting bar, the
+ * non-blocking budget and nitpick rules, and the open-thread suppression
+ * verdict floor. Split from submission.test.ts by the max-lines budget; the
+ * fixtures below are small local copies of that file's helpers.
  */
 
 const REVIEW = "/tmp/gh-aw/review";
@@ -29,6 +30,9 @@ const makeFakeFs = (
         existsSync: (p: string) =>
             p in state || Object.keys(state).some((f) => f.startsWith(`${p}/`)),
         mkdirSync: () => {},
+        rmSync: (p: string) => {
+            delete state[p];
+        },
     };
 };
 
@@ -114,7 +118,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
             }),
         );
 
-    it("caps inline comments at 20, collapsing the overflow into the top comment", () => {
+    it("caps inline comments at 20, collapsing the overflow into the body", () => {
         // 22 blocking claims, confidence descending so the ranking is
         // deterministic: the two weakest collapse.
         const claims = manyClaims(22).map((entry, index) => ({
@@ -125,15 +129,18 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
             makeFakeFs(staged({depth: "full", claims})),
         );
         expect(plan.comments).toHaveLength(20);
-        expect(plan.comments[0].body).toContain(
-            "Lower-confidence observations (2)",
+        // The section lands in the review body (never riding an inline
+        // comment: the body is what the autofix's body-sourced work list
+        // and both stagers can see).
+        expect(plan.body).toContain(
+            "Lower-confidence observations (2; top: `a.ts:21` issue (blocking): finding 21)",
         );
-        expect(plan.comments[0].body).toContain("`a.ts:21`");
-        expect(plan.comments[0].body).toContain("`a.ts:22`");
+        expect(plan.body).toContain("`a.ts:21`");
+        expect(plan.body).toContain("`a.ts:22`");
         // A collapsed blocking claim still drives the verdict.
         expect(plan.event).toBe("REQUEST_CHANGES");
         expect(plan.notes).toContainEqual(
-            "2 claim(s) collapsed below the inline bar (cap 20, medium-confidence floor)",
+            "2 claim(s) collapsed below the inline bar (cap 20, medium-confidence floor, non-blocking budget 3)",
         );
     });
 
@@ -153,13 +160,95 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         const plan = runSubmissionCli(
             makeFakeFs(staged({depth: "full", claims})),
         );
-        expect(plan.comments).toHaveLength(20);
-        // The blocking claim posts inline first; the weakest non-blocking
-        // claim is the one collapsed.
+        // The blocking claim posts inline first; the non-blocking budget
+        // (default 3) admits the next three in ranked order, and the rest
+        // collapse with the budget-shed note.
+        expect(plan.comments).toHaveLength(4);
         expect(plan.comments[0].line).toBe(99);
-        expect(plan.comments[0].body).toContain(
-            "Lower-confidence observations (1)",
+        expect(plan.body).toContain(
+            "Lower-confidence observations (17; top: `a.ts:4` suggestion (non-blocking): finding 4)",
         );
+        expect(plan.notes).toContainEqual(
+            "17 non-blocking claim(s) collapsed over the inline budget (non-blocking budget 3)",
+        );
+    });
+
+    it("reads the non-blocking budget from routing.json", () => {
+        const claims = manyClaims(3, {
+            label: "suggestion (non-blocking)",
+            confidence: 0.9,
+        });
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged(
+                    {depth: "full", claims},
+                    {
+                        [`${REVIEW}/routing.json`]: JSON.stringify({
+                            nonBlockingInlineBudget: 1,
+                        }),
+                    },
+                ),
+            ),
+        );
+        expect(plan.comments).toHaveLength(1);
+        expect(plan.notes).toContainEqual(
+            "2 non-blocking claim(s) collapsed over the inline budget (non-blocking budget 1)",
+        );
+    });
+
+    it("never posts a nitpick inline, budget or no budget", () => {
+        const claims = [
+            claim({
+                id: "nit",
+                line: 1,
+                label: "nitpick (non-blocking)",
+                confidence: 0.95,
+                subject: "rename it",
+            }),
+            claim({
+                id: "sug",
+                line: 2,
+                label: "suggestion (non-blocking)",
+                confidence: 0.6,
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        // The lower-confidence suggestion posts; the nitpick collapses
+        // despite outranking it on confidence.
+        expect(plan.comments).toHaveLength(1);
+        expect(plan.comments[0].line).toBe(2);
+        expect(plan.body).toContain("Lower-confidence observations (1)");
+        expect(plan.body).toContain(
+            "- `a.ts:1` nitpick (non-blocking): rename it",
+        );
+    });
+
+    it("budgets documentation-label claims like any other (autofix reads the collapsed section)", () => {
+        const claims = [
+            ...manyClaims(3, {
+                label: "suggestion (non-blocking)",
+                confidence: 0.9,
+            }),
+            claim({
+                id: "doc",
+                line: 30,
+                label: "suggestion (non-blocking, documentation)",
+                confidence: 0.6,
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        // Three suggestions spend the whole budget; the documentation claim
+        // collapses, where the autofix's body-sourced work list still
+        // reaches it (workflows/autofix/lib/collapsed.ts).
+        expect(plan.comments).toHaveLength(3);
+        expect(plan.comments.map((entry) => entry.line)).not.toContain(30);
+        // The collapsed section lands in the review body, where the
+        // body-sourced work list parses it.
+        expect(plan.body).toContain("`a.ts:30`");
     });
 
     it("collapses sub-medium-confidence non-blocking claims even under the cap", () => {
@@ -183,7 +272,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         );
         expect(plan.comments).toHaveLength(1);
         expect(plan.comments[0].line).toBe(1);
-        expect(plan.comments[0].body).toContain("a hunch");
+        expect(plan.body).toContain("a hunch");
         expect(plan.event).toBe("APPROVE");
     });
 
@@ -201,7 +290,10 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
             makeFakeFs(staged({depth: "full", claims})),
         );
         expect(plan.comments).toEqual([]);
-        expect(plan.body).toContain("Lower-confidence observations (1)");
+        // N=1: open section, count-only summary.
+        expect(plan.body).toContain(
+            "<details open>\n<summary>Lower-confidence observations (1)</summary>",
+        );
         expect(plan.body).toContain("a hunch");
     });
 });
@@ -287,5 +379,266 @@ describe("open-thread suppression verdict floor (trial suggestion g)", () => {
             }),
         );
         expect(runSubmissionCli(fs).event).toBe("APPROVE");
+    });
+});
+
+describe("the nitpick posting rules", () => {
+    it("ranks nitpicks last in the collapse, whatever their confidence, and notes the shed", () => {
+        const claims = [
+            claim({
+                id: "nit",
+                line: 1,
+                label: "nitpick (non-blocking)",
+                confidence: 0.95,
+                subject: "rename it",
+            }),
+            claim({
+                id: "weak-thought",
+                line: 2,
+                label: "thought (non-blocking)",
+                confidence: 0.3,
+                subject: "a hunch",
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        // Both collapse (the nitpick by the ban, the thought by the
+        // confidence floor), and the disclosure's top slot goes to the
+        // thought: the class this surface never posts must not win the
+        // summary line built for the tail's best finding.
+        expect(plan.comments).toEqual([]);
+        expect(plan.body).toContain(
+            "Lower-confidence observations (2; top: `a.ts:2` thought (non-blocking): a hunch)",
+        );
+        expect(plan.notes).toContainEqual(
+            "1 nitpick claim(s) collapsed (nitpick-class never posts inline)",
+        );
+    });
+});
+
+describe("the budget's edge values", () => {
+    it("a zero budget posts blocking claims only (the doc exemption is gone)", () => {
+        const claims = [
+            claim({id: "blocking", line: 1, label: "issue (blocking)"}),
+            claim({
+                id: "doc",
+                line: 2,
+                label: "suggestion (non-blocking, documentation)",
+                confidence: 0.9,
+            }),
+            claim({
+                id: "sug",
+                line: 3,
+                label: "suggestion (non-blocking)",
+                confidence: 0.9,
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged(
+                    {depth: "full", claims},
+                    {
+                        [`${REVIEW}/routing.json`]: JSON.stringify({
+                            nonBlockingInlineBudget: 0,
+                        }),
+                    },
+                ),
+            ),
+        );
+        expect(plan.comments.map((entry) => entry.line)).toEqual([1]);
+        expect(plan.notes).toContainEqual(
+            "2 non-blocking claim(s) collapsed over the inline budget (non-blocking budget 0)",
+        );
+    });
+
+    it("a pr-level claim can be the tail's named top entry", () => {
+        const claims = [
+            claim({
+                id: "pr-level",
+                path: undefined,
+                line: undefined,
+                label: "note (non-blocking)",
+                confidence: 0.9,
+                subject: "A cross-file observation.",
+            }),
+            claim({
+                id: "weak",
+                line: 2,
+                label: "thought (non-blocking)",
+                confidence: 0.3,
+                subject: "a hunch",
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged(
+                    {depth: "scoped", claims},
+                    {
+                        [`${REVIEW}/routing.json`]: JSON.stringify({
+                            reReviewBlockingOnly: true,
+                        }),
+                    },
+                ),
+            ),
+        );
+        // Both collapse under blocking-only; the pr-level note outranks the
+        // low-confidence anchored thought for the summary slot.
+        expect(plan.body).toContain(
+            "Non-blocking observations (2; top: note (non-blocking): A cross-file observation.)",
+        );
+    });
+});
+
+describe("the budget's spend order", () => {
+    it("spends the budget on the highest-confidence non-blocking claims", () => {
+        const claims = [
+            claim({
+                id: "weakest",
+                line: 1,
+                label: "suggestion (non-blocking)",
+                confidence: 0.55,
+            }),
+            claim({
+                id: "strongest",
+                line: 2,
+                label: "suggestion (non-blocking)",
+                confidence: 0.95,
+            }),
+            claim({
+                id: "middle",
+                line: 3,
+                label: "suggestion (non-blocking)",
+                confidence: 0.75,
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged(
+                    {depth: "full", claims},
+                    {
+                        [`${REVIEW}/routing.json`]: JSON.stringify({
+                            nonBlockingInlineBudget: 2,
+                        }),
+                    },
+                ),
+            ),
+        );
+        // The budget spends in ranked order, so the two strongest post and
+        // the weakest is the one collapsed.
+        expect(plan.comments.map((entry) => entry.line).sort()).toEqual([2, 3]);
+        // The shed claim lands in the review body's collapsed section.
+        expect(plan.body).toContain("`a.ts:1`");
+    });
+});
+
+describe("the named-top tag's escaping", () => {
+    it("neutralizes a model-authored subject and truncates a long one", () => {
+        const hostile = "Breaks out</summary></details> <b>of the block</b>";
+        const claims = [
+            claim({
+                id: "hostile",
+                line: 2,
+                label: "thought (non-blocking)",
+                confidence: 0.3,
+                subject: hostile,
+            }),
+            claim({
+                id: "long",
+                line: 3,
+                label: "thought (non-blocking)",
+                confidence: 0.2,
+                subject: "x".repeat(150),
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        // The hostile subject ranks first (higher confidence): the SUMMARY
+        // line parenthesises the structural tags (entities alone do not
+        // survive the ingest sanitizer, which decodes them back to live
+        // tags; the Khan/actions#401 re-review broke exactly there) and
+        // escapes the rest.
+        const summaryLine = plan.body
+            .split("\n")
+            .find((line) => line.includes("Lower-confidence observations"));
+        expect(summaryLine).toContain(
+            "Breaks out(/summary)(/details) &lt;b&gt;of the block&lt;/b&gt;",
+        );
+        expect(summaryLine).not.toContain("out</summary>");
+        // The list entries get the same neutralization: a bare </details>
+        // in ANY entry closes the section at that bullet and spills the
+        // rest of the list out of the collapse.
+        expect(plan.body).toContain(
+            "thought (non-blocking): Breaks out(/summary)(/details)",
+        );
+        // The long subject keeps its full text in the list entry; only the
+        // summary tag truncates.
+        expect(plan.body).toContain("x".repeat(150));
+    });
+
+    it("neutralizes a backticked tag in the summary but not the entry", () => {
+        const claims = [
+            claim({
+                id: "spanned",
+                line: 2,
+                label: "thought (non-blocking)",
+                confidence: 0.3,
+                subject: "The `</details>` guard skips the sketch.",
+            }),
+            claim({
+                id: "plain",
+                line: 3,
+                label: "thought (non-blocking)",
+                confidence: 0.2,
+                subject: "Second.",
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        // The <summary> is raw HTML (backticks render literally, no code
+        // span forms), so the tag is rewritten even inside backticks; the
+        // list entry below the blank line is markdown, where the code
+        // span is real and the quoted tag is safe.
+        const summaryLine = plan.body
+            .split("\n")
+            .find((line) => line.includes("Lower-confidence observations"));
+        expect(summaryLine).toContain("The `(/details)` guard");
+        expect(summaryLine).not.toContain("</details>");
+        expect(plan.body).toContain(
+            "thought (non-blocking): The `</details>` guard skips the sketch.",
+        );
+    });
+
+    it("cannot post a live fragment when the cap lands mid-tag", () => {
+        // Truncation runs AFTER neutralization: slicing the raw subject
+        // could cut </details> in half, and the ingest sanitizer's tag
+        // fold then matches from the fragment to the section's own
+        // closing tag. A sliced "(/details)" is inert.
+        const claims = [
+            claim({
+                id: "straddler",
+                line: 2,
+                label: "thought (non-blocking)",
+                confidence: 0.3,
+                subject: `${"y".repeat(115)} </details> and more trailing text`,
+            }),
+            claim({
+                id: "plain",
+                line: 3,
+                label: "thought (non-blocking)",
+                confidence: 0.2,
+                subject: "Second.",
+            }),
+        ];
+        const plan = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims})),
+        );
+        const summaryLine = plan.body
+            .split("\n")
+            .find((line) => line.includes("Lower-confidence observations"));
+        expect(summaryLine).toContain(`${"y".repeat(115)} (/de...`);
+        expect(summaryLine).not.toContain("</det");
     });
 });

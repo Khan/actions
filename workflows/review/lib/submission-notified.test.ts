@@ -3,7 +3,7 @@ import {describe, it, expect} from "vitest";
 import {runSubmissionCli, type SubmissionFs} from "./submission";
 
 /**
- * The NOTIFIED half of the Review Guidance idempotency key.
+ * The NOTIFIED half of the Guidance for reviewers idempotency key.
  *
  * Its own file rather than another block in submission.test.ts, which sits
  * within ten lines of the 1000-line max-lines budget: these cases pushed it
@@ -39,6 +39,9 @@ const makeFakeFs = (
         existsSync: (p: string) =>
             p in state || Object.keys(state).some((f) => f.startsWith(`${p}/`)),
         mkdirSync: () => {},
+        rmSync: (p: string) => {
+            delete state[p];
+        },
     };
 };
 

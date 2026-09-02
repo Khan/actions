@@ -108,7 +108,9 @@ describe("extractAgents: the real review.md", () => {
 
     it("pins a model on every agent", () => {
         for (const agent of agents.values()) {
-            expect(agent.model).toMatch(/^claude-/);
+            // claude- or gemini-: the runner routes the pin by its family
+            // prefix (dispatch-runner-pi.ts's providerForPin).
+            expect(agent.model).toMatch(/^(claude|gemini)-/);
         }
     });
 

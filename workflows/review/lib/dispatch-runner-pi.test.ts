@@ -5,28 +5,18 @@ import {join} from "node:path";
 import {describe, it, expect, vi, beforeEach} from "vitest";
 
 import type {AgentRequest} from "./dispatch";
-import {
-    capOutput,
-    createPiRunner,
-    createReviewTools,
-    createSubmitTool,
-    finalText,
-    makeSandboxedExec,
-    plainExec,
-    rejectStaleRunnerSelection,
-    resolveModelId,
-    shellQuote,
-    windowLines,
-} from "./dispatch-runner-pi";
+import {createPiRunner, rejectStaleRunnerSelection} from "./dispatch-runner-pi";
 
 /**
  * The Pi seam's own decision logic, exercised against mocked Pi libraries:
- * the tool surface, the `submit_result` accept/reject handler, the structured
- * final taking precedence over the free-text final, cost accumulation from
- * per-turn usage, the turn cap, the api-proxy base-URL override, the OS
- * sandbox contract (fail-closed init, the explicit off switch, the wrap of
- * every tool subprocess), and the salvage of an already-accepted payload
- * when the loop then dies.
+ * the structured final taking precedence over the free-text final, the
+ * prose-gate salvage order, the follow-up redirect, cost accumulation from
+ * per-turn usage, the turn cap, provider routing and the api-proxy
+ * base-URL override, and the OS sandbox contract (fail-closed init, the
+ * explicit off switch, the wrap of every tool subprocess). The extracted
+ * layers carry their own unit tests (dispatch-models.test.ts,
+ * dispatch-exec.test.ts, dispatch-tools-pi.test.ts); this file is about how
+ * the runner wires them into a live loop.
  *
  * `pi-ai`, `pi-agent-core`, and `sandbox-runtime` are mocked; the runner,
  * its tools, and the real `execFile` run for real.
@@ -50,20 +40,45 @@ type LoopArgs = {
 let loop: (args: LoopArgs) => Promise<unknown[]>;
 
 /** Providers the runner registered, and the catalog it resolved pins against. */
-let registeredProviders: unknown[];
+type RegisteredProvider = {
+    id: string;
+    getModels: () => readonly {id: string; baseUrl?: string}[];
+};
+let registeredProviders: RegisteredProvider[];
 let catalog: {id: string}[];
-let createProviderInput: Record<string, unknown> | undefined;
+let googleCatalog: {id: string}[];
+/** Every (provider, id) pair the runner loaded, for the routing assertions. */
+let getModelCalls: [string, string][];
 
 /** Stream options per `streamSimple` call, for the retry-budget assertion. */
 let streamSimpleOptions: (Record<string, unknown> | undefined)[];
 
+const registered = (id: string): RegisteredProvider => {
+    const provider = registeredProviders.find((entry) => entry.id === id);
+    if (provider === undefined) {
+        throw new Error(`provider ${id} was not registered`);
+    }
+    return provider;
+};
+
 vi.mock("@earendil-works/pi-ai", () => ({
     createModels: () => ({
         setProvider: (provider: unknown) => {
-            registeredProviders.push(provider);
+            registeredProviders.push(provider as RegisteredProvider);
         },
-        getModels: () => catalog,
-        getModel: (_provider: string, id: string) => ({id}),
+        // Like the real ModelsImpl: the registry answers from the REGISTERED
+        // provider's getModels, so a provider the runner rebased or extended
+        // answers with its rebased or extended catalog.
+        getModels: (provider?: string) => {
+            const entry = registeredProviders.find(
+                (candidate) => candidate.id === provider,
+            );
+            return entry === undefined ? catalog : entry.getModels();
+        },
+        getModel: (provider: string, id: string) => {
+            getModelCalls.push([provider, id]);
+            return {id};
+        },
         streamSimple: (
             _model: unknown,
             _context: unknown,
@@ -73,16 +88,25 @@ vi.mock("@earendil-works/pi-ai", () => ({
             return undefined;
         },
     }),
-    createProvider: (input: Record<string, unknown>) => {
-        createProviderInput = input;
-        return {...input, tag: "overridden"};
-    },
 }));
 
 vi.mock("@earendil-works/pi-ai/providers/anthropic", () => ({
     anthropicProvider: () => ({
         id: "anthropic",
         baseUrl: "https://api.anthropic.com",
+        getModels: () =>
+            catalog.map((model) => ({
+                ...model,
+                baseUrl: "https://api.anthropic.com",
+            })),
+    }),
+}));
+
+vi.mock("@earendil-works/pi-ai/providers/google", () => ({
+    googleProvider: () => ({
+        id: "google",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        getModels: () => googleCatalog,
     }),
 }));
 
@@ -158,8 +182,9 @@ const findTool = (
 
 beforeEach(() => {
     registeredProviders = [];
-    createProviderInput = undefined;
+    getModelCalls = [];
     catalog = [{id: "claude-opus-4-8"}, {id: "claude-fable-5"}];
+    googleCatalog = [{id: "gemini-3.6-flash"}];
     delete process.env["ANTHROPIC_BASE_URL"];
     delete process.env["REVIEW_SANDBOX"];
     loop = () => Promise.resolve([]);
@@ -167,48 +192,6 @@ beforeEach(() => {
     sandboxWrapped = [];
     sandboxConfigs = [];
     streamSimpleOptions = [];
-});
-
-describe("resolveModelId", () => {
-    it("takes an exact catalog match", () => {
-        expect(
-            resolveModelId("claude-opus-4-8", [
-                {id: "claude-opus-4-8"},
-                {id: "claude-opus-4-8-20260101"},
-            ]),
-        ).toBe("claude-opus-4-8");
-    });
-
-    it("falls back to the pin's latest dated release when not exact", () => {
-        expect(
-            resolveModelId("claude-opus-4-8", [
-                {id: "claude-opus-4-8-20251201"},
-                {id: "claude-opus-4-8-20260101"},
-            ]),
-        ).toBe("claude-opus-4-8-20260101");
-    });
-
-    it("never jumps tiers on a family-prefix pin", () => {
-        // A bare startsWith fallback resolved claude-sonnet-4 to the LONGER
-        // claude-sonnet-4-5 id, silently running a different model tier than
-        // the pin claims.
-        expect(
-            resolveModelId("claude-sonnet-4", [
-                {id: "claude-sonnet-4-20250514"},
-                {id: "claude-sonnet-4-5-20250929"},
-            ]),
-        ).toBe("claude-sonnet-4-20250514");
-    });
-
-    it("throws with the candidates rather than silently running another model", () => {
-        expect(() =>
-            resolveModelId("claude-opus-9", [{id: "claude-fable-5"}]),
-        ).toThrow(/not in Pi's Anthropic catalog.*claude-fable-5/s);
-        // A non-dated extension is not a release of the pin either.
-        expect(() =>
-            resolveModelId("claude-opus-4-8", [{id: "claude-opus-4-8-latest"}]),
-        ).toThrow(/not in Pi's Anthropic catalog/);
-    });
 });
 
 describe("rejectStaleRunnerSelection", () => {
@@ -225,263 +208,6 @@ describe("rejectStaleRunnerSelection", () => {
                 rejectStaleRunnerSelection({REVIEW_DISPATCH_RUNNER: stale}),
             ).toThrow(/selects nothing/);
         }
-    });
-});
-
-describe("capOutput", () => {
-    it("passes short output through untouched", () => {
-        expect(capOutput("two lines\nof output")).toBe("two lines\nof output");
-    });
-
-    it("truncates long output and says how much was dropped", () => {
-        const capped = capOutput("x".repeat(30_050));
-        expect(capped).toContain("[truncated: 50 more characters]");
-        expect(capped.startsWith("x".repeat(30_000))).toBe(true);
-    });
-});
-
-describe("createReviewTools", () => {
-    it("grants exactly the read-only investigation surface plus Bash", () => {
-        expect(createReviewTools("/tmp").map((tool) => tool.name)).toEqual([
-            "Read",
-            "Grep",
-            "Bash",
-        ]);
-    });
-
-    it("never grants a mutation tool", () => {
-        const names = createReviewTools("/tmp").map((tool) =>
-            tool.name.toLowerCase(),
-        );
-        expect(names).not.toContain("edit");
-        expect(names).not.toContain("write");
-    });
-
-    it("reads a real file with line numbers", async () => {
-        const dir = mkdtempSync(join(tmpdir(), "pi-runner-"));
-        writeFileSync(join(dir, "a.ts"), "const a = 1;\n");
-        const read = createReviewTools(dir).find(
-            (tool) => tool.name === "Read",
-        );
-        const result = await read?.execute("1", {path: "a.ts"});
-        expect(result?.content[0].text).toContain("const a = 1;");
-        expect(result?.content[0].text).toContain("1");
-    });
-
-    it("windows a Read with offset and limit, keeping real line numbers", async () => {
-        const dir = mkdtempSync(join(tmpdir(), "pi-runner-"));
-        const body = Array.from({length: 50}, (_, i) => `line ${i + 1}`).join(
-            "\n",
-        );
-        writeFileSync(join(dir, "big.ts"), `${body}\n`);
-        const read = createReviewTools(dir).find(
-            (tool) => tool.name === "Read",
-        );
-        const result = await read?.execute("1", {
-            path: "big.ts",
-            offset: 10,
-            limit: 3,
-        });
-        const text = result?.content[0].text ?? "";
-        expect(text).toContain("line 10");
-        expect(text).toContain("line 12");
-        expect(text).not.toContain("line 13");
-        // `cat -n` numbering survives the window: the model can anchor
-        // findings on real line numbers, not window-relative ones.
-        expect(text).toMatch(/10\tline 10/);
-        expect(text).toContain("[showing lines 10-12 of 50]");
-    });
-
-    it("reports a grep miss as an ordinary result, not a tool failure", async () => {
-        const dir = mkdtempSync(join(tmpdir(), "pi-runner-"));
-        writeFileSync(join(dir, "a.ts"), "const a = 1;\n");
-        const grep = createReviewTools(dir).find(
-            (tool) => tool.name === "Grep",
-        );
-        const result = await grep?.execute("1", {pattern: "nothing-here"});
-        expect(result?.content[0].text).toBe("(no output)");
-        expect(result?.isError).toBeUndefined();
-    });
-
-    it("reports a spawn failure as a failure, unlike a plain non-zero exit", async () => {
-        // The classification boundary: grep's exit 1 (numeric code) is an
-        // ordinary miss above; a binary that cannot start has no exit code
-        // and IS a failure the model needs to see.
-        const out = await plainExec(["definitely-not-a-real-binary-5f3a"], ".");
-        expect(out).toMatch(/^command failed: /);
-        expect(out).toContain("ENOENT");
-    });
-
-    it("never windows a failed Read: the error survives verbatim", async () => {
-        const dir = mkdtempSync(join(tmpdir(), "pi-runner-"));
-        const read = createReviewTools(dir).find(
-            (tool) => tool.name === "Read",
-        );
-        const result = await read?.execute("1", {
-            path: "missing.ts",
-            offset: 40,
-            limit: 5,
-        });
-        const text = result?.content[0].text ?? "";
-        // Windowing cat's stderr to line 40 would bury the error behind
-        // "(no lines in window…)".
-        expect(text).toContain("missing.ts");
-        expect(text).toMatch(/No such file/);
-        expect(text).not.toContain("no lines in window");
-    });
-});
-
-describe("windowLines", () => {
-    const numbered = "     1\ta\n     2\tb\n     3\tc\n     4\td\n";
-
-    it("returns the text untouched when no window is asked for", () => {
-        expect(windowLines(numbered)).toBe(numbered);
-        expect(windowLines(numbered, undefined, undefined)).toBe(numbered);
-    });
-
-    it("slices from offset and notes what was left out", () => {
-        expect(windowLines(numbered, 2, 2)).toBe(
-            "     2\tb\n     3\tc\n[showing lines 2-3 of 4]",
-        );
-    });
-
-    it("omits the note when the window covers the whole file", () => {
-        expect(windowLines(numbered, 1, 100)).toBe(
-            "     1\ta\n     2\tb\n     3\tc\n     4\td",
-        );
-    });
-
-    it("says so when the offset is past the end of the file", () => {
-        expect(windowLines(numbered, 99)).toBe(
-            "(no lines in window: the file has 4 lines, offset was 99)",
-        );
-    });
-
-    it("ignores non-numeric and non-positive window params", () => {
-        expect(windowLines(numbered, "2", "1")).toBe(numbered);
-        expect(windowLines(numbered, 0, -5)).toBe(numbered);
-    });
-});
-
-describe("shellQuote", () => {
-    it("single-quotes each argv part", () => {
-        expect(shellQuote(["grep", "-n", "a b"])).toBe("'grep' '-n' 'a b'");
-    });
-
-    it("escapes embedded single quotes", () => {
-        expect(shellQuote(["echo", "it's"])).toBe("'echo' 'it'\\''s'");
-    });
-
-    it("round-trips through a real shell", async () => {
-        const exec = makeSandboxedExec({
-            initialize: () => Promise.resolve(),
-            // Identity wrap: the command string srt would sandbox, run plain.
-            wrapWithSandboxArgv: (command) =>
-                Promise.resolve({argv: ["bash", "-c", command]}),
-        });
-        const out = await exec(["printf", "%s", "it's a 'quoted' $arg"], ".");
-        expect(out).toBe("it's a 'quoted' $arg");
-    });
-});
-
-describe("makeSandboxedExec", () => {
-    it("hands srt the quoted command and the cwd, and spawns srt's argv", async () => {
-        const seen: {command?: string; cwd?: string} = {};
-        const exec = makeSandboxedExec({
-            initialize: () => Promise.resolve(),
-            wrapWithSandboxArgv: (command, _shell, _config, _signal, cwd) => {
-                seen.command = command;
-                seen.cwd = cwd;
-                return Promise.resolve({argv: ["echo", "wrapped"]});
-            },
-        });
-        const out = await exec(["printf", "hi"], "/tmp");
-        expect(seen.command).toBe("'printf' 'hi'");
-        expect(seen.cwd).toBe("/tmp");
-        expect(out.trim()).toBe("wrapped");
-    });
-
-    it("spawns with the environment srt asks for", async () => {
-        const exec = makeSandboxedExec({
-            initialize: () => Promise.resolve(),
-            wrapWithSandboxArgv: () =>
-                Promise.resolve({
-                    argv: ["bash", "-c", 'printf %s "$SRT_MARKER"'],
-                    env: {...process.env, SRT_MARKER: "sandboxed"},
-                }),
-        });
-        expect(await exec(["ignored"], ".")).toBe("sandboxed");
-    });
-
-    it("scrubs credentials from the subprocess environment", async () => {
-        // The sandbox is a mount/network boundary, not an env boundary: srt's
-        // env extends process.env, so without the scrub a prompt-injected
-        // `env` through Bash reads every secret the runner holds.
-        const exec = makeSandboxedExec({
-            initialize: () => Promise.resolve(),
-            wrapWithSandboxArgv: () =>
-                Promise.resolve({
-                    argv: [
-                        "bash",
-                        "-c",
-                        'printf %s "${ANTHROPIC_API_KEY:-scrubbed}:${KEEP_ME:-lost}"',
-                    ],
-                    env: {
-                        ...process.env,
-                        ANTHROPIC_API_KEY: "sk-secret",
-                        KEEP_ME: "kept",
-                    },
-                }),
-        });
-        expect(await exec(["ignored"], ".")).toBe("scrubbed:kept");
-    });
-});
-
-describe("createSubmitTool", () => {
-    it("bounces a rejected payload back with the rejection message", async () => {
-        const tool = createSubmitTool(
-            () => "missing `lens`",
-            () => {
-                throw new Error("must not accept");
-            },
-        );
-        const result = await tool.execute("1", {result: {}});
-        expect(result.isError).toBe(true);
-        expect(result.content[0].text).toContain("missing `lens`");
-        expect(result.content[0].text).toContain("Call submit_result again");
-    });
-
-    it("records an accepted payload", async () => {
-        let captured: Record<string, unknown> | undefined;
-        const tool = createSubmitTool(
-            () => null,
-            (payload) => {
-                captured = payload;
-            },
-        );
-        const result = await tool.execute("1", {result: {lens: "security"}});
-        expect(result.isError).toBeUndefined();
-        expect(captured).toEqual({lens: "security"});
-    });
-});
-
-describe("finalText", () => {
-    it("prefers the last turn that carries a JSON object", () => {
-        expect(finalText(["prose", '{"a": 1}', "thanks, done"])).toBe(
-            '{"a": 1}',
-        );
-    });
-
-    it("takes the latest JSON when several turns carry one", () => {
-        expect(finalText(['{"a": 1}', '{"a": 2}'])).toBe('{"a": 2}');
-    });
-
-    it("falls back to the whole transcript when no turn carries JSON", () => {
-        expect(finalText(["first", "second"])).toBe("first\nsecond");
-    });
-
-    it("survives an empty transcript", () => {
-        expect(finalText([])).toBe("");
     });
 });
 
@@ -672,6 +398,113 @@ describe("createPiRunner", () => {
         const result = await runner(request({validate: () => null}));
         expect(result.structured).toBe(true);
         expect(JSON.parse(result.output)).toEqual({findings: ["one"]});
+    });
+
+    it("salvages the contract-valid payload when the loop dies mid style bounce", async () => {
+        loop = async ({context}) => {
+            const submit = findTool(context, "submit_result");
+            // Contract accepts; the prose gate bounces; the session dies
+            // before the rewrite lands.
+            await submit.execute("1", {result: {findings: ["valid"]}});
+            throw new Error("session died mid bounce");
+        };
+        const runner = await createPiRunner();
+        const result = await runner(
+            request({
+                validate: () => null,
+                judgeProse: () => Promise.resolve("too poetic"),
+            }),
+        );
+        // Style enforcement may cost prose quality, never a dimension.
+        expect(result.structured).toBe(true);
+        expect(JSON.parse(result.output)).toEqual({findings: ["valid"]});
+    });
+
+    it("prefers the contract-valid provisional over an unvalidated free-text final", async () => {
+        loop = async ({context, emit}) => {
+            const submit = findTool(context, "submit_result");
+            await submit.execute("1", {result: {findings: ["valid"]}});
+            // The bounced author gives up on the tool and narrates instead.
+            emit(turnEnd('{"findings": ["unvalidated prose rewrite"]}', 0.1));
+            return [];
+        };
+        const runner = await createPiRunner();
+        const result = await runner(
+            request({
+                validate: () => null,
+                judgeProse: () => Promise.resolve("too poetic"),
+            }),
+        );
+        expect(result.structured).toBe(true);
+        expect(JSON.parse(result.output)).toEqual({findings: ["valid"]});
+    });
+
+    it("redirects a turn-ending agent to submit_result, twice, then lets the fallback proceed", async () => {
+        const redirects: string[][] = [];
+        loop = async ({config}) => {
+            const followUps = config["getFollowUpMessages"] as () => {
+                content: {text: string}[];
+            }[];
+            // Three natural stops without a submission: two redirects, then
+            // the genuine fallback.
+            for (let i = 0; i < 3; i += 1) {
+                redirects.push(
+                    followUps().map((message) => message.content[0].text),
+                );
+            }
+            return [];
+        };
+        const runner = await createPiRunner();
+        await runner(request({validate: () => null}));
+        expect(redirects[0]).toEqual([
+            expect.stringContaining("You have not delivered your result yet"),
+        ]);
+        expect(redirects[1]).toEqual([
+            expect.stringContaining("You have not delivered your result yet"),
+        ]);
+        expect(redirects[2]).toEqual([]);
+    });
+
+    it("names the mid-bounce state when a rejected submission exists", async () => {
+        loop = async ({context, config}) => {
+            const submit = findTool(context, "submit_result");
+            await submit.execute("1", {result: {}});
+            const followUps = config["getFollowUpMessages"] as () => {
+                content: {text: string}[];
+            }[];
+            const messages = followUps();
+            expect(messages[0].content[0].text).toContain(
+                "Your submission was rejected and must be corrected",
+            );
+            return [];
+        };
+        const runner = await createPiRunner();
+        await runner(
+            request({validate: () => 'missing required array "findings"'}),
+        );
+    });
+
+    it("lets a stop through once a payload was accepted", async () => {
+        loop = async ({context, config}) => {
+            const submit = findTool(context, "submit_result");
+            await submit.execute("1", {result: {findings: []}});
+            const followUps = config["getFollowUpMessages"] as () => unknown[];
+            expect(followUps()).toEqual([]);
+            return [];
+        };
+        const runner = await createPiRunner();
+        const result = await runner(request({validate: () => null}));
+        expect(result.structured).toBe(true);
+    });
+
+    it("never redirects without a validate contract (no tool to point at)", async () => {
+        loop = async ({config}) => {
+            const followUps = config["getFollowUpMessages"] as () => unknown[];
+            expect(followUps()).toEqual([]);
+            return [];
+        };
+        const runner = await createPiRunner();
+        await runner(request());
     });
 
     it("reports a timeout as a timeout, not as a generic abort", async () => {
@@ -887,16 +720,52 @@ describe("createPiRunner", () => {
 
     it("keeps Pi's bundled provider when the sandbox sets no base URL", async () => {
         await createPiRunner();
-        expect(createProviderInput).toBeUndefined();
-        expect(registeredProviders).toEqual([
-            {id: "anthropic", baseUrl: "https://api.anthropic.com"},
+        const models = registered("anthropic").getModels();
+        expect(models.map((model) => model.baseUrl)).toEqual([
+            "https://api.anthropic.com",
+            "https://api.anthropic.com",
         ]);
     });
 
-    it("re-registers Anthropic on the api-proxy base URL when steered", async () => {
+    it("re-registers Anthropic with every model rebased onto the api-proxy URL when steered", async () => {
         process.env["ANTHROPIC_BASE_URL"] = "http://api-proxy:10001";
         await createPiRunner();
-        expect(createProviderInput?.["baseUrl"]).toBe("http://api-proxy:10001");
+        const models = registered("anthropic").getModels();
+        expect(models.length).toBeGreaterThan(0);
+        for (const model of models) {
+            // model.baseUrl is the field the API layer reads; the provider's
+            // own baseUrl is advisory.
+            expect(model.baseUrl).toBe("http://api-proxy:10001");
+        }
+    });
+
+    it("registers Google with gemini-3.8-flash appended to a catalog that predates it", async () => {
+        await createPiRunner();
+        const ids = registered("google")
+            .getModels()
+            .map((model) => model.id);
+        expect(ids).toEqual(["gemini-3.6-flash", "gemini-3.8-flash"]);
+    });
+
+    it("lets a pi-ai catalog that already carries gemini-3.8-flash win over the local entry", async () => {
+        googleCatalog = [{id: "gemini-3.8-flash", own: true} as never];
+        await createPiRunner();
+        const models = registered("google").getModels();
+        expect(models).toEqual([{id: "gemini-3.8-flash", own: true}]);
+    });
+
+    it("routes a gemini pin to the Google provider", async () => {
+        loop = async () => [];
+        const runner = await createPiRunner();
+        await runner(request({model: "gemini-3.8-flash"}));
+        expect(getModelCalls).toEqual([["google", "gemini-3.8-flash"]]);
+    });
+
+    it("routes a claude pin to the Anthropic provider", async () => {
+        loop = async () => [];
+        const runner = await createPiRunner();
+        await runner(request({model: "claude-opus-4-8"}));
+        expect(getModelCalls).toEqual([["anthropic", "claude-opus-4-8"]]);
     });
 
     it("fails loudly when the pin is missing from Pi's catalog", async () => {
@@ -904,6 +773,14 @@ describe("createPiRunner", () => {
         const runner = await createPiRunner();
         await expect(
             runner(request({model: "claude-opus-4-8"})),
-        ).rejects.toThrow(/not in Pi's Anthropic catalog/);
+        ).rejects.toThrow(/not in Pi's anthropic catalog/);
+    });
+
+    it("fails loudly on a gemini pin the Google catalog does not carry", async () => {
+        googleCatalog = [{id: "gemini-3.6-flash"}];
+        const runner = await createPiRunner();
+        await expect(
+            runner(request({model: "gemini-9-flash"})),
+        ).rejects.toThrow(/not in Pi's google catalog.*gemini-3.8-flash/s);
     });
 });

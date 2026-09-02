@@ -109,9 +109,20 @@ export const synthesizeSummaryFromGhAw = (
             continue;
         }
         const event = entry["event"];
+        // If a malformed artifact carries several submissions, the
+        // stricter verdict wins, and strictness is now a three-value rank:
+        // REQUEST_CHANGES > COMMENT > APPROVE.
+        const rank: Record<string, number> = {
+            APPROVE: 0,
+            COMMENT: 1,
+            REQUEST_CHANGES: 2,
+        };
         if (
-            (event === "APPROVE" || event === "REQUEST_CHANGES") &&
-            summary["verdict"] !== "REQUEST_CHANGES"
+            typeof event === "string" &&
+            event in rank &&
+            (typeof summary["verdict"] !== "string" ||
+                !(summary["verdict"] in rank) ||
+                rank[event] > rank[summary["verdict"]])
         ) {
             summary["verdict"] = event;
         }
@@ -293,9 +304,9 @@ export const renderCountersMarkdown = (
         "",
         "### Verdict mix",
         "",
-        "| APPROVE | REQUEST_CHANGES | HOLD_FOR_HUMAN* |",
-        "| --- | --- | --- |",
-        `| ${counters.verdictMix.APPROVE} | ${counters.verdictMix.REQUEST_CHANGES} | ${counters.verdictMix.HOLD_FOR_HUMAN} |`,
+        "| APPROVE | COMMENT | REQUEST_CHANGES | HOLD_FOR_HUMAN* |",
+        "| --- | --- | --- | --- |",
+        `| ${counters.verdictMix.APPROVE} | ${counters.verdictMix.COMMENT} | ${counters.verdictMix.REQUEST_CHANGES} | ${counters.verdictMix.HOLD_FOR_HUMAN} |`,
         "",
         `*${runsWithoutVerdict} run(s) submitted no review this window (e.g. the` +
             " redundant-approval skip) and count under the HOLD_FOR_HUMAN fallback.",
@@ -324,14 +335,7 @@ export const renderCountersMarkdown = (
         }
     }
 
-    lines.push("", "### Thumbs and cost", "");
-    lines.push(
-        counters.thumbs.agreeRate === null
-            ? "- Thumbs: none recorded in per-run artifacts (live tallies are" +
-                  " reported by each thumbs-sweep run's job summary)"
-            : `- Thumbs: ${counters.thumbs.up} 👍 / ${counters.thumbs.down} 👎` +
-                  ` (agree rate ${pct(counters.thumbs.agreeRate)})`,
-    );
+    lines.push("", "### Cost", "");
     lines.push(
         counters.cost.usdPerRun === null
             ? "- Cost: not recorded"

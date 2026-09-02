@@ -1,6 +1,7 @@
 import {describe, expect, it} from "vitest";
 
-import {buildWorkList} from "./worklist.ts";
+import {buildBodyWorkList, buildWorkList} from "./worklist.ts";
+import type {CollapsedObservation} from "./collapsed.ts";
 import type {StagedThread} from "../../review/lib/rereview.ts";
 import {
     BLOCKING_LABELS,
@@ -185,5 +186,118 @@ describe("thread ownership", () => {
         expect(
             buildWorkList([staged], BLOCKING, "other-bot").items,
         ).toHaveLength(1);
+    });
+});
+
+describe("buildBodyWorkList", () => {
+    const observation = (over: Partial<CollapsedObservation> = {}) => ({
+        path: "src/a.ts",
+        line: 12,
+        label: "suggestion (non-blocking, documentation)",
+        subject: "Trim the doc comment.",
+        ...over,
+    });
+
+    /** src/a.ts line 12 is an added line of the staged head diff. */
+    const changed = {
+        "src/a.ts": {
+            added: [12],
+            removed: [],
+            removedAdjacent: [],
+            lastShownLine: 12,
+            textOverhead: 0,
+        },
+    };
+
+    it("selects in-scope observations as review-body items", () => {
+        const {items, skipped} = buildBodyWorkList(
+            [observation()],
+            ["suggestion (non-blocking, documentation)"],
+            [],
+            changed,
+        );
+        expect(skipped).toEqual([]);
+        expect(items).toEqual([
+            {
+                threadId: "review-body:src/a.ts:12:suggestion",
+                path: "src/a.ts",
+                line: 12,
+                label: "suggestion (non-blocking, documentation)",
+                body: "Trim the doc comment.",
+            },
+        ]);
+    });
+
+    it("skips out-of-scope observations, recording the label", () => {
+        const {items, skipped} = buildBodyWorkList(
+            [observation({label: "question (non-blocking)"})],
+            ["suggestion (non-blocking, documentation)"],
+            [],
+            changed,
+        );
+        expect(items).toEqual([]);
+        expect(skipped).toEqual([
+            {
+                threadId: "review-body:src/a.ts:12:question",
+                path: "src/a.ts",
+                reason: "out-of-scope",
+                label: "question (non-blocking)",
+            },
+        ]);
+    });
+
+    it("skips an observation whose anchor an open thread already covers", () => {
+        const {items, skipped} = buildBodyWorkList(
+            [observation()],
+            ["suggestion (non-blocking, documentation)"],
+            [thread({body: "**suggestion (non-blocking):** same spot"})],
+            changed,
+        );
+        expect(items).toEqual([]);
+        expect(skipped[0]).toMatchObject({reason: "thread-covered"});
+    });
+
+    it("skips an anchor the staged head diff does not vouch for", () => {
+        // Line 12 is not an added line of the current diff: the observation
+        // was written against an older head, and nothing else can
+        // invalidate a line parsed out of review text (threads get this
+        // from GitHub nulling outdated anchors).
+        const {items, skipped} = buildBodyWorkList(
+            [observation()],
+            ["suggestion (non-blocking, documentation)"],
+            [],
+            {
+                "src/a.ts": {
+                    added: [3],
+                    removed: [],
+                    removedAdjacent: [],
+                    lastShownLine: 3,
+                    textOverhead: 0,
+                },
+            },
+        );
+        expect(items).toEqual([]);
+        expect(skipped[0]).toMatchObject({
+            reason: "outdated-anchor",
+            threadId: "review-body:src/a.ts:12:suggestion",
+        });
+    });
+
+    it("keeps a removal-adjacent anchor (deletion-anchored observations)", () => {
+        const {items} = buildBodyWorkList(
+            [observation()],
+            ["suggestion (non-blocking, documentation)"],
+            [],
+            {
+                "src/a.ts": {
+                    added: [],
+                    removed: [12],
+                    removedAdjacent: [12],
+                    lastShownLine: 12,
+                    textOverhead: 0,
+                },
+            },
+        );
+        expect(items).toHaveLength(1);
     });
 });

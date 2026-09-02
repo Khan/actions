@@ -75,11 +75,16 @@ export type EnableableReviewer = typeof ENABLEABLE_REVIEWERS[number];
  *                   those hunks. Catches fresh defects in new code at a
  *                   fraction of the input cost.
  *   - `flip-gated`: reconcile-only fast path, plus the correctness pass over
- *                   the new hunks; a REQUEST_CHANGES→APPROVE flip is vetoed
- *                   by any validated blocking finding from that pass.
+ *                   the new hunks; blocking findings from that pass still
+ *                   REQUEST_CHANGES.
  *   - `fast`:       reconcile-only: threads are verified and resolved,
  *                   nothing new is reviewed (the divergence tripwire is the
  *                   only fresh-code guard).
+ *
+ * Neither reduced depth can approve (submission.ts's full-roster approval
+ * rule): a prior REQUEST_CHANGES whose blocking objections are all
+ * resolved is cleared by dismissing the standing review, and the approval
+ * waits for a round that dispatches the full roster.
  *
  * `full` is the default everywhere: a repo pays for a cheaper mode only by
  * writing a `re-review` line in its ROUTING file.
@@ -94,6 +99,49 @@ export const RE_REVIEW_MODES = [
 export type ReReviewMode = typeof RE_REVIEW_MODES[number];
 
 export const DEFAULT_RE_REVIEW_MODE: ReReviewMode = "full";
+
+/**
+ * The modifiers the `re-review` line accepts (at most one per line; a later
+ * line replaces an earlier one). Both keep the configured depth's roster
+ * and staging and change only the REPEAT review's posting surface; the
+ * verdict still counts every claim, so nothing either suppresses can flip
+ * an outcome, and both apply exactly when a run executes at a reduced
+ * depth, so the first full review of a ready PR, a divergence-tripwire
+ * re-arm, and every guard that resolves to full depth still post
+ * everything.
+ *
+ *   - `blocking-only`: only blocking findings post inline; every validated
+ *     non-blocking finding collapses into a <details> block in the review
+ *     body. The strict dial, kept as the rollback if the medium tier
+ *     inflates on a consumer.
+ *   - `blocking-medium`: blocking findings AND medium-importance findings
+ *     post inline (medium spends the non-blocking inline budget); minor
+ *     findings collapse. The recommended dial: under `blocking-only`,
+ *     three 2026-08-24 approving re-reviews collapsed verified correctness
+ *     findings behind a bare count (Khan/actions#367, #371, #366).
+ */
+export const RE_REVIEW_MODIFIERS = [
+    "blocking-only",
+    "blocking-medium",
+] as const;
+
+/**
+ * How many non-blocking findings may post as inline comments per review (the
+ * P1 comment budget). Blocking findings never count against it, and
+ * `nitpick (non-blocking)` never posts inline at all. Everything over budget
+ * collapses into the review body's <details> block; nothing is dropped, the
+ * verdict still counts every claim, and the autofix still reaches collapsed
+ * findings through its body-sourced work list
+ * (workflows/autofix/lib/collapsed.ts), so the budget shrinks the
+ * notification surface, never a feature's scope.
+ *
+ * 3 is set by fiat (the quiet-the-human-surface lane's Q8 decision): at the
+ * measured 2.91 findings/run it binds rarely and acts as a backstop against
+ * the wall-of-comments failure mode (webapp#41440: 13 non-blocking inline
+ * comments in one review). Consumers tune it with a `non-blocking-budget`
+ * line in ROUTING.
+ */
+export const DEFAULT_NON_BLOCKING_INLINE_BUDGET = 3;
 
 /**
  * How Step 3 runs: the orchestrator invokes the deterministic dispatcher
@@ -115,6 +163,15 @@ export type RoutingFileConfig = {
     enabledReviewers: EnableableReviewer[];
     /** The repo's re-review mode (`re-review` line; default `full`). */
     reReviewMode: ReReviewMode;
+    /** `re-review <mode> blocking-only`: repeat reviews post only blocking
+     * findings inline (see {@link RE_REVIEW_MODIFIERS}). */
+    reReviewBlockingOnly: boolean;
+    /** `re-review <mode> blocking-medium`: repeat reviews post blocking and
+     * medium-importance findings inline (see {@link RE_REVIEW_MODIFIERS}). */
+    reReviewBlockingMedium: boolean;
+    /** `non-blocking-budget <n>`: how many non-blocking findings may post
+     * inline per review (see {@link DEFAULT_NON_BLOCKING_INLINE_BUDGET}). */
+    nonBlockingInlineBudget: number;
     /** The dispatch mode: always `scripted`. */
     dispatchMode: DispatchMode;
     /** Fixed-format parse warnings (unknown lens/tier, no-op rule). */
@@ -129,7 +186,8 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  *
  *     <pattern> [lens=<lens>[,<lens>…]] [tier=trivial|low|medium|high] [direction-dependent]
  *     enable <reviewer>[,<reviewer>…]
- *     re-review full|scoped|flip-gated|fast
+ *     re-review full|scoped|flip-gated|fast [blocking-only|blocking-medium]
+ *     non-blocking-budget <n>
  *
  * `lens=` names specialist lenses to spawn when the pattern is touched (multiple
  * matching rules union their lenses). `tier=` assigns a risk tier; when several
@@ -143,8 +201,16 @@ const KNOWN_LENS_SET: ReadonlySet<string> = new Set(KNOWN_LENSES);
  * ({@link ENABLEABLE_REVIEWERS}) for every review in this repo.
  * `re-review` sets the repo's re-review mode ({@link RE_REVIEW_MODES}); when
  * several lines set it the LAST one wins (with a warning), matching the
- * file's last-rule-wins convention. A leftover `dispatch` line from the
- * retired dial warns and is ignored (scripted is the only mode).
+ * file's last-rule-wins convention. An optional `blocking-only` modifier
+ * ({@link RE_REVIEW_MODIFIERS}) makes repeat reviews post only blocking
+ * findings inline; an unknown modifier warns and is ignored (the mode still
+ * applies), and `full blocking-only` warns that the modifier never applies
+ * at full depth. `non-blocking-budget` sets how many non-blocking findings
+ * post inline per review ({@link DEFAULT_NON_BLOCKING_INLINE_BUDGET});
+ * a malformed value warns and keeps the previous value, and when several
+ * lines set it the last one wins (with a warning). A leftover `dispatch`
+ * line from the retired dial warns and is ignored (scripted is the only
+ * mode).
  *
  * Malformed fields and unknown lens/reviewer names produce a warning and skip
  * the lens or line rather than aborting the run: routing degrades to fewer
@@ -156,7 +222,11 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
     const riskRules: RiskRule[] = [];
     const enabled = new Set<EnableableReviewer>();
     let reReviewMode: ReReviewMode = DEFAULT_RE_REVIEW_MODE;
+    let reReviewBlockingOnly = false;
+    let reReviewBlockingMedium = false;
     let reReviewLineSeen = false;
+    let nonBlockingInlineBudget = DEFAULT_NON_BLOCKING_INLINE_BUDGET;
+    let budgetLineSeen = false;
     let dispatchLineSeen = false;
     const warnings: string[] = [];
 
@@ -195,10 +265,10 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
         }
 
         if (pattern === "re-review") {
-            if (fields.length !== 1) {
+            if (fields.length < 1 || fields.length > 2) {
                 warnings.push(
-                    `ROUTING line ${lineNo}: re-review takes exactly one ` +
-                        `mode (line skipped)`,
+                    `ROUTING line ${lineNo}: re-review takes one mode and ` +
+                        `optionally blocking-only (line skipped)`,
                 );
                 continue;
             }
@@ -210,6 +280,32 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
                 );
                 continue;
             }
+            let blockingOnly = false;
+            let blockingMedium = false;
+            if (fields.length === 2) {
+                if (
+                    (RE_REVIEW_MODIFIERS as readonly string[]).includes(
+                        fields[1],
+                    )
+                ) {
+                    blockingOnly = fields[1] === "blocking-only";
+                    blockingMedium = fields[1] === "blocking-medium";
+                    if (mode === "full") {
+                        // full never executes at a reduced depth, so the
+                        // modifier never applies; the mode still does.
+                        warnings.push(
+                            `ROUTING line ${lineNo}: ${fields[1]} never ` +
+                                `applies at full re-review depth (repeat ` +
+                                `reviews post everything)`,
+                        );
+                    }
+                } else {
+                    warnings.push(
+                        `ROUTING line ${lineNo}: unknown re-review ` +
+                            `modifier "${fields[1]}" (ignored)`,
+                    );
+                }
+            }
             if (reReviewLineSeen) {
                 warnings.push(
                     `ROUTING line ${lineNo}: duplicate re-review line ` +
@@ -217,7 +313,37 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
                 );
             }
             reReviewMode = mode as ReReviewMode;
+            reReviewBlockingOnly = blockingOnly;
+            reReviewBlockingMedium = blockingMedium;
             reReviewLineSeen = true;
+            continue;
+        }
+
+        if (pattern === "non-blocking-budget") {
+            if (fields.length !== 1) {
+                warnings.push(
+                    `ROUTING line ${lineNo}: non-blocking-budget takes ` +
+                        `exactly one number (line skipped)`,
+                );
+                continue;
+            }
+            const value = Number(fields[0]);
+            if (!Number.isInteger(value) || value < 0) {
+                warnings.push(
+                    `ROUTING line ${lineNo}: non-blocking-budget must be a ` +
+                        `non-negative integer, got "${fields[0]}" (kept ` +
+                        `${nonBlockingInlineBudget})`,
+                );
+                continue;
+            }
+            if (budgetLineSeen) {
+                warnings.push(
+                    `ROUTING line ${lineNo}: duplicate non-blocking-budget ` +
+                        `line (last one wins)`,
+                );
+            }
+            nonBlockingInlineBudget = value;
+            budgetLineSeen = true;
             continue;
         }
 
@@ -315,6 +441,9 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
             enabled.has(reviewer),
         ),
         reReviewMode,
+        reReviewBlockingOnly,
+        reReviewBlockingMedium,
+        nonBlockingInlineBudget,
         dispatchMode: DEFAULT_DISPATCH_MODE,
         warnings,
     };

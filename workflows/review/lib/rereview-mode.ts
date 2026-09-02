@@ -18,9 +18,11 @@
  *      fingerprint stamped on a draft forces one more full review when the
  *      PR leaves draft.
  *   2. **Flip gate.** `flip-gated` dispatches the correctness pass alongside
- *      reconciliation, and a REQUEST_CHANGES→APPROVE flip is vetoed by any
- *      validated blocking finding from that pass; the findings gate the
- *      flip instead of being discarded.
+ *      reconciliation, and any validated blocking finding from that pass
+ *      still forces REQUEST_CHANGES; the findings gate the outcome instead
+ *      of being discarded. Neither reduced depth can approve at all
+ *      (submission.ts's full-roster approval rule): a block the
+ *      round earned back is cleared by dismissing the standing review.
  *   3. **Divergence tripwire.** Every full-depth review records a
  *      content-hashed hunk signature. Each later push compares its current
  *      signature against that last fully-reviewed fingerprint; when the
@@ -31,24 +33,25 @@
  * **Fingerprint carriers.** The signature is written to two places and read
  * back in priority order:
  *
- *   1. The hidden-comment stamp in the review body. This was designed as the
- *      durable carrier (it would survive cache eviction and branch
- *      protection's dismiss-stale-approvals), but gh-aw's safe-output ingest
- *      sanitizer strips ALL XML/HTML comments (`removeXmlComments` in
- *      gh-aw-actions `sanitize_content_core.cjs`), so a stamp posted through
- *      `submit_pull_request_review` never reaches the PR. Measured in
- *      production 2026-07-21 (Khan/webapp#40996: every re-review planned
- *      `no-prior-fingerprint` and escalated to full). The stamp is still
- *      emitted and still parsed first: it costs nothing, it documents the
- *      run, and it becomes load-bearing again the day the sanitizer allows
- *      it through or another submission path posts it verbatim.
+ *   1. The stamp in the review body, a collapsed `<details>` block
+ *      ({@link renderRereviewStamp}). This is the durable carrier: it
+ *      survives cache eviction and branch protection's
+ *      dismiss-stale-approvals. It was originally an HTML comment, which
+ *      gh-aw's safe-output ingest sanitizer strips (`removeXmlComments` in
+ *      gh-aw-actions `sanitize_content_core.cjs`), so no posted review ever
+ *      carried a stamp and every production re-review planned
+ *      `no-prior-fingerprint` (measured 2026-07-21 on Khan/webapp#40996,
+ *      and again on webapp#41742). `details`/`summary`/`sub` are on the
+ *      sanitizer's allowed-tags list, so the block form posts intact.
  *   2. The cache-memory record (`/tmp/gh-aw/cache-memory/pr-<n>.json`),
  *      whose Step 9 fields (`verdict`, `stampHunks` — falling back to
  *      `reviewedHunks` where a consumer's Step 9 wrote the code-computed
  *      signature there — and `wasDraft`) carry the same information. This
- *      is the carrier that works today. Cache eviction degrades to `full`
- *      (more review, never less), which is exactly the pre-fix steady
- *      state.
+ *      is the fallback for bodies posted before the block form existed,
+ *      and it cannot be the primary: GitHub's 2026-06-30 cache policy
+ *      denies cache writes from issue_comment-triggered runs regardless of
+ *      job permissions, which is exactly the /review trigger. Missing both
+ *      degrades to `full` (more review, never less).
  *
  * Two interactions are handled by construction:
  *
@@ -78,6 +81,7 @@
 import {createHash} from "node:crypto";
 
 import {splitPatchHunks, splitUnifiedDiff} from "./diff";
+import {commentAuthorFromEvent, isManualReviewRequest} from "./manual-request";
 import {DEFAULT_RE_REVIEW_MODE, RE_REVIEW_MODES} from "./routing-config";
 import type {ReReviewMode} from "./routing-config";
 
@@ -181,7 +185,8 @@ export const computeDivergence = (
 export type ReReviewDepth = ReReviewMode;
 
 /**
- * The hidden-comment stamp a review body carries. `anchorHunks` is the last
+ * The stamp a review body carries (a collapsed `<details>` block; see
+ * {@link renderRereviewStamp}). `anchorHunks` is the last
  * fully-reviewed fingerprint (refreshed by a `full`/`scoped` run, carried
  * forward verbatim by `flip-gated`/`fast`), or `"overflow"` when the
  * signature was too large to stamp; `anchorDraft` is whether the PR was a
@@ -210,14 +215,32 @@ const STAMP_MARKER = "pr-reviewer:rereview";
  */
 export const MAX_STAMP_HUNKS_B64_CHARS = 20000;
 
-/** Stable serialization: sorted paths, so equal signatures encode equally. */
+/**
+ * Stable serialization: sorted paths, so equal signatures encode equally.
+ * base64url, not base64: the payload posts as visible body text, and the
+ * ingest sanitizer redacts anything that looks like a protocol-relative URL,
+ * which a standard-alphabet payload can produce (`//` is a legal base64
+ * bigram). The url-safe alphabet has no slashes. Node's base64 decoder
+ * accepts both alphabets, so decode is unchanged.
+ */
 const encodeSignature = (signature: HunkSignature): string => {
     const sorted: HunkSignature = {};
     for (const path of Object.keys(signature).sort()) {
         sorted[path] = signature[path];
     }
-    return Buffer.from(JSON.stringify(sorted), "utf8").toString("base64");
+    return Buffer.from(JSON.stringify(sorted), "utf8").toString("base64url");
 };
+
+/** Shape check shared by the payload decoder and the stamp CLI's guard. */
+const isHunkSignature = (value: unknown): value is HunkSignature =>
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.values(value).every(
+        (hashes) =>
+            Array.isArray(hashes) &&
+            hashes.every((hash) => typeof hash === "string"),
+    );
 
 const decodeSignature = (encoded: string): HunkSignature | null => {
     let parsed: unknown;
@@ -226,27 +249,22 @@ const decodeSignature = (encoded: string): HunkSignature | null => {
     } catch {
         return null;
     }
-    if (
-        parsed === null ||
-        typeof parsed !== "object" ||
-        Array.isArray(parsed)
-    ) {
-        return null;
-    }
-    const signature: HunkSignature = {};
-    for (const [path, hashes] of Object.entries(parsed)) {
-        if (
-            !Array.isArray(hashes) ||
-            !hashes.every((hash) => typeof hash === "string")
-        ) {
-            return null;
-        }
-        signature[path] = hashes as string[];
-    }
-    return signature;
+    return isHunkSignature(parsed) ? parsed : null;
 };
 
-/** Render the stamp as the hidden HTML comment the review body carries. */
+/** The summary chip the stamp's collapsed block renders under. */
+const STAMP_SUMMARY = "review fingerprint";
+
+/**
+ * Render the stamp as a collapsed `<details>` block appended to the review
+ * body; this is the primary carrier (the module header's "Fingerprint
+ * carriers" section has the full sanitizer and cache-policy rationale).
+ * `anchorDraft` is coerced to a strict boolean: the stamp CLI reads it off
+ * the agent-writable plan file, and interpolating a forged string like
+ * `false hunks=<payload>` verbatim would hand the delimiter-free parser a
+ * spliced fingerprint (the same boundary `runRereviewStampCli` holds
+ * `depth` to).
+ */
 export const renderRereviewStamp = (stamp: ReReviewStamp): string => {
     let hunksField: string;
     if (stamp.anchorHunks === "overflow") {
@@ -256,16 +274,36 @@ export const renderRereviewStamp = (stamp: ReReviewStamp): string => {
         hunksField =
             encoded.length > MAX_STAMP_HUNKS_B64_CHARS ? "overflow" : encoded;
     }
-    return (
-        `<!-- ${STAMP_MARKER} v=${stamp.schemaVersion} ` +
+    const payload =
+        `${STAMP_MARKER} v=${stamp.schemaVersion} ` +
         `depth=${stamp.depth} verdict=${stamp.verdict} ` +
-        `anchor-draft=${stamp.anchorDraft} hunks=${hunksField} -->`
-    );
+        `anchor-draft=${stamp.anchorDraft === true} hunks=${hunksField}`;
+    return [
+        `<details><summary><sub>${STAMP_SUMMARY}</sub></summary>`,
+        `<sub>${payload}</sub>`,
+        "</details>",
+    ].join("\n");
 };
 
+/**
+ * Delimiter-free on purpose: the payload is matched wherever it appears, so
+ * the reader accepts both this block form and the legacy `<!-- ... -->`
+ * comment form (staged plans, cache fixtures, and any pre-fix body that
+ * never went through the sanitizer). The hunks charset is the base64url
+ * alphabet plus the legacy base64 characters, and it cannot match past the
+ * closing `</sub>` or ` -->` because neither `<` nor a space is in it.
+ * Delimiter-free also means a body QUOTING a stamp (a review discussing
+ * this format, say) can match; last-wins plus the schema, depth, and
+ * decode checks bound that to adopting a well-formed quoted fingerprint,
+ * which the divergence tripwire then treats like any stale anchor. The
+ * depth and verdict charsets are exact by construction (`[a-z-]+` covers
+ * every RE_REVIEW_MODES value, `[A-Z_]+` every review event), and both
+ * stop at the space before the next field, so a mangled field ends the
+ * match instead of bleeding into the payload.
+ */
 const STAMP_RE = new RegExp(
-    `<!-- ${STAMP_MARKER} v=(\\d+) depth=(\\S+) verdict=(\\S+) ` +
-        `anchor-draft=(true|false) hunks=(\\S+) -->`,
+    `${STAMP_MARKER} v=(\\d+) depth=([a-z-]+) verdict=([A-Z_]+) ` +
+        `anchor-draft=(true|false) hunks=([A-Za-z0-9+/=_-]+)`,
     "g",
 );
 
@@ -309,6 +347,81 @@ export const parseRereviewStamp = (body: string): ReReviewStamp | null => {
         anchorDraft: anchorDraft === "true",
         anchorHunks,
     };
+};
+
+/**
+ * The stamp's collapsed block. The wrapper is transcription-tolerant (the
+ * `<sub>` tags and whitespace are optional, and a block truncated at the
+ * end of the body still strips, so a reflowed or clipped transcription
+ * leaves no residue for rule 7 to read as a body splice), but the interior
+ * must carry the stamp's full field skeleton: marker, `v=`, `depth=`,
+ * `verdict=`, `anchor-draft=`, `hunks=`. Only the `hunks=` tail admits
+ * whitespace, because the base64 payload is the field a transcription
+ * plausibly garbles or wraps. Every field is a single space-free token
+ * except the `hunks=` region, which admits NEWLINE-separated tokens (a
+ * line-wrapped payload is the transcription failure worth tolerating); a
+ * space anywhere in the region ends the match, so space-separated prose
+ * leaves residue that trips rule 7's body comparison. Newline-separated
+ * prose still fits the shape, so the gate bounds the region's length
+ * against the plan's ({@link stampHunksChain}) and blocks extra blocks by
+ * count ({@link countRereviewStampBlocks}). The floor that remains: a
+ * replacement region no LONGER than the plan's own payload, which costs
+ * the orchestrator the fingerprint (the next run plans full) and renders
+ * inside the collapsed chip. A looser interior (the marker alone, or a
+ * wildcard) would let the fold delete arbitrary prose hidden inside a
+ * fingerprint-labeled block, the splice (#244) the gate exists to catch.
+ */
+const STAMP_BLOCK_RE = new RegExp(
+    `<details>\\s*<summary>\\s*(?:<sub>\\s*)?${STAMP_SUMMARY}` +
+        `\\s*(?:</sub>\\s*)?</summary>\\s*(?:<sub>\\s*)?${STAMP_MARKER}` +
+        ` v=\\d+ depth=[^<\\s]* verdict=[^<\\s]* anchor-draft=[^<\\s]* ` +
+        `hunks=[^<\\s]*(?:\\n[^<\\s]*)*\\s*(?:</sub>\\s*)?(?:</details>|$)`,
+    "gi",
+);
+
+/**
+ * Strip the stamp (block form and bare payload) from a review body. For the
+ * dispatch gate's rule 7: it compares the queued body against the staged
+ * plan under `normalizeBody`, which dropped the legacy comment-form stamp
+ * from both sides, so the orchestrator's transcription of the payload was
+ * never load-tested. The block form survives that fold, and the payload is
+ * the largest opaque high-entropy string in the body; requiring it byte-
+ * exact would withhold the whole review over one garbled base64 character.
+ * The gate folds the stamp out of both sides instead, so a corrupted or
+ * dropped payload posts and degrades the NEXT run to `no-prior-fingerprint`
+ * (full depth), the same steady state as before the block form existed.
+ */
+export const stripRereviewStamp = (body: string): string =>
+    body.replace(STAMP_BLOCK_RE, "").replace(STAMP_RE, "");
+
+/**
+ * How many stamp-shaped blocks a body carries. Rule 7 pairs this with the
+ * fold: stripping tolerates variation inside a matched block's payload
+ * region, so a body carrying MORE skeleton-shaped blocks than its plan is
+ * smuggling text through the fold (a forged block's newline-token tail
+ * would strip before the comparison); fewer is the ordinary degrade path
+ * (a dropped stamp).
+ */
+export const countRereviewStampBlocks = (body: string): number =>
+    body.match(STAMP_BLOCK_RE)?.length ?? 0;
+
+/**
+ * The first stamp block's `hunks=` region with whitespace removed, or null
+ * when the body carries no stamp-shaped block. The region is the one part
+ * of a matched block the fold cannot pin to the plan byte-for-byte (that
+ * byte-exactness is what the fold exists to avoid), so rule 7 bounds its
+ * LENGTH instead: a transcription garble may mangle or shorten the region,
+ * but prose smuggled after an intact payload can only grow it.
+ */
+export const stampHunksChain = (body: string): string | null => {
+    STAMP_BLOCK_RE.lastIndex = 0;
+    const match = STAMP_BLOCK_RE.exec(body);
+    STAMP_BLOCK_RE.lastIndex = 0;
+    if (match === null) {
+        return null;
+    }
+    const region = /hunks=([^<]*)/.exec(match[0]);
+    return (region?.[1] ?? "").replace(/\s+/g, "");
 };
 
 /** A prior review of the PR, as the orchestrator stages it. */
@@ -361,7 +474,11 @@ export const stampFromCacheMemory = (raw: unknown): ReReviewStamp | null => {
         reviewedHunks?: unknown;
         wasDraft?: unknown;
     };
-    if (record.verdict !== "APPROVE" && record.verdict !== "REQUEST_CHANGES") {
+    if (
+        record.verdict !== "APPROVE" &&
+        record.verdict !== "COMMENT" &&
+        record.verdict !== "REQUEST_CHANGES"
+    ) {
         return null;
     }
     if (typeof record.wasDraft !== "boolean") {
@@ -422,6 +539,17 @@ export type ReReviewDecisionInput = {
     currentSignature: HunkSignature;
     /** Tripwire re-arm threshold; {@link DEFAULT_TRIPWIRE_THRESHOLD}. */
     tripwireThreshold?: number;
+    /**
+     * An explicit human ask for a review (a `/review` comment posted by a
+     * person, `manual-request.ts`'s isManualReviewRequest). Manual requests plan full
+     * depth regardless of the configured mode; the point of keeping a
+     * comment trigger on an auto-on-push consumer is "give me a real
+     * review now", and under `fast` the modes would otherwise answer it
+     * with a reconcile-only round. Automation-posted `/review` comments
+     * (webapp's shim fires one on every push) are NOT manual: they follow
+     * the mode dial like the push they stand in for.
+     */
+    manualRequest?: boolean;
 };
 
 /** Which sub-agents a depth dispatches (the prompt maps this to the roster). */
@@ -499,6 +627,9 @@ export const decideReReviewDepth = (
 ): ReReviewPlan => {
     const threshold = input.tripwireThreshold ?? DEFAULT_TRIPWIRE_THRESHOLD;
 
+    if (input.manualRequest === true) {
+        return fullPlan(input, ["manual-review-request"], null, false);
+    }
     if (input.mode === "full") {
         return fullPlan(input, ["mode-full"], null, false);
     }
@@ -600,8 +731,8 @@ export const buildScopedDiff = (
  * and never to a cheaper depth.
  *
  * `stamp --verdict <EVENT>` runs after the verdict is decided: it reads
- * `rereview-plan.json` back and prints the hidden-comment stamp line the
- * orchestrator appends to the review body it submits.
+ * `rereview-plan.json` back and prints the collapsed-details stamp block
+ * the orchestrator appends to the review body it submits.
  */
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const FULL_DIFF_PATH = `${REVIEW_DIR}/full.diff`;
@@ -642,11 +773,18 @@ export type RereviewPlanCliResult = {
 };
 
 /**
- * Stage the re-review plan. Factored out (fs injected) so it is testable
- * without touching the real filesystem. Returns what was written.
+ * Stage the re-review plan. Factored out (fs injected, the trigger event
+ * name and event-payload path likewise) so it is testable without touching
+ * the real filesystem or process env. A comment-triggered run whose comment
+ * a human posted ({@link isManualReviewRequest}) is an explicit ask and
+ * plans full depth whatever the configured mode says; automation-posted
+ * `/review` comments (Khan/webapp's shim fires one per push) follow the
+ * mode dial like any push.
  */
 export const runRereviewPlanCli = (
     fs: RereviewCliFs,
+    eventName: string | undefined = process.env.GITHUB_EVENT_NAME,
+    eventPath: string | undefined = process.env.GITHUB_EVENT_PATH,
 ): RereviewPlanCliResult => {
     const warnings: string[] = [];
 
@@ -726,6 +864,13 @@ export const runRereviewPlanCli = (
         isDraft,
         priorStamp,
         currentSignature,
+        // GITHUB_EVENT_NAME/GITHUB_EVENT_PATH are the runner's own event
+        // env; the CLI runs in pre-agent staging on the runner, never in
+        // the agent sandbox.
+        manualRequest: isManualReviewRequest(
+            eventName,
+            commentAuthorFromEvent(fs, eventPath),
+        ),
     });
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});
@@ -758,6 +903,25 @@ export const runRereviewStampCli = (
 ): string | null => {
     const plan = readJsonIfPresent(fs, PLAN_OUT) as ReReviewPlan | undefined;
     if (plan === undefined) {
+        return null;
+    }
+    // The verdict is validated at the CLI boundary; hold depth to the same
+    // bar. The plan file is code-written but lives in an agent-writable
+    // directory, and an unknown depth would render a stamp the parser
+    // rejects anyway, so omit the stamp and let the next run plan full.
+    if (!(RE_REVIEW_MODES as readonly string[]).includes(plan.depth)) {
+        return null;
+    }
+    // Same bar for anchorDraft: omitting the stamp degrades the NEXT run to
+    // full (more review), where the render coercion alone would read
+    // non-boolean garbage as `false`, the less-review direction.
+    if (typeof plan.stampAnchorDraft !== "boolean") {
+        return null;
+    }
+    // And for stampHunks, the field that drives the next run's scoping: a
+    // shape that is neither "overflow" nor a hunk signature omits the stamp
+    // rather than encoding garbage the next run would anchor on.
+    if (plan.stampHunks !== "overflow" && !isHunkSignature(plan.stampHunks)) {
         return null;
     }
     return renderRereviewStamp({

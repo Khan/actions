@@ -8,14 +8,17 @@
  *
  * Why Pi: its libraries are multi-provider, so moving a role to a
  * non-Anthropic model is a pin change rather than a second bespoke agent
- * loop, and a cross-provider A/B measures the model instead of the harness.
- * Pi also reports usage with a per-component `cost` breakdown (input,
- * output, cacheRead, cacheWrite), so `AgentResult.usd` does not inherit the
- * api-proxy default-pricing path's known cache-write under-count.
+ * loop, and a cross-provider A/B measures the model instead of the harness
+ * (exercised for real by the gemini-3.8-flash pins: dispatch-models.ts
+ * routes each pin to its provider). Pi also reports usage with a
+ * per-component `cost` breakdown (input, output, cacheRead, cacheWrite), so
+ * `AgentResult.usd` does not inherit the api-proxy default-pricing path's
+ * known cache-write under-count.
  *
- * The tools are implemented here rather than taken from pi-coding-agent's
- * factories (which do include a `createReadOnlyTools`) because the SDK's
- * tool layer cannot be uniformly sandboxed. Verified against 0.83.0/dist:
+ * The tools are implemented in dispatch-tools-pi.ts rather than taken from
+ * pi-coding-agent's factories (which do include a `createReadOnlyTools`)
+ * because the SDK's tool layer cannot be uniformly sandboxed. Verified
+ * against 0.83.0/dist:
  * its `grep` spawns rg directly (`core/tools/grep.js`, via
  * `ensureTool("rg", true)`, which downloads the binary if absent) with no
  * interceptable exec seam, its `read` is in-process `fs.readFile`, and only
@@ -23,8 +26,8 @@
  * OUTSIDE the sandbox (the loop must reach the model provider), so adopting
  * those factories would sandbox Bash while Read and Grep ran unwrapped in
  * the credentialed process: a hole in the mount-level boundary, not a
- * trade. The single {@link ToolExec} seam below is what makes the sandbox
- * policy total. Two SDK defaults reinforce the decision: `createAgentSession`
+ * trade. The single ToolExec seam (dispatch-exec.ts) is what makes the
+ * sandbox policy total. Two SDK defaults reinforce the decision: `createAgentSession`
  * trusts project settings and `.pi/` extensions from cwd (`projectTrusted ??
  * true`), and in CI the cwd is the PR under review; and compaction defaults
  * on, whose silent mid-investigation summarization is the failure mode that
@@ -36,27 +39,53 @@
  * Every tool subprocess additionally runs inside an OS sandbox
  * (`@anthropic-ai/sandbox-runtime`, the engine behind Claude Code's own
  * sandbox: bubblewrap on Linux, Seatbelt on macOS) with the checkout
- * read-only and tool-level network denied. See {@link SANDBOX_CONFIG} for
- * the policy and the fail-closed contract.
+ * read-only and tool-level network denied. dispatch-exec.ts carries the
+ * policy and the fail-closed contract.
  */
-
-import {execFile} from "node:child_process";
-import {existsSync, mkdirSync, writeFileSync} from "node:fs";
-import {dirname} from "node:path";
 
 import type {AgentRequest, AgentResult, AgentRunner} from "./dispatch";
+import {createToolExec} from "./dispatch-exec";
+import {
+    ANTHROPIC_BASE_URL_ENV,
+    providerForPin,
+    rebaseModels,
+    resolveModelId,
+    withGemini38Flash,
+} from "./dispatch-models";
+import {
+    createReviewTools,
+    createSubmitTool,
+    finalText,
+    type TextBlock,
+} from "./dispatch-tools-pi";
 
-/**
- * Per-tool-result output cap, in characters. A reviewer that greps a wide
- * pattern must not spend its whole context on one result. This value was a
- * measured variable of the re-anchoring A/B (it matches what the Claude Code
- * harness allowed its tools), so treat it as calibrated, not free: changing
- * it changes how the loop investigates.
- */
-const MAX_TOOL_OUTPUT_CHARS = 30_000;
-
-/** Per-tool-call wall clock. The whole-agent cap is `request.timeoutMs`. */
-const BASH_TIMEOUT_MS = 120_000;
+// The runner decomposes along its real seams — the model-pin routing layer
+// (dispatch-models.ts), the sandboxed subprocess seam (dispatch-exec.ts),
+// and the tool surface (dispatch-tools-pi.ts) — re-exported here so
+// existing importers keep this module as the runner's one surface.
+export {
+    GEMINI_38_FLASH_MODEL,
+    providerForPin,
+    resolveModelId,
+    withGemini38Flash,
+} from "./dispatch-models";
+export {
+    CAP_JOURNAL_PATH,
+    SCRATCH_DIR,
+    SCRUBBED_ENV_KEYS,
+    createToolExec,
+    makeSandboxedExec,
+    plainExec,
+    shellQuote,
+    type ToolExec,
+} from "./dispatch-exec";
+export {
+    capOutput,
+    createReviewTools,
+    createSubmitTool,
+    finalText,
+    windowLines,
+} from "./dispatch-tools-pi";
 
 /**
  * Bounded client-side retries for transient provider failures (429, 529, the
@@ -79,72 +108,14 @@ const BASH_TIMEOUT_MS = 120_000;
 const SUB_AGENT_MAX_RETRIES = 2;
 
 /**
- * The provider id Pi registers Anthropic models under, and the env var the
- * sandbox uses to steer Anthropic traffic at the firewall api-proxy. The
- * agent container deliberately runs WITHOUT `ANTHROPIC_API_KEY` (the awf
- * invocation passes `--exclude-env ANTHROPIC_API_KEY`); the proxy sidecar
- * holds the credential and injects it. Pi's bundled Anthropic provider
- * hardcodes `https://api.anthropic.com`, so the provider is re-registered
- * with the steered base URL when one is present. Without this the runner
- * would bypass the proxy, lose credit metering, and fail auth.
+ * Times the follow-up seam redirects a sub-agent that ended its turn without
+ * an ACCEPTED `submit_result` back to the tool (the port of the SDK
+ * harness's Stop hook). Past the cap the free-text fallback proceeds
+ * (fail-open: the fallback exists precisely so a tool-shy model cannot void
+ * a dimension), and dispatch.ts records the agent's findings as skipped by
+ * the prose gate.
  */
-const ANTHROPIC_PROVIDER_ID = "anthropic";
-const ANTHROPIC_BASE_URL_ENV = "ANTHROPIC_BASE_URL";
-
-/**
- * The OS sandbox around every tool subprocess. The runner process itself
- * stays OUTSIDE it (the loop must reach the model provider); only the
- * commands the model asks for are wrapped.
- *
- * The policy, line by line:
- *
- *  - Network deny-all. The tools investigate a checkout; none of them needs
- *    the network, and model traffic leaves from the runner process, not from
- *    a tool. In production this stacks INSIDE the awf firewall rather than
- *    replacing it; in the eval (a bare runner VM with the real API key in
- *    the environment) it is the only network boundary the tools have.
- *
- *  - Checkout read-only. "Reviewers never get edit or write" used to be a
- *    tool-surface promise that Bash could bypass (`echo > file`); read-only
- *    makes it a boundary. A prompt-injected reviewer cannot poison the
- *    checkout its sibling reviewers are reading, nor the staged inputs and
- *    outputs downstream phases trust (`routing.json`, `out/`).
- *
- *  - The investigation-cap journal is the ONE writable path in the review
- *    staging dir: the cap CLI appends one line per authorised call
- *    (investigation-cap.ts), and refusing that write would break the cap.
- *    `routing.json` (the caps) stays read-only.
- *
- *  - A scratch directory for the model's own use; nothing downstream reads
- *    from it.
- *
- * Fail-closed: when the sandbox cannot initialize (bubblewrap missing, user
- * namespaces blocked in a nested container), {@link createPiRunner} THROWS
- * rather than silently running unsandboxed. `REVIEW_SANDBOX=off` is the
- * explicit, logged escape hatch; in production the awf firewall still stands
- * around an unsandboxed runner, so "off" degrades to exactly the pre-srt
- * posture rather than to nothing.
- */
-const REVIEW_SANDBOX_ENV = "REVIEW_SANDBOX";
-
-/**
- * The one writable file in the staging dir; see investigation-cap.ts.
- * Exported so the sandbox smoke job can assert the mount actually works
- * rather than trusting that it does.
- */
-export const CAP_JOURNAL_PATH = "/tmp/gh-aw/review/investigation-journal.log";
-
-/** Model-usable scratch space; nothing downstream reads from it. */
-export const SCRATCH_DIR = "/tmp/review-agent-scratch";
-
-const SANDBOX_CONFIG = {
-    network: {allowedDomains: [], deniedDomains: ["*"]},
-    filesystem: {
-        denyRead: ["~/.ssh"],
-        allowWrite: [CAP_JOURNAL_PATH, SCRATCH_DIR],
-        denyWrite: [],
-    },
-};
+const MAX_STOP_BLOCKS = 2;
 
 /**
  * The sub-agent framing. Pi supplies no system prompt of its own, and an
@@ -161,423 +132,6 @@ export const SYSTEM_PROMPT = [
     "else: emit the JSON object your instructions specify, with no prose",
     "before or after it.",
 ].join(" ");
-
-type TextBlock = {type: "text"; text: string};
-
-type PiToolResult = {
-    content: TextBlock[];
-    details: Record<string, unknown>;
-    isError?: boolean;
-};
-
-type PiTool = {
-    name: string;
-    label: string;
-    description: string;
-    parameters: unknown;
-    execute: (
-        toolCallId: string,
-        params: Record<string, unknown>,
-        signal?: AbortSignal,
-    ) => Promise<PiToolResult>;
-};
-
-/**
- * One tool subprocess: argv in, combined output out. This is the seam the OS
- * sandbox wraps — every tool below runs its command through an injected
- * executor, so the sandboxed and unsandboxed paths differ ONLY in how the
- * argv is spawned, never in what the tools do.
- */
-export type ToolExec = (
-    argv: string[],
-    cwd: string,
-    signal?: AbortSignal,
-) => Promise<string>;
-
-/** Truncate a tool result, saying so, so the model knows it was cut. */
-export const capOutput = (text: string): string =>
-    text.length <= MAX_TOOL_OUTPUT_CHARS
-        ? text
-        : `${text.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n[truncated: ${
-              text.length - MAX_TOOL_OUTPUT_CHARS
-          } more characters]`;
-
-const ok = (text: string): PiToolResult => ({
-    content: [{type: "text", text: capOutput(text)}],
-    details: {},
-});
-
-/**
- * Window a `cat -n` capture to `limit` lines starting at the 1-indexed
- * `offset`, saying what was left out. The subprocess always reads the whole
- * file (the sandbox boundary lives on the subprocess, so the window is about
- * the model's view, not about I/O). Without this, a large file was silently
- * truncated at MAX_TOOL_OUTPUT_CHARS and its tail was unreachable — a recall
- * defect in a reviewer, not a nicety.
- */
-export const windowLines = (
-    text: string,
-    offset?: unknown,
-    limit?: unknown,
-): string => {
-    const start =
-        typeof offset === "number" && offset > 0 ? Math.floor(offset) : 1;
-    const max =
-        typeof limit === "number" && limit > 0 ? Math.floor(limit) : undefined;
-    if (start === 1 && max === undefined) {
-        return text;
-    }
-    const lines = text.replace(/\n$/, "").split("\n");
-    const total = lines.length;
-    const window = lines.slice(
-        start - 1,
-        max === undefined ? undefined : start - 1 + max,
-    );
-    if (window.length === 0) {
-        return `(no lines in window: the file has ${total} lines, offset was ${start})`;
-    }
-    const end = start + window.length - 1;
-    const note =
-        start > 1 || end < total
-            ? `\n[showing lines ${start}-${end} of ${total}]`
-            : "";
-    return window.join("\n") + note;
-};
-
-/**
- * Spawn one argv, resolving with its combined output. A non-zero exit is
- * NOT an error here: `grep` exits 1 on no-match, and the model needs to see
- * "no matches" as an ordinary result rather than a tool failure.
- */
-const spawn = (
-    argv: string[],
-    cwd: string,
-    env: Record<string, string | undefined> | undefined,
-    signal?: AbortSignal,
-): Promise<string> =>
-    new Promise((resolve) => {
-        execFile(
-            argv[0],
-            argv.slice(1),
-            {
-                cwd,
-                signal,
-                ...(env !== undefined ? {env} : {}),
-                timeout: BASH_TIMEOUT_MS,
-                maxBuffer: 64 * 1024 * 1024,
-            },
-            (error, stdout, stderr) => {
-                const out = `${stdout}${stderr}`;
-                // A plain non-zero exit carries a numeric `code` and is an
-                // ordinary result: `grep` exits 1 on no-match, and reporting
-                // that as a failure would tell the model its toolbox is
-                // broken when the honest answer is "nothing matched". A
-                // kill (timeout, signal) or a spawn error has no exit code
-                // and IS a failure the model needs to see.
-                const failed = error !== null && typeof error.code !== "number";
-                if (failed) {
-                    resolve(`command failed: ${error.message}`);
-                    return;
-                }
-                resolve(out.trim() === "" ? "(no output)" : out);
-            },
-        );
-    });
-
-/** The unsandboxed executor: exactly the pre-srt behavior. */
-export const plainExec: ToolExec = (argv, cwd, signal) =>
-    spawn(argv, cwd, undefined, signal);
-
-/**
- * POSIX single-quote each part so an argv survives the shell round-trip
- * through the sandbox wrapper (srt takes a command STRING and returns the
- * bwrap/seatbelt argv to spawn).
- */
-export const shellQuote = (argv: string[]): string =>
-    argv.map((part) => `'${part.replaceAll("'", "'\\''")}'`).join(" ");
-
-/** What this runner needs from srt's `SandboxManager`. */
-type SandboxWrapper = {
-    initialize: (config: unknown) => Promise<void>;
-    wrapWithSandboxArgv: (
-        command: string,
-        binShell?: string,
-        customConfig?: unknown,
-        abortSignal?: AbortSignal,
-        cwd?: string,
-    ) => Promise<{
-        argv: string[];
-        env?: Record<string, string | undefined>;
-    }>;
-};
-
-/**
- * The sandboxed executor: quote the argv back into a command string, have
- * srt wrap it in the platform sandbox, and spawn the wrapped argv with the
- * environment srt asks for.
- */
-/**
- * Credentials scrubbed from every sandboxed tool subprocess. The sandbox is a
- * mount/network boundary, not an environment boundary: spawn defaults to
- * process.env and srt's returned env extends it, so without this a
- * prompt-injected `env` through Bash reads every secret the runner holds.
- * Model traffic leaves from the runner process, so no tool needs a
- * credential.
- */
-export const SCRUBBED_ENV_KEYS = [
-    "ANTHROPIC_API_KEY",
-    "GITHUB_TOKEN",
-    "GH_TOKEN",
-    "GITHUB_MCP_SERVER_TOKEN",
-    "MCP_GATEWAY_API_KEY",
-] as const;
-
-const scrubSecrets = (
-    env: Record<string, string | undefined>,
-): Record<string, string | undefined> => {
-    const out = {...env};
-    for (const key of SCRUBBED_ENV_KEYS) {
-        delete out[key];
-    }
-    return out;
-};
-
-export const makeSandboxedExec =
-    (sandbox: SandboxWrapper): ToolExec =>
-    async (argv, cwd, signal) => {
-        const wrapped = await sandbox.wrapWithSandboxArgv(
-            shellQuote(argv),
-            undefined,
-            undefined,
-            signal,
-            cwd,
-        );
-        return spawn(
-            wrapped.argv,
-            cwd,
-            scrubSecrets(wrapped.env ?? process.env),
-            signal,
-        );
-    };
-
-const schema = (
-    properties: Record<string, unknown>,
-    required: string[],
-): unknown => ({
-    type: "object",
-    properties,
-    required,
-    additionalProperties: false,
-});
-
-const str = (description: string): unknown => ({type: "string", description});
-
-/**
- * The reviewer tool surface: Read and Grep for investigation, plus Bash (the
- * investigation-cap CLI the sub-agent prompts invoke runs through it). No
- * edit, no write — and with the sandboxed executor that is a mount-level
- * boundary on Bash too, not just a tool-surface promise.
- *
- * Deliberately small. Every tool here runs through the same sandboxed
- * executor as Bash, so a named tool earns its place on model ergonomics, not
- * on containment: Read gives windowed, line-numbered file views, and Grep's
- * structured params avoid the shell-quoting failure class (a model quoting a
- * regex into `bash -lc` botches it often enough to add noise). Two former
- * tools were removed as adding nothing over Bash: LS (`ls -la` verbatim) and
- * Glob, whose `find -path` emulation was wrong, not just limited (`*`
- * matched across `/`, so reviewers got a wider file list than they asked
- * for). Raised by mojadem on #305.
- */
-export const createReviewTools = (
-    cwd: string,
-    exec: ToolExec = plainExec,
-): PiTool[] => [
-    {
-        name: "Read",
-        label: "Read",
-        description:
-            "Read a file from the repository. Returns the file with 1-indexed line numbers. Use offset and limit to window large files.",
-        parameters: schema(
-            {
-                path: str("Path to the file, relative to the repository root."),
-                offset: {
-                    type: "number",
-                    description: "1-indexed line number to start reading from.",
-                },
-                limit: {
-                    type: "number",
-                    description: "Maximum number of lines to return.",
-                },
-            },
-            ["path"],
-        ),
-        execute: async (_id, params, signal) => {
-            const path = String(params["path"] ?? "");
-            const out = await exec(["cat", "-n", "--", path], cwd, signal);
-            // The exec seam resolves failures as ordinary text ("command
-            // failed: …", or cat's own stderr). Never window those: slicing
-            // an error message to an offset deep in a file the read never
-            // opened masks the actual error behind "(no lines in window…)".
-            const failed =
-                out.startsWith("command failed: ") || /^\s*cat: /.test(out);
-            return ok(
-                failed
-                    ? out
-                    : windowLines(out, params["offset"], params["limit"]),
-            );
-        },
-    },
-    {
-        name: "Grep",
-        label: "Grep",
-        description:
-            "Search file contents with a regular expression. Returns matching lines prefixed with file:line.",
-        parameters: schema(
-            {
-                pattern: str("Extended regular expression to search for."),
-                path: str("Optional directory or file to scope the search to."),
-            },
-            ["pattern"],
-        ),
-        execute: async (_id, params, signal) => {
-            const pattern = String(params["pattern"] ?? "");
-            const path = String(params["path"] ?? ".");
-            return ok(
-                await exec(
-                    [
-                        "grep",
-                        "-rIn",
-                        "--exclude-dir=.git",
-                        "-E",
-                        "--",
-                        pattern,
-                        path,
-                    ],
-                    cwd,
-                    signal,
-                ),
-            );
-        },
-    },
-    {
-        name: "Bash",
-        label: "Bash",
-        description:
-            "Run a shell command in the repository. Use for the investigation-cap CLI, listing or finding files, and other read-only checks. Commands run inside an OS sandbox: the repository is read-only and there is no network access.",
-        parameters: schema({command: str("The shell command to run.")}, [
-            "command",
-        ]),
-        execute: async (_id, params, signal) => {
-            const command = String(params["command"] ?? "");
-            return ok(await exec(["bash", "-lc", command], cwd, signal));
-        },
-    },
-];
-
-/**
- * The structured-final tool: the payload is validated by `request.validate`
- * BEFORE it is accepted, and a drifted shape bounces back to the model with
- * the exact rejection message while the session is still alive.
- */
-export const createSubmitTool = (
-    validate: (payload: Record<string, unknown>) => string | null,
-    onAccept: (payload: Record<string, unknown>) => void,
-): PiTool => ({
-    name: "submit_result",
-    label: "submit_result",
-    description:
-        "Deliver your final structured result. Pass the entire output-contract JSON object as `result`.",
-    parameters: schema(
-        {
-            result: {
-                type: "object",
-                description: "The full output-contract object.",
-            },
-        },
-        ["result"],
-    ),
-    execute: (_id, params) => {
-        const payload = (params["result"] ?? {}) as Record<string, unknown>;
-        const rejection = validate(payload);
-        if (rejection !== null) {
-            return Promise.resolve({
-                content: [
-                    {
-                        type: "text" as const,
-                        text: `Result rejected: ${rejection}. Call submit_result again with the full corrected result object.`,
-                    },
-                ],
-                details: {},
-                isError: true,
-            });
-        }
-        onAccept(payload);
-        return Promise.resolve({
-            content: [
-                {
-                    type: "text" as const,
-                    text: "Result recorded. End the turn now; no further output is needed.",
-                },
-            ],
-            details: {},
-        });
-    },
-});
-
-/**
- * The free-text final, for a request with no output contract (the eval path:
- * `LiveAgentRequest` carries no `validate`, so `submit_result` is never
- * registered and the agent falls back to free text).
- *
- * Pi emits one assistant message per turn, so the final is not simply the
- * last one: a reviewer that emitted its JSON and then added a closing
- * sentence would lose the JSON, which is exactly how run 30592964392's
- * candidate arm failed. Prefer the last turn that actually carries a JSON
- * object, and fall back to the whole transcript's assistant text so a
- * downstream extractor can still find it.
- */
-export const finalText = (texts: string[]): string => {
-    for (let i = texts.length - 1; i >= 0; i -= 1) {
-        if (texts[i].includes("{") && texts[i].includes("}")) {
-            return texts[i];
-        }
-    }
-    return texts.join("\n");
-};
-
-/**
- * Resolve a review.md model pin against Pi's Anthropic catalog. The pins are
- * tier aliases (`claude-opus-4-8`); Pi's catalog may carry dated ids, so an
- * exact miss falls back to the pin's own dated releases — `pin-YYYYMMDD`
- * exactly, latest date first. A bare `startsWith` fallback would let a
- * family pin jump tiers (`claude-sonnet-4` longest-matching
- * `claude-sonnet-4-5-<date>`), and the contract here is "never silently run
- * a different model than the pin claims": an unresolvable pin throws with
- * the candidates listed.
- */
-export const resolveModelId = (
-    pin: string,
-    available: readonly {id: string}[],
-): string => {
-    const exact = available.find((model) => model.id === pin);
-    if (exact !== undefined) {
-        return exact.id;
-    }
-    const dated = available.filter(
-        (model) =>
-            model.id.startsWith(pin) &&
-            /^-\d{8}$/.test(model.id.slice(pin.length)),
-    );
-    if (dated.length > 0) {
-        // Dated suffixes are equal-length, so lexicographic IS chronological.
-        return dated.sort((a, b) => b.id.localeCompare(a.id))[0].id;
-    }
-    throw new Error(
-        `model pin "${pin}" is not in Pi's Anthropic catalog (candidates: ${available
-            .map((model) => model.id)
-            .join(", ")})`,
-    );
-};
 
 /**
  * The `REVIEW_DISPATCH_RUNNER` seam is gone: the Claude-Agent-SDK harness
@@ -598,49 +152,6 @@ export const rejectStaleRunnerSelection = (env: {
                 `Unset REVIEW_DISPATCH_RUNNER.`,
         );
     }
-};
-
-/**
- * The tool executor production runs: srt-wrapped, or the explicit unwrapped
- * escape hatch. Fail-closed — an initialization failure throws rather than
- * degrading to unsandboxed tools; `REVIEW_SANDBOX=off` is the loud opt-out.
- *
- * Exported for the sandbox smoke job (review-eval-ab), which probes the
- * boundary through this exact function. A probe that built its own sandbox
- * would be testing a second policy, and the only interesting question is
- * whether THIS one holds.
- */
-export const createToolExec = async (): Promise<ToolExec> => {
-    if (process.env[REVIEW_SANDBOX_ENV] === "off") {
-        // eslint-disable-next-line no-console
-        console.error(
-            "review dispatch: tool sandbox OFF (REVIEW_SANDBOX=off); tool subprocesses run unwrapped.",
-        );
-        return plainExec;
-    }
-    const srt = (await import("@anthropic-ai/sandbox-runtime")) as {
-        SandboxManager: SandboxWrapper;
-    };
-    try {
-        // Pre-create the writable bind targets so the sandbox can mount
-        // them: the cap journal may not exist yet on a fresh run, and
-        // its first append must not be the thing that fails.
-        mkdirSync(SCRATCH_DIR, {recursive: true});
-        mkdirSync(dirname(CAP_JOURNAL_PATH), {recursive: true});
-        if (!existsSync(CAP_JOURNAL_PATH)) {
-            writeFileSync(CAP_JOURNAL_PATH, "");
-        }
-        await srt.SandboxManager.initialize(SANDBOX_CONFIG);
-    } catch (error) {
-        throw new Error(
-            `the review tool sandbox failed to initialize; refusing to ` +
-                `run sub-agents with unsandboxed tools (set ` +
-                `${REVIEW_SANDBOX_ENV}=off to explicitly accept that): ${
-                    error instanceof Error ? error.message : String(error)
-                }`,
-        );
-    }
-    return makeSandboxedExec(srt.SandboxManager);
 };
 
 /**
@@ -686,14 +197,26 @@ export const createPiRunner = async (
                 options?: unknown,
             ) => unknown;
         };
-        createProvider: (input: Record<string, unknown>) => unknown;
     };
-    // `anthropicProvider` is not on pi-ai's index; it lives behind the
+    // The providers are not on pi-ai's index; they live behind the
     // package's `./providers/*` export subpath.
     const {anthropicProvider} = (await import(
         "@earendil-works/pi-ai/providers/anthropic"
-    )) as {anthropicProvider: () => Record<string, unknown>};
-    const core = (await import("@earendil-works/pi-agent-core")) as {
+    )) as {
+        anthropicProvider: () => {
+            id: string;
+            getModels: () => readonly {id: string; baseUrl?: string}[];
+        };
+    };
+    const {googleProvider} = (await import(
+        "@earendil-works/pi-ai/providers/google"
+    )) as {
+        googleProvider: () => {
+            id: string;
+            getModels: () => readonly {id: string}[];
+        };
+    };
+    const core = (await import("@earendil-works/pi-agent-core")) as unknown as {
         runAgentLoop: (
             prompts: unknown[],
             context: Record<string, unknown>,
@@ -708,13 +231,24 @@ export const createPiRunner = async (
 
     const models = ai.createModels();
     const baseUrl = process.env[ANTHROPIC_BASE_URL_ENV];
-    // Re-register Anthropic on the steered base URL when the sandbox provides
-    // one; otherwise Pi's bundled provider (direct to api.anthropic.com) stands.
+    // Register Anthropic, steered when the sandbox provides a base URL;
+    // otherwise Pi's bundled provider (direct to api.anthropic.com) stands.
+    // dispatch-models.ts's rebaseModels carries the how and the why.
+    const anthropic = anthropicProvider();
     models.setProvider(
         baseUrl === undefined || baseUrl === ""
-            ? anthropicProvider()
-            : ai.createProvider({...anthropicProvider(), baseUrl}),
+            ? anthropic
+            : rebaseModels(anthropic, baseUrl),
     );
+    // Register Google (Gemini API) with the catalog extended by the
+    // gemini-3.8-flash entry pi-ai 0.83.0 predates. Auth (GEMINI_API_KEY)
+    // resolves lazily at call time, so registering the provider costs
+    // nothing on runs whose pins never leave Anthropic.
+    const google = googleProvider();
+    models.setProvider({
+        ...google,
+        getModels: () => withGemini38Flash(google.getModels()),
+    });
 
     return async (request: AgentRequest): Promise<AgentResult> => {
         const started = Date.now();
@@ -726,6 +260,16 @@ export const createPiRunner = async (
         }, request.timeoutMs);
 
         let captured: Record<string, unknown> | undefined;
+        // The last CONTRACT-VALID payload, held even while the prose gate
+        // bounces it: a style rejection keeps the session going, and a
+        // session can die there (turns, timeout). Every salvage path below
+        // uses `captured ?? provisional` — the styled acceptance when one
+        // happened, else the best contract-valid submission seen.
+        let provisional: Record<string, unknown> | undefined;
+        // Calls counted BEFORE the contract check; the follow-up redirect's
+        // reason branches on it (a contract- or prose-bounced agent is still
+        // mid-correction, not an agent that never delivered).
+        let submitAttempts = 0;
         const allowed = options.allowedTools;
         const tools = createReviewTools(request.cwd, exec).filter(
             (tool) => allowed === undefined || allowed.includes(tool.name),
@@ -733,11 +277,33 @@ export const createPiRunner = async (
         if (request.validate !== undefined) {
             const validate = request.validate;
             tools.push(
-                createSubmitTool(validate, (payload) => {
-                    captured = payload;
-                }),
+                createSubmitTool(
+                    validate,
+                    (payload) => {
+                        captured = payload;
+                    },
+                    {
+                        ...(request.judgeProse === undefined
+                            ? {}
+                            : {judgeProse: request.judgeProse}),
+                        onProvisional: (payload) => {
+                            provisional = payload;
+                        },
+                        onAttempt: () => {
+                            submitAttempts += 1;
+                        },
+                    },
+                ),
             );
         }
+        // The follow-up redirect (the SDK harness's Stop hook, ported to
+        // Pi's follow-up seam): an agent ending its turn WITHOUT an accepted
+        // submission is heading for the free-text fallback, which skips both
+        // the in-session contract bounce and the prose gate. Point it back
+        // at the tool, at most MAX_STOP_BLOCKS times: past the cap a
+        // confused agent gets its genuine fallback rather than a loop, and
+        // dispatch.ts records its findings as skipped by the gate.
+        let stopBlocks = 0;
 
         let usd = 0;
         let turns = 0;
@@ -748,11 +314,12 @@ export const createPiRunner = async (
         let tokensAtFailure: {input: number; total: number} | undefined;
         const texts: string[] = [];
         try {
+            const providerId = providerForPin(request.model);
             const modelId = resolveModelId(
                 request.model,
-                models.getModels(ANTHROPIC_PROVIDER_ID),
+                models.getModels(providerId),
             );
-            const model = models.getModel(ANTHROPIC_PROVIDER_ID, modelId);
+            const model = models.getModel(providerId, modelId);
             if (model === undefined) {
                 throw new Error(`Pi could not load the model "${modelId}"`);
             }
@@ -781,6 +348,37 @@ export const createPiRunner = async (
                      */
                     shouldStopAfterTurn: () =>
                         captured !== undefined || turns >= request.maxTurns,
+                    /**
+                     * The follow-up redirect: consulted only when the agent
+                     * would otherwise stop (no pending tool calls), which is
+                     * exactly the SDK Stop hook's trigger. No contract, no
+                     * redirect — there is no tool to point at.
+                     */
+                    getFollowUpMessages: () => {
+                        if (
+                            request.validate === undefined ||
+                            captured !== undefined ||
+                            stopBlocks >= MAX_STOP_BLOCKS
+                        ) {
+                            return [];
+                        }
+                        stopBlocks += 1;
+                        return [
+                            {
+                                role: "user",
+                                content: [
+                                    {
+                                        type: "text",
+                                        text:
+                                            submitAttempts === 0
+                                                ? "You have not delivered your result yet. Call the submit_result tool ONCE now, passing the ENTIRE JSON object your output contract specifies as its `result` argument; do not paste the JSON as a message."
+                                                : "Your submission was rejected and must be corrected. Rewrite what the rejection message named and call submit_result again with the full corrected result object; do not paste the JSON as a message.",
+                                    },
+                                ],
+                                timestamp: Date.now(),
+                            },
+                        ];
+                    },
                 },
                 (event: Record<string, unknown>) => {
                     if (event["type"] === "tool_execution_end") {
@@ -860,9 +458,13 @@ export const createPiRunner = async (
                             SUB_AGENT_MAX_RETRIES,
                     }),
             );
-            if (captured !== undefined) {
+            // A styled acceptance when one happened, else the best
+            // contract-valid submission the prose gate was still bouncing:
+            // style enforcement may cost prose quality, never a dimension.
+            const salvage = captured ?? provisional;
+            if (salvage !== undefined) {
                 return {
-                    output: JSON.stringify(captured),
+                    output: JSON.stringify(salvage),
                     usd,
                     turns,
                     toolCalls,
@@ -905,16 +507,18 @@ export const createPiRunner = async (
                 wallMs: Date.now() - started,
             };
         } catch (error) {
-            // A payload the tool already accepted is complete and validated:
+            // A payload the tool already accepted (or a contract-valid one
+            // the prose gate was still bouncing) is complete and validated:
             // salvage it even when the session then dies. The cost
             // accumulated so far is real (Pi reports per-turn usage), so it
             // is kept rather than zeroed, and so are the diagnostics: this is
             // the path where a session died mid-flight, which is exactly when
             // "what killed it" is worth reporting. Dropping them here made a
             // salvaged result look like a clean one.
-            if (captured !== undefined) {
+            const salvage = captured ?? provisional;
+            if (salvage !== undefined) {
                 return {
-                    output: JSON.stringify(captured),
+                    output: JSON.stringify(salvage),
                     usd,
                     turns,
                     toolCalls,

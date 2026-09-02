@@ -23,6 +23,9 @@
  * to act on and any edit would be guesswork.
  */
 
+import {bodyItemId} from "./collapsed.ts";
+import type {CollapsedObservation} from "./collapsed.ts";
+import type {DiffChangedLines} from "../../review/lib/diff.ts";
 import {parseLeadingLabel} from "../../review/lib/rereview.ts";
 import type {StagedThread} from "../../review/lib/rereview.ts";
 
@@ -51,7 +54,10 @@ export type SkippedThread = {
         /** The file changed after the review that raised this finding. */
         | "stale-path"
         /** Somebody other than the reviewer opened it; not v1's to act on. */
-        | "not-reviewer-thread";
+        | "not-reviewer-thread"
+        /** A body-sourced observation whose anchor an open thread already
+         * covers; the thread is the work item, the body line is its echo. */
+        | "thread-covered";
     /** The parsed label when there was one; absent for unparseable. */
     label?: string;
 };
@@ -147,5 +153,93 @@ export const buildWorkList = (
         });
     }
 
+    return {items, skipped};
+};
+
+/**
+ * Select the body-sourced observations in scope for this run (the collapsed
+ * entries of the latest review body; see `collapsed.ts` for why those exist
+ * and why latest-only). Same in-scope rule as {@link buildWorkList}, plus
+ * two extra guards:
+ *
+ *   - An observation whose `path:line` an open staged thread already covers
+ *     is skipped as `thread-covered`, so one finding cannot become two work
+ *     items when a re-review posts what an earlier run collapsed. Staged
+ *     threads are the reviewer's own unresolved threads (staging filters to
+ *     bot-opened ones), so this is a bot-thread dedup guard; deference to
+ *     open HUMAN conversations happens on the reviewer's side, at its
+ *     skip-lines rule, before a finding ever posts or collapses.
+ *   - The anchor must land on a CHANGED line of the staged head diff:
+ *     added, or adjacent to a removal (the provenance gate's
+ *     change-anchored union; a deletion-anchored observation about a
+ *     dropped guard legitimately anchors beside the removal). Threads get
+ *     their invalidation for free from GitHub, which nulls an outdated
+ *     thread's line; a body item's line is a number parsed out of review
+ *     text with nothing else to invalidate it, and the file-level
+ *     stale-path check upstream runs only when review currency is
+ *     verifiable, which in production it usually is not (posted reviews
+ *     lose their fingerprint stamp). An anchor the current diff does not
+ *     vouch for is skipped as `outdated-anchor`, the same fail-closed
+ *     direction the thread path takes.
+ *
+ * Body items carry a synthetic `review-body:` id ({@link bodyItemId});
+ * there is no thread to reply on, so the prompt reports their fixes in the
+ * run summary instead (autofix.md Step 6).
+ */
+export const buildBodyWorkList = (
+    observations: readonly CollapsedObservation[],
+    findingLabels: readonly string[],
+    threads: readonly StagedThread[],
+    changedLines: DiffChangedLines,
+): WorkList => {
+    const inScope = new Set(findingLabels);
+    const covered = new Set(
+        threads
+            .filter((thread) => typeof thread.line === "number")
+            .map((thread) => `${thread.path}:${thread.line}`),
+    );
+    const items: WorkItem[] = [];
+    const skipped: SkippedThread[] = [];
+    for (const observation of observations) {
+        const id = bodyItemId(observation);
+        if (!inScope.has(observation.label)) {
+            skipped.push({
+                threadId: id,
+                path: observation.path,
+                reason: "out-of-scope",
+                label: observation.label,
+            });
+            continue;
+        }
+        if (covered.has(`${observation.path}:${observation.line}`)) {
+            skipped.push({
+                threadId: id,
+                path: observation.path,
+                reason: "thread-covered",
+                label: observation.label,
+            });
+            continue;
+        }
+        const file = changedLines[observation.path];
+        if (
+            !(file?.added ?? []).includes(observation.line) &&
+            !(file?.removedAdjacent ?? []).includes(observation.line)
+        ) {
+            skipped.push({
+                threadId: id,
+                path: observation.path,
+                reason: "outdated-anchor",
+                label: observation.label,
+            });
+            continue;
+        }
+        items.push({
+            threadId: id,
+            path: observation.path,
+            line: observation.line,
+            label: observation.label,
+            body: observation.subject,
+        });
+    }
     return {items, skipped};
 };

@@ -58,8 +58,11 @@ export type LiveSpecLocation = {
 export type LiveDefectSpec = {
     /** Stable key for reports (conventionally the recorded finding's id). */
     key: string;
-    /** Changed-file path the defect lives in (must appear in the diff). */
-    path: string;
+    /**
+     * Changed-file path the defect lives in (must appear in the diff).
+     * Absent iff `prLevel` is set: a PR-level defect names no file.
+     */
+    path?: string;
     /** First line of the window a matching finding may anchor in (1-based). */
     lineStart?: number;
     /** Last line of the window (inclusive). Required iff lineStart is. */
@@ -94,6 +97,15 @@ export type LiveDefectSpec = {
      * counts.
      */
     blockingOnly?: boolean;
+    /**
+     * When true, the defect lives in the PR title or description rather than
+     * in a changed file (a documentation prose finding on the PR metadata).
+     * The spec then carries no `path`, line window, or `altLocations`, and
+     * only a pr-anchored candidate (the kind `submission.ts` folds into the
+     * review body) can satisfy it; a line-anchored comment about a file never
+     * claims a PR-level spec, however well its mechanism matches.
+     */
+    prLevel?: true;
 };
 
 /**
@@ -166,6 +178,14 @@ export type CaseLive = {
      * nothing more.
      */
     tree: string;
+    /**
+     * Optional staged ticket-context.json content, for cases exercising the
+     * ticket-present path of the intent-reading prompts (the shape is
+     * lib/stage-ticket.ts's TicketContext; only `available` is validated).
+     * Absent, staging writes `{available: false, reason: "not-configured"}`,
+     * matching an unconfigured production consumer.
+     */
+    ticket?: Record<string, unknown>;
     /** Labeled defects a live run must catch. */
     mustCatchSpecs?: LiveDefectSpec[];
     /** Labeled traps a live run must NOT flag (clean-case ground truth). */
@@ -212,16 +232,37 @@ const parseDefectSpecs = (
             return;
         }
         seenKeys.add(specKey);
-        const path = entry["path"];
-        if (!isNonEmptyString(path)) {
-            errors.push(`${at}.path: required non-empty string`);
+        const prLevel = entry["prLevel"];
+        if (prLevel !== undefined && prLevel !== true) {
+            errors.push(`${at}.prLevel: must be true when present`);
             return;
         }
-        if (!changedPaths.has(path)) {
-            errors.push(`${at}.path: "${path}" is not in changedFiles`);
-        }
-        if (diffPaths !== undefined && !diffPaths.has(path)) {
-            errors.push(`${at}.path: "${path}" has no section in the diff`);
+        const path = entry["path"];
+        if (prLevel === true) {
+            const located = [
+                "path",
+                "lineStart",
+                "lineEnd",
+                "altLocations",
+            ].filter((field) => entry[field] !== undefined);
+            if (located.length > 0) {
+                errors.push(
+                    `${at}: ${located.join(", ")} must be omitted on a ` +
+                        `prLevel spec (a PR-level defect names no file)`,
+                );
+                return;
+            }
+        } else {
+            if (!isNonEmptyString(path)) {
+                errors.push(`${at}.path: required non-empty string`);
+                return;
+            }
+            if (!changedPaths.has(path)) {
+                errors.push(`${at}.path: "${path}" is not in changedFiles`);
+            }
+            if (diffPaths !== undefined && !diffPaths.has(path)) {
+                errors.push(`${at}.path: "${path}" has no section in the diff`);
+            }
         }
         const mechanism = entry["mechanism"];
         if (
@@ -333,9 +374,13 @@ const parseDefectSpecs = (
         }
         const spec: LiveDefectSpec = {
             key: specKey,
-            path,
             mechanism: mechanism as string[],
         };
+        if (prLevel === true) {
+            spec.prLevel = true;
+        } else {
+            spec.path = path as string;
+        }
         if (lineStart !== undefined) {
             spec.lineStart = lineStart as number;
             spec.lineEnd = lineEnd as number;
@@ -612,12 +657,30 @@ export const parseLive = (
         errors,
     );
 
+    const rawTicket = raw["ticket"];
+    let ticket: Record<string, unknown> | undefined;
+    if (rawTicket !== undefined) {
+        if (
+            !isRecord(rawTicket) ||
+            typeof rawTicket["available"] !== "boolean"
+        ) {
+            errors.push(
+                "live.ticket: must be an object with a boolean `available` when present",
+            );
+        } else {
+            ticket = rawTicket;
+        }
+    }
+
     const rereview = parseRereview(raw["rereview"], errors);
 
     if (prContext === undefined) {
         return undefined;
     }
     const live: CaseLive = {prContext, tree};
+    if (ticket !== undefined) {
+        live.ticket = ticket;
+    }
     if (mustCatchSpecs !== undefined) {
         live.mustCatchSpecs = mustCatchSpecs;
     }

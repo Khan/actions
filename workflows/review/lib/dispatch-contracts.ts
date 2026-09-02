@@ -11,6 +11,8 @@
  * code under review.
  */
 
+import type {AlsoFlagged} from "./attribution";
+import type {DiffChangedLines} from "./diff";
 import {
     validateFinding,
     type Anchor,
@@ -21,6 +23,7 @@ import {extractJsonObject} from "./agent-json";
 import {
     BLOCKING_LABELS,
     NON_BLOCKING_LABELS,
+    firstSentence,
     isBlockingLabel,
     labelForFinding,
 } from "./render-comment";
@@ -87,17 +90,159 @@ export type Candidate = {
 };
 
 /**
+ * Fold a prose token toward its stem so an inflection difference does not
+ * defeat the restatement check below ("drops" vs "dropped", "cache" vs
+ * "caches"). Deliberately crude: strip one of ing/ed/es/s, collapse a
+ * doubled final consonant ("dropped" -> "dropp" -> "drop"), then strip a
+ * trailing "e" so "caches" -> "cach" meets "cache" -> "cach". Both sides
+ * of every comparison fold identically, and a miss is safe — the subject
+ * is kept and the body merely stays as long as it is today.
+ *
+ * The three length thresholds all protect stem recognizability: a token of
+ * 3 or fewer chars is returned whole (too short to carry a strippable
+ * suffix; "les" is a word, not "le"+s), a suffix strip must leave a stem of
+ * at least 3 chars ("goes" loses "es" only because "go"+es fails the floor
+ * and falls through to the "s" strip, keeping "goe"), and the trailing-e
+ * strip requires 4+ chars so 3-char words like "use" survive intact.
+ */
+const foldToken = (token: string): string => {
+    if (token.length <= 3) {
+        return token;
+    }
+    let folded = token;
+    for (const suffix of ["ing", "ed", "es", "s"]) {
+        if (folded.endsWith(suffix) && folded.length - suffix.length >= 3) {
+            folded = folded.slice(0, folded.length - suffix.length);
+            break;
+        }
+    }
+    if (/([b-df-hj-np-tv-z])\1$/.test(folded)) {
+        folded = folded.slice(0, -1);
+    }
+    return folded.length >= 4 && folded.endsWith("e")
+        ? folded.slice(0, -1)
+        : folded;
+};
+
+/**
+ * Function words that carry no claim content; ignored on the SUBJECT side
+ * of the restatement check so "turns are dropped" still matches "drops
+ * turns" (the sentence has no "are"). Never filtered from the sentence
+ * side — there they can only help containment, not hurt it. Distinct from
+ * dedup-text.ts's STOPWORDS (near-identical list, different semantics:
+ * that one filters both sides of a similarity score).
+ */
+const SUBJECT_STOPWORDS: ReadonlySet<string> = new Set([
+    "a",
+    "an",
+    "the",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "it",
+    "its",
+    "this",
+    "that",
+    "these",
+    "those",
+    "and",
+    "or",
+    "of",
+    "to",
+    "in",
+    "on",
+    "by",
+    "for",
+    "with",
+    "as",
+    "at",
+    "so",
+]);
+
+/**
+ * The comparable word tokens of a prose fragment: markdown emphasis
+ * stripped, lowercased, internal punctuation kept (`counts.go` is one
+ * token) but trailing punctuation shed ("turns." and "turns" are the same
+ * word).
+ */
+const proseTokens = (text: string): string[] =>
+    (
+        text
+            .toLowerCase()
+            .replace(/[`*_]/g, "")
+            .match(/[a-z0-9][a-z0-9./:-]*/g) ?? []
+    ).map((token) => token.replace(/[./:-]+$/, ""));
+
+/**
+ * Whether the subject merely restates the discussion's FIRST sentence:
+ * every folded subject token already appears there, so prepending the
+ * subject adds repetition and no vocabulary. This is the mechanical
+ * subset of the prose repetition the 2026-08-20 version audit measured
+ * in v1.11.0-v1.13.0 bodies (5 of 29 sampled bodies restated one fact two
+ * to four times, vs 1 of 60 before): the v1.8.0 task-mode removal deleted
+ * the orchestrator rewrite pass that used to absorb subject/discussion
+ * overlap (PRA-46). Re-fetching the 5 audited fail bodies shows their
+ * restatement is mostly paraphrase (same fact, different vocabulary),
+ * which a token-containment check deliberately does not touch; that mode
+ * is producer-side (finding-contract wording, PRA-46 follow-up). This
+ * drop removes only the strict duplicate, where firing is provably safe.
+ *
+ * First-sentence-only is deliberate. When the drop fires, `buildClaims`'
+ * first-sentence split recovers the discussion's opening sentence as
+ * `claim.subject`, and that string is a visible header downstream (the
+ * HOLD_FOR_HUMAN and over-cap collapsed lists, `renderPrLevelFold`), so it
+ * must be the claim; matching a later sentence would leave setup prose
+ * there. A subject restating a later sentence, one summarizing across
+ * sentences, or one carrying any token the first sentence lacks is kept
+ * whole. The comparison is an unordered token bag, so a subject reusing
+ * the sentence's exact vocabulary to state a different relation would be
+ * dropped too; accepted, since the audited failure mode is restatement and
+ * the sentence carrying that vocabulary still posts.
+ */
+export const subjectRestatesDiscussion = (
+    subject: string,
+    discussion: string,
+): boolean => {
+    const subjectTokens = proseTokens(subject)
+        .filter((token) => !SUBJECT_STOPWORDS.has(token))
+        .map(foldToken);
+    if (subjectTokens.length === 0) {
+        return false;
+    }
+    const opening = firstSentence(discussion);
+    // A "first sentence" spanning lines means the discussion opens with an
+    // unterminated line (a heading, a bullet list): dropping the subject
+    // would promote that whole block into `claim.subject` via buildClaims'
+    // identical split, and subjects print in one-line list contexts.
+    if (opening.includes("\n")) {
+        return false;
+    }
+    const sentenceTokens = new Set(proseTokens(opening).map(foldToken));
+    return subjectTokens.every((token) => sentenceTokens.has(token));
+};
+
+/**
  * Join the label contract's `subject` and `discussion` into one prose block.
  * A subject with no terminal punctuation gets a sentence break, not a bare
  * space (run 29897276810 posted "...memory Both TestExpiration..."); the
  * break also keeps `buildClaims`' first-sentence split recovering the
  * subject.
+ *
+ * A subject that restates the discussion's opening sentence
+ * ({@link subjectRestatesDiscussion}) is dropped instead of joined: the
+ * posted body then opens with the discussion's own first claim, and
+ * `buildClaims`' first-sentence split recovers that as the subject, so no
+ * downstream field goes empty; the body loses the duplicate sentence.
  */
 export const joinProse = (subject: string, discussion: string): string => {
     if (discussion === "") {
         return subject.trim();
     }
-    if (subject === "") {
+    if (subject === "" || subjectRestatesDiscussion(subject, discussion)) {
         return discussion.trim();
     }
     const trimmed = subject.trimEnd();
@@ -134,6 +279,13 @@ const fromLabelShape = (
     const discussion =
         typeof raw["discussion"] === "string" ? raw["discussion"] : "";
     const label = typeof raw["label"] === "string" ? raw["label"] : "";
+    // The optional medium-importance tier (PRA-7): a reviewer marks a
+    // non-blocking finding it judges worth fixing before merge. Anything
+    // other than the literal "medium" reads as minor — fail quiet, never
+    // reject: an unknown value must not void a finding, and under-marking
+    // only reproduces the pre-tier surface. Blocking labels ignore the
+    // field (they always post inline).
+    const medium = raw["importance"] === "medium" && !isBlockingLabel(label);
     if (!KNOWN_LABELS.has(label)) {
         throw new Error(
             `findings[${index}] label ${JSON.stringify(
@@ -155,7 +307,11 @@ const fromLabelShape = (
                       line,
                       side: "RIGHT",
                   },
-        severity: isBlockingLabel(label) ? "blocking" : "advisory",
+        severity: isBlockingLabel(label)
+            ? "blocking"
+            : medium
+            ? "medium"
+            : "advisory",
         confidence: LABEL_SHAPE_CONFIDENCE,
         evidence_trace: [
             `${agentName} label: ${label}`,
@@ -166,11 +322,34 @@ const fromLabelShape = (
         // valid labels with only {id, anchor, discussion}; rejecting it for
         // the missing failure_scenario voided the whole correctness
         // dimension twice, which is strictly worse than validating against
-        // the discussion prose.
+        // the discussion prose. A subject joinProse drops (restatement)
+        // salvages from the discussion too: dedup's comparedText reads the
+        // discussion only when failure_scenario prefix-matches
+        // claim.subject (dedup.ts), and after the drop claim.subject is
+        // the discussion's first sentence, which prefix-matches the
+        // discussion itself but not an inflected or reordered dropped
+        // subject; salvaging that subject would compare the claim on one
+        // sentence plus its own restatement, the exact shape run
+        // 30301235749 failed to merge.
         failure_scenario:
-            raw["failure_scenario"] ?? (subject !== "" ? subject : discussion),
+            raw["failure_scenario"] ??
+            (subject !== "" && !subjectRestatesDiscussion(subject, discussion)
+                ? subject
+                : discussion),
         producing_hunt: `dispatch:${agentName}`,
         model_authored_prose: joinProse(subject, discussion),
+        // The authored subject rides through as the fold's visible line,
+        // EXCEPT when joinProse drops it as a restatement: then
+        // buildClaims' first-sentence fallback must recover the
+        // discussion's own opening (the same text, differently inflected),
+        // because dedup's comparedText prefix-matches failure_scenario
+        // against claim.subject and the salvaged failure_scenario is the
+        // discussion in exactly that case.
+        ...(subject !== "" &&
+        !subject.includes("\n") &&
+        !subjectRestatesDiscussion(subject, discussion)
+            ? {summary: subject}
+            : {}),
         // Suggestion salvage, like the anchor/subject salvage above: run
         // 29943085279's correctness pass drifted into the ReportFindings
         // shape with the AddDate one-line fix under `suggested_patch`, and
@@ -333,10 +512,68 @@ export const parseFinderOutput = (
 };
 
 /* -------------------------------------------------------------------------- */
+/* Defect clustering (the claim-clusterer contract)                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One group of candidate claims the `claim-clusterer` says describe ONE
+ * defect, plus the `evidence` it grounded the identity in: the code element,
+ * literal, or quoted text every member refers to.
+ *
+ * `evidence` is not documentation. It is the load-bearing half of the
+ * contract, because `dedup.ts` verifies the model's identity claim rather than
+ * trusting it: a cluster whose evidence names no code element at all is
+ * rejected outright, and a member whose own text never mentions that element
+ * is dropped from the group (see `verifiableClusters` there). A model asked
+ * for a grounded assertion is checkable; one asked only for a grouping is not.
+ */
+export type ProposedCluster = {evidence: string; ids: string[]};
+
+/**
+ * Parse the clusterer's output, per its contract (review.md):
+ * `{"clusters": [{"evidence": "...", "ids": ["...", "..."]}]}`. Malformed
+ * entries are skipped rather than thrown on — every skipped entry simply
+ * merges nothing, which is the safe direction (a missed merge costs a
+ * duplicate comment; a bad one drops a reviewer's distinct finding). A
+ * missing `clusters` array IS thrown on, so the one corrective re-dispatch
+ * fires: silently reading a drifted shape as "no duplicates" is how a paid-for
+ * dimension goes missing without a trace.
+ */
+export const parseClustererOutput = (output: string): ProposedCluster[] => {
+    const parsed = parseJsonObject(output);
+    const raw = parsed["clusters"];
+    if (!Array.isArray(raw)) {
+        throw new Error("clusterer output has no clusters array");
+    }
+    return raw.flatMap((entry): ProposedCluster[] => {
+        if (!isRecord(entry) || typeof entry["evidence"] !== "string") {
+            return [];
+        }
+        const ids = entry["ids"];
+        if (!Array.isArray(ids)) {
+            return [];
+        }
+        const strings = [
+            ...new Set(
+                ids.filter((id): id is string => typeof id === "string"),
+            ),
+        ];
+        return strings.length < 2
+            ? []
+            : [{evidence: entry["evidence"], ids: strings}];
+    });
+};
+
+/* -------------------------------------------------------------------------- */
 /* Structured-final contract checks                                           */
 /* -------------------------------------------------------------------------- */
 
-export type ContractKind = "finder" | "lens" | "validator" | "json";
+export type ContractKind =
+    | "finder"
+    | "lens"
+    | "validator"
+    | "clusterer"
+    | "json";
 
 /**
  * Build the structured-final contract check for one sub-agent: the exact
@@ -365,6 +602,8 @@ export const contractValidator = (
             const text = JSON.stringify(payload);
             if (kind === "validator") {
                 parseValidatorOutput(text);
+            } else if (kind === "clusterer") {
+                parseClustererOutput(text);
             } else if (kind === "finder" || kind === "lens") {
                 parseFinderOutput(name, text, new Set(), kind === "lens");
             }
@@ -444,8 +683,31 @@ export type Claim = {
     suggestion?: string;
     skill?: string;
     confidence: number;
+    /**
+     * The medium-importance tier (PRA-7): present (as `"medium"`) on a
+     * claim whose finding carried `severity: "medium"` — a verified defect
+     * or gap in code this PR adds, that a reasonable author would fix
+     * before merge, but that does not block. Absent means minor. It can
+     * never force REQUEST_CHANGES (the label carries blocking-ness); the
+     * posting surface (submission.ts) ranks medium claims ahead of minor
+     * ones for the non-blocking inline budget and posts them inline on
+     * `blocking-medium` re-reviews, and a nonzero post-veto medium count
+     * demotes a would-be APPROVE to COMMENT (verdict.ts). The claim-validator adjudicates it (`corrected.importance`
+     * both directions), a `plausible` verification strips it (unconfirmed
+     * fails the tier's "verified" test), and {@link applyMediumVeto} strips
+     * it from any claim not anchored on a line this PR added.
+     */
+    importance?: "medium";
     author_dispute?: string;
     rule_quote?: string;
+    /**
+     * The cross-source duplicate copies dedup folded into this claim (one
+     * entry per other source; see dedup.ts). Structured rather than appended
+     * to `discussion` so a validator `corrected.discussion` rewrite cannot
+     * silently drop the record; the posting surface (submission.ts) renders
+     * it into the comment's collapsed attribution footer (attribution.ts).
+     */
+    also_flagged_by?: AlsoFlagged[];
 };
 
 export const buildClaims = (candidates: Candidate[]): Claim[] =>
@@ -453,14 +715,20 @@ export const buildClaims = (candidates: Candidate[]): Claim[] =>
         const {finding} = candidate;
         const {path, line} = anchorPathLine(finding.anchor);
         const prose = finding.model_authored_prose;
-        const firstSentence = prose.split(/(?<=[.!?])\s/, 1)[0] ?? prose;
+        // The authored summary wins; the first-sentence split is the
+        // fallback for lenses that have not adopted the field.
+        const subject = finding.summary ?? firstSentence(prose);
         return {
             id: finding.id,
             source: candidate.source,
             ...(path !== undefined ? {path} : {}),
             ...(line !== undefined ? {line} : {}),
             label: candidateLabel(candidate),
-            subject: firstSentence,
+            ...(finding.severity === "medium" &&
+            !isBlockingLabel(candidateLabel(candidate))
+                ? {importance: "medium" as const}
+                : {}),
+            subject,
             discussion: prose,
             failure_scenario: finding.failure_scenario,
             ...(finding.suggested_patch !== undefined
@@ -475,6 +743,45 @@ export const buildClaims = (candidates: Candidate[]): Claim[] =>
                 ? {rule_quote: finding.rule_quote}
                 : {}),
         };
+    });
+
+/**
+ * The deterministic changed-lines veto on the medium tier (PRA-7): medium
+ * prominence is defined over "code this PR adds", so a medium claim must
+ * anchor on a line the staged diff changed: an ADDED line, or a line
+ * adjacent to a removal (the provenance gate's change-anchored set; a
+ * dropped-guard finding anchors on the line neighbouring the deletion, and
+ * review.md's removed-behavior audit tells reviewers to anchor exactly
+ * there). Anything else (other context lines, file-level or pr-level
+ * anchors, a path outside the diff) keeps the claim and loses only the
+ * tier. Runs at the posting surface, AFTER validation, so it has the last
+ * word over both a reviewer's proposal and a validator grant; code vetoes,
+ * models propose. Measured on the 08-24 collapsed-tail corpus the veto
+ * barely binds (86 of 91 entries anchored to added lines already), which is
+ * the point: it is a cheap floor against the drift case, not a filter that
+ * does daily work.
+ */
+export const applyMediumVeto = (
+    claims: Claim[],
+    changedLines: DiffChangedLines,
+): Claim[] =>
+    claims.map((claim) => {
+        if (claim.importance !== "medium") {
+            return claim;
+        }
+        const file =
+            claim.path !== undefined ? changedLines[claim.path] : undefined;
+        if (
+            claim.line !== undefined &&
+            file !== undefined &&
+            (file.added.includes(claim.line) ||
+                file.removedAdjacent.includes(claim.line))
+        ) {
+            return claim;
+        }
+        const stripped = {...claim};
+        delete stripped.importance;
+        return stripped;
     });
 
 /** The Phase 3 blocking→non-blocking downgrade map (review.md, mechanical). */
@@ -553,10 +860,14 @@ export const applyVerifications = (
             // never re-block on the same evidence without a confirmed
             // verification, validator or no validator.
             if (claim.author_dispute !== undefined) {
-                surviving.push({
+                const capped = {
                     ...claim,
                     label: "question (non-blocking)",
-                });
+                };
+                // The cap also strips the medium tier: an unconfirmed
+                // disputed claim is not "verified" in the tier's sense.
+                delete capped.importance;
+                surviving.push(capped);
             } else {
                 surviving.push(claim);
             }
@@ -627,8 +938,28 @@ export const applyVerifications = (
                     verdict.confidence,
                 );
             }
+            // The medium tier's definition is "a VERIFIED defect or gap";
+            // plausible means the validator could not verify it, so the
+            // claim keeps posting but loses its prominence claim. Same for
+            // the dispute cap above (it forces state to plausible).
+            delete updated.importance;
         } else if (verdict.confidence !== undefined) {
             updated.confidence = verdict.confidence;
+        }
+        // The validator adjudicates the tier on confirmed claims, both
+        // directions: `corrected.importance: "medium"` grants prominence a
+        // reviewer under-marked, `"minor"` strips an over-marked one. Only
+        // these two literals apply (anything else is ignored), and a grant
+        // onto a blocking label is meaningless (blocking always posts) so
+        // it is skipped. This is not the never-raise rule's territory:
+        // that rule is about blocking-ness, which importance never touches.
+        if (state === "confirmed" && verdict.corrected !== undefined) {
+            const importance = verdict.corrected["importance"];
+            if (importance === "medium" && !isBlockingLabel(updated.label)) {
+                updated.importance = "medium";
+            } else if (importance === "minor") {
+                delete updated.importance;
+            }
         }
         surviving.push(updated);
     }

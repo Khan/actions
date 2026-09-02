@@ -2,8 +2,8 @@
 
 A [GitHub Agentic Workflow](https://github.github.com/gh-aw/) that reviews pull
 request changes for correctness, conventions, and risk on every push. It leaves
-per-line Conventional Comments, and on approval posts a risk/patterns summary
-comment and requests the owning teams as reviewers.
+per-line Conventional Comments; on approval it posts a risk/patterns summary
+comment, and on approval or comment it requests the owning teams as reviewers.
 
 The flow here is **generic**; everything repo-specific (risk file patterns, the
 best-practice skill catalog, the CI-tooling exclusions, and the reviewer team
@@ -50,6 +50,15 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
    blocking first, with the resolved count, and an approval that resolved the last
    open threads states that every prior thread is resolved — resolving some threads
    never leaves the rest silently open.
+   A kept thread whose reply chain shows the AUTHOR conceded the finding (will fix,
+   TODO stands in) is reported by the reconciler as `acknowledged` and recapped as
+   "acknowledged (fix pending)" instead of unaddressed. Code verifies the mechanical
+   preconditions against the staged reply chain (the id must be kept, and the PR
+   author must have actually replied; bot replies never count); whether that reply
+   concedes rather than pushes back is the reconciler's judgment, and the cost of a
+   wrong call is one mislabeled recap line. Acknowledgment never weakens the flip
+   gate: an acknowledged blocking thread still counts toward `keptBlockingCount`.
+   The verified ids are recorded in `rereview.json`; nothing consumes them yet.
    A reviewer that surfaces a real concern its own mandate does not let it report — a
    correctness problem the skill-auditor cannot quote a rule for, or something outside
    a specialist lens's domain — hands it off as an `out_of_lane_observations[]` entry
@@ -63,9 +72,12 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
    about a mechanism that predates the diff is confirmed only when the diff materially
    amplifies its consequence and the finding says so.
 
-The workflow then posts the per-line Conventional Comments that survived validation,
-submits an approve / request-changes review, and on approval posts the risk/patterns
-summary and requests the owning teams. The config files below feed these sub-agents.
+The workflow then posts the per-line Conventional Comments that survived validation
+and submits an approve, comment, or request-changes review: changes are requested
+iff a blocking finding survived, the run comments (without approving) when its
+findings top out at the medium importance tier, and it approves only when it found
+nothing worth fixing before merge. On approval it also posts the risk/patterns
+summary; on approval or comment it requests the owning teams. The config files below feed these sub-agents.
 
 A mechanical gate and a budget guardrail sit between the reviewers and the PR. The
 **change-provenance gate** (enforced in code against the diff's parsed changed-line
@@ -89,7 +101,10 @@ every safe output during the agent run and executes the queue from a separate
 verdict and findings against the staged `out/` sub-agent outputs (per re-review
 depth: the correctness pass wherever the depth dispatches one, the
 claim-validator whenever findings post, a disclosure note for every planned
-shed, no blocking inline comment under an APPROVE, the reduced-depth flip veto
+shed, no blocking inline comment under an APPROVE or COMMENT, no APPROVE at a
+reduced depth, a staged dismissal decision licensed by the plan (reduced
+depth, COMMENT verdict, only standing CHANGES_REQUESTED ids), the
+reduced-depth flip veto
 over kept blocking threads, and every queued thread resolution backed by the
 reconciler's decision) and, on violation, strips the posting items from the
 queue and fails the job. A run that skipped its own dispatch protocol (observed in production:
@@ -104,7 +119,11 @@ CLI invocation (`lib/dispatch.ts`) that runs triage, the reviewer fan-out
 (roster, budget cap, and planned sheds computed from `routing.json`), the
 provenance gate, the scope filter, cross-source dedup, open-thread suppression
 (a candidate describing a defect an open bot thread already tracks posts no
-duplicate; a suppressed blocking candidate still floors the verdict), and
+duplicate; a suppressed blocking candidate still floors the verdict),
+adjudicated-thread suppression (a non-blocking candidate re-deriving a defect
+a human settled by resolving the bot's thread or downvoting its opener posts
+no new thread; a blocking candidate is never suppressed this way, so a
+regression re-flag stays visible), and
 claim validation, inside the same firewall sandbox (the api-proxy meters and
 caps script-spawned sub-agents exactly like Task-spawned ones). Each sub-agent
 delivers its result through an in-session `submit_result` tool whose input
@@ -129,6 +148,46 @@ run-local JSONL append that needs no credentials, but the agent sandbox mounts
 write it. Removing the seam wants a writable path into the queue (an upstream
 mount change, or a post-agent step on the host); neither is tested yet.
 
+## What your feedback does
+
+The reviewer reads four signals off its own threads. What each one means, so
+you can pick the one that says what you mean:
+
+- **Reply to the thread.** Read in full: the reconciler sees every reply
+  chain verbatim, and the orchestrator surfaces replies that factually
+  dispute a finding to claim validation. But a reply alone does not close
+  anything: the reconciler resolves a thread when the CODE changes to address
+  it, so arguing a finding down in prose and pushing nothing leaves it open
+  (and blocking, if it was blocking).
+- **Resolve the thread.** "This is settled." The thread leaves the
+  accountability recap, and the defect joins the adjudicated corpus: a later
+  run that re-derives the same defect (any wording, any line, and unlike the
+  open-thread corpus any file, since a settled defect's rephrasing often
+  re-anchors on the spec or the test rather than the implementation) posts
+  nothing, unless it comes back at BLOCKING severity, which always posts (a
+  regression worth stopping the PR for must never be silenced by an old
+  resolution). Threads the bot resolved itself (because a push fixed them)
+  do not join the corpus; a fixed defect that reappears is a fresh finding.
+- **👎 the finding's comment.** Same adjudication as resolving, through the
+  reaction channel: a 👎 on a thread's OPENING comment puts its defect in the
+  adjudicated corpus whether or not you also resolve. The 👎 alone is what
+  suppresses; if you want to say why, reply in the thread: the reconciler and
+  claim validation read replies as described above, and replies reach a
+  feedback report when a maintainer runs the
+  [`review-feedback-audit` skill](../../.claude/skills/review-feedback-audit/SKILL.md).
+  Reactions on replies are
+  conversation, not adjudication. 👎 is the ONLY adjudicating reaction: a 😕
+  does not suppress (😕 reads as "unclear", not "wrong", and ambiguity is
+  worth a conversation, not a standing suppression). The bot's own seeded
+  nudge reactions never count as adjudication either.
+- **Hide the comment.** Reads as nothing. The reviewer does not see hidden
+  state; resolve or 👎 instead.
+
+Per-PR opt-out and re-runs are consumer-trigger concerns: repos using the
+stock push trigger skip any PR carrying the `skip-ai-review` label, and
+consumers with comment triggers or shims should honor the same label (see
+Khan/webapp's kore shim).
+
 ## Install
 
 ```sh
@@ -142,14 +201,70 @@ gh aw add Khan/actions/workflows/review/review.md@review-v<major>.<minor>.<patch
 
 This copies `review.md` into the consuming repo's `.github/workflows/`, records a
 `source:` field pointing back here, and compiles `review.lock.yml`. Commit both,
-plus the consumer config files below. Pull future updates with `gh aw update`
-(a 3-way merge that preserves your local edits).
+plus the consumer config files below. Pull future updates with the 3-way merge
+flow in [`review-consumer-bump`](../../.claude/skills/review-consumer-bump/SKILL.md),
+**not** `gh aw update`: the tool does not recognize the `review-v<version>` tag
+scheme, repins to main's head SHA instead, and has emptied an installed
+`review.md` to 0 bytes (both observed on gh-aw v0.85.4; neither failure is
+filed upstream yet, so re-test both on a scratch install before trusting a
+newer gh-aw release with this).
 
 The tag is self-consistent: the `review.md` inside each `review-v<version>` tag
 pins its own `pre-agent-steps` checkout `ref:` to that same version (the release
-flow rewrites it; see [Versioning](#versioning)), so after `gh aw add` or
-`gh aw update` the imported file already fetches the matching lib code and needs
+flow rewrites it; see [Versioning](#versioning)), so after `gh aw add` or a
+merge-based update the imported file already fetches the matching lib code and needs
 no manual fix-up of the ref.
+
+### Onboarding a whole repo
+
+`gh aw add` is the mechanical half. The judgment half (writing the five consumer
+config files for *that* repo's blast radius, the two local edits to the installed
+`review.md`, the admin blockers only a repo admin can clear, and a PR body that
+discloses what is generated versus decided) is choreographed by the
+[`review-onboarding` skill](../../.claude/skills/review-onboarding/SKILL.md)
+in this repo. [`Khan/kore-marketplace#3`](https://github.com/Khan/kore-marketplace/pull/3)
+is the template it produces.
+
+Validate any install (new or existing) with the consumer-config checker, run from
+a checkout of the tag the consumer pins:
+
+```sh
+git -C <consumer> ls-files | npx -y tsx workflows/review/lib/check-consumer-config.ts \
+    --repo <consumer> --files-from -
+
+# Why does this path get this tier? (every matching ROUTING rule, last one wins)
+npx -y tsx workflows/review/lib/check-consumer-config.ts --repo <consumer> --explain <path>
+```
+
+It reads the install through the *production* parsers (`route()`,
+`parseRoutingConfig`, `parseGitattributesGenerated`), so it never drifts from
+what a review actually does, and it reports the whole class of mistakes that
+otherwise surface as a red run on someone's PR: a missing runtime import, a
+`${{ }}` expression inside one, `add-reviewer` defined in both `review.md` and
+`config.md` (the main workflow wins, discarding the allowlist), a dropped
+`imports:` line, an empty team allowlist in a repo that *has* a `.github/REVIEWERS`
+ownership map, a missing or unmarked `.lock.yml`, an unmarked
+`agentics-maintenance.yml`, a live `observability:` block, the shipped credit
+ceiling, `ROUTING` parse warnings, inert lens payloads, reviewer config that does
+not route to `high`, and the resolved tier of every tracked file. Errors exit 1;
+`--strict` also fails on warnings, and `--json` emits the report for tooling.
+
+Two of those deserve a note, because both are "valid, but invisible" rather than
+broken. An empty `allowed-team-reviewers` is only an **error** when
+`.github/REVIEWERS` exists: that file is the router's only source of ownership, so
+without it Step 8 requests nobody regardless, and the empty allowlist is an accurate
+statement that the repo does not do reviewer requests (reported as
+`reviewer-requests-inert`). Requiring a team there would only get an inert one
+invented to satisfy the check. And `agentics-maintenance.yml` is `gh aw compile`
+output that is *not* named `*.lock.yml`, so the marker every consumer was told to add
+misses it, and ~600 generated lines get line-reviewed until it has its own.
+
+Follow-up, not yet built: the failure class the checker targets (config failing
+late and quietly) recurs on every later edit to ROUTING or `config.md`, not just
+at onboarding. `checkConsumerConfig` is pure with an injected filesystem and
+already ships `--json` and `--strict`, so a consumer CI job gating PRs that
+touch the config paths is the natural next layer; nothing in the checker
+blocks it.
 
 ## Consumer configuration
 
@@ -184,7 +299,7 @@ main workflow would override the import and discard your allowlist.
 
 Repo-specific frontmatter that imports can't merge (e.g. an `if:` condition to skip
 deploy/automation branches or forks) goes directly in your installed `review.md` as
-a local edit; `gh aw update` preserves it.
+a local edit; the 3-way merge update flow preserves it.
 
 ### Per-lens payloads (`lenses/<lens>.md`)
 
@@ -261,7 +376,8 @@ rule per line:
 ```
 # <pattern> [lens=<lens>,…] [tier=trivial|low|medium|high] [direction-dependent]
 # enable <reviewer>[,<reviewer>…]
-# re-review full|scoped|flip-gated|fast
+# re-review full|scoped|flip-gated|fast [blocking-only|blocking-medium]
+# non-blocking-budget <n>
 services/**/migrations/**  tier=high lens=data-migrations
 **/*.graphql               lens=api-federation-compat
 pkg/auth/**                tier=high direction-dependent lens=security-auth
@@ -288,7 +404,26 @@ re-review scoped
   winning tier rule for the path.
 - `re-review` sets the repo's re-review mode (see the next section). Default
   `full`; when several lines set it, the last one wins with a warning. An
-  unknown mode degrades to `full`: toward more review, never less.
+  unknown mode degrades to `full`: toward more review, never less. The
+  optional `blocking-only` and `blocking-medium` modifiers change the repeat
+  review's posting surface (see
+  [Re-review modes](#re-review-modes-the-runs-per-pr-cost-lever));
+  an unknown modifier warns and is ignored, and the mode still applies.
+- `non-blocking-budget` sets how many non-blocking findings may post as inline
+  comments per review (default 3). Blocking findings never count against it;
+  `nitpick (non-blocking)` findings never post inline at all. Findings over
+  budget collapse into a `<details>` block in the review body whose summary
+  names the top-ranked entry when it holds two or more; a one-entry
+  observation section renders `<details open>` with a count-only summary,
+  since the entry is its own preview (metadata chips such as the version
+  footer stay closed at any count; always the body, never riding an inline
+  comment: the body is the surface the autofix's body-sourced work list
+  reads back); nothing is dropped, the verdict counts every validated
+  finding, and the autofix still reaches collapsed findings through that
+  work list, so the budget shrinks the notification surface, never the
+  autofix scope. A malformed value warns and keeps the previous value (the
+  default when no earlier line set one); when several lines set it, the
+  last one wins.
 
 Glob semantics are a practical subset of gitignore/CODEOWNERS: `**` crosses
 directories, `*` and `?` stay within a segment, a trailing `/` matches everything
@@ -300,10 +435,42 @@ and are skipped; routing degrades to fewer lenses, never to a crashed review.
 stays the model-facing prose about file *contents*; team ownership stays in
 `.github/REVIEWERS`, unchanged.
 
+### Routing the `security-auth` workflow hunts
+
+The `security-auth` lens's GitHub Actions workflow hunts (`pwn-request`,
+`over-scoped-secret`) run only when the lens spawns, so a repo that wants
+workflow changes reviewed must route the workflow paths:
+
+```
+.github/workflows/**       tier=high lens=security-auth
+**/action.yml              tier=high lens=security-auth
+**/action.yaml             tier=high lens=security-auth
+```
+
+`.github/workflows/**` covers gh-aw repos too: the authored `.md` workflow —
+whose frontmatter carries the trigger, permissions, and secrets — matches the
+pattern, and the hunts' own file gate includes it (the compiled `.lock.yml`
+beside it is generated output the reviewer skips).
+
+A repo that stages workflow files outside `.github/workflows/` pending a later
+move into it (e.g. a `.github-staging/` pen) should route that directory to the
+lens as well; the hunts' file gate covers staged workflow definitions by
+content, so they are reviewed before the move (the move itself is a rename
+that shows no content diff).
+
+A repo that stages deliberately-vulnerable workflow fixtures (test corpora,
+training material) should scope these patterns to its real action directories
+instead of `**`: lenses cannot be un-routed by a later rule, so a broad
+pattern would route the fixtures to a live lens. Scoping controls only
+whether the lens spawns; a spawned lens still reads the whole change's diff,
+so such a repo should also name its fixture paths as intentionally vulnerable
+in its `.github/aw/review/lenses/security-auth.md` payload.
+
 ### The `documentation` reviewer (opt-in)
 
 `enable documentation` turns on a reviewer that checks the **comments and prose docs
-the diff adds or changes** against a documentation policy. It is advisory-only and
+the diff adds or changes**, plus the **PR title and description**, against a
+documentation policy. It is advisory-only and
 opt-in like `conventions`, and it exists because comment quality is an enforcement
 problem rather than a prompt problem: every author, human or agent, is told what a
 good comment looks like, and nothing checks.
@@ -318,13 +485,23 @@ that had not yet written the file. Repo-specific calibration rides the per-direc
 frontend want different things here": they can, per directory, without a global
 decision.
 
+The policy has two halves. The **content half** is the original test: a comment
+earns its line by carrying information the code does not. The **readability half**
+applies to prose docs and the PR title/description, and is about translation cost,
+not taste: metaphor in place of the mechanism (a sentence the reader cannot decode
+into concrete operations without already knowing them), a paragraph that restates
+an earlier one, and shorthand the document coins but never defines. A
+title/description finding carries no path/line and posts PR-level, folded into the
+review body; whether the description *matches the diff* stays with `completeness`.
+
 Two things it deliberately does not do:
 
 - **It never reasons about who wrote the text.** It cannot tell whether a human or a
   model wrote a comment, and the policy is the same either way. A finding that reads
   as an accusation of AI authorship is out of bounds even when the comment is bad.
-- **It does not review the PR title or description.** Those carry no line anchor and
-  no fix path today; `completeness` and `first-principles` already read them.
+- **It does not police tone or style.** Vivid prose that names its mechanism passes,
+  domain terms of art pass, and quoted text (error messages, cited titles) is never
+  flaggable. The readability clauses fire only when the reader has to translate.
 
 **The label is load-bearing.** Its findings render as
 `suggestion (non-blocking, documentation)` rather than a plain `suggestion
@@ -338,8 +515,11 @@ carrying this label before a documentation-scoped autofix finds anything.
 
 **Volume is part of its policy.** The definition caps this reviewer at one finding per
 comment, two per file, and five per review, and ranks the policy's clauses so the tail
-is dropped from the bottom (restatement cleanups go first; a comment the diff falsified
-never does). The cap is there because the failure mode is not precision, it is
+is dropped from the bottom (readability findings go first, then restatement cleanups; a
+comment the diff falsified never does). Readability carries its own sub-cap: at most one
+line-anchored readability finding per review (batched: worst instance anchored, up to
+three more quoted in its discussion) and at most one PR-level finding on the
+title/description. The cap is there because the failure mode is not precision, it is
 attention: on a 70-line fixture the reviewer returned seven findings, several of them the
 docstring half of a blocking finding whose code fix resolved the observation anyway, and
 one the *fourth* thread on a single comment. Two other rules do the same work from
@@ -389,7 +569,7 @@ matching deterministically (review.md Step 7 runs the CLI and pastes its rendere
 block); no file means no section, so it costs nothing where it is absent.
 
 **Delivery is approval-time, not on-touch.** The pings ride in the (approval-only)
-Review Guidance comment, so — unlike Gerald, which notifies on every push — a
+Guidance for reviewers comment, so — unlike Gerald, which notifies on every push — a
 watcher is pinged when the reviewer approves, and a PR held at REQUEST_CHANGES or
 merged before the AI verdict lands never pings them. This is intentional: the
 notification piggybacks on the one comment the reviewer already posts, and firing
@@ -412,7 +592,7 @@ relies on those may match a slightly different set than Gerald. An unsupported g
 construct matches nothing rather than crashing the review; a malformed rule (bad
 regex body, unterminated quote) is dropped and adds a `Note:` to the PR review.
 
-Because the notified `@mentions` ride in the Review Guidance comment (an
+Because the notified `@mentions` ride in the Guidance for reviewers comment (an
 `add-comment` safe output), gh-aw's mention sanitizer governs whether they
 actually ping: repository collaborators are allow-listed by default
 (`mentions.allow-team-members`), and to let arbitrary teams/users through, widen
@@ -433,8 +613,17 @@ everything, whatever the mode:
 | --- | --- | --- |
 | `full` | The whole roster over the whole diff (today's behavior). **Default.** | Until the live A/B has priced a cheaper mode for the repo. |
 | `scoped` | The whole roster, staged only the hunks that are new since the last fully-reviewed fingerprint (`scoped.diff`); comments stay scoped to those hunks. | The recommended first step down: measured lifecycles caught fresh seeded defects on re-review pushes, which a reconcile-only path would miss. |
-| `flip-gated` | Thread reconciliation plus the correctness pass over the new hunks. A REQUEST_CHANGES→APPROVE flip is vetoed by any validated blocking finding from that pass; the pass gates the flip instead of being discarded. | Cheap re-reviews that still cannot flip to approval over a fresh validated defect. |
+| `flip-gated` | Thread reconciliation plus the correctness pass over the new hunks. Reduced depths never approve (approval requires a full-roster round): a standing REQUEST_CHANGES whose blocking objections are all resolved is cleared by dismissing it, and any validated blocking finding from the pass vetoes that clearance. | Cheap re-reviews that still cannot clear a standing block over a fresh validated defect. |
 | `fast` | Thread reconciliation only. | Maximum savings; fresh code on a re-push is guarded only by the tripwire below. |
+
+The dial governs push-shaped triggers. A `/review` comment a human posts on a
+consumer that keeps the comment trigger always plans `full` (reason
+`manual-review-request`): the point of the manual ask is "give me a real
+review now", and a reduced mode would otherwise answer it with a cheaper
+round. A `/review` posted by our automation (a Bot-type account, or a login
+in the `REVIEW_AUTOMATION_LOGINS` env, comma-separated and defaulting to
+`khan-actions-bot`; Khan/webapp's shim posts one per push) is not a manual
+ask and follows the configured mode like the push it stands in for.
 
 Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministic):
 
@@ -442,9 +631,13 @@ Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministi
   never anchors cheap re-reviews of the ready PR: the ready PR gets the one
   full review the cheaper modes lean on.
 - **Flip gate.** In `flip-gated` mode the dispatched correctness pass's
-  validated blocking findings veto the approval flip.
+  validated blocking findings veto the flip out of a standing
+  REQUEST_CHANGES. The flip's target is a dismissal, not an approval:
+  reduced depths never approve, so the cleared block waits for a
+  full-roster round to become one.
 - **Divergence tripwire.** Every full-depth review stamps a content-hashed
-  hunk signature into its review body as a hidden comment (it survives cache
+  hunk signature into its review body as a collapsed `<details>` block (an
+  HTML comment would be deleted by the ingest sanitizer; it survives cache
   eviction and branch protection's dismiss-stale-approvals, and it (not the
   review state) is what marks a full review as having happened, so a
   COMMENTED-only or dismissed history never wedges the dial). Each push is
@@ -453,6 +646,37 @@ Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministi
   divergent push gets the whole roster. This is what defeats
   rewrite-after-approval and sparse-PR-then-payload
   (`eval/lifecycle/`, replayed in `eval/lifecycle.test.ts`).
+
+**The `blocking-only` modifier** (`re-review scoped blocking-only`) composes
+with any mode: the depth's roster and staging are unchanged, but a repeat
+review posts only blocking findings inline; validated non-blocking findings
+collapse to one line each in a `<details>` block in the review body, and the
+depth note names the modifier. It applies exactly when the run executes at a
+reduced depth, so the first full review of a ready PR, a divergence-tripwire
+re-arm, and every guard that resolves to `full` still post everything (which
+is also why `full blocking-only` warns: it can never apply). The verdict is
+computed from every validated claim either way, so the modifier can never
+flip an outcome; it only moves non-blocking feedback off the inline surface.
+Use it when re-review chatter is the complaint but whole-change coverage
+(`scoped`) is still wanted: `flip-gated` silences the noise by not running
+the whole-change reviewers at all, while `scoped blocking-only` keeps their
+blocking recall and their body-collapsed observations.
+
+**The `blocking-medium` modifier** (`re-review scoped blocking-medium`) is the
+recommended middle: same reduced surface as `blocking-only`, except findings
+carrying the medium importance tier (a verified defect or gap in code the PR
+adds, one a reasonable author would fix before merge; reviewer-proposed,
+validator-adjudicated, and code-vetoed against the diff's added lines) keep
+posting inline, spending the non-blocking budget. Motivating case for
+preferring it over strict `blocking-only`: three 2026-08-24 approving
+re-reviews on this repo collapsed verified correctness findings behind a bare
+"Non-blocking observations (N)" count (#367's "the reply guard never fires"
+among them). `blocking-only` stays available as the rollback dial for the
+inline surface if the medium tier inflates on a consumer; note it quiets the
+posting surface only — the verdict follows the medium count regardless, so
+sustained inflation is a calibration fix (reviewer prompts, validator
+adjudication), not a ROUTING dial. At most one modifier per `re-review`
+line; a later line replaces an earlier one.
 
 The dial is a measured change, not a default change: it ships `full`
 everywhere, so no consumer's behavior moves until its repo adds a `re-review`
@@ -520,7 +744,9 @@ Fable's cyber classifiers can refuse benign security analysis, while
 `correctness-reviewer` — the default roster's load-bearing recall agent — was
 moved *onto* Fable 5 for its recall gain. Eval run 30656579898 caught it
 refusing `incident-auth-bypass` and `adversarial-injection-approve` outright,
-at 5,207 tokens (so not a context limit).
+at 5,207 tokens (so not a context limit). The roster has since moved to Opus 5,
+which carries its own elevated cyber safeguards, so the hazard moved with it
+rather than being resolved by the pin change.
 
 Refusals are **intermittent**: probe run 30658862532 saw the same Fable pin
 clear both cases that run 30656579898 blocked. The ordinary retry still cannot
@@ -531,7 +757,7 @@ refusing pin to a model with a different refusal profile:
 | Pinned model | Falls back to | Basis |
 | --- | --- | --- |
 | `claude-fable-5` | `claude-opus-4-8` | measured (run 30656579898) |
-| `claude-opus-5` | `claude-opus-4-8` | pre-emptive; #294 notes Opus 5 also ships elevated cyber safeguards |
+| `claude-opus-5` | `claude-opus-4-8` | pre-emptive; Opus 5 ships elevated cyber safeguards and can also return `stop_reason: "refusal"` |
 
 Rules: **one hop**, never back to a model that already refused, and **no
 fallback for an unlisted pin** — an unmapped model's refusal stands and is
@@ -552,23 +778,29 @@ provider-policy shift.
 Each sub-agent pins its model in its own definition inside `review.md` (with a
 launch-default `effort:` annotation; the gh-aw Claude engine exposes no per-agent
 effort field yet). The orchestrator prompt deliberately says nothing about
-sub-agent models — this table is the human-facing summary:
+sub-agent models — this table is the human-facing summary of the claude
+baseline. On this branch every sub-agent pin is temporarily
+`gemini-3.8-flash`: the live A/B measures that model against the claude
+baseline below, and the pins revert (or move deliberately) once the A/B is
+read. The engine pin and the eval's judge/arbiter pins stay claude either
+way.
 
 | Role | Model | Effort | Why |
 | --- | --- | --- | --- |
-| orchestrator | `claude-opus-4-8` | high | Owns every GitHub/safe-output decision |
+| orchestrator | `claude-opus-5` | high | Owns every GitHub/safe-output decision |
 | `pattern-triage` | `claude-sonnet-4-6` | medium | Cheap first-pass triage |
-| `thread-reconciler` | `claude-opus-4-8` | medium | Reconciliation |
-| `correctness-reviewer` | `claude-fable-5` | high | Whole-change reviewer; bug-finding recall is the load-bearing metric |
-| `skill-auditor` | `claude-opus-4-8` | high | Whole-change reviewer |
-| `holistic` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
-| `completeness` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
-| `test-adequacy` | `claude-opus-4-8` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
-| `conventions` | `claude-opus-4-8` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
-| `documentation` | `claude-opus-4-8` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
-| `first-principles` | `claude-fable-5` | high | Opt-in advisory-only; reviews the change's justification |
-| `claim-validator` | `claude-opus-4-8` | xhigh | Adversarial claim validation; stays Opus (the Fable arm did not improve precision) |
-| specialist lenses | `claude-opus-4-8` | high | Opt-in via `lens=` in `ROUTING`; the security & auth lens is xhigh |
+| `thread-reconciler` | `claude-opus-5` | medium | Reconciliation |
+| `correctness-reviewer` | `claude-opus-5` | high | Whole-change reviewer; bug-finding recall is the load-bearing metric |
+| `skill-auditor` | `claude-opus-5` | high | Whole-change reviewer |
+| `holistic` | `claude-opus-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `completeness` | `claude-opus-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `test-adequacy` | `claude-opus-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `conventions` | `claude-opus-5` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
+| `documentation` | `claude-opus-5` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
+| `first-principles` | `claude-opus-5` | high | Opt-in advisory-only; reviews the change's justification |
+| `claim-validator` | `claude-opus-5` | xhigh | Adversarial claim validation; stays Opus (the Fable arm did not improve precision) |
+| prose judge | `claude-opus-4-8` | (single completion) | In-session style gate on submitted finding prose (`judge-prose.ts`); haiku's verdicts flickered run to run, and opus-4-8 is proven invokable and curated-priced through the stable firewall |
+| specialist lenses | `claude-opus-5` | high | Opt-in via `lens=` in `ROUTING`; the security & auth lens is xhigh |
 
 Only the orchestrator and the default roster (`pattern-triage`,
 `correctness-reviewer`, `skill-auditor`, `thread-reconciler`, `claim-validator`)
@@ -587,42 +819,30 @@ analysis, and a refused security lens would be a silent coverage hole. Any
 further per-role promotion (or Sonnet step-down) earns its line through its
 own eval-suite arm.
 
-### Feedback signal: thumbs sweep and live counters
+### Feedback signal: live counters
 
-Two small scheduled workflows in each consumer repo turn on the tuning loop's
-production signal. Both are plain GitHub Actions YAML (not gh-aw), both check
-out this repo at the pinned `review-v*` tag and run lib scripts with
-`npx -y tsx`, and neither touches review semantics:
+One small scheduled workflow in each consumer repo turns on the tuning loop's
+production signal. It is plain GitHub Actions YAML (not gh-aw), checks out
+this repo at the pinned `review-v*` tag, runs a lib script with `npx -y tsx`,
+and never touches review semantics:
 
-- **Thumbs sweep** (`lib/run-thumbs-sweep.ts`, every 1-2 hours): collects
-  reactions on the reviewer's comments at both grains (inline review comments,
-  identified by the code-owned Conventional-Comment label prefixes; the
-  risks/patterns summary comment, identified by its hidden marker) and posts
-  exactly one "why?" follow-up per newly-downvoted comment, offering the closed
-  reason vocabulary (`incorrect` / `unimportant` / `unclear` / `duplicate`).
-  Reactions are tallied with the same sets gh-aw's outcome evaluation uses
-  (👍/❤️/🎉/🚀 positive, 👎/😕 negative; a 😕 triggers the follow-up like a 👎),
-  and resolved inline threads are counted as their own positive column: threads
-  also get resolved just to clear noise, so resolution is reported alongside
-  the reaction tallies rather than folded into them. Idempotent across restarts
-  via the hidden follow-up markers; bounded to PRs updated in the last 14 days
-  (`REVIEW_SWEEP_LOOKBACK_DAYS`), skipping PRs closed or merged more than 3
-  days ago (`REVIEW_SWEEP_CLOSED_GRACE_DAYS`; feedback lands around merge time,
-  after which a landed PR stops changing). Needs only `pull-requests: write`.
-  The sweep run needs `npm ci --omit=dev` in the checked-out
-  `workflows/review/` first (the sweep's `octokit` dependency is pinned exactly
-  in `package.json`, with the transitive tree locked by the committed
-  `package-lock.json`); the other lib scripts remain dependency-free. Each run's
-  `SweepResult` and API-request count land in the job summary.
 - **Live counters** (`lib/counters-report.ts`, weekly): the workflow downloads
   the review runs' per-run artifacts (bounded window), and the script
   aggregates them with `lib/counters.ts` into the job summary — verdict mix,
-  comments/run, validator drop rate, cost/run. Needs only `actions: read`.
+  comments/run, validator drop rate, cost/run. Needs only `actions: read`,
+  and no `npm ci`: the lib scripts consumers run are dependency-free.
 
-The reviewer posts as `github-actions[bot]` (gh-aw safe outputs use the
-workflow's own token), so that login is both the sweep's `botLogin` filter and
-the author of its follow-ups; every count in the sweep excludes that login's
-own reactions, so the seeded nudge pair (below) is never live signal.
+There used to be a second workflow here, the thumbs sweep (a 2-hourly poll
+that tallied reactions on the reviewer's comments and posted a "why?"
+follow-up per newly-downvoted comment). Both halves are retired: the
+2026-08-20 audit measured 2 reason replies across the 31 follow-ups ever
+posted, each follow-up also registered as an implicit empty review event, and
+nobody consumed the read-side tallies. A bare 👎 adjudicates directly since
+v1.17.0 (the staging reads thread-opener reactions itself, excluding the
+bot's own seeded nudges), so no scheduled collector is needed for feedback to
+act on the reviewer. A consumer still carrying the sweep's `review-feedback.yml`
+should delete it at its next bump (Khan/webapp#41685 is the reference deletion);
+`review-counters.yml` stays.
 
 ### Relationship to the gh-aw outcome-collector
 
@@ -631,29 +851,28 @@ classifies every agentic safe output as accepted / rejected / ignored /
 pending and exports the results to Sentry over OTLP. The two systems answer
 different questions and neither replaces the other:
 
-- **Outcome-collector**: passive fleet-wide acceptance telemetry. It never
-  writes to GitHub, so it can observe engagement but cannot ask *why* a
-  comment was downvoted. Its data lives in Sentry.
-- **Thumbs sweep**: active reason elicitation for the reviewer's tuning loop.
-  Its "why?" follow-ups produce the closed reason labels that calibrate the
-  eval-suite judge and feed dismissal learning. Its data lives in each run's
-  job summary and stdout JSON (not exported to OTel today).
+- **Outcome-collector**: passive fleet-wide acceptance telemetry across every
+  agentic workflow. Its data lives in Sentry. It counts any reaction with no
+  reactor identity, so it cannot exclude the seeded nudges.
+- **Reviewer-side signal**: the adjudication path reads thread-opener
+  reactions identity-filtered at review time, and the live-counters report
+  aggregates the per-run artifacts. Neither is exported to OTel today.
 
 Two known interactions:
 
 - **Nudge seeding** is planned as a post-time step in the consumer repos'
   review workflow (a custom safe-output job that reacts 👍/👎 to each posted
-  comment seconds after posting), not in the sweep: gh-aw cannot react to its
-  own safe outputs natively, and comments posted via `GITHUB_TOKEN` emit no
-  workflow events, so post-time is the only immediate option.
+  comment seconds after posting): gh-aw cannot react to its own safe outputs
+  natively, and comments posted via `GITHUB_TOKEN` emit no workflow events,
+  so post-time is the only immediate option.
 - Once seeding is live, the outcome-collector's `add_comment` metric for the
   review workflow is **inflated by design**: its evaluator counts any reaction
   as acceptance with no reactor identity, so every seeded summary comment
   reads as `accepted`. The inflation is bounded to that one metric (inline
-  comments and submitted reviews are evaluated by other means), and the sweep's
-  identity-filtered tallies are the authoritative reviewer-comment engagement
-  numbers. An upstream gh-aw change to identity-aware reaction counting would
-  retire this caveat.
+  comments and submitted reviews are evaluated by other means); the
+  adjudication path's identity-filtered reads are the authoritative
+  reviewer-comment engagement signal. An upstream gh-aw change to
+  identity-aware reaction counting would retire this caveat.
 
 ### Required secrets / variables
 
@@ -668,10 +887,28 @@ Two known interactions:
   rejects it, and the agent job dies at startup instead of skipping trace
   export (observed on Khan/actions#241). A repo without these secrets must
   comment out the `observability:` block in its installed `review.md` as a
-  local edit (which `gh aw update` preserves) and recompile.
+  local edit (which the 3-way merge update flow preserves) and recompile.
 
 Optional:
 
+- `REVIEW_JIRA_BASE_URL` (repo **variable**), `REVIEW_JIRA_EMAIL` and
+  `REVIEW_JIRA_API_TOKEN` (repo **secrets**): the linked-ticket staging
+  (`lib/stage-ticket.ts`). When all three are set, the pre-agent staging
+  collects every Jira issue key the PR references (title, head branch, and
+  description, deduped; known key-shaped noise like `UTF-8`, `SHA-256`, and
+  `CVE-2024-1234` sinks to the back before the cap of 5 applies), fetches
+  each read-only on the host, and stages the ones that resolve as
+  `ticket-context.json` (a `tickets` array) for the intent-reading
+  sub-agents (completeness, first-principles). Noise and stale keys 404 and
+  drop silently. The disclosure
+  bound (which tickets author-written keys can pull into a review that
+  posts publicly) is the service account's own Jira permissions, enforced
+  server-side: use a dedicated service account granted Browse Projects on
+  only the projects reviews may quote, with a read-only API token. The
+  agent sandbox never sees the credentials and has no Jira egress. Without
+  these, the file stages `{available: false, reason: "not-configured"}` and
+  those sub-agents fall back to the PR description; a ticket is context,
+  never a prerequisite, so nothing else changes.
 - `REVIEW_BOT_LOGIN` — the account this workflow posts reviews as, default
   `github-actions[bot]`. Set it only in a repo that posts under its own GitHub
   App, in the installed `review.md`'s workflow-level `env:` block (the one
@@ -683,6 +920,13 @@ Optional:
   human ones, which puts their lines in `skipLines` and DROPS fresh findings
   there. Either spelling works (`name` or `name[bot]`); the comparison strips
   the suffix.
+- `REVIEW_AUTOMATION_LOGINS` — comma-separated logins whose `/review`
+  comments are automation, not a manual ask, default `khan-actions-bot`. Set
+  it in the same workflow-level `env:` block as `REVIEW_BOT_LOGIN` (the plan
+  CLI reads it in the pre-agent staging step) in a repo whose `/review` shim
+  posts under a different classic-PAT account. The list REPLACES the default
+  (an empty value restores it), the comparison is case-folded, and Bot-type
+  authors are treated as automation regardless of the list.
 
 ## Versioning
 
@@ -703,20 +947,82 @@ bump lands in the same Version Packages commit that gets tagged.
 literals do not match the `review` package version (releases v1.3.0 through
 v1.4.0 shipped still pointing at v1.2.2, before the sync existed).
 
+### Output-shape changes belong in the changeset
+
+A change to the render path (`lib/submission.ts`, `lib/render-comment.ts`,
+`lib/dispatch-contracts.ts` prose composition) that alters what authors see
+must say so in its changeset, including the expected direction of body-size
+change. The v1.8.0 task-mode removal shipped a +60% median-body step (557 to
+889 chars across webapp's v1.7.0 to v1.11.0 bump, sketch share 15.6% to 48.6%)
+with changesets framed entirely as conformance wins; the regression went
+unattributed for four versions until a by-version audit reconstructed it
+(PRA-46). Each staged `submission-plan.json` now carries `bodyStats`
+(per-comment median/p90/max/total chars and the review body's length), and a
+copy of the plan is staged under `out/` so it rides the run's uploaded
+artifact (Step 9's `upload-artifact` matches the staging-relative `out/**`;
+the absolute `/tmp/gh-aw/review/out/**` pattern alongside it matches nothing
+under gh-aw v0.81.6 and is kept only as future-proofing); compare a
+release's first live artifacts against the prior version's when a render
+change ships.
+
 ### Version attribution
 
 Semver is the behavior contract: a release that changes the reviewer's behavior bumps
 the major version, so a consumer pinned to `review-v<major>` can assume the fundamental
-behavior holds within a major. For attribution and rollback, the risks/patterns
-guidance comment (Step 7) carries the release the run executed, in one HTML marker
-reusing the `pr-reviewer:` marker namespace `#194` established:
+behavior holds within a major. For attribution and rollback, every submitted review
+body and the risks/patterns guidance comment (Step 7) end with a footer collapsed
+inside a `<details>` block (summary chip `review details`), rendered in code by
+`lib/version-footer.ts` from the pinned checkout's `package.json` and the staged
+run files (never composed by the model):
 
 ```
-<!-- pr-reviewer:version v=review-v<major>.<minor>.<patch> schema=<n> -->
+<details><summary><sub>review details</sub></summary>
+<sub>review-v<major>.<minor>.<patch> | schema <n> | depth <depth> | re-review <mode> [blocking-only|blocking-medium] | enable <reviewer,...> | non-blocking-budget <n></sub>
+</details>
 ```
 
 `schema` is the finding-schema version (`FINDING_SCHEMA_VERSION` in
-`lib/finding-schema.ts`) the run was on. A bad reviewer release rolls back by
-re-pinning the previous tag; the marker on each posted review makes attribution
-immediate. There is no separate config-hash or drift-stamp mechanism — the release
-tag is the single version surface.
+`lib/finding-schema.ts`) the run was on; `depth` is the EXECUTED re-review depth;
+the `re-review`, `enable`, and `non-blocking-budget` segments echo the repo's
+ROUTING configuration, so a posted review attributes both the release and the
+config it ran under (`non-blocking-budget` appears only at a non-default value:
+the footer states configuration, not defaults). A segment
+the staging cannot state is omitted rather than guessed. A bad reviewer release
+rolls back by re-pinning the previous tag; the footer on each posted review makes
+attribution immediate.
+
+The footer posts (collapsed, expandable) by necessity, not preference:
+attribution originally rode a hidden HTML marker
+(`<!-- pr-reviewer:version ... -->`), but gh-aw's safe-output
+ingest sanitizer deletes ALL XML/HTML comments (`removeXmlComments` in
+`sanitize_content_core.cjs`, the same strip documented for the fingerprint stamp
+in `lib/rereview-mode.ts`), so the marker never reached a posted comment; `sub`,
+`details`, and `summary` are on the sanitizer's allowed-tag list and survive
+ingest. There is no separate config-hash or drift-stamp mechanism; the release
+tag plus the footer's config segments are the version surface.
+
+After the footer, a submitted review body ends with one more collapsed block:
+the re-review fingerprint stamp (summary chip `review fingerprint`, rendered
+by `lib/rereview-mode.ts`), the hunk-signature record the next run's re-review
+planner and autofix's currency check read back. It rides the same
+sanitizer-surviving `details`/`summary`/`sub` mechanism as the footer, so the
+footer is second-to-last and the stamp is the final block.
+
+Every inline review comment (and each pr-level finding folded into the review
+body) additionally carries per-comment attribution, naming the reviewer that
+produced the finding and, when cross-source dedup merged duplicates into it,
+each other reviewer that flagged the same defect (`lib/attribution.ts`; the
+merge record is the structured `also_flagged_by` field on the claim, so a
+validator discussion rewrite cannot drop it). For inline comments the shape
+splits on length: a short comment ends with the classic collapsed footer
+block, and a long one posts as a visible summary line plus one collapsed
+context block (`lib/render-comment.ts`) with the attribution riding inside
+that block as its final `<sub>` line rather than stacking a second expando.
+A pr-level finding in the review body keeps its own fold
+(`renderPrLevelFold`: the `Full finding` chip at 400 chars) with the classic
+footer stacked after it. Collapsed one-liners (the low-confidence `<details>` section and a
+hold comment's claim list) carry the short form, a trailing
+`<sub>(<source>)</sub>` tag. Text-similarity comparisons against
+previously-posted bodies (open-thread suppression, the adjudicated corpus)
+strip these footers first, so the shared boilerplate cannot inflate similarity
+between unrelated findings.

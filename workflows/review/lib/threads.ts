@@ -19,7 +19,7 @@
  * `reviewThreads` connection carries both.
  *
  * This module also owns the answer to "is this login our review bot", because
- * the producer's filter and the consumer's guard (`dedup.ts`'s open-thread
+ * the producer's filter and the consumer's guard (`dedup-threads.ts`'s open-thread
  * suppression) must not be able to disagree about it. Khan/actions#302 was
  * exactly that disagreement one layer up: the prompt selected threads by one
  * spelling of the bot's login and the code admitted another, so a conforming
@@ -48,7 +48,7 @@ export const DEFAULT_REVIEW_BOT_LOGIN = "github-actions[bot]";
  * The login this workflow's own review comments are authored by, and the
  * single source of truth for that identity across the producer
  * (`stage-pr.ts`, which selects the bot's threads) and the consumers
- * (`dedup.ts`'s suppression guard). Both layers read it here, which is the
+ * (`dedup-threads.ts`'s suppression guard). Both layers read it here, which is the
  * property #302 lost when each spelled the identity itself.
  *
  * Deployment config, not a compiled-in constant, because the identity is a
@@ -56,8 +56,7 @@ export const DEFAULT_REVIEW_BOT_LOGIN = "github-actions[bot]";
  * GitHub App has a different login, and a login it cannot change would misfile
  * every one of its bot threads as human, which puts them in `skipLines` and
  * DROPS fresh findings on those lines. `REVIEW_BOT_LOGIN` matches the env its
- * siblings already take (autofix's `AUTOFIX_BOT_LOGIN`, the thumbs sweep's
- * `REVIEW_SWEEP_BOT_LOGIN`), same default.
+ * sibling already takes (autofix's `AUTOFIX_BOT_LOGIN`), same default.
  *
  * Read per call rather than captured at import so the value a CLI sets after
  * this module loads is still seen.
@@ -96,6 +95,16 @@ const baseLogin = (login: string): string => {
 export const sameLogin = (a: string, b: string): boolean =>
     baseLogin(a) === baseLogin(b);
 
+/**
+ * Whether a login is ANY GitHub App (`[bot]`-suffixed), not just this
+ * workflow's review bot. Lives here so the suffix spelling stays in the one
+ * module that owns login identity ({@link baseLogin}); note this only sees
+ * the REST spelling (GraphQL reports the bare login), so callers needing
+ * "is this the review bot on either surface" want {@link isReviewBotAuthor}.
+ */
+export const isBotLogin = (login: string): boolean =>
+    login.toLowerCase().endsWith("[bot]");
+
 /** Whether a comment author is this workflow's review bot, either spelling. */
 export const isReviewBotAuthor = (login: string): boolean =>
     sameLogin(login, reviewBotLogin());
@@ -103,10 +112,23 @@ export const isReviewBotAuthor = (login: string): boolean =>
 /**
  * Review threads with their full reply chain.
  *
- * `comments(first: 100)` rather than the thumbs sweep's `first: 1`: the
+ * `comments(first: 100)` rather than an opener-only `first: 1`: the
  * reconciler contract wants the whole chain, because an author's reply is
  * often what says a finding is already handled. `isResolved` is fetched so
  * resolved threads are dropped here rather than downstream.
+ *
+ * `reactions(first: 10)`, NOT 100: GitHub prices a query by its potential
+ * nodes (each page size multiplied down the nesting) against a 500,000 cap,
+ * and rejects an over-budget query STATICALLY, before looking at the PR. At
+ * 100 this query priced at 100 + 100*100 + 100*100*100 = 1,010,100, so every
+ * staging failed with `MAX_NODE_LIMIT_EXCEEDED` whatever the PR held
+ * (Khan/agent-settings#76 was the first consumer to hit it, on the v1.17.0
+ * bump itself). 10 prices it at 110,100. The depth is semantically free:
+ * only the opener's reactions are read (`openerDownvotes`), the consumer's
+ * threshold is `> 0`, and the only non-human reaction to skip past is the
+ * bot's own single nudge seed, so 10 attributable reactors is already 10x
+ * what adjudication needs. The budget is pinned by a test in
+ * stage-threads.test.ts; check it before widening any `first:` here.
  */
 const THREADS_QUERY = `
 query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
@@ -117,10 +139,18 @@ query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
                 nodes {
                     id
                     isResolved
+                    resolvedBy { login }
                     path
                     line
                     comments(first: 100) {
-                        nodes { author { login } body url }
+                        nodes {
+                            author { login }
+                            body
+                            url
+                            reactions(first: 10, content: THUMBS_DOWN) {
+                                nodes { user { login } }
+                            }
+                        }
                     }
                 }
             }
@@ -227,23 +257,70 @@ const threadsConnectionOf = (
 };
 
 /**
- * Every UNRESOLVED review thread on the PR, in API order, whoever opened it.
- * Callers partition by opener ({@link isReviewBotAuthor}); nothing here is
- * filtered by author, so the reviewer can stage the human threads it defers to
- * from the same fetch.
+ * A review thread as fetched, resolution state included. The `StagedThread`
+ * fields carry the shape every downstream reader already consumes;
+ * `resolved`/`resolvedBy` exist so ONE fetch can serve both the unresolved
+ * partition (threads.json / human-threads.json) and the adjudicated corpus
+ * (adjudicated-threads.json: bot threads a HUMAN resolved, which suppress
+ * re-derivation of the defect they adjudicated — see dedup-adjudicated.ts's
+ * `adjudicatedThreadsFromStaged`).
+ */
+export type FetchedThread = StagedThread & {
+    resolved: boolean;
+    /**
+     * Who resolved the thread, suffix-stripped like every login comparison in
+     * this module (`resolvedBy` arrives over GraphQL, so the bot appears as
+     * bare `github-actions`; see {@link sameLogin}). Empty when the thread is
+     * unresolved or the resolver is unattributable (a deleted account), and
+     * an empty resolver never reads as human adjudication downstream.
+     */
+    resolvedBy: string;
+    /**
+     * How many 👎 reactions from ATTRIBUTABLE NON-BOT reactors the thread's
+     * OPENING comment carries. The opener is the finding, so a downvote on it
+     * is a reviewer's judgment on the finding itself; later
+     * comments' reactions are conversation,
+     * not adjudication, and are not counted. 0 when there is no opener or the
+     * API returned no connection.
+     *
+     * Reactor identity is filtered, not merely counted, for the same reason
+     * the retired sweep's `countDownvotes` filtered `r.user !== botLogin`: the review
+     * workflow plans to seed the 👍/👎 nudge pair on its own comments at post
+     * time (README, "Nudge seeding"), and a seeded 👎 is the presence of the
+     * feedback widget, not a judgment on the finding. A raw `totalCount`
+     * cannot exclude the bot, so it would put every nudge-seeded finding in
+     * the adjudicated corpus the moment seeding ships.
+     *
+     * An unattributable reactor (a deleted account, GraphQL `user: null`) is
+     * excluded too, matching {@link FetchedThread.resolvedBy}'s rule that an
+     * empty identity never reads as human adjudication. This is deliberately
+     * STRICTER than the retired sweep, whose `Reaction` doc treated a login-less
+     * reaction as a real user's: that worst case was one wasted "why?"
+     * question, while this count suppresses re-derivation of the defect, and
+     * suppression on unverifiable authority is the expensive direction.
+     */
+    openerDownvotes: number;
+};
+
+/**
+ * Every review thread on the PR, in API order, whoever opened it and whatever
+ * its resolution state. Callers partition by opener
+ * ({@link isReviewBotAuthor}) and by `resolved`; nothing here is filtered, so
+ * the reviewer can stage the human threads it defers to, its own open
+ * threads, and the human-adjudicated corpus from the same fetch.
  *
  * Fails closed on both shapes a failed query takes (an `errors` array, and a
  * body with no `reviewThreads` connection), because neither means "this PR has
  * no threads", and reading them that way is the one mistake this module cannot
  * afford (see {@link assertNoGraphqlErrors}).
  */
-export const collectUnresolvedThreads = async (
+export const collectReviewThreads = async (
     graphql: GhGraphql,
     owner: string,
     repo: string,
     number: number,
-): Promise<StagedThread[]> => {
-    const out: StagedThread[] = [];
+): Promise<FetchedThread[]> => {
+    const out: FetchedThread[] = [];
     let cursor: string | null = null;
 
     for (;;) {
@@ -264,7 +341,7 @@ export const collectUnresolvedThreads = async (
 
         const nodes = Array.isArray(conn["nodes"]) ? conn["nodes"] : [];
         for (const node of nodes) {
-            if (!isRecord(node) || node["isResolved"] === true) {
+            if (!isRecord(node)) {
                 continue;
             }
             const commentsConn = isRecord(node["comments"])
@@ -278,7 +355,7 @@ export const collectUnresolvedThreads = async (
                     ? str(comment["author"]["login"])
                     : "",
                 // Verbatim. The label parsers (`rereview.ts`'s recap,
-                // `dedup.ts`'s suppression) read the leading `**label:**`
+                // `dedup-threads.ts`'s suppression) read the leading `**label:**`
                 // template off this string; normalising it here is how a
                 // finding becomes unclassifiable.
                 body: str(comment["body"]),
@@ -286,12 +363,37 @@ export const collectUnresolvedThreads = async (
             const firstUrl = isRecord(rawComments[0])
                 ? str(rawComments[0]["url"])
                 : "";
+            // `resolved` is strict on `=== true`: an absent or malformed
+            // `isResolved` must not manufacture an adjudicated thread, and
+            // reading it as unresolved only risks a duplicate comment.
+            const resolved = node["isResolved"] === true;
+            const openerReactions = isRecord(rawComments[0])
+                ? rawComments[0]["reactions"]
+                : undefined;
+            const reactionNodes =
+                isRecord(openerReactions) &&
+                Array.isArray(openerReactions["nodes"])
+                    ? openerReactions["nodes"]
+                    : [];
+            const openerDownvotes = reactionNodes.filter((reaction) => {
+                if (!isRecord(reaction) || !isRecord(reaction["user"])) {
+                    return false;
+                }
+                const login = str(reaction["user"]["login"]);
+                return login !== "" && !isReviewBotAuthor(login);
+            }).length;
             out.push({
                 thread_id: str(node["id"]),
                 path: str(node["path"]),
                 line: typeof node["line"] === "number" ? node["line"] : null,
                 ...(firstUrl === "" ? {} : {url: firstUrl}),
                 comments,
+                resolved,
+                openerDownvotes,
+                resolvedBy:
+                    resolved && isRecord(node["resolvedBy"])
+                        ? str(node["resolvedBy"]["login"])
+                        : "",
             });
         }
 
@@ -317,3 +419,29 @@ export const collectUnresolvedThreads = async (
         cursor = next;
     }
 };
+
+/**
+ * Every UNRESOLVED review thread on the PR, in the exact `StagedThread` shape
+ * the pre-`resolvedBy` collector returned. Kept as the narrow surface for the
+ * consumers that only ever want open threads (autofix's staging), so adding
+ * the adjudicated corpus could not silently change what they stage: the
+ * resolution fields are STRIPPED here, not merely defaulted, because both
+ * stagings serialize these objects verbatim and an extra field is a shape
+ * change to every exact-match reader downstream.
+ */
+export const collectUnresolvedThreads = async (
+    graphql: GhGraphql,
+    owner: string,
+    repo: string,
+    number: number,
+): Promise<StagedThread[]> =>
+    (await collectReviewThreads(graphql, owner, repo, number))
+        .filter((thread) => !thread.resolved)
+        .map(
+            ({
+                resolved: _resolved,
+                resolvedBy: _resolvedBy,
+                openerDownvotes: _openerDownvotes,
+                ...thread
+            }) => thread,
+        );

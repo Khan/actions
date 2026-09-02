@@ -22,17 +22,24 @@ import type {Anchor, Finding, Lens} from "./finding-schema";
 
 /**
  * The review-outcome vocabulary. `APPROVE` / `REQUEST_CHANGES` are #194's
- * mechanical events; `HOLD_FOR_HUMAN` is the third outcome (missing-core
- * dimension gate + policy-named conflicts). It is not a GitHub review event —
- * `review.md` only allows `[APPROVE, REQUEST_CHANGES]` — so the orchestrator
- * surfaces a hold by pulling in a human rather than auto-submitting an approval.
+ * mechanical events. `COMMENT` is the middle verdict (PRA-7): the run found
+ * medium-importance findings and nothing blocking, so it neither vouches for
+ * the change nor demands another round; it IS a GitHub review event, and the
+ * findings post exactly as they would on an approval. `HOLD_FOR_HUMAN` is
+ * the coverage outcome (missing-core dimension gate + policy-named
+ * conflicts); it is NOT a GitHub review event, so the orchestrator surfaces
+ * a hold by pulling in a human rather than auto-submitting anything.
  *
  * Defined here (the rendering module) rather than in `verdict.ts` so the import
  * graph has a single direction (`verdict.ts` -> `render-comment.ts`) with no
  * cycle: rendering is the lower-level presentation vocabulary, verdict is the
  * policy computed on top of it.
  */
-export type VerdictEvent = "APPROVE" | "REQUEST_CHANGES" | "HOLD_FOR_HUMAN";
+export type VerdictEvent =
+    | "APPROVE"
+    | "COMMENT"
+    | "REQUEST_CHANGES"
+    | "HOLD_FOR_HUMAN";
 
 /**
  * The Conventional-Comment labels that drive REQUEST_CHANGES under #194's
@@ -52,12 +59,20 @@ export const BLOCKING_LABELS = [
  */
 export const DOCUMENTATION_LABEL = "suggestion (non-blocking, documentation)";
 
+/**
+ * The nitpick label. Named for the same reason {@link DOCUMENTATION_LABEL}
+ * is: it is a selection key, not only a description — the posting surface
+ * (`submission.ts`) never posts nitpick-class findings inline, so the string
+ * is imported rather than re-spelled downstream.
+ */
+export const NITPICK_LABEL = "nitpick (non-blocking)";
+
 /** Every other Conventional-Comment label; none of these block. */
 export const NON_BLOCKING_LABELS = [
     "suggestion (non-blocking)",
     "suggestion (non-blocking, best-practice)",
     DOCUMENTATION_LABEL,
-    "nitpick (non-blocking)",
+    NITPICK_LABEL,
     "question (non-blocking)",
     "thought (non-blocking)",
     "note (non-blocking)",
@@ -79,8 +94,8 @@ export const isBlockingLabel = (label: string): boolean =>
 
 /**
  * Lenses whose findings render as *best-practice* labels rather than plain
- * correctness labels. The finding schema deliberately keeps only a two-value
- * `severity` (blocking/advisory); the richer Conventional taxonomy is applied
+ * correctness labels. The finding schema deliberately keeps a small three-value
+ * `severity` (blocking/medium/advisory); the richer Conventional taxonomy is applied
  * here at render time (schema comment on `SEVERITIES`). #194 maps skill/
  * best-practice findings to the `, best-practice` label variants, so among
  * schema findings only the conventions lens gets them (the skill-auditor's
@@ -121,6 +136,14 @@ const DOCUMENTATION_LENSES: ReadonlySet<Lens> = new Set<Lens>([
  *   - advisory  + documentation lens  -> `suggestion (non-blocking, documentation)`
  *   - advisory  + other lens          -> `suggestion (non-blocking)`
  *
+ * `medium` severity renders exactly as `advisory` does (the non-blocking
+ * rows above). That is the tier's design invariant, not an omission:
+ * keeping medium out of the label vocabulary is what leaves the label-keyed
+ * machinery (the recap parser, dedup's blocking guards, the flip gate)
+ * untouched. The verdict DOES read the tier, but directly (`verdict.ts`
+ * consumes the post-veto medium count and demotes a would-be APPROVE to
+ * COMMENT), never through labels.
+ *
  * There is deliberately **no blocking documentation variant**. The
  * documentation reviewer is advisory-only (its definition permits it one
  * label), so the blocking row is unreachable for it in practice; and minting a
@@ -131,7 +154,7 @@ const DOCUMENTATION_LENSES: ReadonlySet<Lens> = new Set<Lens>([
  * safe direction (a blocking finding wants a human, not a scoped bulk fix).
  *
  * The finer labels a human reviewer might pick (`todo`, `nitpick`, `question`,
- * `thought`, `note`) are not expressible in the two-value schema, so lenses fold
+ * `thought`, `note`) are not expressible in the three-value schema, so lenses fold
  * them into the canonical issue/suggestion pair. `verdict.ts` and `review.md`
  * both treat `issue (blocking*)` and `todo (blocking)` identically, so the fold
  * is verdict-preserving.
@@ -152,6 +175,116 @@ export const labelForFinding = (finding: Finding): ConventionalLabel => {
 };
 
 /**
+ * Split point for "the prose's first sentence": a sentence terminator
+ * followed by whitespace. Owned here (the lowest rendering module) and
+ * consumed by dispatch-contracts.ts's restatement drop and buildClaims'
+ * subject recovery, which must agree with the renderer on what the first
+ * sentence IS: the fold's visible line and the claim's `subject` are the
+ * same text.
+ */
+export const FIRST_SENTENCE_SPLIT = /(?<=[.!?])\s/;
+
+/** The prose's first sentence, whole prose when no terminator splits it. */
+export const firstSentence = (prose: string): string =>
+    prose.split(FIRST_SENTENCE_SPLIT, 1)[0] ?? prose;
+
+/**
+ * The context fold (PR feedback on webapp#41843: a long comment front-loads
+ * its whole mechanism; compressing it after the fact drops exactly the
+ * detail a reader needs to check the claim). The posted shape becomes a
+ * 1-2 line visible summary plus one collapsed block carrying the full
+ * prose, rule quote, sketch, and attribution, verbatim. The summary chip is
+ * deliberately NOT attribution.ts's `review details`: stripFooters removes
+ * that block wholesale before dedup-threads' text-similarity comparison,
+ * and the context block's prose must stay comparable (only the wrapper
+ * lines are stripped, see stripFooters).
+ */
+export const CONTEXT_FOLD_SUMMARY = "context";
+
+/** The context fold's fixed opening line (stripFooters strips it by shape). */
+export const CONTEXT_FOLD_OPEN = `<details><summary><sub>${CONTEXT_FOLD_SUMMARY}</sub></summary>`;
+
+/**
+ * The shortness threshold: prose under this never folds, it just posts as
+ * today (a two-line comment behind an expando is pure friction). 200 chars
+ * is roughly two sentences; code-owned, tuned by eye, not measured.
+ */
+export const CONTEXT_FOLD_MIN_CHARS = 200;
+
+/**
+ * Whether a summary/prose pair renders as the context fold. Requires a
+ * summary that actually stands apart (prose equal to its own summary has
+ * no context to fold) and prose past the shortness threshold.
+ */
+export const shouldFoldContext = (summary: string, prose: string): boolean =>
+    summary.trim() !== "" &&
+    // A multi-line summary defeats the stand-alone-visible-line goal. The
+    // authored field is newline-rejected by the schema, but the
+    // first-sentence fallback (every lens today) recovers a whole opening
+    // block when the prose starts without a sentence terminator (a
+    // heading, a bullet list), the same case the restatement drop refuses
+    // (dispatch-contracts.ts).
+    !summary.includes("\n") &&
+    prose.trim() !== summary.trim() &&
+    prose.trim().length >= CONTEXT_FOLD_MIN_CHARS &&
+    // Model-authored text interpolates into the block unescaped (it is
+    // markdown, so entity-escaping would corrupt code spans); a literal
+    // closing tag anywhere in it, fenced or not, risks ending the block
+    // early and desyncing stripFooters' unwrap, so such prose posts flat.
+    // Escaping only the unfenced occurrences would need a markdown parse
+    // this module deliberately does not have.
+    !containsBlockClose(prose) &&
+    !containsBlockClose(summary);
+
+/**
+ * Whether model-supplied text would end the context block early. Applied
+ * to everything the renderers place INSIDE the block (prose, summary, rule
+ * quote, sketch): one occurrence anywhere posts the comment flat.
+ * Attribution is exempt by construction (attribution.ts HTML-escapes the
+ * interpolated subjects).
+ */
+export const containsBlockClose = (text: string): boolean =>
+    /<\/details>/i.test(text);
+
+/**
+ * Assemble the context fold: the visible `**label:** summary` line, then
+ * one details block with the full prose and every inside-the-fold extra
+ * (rule quote, sketch, attribution line), each separated by blank lines so
+ * GitHub renders the markdown inside the HTML block. The prose restating
+ * the visible line is fine by design: the fold reads self-contained.
+ */
+export const renderContextFold = (input: {
+    label: string;
+    summary: string;
+    prose: string;
+    insideFold?: readonly string[];
+    outsideFold?: readonly string[];
+}): string => {
+    const inside = (input.insideFold ?? []).filter((block) => block !== "");
+    const outside = (input.outsideFold ?? []).filter((block) => block !== "");
+    return [
+        `**${input.label}:** ${input.summary}`,
+        [
+            CONTEXT_FOLD_OPEN,
+            "",
+            input.prose,
+            // Each inside block gets its own blank-line separation (the
+            // join owns it; callers pass bare blocks) so GitHub renders
+            // them as paragraphs, not soft-wrapped continuations.
+            ...inside.flatMap((block) => ["", block]),
+            "",
+            "</details>",
+        ].join("\n"),
+        // Below the block, never between the summary and the block:
+        // dedup-threads' threadProse reads a posted opener as everything
+        // before the FIRST ``` fence, so a fence above the block would
+        // hide the whole discussion from open-thread dedup (PR #401
+        // review). The one-click apply still never collapses.
+        ...outside,
+    ].join("\n\n");
+};
+
+/**
  * Render a single finding as a Conventional-Comment body. Shape (per
  * conventionalcomments.org and `review.md` Step 5):
  *
@@ -162,6 +295,12 @@ export const labelForFinding = (finding: Finding): ConventionalLabel => {
  *     ```suggestion
  *     <suggested_patch>
  *     ```
+ *
+ * When the prose clears the context-fold bar ({@link shouldFoldContext},
+ * against the finding's `summary` or its first sentence), the body opens
+ * with the visible summary line instead and the prose plus rule quote move
+ * inside the collapsed block; a committable suggestion fence stays outside
+ * the fold (the one-click apply must not hide).
  *
  * The label and the `**…:**` wrapping are code-owned; the prose after it is the
  * model's `model_authored_prose` copied verbatim (it already carries the subject
@@ -176,18 +315,41 @@ export const labelForFinding = (finding: Finding): ConventionalLabel => {
  */
 export const renderComment = (finding: Finding): string => {
     const label = labelForFinding(finding);
+    const summary =
+        finding.summary ?? firstSentence(finding.model_authored_prose);
+
+    if (
+        shouldFoldContext(summary, finding.model_authored_prose) &&
+        // The rule quote lands inside the block, so it gets the same
+        // block-close guard the prose does.
+        (finding.rule_quote === undefined ||
+            !containsBlockClose(finding.rule_quote))
+    ) {
+        return renderContextFold({
+            label,
+            summary,
+            prose: finding.model_authored_prose,
+            insideFold:
+                finding.rule_quote !== undefined
+                    ? [renderRuleQuote(finding.rule_quote)]
+                    : [],
+            outsideFold:
+                finding.suggested_patch !== undefined
+                    ? [
+                          [
+                              "```suggestion",
+                              finding.suggested_patch,
+                              "```",
+                          ].join("\n"),
+                      ]
+                    : [],
+        });
+    }
+
     const lines: string[] = [`**${label}:** ${finding.model_authored_prose}`];
 
     if (finding.rule_quote !== undefined) {
-        // Prefix every line of the quote so a multi-line rule (including one
-        // with a blank line) stays inside a single blockquote; an unprefixed
-        // line would escape it.
-        const [first, ...rest] = finding.rule_quote.split("\n");
-        lines.push(
-            "",
-            `> **Rule:** ${first}`,
-            ...rest.map((line) => (line === "" ? ">" : `> ${line}`)),
-        );
+        lines.push("", renderRuleQuote(finding.rule_quote));
     }
 
     if (finding.suggested_patch !== undefined) {
@@ -195,6 +357,20 @@ export const renderComment = (finding: Finding): string => {
     }
 
     return lines.join("\n");
+};
+
+/**
+ * The `> **Rule:** …` blockquote: every line of the quote is prefixed so a
+ * multi-line rule (including one with a blank line) stays inside a single
+ * blockquote; an unprefixed line would escape it. Shared by both render
+ * shapes and by renderClaimComment.
+ */
+export const renderRuleQuote = (quote: string): string => {
+    const [first, ...rest] = quote.split("\n");
+    return [
+        `> **Rule:** ${first}`,
+        ...rest.map((line) => (line === "" ? ">" : `> ${line}`)),
+    ].join("\n");
 };
 
 /** A core/optional dimension that could not be assessed this run (#194 Step 6). */
@@ -244,11 +420,21 @@ export type ReviewBodyInput = {
 };
 
 /**
+ * The HOLD_FOR_HUMAN verdict head. Exported (with {@link HOLD_UNSTUCK_LINES})
+ * for the submission-plan CLI, which composes the hold's standalone PR comment
+ * from the same fixed template text this renderer uses, so the two surfaces
+ * cannot drift.
+ */
+export const HOLD_HEAD =
+    "Holding for human review — the automated review could not " +
+    "complete safely this run.";
+
+/**
  * How the author of a held PR gets unstuck. Fixed template text (code-owned,
  * like the skipped-dimension note): a hold must never strand the author with a
  * verdict and no next action.
  */
-const HOLD_UNSTUCK_LINES = [
+export const HOLD_UNSTUCK_LINES = [
     "To get unstuck: push a new commit (or re-run the review workflow from the " +
         "Actions tab) to retry the failed pass, or ask a human to review this " +
         "PR manually. A hold means the automated review declined to approve on " +
@@ -300,10 +486,14 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             // make the event non-empty: the pointer line is unconditional.
             head = "Changes requested — see inline comments.";
             break;
-        case "HOLD_FOR_HUMAN":
+        case "COMMENT":
+            // The middle verdict never has an empty body either: the head is
+            // what tells an author this is deliberately not an approval.
             head =
-                "Holding for human review — the automated review could not " +
-                "complete safely this run.";
+                "Commented — medium-importance findings found; nothing blocks.";
+            break;
+        case "HOLD_FOR_HUMAN":
+            head = HOLD_HEAD;
             break;
         default: {
             // Exhaustiveness guard: a new VerdictEvent must add a body branch.

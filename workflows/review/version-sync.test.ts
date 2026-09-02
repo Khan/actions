@@ -26,6 +26,9 @@ describe("review.md version surface", () => {
         const refs = [...reviewMd.matchAll(/^\s*ref:\s*(\S+)\s*$/gm)].map(
             (m) => m[1],
         );
+        // One `ref:` line (the pre-agent checkout); the post-agent copy is
+        // taken from that same checkout, so this one pin covers both
+        // (structure asserted in post-agent-steps.test.ts).
         expect(refs).toEqual([`review-v${pkg.version}`]);
     });
 

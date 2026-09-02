@@ -1,5 +1,60 @@
 # autofix
 
+## 0.5.0
+
+### Minor Changes
+
+-   922d283: The review-currency fingerprint branch goes live. `staleness.ts` reads the reviewer's body stamp via the shared `findLatestStamp`, and until now that branch was dead in production: the stamp was an HTML comment the ingest sanitizer deleted before any review posted, so `assessReviewCurrency` returned `unverifiable` on essentially every real run and the per-thread anchor check was the only currency signal. The reviewer's stamp now posts as a collapsed `<details>` block (webapp#41742), so from the first autofix release built against that reviewer, reviews from current reviewer versions carry a parseable fingerprint and the per-path stale filter (`plan.ts` dropping work items on `stalePaths`) actually runs. Behavior for unstamped bodies (every pre-fix review, and reviews from a consumer's pinned older reviewer) is unchanged: degrade to anchors, never refuse. The staleness header, README, and autofix.md are rewritten to stop describing the unstamped path as the only real path, and a test pins the flip off a full posted-shape body.
+
+## 0.4.0
+
+### Minor Changes
+
+-   499a8bd: Autofix now parses the review body's collapsed observations as a second work-list source, and the reviewer's documentation-label budget exemption goes away. The coupling this fixes: autofix selected its work exclusively off posted threads (the label parse on each opener), so any finding the reviewer's posting surface collapsed (the non-blocking budget, `blocking-only`/`blocking-medium` re-reviews) silently vanished from autofix's scope; the documentation autofix was the acute case, since its entire selection is one label. The plan reads the collapsed entries of the latest bot review body (`workflows/autofix/lib/collapsed.ts`, parsing the exact line grammar `submission.ts` renders), filtered by the same scope labels, deduplicated against open threads (`thread-covered`), and subject to the same stale-path currency check. Body-sourced items carry a synthetic `review-body:path:line:label-token` id; there is no thread to reply on, so the prompt reports their outcomes in the run summary instead of Step 6 replies. With that in place, the review side drops the documentation exemption from the non-blocking inline budget: doc findings are budgeted like any other, and collapsing one no longer shrinks the autofix's reach.
+
+    Two disclosures. The collapsed section now always renders into the review body, never riding the top-ranked inline comment: the body is the only surface both stagers persist, so the ride made the new work-list source blind exactly where the budget sheds. Expected output-shape effect: the top inline comment shrinks by the collapsed section it used to carry, the review body grows by the same block, inline comment count is unchanged by this PR itself, and dropping the documentation exemption means a doc finding past the budget collapses instead of posting inline (at the measured 2.91 findings/run the budget binds rarely). And the body source widens `autofix: nits` to collapsed nitpick-class findings, which by design never become threads and were previously unreachable; that is the reach the posting-surface changeset promised this change would restore, and it means autofix can push commits for findings that never appeared as inline comments.
+
+## 0.3.0
+
+### Minor Changes
+
+-   c24fdbf: The fixer learns the documentation reviewer's three new readability finding
+    shapes (review's prose-readability release: metaphor in place of the
+    mechanism, says-the-same-thing-twice, undefined coinage).
+
+    Three rule changes in `autofix.md` Step 4, no code changes:
+
+    -   **Batched instances are in scope.** The reviewer caps readability at one
+        thread per review and enumerates up to three further instances, verbatim, in
+        that thread's body. The do-not-touch-other-files rule gains a second
+        exception for them: each _quoted_ instance is part of the finding wherever
+        it lives, while an instance merely alluded to without a quote is not.
+        Without this, the fixer could only ever fix the anchored instance, the
+        thread could never fully resolve, and the batching (which exists to spare
+        the author five separate threads) would trade author attention for fixer
+        blindness. The verbatim-rewrite rule below still governs each quoted
+        instance: the reviewer quotes it but need not rewrite it, so the fixer
+        touches it only when the fix needs none of its own words (deleting a
+        duplicated paragraph) or the thread body carries a rewrite for that
+        instance; a quoted metaphor or coinage without one is left unfixed and
+        reported.
+    -   **Readability rewrites are applied verbatim.** A readability finding carries
+        its plain rewrite, and that rewrite passed claim validation, which checked
+        it preserves the original sentence's meaning. The fixer's improvised
+        paraphrase passed nothing, so improvising is now off the table: apply the
+        reviewer's words, or (when the file has drifted and the quote no longer
+        fits) leave the item unfixed and say so.
+    -   **Duplicate paragraphs are deleted, never re-worded.** The existing
+        rewrite-before-delete bias is calibrated for a restated comment sitting on
+        unexplained code. Applied to a says-the-same-thing-twice finding it would
+        produce a third phrasing of content that already exists twice, which is the
+        defect the finding names. Deletion of the quoted copy is the fix.
+
+    The README documents the one shape that stays out of reach by design: a PR
+    title/description readability finding folds into the review body and never
+    becomes a thread, so the thread-driven worklist cannot see it. The description
+    is the author's voice; the review body already offers them the rewrite.
+
 ## 0.2.0
 
 ### Minor Changes

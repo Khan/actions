@@ -1,9 +1,14 @@
 import {describe, it, expect} from "vitest";
 
-import {openThreadsFromStaged, stagedThreadShapeFailure} from "./dedup";
+import {openThreadsFromStaged, stagedThreadShapeFailure} from "./dedup-threads";
+import {adjudicatedThreadsFromStaged} from "./dedup-adjudicated";
 import {computeRoster} from "./dispatch-roster";
 import {runStagePrCli, type GhGet, type StagePrFs} from "./stage-pr";
-import {withGraphqlRateLimitRetry, type GhGraphql} from "./threads";
+import {
+    collectReviewThreads,
+    withGraphqlRateLimitRetry,
+    type GhGraphql,
+} from "./threads";
 
 /**
  * Review-thread staging: the last load-bearing staging review.md Step 3 asked
@@ -12,8 +17,8 @@ import {withGraphqlRateLimitRetry, type GhGraphql} from "./threads";
  * following the precedent dispatch-trial-followups.test.ts set; the fixtures
  * mirror that file's.
  *
- * These cases pin the producer against the consumers it feeds (`dedup.ts`'s
- * open-thread suppression and `dispatch-roster.ts`'s reconciler gate) rather
+ * These cases pin the producer against the consumers it feeds
+ * (`dedup-threads.ts`'s open-thread suppression and `dispatch-roster.ts`'s reconciler gate) rather
  * than only against the shape a reader of this file would expect, because
  * "each layer looked right on its own" is exactly how Khan/actions#302 shipped:
  * the prompt selected bot threads by one spelling of the login and the code
@@ -110,6 +115,9 @@ const baseRoutes = (): Record<string, unknown> => ({
 
 describe("review-thread staging (slice 1)", () => {
     const options = {repo: "o/r", prNumber: 7, repoRoot: "/work"};
+    // REVIEW_JIRA_* is unset here, so the ticket staging never fetches.
+    const noTicket = (): Promise<{status: number; json: unknown}> =>
+        Promise.reject(new Error("unexpected ticket fetch"));
     const routes = () => baseRoutes();
     const stage = async (pages: unknown[]) => {
         const fs = makeFakeFs();
@@ -117,6 +125,7 @@ describe("review-thread staging (slice 1)", () => {
             fs,
             ghGetFromMap(routes()),
             graphqlFromPages(pages),
+            noTicket,
             options,
         );
         return {
@@ -124,6 +133,9 @@ describe("review-thread staging (slice 1)", () => {
             result,
             threads: JSON.parse(fs.files[`${REVIEW}/threads.json`]),
             humanThreads: JSON.parse(fs.files[`${REVIEW}/human-threads.json`]),
+            adjudicated: JSON.parse(
+                fs.files[`${REVIEW}/adjudicated-threads.json`],
+            ),
         };
     };
 
@@ -232,7 +244,7 @@ describe("review-thread staging (slice 1)", () => {
         expect(humanThreads).toEqual([]);
     });
 
-    it("drops resolved threads and omits an absent opener url", async () => {
+    it("drops resolved threads from the unresolved partition and omits an absent opener url", async () => {
         const {threads, humanThreads} = await stage([
             threadPage([
                 threadNode({id: "PRRT_done", isResolved: true}),
@@ -251,7 +263,210 @@ describe("review-thread staging (slice 1)", () => {
         ]);
         expect(threads).toHaveLength(1);
         expect("url" in threads[0]).toBe(false);
+        // The resolution fields serve the adjudicated partition only; leaking
+        // them into threads.json would be a shape change to every exact-match
+        // reader of the unresolved staging.
+        expect("resolvedBy" in threads[0]).toBe(false);
         expect(humanThreads).toEqual([]);
+    });
+
+    it("stages a human-resolved bot thread as adjudicated, and the corpus filter accepts the staged bytes", async () => {
+        // The webapp#41290 shape: the author resolved the bot's thread, and
+        // before this file existed that resolution REMOVED the defect from
+        // the suppression corpus, so the next run could re-derive it with
+        // fresh wording. Same producer-to-consumer bind as the open-corpus
+        // case above: the staged bytes go straight into
+        // `adjudicatedThreadsFromStaged`, so a shape drift fails HERE.
+        const {threads, adjudicated} = await stage([
+            threadPage([
+                threadNode({
+                    id: "PRRT_adjudicated",
+                    isResolved: true,
+                    resolvedBy: {login: "octo"},
+                }),
+                threadNode({id: "PRRT_open2"}),
+            ]),
+        ]);
+        expect(threads.map((t: {thread_id: string}) => t.thread_id)).toEqual([
+            "PRRT_open2",
+        ]);
+        expect(adjudicated).toEqual([
+            {
+                thread_id: "PRRT_adjudicated",
+                path: "a.ts",
+                line: 2,
+                url: "https://github.com/o/r/pull/7#discussion_r1",
+                comments: [
+                    {
+                        author: "github-actions",
+                        body: "**issue (blocking):** opener",
+                    },
+                ],
+                resolved: true,
+                resolvedBy: "octo",
+                openerDownvotes: 0,
+            },
+        ]);
+        expect(adjudicatedThreadsFromStaged(adjudicated)).toEqual([
+            {
+                thread_id: "PRRT_adjudicated",
+                path: "a.ts",
+                body: "**issue (blocking):** opener",
+            },
+        ]);
+    });
+
+    it("stages a downvoted OPEN bot thread in BOTH files: open for the verdict floor, adjudicated for re-derivation", async () => {
+        // The 👎 arrives over the opener's reactions connection; the thread is
+        // still open, so it stays in threads.json (the open corpus carries
+        // the verdict-floor bookkeeping) AND joins the adjudicated corpus
+        // (so the settled defect cannot re-post under fresh wording later).
+        const {threads, adjudicated} = await stage([
+            threadPage([
+                threadNode({
+                    id: "PRRT_downvoted",
+                    comments: {
+                        nodes: [
+                            {
+                                author: {login: "github-actions"},
+                                body: "**note (non-blocking):** opener",
+                                url: "https://github.com/o/r/pull/7#discussion_r9",
+                                reactions: {
+                                    nodes: [
+                                        {user: {login: "octo"}},
+                                        {user: {login: "hubot"}},
+                                    ],
+                                },
+                            },
+                        ],
+                    },
+                }),
+            ]),
+        ]);
+        expect(threads.map((t: {thread_id: string}) => t.thread_id)).toEqual([
+            "PRRT_downvoted",
+        ]);
+        // No reaction leak into the open staging's exact shape.
+        expect("openerDownvotes" in threads[0]).toBe(false);
+        expect(adjudicated).toEqual([
+            {
+                thread_id: "PRRT_downvoted",
+                path: "a.ts",
+                line: 2,
+                url: "https://github.com/o/r/pull/7#discussion_r9",
+                comments: [
+                    {
+                        author: "github-actions",
+                        body: "**note (non-blocking):** opener",
+                    },
+                ],
+                resolved: false,
+                resolvedBy: "",
+                openerDownvotes: 2,
+            },
+        ]);
+        expect(adjudicatedThreadsFromStaged(adjudicated)).toHaveLength(1);
+    });
+
+    it("counts only the opener's 👎, never a reply's", async () => {
+        // The opener is the finding; a reply's reactions are conversation.
+        // Structurally guaranteed today by the `rawComments[0]` indexing, and
+        // pinned here so a refactor that sums the chain cannot land quietly:
+        // a 👎 on a bot reply would otherwise adjudicate a finding its
+        // opener never received judgment on.
+        const {adjudicated} = await stage([
+            threadPage([
+                threadNode({
+                    id: "PRRT_reply_down",
+                    comments: {
+                        nodes: [
+                            {
+                                author: {login: "github-actions"},
+                                body: "**note (non-blocking):** opener",
+                            },
+                            {
+                                author: {login: "octo"},
+                                body: "disagree",
+                                reactions: {
+                                    nodes: [{user: {login: "octo"}}],
+                                },
+                            },
+                        ],
+                    },
+                }),
+            ]),
+        ]);
+        expect(adjudicated).toEqual([]);
+    });
+
+    it("ignores the bot's own seeded 👎 and an unattributable reactor", async () => {
+        // The workflow plans to seed the 👍/👎 nudge pair on its own comments
+        // at post time (README, "Nudge seeding"); a seeded 👎 is the feedback
+        // widget, not a judgment, so it must not put the finding in the
+        // adjudicated corpus. The sweep's countDownvotes filters the same
+        // identity. GraphQL reports the bot bare, REST bracketed, so both
+        // spellings are pinned; a `user: null` reactor (deleted account)
+        // never reads as human adjudication, matching resolvedBy's rule.
+        const {adjudicated} = await stage([
+            threadPage([
+                threadNode({
+                    id: "PRRT_seeded",
+                    comments: {
+                        nodes: [
+                            {
+                                author: {login: "github-actions"},
+                                body: "**note (non-blocking):** opener",
+                                reactions: {
+                                    nodes: [
+                                        {user: {login: "github-actions"}},
+                                        {
+                                            user: {
+                                                login: "github-actions[bot]",
+                                            },
+                                        },
+                                        {user: null},
+                                        {},
+                                    ],
+                                },
+                            },
+                        ],
+                    },
+                }),
+            ]),
+        ]);
+        // Only bot and unattributable reactors: no adjudication at all.
+        expect(adjudicated).toEqual([]);
+    });
+
+    it("keeps bot-resolved and human-opened resolved threads out of the adjudicated corpus", async () => {
+        // Bot-resolved = the reconciler marking a defect FIXED (its regression
+        // must re-post); a resolved HUMAN thread is not the bot's finding and
+        // adjudicates nothing. An unattributable resolver (deleted account,
+        // GraphQL null) fails toward posting a duplicate, never toward
+        // suppression on unverifiable authority.
+        const {adjudicated} = await stage([
+            threadPage([
+                threadNode({
+                    id: "PRRT_fixed",
+                    isResolved: true,
+                    resolvedBy: {login: "github-actions"},
+                }),
+                threadNode({
+                    id: "PRRT_human_resolved",
+                    isResolved: true,
+                    resolvedBy: {login: "octo"},
+                    comments: {
+                        nodes: [{author: {login: "octo"}, body: "human"}],
+                    },
+                }),
+                threadNode({
+                    id: "PRRT_ghost",
+                    isResolved: true,
+                    resolvedBy: null,
+                }),
+            ]),
+        ]);
+        expect(adjudicated).toEqual([]);
     });
 
     it("skips human threads with no RIGHT-side line and collapses duplicates", async () => {
@@ -407,6 +622,7 @@ describe("review-thread staging (slice 1)", () => {
                 fs,
                 ghGetFromMap(routes()),
                 graphqlFromPages([{errors: [{type: "RATE_LIMITED"}]}]),
+                noTicket,
                 options,
             ),
         ).rejects.toThrow(/RATE_LIMITED/);
@@ -420,6 +636,7 @@ describe("review-thread staging (slice 1)", () => {
                 makeFakeFs(),
                 ghGetFromMap(routes()),
                 graphqlFromPages([{data: {repository: null}}]),
+                noTicket,
                 options,
             ),
         ).rejects.toThrow(/no reviewThreads connection/);
@@ -448,6 +665,7 @@ describe("review-thread staging (slice 1)", () => {
                 makeFakeFs(),
                 ghGetFromMap(routes()),
                 graphqlFromPages([noCursor]),
+                noTicket,
                 options,
             ),
         ).rejects.toThrow(/without an endCursor/);
@@ -517,5 +735,46 @@ describe("withGraphqlRateLimitRetry", () => {
 
         await wrapped("q", {});
         expect(waits).toEqual([1000, 2000]);
+    });
+});
+
+describe("THREADS_QUERY node budget", () => {
+    // GitHub prices a GraphQL query by its POTENTIAL nodes — each connection's
+    // page size multiplied down the nesting — against a 500,000 cap, and
+    // rejects an over-budget query statically, before reading any data. So an
+    // over-budget THREADS_QUERY is not a big-PR edge case: it fails EVERY
+    // staging on every PR. reactions(first: 100) shipped exactly that in
+    // v1.17.0 (1,010,100 potential nodes; Khan/agent-settings#76 hit it on the
+    // bump itself), which no fixture-driven test above can catch because the
+    // fake GraphQL port never prices the query. This pins the arithmetic
+    // itself, from the query string the production code actually sends.
+    it("stays under GitHub's 500,000 potential-node cap", async () => {
+        let captured = "";
+        const graphql: GhGraphql = (query) => {
+            captured = query;
+            return Promise.resolve({
+                data: {
+                    repository: {
+                        pullRequest: {
+                            reviewThreads: {
+                                pageInfo: {hasNextPage: false, endCursor: ""},
+                                nodes: [],
+                            },
+                        },
+                    },
+                },
+            });
+        };
+        await collectReviewThreads(graphql, "Khan", "repo", 1);
+
+        // Nesting order in the query: reviewThreads, comments, reactions.
+        const firsts = [...captured.matchAll(/\(first: (\d+)/g)].map((m) =>
+            Number(m[1]),
+        );
+        expect(firsts).toHaveLength(3);
+        const [threads, comments, reactions] = firsts;
+        const potentialNodes =
+            threads + threads * comments + threads * comments * reactions;
+        expect(potentialNodes).toBeLessThanOrEqual(500_000);
     });
 });

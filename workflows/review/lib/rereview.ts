@@ -25,7 +25,9 @@
  * substitute.
  */
 
+import {neutralizeStructuralTags} from "./attribution";
 import {isBlockingLabel} from "./render-comment";
+import {isBotLogin, isReviewBotAuthor, sameLogin} from "./threads";
 
 /** One staged unresolved bot thread (`threads.json`, review.md Step 3 Phase 2). */
 export type StagedThread = {
@@ -47,6 +49,84 @@ export type StagedThread = {
 export type ReconcilerResult = {
     resolve: string[];
     keep: string[];
+    /**
+     * Kept threads whose reply chain shows the AUTHOR conceded the finding
+     * (agreed it should change, a fix is under way, a TODO stands in) with
+     * the code not yet changed. Optional: older reconciler outputs omit it.
+     * The subset surviving {@link verifiedAcknowledgedIds} renders as
+     * acknowledged (fix pending) in the recap instead of counting as plain
+     * "unaddressed", and is recorded in `rereview.json`. Nothing else
+     * consumes it.
+     */
+    acknowledged?: string[];
+};
+
+/**
+ * The acknowledged ids that survive the mechanical fail-closed checks. What
+ * code verifies here is deliberately WEAKER than what the reconciler
+ * asserts: these checks establish that a real, non-bot PR-author reply
+ * exists on a kept thread (necessary for a concession), not that the reply
+ * CONCEDES rather than pushes back. Concession-vs-pushback stays the
+ * reconciler's judgment (its prompt says "when in doubt, leave it out"),
+ * and the cost of a wrong call is one mislabeled recap line, rendered
+ * directly under the reply's own author. This is NOT the thread-resolution
+ * pattern, where code re-checks the same property the reconciler asserted.
+ *
+ * - The id must be in `keep`. An acknowledgment on a resolved thread is a
+ *   contradiction (resolution already accounts for it), and an id the
+ *   reconciler never decided is a fabrication.
+ * - The staged thread must carry a REPLY (not the opener) whose author is
+ *   the PR author. "Bot replies never count" is the #332 fail-closed rule
+ *   this enforces mechanically: autofix's replies (and, on older threads,
+ *   the retired thumbs sweep's follow-ups) sit on exactly these threads, and a reconciler hallucinating an
+ *   acknowledgment out of one must contribute nothing. The author
+ *   comparison is {@link sameLogin} (the REST/GraphQL bot-suffix split
+ *   applies to human logins too, trivially), belt-and-suspendered by the
+ *   explicit bot guards for the case where the PR author IS a bot (an
+ *   autofix PR must not self-acknowledge).
+ * - No PR author staged reads as NO verified acknowledgments. Absent,
+ *   malformed, or unmatchable data fails toward a plain kept thread, whose
+ *   worst case is the recap line reading "unaddressed" when the author
+ *   already said "will fix": noise, never a dropped accountability line.
+ */
+export const verifiedAcknowledgedIds = (
+    reconciler: ReconcilerResult,
+    threads: readonly StagedThread[],
+    prAuthor: string | undefined,
+): Set<string> => {
+    const verified = new Set<string>();
+    if (
+        prAuthor === undefined ||
+        prAuthor === "" ||
+        isReviewBotAuthor(prAuthor) ||
+        isBotLogin(prAuthor)
+    ) {
+        return verified;
+    }
+    const kept = new Set(reconciler.keep);
+    for (const id of reconciler.acknowledged ?? []) {
+        if (!kept.has(id)) {
+            continue;
+        }
+        const thread = threads.find((t) => t.thread_id === id);
+        const authorReplied = thread?.comments.slice(1).some(
+            (comment) =>
+                comment.author !== "" &&
+                !isReviewBotAuthor(comment.author) &&
+                // Belt-and-suspenders only: staged threads carry
+                // GraphQL's bare logins, which never end in `[bot]`, so
+                // this clause fires only if staging ever switches to the
+                // REST spelling. The guards that actually hold are the
+                // bot-PR-author early return above and the sameLogin
+                // comparison below.
+                !isBotLogin(comment.author) &&
+                sameLogin(comment.author, prAuthor),
+        );
+        if (authorReplied === true) {
+            verified.add(id);
+        }
+    }
+    return verified;
 };
 
 export type RereviewSection = {
@@ -54,6 +134,15 @@ export type RereviewSection = {
     section: string;
     keptCount: number;
     resolvedCount: number;
+    /**
+     * The VERIFIED acknowledged kept threads ({@link verifiedAcknowledgedIds}),
+     * sorted for determinism. Written into `rereview.json` so the run
+     * artifact records the acknowledgment membership the recap counted;
+     * `acknowledgedCount` is its length, kept separately because the
+     * artifact's numeric consumers read counts, not lists.
+     */
+    acknowledged: string[];
+    acknowledgedCount: number;
     /**
      * How many kept threads carry a blocking opening label, plus any whose
      * label could not be parsed (unknown fails closed; see keptEntryFor).
@@ -105,18 +194,40 @@ const EXCERPT_MAX = 120;
 /**
  * The first prose line of a previously-posted comment, with the `**label:**`
  * prefix (or its markdown-stripped plain form, {@link PLAIN_LABEL_RE})
- * stripped and a hard length cap. Quoted verbatim otherwise: this text was
- * already posted to the PR by an earlier run of this workflow.
+ * stripped and a hard length cap. Quoted verbatim otherwise, except that
+ * `details`/`summary` tags are neutralized (neutralizeStructuralTags): the
+ * non-blocking excerpts render inside the recap's collapsed block, where a
+ * bare `</details>` quoted from an old comment would close the block early
+ * (the same breakage Khan/actions#401's collapsed-observations section
+ * hit). previouslyRecapped keys on the thread URL, not this text, so the
+ * damping is unaffected.
  */
 export const excerptOpeningComment = (body: string): string => {
     const withoutBold = body.replace(BOLD_LABEL_RE, "");
     const withoutLabel =
         withoutBold !== body ? withoutBold : body.replace(PLAIN_LABEL_RE, "");
-    const firstLine = withoutLabel.split("\n", 1)[0].trim();
+    const firstLine = neutralizeStructuralTags(
+        withoutLabel.split("\n", 1)[0].trim(),
+    );
     if (firstLine.length <= EXCERPT_MAX) {
         return firstLine;
     }
-    return `${firstLine.slice(0, EXCERPT_MAX).trimEnd()}...`;
+    // The cap can sever a code span the neutralize pass preserved, leaving
+    // its backtick unbalanced (no span forms, the tag inside is live) or
+    // the tag itself cut mid-way (a "<" fragment the sanitizer's tag fold
+    // matches through to the recap's own closing tag). Re-neutralize the
+    // sliced text and drop a trailing tag fragment (the fragment shape is
+    // foldXmlTags's opener: "<" then [A-Za-z!/], so a bare "a < b" tail
+    // survives). Cosmetic loss on a pathological line, never a live tag.
+    const sliced = neutralizeStructuralTags(
+        firstLine.slice(0, EXCERPT_MAX).trimEnd(),
+    );
+    return `${sliced
+        .replace(
+            /(?:<|&(?:amp;)?(?:lt|#0*60|#[xX]0*3c);)\/?[A-Za-z!][^>]*$/,
+            "",
+        )
+        .trimEnd()}...`;
 };
 
 /** A kept thread joined with its staged data, ready to render. */
@@ -126,12 +237,21 @@ type KeptEntry = {
     url: string | undefined;
     label: string;
     blocking: boolean;
+    /**
+     * Verified author acknowledgment (fix pending). Rendering only: an
+     * acknowledged BLOCKING thread still renders visibly and still counts
+     * toward `keptBlockingCount`, so "will fix" never weakens the
+     * reduced-depth flip gate; the code change itself is what resolves the
+     * thread and releases the verdict.
+     */
+    acknowledged: boolean;
     excerpt: string;
 };
 
 const keptEntryFor = (
     threadId: string,
     threads: readonly StagedThread[],
+    acknowledgedIds: ReadonlySet<string>,
 ): KeptEntry => {
     const thread = threads.find((t) => t.thread_id === threadId);
     if (thread === undefined) {
@@ -144,6 +264,7 @@ const keptEntryFor = (
             url: undefined,
             label: "unknown",
             blocking: true,
+            acknowledged: false,
             excerpt: "(not in the staged threads)",
         };
     }
@@ -167,6 +288,7 @@ const keptEntryFor = (
         // REQUEST_CHANGES until a full-depth review re-judges it, which is
         // noise, not a wrongly-permitted approval.
         blocking: label === "unknown" || isBlockingLabel(label),
+        acknowledged: acknowledgedIds.has(threadId),
         excerpt: excerptOpeningComment(opener),
     };
 };
@@ -182,14 +304,58 @@ const compareKept = (a: KeptEntry, b: KeptEntry): number => {
     return a.threadId < b.threadId ? -1 : a.threadId > b.threadId ? 1 : 0;
 };
 
+/** The rendered marker for a verified author acknowledgment. */
+const ACK_MARKER = " (acknowledged, fix pending)";
+
 const renderKeptLine = (entry: KeptEntry): string => {
     const anchorToken = `\`${entry.anchor}\``;
     const linked =
         entry.url !== undefined
             ? `[${anchorToken}](${entry.url})`
             : anchorToken;
-    return `- **${entry.label}** ${linked}: ${entry.excerpt}`;
+    const marker = entry.acknowledged ? ACK_MARKER : "";
+    return `- **${entry.label}** ${linked}${marker}: ${entry.excerpt}`;
 };
+
+/**
+ * The damped form for a non-blocking thread a prior recap already quoted:
+ * label and link, no excerpt. The full excerpt was already posted (twice: the
+ * original comment, then the first recap), so re-quoting it on every
+ * subsequent push is what built the recap walls the collapse block only
+ * partially fixed — the drumbeat reads as the bot re-arguing threads the
+ * author is already looking at. The link keeps the accountability contract:
+ * every kept thread is still enumerated, just not re-quoted.
+ */
+const renderKeptLineCompact = (entry: KeptEntry): string => {
+    const anchorToken = `\`${entry.anchor}\``;
+    const linked =
+        entry.url !== undefined
+            ? `[${anchorToken}](${entry.url})`
+            : anchorToken;
+    const marker = entry.acknowledged ? ACK_MARKER : "";
+    return `- **${entry.label}** ${linked}${marker}`;
+};
+
+/**
+ * Whether a prior review body already recapped this thread, decided by its
+ * opener URL appearing in any staged prior-review body in the RENDERED link
+ * form `](url)` (both kept-line renderers emit exactly that, so the first
+ * recap plants the marker every later run finds). The closing delimiter is
+ * part of the match: a bare substring would false-positive when one
+ * discussion id is a prefix of another (r123 vs r1234) or when a prior
+ * body's finding PROSE merely mentions the URL, and either way a
+ * never-recapped thread would lose its excerpt — the one direction the
+ * damping must not fail. A thread with no staged URL reads as never recapped
+ * and renders full: fail toward MORE information, since the cost of a wrong
+ * "repeat" is an excerpt the reader has to click for, on a thread the bot is
+ * actively accounting for.
+ */
+const previouslyRecapped = (
+    entry: KeptEntry,
+    priorReviewBodies: readonly string[],
+): boolean =>
+    entry.url !== undefined &&
+    priorReviewBodies.some((body) => body.includes(`](${entry.url})`));
 
 export type RenderRereviewInput = {
     /** The staged unresolved bot threads this run started from. */
@@ -198,6 +364,20 @@ export type RenderRereviewInput = {
     reconciler: ReconcilerResult;
     /** Head commit of this review; stamped on the still-open header. */
     headSha?: string;
+    /**
+     * The bodies of this bot's prior reviews on the PR (staged
+     * prior-reviews.json), read only to decide which kept non-blocking
+     * threads a recap has already quoted. Absent or empty renders every
+     * entry full, which is exactly the pre-damping behavior.
+     */
+    priorReviewBodies?: readonly string[];
+    /**
+     * The PR author's login (staged pr-context.json), read only to verify
+     * the reconciler's `acknowledged` ids against the reply chains
+     * ({@link verifiedAcknowledgedIds}). Absent verifies nothing: every
+     * kept thread renders as plain kept.
+     */
+    prAuthor?: string;
 };
 
 /**
@@ -218,9 +398,23 @@ export const renderRereviewSection = (
     const resolvedCount = input.reconciler.resolve.length;
     const keptCount = input.reconciler.keep.length;
     const total = resolvedCount + keptCount;
+    const acknowledgedIds = verifiedAcknowledgedIds(
+        input.reconciler,
+        input.threads,
+        input.prAuthor,
+    );
+    const acknowledged = [...acknowledgedIds].sort();
+    const acknowledgedCount = acknowledged.length;
 
     if (total === 0) {
-        return {section: "", keptCount, resolvedCount, keptBlockingCount: 0};
+        return {
+            section: "",
+            keptCount,
+            resolvedCount,
+            acknowledged: [],
+            acknowledgedCount: 0,
+            keptBlockingCount: 0,
+        };
     }
 
     if (keptCount === 0) {
@@ -228,23 +422,37 @@ export const renderRereviewSection = (
             resolvedCount === 1
                 ? "The 1 prior review thread is resolved."
                 : `All ${resolvedCount} prior review threads are resolved.`;
-        return {section, keptCount, resolvedCount, keptBlockingCount: 0};
+        return {
+            section,
+            keptCount,
+            resolvedCount,
+            acknowledged: [],
+            acknowledgedCount: 0,
+            keptBlockingCount: 0,
+        };
     }
 
     const asOf =
         input.headSha !== undefined && input.headSha.length > 0
             ? ` as of ${input.headSha.slice(0, 7)}`
             : "";
+    // With verified acknowledgments the header stops calling those threads
+    // "unaddressed" (the author has addressed the ARGUMENT; the fix is
+    // pending), without changing the zero-acknowledgment wording at all.
+    const still =
+        acknowledgedCount > 0
+            ? `still open, ${acknowledgedCount} of them acknowledged (fix pending)`
+            : "still unaddressed";
     const header =
         resolvedCount === 0
             ? `${keptCount} of ${total} prior review ${
                   total === 1 ? "thread is" : "threads are"
-              } still unaddressed${asOf}:`
+              } ${still}${asOf}:`
             : `${resolvedCount} of ${total} prior review threads resolved; ` +
-              `${keptCount} still unaddressed${asOf}:`;
+              `${keptCount} ${still}${asOf}:`;
 
     const entries = input.reconciler.keep
-        .map((id) => keptEntryFor(id, input.threads))
+        .map((id) => keptEntryFor(id, input.threads, acknowledgedIds))
         .sort(compareKept);
     const blocking = entries.filter((entry) => entry.blocking);
     const nonBlocking = entries.filter((entry) => !entry.blocking);
@@ -257,16 +465,32 @@ export const renderRereviewSection = (
     // the motivating pathology.
     const parts: string[] = [header, ...blocking.map(renderKeptLine)];
     if (nonBlocking.length > 0) {
+        // First mention full, thereafter label + link: a non-blocking thread
+        // some prior recap already quoted renders without its excerpt
+        // (blocking threads are never damped — they are the reason the
+        // verdict is what it is, and their lines must stand on their own).
+        // Fresh entries render first so new information leads the block.
+        const priorBodies = input.priorReviewBodies ?? [];
+        const fresh = nonBlocking.filter(
+            (entry) => !previouslyRecapped(entry, priorBodies),
+        );
+        const repeats = nonBlocking.filter((entry) =>
+            previouslyRecapped(entry, priorBodies),
+        );
         const summary =
-            nonBlocking.length === 1
+            (nonBlocking.length === 1
                 ? "1 non-blocking thread still open"
-                : `${nonBlocking.length} non-blocking threads still open`;
+                : `${nonBlocking.length} non-blocking threads still open`) +
+            (repeats.length > 0
+                ? ` (${repeats.length} previously reported)`
+                : "");
         parts.push(
             "",
             "<details>",
             `<summary>${summary}</summary>`,
             "",
-            ...nonBlocking.map(renderKeptLine),
+            ...fresh.map(renderKeptLine),
+            ...repeats.map(renderKeptLineCompact),
             "",
             "</details>",
         );
@@ -276,6 +500,12 @@ export const renderRereviewSection = (
         section: parts.join("\n"),
         keptCount,
         resolvedCount,
+        acknowledged,
+        acknowledgedCount,
+        // Acknowledged blocking threads still count: "will fix" must never
+        // let a reduced-depth run flip a prior REQUEST_CHANGES to APPROVE
+        // past the still-open blocking thread (the code change is what
+        // resolves it, through the reconciler).
         keptBlockingCount: blocking.length,
     };
 };
@@ -286,6 +516,7 @@ export const renderRereviewSection = (
 
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const THREADS_PATH = `${REVIEW_DIR}/threads.json`;
+const PRIOR_REVIEWS_PATH = `${REVIEW_DIR}/prior-reviews.json`;
 const RECONCILER_PATH = `${REVIEW_DIR}/out/thread-reconciler.json`;
 const PR_CONTEXT_PATH = `${REVIEW_DIR}/pr-context.json`;
 const RESULT_PATH = `${REVIEW_DIR}/rereview.json`;
@@ -310,6 +541,18 @@ const readJson = (fs: RereviewCliFs, path: string): unknown => {
         return undefined;
     }
 };
+
+/**
+ * Defensive parse of the staged prior-review bodies (untrusted-shape JSON on
+ * disk, like every staged input this CLI reads). Anything but an array of
+ * records with string bodies contributes nothing, and no prior bodies means
+ * no damping: every kept thread renders full.
+ */
+const parsePriorReviewBodies = (raw: unknown): string[] =>
+    (Array.isArray(raw) ? raw : [])
+        .filter(isRecord)
+        .map((review) => review["body"])
+        .filter((body): body is string => typeof body === "string");
 
 /** Defensive parse of the staged threads (untrusted-shape JSON on disk). */
 const parseThreads = (raw: unknown): StagedThread[] => {
@@ -355,7 +598,20 @@ const parseReconciler = (raw: unknown): ReconcilerResult | undefined => {
     if (resolve === undefined || keep === undefined) {
         return undefined;
     }
-    return {resolve, keep};
+    // `acknowledged` is an optional refinement over keep, so it degrades
+    // instead of invalidating: non-string entries are FILTERED (one junk
+    // entry must not erase real acknowledgments, and every surviving id
+    // still has to pass verifiedAcknowledgedIds), and a non-array value
+    // degrades to absent. A malformed resolve/keep still invalidates the
+    // whole reconciliation, because those two lists ARE the accounting.
+    const acknowledged = Array.isArray(raw["acknowledged"])
+        ? raw["acknowledged"].filter((v): v is string => typeof v === "string")
+        : undefined;
+    return {
+        resolve,
+        keep,
+        ...(acknowledged !== undefined ? {acknowledged} : {}),
+    };
 };
 
 /**
@@ -373,6 +629,8 @@ export const runRereviewCli = (fs: RereviewCliFs): RereviewSection => {
             section: "",
             keptCount: 0,
             resolvedCount: 0,
+            acknowledged: [],
+            acknowledgedCount: 0,
             keptBlockingCount: 0,
         };
     } else {
@@ -381,7 +639,23 @@ export const runRereviewCli = (fs: RereviewCliFs): RereviewSection => {
             isRecord(prContext) && typeof prContext["headSha"] === "string"
                 ? prContext["headSha"]
                 : undefined;
-        result = renderRereviewSection({threads, reconciler, headSha});
+        const prAuthor =
+            isRecord(prContext) && typeof prContext["author"] === "string"
+                ? prContext["author"]
+                : undefined;
+        // Prior review bodies feed the recap damping only; a missing or
+        // malformed staging reads as no prior reviews, and every kept thread
+        // then renders full (fail toward more information).
+        const priorReviewBodies = parsePriorReviewBodies(
+            readJson(fs, PRIOR_REVIEWS_PATH),
+        );
+        result = renderRereviewSection({
+            threads,
+            reconciler,
+            headSha,
+            priorReviewBodies,
+            prAuthor,
+        });
     }
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});

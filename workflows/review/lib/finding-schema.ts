@@ -74,8 +74,27 @@ export type Lens = typeof KNOWN_LENSES[number];
  * severities plus posted-comment labels into a run-level outcome. Kept
  * deliberately small — richer taxonomy lives in Conventional-Comment labels,
  * which are code-owned at render time, not here.
+ *
+ * `medium` is the middle tier (PRA-7): a verified defect or gap in code this
+ * PR adds, that a reasonable author would fix before merge, but that does
+ * not block. It can never force REQUEST_CHANGES, and it mints no label: a
+ * medium finding renders with the same non-blocking labels an advisory one
+ * does (`labelForFinding` treats them identically), so every label-keyed
+ * consumer (recap parser, dedup guards, flip gate) is untouched by
+ * construction. What medium buys is prominence and honesty: it ranks ahead
+ * of advisory findings for the non-blocking inline budget, posts inline on
+ * re-reviews under the ROUTING `blocking-medium` modifier where advisory
+ * findings collapse, and demotes the run's verdict from APPROVE to COMMENT
+ * (verdict.ts reads the post-veto medium count directly, not through
+ * labels). Motivating case: three 2026-08-24 approving re-reviews collapsed
+ * verified correctness findings behind a bare "Non-blocking observations
+ * (N)" count (Khan/actions#367, #371, #366).
+ *
+ * Added WITHOUT a schema_version bump: an enum value is additive — no
+ * previously-serialized finding is invalidated, and every consumer of the
+ * new value ships in the same release as the producers.
  */
-export const SEVERITIES = ["blocking", "advisory"] as const;
+export const SEVERITIES = ["blocking", "medium", "advisory"] as const;
 
 export type Severity = typeof SEVERITIES[number];
 
@@ -179,6 +198,16 @@ export type Finding = {
     producing_hunt: string;
     /** The single human-read sentence(s) authored by the model. */
     model_authored_prose: string;
+    /**
+     * Optional author-supplied summary: the one visible line the posted
+     * comment opens with when the prose is long enough to fold
+     * (render-comment.ts's context fold). Single line, stands alone (the
+     * defect or the ask, never "see below"); the full
+     * `model_authored_prose` renders inside the collapsed context block.
+     * Absent falls back to the prose's first sentence, so a lens that has
+     * not adopted the field posts exactly as before the fold shipped.
+     */
+    summary?: string;
 };
 
 /**
@@ -356,6 +385,15 @@ export const validateFinding = (input: unknown): ValidationResult => {
     }
 
     // Optional fields: only constrained when present.
+    if (
+        input["summary"] !== undefined &&
+        (!isNonEmptyString(input["summary"]) ||
+            (input["summary"] as string).includes("\n"))
+    ) {
+        errors.push(
+            "summary: when present, must be a non-empty single-line string",
+        );
+    }
     if (
         input["suggested_patch"] !== undefined &&
         !isNonEmptyString(input["suggested_patch"])

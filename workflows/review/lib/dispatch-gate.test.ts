@@ -145,16 +145,42 @@ describe("evaluateDispatchConformance", () => {
         expect(result.commentCount).toBe(0);
     });
 
+    it("passes the dispatcher-death shape: a lone add_comment, no submission plan, empty out/", () => {
+        // Run 32418662895: the dispatcher's Bash call was killed at the
+        // engine ceiling before writing dispatch-result.json, so review.md
+        // (Step 3) posts one standalone add-comment death notice and queues
+        // nothing else. The rereview plan and routing WERE staged before the
+        // dispatcher died. add_comment is NOT in KEEP_ITEM_TYPES, so any
+        // violation here would strip the death notice and the failure would
+        // go invisible again; this pins the shape green.
+        const result = evaluate({
+            items: [
+                {
+                    type: "add_comment",
+                    body: "The automated review died mid-dispatch and posted no review.",
+                },
+                uploadItem,
+            ],
+            plan: {depth: "full"},
+            routing: {
+                enabledReviewers: ["correctness-reviewer", "security-auth"],
+                lensesToSpawn: [],
+            },
+            outFiles: {},
+        });
+        expect(result.violations).toEqual([]);
+        expect(result.conformant).toBe(true);
+        expect(result.verdictEvent).toBeNull();
+    });
+
     describe("per depth mode", () => {
         it("requires the correctness pass at full, scoped, and flip-gated", () => {
             for (const depth of ["full", "scoped", "flip-gated"]) {
+                // COMMENT, not APPROVE: an APPROVE at flip-gated would also
+                // trip the full-roster approval rule, and this test isolates
+                // rule 1.
                 const result = evaluate({
-                    items: [
-                        submitItem(
-                            "APPROVE",
-                            "Approved — no blocking issues found.",
-                        ),
-                    ],
+                    items: [submitItem("COMMENT")],
                     plan: {depth},
                     outFiles: {},
                 });
@@ -167,12 +193,7 @@ describe("evaluateDispatchConformance", () => {
 
         it("carries no correctness requirement at fast depth (reconcile-only roster)", () => {
             const result = evaluate({
-                items: [
-                    submitItem(
-                        "APPROVE",
-                        "Approved — no blocking issues found.",
-                    ),
-                ],
+                items: [submitItem("COMMENT", "Reduced-depth round.")],
                 plan: {depth: "fast"},
                 outFiles: {"thread-reconciler.json": "{}"},
             });
@@ -182,13 +203,52 @@ describe("evaluateDispatchConformance", () => {
 
         it("still requires the validator when findings post at fast depth (no producer ran)", () => {
             const result = evaluate({
-                items: [commentItem(), submitItem("APPROVE")],
+                items: [commentItem(), submitItem("COMMENT")],
                 plan: {depth: "fast"},
                 outFiles: {},
             });
             expect(result.violations.map((v) => v.code)).toEqual([
                 "validator-missing-with-findings",
             ]);
+        });
+
+        it("blocks an APPROVE at fast or flip-gated depth outright (the full-roster approval rule)", () => {
+            for (const depth of ["fast", "flip-gated"]) {
+                const result = evaluate({
+                    items: [submitItem("APPROVE")],
+                    plan: {depth},
+                    outFiles:
+                        depth === "fast"
+                            ? {"thread-reconciler.json": "{}"}
+                            : {
+                                  "correctness-reviewer.json": "{}",
+                                  "thread-reconciler.json": "{}",
+                              },
+                });
+                expect(
+                    result.violations.map((v) => v.code),
+                    `depth ${depth}`,
+                ).toEqual(["approve-requires-full-roster"]);
+            }
+        });
+
+        it("the full-roster approval rule never fires at full or scoped depth", () => {
+            for (const depth of ["full", "scoped"]) {
+                const result = evaluate({
+                    items: [
+                        submitItem(
+                            "APPROVE",
+                            "Approved — no blocking issues found.",
+                        ),
+                    ],
+                    plan: {depth},
+                    outFiles: {"correctness-reviewer.json": "{}"},
+                });
+                expect(
+                    result.violations.map((v) => v.code),
+                    `depth ${depth}`,
+                ).toEqual([]);
+            }
         });
 
         it("defaults a missing or unrecognized plan to full depth (the strictest)", () => {
@@ -252,7 +312,7 @@ describe("evaluateDispatchConformance", () => {
 
         it("does not apply at flip-gated depth (triage never runs there)", () => {
             const result = evaluate({
-                items: [submitItem("APPROVE")],
+                items: [submitItem("COMMENT")],
                 plan: {depth: "flip-gated"},
                 outFiles: {
                     "pattern-triage.json": JSON.stringify({reviewFiles: []}),
@@ -562,7 +622,7 @@ describe("runDispatchGateCli", () => {
                 items: [
                     {
                         type: "submit_pull_request_review",
-                        event: "APPROVE",
+                        event: "COMMENT",
                         body: "",
                     },
                 ],
@@ -766,12 +826,15 @@ describe("runDispatchGateCli: rule 5 disk wiring", () => {
     const REVIEW_STAGE = "/tmp/gh-aw/review";
 
     it("reads prior-reviews, rereview accounting, and the cache-memory stamp from disk for the flip veto", () => {
+        // COMMENT, not APPROVE: rule 5b blocks a reduced-depth APPROVE
+        // before the kept-blocking veto gets to speak, and this test wires
+        // rule 5's disk reads.
         const fs = makeFakeFs({
             [AGENT_OUTPUT]: JSON.stringify({
                 items: [
                     {
                         type: "submit_pull_request_review",
-                        event: "APPROVE",
+                        event: "COMMENT",
                         body: "ok",
                     },
                 ],

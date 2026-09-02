@@ -134,6 +134,52 @@ describe("parseCase: the live block", () => {
         expect(parsed.live?.mustCatchSpecs?.[0]?.blockingOnly).toBeUndefined();
     });
 
+    it("parses a prLevel spec (no path) and rejects a located one", () => {
+        const withSpec = (specEntry: Record<string, unknown>) =>
+            liveCase({
+                live: {
+                    prContext: {
+                        title: "t",
+                        description: "d",
+                        author: "a",
+                        baseBranch: "main",
+                    },
+                    mustCatchSpecs: [specEntry],
+                },
+            });
+        const parsed = parseCase(
+            withSpec({
+                key: "pr-doc-1",
+                prLevel: true,
+                mechanism: ["metaphor"],
+                lens: "documentation",
+            }),
+            "test://case",
+        );
+        expect(parsed.live?.mustCatchSpecs?.[0]?.prLevel).toBe(true);
+        expect(parsed.live?.mustCatchSpecs?.[0]?.path).toBeUndefined();
+        expect(
+            parseErrors(
+                withSpec({
+                    key: "pr-doc-2",
+                    prLevel: true,
+                    path: "src/a.ts",
+                    mechanism: ["metaphor"],
+                }),
+            ),
+        ).toMatch(/must be omitted on a prLevel spec/);
+        expect(
+            parseErrors(
+                withSpec({
+                    key: "pr-doc-3",
+                    prLevel: false,
+                    path: "src/a.ts",
+                    mechanism: ["metaphor"],
+                }),
+            ),
+        ).toMatch(/prLevel: must be true when present/);
+    });
+
     it("parses and validates altLocations like the primary location", () => {
         const withAlt = (altLocations: unknown) =>
             liveCase({
@@ -182,6 +228,38 @@ describe("parseCase: the live block", () => {
                 withAlt([{path: "src/a.ts", lineStart: 5, lineEnd: 3}]),
             ),
         ).toMatch(/lineStart <= lineEnd/);
+    });
+
+    it("parses a live.ticket block and rejects a malformed one", () => {
+        const withTicket = (ticket: unknown) =>
+            liveCase({
+                live: {
+                    prContext: {
+                        title: "A change",
+                        description: "",
+                        author: "octocat",
+                        baseBranch: "main",
+                    },
+                    ticket,
+                },
+            });
+        const parsed = parseCase(
+            withTicket({available: true, tickets: [{key: "KORE-1"}]}),
+            "test://case",
+        );
+        expect(parsed.live?.ticket).toEqual({
+            available: true,
+            tickets: [{key: "KORE-1"}],
+        });
+        // `available` is the only validated field: the shape is
+        // stage-ticket.ts's TicketContext, owned by lib, not re-specified
+        // here.
+        expect(parseErrors(withTicket({tickets: []}))).toMatch(
+            /live\.ticket: must be an object with a boolean `available`/,
+        );
+        expect(parseErrors(withTicket("KORE-1"))).toMatch(
+            /live\.ticket: must be an object/,
+        );
     });
 
     it("requires a diff on a live case", () => {

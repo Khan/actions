@@ -39,19 +39,25 @@
  * note lines) is pure code. No prose about the code under review.
  */
 
+import {dedupeClaims, type ClaimMerge} from "./dedup";
+import {type ThreadSuppression} from "./dedup-threads";
 import {
-    dedupeClaims,
-    openThreadsFromStaged,
-    stagedThreadShapeFailure,
-    suppressOpenThreadDuplicates,
-    type ClaimMerge,
-    type ThreadSuppression,
-} from "./dedup";
+    reapplyCrossFileOccurrences,
+    suppressThenMergeCrossFile,
+    type CrossFileMerge,
+} from "./dedup-crossfile";
+import {
+    clusteringRecord,
+    runClusterStep,
+    CLUSTERER,
+    type DispatchClustering,
+} from "./dispatch-cluster";
 import {annotateDiffLineNumbers, splitUnifiedDiff} from "./diff";
 import {
     applyScopeFilter,
     buildClaims,
     contractValidator,
+    parseClustererOutput,
     parseFinderOutput,
     parseJsonObject,
     parseValidatorOutput,
@@ -61,14 +67,18 @@ import {
     type Candidate,
     type Claim,
 } from "./dispatch-contracts";
-import {loadAgents, type DispatchFs} from "./dispatch-agents";
+import {loadAgents, type AgentRunner, type DispatchFs} from "./dispatch-agents";
+import {createAgentDispatcher, type PerAgentReport} from "./dispatch-calls";
 import {
-    createAgentDispatcher,
-    type AgentRunner,
-    type PerAgentReport,
-} from "./dispatch-calls";
+    buildProseJudgeArtifact,
+    stageProseJudgeArtifact,
+    type JudgeRecord,
+    type ProseJudgeArtifact,
+    type ProseRunner,
+} from "./judge-prose";
 
-import {computeRoster, type RosterShed} from "./dispatch-roster";
+import {computeRoster, TRIAGE_DIMENSION} from "./dispatch-roster";
+import type {RosterShed} from "./dispatch-roster";
 import {
     applyProvenanceGate,
     type DiffProvenance,
@@ -82,11 +92,13 @@ export {
     applyVerifications,
     buildClaims,
     contractValidator,
+    parseClustererOutput,
     parseFinderOutput,
     parseValidatorOutput,
     type Candidate,
     type Claim,
     type ContractKind,
+    type ProposedCluster,
     type Verification,
 } from "./dispatch-contracts";
 export {
@@ -97,26 +109,42 @@ export {
     type RosterShed,
 } from "./dispatch-roster";
 export {
+    clusteringRecord,
+    runClusterStep,
+    CLUSTERER,
+    type ClusterStep,
+    type DispatchClustering,
+} from "./dispatch-cluster";
+export {
     loadAgents,
     parseAgentFile,
     type AgentDefinition,
     type DispatchFs,
 } from "./dispatch-agents";
+export {dedupeClaims, type ClaimMerge} from "./dedup";
 export {
-    dedupeClaims,
     suppressOpenThreadDuplicates,
-    type ClaimMerge,
     type ThreadSuppression,
-} from "./dedup";
-// The model seam and the per-agent report live with the code that calls one
-// agent (dispatch-calls.ts); re-exported here so callers and tests keep one
-// import surface for the dispatch machinery.
+} from "./dedup-threads";
+export {type ClusterRejection} from "./dedup-cluster";
+
+/* -------------------------------------------------------------------------- */
+/* Seams                                                                      */
+/* -------------------------------------------------------------------------- */
+
+// The model-facing contract types live in dispatch-agents.ts (the same
+// max-lines split that placed agent loading there); re-exported so every
+// existing importer keeps this module as the one surface. The dispatcher
+// itself (calling one agent, plus its recovery behaviors) lives in
+// dispatch-calls.ts and is re-exported the same way.
 export {
-    createAgentDispatcher,
-    type AgentDispatcher,
     type AgentRequest,
     type AgentResult,
     type AgentRunner,
+} from "./dispatch-agents";
+export {
+    createAgentDispatcher,
+    type AgentDispatcher,
     type PerAgentReport,
 } from "./dispatch-calls";
 
@@ -127,7 +155,8 @@ export {
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const OUT_DIR = `${REVIEW_DIR}/out`;
 
-const DEFAULT_MAX_TURNS = 30;
+// 100, not 30: #295 held twice on error_max_turns (a loop guard only).
+const DEFAULT_MAX_TURNS = 100;
 /**
  * Per-sub-agent wall-clock cap. 15 minutes, not 5: trial run 29901690493
  * killed both default finders (correctness-reviewer, skill-auditor) at
@@ -166,6 +195,17 @@ export type DispatchResult = {
     claims: Claim[];
     /** Cross-source duplicates merged before validation (#245). */
     merges: ClaimMerge[];
+    /** One source's same finding on several files, collapsed (dedup-crossfile.ts). */
+    crossFileMerges: CrossFileMerge[];
+    /**
+     * Dedup tier 2's audit block, present when the clusterer was dispatched
+     * (absent when there was nothing to cluster: fewer than two claims, or one
+     * source). `candidates` is the pre-merge claim count, so the run's merge
+     * rate reads off the artifact — the number to trust, since autofix later
+     * satisfies duplicate comments with one edit and hides the symptom on the
+     * PR itself.
+     */
+    clustering?: DispatchClustering;
     /**
      * Candidates dropped because an open bot thread already tracks the
      * defect (trial suggestion g). Blocking entries still floor the verdict
@@ -176,6 +216,13 @@ export type DispatchResult = {
     threadSuppressionUnavailable?: {unusableThreads: number; warning: string};
     /** The reconciler's decision, when it ran and parsed. */
     reconciliation?: {resolve: string[]; keep: string[]; skipLines: unknown};
+    /**
+     * The prose judge's verdicts (judge-prose.ts), present when the run had
+     * a prose runner. Also staged standalone as judge-prose-verdicts.json;
+     * duplicated here so the artifact's one-file dispatch record carries the
+     * error-rate the fail-open design needs watched.
+     */
+    proseJudge?: ProseJudgeArtifact;
     /** correctness-reviewer `files[]` risk levels (Steps 7-8). */
     riskFiles?: unknown;
     /** pattern-triage patterns + excluded files (Step 7). */
@@ -195,6 +242,14 @@ export type DispatchOptions = {
     maxTurns?: number;
     timeoutMs?: number;
     concurrency?: number;
+    /**
+     * The prose judge's model call (PRA-45). When set, every dispatched
+     * agent gets a per-agent prose gate on its `submit_result` path and the
+     * run stages `judge-prose-verdicts.json`. Absent (unit tests, task
+     * mode), no gate exists and nothing is judged — the same fail-open
+     * default as every other optional model surface here.
+     */
+    proseRunner?: ProseRunner;
 };
 
 const readJson = (fs: DispatchFs, path: string): unknown => {
@@ -287,6 +342,8 @@ export const runDispatch = async (
             name,
             name === VALIDATOR
                 ? "validator"
+                : name === CLUSTERER
+                ? "clusterer"
                 : name === TRIAGE || name === RECONCILER
                 ? "json"
                 : lensNames.includes(name)
@@ -294,6 +351,7 @@ export const runDispatch = async (
                 : "finder",
         );
     const perAgent: PerAgentReport[] = [];
+    const proseVerdicts: JudgeRecord[] = [];
     const skippedDimensions: DispatchSkippedDimension[] = roster.shed.map(
         (shed) => ({
             dimension: shed.name,
@@ -313,6 +371,10 @@ export const runDispatch = async (
         maxTurns,
         timeoutMs,
         validatorFor,
+        ...(options.proseRunner === undefined
+            ? {}
+            : {proseRunner: options.proseRunner}),
+        recordProseVerdicts: (records) => proseVerdicts.push(...records),
     });
 
     // Phase 1: triage (full/scoped), staging pr.diff and review-files.json.
@@ -355,7 +417,7 @@ export const runDispatch = async (
             // Triage unavailable: review everything (fail toward more
             // review), and say so.
             skippedDimensions.push({
-                dimension: "pattern triage",
+                dimension: TRIAGE_DIMENSION,
                 cause: "unavailable",
             });
             fs.writeFileSync(`${REVIEW_DIR}/pr.diff`, diffText);
@@ -575,31 +637,49 @@ export const runDispatch = async (
         }
     }
 
-    // Cross-source duplicate merge (#245), BEFORE validation so duplicate
-    // claims are neither separately validated (the largest sub-agent cost
-    // line) nor separately posted.
-    const deduped = dedupeClaims(buildClaims(scoped.kept));
+    // Duplicate merge, BEFORE validation so duplicates are neither validated
+    // nor posted; dedup.ts's header carries the rationale and measured runs.
+    const candidateClaims = buildClaims(scoped.kept);
+    const clusterStep = await runClusterStep(candidateClaims, {
+        dispatch: dispatchAgent,
+        parse: (name, output) =>
+            parseWithRetry(name, output, parseClustererOutput),
+        write: (content) =>
+            fs.writeFileSync(`${REVIEW_DIR}/candidates.json`, content),
+        // eslint-disable-next-line no-console
+        warn: (message) => console.error(message),
+    });
+    // Tiers 1-2; the cross-file pass runs after suppression (see dedup-crossfile.ts).
+    const deduped = dedupeClaims(candidateClaims, clusterStep.proposals);
+    const clustering = clusteringRecord(
+        clusterStep,
+        candidateClaims.length,
+        deduped,
+    );
     let claims = deduped.claims;
 
-    // Open-thread suppression (trial suggestion g), also before validation:
-    // a defect an open bot thread already tracks is not re-validated or
-    // re-posted at a new anchor. Threads the reconciler resolves this run
-    // are exempt; when the reconciler was unavailable, nothing resolves, so
-    // every staged bot thread suppresses (fail toward fewer duplicate
-    // threads). The bot-opener filter, and the check for a staging whose shape
-    // defeats it and so suppresses nothing, both live in dedup.ts beside the
-    // rules they enforce; the staging is code now (stage-pr.ts), and the guards
-    // stay so a producer bug degrades to a duplicate, never to a dropped
-    // finding.
-    const resolvedIds = new Set(reconciliation?.resolve ?? []);
-    const openThreads = openThreadsFromStaged(threads, resolvedIds);
-    const suppression = suppressOpenThreadDuplicates(claims, openThreads);
-    claims = suppression.kept;
-    const threadSuppressionUnavailable = stagedThreadShapeFailure(
+    // Thread suppression (trial suggestion g), also before validation: a
+    // defect an OPEN bot thread already tracks, or one a human ADJUDICATED by
+    // resolving its thread (webapp#41290: six resolved variants of one
+    // concern, then a seventh posted anyway), is not re-validated or
+    // re-posted at a new anchor. Threads the reconciler resolves this run are
+    // exempt from the open corpus; blocking candidates are exempt from the
+    // adjudicated one (a closed thread floors nothing, so a regression
+    // re-flag at blocking severity must stay visible). Every filter and guard
+    // lives in dedup.ts / dedup-adjudicated.ts beside the rules it enforces;
+    // a producer bug or an older staging without adjudicated-threads.json
+    // degrades to a duplicate comment, never to a dropped finding. The
+    // cross-file merge runs AFTER both passes, inside the composed step
+    // (dedup-crossfile.ts carries the ordering rationale).
+    const dedupStep = suppressThenMergeCrossFile(
+        claims,
         threads,
-        openThreads,
-        resolvedIds,
+        readJson(fs, `${REVIEW_DIR}/adjudicated-threads.json`),
+        new Set(reconciliation?.resolve ?? []),
+        readJson(fs, `${REVIEW_DIR}/files.json`),
     );
+    claims = dedupStep.claims;
+    const threadSuppressionUnavailable = dedupStep.shapeFailure;
     if (threadSuppressionUnavailable !== undefined) {
         // eslint-disable-next-line no-console
         console.error(threadSuppressionUnavailable.warning);
@@ -634,6 +714,10 @@ export const runDispatch = async (
                 cause: "unavailable",
             });
         }
+        // A validator corrected.discussion replaces a survivor's free text
+        // wholesale, erasing the merge's "Also applies to" line; re-build
+        // it from the merge records so no correction loses an occurrence.
+        claims = reapplyCrossFileOccurrences(claims, dedupStep.crossFileMerges);
     }
 
     const dispatched = [
@@ -654,7 +738,7 @@ export const runDispatch = async (
                         ? VALIDATOR
                         : skip.dimension === "thread reconciliation"
                         ? RECONCILER
-                        : skip.dimension === "pattern triage"
+                        : skip.dimension === TRIAGE_DIMENSION
                         ? TRIAGE
                         : skip.dimension,
                 ),
@@ -664,9 +748,9 @@ export const runDispatch = async (
                   "Note: change-provenance gate skipped this run (diff staging unparseable).",
               ]
             : []),
-        ...(suppression.suppressed.length > 0
+        ...(dedupStep.suppressed.length > 0
             ? [
-                  `Note: ${suppression.suppressed.length} finding(s) not re-posted (already tracked in open review threads).`,
+                  `Note: ${dedupStep.suppressed.length} finding(s) not re-posted (already tracked in open review threads).`,
               ]
             : []),
     ];
@@ -680,7 +764,9 @@ export const runDispatch = async (
         noteLines,
         claims,
         merges: deduped.merges,
-        threadSuppressions: suppression.suppressed,
+        crossFileMerges: dedupStep.crossFileMerges,
+        ...(clustering !== undefined ? {clustering} : {}),
+        threadSuppressions: dedupStep.suppressed,
         ...(threadSuppressionUnavailable !== undefined
             ? {threadSuppressionUnavailable}
             : {}),
@@ -688,9 +774,17 @@ export const runDispatch = async (
         ...(riskFiles !== undefined ? {riskFiles} : {}),
         ...(patterns !== undefined ? {patterns} : {}),
         ...(excludedFiles !== undefined ? {excludedFiles} : {}),
+        ...(options.proseRunner === undefined
+            ? {}
+            : {proseJudge: buildProseJudgeArtifact(proseVerdicts)}),
         perAgent,
         totalUsd: perAgent.reduce((sum, agent) => sum + agent.usd, 0),
     };
+    stageProseJudgeArtifact(
+        (path, data) => fs.writeFileSync(path, data),
+        writeOut,
+        result.proseJudge,
+    );
     const serialized = JSON.stringify(result, null, 2);
     fs.writeFileSync(`${REVIEW_DIR}/dispatch-result.json`, serialized);
     // Also staged under out/ so the Step 9 artifact upload carries it: run
@@ -713,8 +807,9 @@ export const runDispatch = async (
 // loaded lazily so unit tests and the task-mode path never require Pi's
 // libraries; the staging pre-step installs them
 // (workflows/review/package.json) before the agent starts. The per-role
-// `model:` pins are unchanged by the harness; they resolve through Pi's
-// Anthropic catalog (resolveModelId).
+// `model:` pins resolve through Pi's catalog for each pin's provider
+// (dispatch-models.ts: providerForPin routes gemini-* pins to Google,
+// everything else to Anthropic; resolveModelId names the concrete id).
 if (typeof require !== "undefined" && require.main === module) {
     const nodeFs = require("node:fs") as DispatchFs;
     void (async () => {
@@ -726,9 +821,16 @@ if (typeof require !== "undefined" && require.main === module) {
         // rather than silently running the other harness.
         rejectStaleRunnerSelection(process.env);
         const runner = await createPiRunner();
+        const {createDefaultProseRunner} = await import("./judge-prose-runner");
+        const proseRunner = await createDefaultProseRunner();
         const repoRoot =
             process.env.REVIEW_REPO_ROOT ?? process.env.GITHUB_WORKSPACE ?? ".";
-        const result = await runDispatch({fs: nodeFs, runner, repoRoot});
+        const result = await runDispatch({
+            fs: nodeFs,
+            runner,
+            repoRoot,
+            ...(proseRunner === undefined ? {} : {proseRunner}),
+        });
         // eslint-disable-next-line no-console
         console.log(
             JSON.stringify(

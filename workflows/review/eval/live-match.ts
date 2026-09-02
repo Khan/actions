@@ -123,19 +123,29 @@ const DEFAULT_MAX_FALLBACK_CALLS = 10;
  */
 const specLocations = (
     spec: LiveDefectSpec,
-): {path: string; lineStart?: number; lineEnd?: number}[] => [
-    {
-        path: spec.path,
-        ...(spec.lineStart !== undefined
-            ? {lineStart: spec.lineStart, lineEnd: spec.lineEnd}
-            : {}),
-    },
-    ...(spec.altLocations ?? []),
-];
+): {path: string; lineStart?: number; lineEnd?: number}[] =>
+    spec.path === undefined
+        ? [] // A prLevel spec names no file location.
+        : [
+              {
+                  path: spec.path,
+                  ...(spec.lineStart !== undefined
+                      ? {lineStart: spec.lineStart, lineEnd: spec.lineEnd}
+                      : {}),
+              },
+              ...(spec.altLocations ?? []),
+          ];
 
-/** Whether a candidate shares a file with any of the spec's locations. */
+/**
+ * Whether a candidate shares a file with any of the spec's locations (for a
+ * prLevel spec: whether the candidate is itself PR-level).
+ */
 const onSpecFile = (candidate: RunCandidate, spec: LiveDefectSpec): boolean =>
-    specLocations(spec).some((location) => location.path === candidate.path);
+    spec.prLevel === true
+        ? candidate.anchor.type === "pr"
+        : specLocations(spec).some(
+              (location) => location.path === candidate.path,
+          );
 
 /** Whether a candidate's anchor agrees with any of a spec's locations. */
 const anchorAgrees = (
@@ -143,6 +153,12 @@ const anchorAgrees = (
     spec: LiveDefectSpec,
 ): boolean => {
     const anchor = candidate.anchor;
+    if (spec.prLevel === true) {
+        // A PR-level spec names the title/description; only a PR-level
+        // comment can satisfy it. A line-anchored comment is about a file,
+        // whatever its mechanism says.
+        return anchor.type === "pr";
+    }
     if (anchor.type === "pr") {
         // A PR-level comment names no location; mechanism alone decides.
         return true;

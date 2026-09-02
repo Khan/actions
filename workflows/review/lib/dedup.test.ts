@@ -1,11 +1,11 @@
 import {describe, it, expect} from "vitest";
 
+import {dedupeClaims} from "./dedup";
 import {
-    dedupeClaims,
     openThreadsFromStaged,
     stagedThreadShapeFailure,
     suppressOpenThreadDuplicates,
-} from "./dedup";
+} from "./dedup-threads";
 import type {Claim} from "./dispatch-contracts";
 
 /**
@@ -166,9 +166,11 @@ describe("dedupeClaims", () => {
         expect(claims).toHaveLength(1);
         expect(claims[0].id).toBe("correctness-reviewer-1");
         expect(claims[0].label).toBe("issue (blocking)");
-        expect(claims[0].discussion).toContain(
-            "Also flagged by completeness, first-principles, skill-auditor (out-of-lane).",
-        );
+        expect(claims[0].also_flagged_by).toEqual([
+            {source: "completeness"},
+            {source: "first-principles"},
+            {source: "skill-auditor (out-of-lane)"},
+        ]);
         expect(merges).toEqual([
             {
                 survivor: "correctness-reviewer-1",
@@ -191,6 +193,7 @@ describe("dedupeClaims", () => {
                 ],
                 path: "services/ai-guide/memory/expiration.go",
                 line: 38,
+                via: "similarity",
             },
         ]);
     });
@@ -295,10 +298,12 @@ describe("dedupeClaims", () => {
                         id: "test-adequacy-1",
                         source: "test-adequacy",
                         label: "todo (blocking)",
+                        line: 40,
                     },
                 ],
                 path: "services/ai-guide/memory/expiration.go",
                 line: 15,
+                via: "similarity",
             },
         ]);
     });
@@ -352,9 +357,12 @@ describe("dedupeClaims", () => {
         expect(claims).toHaveLength(1);
         expect(claims[0].id).toBe("correctness-reviewer-3");
         expect(claims[0].label).toBe("todo (blocking)");
-        expect(claims[0].discussion).toContain(
-            "Also flagged by skill-auditor (out-of-lane).",
-        );
+        // The record names the other copy's anchor, since it is not the
+        // survivor's: an author reading a merge across 43 lines needs to know
+        // the second reviewer was looking somewhere else.
+        expect(claims[0].also_flagged_by).toEqual([
+            {source: "skill-auditor (out-of-lane)", line: 58},
+        ]);
         expect(merges).toEqual([
             {
                 survivor: "correctness-reviewer-3",
@@ -363,10 +371,12 @@ describe("dedupeClaims", () => {
                         id: "skill-auditor-ool-2",
                         source: "skill-auditor (out-of-lane)",
                         label: "question (non-blocking)",
+                        line: 58,
                     },
                 ],
                 path: "services/ai-guide/memory/expiration_test.go",
                 line: 15,
+                via: "similarity",
             },
         ]);
     });
@@ -432,10 +442,12 @@ describe("dedupeClaims", () => {
         const {claims, merges} = dedupeClaims(ttlUnitClaims());
         expect(claims).toHaveLength(1);
         expect(claims[0].id).toBe("correctness-reviewer-1");
-        expect(claims[0].discussion).toContain(
-            "Also flagged by skill-auditor (out-of-lane), completeness, " +
-                "holistic, first-principles.",
-        );
+        expect(claims[0].also_flagged_by).toEqual([
+            {source: "skill-auditor (out-of-lane)"},
+            {source: "completeness"},
+            {source: "holistic"},
+            {source: "first-principles"},
+        ]);
         expect(merges).toEqual([
             {
                 survivor: "correctness-reviewer-1",
@@ -463,6 +475,7 @@ describe("dedupeClaims", () => {
                 ],
                 path: "services/ai-guide/memory/expiration.go",
                 line: 38,
+                via: "similarity",
             },
         ]);
     });
@@ -708,7 +721,7 @@ describe("suppressOpenThreadDuplicates (trial suggestion g)", () => {
         expect(suppressed).toEqual([]);
     });
 
-    it("never matches across paths or without an anchor, and is identity without threads", () => {
+    it("never matches an anchored claim across paths, and is identity without threads", () => {
         const reflag = claim({
             id: "c",
             source: "correctness-reviewer",
@@ -718,12 +731,6 @@ describe("suppressOpenThreadDuplicates (trial suggestion g)", () => {
             failure_scenario:
                 "A regression that identifies expired memories but skips the deletion stays green.",
         });
-        expect(
-            suppressOpenThreadDuplicates(
-                [claim({...reflag, path: undefined, line: undefined})],
-                [openThread()],
-            ).suppressed,
-        ).toEqual([]);
         expect(
             suppressOpenThreadDuplicates(
                 [reflag],
@@ -940,5 +947,39 @@ describe("openThreadsFromStaged", () => {
             ],
         };
         expect(openThreadsFromStaged([humanThread], new Set())).toEqual([]);
+    });
+});
+
+describe("survivor election and the medium tier", () => {
+    it("prefers the copy carrying medium over a higher-confidence minor copy", () => {
+        // Two non-blocking copies of one defect, same anchor, near-identical
+        // text: the tier must survive corroboration (and keep the plan's
+        // medium-count instrument honest), so the medium copy wins the
+        // election despite the lower confidence.
+        const minor = claim({
+            id: "holistic-1",
+            source: "holistic",
+            label: "note (non-blocking)",
+            confidence: 0.9,
+            subject:
+                "AddDate(0, -MemoryTTLDays, 0) subtracts 180 months, not 180 days, so nothing expires.",
+            failure_scenario:
+                "AddDate(0, -MemoryTTLDays, 0) subtracts 180 months, not 180 days, so nothing expires",
+        });
+        const medium = claim({
+            id: "correctness-reviewer-1",
+            source: "correctness-reviewer",
+            label: "note (non-blocking)",
+            confidence: 0.6,
+            importance: "medium",
+            subject:
+                "AddDate(0, -MemoryTTLDays, 0) subtracts 180 months, not 180 days, so nothing expires.",
+            failure_scenario:
+                "AddDate(0, -MemoryTTLDays, 0) subtracts 180 months, not 180 days, so nothing expires",
+        });
+        const {claims} = dedupeClaims([minor, medium]);
+        expect(claims).toHaveLength(1);
+        expect(claims[0].id).toBe("correctness-reviewer-1");
+        expect(claims[0].importance).toBe("medium");
     });
 });

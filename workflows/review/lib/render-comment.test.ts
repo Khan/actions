@@ -7,6 +7,7 @@ import {
     labelForFinding,
     renderComment,
     renderReviewBody,
+    shouldFoldContext,
     type ReviewBodyInput,
 } from "./render-comment.ts";
 import {
@@ -15,6 +16,7 @@ import {
     type Finding,
     type Lens,
 } from "./finding-schema.ts";
+import {renderClaimComment} from "./submission-render.ts";
 
 /**
  * Rendering tests. The renderer sits on the determinism
@@ -77,6 +79,21 @@ describe("labelForFinding — deterministic from severity + lens", () => {
                 makeFinding({severity: "advisory", lens: "correctness"}),
             ),
         ).toBe("suggestion (non-blocking)");
+    });
+
+    it("medium renders exactly as advisory does (the no-new-labels invariant)", () => {
+        // The tier's design rests on medium minting no label of its own:
+        // every label-keyed consumer (verdict, recap parser, dedup guards,
+        // flip gate) stays untouched only if this holds.
+        for (const lens of [
+            "security-auth",
+            "conventions",
+            "documentation",
+        ] as const) {
+            expect(
+                labelForFinding(makeFinding({severity: "medium", lens})),
+            ).toBe(labelForFinding(makeFinding({severity: "advisory", lens})));
+        }
     });
 
     it("advisory + conventions lens -> suggestion (non-blocking, best-practice)", () => {
@@ -371,5 +388,128 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
           Note: correctness not assessed this run (correctness-reviewer output unavailable).
           Note: claim validation not assessed this run (claim-validator output unavailable)."
         `);
+    });
+});
+
+describe("renderReviewBody — the COMMENT verdict", () => {
+    it("always carries the middle verdict's head", () => {
+        const body = renderReviewBody({
+            event: "COMMENT",
+            hasInlineComments: true,
+        });
+        expect(body).toContain(
+            "Commented — medium-importance findings found; nothing blocks.",
+        );
+    });
+});
+
+describe("renderComment context fold", () => {
+    const longProse =
+        "User input flows unsanitized into a shell command. The request " +
+        "param reaches exec() through buildArgs without passing " +
+        "shellEscape, and the only caller that sanitizes is the CLI " +
+        "entrypoint, so every HTTP path hits the raw join. Verified by " +
+        "tracing buildArgs callers in src/app.ts and src/cli.ts.";
+
+    it("folds long prose behind the authored summary", () => {
+        const body = renderComment(
+            makeFinding({
+                model_authored_prose: longProse,
+                summary: "Request params reach exec() unescaped.",
+            }),
+        );
+        expect(body).toBe(
+            [
+                "**issue (blocking):** Request params reach exec() unescaped.",
+                "",
+                "<details><summary><sub>context</sub></summary>",
+                "",
+                longProse,
+                "",
+                "</details>",
+            ].join("\n"),
+        );
+    });
+
+    it("falls back to the first sentence when no summary is authored", () => {
+        const body = renderComment(
+            makeFinding({model_authored_prose: longProse}),
+        );
+        expect(
+            body.startsWith(
+                "**issue (blocking):** User input flows unsanitized into a shell command.",
+            ),
+        ).toBe(true);
+        expect(body).toContain(
+            "<details><summary><sub>context</sub></summary>",
+        );
+    });
+
+    it("keeps short prose unfolded (the pre-fold shape, byte for byte)", () => {
+        expect(renderComment(makeFinding())).toBe(
+            "**issue (blocking):** User input flows unsanitized into a shell command.",
+        );
+    });
+
+    it("keeps the committable fence outside and BELOW the block", () => {
+        // Below, not between the summary and the block: dedup-threads'
+        // threadProse truncates a posted body at its first ``` fence, so
+        // a fence above the block would hide the discussion from
+        // open-thread dedup (PR #401 review).
+        const body = renderComment(
+            makeFinding({
+                model_authored_prose: longProse,
+                summary: "Request params reach exec() unescaped.",
+                suggested_patch: "exec(shellEscape(args))",
+                rule_quote: "Never pass raw input to exec.",
+            }),
+        );
+        const closeAt = body.indexOf("</details>");
+        expect(body.indexOf("```suggestion")).toBeGreaterThan(closeAt);
+        const ruleAt = body.indexOf(
+            "> **Rule:** Never pass raw input to exec.",
+        );
+        expect(ruleAt).toBeGreaterThan(body.indexOf("<details>"));
+        expect(ruleAt).toBeLessThan(closeAt);
+    });
+
+    it("stays byte-identical to renderClaimComment on the folded shape", () => {
+        // The layout-parity contract: buildClaims turns this finding into a
+        // claim whose subject is the summary and whose discussion is the
+        // prose, and the two renderers must agree on the posted body.
+        const finding = makeFinding({
+            model_authored_prose: longProse,
+            summary: "Request params reach exec() unescaped.",
+        });
+        const claimBody = renderClaimComment({
+            id: "finding-1",
+            source: "security-auth-reviewer",
+            path: "src/app.ts",
+            line: 42,
+            label: "issue (blocking)",
+            subject: "Request params reach exec() unescaped.",
+            discussion: longProse,
+            failure_scenario: "f",
+            confidence: 0.9,
+        });
+        expect(renderComment(finding)).toBe(claimBody);
+    });
+});
+
+describe("shouldFoldContext block-close refusal", () => {
+    it("posts flat when the prose carries a literal closing tag", () => {
+        const prose =
+            "A discussion long enough to clear the two-hundred-character bar " +
+            "that quotes the `</details>` tag in backticks, which would still " +
+            "end the surrounding block early on GitHub's HTML-block parse, " +
+            "so this body must render in the flat shape instead.";
+        expect(shouldFoldContext("The visible line.", prose)).toBe(false);
+        const body = renderComment(
+            makeFinding({
+                model_authored_prose: prose,
+                summary: "The visible line.",
+            }),
+        );
+        expect(body).toBe(`**issue (blocking):** ${prose}`);
     });
 });

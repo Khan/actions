@@ -2,11 +2,12 @@
  * The computed review verdict.
  *
  * The verdict is a pure function of (1) the Conventional-Comment labels on the
- * comments that will actually be posted, (2) which review dimensions were
- * assessed this run, and (3) any policy-named conflicts a lens flagged. It emits
- * one of three events with a machine-readable list of reasons. No prose is
- * synthesised here: reasons are structured records, not
- * sentences about the code.
+ * comments that will actually be posted, (2) the posted claims' medium tier
+ * (PRA-7: mediums demote a would-be approval to COMMENT), (3) which review
+ * dimensions were assessed this run, and (4) any policy-named conflicts a
+ * lens flagged. It emits one of four events with a machine-readable list of
+ * reasons. No prose is synthesised here: reasons are structured records,
+ * not sentences about the code.
  *
  * Relationship to #194: #194 already established the *mechanical label model* —
  * REQUEST_CHANGES iff at least one posted comment carries a blocking label,
@@ -86,7 +87,8 @@ export type VerdictReason =
     | {code: "core-dimension-unavailable"; dimension: CoreDimension}
     | {code: "pattern-triage-unavailable"}
     | {code: "policy-conflict"; policy: string; detail: string}
-    | {code: "kept-blocking-thread"; count: number};
+    | {code: "kept-blocking-thread"; count: number}
+    | {code: "medium-importance"; count: number};
 
 export type Verdict = {
     event: VerdictEvent;
@@ -110,6 +112,15 @@ export type VerdictInput = {
      * never REQUEST_CHANGES regardless of this value.
      */
     blockingThreshold?: number;
+    /**
+     * How many posted claims carry the medium importance tier (post-veto;
+     * the count the plan's notes record). Any nonzero value demotes a
+     * would-be APPROVE to COMMENT (PRA-7): a verified finding worth fixing
+     * before merge should not ride under an approval, and the middle
+     * verdict says so without demanding another round. Never affects
+     * REQUEST_CHANGES. Absent means zero.
+     */
+    mediumCount?: number;
     /**
      * How many prior review threads with a blocking opening label the
      * reconciler KEPT this run (`rereview.json` `keptBlockingCount`). The
@@ -145,7 +156,7 @@ export const DEFAULT_BLOCKING_THRESHOLD = 1;
  * input always yields the same verdict, which is what makes the determinism
  * boundary testable.
  *
- * Precedence is REQUEST_CHANGES > HOLD_FOR_HUMAN > APPROVE:
+ * Precedence is REQUEST_CHANGES > HOLD_FOR_HUMAN > COMMENT > APPROVE:
  *
  *   1. If the blocking-label count meets the threshold -> REQUEST_CHANGES. A
  *      blocking finding is actionable on its own: the author gets concrete
@@ -154,13 +165,19 @@ export const DEFAULT_BLOCKING_THRESHOLD = 1;
  *      core dimension or policy conflict is still recorded in `reasons` (and
  *      rendered into the body), so nothing is hidden.
  *   2. Otherwise, if any core dimension is unavailable or any policy conflict
- *      is present, the run must not resolve to an approval the automation
- *      cannot stand behind -> HOLD_FOR_HUMAN.
- *   3. Otherwise -> APPROVE.
+ *      is present -> HOLD_FOR_HUMAN, mediums or no mediums. An earlier
+ *      revision had COMMENT outrank the hold ("a COMMENT approves nothing"),
+ *      which reasoned about the approval half only: the hold's OTHER effect
+ *      is that no fingerprint stamp is written and the cache record is
+ *      refused, so the next run reviews in full rather than anchoring a
+ *      reduced re-review on a partial assessment. A COMMENT run writes both,
+ *      so letting it win would trade that away; medium findings still reach
+ *      the author as folded claim lines in the hold comment.
+ *   3. Otherwise, if any posted claim carries the medium tier -> COMMENT.
+ *   4. Otherwise -> APPROVE.
  *
  * The hold therefore only ever replaces what would otherwise have been an
- * auto-approval; it never sits in front of feedback the author could already
- * act on.
+ * auto-approval or a comment; it never sits in front of blocking feedback.
  */
 export const computeVerdict = (input: VerdictInput): Verdict => {
     const threshold = Math.max(
@@ -212,6 +229,14 @@ export const computeVerdict = (input: VerdictInput): Verdict => {
     // A run with zero blocking labels is never REQUEST_CHANGES (review.md
     // Step 4) — unless a prior review's blocking thread is still open, in
     // which case the earlier objection is the actionable feedback.
+    // (f) Medium-importance claims — the PRA-7 middle verdict's signal
+    // (post-veto count, from the caller).
+    const mediumCount = input.mediumCount ?? 0;
+    if (mediumCount > 0) {
+        reasons.push({code: "medium-importance", count: mediumCount});
+    }
+
+    // Precedence: a blocking finding is actionable on its own, so it wins.
     if (
         (blockingLabelCount > 0 && blockingLabelCount >= threshold) ||
         keptBlocking > 0
@@ -219,9 +244,16 @@ export const computeVerdict = (input: VerdictInput): Verdict => {
         return {event: "REQUEST_CHANGES", reasons};
     }
 
-    // The hold only ever replaces what would otherwise be an auto-approval.
+    // The hold outranks the comment (see the precedence note above): its
+    // no-stamp/no-record effect is what forces the next run to review in
+    // full, and a COMMENT run would write both from a partial assessment.
     if (missingCore.length > 0 || policyConflicts.length > 0) {
         return {event: "HOLD_FOR_HUMAN", reasons};
+    }
+
+    // The middle verdict: verified worth-fixing findings, nothing blocking.
+    if (mediumCount > 0) {
+        return {event: "COMMENT", reasons};
     }
 
     return {event: "APPROVE", reasons};

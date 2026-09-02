@@ -95,6 +95,7 @@ import {
 } from "./rereview-match";
 import {runCase} from "./runner";
 import {reviewMdHasAnchorSnap} from "../lib/provenance";
+import {CLUSTERER} from "../lib/dispatch-cluster";
 import type {ReReviewMode} from "../lib/routing-config";
 
 // The report shapes and renderers live in ./live-ab-report; re-exported so
@@ -229,6 +230,9 @@ export const runArm = async (
             });
         }
 
+        const clusterer = produced.perAgent.find(
+            (agent) => agent.name === CLUSTERER,
+        );
         perCase.push({
             caseId: corpusCase.id,
             usd: caseUsd,
@@ -237,6 +241,74 @@ export const runArm = async (
             caught: match.caught.length,
             missed: match.missed,
             snapped: result.snappedByProvenance.length,
+            ...(produced.dedup === undefined
+                ? {}
+                : {
+                      dedup: {
+                          candidates: produced.dedup.candidates,
+                          merged: produced.dedup.merges.reduce(
+                              (sum, merge) => sum + merge.merged.length,
+                              0,
+                          ),
+                          // Counted per absorbed copy, not per group: a `both`
+                          // group merged some of its members on the text floor
+                          // and only the rest on the clusterer's word, and
+                          // crediting the whole group to tier 2 would overstate
+                          // the delta this arm is asked to justify.
+                          clusterMerged: produced.dedup.merges.reduce(
+                              (sum, merge) =>
+                                  sum +
+                                  merge.merged.filter(
+                                      (copy) => copy.via === "clusterer",
+                                  ).length,
+                              0,
+                          ),
+                          rejected: produced.dedup.rejected.length,
+                          clustererAbsent: produced.dedup.clustererAbsent,
+                          // A dispatched clusterer that returned nothing
+                          // usable, kept apart from one that ran and proposed
+                          // nothing: both are zero merges, and only one of
+                          // them is a result.
+                          ...(produced.dedup.clustererFailed
+                              ? {clustererFailed: true as const}
+                              : {}),
+                          // What tier 2 COST, beside what it merged. The
+                          // clusterer is a serial step on nearly every
+                          // multi-finding run while absorbing a fraction of a
+                          // group per run, so a merge count alone cannot say
+                          // whether it is worth dispatching; these two make the
+                          // graduation decision a price per merge rather than a
+                          // count. Read off the clusterer's own per-agent
+                          // entry, so a run where it was skipped or absent
+                          // contributes zero rather than nothing.
+                          ...(clusterer === undefined
+                              ? {}
+                              : {
+                                    clustererUsd: clusterer.usd,
+                                    clustererWallMs: clusterer.wallMs,
+                                }),
+                          // The groups themselves, not just the count: the
+                          // powered run that graduated tier 2 could see THAT 4
+                          // claims merged but not WHICH, so auditing a
+                          // suspicious merge meant paying for the run again.
+                          // A false merge is the failure mode here, and it is
+                          // only diagnosable from the ids and the evidence the
+                          // clusterer grounded them in.
+                          groups: produced.dedup.merges.map((merge) => ({
+                              survivor: merge.survivor,
+                              absorbed: merge.merged.map((copy) => ({
+                                  id: copy.id,
+                                  ...(copy.via !== undefined
+                                      ? {via: copy.via}
+                                      : {}),
+                              })),
+                              via: merge.via,
+                              ...(merge.evidence !== undefined
+                                  ? {evidence: merge.evidence}
+                                  : {}),
+                          })),
+                      },
+                  }),
             failedAgents: produced.perAgent
                 .filter((a) => a.failed !== undefined)
                 .map((a) => `${a.name}: ${a.failed}`),

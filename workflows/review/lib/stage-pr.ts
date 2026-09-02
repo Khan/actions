@@ -8,9 +8,14 @@
  * (dispatch-gate.ts) stops trusting the orchestrator to have staged its own
  * rule inputs honestly.
  *
- * What it stages under /tmp/gh-aw/review/ (the Step 1 contract, unchanged):
+ * What it stages under /tmp/gh-aw/review/ (the Step 1 contract):
  *
  *   pr-context.json     PR metadata (untrusted author text included verbatim)
+ *   ticket-context.json the linked Jira tickets (stage-ticket.ts): every
+ *                       issue key the PR references, resolved and fetched
+ *                       read-only when the consumer configures credentials;
+ *                       otherwise (and when none resolve) {available: false,
+ *                       reason}. A ticket is context, never a prerequisite.
  *   files.json          path/status/hasPatch per changed file
  *   full.diff           standard unified diff rebuilt from the per-file
  *                       patches (diff --git + ---/+++ headers per file, which
@@ -21,14 +26,20 @@
  *   new-scope.json      {priorReview, inScope} against cache memory's
  *                       reviewedHunks (missing/unparseable cache degrades to
  *                       "everything in scope": more review, never less)
- *   prior-reviews.json  every github-actions[bot] review body, all states
- *                       (fetch failure degrades to [], which forces a full
- *                       review downstream, never a cheaper one)
+ *   prior-reviews.json  every github-actions[bot] review body, all states,
+ *                       with the numeric review id and state (the
+ *                       reduced-depth clearance dismisses by id; fetch
+ *                       failure degrades to [], which forces a full review
+ *                       downstream, never a cheaper one)
  *   threads.json        the unresolved review threads THIS bot opened, each
  *                       with its full reply chain verbatim, `resolved: false`,
  *                       and the opener's html_url
  *   human-threads.json  the `{path, line}` of every unresolved thread someone
  *                       ELSE opened, which the dispatcher defers to
+ *   adjudicated-threads.json  the bot's threads a HUMAN resolved or
+ *                       downvoted, which the dispatcher's adjudicated
+ *                       suppression reads so a settled defect is not
+ *                       re-derived under fresh wording
  *   disciplines.md      the marker-delimited shared-disciplines section, cut
  *                       out of the rendered prompt (slice 3, #247)
  *   routing.json        the router's deterministic first pass (a non-empty
@@ -84,10 +95,11 @@ import {
 } from "./diff";
 import {runProvenanceCli} from "./provenance";
 import type {StagedThread} from "./rereview";
+import {stageTicketContext, type TicketFetch} from "./stage-ticket";
 import {runRereviewPlanCli} from "./rereview-mode";
 import {runCli as runRouterCli} from "./router";
 import {
-    collectUnresolvedThreads,
+    collectReviewThreads,
     isReviewBotAuthor,
     withGraphqlRateLimitRetry,
     type GhGraphql,
@@ -107,6 +119,7 @@ const CACHE_MEMORY_DIR = "/tmp/gh-aw/cache-memory";
  * reads it.
  */
 const PR_CONTEXT_OUT = `${REVIEW_DIR}/pr-context.json`;
+const TICKET_CONTEXT_OUT = `${REVIEW_DIR}/ticket-context.json`;
 const FILES_OUT = `${REVIEW_DIR}/files.json`;
 const FULL_DIFF_OUT = `${REVIEW_DIR}/full.diff`;
 const DIFF_FACTS_OUT = `${REVIEW_DIR}/diff-facts.json`;
@@ -114,6 +127,7 @@ const NEW_SCOPE_OUT = `${REVIEW_DIR}/new-scope.json`;
 const PRIOR_REVIEWS_OUT = `${REVIEW_DIR}/prior-reviews.json`;
 const THREADS_OUT = `${REVIEW_DIR}/threads.json`;
 const HUMAN_THREADS_OUT = `${REVIEW_DIR}/human-threads.json`;
+const ADJUDICATED_THREADS_OUT = `${REVIEW_DIR}/adjudicated-threads.json`;
 const ROUTING_OUT = `${REVIEW_DIR}/routing.json`;
 const PROVENANCE_OUT = `${REVIEW_DIR}/provenance.json`;
 const STRIPPED_DIFF_OUT = `${REVIEW_DIR}/full-stripped.diff`;
@@ -360,6 +374,7 @@ export const runStagePrCli = async (
     fs: StagePrFs,
     ghGet: GhGet,
     ghGraphql: GhGraphql,
+    ticketFetch: TicketFetch,
     options: StagePrOptions,
 ): Promise<StagePrResult> => {
     const {repo, prNumber, repoRoot} = options;
@@ -381,7 +396,7 @@ export const runStagePrCli = async (
         body?: string | null;
         user?: {login?: string};
         base?: {ref?: string};
-        head?: {sha?: string};
+        head?: {sha?: string; ref?: string};
         draft?: boolean;
     };
     if (
@@ -415,6 +430,22 @@ export const runStagePrCli = async (
             2,
         ),
     );
+
+    // 1b. The linked Jira tickets → ticket-context.json (never a
+    // prerequisite: every degradation stages {available: false, reason} and
+    // the intent-reading sub-agents fall back to the PR description).
+    // stage-ticket.ts owns every degradation shape, including the
+    // unconfigured one, so an env without REVIEW_JIRA_* never fetches.
+    const ticket = await stageTicketContext(ticketFetch, {
+        baseUrl: env.REVIEW_JIRA_BASE_URL ?? "",
+        email: env.REVIEW_JIRA_EMAIL ?? "",
+        apiToken: env.REVIEW_JIRA_API_TOKEN ?? "",
+        title: pr.title ?? "",
+        headBranch: pr.head?.ref ?? "",
+        description: pr.body ?? "",
+    });
+    warnings.push(...ticket.warnings);
+    write(TICKET_CONTEXT_OUT, JSON.stringify(ticket.context, null, 2));
 
     // 2. Changed files → files.json + full.diff (hard prerequisite).
     const files = await fetchAllFiles(ghGet, repo, prNumber);
@@ -480,9 +511,16 @@ export const runStagePrCli = async (
     );
 
     // 5. Prior bot reviews (fetch failure degrades to []: full review).
-    let priorReviews: {body: string; submittedAt?: string}[] = [];
+    let priorReviews: {
+        body: string;
+        submittedAt?: string;
+        id?: number;
+        state?: string;
+    }[] = [];
     try {
         type RawReview = {
+            id?: number;
+            state?: string;
             user?: {login?: string};
             body?: string | null;
             submitted_at?: string;
@@ -511,6 +549,15 @@ export const runStagePrCli = async (
                 ...(typeof review.submitted_at === "string"
                     ? {submittedAt: review.submitted_at}
                     : {}),
+                // The numeric review id and state feed the reduced-depth
+                // clearance (submission.ts): a CHANGES_REQUESTED review's id
+                // is what the dismissal post-step dismisses. Optional so an
+                // older reader is unaffected; a staging without them skips
+                // the dismissal (the block stands).
+                ...(typeof review.id === "number" ? {id: review.id} : {}),
+                ...(typeof review.state === "string"
+                    ? {state: review.state}
+                    : {}),
             }));
     } catch (error) {
         warnings.push(
@@ -527,7 +574,7 @@ export const runStagePrCli = async (
     // particular shape, and everything downstream then depended on a
     // model-produced file: `hasThreads` (which decides whether the
     // thread-reconciler is dispatched at all, so it changes the roster),
-    // open-thread suppression (dedup.ts), and the accountability recap
+    // open-thread suppression (dedup-threads.ts), and the accountability recap
     // (rereview.ts). Khan/actions#302 patched a symptom of that seam: a
     // CONFORMING staging produced zero usable threads for a whole release
     // because the prompt's selection rule and the code's guard spelled the
@@ -541,12 +588,26 @@ export const runStagePrCli = async (
     // duplicating one. Hence one fetch, one partition: a thread is in exactly
     // one file, and neither list is assembled by hand.
     const [owner = "", repoName = ""] = repo.split("/");
-    const allThreads = await collectUnresolvedThreads(
+    const fetchedThreads = await collectReviewThreads(
         ghGraphql,
         owner,
         repoName,
         prNumber,
     );
+    // The unresolved partition, in the exact `StagedThread` shape every
+    // downstream reader of threads.json / human-threads.json already parses:
+    // the resolution and reaction fields are stripped, not carried, because
+    // both files serialize these objects verbatim.
+    const allThreads = fetchedThreads
+        .filter((thread) => !thread.resolved)
+        .map(
+            ({
+                resolved: _resolved,
+                resolvedBy: _resolvedBy,
+                openerDownvotes: _openerDownvotes,
+                ...thread
+            }) => thread,
+        );
     // The OPENER decides which file a thread lands in (its opening comment is
     // the finding), so a thread with no opener at all is staged in NEITHER. A
     // real review thread always has one and a partial GraphQL response throws
@@ -578,16 +639,50 @@ export const runStagePrCli = async (
         JSON.stringify(
             botThreads.map((thread) => ({
                 ...thread,
-                // Unresolved by construction (the fetch drops resolved
-                // threads), but written anyway: dedup.ts requires an explicit
-                // `resolved: false` and fails closed without one. That guard
-                // stays deliberately, rather than trusting this producer.
+                // Unresolved by construction (the partition above drops
+                // resolved threads), but written anyway: dedup-threads.ts requires an
+                // explicit `resolved: false` and fails closed without one.
+                // That guard stays deliberately, rather than trusting this
+                // producer.
                 resolved: false,
             })),
             null,
             2,
         ),
     );
+    // 5b'. The adjudicated corpus: bot-opened threads a HUMAN resolved, or
+    // whose opening comment a reviewer downvoted. A human resolving a bot
+    // thread is the strongest "this is settled" signal the PR surface
+    // carries, and before this file existed it was also an anti-signal:
+    // resolution removed the thread from threads.json, so the suppression
+    // corpus, so the next run was free to re-derive the same defect with
+    // fresh wording as a brand-new thread (webapp#41290: six resolved
+    // variants of one concern at moderation_helpers.go:135, then a seventh
+    // posted anyway). A 👎 on the opener is the same judgment delivered
+    // through the OTHER feedback channel the bot advertises, and before
+    // this it dead-ended in the retired thumbs sweep's counters. dedup-adjudicated.ts's suppression reads this
+    // file; only non-blocking candidates are suppressed by it, so a genuine
+    // regression re-flag at blocking severity always posts.
+    //
+    // The resolver identity decides resolution membership, not resolution
+    // alone: a thread the BOT resolved (the reconciler, after a code change
+    // addressed it) is a fixed defect, and a fixed defect that reappears is
+    // a fresh finding that must post. `resolvedBy` is "" for an
+    // unattributable resolver (a deleted account), which fails toward
+    // posting a duplicate, never toward suppression on unverifiable
+    // authority. A downvoted thread joins whatever its resolution state:
+    // still-open downvoted threads are also in threads.json, and the
+    // composed suppression attributes a candidate matching both corpora to
+    // the OPEN thread, whose blocking state floors the verdict.
+    const adjudicatedThreads = fetchedThreads.filter(
+        (thread) =>
+            openedByBot(thread) &&
+            ((thread.resolved &&
+                thread.resolvedBy !== "" &&
+                !isReviewBotAuthor(thread.resolvedBy)) ||
+                thread.openerDownvotes > 0),
+    );
+    write(ADJUDICATED_THREADS_OUT, JSON.stringify(adjudicatedThreads, null, 2));
     // The reconciler echoes these into `skipLines`, so a thread with no
     // RIGHT-side line (outdated, or file-level) has nothing to contribute and
     // is dropped rather than staged as a line the submission cannot match.
@@ -811,7 +906,25 @@ if (typeof require !== "undefined" && require.main === module) {
         );
         process.exit(2);
     }
-    void runStagePrCli(nodeFs, ghGet, ghGraphql, {
+    // The linked-ticket GET (stage-ticket.ts). Plain fetch, no retry, and a
+    // hard 10s bound per candidate, fetched in parallel (a blackholed Jira
+    // host must not stall staging until the job timeout): a ticket is
+    // context, not a prerequisite, and stage-ticket degrades every failure
+    // rather than failing the staging.
+    const ticketFetch = async (
+        url: string,
+        headers: Record<string, string>,
+    ): Promise<{status: number; json: unknown}> => {
+        const response = await fetch(url, {
+            headers,
+            signal: AbortSignal.timeout(10_000),
+        });
+        return {
+            status: response.status,
+            json: await response.json().catch(() => null),
+        };
+    };
+    void runStagePrCli(nodeFs, ghGet, ghGraphql, ticketFetch, {
         repo,
         prNumber,
         repoRoot,

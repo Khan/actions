@@ -1,14 +1,18 @@
 import {describe, it, expect} from "vitest";
 
 import {
+    applyMediumVeto,
     applyVerifications,
     buildClaims,
+    contractValidator,
     joinProse,
+    parseClustererOutput,
     parseFinderOutput,
     parseJsonObject,
     parseValidatorOutput,
     type Claim,
 } from "./dispatch-contracts";
+import {computeChangedLines} from "./diff";
 import {labelForFinding} from "./render-comment";
 
 /**
@@ -257,6 +261,119 @@ describe("label-contract enforcement (run 29897276810)", () => {
         expect(joinProse("Only a subject", "")).toBe("Only a subject");
         expect(joinProse("", "Only a discussion.")).toBe("Only a discussion.");
     });
+
+    it("drops a subject that restates the discussion's first sentence (PRA-46 W4-W5 repetition mode)", () => {
+        // Verbatim restatement: the discussion opens with the subject.
+        expect(
+            joinProse(
+                "The merger drops flagged turns.",
+                "The merger drops flagged turns whenever moderation flags a turn mid-stream.",
+            ),
+        ).toBe(
+            "The merger drops flagged turns whenever moderation flags a turn mid-stream.",
+        );
+        // Inflected restatement: "dropped" vs "drops" still folds together.
+        expect(
+            joinProse(
+                "Flagged turns are dropped by the merger.",
+                "The merger drops flagged turns because the filter runs before the merge, so a flagged turn never reaches the sink.",
+            ),
+        ).toBe(
+            "The merger drops flagged turns because the filter runs before the merge, so a flagged turn never reaches the sink.",
+        );
+        // Markdown wrapping does not defeat the comparison.
+        expect(
+            joinProse(
+                "`counts.go` recomputes the total.",
+                "counts.go recomputes the total on every call.",
+            ),
+        ).toBe("counts.go recomputes the total on every call.");
+    });
+
+    it("never drops against a multi-line 'first sentence' (an unterminated opening line)", () => {
+        // A discussion opening with an unterminated line plus a bullet list
+        // has no [.!?]-then-space split point, so the split returns the whole
+        // block. Dropping the subject would let buildClaims' identical split
+        // promote that block into claim.subject, which submission.ts prints
+        // inside one-line list items.
+        const block =
+            "The merger drops flagged turns\n- the filter runs first\n- a flagged turn never reaches the sink.";
+        expect(joinProse("The merger drops flagged turns.", block)).toBe(
+            `The merger drops flagged turns. ${block}`,
+        );
+    });
+
+    it("folds a bare form against its inflection (the trailing-e strip is what matches)", () => {
+        // "reuses" folds to "reus" via the "es" suffix strip; "reuse"
+        // carries no strippable suffix and meets it only via the trailing-e
+        // strip. If the trailing-e strip regresses, the subject side stays
+        // "reuse", the pair stops folding together, and this drop stops
+        // firing.
+        expect(
+            joinProse(
+                "Stale cache reuse.",
+                "The run reuses a stale cache because the key never rotates.",
+            ),
+        ).toBe("The run reuses a stale cache because the key never rotates.");
+    });
+
+    it("still drops against a multi-line discussion whose FIRST sentence is one line", () => {
+        // The drop side of the newline guard: the guard rejects a
+        // multi-line first sentence, not any multi-line discussion. A
+        // terminated opening sentence on its own line is a safe drop target;
+        // buildClaims recovers exactly that line as claim.subject.
+        expect(
+            joinProse(
+                "The merger drops flagged turns.",
+                "The merger drops flagged turns on every stream.\nDetails:\n- the filter runs first",
+            ),
+        ).toBe(
+            "The merger drops flagged turns on every stream.\nDetails:\n- the filter runs first",
+        );
+    });
+
+    it("keeps a subject made entirely of function words (empty token bag)", () => {
+        // The early return: with every subject token stopword-filtered away,
+        // containment would be vacuously true, so the guard must refuse to
+        // drop rather than treat an empty bag as a restatement.
+        expect(joinProse("It is as it was.", "The filter runs first.")).toBe(
+            "It is as it was. The filter runs first.",
+        );
+    });
+
+    it("keeps a subject that carries information the opening sentence lacks", () => {
+        // Restating a LATER sentence keeps the subject: dropping it would
+        // make buildClaims recover the discussion's opening SETUP sentence
+        // as claim.subject, which renderPrLevelFold and the HOLD/over-cap
+        // collapsed lists print as the finding's one-line header.
+        expect(
+            joinProse(
+                "A delete leaves the stale entry behind.",
+                "The cache is written in save(). A delete leaves the stale entry behind.",
+            ),
+        ).toBe(
+            "A delete leaves the stale entry behind. The cache is written in save(). A delete leaves the stale entry behind.",
+        );
+        // "never invalidated" is not in the first sentence: kept whole.
+        expect(
+            joinProse(
+                "The cache is never invalidated.",
+                "The cache is written in save(). A delete leaves the stale entry behind.",
+            ),
+        ).toBe(
+            "The cache is never invalidated. The cache is written in save(). A delete leaves the stale entry behind.",
+        );
+        // A subject summarizing ACROSS sentences (no single sentence holds
+        // all its tokens) is a genuine lede and survives.
+        expect(
+            joinProse(
+                "save() caches, delete leaves it stale.",
+                "The cache is written in save(). A delete leaves the stale entry behind.",
+            ),
+        ).toBe(
+            "save() caches, delete leaves it stale. The cache is written in save(). A delete leaves the stale entry behind.",
+        );
+    });
 });
 
 describe("label-shape lens assignment", () => {
@@ -433,6 +550,39 @@ describe("verification mechanics", () => {
             confidence: 0.7,
         });
     });
+
+    it("recovers the discussion's opening claim and a discussion-salvaged failure_scenario when the restatement drop fires (PRA-46)", () => {
+        const {candidates} = parseFinderOutput(
+            "correctness-reviewer",
+            JSON.stringify({
+                findings: [
+                    {
+                        path: "a.ts",
+                        line: 2,
+                        label: "issue (blocking)",
+                        // Inflected restatement of the discussion's first
+                        // sentence: joinProse drops it.
+                        subject: "Flagged turns are dropped by the merger.",
+                        discussion:
+                            "The merger drops flagged turns. The filter runs before the merge.",
+                    },
+                ],
+            }),
+            new Set(),
+        );
+        const [claimed] = buildClaims(candidates);
+        // The HOLD/over-cap collapsed lists and renderPrLevelFold print
+        // claim.subject as the finding's one-line header: after the drop it
+        // is the discussion's own opening claim, never empty.
+        expect(claimed?.subject).toBe("The merger drops flagged turns.");
+        // The salvage skips the dropped subject: dedup's comparedText reads
+        // the discussion only when failure_scenario prefix-matches
+        // claim.subject, and the inflected subject would fail that test and
+        // compare the claim on one sentence plus its own restatement.
+        expect(claimed?.failure_scenario).toBe(
+            "The merger drops flagged turns. The filter runs before the merge.",
+        );
+    });
 });
 
 describe("applyVerifications: corrected-field validation", () => {
@@ -472,6 +622,66 @@ describe("applyVerifications: corrected-field validation", () => {
     });
 });
 
+describe("parseClustererOutput", () => {
+    it("keeps well-formed clusters and dedupes the ids inside one", () => {
+        expect(
+            parseClustererOutput(
+                JSON.stringify({
+                    clusters: [
+                        {
+                            evidence:
+                                "the `maxSamples` comment says 10, not 25",
+                            ids: ["a", "b", "a", "c"],
+                        },
+                    ],
+                }),
+            ),
+        ).toEqual([
+            {
+                evidence: "the `maxSamples` comment says 10, not 25",
+                ids: ["a", "b", "c"],
+            },
+        ]);
+    });
+
+    it("skips entries that cannot merge anything, rather than voiding the dispatch", () => {
+        // A single-id "cluster", a missing evidence string, and a non-array
+        // `ids` each merge nothing on their own; dropping them keeps the rest
+        // of a mostly-good reply usable (a missed merge costs a duplicate
+        // comment, so partial credit is the safe direction here).
+        expect(
+            parseClustererOutput(
+                JSON.stringify({
+                    clusters: [
+                        {evidence: "`maxSamples` cap", ids: ["only-one"]},
+                        {ids: ["a", "b"]},
+                        {evidence: "`maxSamples` cap", ids: "a,b"},
+                        {evidence: "`maxSamples` cap", ids: ["a", 7, "b"]},
+                    ],
+                }),
+            ),
+        ).toEqual([{evidence: "`maxSamples` cap", ids: ["a", "b"]}]);
+    });
+
+    it("throws on a drifted shape so the corrective re-dispatch fires", () => {
+        // Reading a drifted reply as "no duplicates" is how a paid-for
+        // dimension goes missing without a trace.
+        expect(() =>
+            parseClustererOutput(JSON.stringify({groups: []})),
+        ).toThrow(/no clusters array/);
+        expect(() => parseClustererOutput("not json")).toThrow();
+        expect(parseClustererOutput(JSON.stringify({clusters: []}))).toEqual(
+            [],
+        );
+    });
+
+    it("is the clusterer's structured-final contract check", () => {
+        const check = contractValidator("claim-clusterer", "clusterer");
+        expect(check({clusters: []})).toBeNull();
+        expect(check({groups: []})).toMatch(/no clusters array/);
+    });
+});
+
 describe("parseJsonObject empty-vs-malformed", () => {
     it("names an empty final as empty, not malformed", () => {
         // An empty final is how a refusal presents (#294). Calling it
@@ -486,5 +696,255 @@ describe("parseJsonObject empty-vs-malformed", () => {
         expect(() =>
             parseJsonObject("I reviewed it and found nothing."),
         ).toThrow(/no parseable JSON object/);
+    });
+});
+
+describe("the medium importance tier (PRA-7)", () => {
+    const claim = (overrides: Partial<Claim>): Claim => ({
+        id: "c1",
+        source: "correctness-reviewer",
+        path: "a.ts",
+        line: 2,
+        label: "note (non-blocking)",
+        subject: "s",
+        discussion: "d",
+        failure_scenario: "f",
+        confidence: 0.7,
+        importance: "medium",
+        ...overrides,
+    });
+
+    const finderOut = (finding: Record<string, unknown>): string =>
+        JSON.stringify({
+            findings: [
+                {
+                    path: "a.ts",
+                    line: 2,
+                    label: "note (non-blocking)",
+                    failure_scenario: "the guard never fires",
+                    subject: "s",
+                    discussion: "The guard never fires on staged logins.",
+                    ...finding,
+                },
+            ],
+        });
+
+    it("maps importance: medium onto severity and through buildClaims", () => {
+        const {candidates} = parseFinderOutput(
+            "correctness-reviewer",
+            finderOut({importance: "medium"}),
+            new Set(),
+        );
+        expect(candidates[0].finding.severity).toBe("medium");
+        expect(buildClaims(candidates)[0].importance).toBe("medium");
+    });
+
+    it("reads anything but the literal medium as minor, without rejecting the finding", () => {
+        for (const value of ["high", "MEDIUM", 3, true, undefined]) {
+            const {candidates} = parseFinderOutput(
+                "correctness-reviewer",
+                finderOut(value === undefined ? {} : {importance: value}),
+                new Set(),
+            );
+            expect(candidates[0].finding.severity).toBe("advisory");
+            expect(buildClaims(candidates)[0].importance).toBeUndefined();
+        }
+    });
+
+    it("ignores importance on a blocking label (blocking always posts)", () => {
+        const {candidates} = parseFinderOutput(
+            "correctness-reviewer",
+            finderOut({label: "issue (blocking)", importance: "medium"}),
+            new Set(),
+        );
+        expect(candidates[0].finding.severity).toBe("blocking");
+        expect(buildClaims(candidates)[0].importance).toBeUndefined();
+    });
+
+    it("strips medium on a plausible verification (unverified fails the tier's test)", () => {
+        const result = applyVerifications([claim({})], {
+            c1: {verification: "plausible", confidence: 0.4},
+        });
+        expect(result[0].importance).toBeUndefined();
+    });
+
+    it("strips medium on the author-dispute cap", () => {
+        const result = applyVerifications(
+            [claim({author_dispute: "the author disagrees"})],
+            {},
+        );
+        expect(result[0].label).toBe("question (non-blocking)");
+        expect(result[0].importance).toBeUndefined();
+    });
+
+    it("applies corrected.importance both directions on confirmed claims", () => {
+        const granted = applyVerifications([claim({importance: undefined})], {
+            c1: {
+                verification: "confirmed",
+                corrected: {importance: "medium"},
+            },
+        });
+        expect(granted[0].importance).toBe("medium");
+        const stripped = applyVerifications([claim({})], {
+            c1: {verification: "confirmed", corrected: {importance: "minor"}},
+        });
+        expect(stripped[0].importance).toBeUndefined();
+    });
+
+    it("skips a corrected.importance grant onto a blocking label", () => {
+        const result = applyVerifications(
+            [claim({label: "issue (blocking)", importance: undefined})],
+            {
+                c1: {
+                    verification: "confirmed",
+                    corrected: {importance: "medium"},
+                },
+            },
+        );
+        expect(result[0].importance).toBeUndefined();
+    });
+
+    it("keeps medium on an unmentioned claim (missing-output retains whole claims)", () => {
+        const result = applyVerifications([claim({})], {});
+        expect(result[0].importance).toBe("medium");
+    });
+
+    const DIFF = [
+        "diff --git a/a.ts b/a.ts",
+        "--- a/a.ts",
+        "+++ b/a.ts",
+        "@@ -1,3 +1,4 @@",
+        " context line",
+        "+added line",
+        " more context",
+        " tail",
+    ].join("\n");
+
+    it("vetoes medium off anything not anchored on an added line", () => {
+        const changed = computeChangedLines(DIFF);
+        const result = applyMediumVeto(
+            [
+                claim({id: "on-added", line: 2}),
+                claim({id: "on-context", line: 1}),
+                claim({id: "off-diff", path: "b.ts", line: 2}),
+                claim({id: "pr-level", path: undefined, line: undefined}),
+            ],
+            changed,
+        );
+        expect(
+            result.map((entry) => [entry.id, entry.importance ?? "minor"]),
+        ).toEqual([
+            ["on-added", "medium"],
+            ["on-context", "minor"],
+            ["off-diff", "minor"],
+            ["pr-level", "minor"],
+        ]);
+        // The veto strips the tier, never the claim.
+        expect(result).toHaveLength(4);
+    });
+});
+
+describe("the medium veto's change-anchored line set", () => {
+    const DIFF_WITH_REMOVAL = [
+        "diff --git a/b.ts b/b.ts",
+        "--- a/b.ts",
+        "+++ b/b.ts",
+        "@@ -4,3 +4,2 @@",
+        " context above",
+        "-the removed guard",
+        " context below",
+    ].join("\n");
+
+    it("keeps medium on a removal-adjacent anchor (dropped-guard findings)", () => {
+        const changed = computeChangedLines(DIFF_WITH_REMOVAL);
+        const claims: Claim[] = [
+            {
+                id: "dropped-guard",
+                source: "correctness-reviewer",
+                path: "b.ts",
+                line: 4,
+                label: "note (non-blocking)",
+                subject: "s",
+                discussion: "d",
+                failure_scenario: "f",
+                confidence: 0.8,
+                importance: "medium",
+            },
+        ];
+        const result = applyMediumVeto(claims, changed);
+        expect(result[0].importance).toBe("medium");
+    });
+});
+
+describe("the summary passthrough (fold visible line)", () => {
+    it("prefers a finding's authored summary as the claim subject", () => {
+        const claims = buildClaims([
+            {
+                finding: {
+                    schema_version: 2,
+                    id: "f-1",
+                    lens: "correctness",
+                    anchor: {
+                        type: "line",
+                        path: "a.ts",
+                        line: 3,
+                        side: "RIGHT",
+                    },
+                    severity: "advisory",
+                    confidence: 0.9,
+                    evidence_trace: ["e"],
+                    failure_scenario: "f",
+                    producing_hunt: "h",
+                    model_authored_prose:
+                        "First sentence of the prose. Second sentence with the detail.",
+                    summary: "The authored one-liner.",
+                } as never,
+                source: "correctness-reviewer",
+            } as never,
+        ]);
+        expect(claims[0].subject).toBe("The authored one-liner.");
+        expect(claims[0].discussion).toBe(
+            "First sentence of the prose. Second sentence with the detail.",
+        );
+    });
+
+    it("passes a label shape's subject through as the finding summary", () => {
+        const result = parseFinderOutput(
+            "reviewer-1",
+            JSON.stringify({
+                findings: [
+                    {
+                        path: "a.ts",
+                        line: 3,
+                        label: "thought (non-blocking)",
+                        subject: "A distinct authored subject.",
+                        discussion:
+                            "The discussion opens differently and carries the mechanism detail.",
+                    },
+                ],
+            }),
+            new Set(),
+        );
+        expect(result.candidates[0]?.finding.summary).toBe(
+            "A distinct authored subject.",
+        );
+        // The restatement case keeps the mechanical fallback: no summary.
+        const restated = parseFinderOutput(
+            "reviewer-1",
+            JSON.stringify({
+                findings: [
+                    {
+                        path: "a.ts",
+                        line: 3,
+                        label: "thought (non-blocking)",
+                        subject: "The merger drops flagged turns.",
+                        discussion:
+                            "Flagged turns are dropped by the merger. The retry path never re-adds them.",
+                    },
+                ],
+            }),
+            new Set(),
+        );
+        expect(restated.candidates[0]?.finding.summary).toBeUndefined();
     });
 });

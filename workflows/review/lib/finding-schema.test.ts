@@ -71,8 +71,13 @@ describe("exported canonical lists", () => {
         expect(KNOWN_LENSES).toContain("first-principles");
     });
 
-    it("SEVERITIES is exactly blocking + advisory (#194 axis)", () => {
-        expect([...SEVERITIES]).toEqual(["blocking", "advisory"]);
+    it("SEVERITIES is exactly blocking + medium + advisory (#194 axis plus the PRA-7 tier)", () => {
+        expect([...SEVERITIES]).toEqual(["blocking", "medium", "advisory"]);
+    });
+
+    it("accepts a medium-severity finding (the PRA-7 tier is additive, no version bump)", () => {
+        const result = validateFinding(makeValidFinding({severity: "medium"}));
+        expect(result.ok).toBe(true);
     });
 
     it("ANCHOR_TYPES includes the required PR-level anchor", () => {
@@ -170,6 +175,21 @@ describe("validateFinding — well-formed findings", () => {
             }),
         );
         expect(result.ok).toBe(true);
+    });
+
+    it("accepts a single-line summary and rejects empty or multi-line ones", () => {
+        expect(
+            validateFinding(makeValidFinding({summary: "One line."})).ok,
+        ).toBe(true);
+        for (const bad of ["", 42, "two\nlines"]) {
+            const result = validateFinding(makeValidFinding({summary: bad}));
+            expect(result.ok).toBe(false);
+            if (!result.ok) {
+                expect(
+                    result.errors.some((e) => e.startsWith("summary:")),
+                ).toBe(true);
+            }
+        }
     });
 
     it("rejects an empty or non-string rule_quote", () => {
