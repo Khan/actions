@@ -312,6 +312,17 @@ describe("createSdkRunner sub-agent environment", () => {
         expect(env["ANTHROPIC_MAX_RETRIES"]).toBe("2");
     });
 
+    it("pins effort high explicitly instead of riding the SDK default", async () => {
+        // The SDK default IS adaptive thinking at effort high for opus-4.6+,
+        // so this is behavior-neutral; it exists because the invisible
+        // default let the Pi harness port disable thinking without anyone
+        // noticing (PR #406).
+        await (
+            await createSdkRunner()
+        )(request());
+        expect(lastOptions["effort"]).toBe("high");
+    });
+
     it("spreads the inherited environment, since `env` replaces rather than merges", async () => {
         process.env["GH_AW_DISPATCH_RUNNER_PROBE"] = "inherited";
         try {

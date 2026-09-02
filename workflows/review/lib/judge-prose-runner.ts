@@ -79,6 +79,10 @@ export const createJudgeRunner = async (
                     allowedTools: [],
                     permissionMode: "bypassPermissions",
                     abortController: abort,
+                    // Pinned for the same reason as dispatch-runner.ts: this
+                    // is what the SDK default already runs, made explicit so
+                    // a harness change cannot silently move it again.
+                    effort: "high",
                     env: {
                         ...process.env,
                         ANTHROPIC_MAX_RETRIES: JUDGE_MAX_RETRIES,
