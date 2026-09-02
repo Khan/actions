@@ -127,6 +127,15 @@ describe("review-canary.md deltas", () => {
         );
     });
 
+    it("fails fast before AI spend when the head lib has no REVIEW_CANARY handling", () => {
+        expect(canaryMd).toContain(
+            "name: Verify head lib supports canary execution",
+        );
+        expect(canaryMd).toContain(
+            'if ! grep -rq "REVIEW_CANARY" gh-aw-review-lib/workflows/review/lib; then',
+        );
+    });
+
     it("carries none of the capabilities that touch the production reviewer's state", () => {
         // Thread resolution would close the pinned reviewer's findings;
         // add-reviewer (via the imports: config) would page owning teams;
@@ -163,6 +172,9 @@ describe("compiled review-canary.lock.yml", () => {
         );
         expect(canaryLock).toContain('"allowed_events":["COMMENT"]');
         expect(canaryLock).toContain('REVIEW_CANARY: "1"');
+        expect(canaryLock).toContain(
+            "Verify head lib supports canary execution",
+        );
         expect(canaryLock).not.toContain("resolve_pull_request_review_thread");
         expect(canaryLock).not.toContain("add_reviewer");
         expect(canaryLock).not.toContain("cache-memory");
