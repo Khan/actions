@@ -334,7 +334,9 @@ describe("renderPrLevelFold visible-line punctuation", () => {
         );
         expect(body).toContain("<summary>Full finding</summary>");
     });
+});
 
+describe("renderPrLevelFold block-close refusal", () => {
     it("posts flat when the discussion carries a literal closing tag", () => {
         // Same guard renderContextFold applies: an unescaped `</details>`
         // in the prose would end the Full finding block early and spill

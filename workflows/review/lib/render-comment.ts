@@ -192,15 +192,17 @@ export const firstSentence = (prose: string): string =>
 /**
  * Ensure the fold's visible line ends in terminal punctuation. Subjects
  * arrive headline-style (the contract never asked for a period and the
- * models rarely supply one); `joinProse` already repairs that where the
- * subject joins the discussion, but the visible line interpolates the
- * subject verbatim, so agent-settings#105 posted "…never spawns on them"
- * directly over a collapsed block and read as a truncated comment. Same
- * core-strip as joinProse (terminal punctuation may sit inside closing
- * quotes/brackets/emphasis), and the period lands after the closers,
- * exactly where joinProse puts its sentence break, so the visible line
- * and the fold's opening sentence stay byte-comparable. A trailing `:`
- * or `;` stays terminal on purpose, matching joinProse's glue rule: a
+ * models rarely supply one); the sentence break `joinProse` inserted
+ * where the subject joins the discussion used to be the only repair, and
+ * the visible line interpolated the subject verbatim, so agent-settings#105
+ * posted "…never spawns on them" directly over a collapsed block and read
+ * as a truncated comment. This helper is now the single rule: joinProse
+ * calls it for the sentence break and the renderers call it for the
+ * visible line, so the two stay byte-comparable by construction. The
+ * core-strip (terminal punctuation may sit inside closing quotes/brackets/
+ * emphasis) runs before the terminator test and the period lands after
+ * the closers, so a trailing code span never breaks. A trailing `:`
+ * or `;` stays terminal on purpose, matching the glue rule joinProse had: a
  * subject that hands off mid-thought into the fold is a contract
  * violation ("never a pointer into the discussion"), and LABEL_RUBRIC_EXTRA
  * names the colon/semicolon hand-off explicitly so the judge bounces it,
