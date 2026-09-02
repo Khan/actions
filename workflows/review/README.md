@@ -795,6 +795,14 @@ sub-agent models — this table is the human-facing summary:
 | prose judge | `claude-opus-4-8` | (single completion) | In-session style gate on submitted finding prose (`judge-prose.ts`); haiku's verdicts flickered run to run, and opus-4-8 is proven invokable and curated-priced through the stable firewall |
 | specialist lenses | `claude-opus-5` | high | Opt-in via `lens=` in `ROUTING`; the security & auth lens is xhigh |
 
+Scripted mode does not yet honor the Effort column: `lib/dispatch-runner.ts`
+pins `effort: high` for every dispatched sub-agent, `lib/judge-prose-runner.ts`
+does the same for the prose judge, and `eval/live-runner.ts` for the eval SDK
+arm, so the per-role levels above (xhigh for `claim-validator` and the security
+lens, medium for the triage and advisory rows) are the intended launch-default
+spec, not what runs today. Per-role effort lands once it has its own
+measurement.
+
 Only the orchestrator and the default roster (`pattern-triage`,
 `correctness-reviewer`, `skill-auditor`, `thread-reconciler`, `claim-validator`)
 run by default; every other row is opt-in via `ROUTING` and earns its line through
