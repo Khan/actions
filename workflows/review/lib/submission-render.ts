@@ -17,6 +17,7 @@ import type {AlsoFlagged} from "./attribution";
 import {attributionLine, renderAttributionFooter} from "./attribution";
 import {
     containsBlockClose,
+    ensureTerminalPunctuation,
     renderContextFold,
     renderRuleQuote,
     shouldFoldContext,
@@ -56,7 +57,12 @@ export const renderPrLevelFold = (claim: Claim): string => {
         return `**${claim.label}:** ${claim.discussion}`;
     }
     return [
-        `**${claim.label}:** ${claim.subject}`,
+        // The same visible-line normalization renderContextFold applies:
+        // both renderers put a bare subject directly above a collapsed
+        // block, and the subject contract ("the only text visible when
+        // the discussion folds") governs pr-level findings too (PR #408
+        // review).
+        `**${claim.label}:** ${ensureTerminalPunctuation(claim.subject)}`,
         "<details>",
         "<summary>Full finding</summary>",
         "",

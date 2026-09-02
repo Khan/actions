@@ -1792,7 +1792,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "label": "issue (blocking, best-practice)|suggestion (non-blocking, best-practice)",
     "importance": "medium (optional; omit unless the finding meets the medium bar)",
     "failure_scenario": "one sentence: the concrete consequence of the breach (what goes wrong, for whom)",
-    "subject": "one line naming the skill area, standing alone", "discussion": "the rule violated and the fix, quoting both; otherwise one claim with its evidence chain complete enough to check, at most one question; long discussions post collapsed behind the subject; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
+    "subject": "the only text visible when the discussion folds: the defect and the ask, one short sentence by default, two when it takes both (name the skill area); never a pointer into the discussion", "discussion": "the rule violated and the fix, quoting both; otherwise one claim with its evidence chain complete enough to check, at most one question; long discussions post collapsed behind the subject; name the mechanism plainly, no metaphor", "suggestion": "optional fix code"
   }],
   "out_of_lane_observations": [{
     "path": "...", "line": 0,

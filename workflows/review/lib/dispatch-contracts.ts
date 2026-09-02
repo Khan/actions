@@ -23,6 +23,7 @@ import {extractJsonObject} from "./agent-json";
 import {
     BLOCKING_LABELS,
     NON_BLOCKING_LABELS,
+    ensureTerminalPunctuation,
     firstSentence,
     isBlockingLabel,
     labelForFinding,
@@ -230,7 +231,10 @@ export const subjectRestatesDiscussion = (
  * A subject with no terminal punctuation gets a sentence break, not a bare
  * space (run 29897276810 posted "...memory Both TestExpiration..."); the
  * break also keeps `buildClaims`' first-sentence split recovering the
- * subject.
+ * subject. The break is `ensureTerminalPunctuation`, the same normalization
+ * the renderers apply to the visible line, so the joined prose's opening
+ * and the posted visible line stay byte-identical by construction rather
+ * than by two copies of the core-strip rule (PR #408 review).
  *
  * A subject that restates the discussion's opening sentence
  * ({@link subjectRestatesDiscussion}) is dropped instead of joined: the
@@ -245,11 +249,7 @@ export const joinProse = (subject: string, discussion: string): string => {
     if (subject === "" || subjectRestatesDiscussion(subject, discussion)) {
         return discussion.trim();
     }
-    const trimmed = subject.trimEnd();
-    // Terminal punctuation may sit inside closing quotes/brackets/emphasis.
-    const core = trimmed.replace(/["'`)\]*_]+$/, "");
-    const glue = /[.!?:;]$/.test(core) ? " " : ". ";
-    return `${trimmed}${glue}${discussion.trim()}`;
+    return `${ensureTerminalPunctuation(subject)} ${discussion.trim()}`;
 };
 
 /** Map one label-shape finding into a schema finding (the eval's rule). */

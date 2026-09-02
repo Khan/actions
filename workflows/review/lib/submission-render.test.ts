@@ -5,7 +5,12 @@ import {
     labelAdmitsSketch,
     renderClaimComment,
 } from "./submission";
-import {COLLAPSED_ENTRY_RE, renderCollapsedLine} from "./submission-render";
+import {
+    COLLAPSED_ENTRY_RE,
+    MAX_VERBATIM_FOLD_CHARS,
+    renderCollapsedLine,
+    renderPrLevelFold,
+} from "./submission-render";
 
 /**
  * Claim-rendering tests, split out of submission.test.ts (max-lines): the
@@ -310,6 +315,24 @@ describe("renderClaimComment context fold", () => {
                 "</details>",
             ].join("\n"),
         );
+    });
+});
+
+describe("renderPrLevelFold visible-line punctuation", () => {
+    it("normalizes the subject over the Full finding block", () => {
+        // Both renderers put a bare subject directly above a collapsed
+        // block, so the pr-level path gets the same terminal-punctuation
+        // repair the inline context block got (PR #408 review).
+        const body = renderPrLevelFold(
+            claim({
+                subject: "The retention pass never removes anything",
+                discussion: "x".repeat(MAX_VERBATIM_FOLD_CHARS + 1),
+            }) as never,
+        );
+        expect(body.split("\n")[0]).toBe(
+            "**issue (blocking):** The retention pass never removes anything.",
+        );
+        expect(body).toContain("<summary>Full finding</summary>");
     });
 });
 

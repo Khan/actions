@@ -529,9 +529,17 @@ describe("ensureTerminalPunctuation", () => {
     it("puts the period after an unterminated trailing closer", () => {
         // joinProse places its sentence break after the whole subject,
         // closers included, and the visible line must match it byte for
-        // byte so the fold's opening restatement stays comparable.
+        // byte so the fold's opening restatement stays comparable. The
+        // closer-ending inputs kill the core+"."+closers mutant, which
+        // would break a trailing code span (PR #408 review).
         expect(ensureTerminalPunctuation("so `spawn()` never runs")).toBe(
             "so `spawn()` never runs.",
+        );
+        expect(ensureTerminalPunctuation("the gate is never `flipped`")).toBe(
+            "the gate is never `flipped`.",
+        );
+        expect(ensureTerminalPunctuation('he called it "inert"')).toBe(
+            'he called it "inert".',
         );
     });
 

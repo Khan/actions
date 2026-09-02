@@ -198,7 +198,11 @@ export const firstSentence = (prose: string): string =>
  * core-strip as joinProse (terminal punctuation may sit inside closing
  * quotes/brackets/emphasis), and the period lands after the closers,
  * exactly where joinProse puts its sentence break, so the visible line
- * and the fold's opening sentence stay byte-comparable. Rendering-only:
+ * and the fold's opening sentence stay byte-comparable. A trailing `:`
+ * or `;` stays terminal on purpose, matching joinProse's glue rule: a
+ * subject that hands off mid-thought into the fold is a contract
+ * violation ("never a pointer into the discussion") for the judge to
+ * bounce, not a shape for the renderer to repair. Rendering-only:
  * `claim.subject` itself is untouched, so dedup's prefix-match semantics
  * never see the added period.
  */
@@ -212,7 +216,8 @@ export const ensureTerminalPunctuation = (line: string): string => {
  * The context fold (PR feedback on webapp#41843: a long comment front-loads
  * its whole mechanism; compressing it after the fact drops exactly the
  * detail a reader needs to check the claim). The posted shape becomes a
- * 1-2 line visible summary plus one collapsed block carrying the full
+ * short visible summary (one sentence by default, the judge's soft cap,
+ * not a hard renderer rule) plus one collapsed block carrying the full
  * prose, rule quote, sketch, and attribution, verbatim. The summary chip is
  * deliberately NOT attribution.ts's `review details`: stripFooters removes
  * that block wholesale before dedup-threads' text-similarity comparison,
