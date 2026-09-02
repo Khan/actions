@@ -179,8 +179,9 @@ export const labelForFinding = (finding: Finding): ConventionalLabel => {
  * followed by whitespace. Owned here (the lowest rendering module) and
  * consumed by dispatch-contracts.ts's restatement drop and buildClaims'
  * subject recovery, which must agree with the renderer on what the first
- * sentence IS: the fold's visible line and the claim's `subject` are the
- * same text.
+ * sentence IS: the fold's visible line is the claim's `subject` up to
+ * terminal punctuation (`ensureTerminalPunctuation` may append one period,
+ * and does so identically on the joined prose's opening).
  */
 export const FIRST_SENTENCE_SPLIT = /(?<=[.!?])\s/;
 

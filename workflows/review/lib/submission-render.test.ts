@@ -334,6 +334,21 @@ describe("renderPrLevelFold visible-line punctuation", () => {
         );
         expect(body).toContain("<summary>Full finding</summary>");
     });
+
+    it("posts flat when the discussion carries a literal closing tag", () => {
+        // Same guard renderContextFold applies: an unescaped `</details>`
+        // in the prose would end the Full finding block early and spill
+        // the rest of the review body out of the collapse.
+        const discussion =
+            "The body quotes the `</details>` tag in a code span, which " +
+            "GitHub's HTML-block parse still honours, so this finding must " +
+            "render verbatim rather than inside a collapsed block. " +
+            "x".repeat(MAX_VERBATIM_FOLD_CHARS);
+        const body = renderPrLevelFold(
+            claim({subject: "A closing tag in prose.", discussion}) as never,
+        );
+        expect(body).toBe(`**issue (blocking):** ${discussion}`);
+    });
 });
 
 describe("renderCollapsedLine", () => {

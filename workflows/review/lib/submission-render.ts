@@ -50,10 +50,18 @@ export const MAX_VERBATIM_FOLD_CHARS = 400;
 /**
  * Render a pr-level claim for the review body: verbatim while it reads as
  * a short paragraph, subject line plus a collapsed full finding once it
- * does not.
+ * does not. Same block-close guard as renderContextFold: model-authored
+ * text interpolates into the block unescaped, so a literal closing tag in
+ * the subject or discussion would end the block early and spill the rest
+ * of the finding (and the body sections after it) out of the collapse;
+ * such a claim posts flat instead (PR #408 round 2).
  */
 export const renderPrLevelFold = (claim: Claim): string => {
-    if (claim.discussion.length <= MAX_VERBATIM_FOLD_CHARS) {
+    if (
+        claim.discussion.length <= MAX_VERBATIM_FOLD_CHARS ||
+        containsBlockClose(claim.discussion) ||
+        containsBlockClose(claim.subject)
+    ) {
         return `**${claim.label}:** ${claim.discussion}`;
     }
     return [
