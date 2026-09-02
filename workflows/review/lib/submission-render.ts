@@ -5,10 +5,22 @@
  * body fold, the drop-in-suggestion gate, and the label-token vocabulary
  * helpers. Everything here sits inside the determinism boundary: CODE owns
  * the wrapping and the gates, MODELS own the prose, which is copied
- * verbatim.
+ * verbatim with one exception: `details`/`summary` tags in a collapsed
+ * entry's subject are rewritten to their parenthesised form
+ * (neutralizeStructuralTags, attribution.ts), since a live one closes the
+ * section's collapse at that bullet.
  */
 
+import {neutralizeStructuralTags} from "./attribution";
 import type {Claim} from "./dispatch-contracts";
+import type {AlsoFlagged} from "./attribution";
+import {attributionLine, renderAttributionFooter} from "./attribution";
+import {
+    containsBlockClose,
+    renderContextFold,
+    renderRuleQuote,
+    shouldFoldContext,
+} from "./render-comment";
 
 /**
  * How many lines a committable suggestion may replace the anchored line
@@ -146,30 +158,92 @@ export const labelAdmitsSketch = (label: string): boolean => {
  * under a fix-proposing label ({@link labelAdmitsSketch}): a question or
  * thought proposes no fix, so a sketch under it adds length, not
  * information.
+ *
+ * A claim whose discussion clears the context-fold bar posts as the
+ * summary-plus-fold shape instead ({@link shouldFoldContext} over the
+ * claim's `subject`): the visible line is the subject, and the discussion,
+ * rule quote, sketch, and attribution collapse into one details block. The
+ * committable suggestion fence stays outside the fold either way, so the
+ * one-click apply never hides. `attribution` is optional so the eval
+ * renderer and tests can pin the bare layout; when present it lands inside
+ * the fold as a `<sub>` line, or (unfolded) as the classic collapsed
+ * footer, keeping every posted comment attributed through exactly one of
+ * the two shapes.
  */
-export const renderClaimComment = (claim: Claim): string => {
+export const renderClaimComment = (
+    claim: Claim,
+    attribution?: {source: string; alsoFlaggedBy?: readonly AlsoFlagged[]},
+): string => {
+    const attributionText =
+        attribution === undefined
+            ? undefined
+            : attributionLine(attribution.source, attribution.alsoFlaggedBy);
+    const dropIn =
+        claim.suggestion !== undefined && isDropInSuggestion(claim.suggestion);
+    const sketch =
+        claim.suggestion !== undefined &&
+        !dropIn &&
+        labelAdmitsSketch(claim.label)
+            ? [
+                  "A sketch, not a committable replacement:",
+                  "",
+                  "````",
+                  claim.suggestion,
+                  "````",
+              ].join("\n")
+            : undefined;
+
+    if (
+        shouldFoldContext(claim.subject, claim.discussion) &&
+        // The rule quote and sketch land inside the block, so they get the
+        // same block-close guard the prose does (attribution is escaped by
+        // construction).
+        (claim.rule_quote === undefined ||
+            !containsBlockClose(claim.rule_quote)) &&
+        (sketch === undefined || !containsBlockClose(sketch))
+    ) {
+        return renderContextFold({
+            label: claim.label,
+            summary: claim.subject,
+            prose: claim.discussion,
+            insideFold: [
+                ...(claim.rule_quote !== undefined
+                    ? [renderRuleQuote(claim.rule_quote)]
+                    : []),
+                ...(sketch !== undefined ? [sketch] : []),
+                ...(attributionText !== undefined
+                    ? [`<sub>${attributionText}</sub>`]
+                    : []),
+            ],
+            outsideFold: dropIn
+                ? [
+                      ["```suggestion", claim.suggestion as string, "```"].join(
+                          "\n",
+                      ),
+                  ]
+                : [],
+        });
+    }
+
     const lines: string[] = [`**${claim.label}:** ${claim.discussion}`];
     if (claim.rule_quote !== undefined) {
-        const [first, ...rest] = claim.rule_quote.split("\n");
-        lines.push(
-            "",
-            `> **Rule:** ${first}`,
-            ...rest.map((line) => (line === "" ? ">" : `> ${line}`)),
-        );
+        lines.push("", renderRuleQuote(claim.rule_quote));
     }
     if (claim.suggestion !== undefined) {
-        if (isDropInSuggestion(claim.suggestion)) {
+        if (dropIn) {
             lines.push("", "```suggestion", claim.suggestion, "```");
-        } else if (labelAdmitsSketch(claim.label)) {
-            lines.push(
-                "",
-                "A sketch, not a committable replacement:",
-                "",
-                "````",
-                claim.suggestion,
-                "````",
-            );
+        } else if (sketch !== undefined) {
+            lines.push("", sketch);
         }
+    }
+    if (attribution !== undefined) {
+        lines.push(
+            "",
+            renderAttributionFooter(
+                attribution.source,
+                attribution.alsoFlaggedBy,
+            ),
+        );
     }
     return lines.join("\n");
 };
@@ -189,13 +263,22 @@ export const renderClaimComment = (claim: Claim): string => {
  * {@link COLLAPSED_ENTRY_RE}, so the renderer and the regex live side by
  * side and a round-trip test in workflows/autofix/lib/collapsed.test.ts
  * pins the contract. Change one, change both.
+ *
+ * The subject is model-authored text inside the section's <details>
+ * block, so it is structurally neutralized: a bare `</details>` in any
+ * entry closes the section at that bullet and spills the rest of the
+ * list out of the collapse (Khan/actions#401's re-review), and escaping
+ * cannot help because the ingest sanitizer decodes entities
+ * ({@link neutralizeStructuralTags}).
  */
 export const renderCollapsedLine = (claim: Claim): string =>
     claim.path !== undefined && claim.line !== undefined
-        ? `- \`${claim.path}:${claim.line}\` ${claim.label}: ${
-              claim.subject
-          } ${sourceTag(claim)}`
-        : `- ${claim.label}: ${claim.subject} ${sourceTag(claim)}`;
+        ? `- \`${claim.path}:${claim.line}\` ${
+              claim.label
+          }: ${neutralizeStructuralTags(claim.subject)} ${sourceTag(claim)}`
+        : `- ${claim.label}: ${neutralizeStructuralTags(
+              claim.subject,
+          )} ${sourceTag(claim)}`;
 
 /**
  * The parse of one {@link renderCollapsedLine} entry, anchored form only

@@ -1008,12 +1008,18 @@ sanitizer-surviving `details`/`summary`/`sub` mechanism as the footer, so the
 footer is second-to-last and the stamp is the final block.
 
 Every inline review comment (and each pr-level finding folded into the review
-body) additionally ends with a per-comment attribution footer in the same
-collapsed block, naming the reviewer that produced the finding and, when
-cross-source dedup merged duplicates into it, each other reviewer that flagged
-the same defect (`lib/attribution.ts`; the merge record is the structured
-`also_flagged_by` field on the claim, so a validator discussion rewrite cannot
-drop it). Collapsed one-liners (the low-confidence `<details>` section and a
+body) additionally carries per-comment attribution, naming the reviewer that
+produced the finding and, when cross-source dedup merged duplicates into it,
+each other reviewer that flagged the same defect (`lib/attribution.ts`; the
+merge record is the structured `also_flagged_by` field on the claim, so a
+validator discussion rewrite cannot drop it). For inline comments the shape
+splits on length: a short comment ends with the classic collapsed footer
+block, and a long one posts as a visible summary line plus one collapsed
+context block (`lib/render-comment.ts`) with the attribution riding inside
+that block as its final `<sub>` line rather than stacking a second expando.
+A pr-level finding in the review body keeps its own fold
+(`renderPrLevelFold`: the `Full finding` chip at 400 chars) with the classic
+footer stacked after it. Collapsed one-liners (the low-confidence `<details>` section and a
 hold comment's claim list) carry the short form, a trailing
 `<sub>(<source>)</sub>` tag. Text-similarity comparisons against
 previously-posted bodies (open-thread suppression, the adjudicated corpus)

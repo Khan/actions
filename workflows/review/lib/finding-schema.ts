@@ -198,6 +198,16 @@ export type Finding = {
     producing_hunt: string;
     /** The single human-read sentence(s) authored by the model. */
     model_authored_prose: string;
+    /**
+     * Optional author-supplied summary: the one visible line the posted
+     * comment opens with when the prose is long enough to fold
+     * (render-comment.ts's context fold). Single line, stands alone (the
+     * defect or the ask, never "see below"); the full
+     * `model_authored_prose` renders inside the collapsed context block.
+     * Absent falls back to the prose's first sentence, so a lens that has
+     * not adopted the field posts exactly as before the fold shipped.
+     */
+    summary?: string;
 };
 
 /**
@@ -375,6 +385,15 @@ export const validateFinding = (input: unknown): ValidationResult => {
     }
 
     // Optional fields: only constrained when present.
+    if (
+        input["summary"] !== undefined &&
+        (!isNonEmptyString(input["summary"]) ||
+            (input["summary"] as string).includes("\n"))
+    ) {
+        errors.push(
+            "summary: when present, must be a non-empty single-line string",
+        );
+    }
     if (
         input["suggested_patch"] !== undefined &&
         !isNonEmptyString(input["suggested_patch"])

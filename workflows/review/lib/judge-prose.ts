@@ -60,6 +60,12 @@
  */
 
 import {extractJsonObject} from "./agent-json.ts";
+import {
+    CONTEXT_FOLD_OPEN,
+    firstSentence,
+    shouldFoldContext,
+} from "./render-comment.ts";
+import {subjectRestatesDiscussion} from "./dispatch-contracts.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Rubric and prompts                                                         */
@@ -101,15 +107,45 @@ Fail only on clear violations; when unsure, pass.`;
  * flag on" to a behavior, and it flagged "graduates the behavior", the
  * standard experiment-lifecycle word, so both joined the list verbatim.
  */
-export const LABEL_RUBRIC_EXTRA = `The MESSAGE is one inline review comment on a pull request; the LABEL line names its Conventional-Comment class. Its audience is the pull request's author, an engineer working in this repository: apply rule 5 with that audience, so compositional technical shorthand an engineer reads without translation ("config-agnostic", "no-op") is fine, and only terms private to the reviewing bot's own pipeline violate it. Figurative flourish is a rule 1 violation here even when the reader could decode it: a comment saying a change "removes the last runtime lever" instead of naming the deleted flag or experiment dresses the mechanism in style, and review comments carry no style budget. Flag, switch, and experiment-lifecycle idioms stay terms of art, not flourish: "flip a flag on", "flip a behavior on", "toggle", "kill switch", "gate", "graduate an experiment", "rollout" all name mechanisms directly and are fine. Soft length expectations, applied through rule 3: a thought, question, note, or nitpick should read in one breath, roughly 40-50 words, unless the mechanism it describes genuinely needs more; an issue, todo, or suggestion may run longer when the defect or the fix requires it. Clear overshoot built from padding, restatement, or stacked qualifications is a rule 3 violation; dense necessary mechanism is not.`;
+export const LABEL_RUBRIC_EXTRA = `The MESSAGE is one inline review comment on a pull request; the LABEL line names its Conventional-Comment class. Its audience is the pull request's author, an engineer working in this repository: apply rule 5 with that audience, so compositional technical shorthand an engineer reads without translation ("config-agnostic", "no-op") is fine, and only terms private to the reviewing bot's own pipeline violate it. Figurative flourish is a rule 1 violation here even when the reader could decode it: a comment saying a change "removes the last runtime lever" instead of naming the deleted flag or experiment dresses the mechanism in style, and review comments carry no style budget. Flag, switch, and experiment-lifecycle idioms stay terms of art, not flourish: "flip a flag on", "flip a behavior on", "toggle", "kill switch", "gate", "graduate an experiment", "rollout" all name mechanisms directly and are fine. Soft length expectations, applied through rule 3: a thought, question, note, or nitpick should read in one breath, roughly 40-50 words, unless the mechanism it describes genuinely needs more; an issue, todo, or suggestion may run longer when the defect or the fix requires it. Clear overshoot built from padding, restatement, or stacked qualifications is a rule 3 violation; dense necessary mechanism is not. Some MESSAGEs post as two parts: a visible line (the text after the label, before any <details> block) and a collapsed context block (between <details><summary><sub>context</sub></summary> and </details>). Judge them differently. The visible line must stand alone in one or two lines, stating the defect or the ask directly; a visible line that only points into the block ("see below", "details inside", "expand for context") is a rule 3 violation. The collapsed block is opt-in reading: the soft length expectations above do NOT apply inside it, and it may carry the full evidence chain (tool names, file paths, the concrete detail a reader needs to check the claim) at whatever length that needs; rules 1, 2, and 4 still apply to its prose. The block restating the visible line's point in its opening is NOT a rule 2 violation: the block must read self-contained, so that restatement is structural, not padding.`;
 
 /**
  * The judge prompt over one finding's posting view: the label wrapper plus
  * the prose, the same opening shape renderComment/renderClaimComment emit,
  * because the complaint is about what posts and the label is part of it.
+ * A unit that will post as the context fold (a summary that clears
+ * {@link shouldFoldContext} against its prose) is judged in that shape:
+ * the visible line and the collapsed block carry different expectations
+ * (the fold-shape rules in {@link LABEL_RUBRIC_EXTRA}), so the judge must
+ * see which is which.
  */
-export const buildJudgePrompt = (prose: string, label: string): string =>
-    [
+export const buildJudgePrompt = (
+    prose: string,
+    label: string,
+    summary?: string,
+): string => {
+    const message =
+        summary !== undefined && shouldFoldContext(summary, prose)
+            ? [
+                  `**${label}:** ${summary}`,
+                  "",
+                  CONTEXT_FOLD_OPEN,
+                  "",
+                  prose,
+                  "",
+                  "</details>",
+              ].join("\n")
+            : summary !== undefined &&
+              summary.trim() !== firstSentence(prose).trim()
+            ? // An authored line distinct from the prose's opening posts
+              // even when the inline body does not fold (claim.subject
+              // feeds the review body's collapsed list entries), so it
+              // must reach the judge: without this branch a validator's
+              // corrected.subject on an under-bar pair is judged by
+              // nothing (PR #401 round 2).
+              [`**${label}:** ${summary}`, "", prose].join("\n")
+            : `**${label}:** ${prose}`;
+    return [
         PLAIN_PROSE_RUBRIC,
         LABEL_RUBRIC_EXTRA,
         "",
@@ -117,9 +153,10 @@ export const buildJudgePrompt = (prose: string, label: string): string =>
         "",
         "MESSAGE:",
         "<<<",
-        `**${label}:** ${prose}`,
+        message,
         ">>>",
     ].join("\n");
+};
 
 /* -------------------------------------------------------------------------- */
 /* Verdict parsing                                                            */
@@ -163,6 +200,14 @@ export type ProseUnit = {
     key: string;
     label: string;
     prose: string;
+    /**
+     * The visible line the posted comment opens with when the prose folds
+     * (the authored `summary`/`subject`, else the prose's first sentence,
+     * mirroring buildClaims' subject derivation). Always present so
+     * {@link buildJudgePrompt} can apply the same fold decision the
+     * renderer will.
+     */
+    summary: string;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -202,6 +247,7 @@ export const extractProseUnits = (
                     key: `out_of_lane_observations[${index}]`,
                     label: "question (non-blocking)",
                     prose: observation,
+                    summary: firstSentence(observation),
                 });
             }
         });
@@ -215,19 +261,31 @@ export const extractProseUnits = (
                 return;
             }
             const corrected = entry["corrected"];
-            const joined = [corrected["subject"], corrected["discussion"]]
-                .filter(
-                    (part): part is string =>
-                        typeof part === "string" && part.trim() !== "",
-                )
-                .join(" ");
-            if (joined === "") {
+            const subject =
+                typeof corrected["subject"] === "string" &&
+                corrected["subject"].trim() !== ""
+                    ? corrected["subject"]
+                    : "";
+            const discussion =
+                typeof corrected["discussion"] === "string" &&
+                corrected["discussion"].trim() !== ""
+                    ? corrected["discussion"]
+                    : "";
+            if (subject === "" && discussion === "") {
                 return;
             }
             const key =
                 typeof entry["id"] === "string" && entry["id"] !== ""
                     ? `${entry["id"]}.corrected`
                     : `claims[${index}].corrected`;
+            // Mirror the posting surface: applyVerifications puts
+            // `corrected.discussion` in the body and `corrected.subject`
+            // on the visible line, so the unit judges discussion as prose
+            // with the subject as its summary (the old subject+discussion
+            // join judged a body shape that never posts). Known
+            // approximation: a discussion-only correction posts under the
+            // claim's ORIGINAL subject, which this payload cannot see, so
+            // the first-sentence fallback stands in for it.
             units.push({
                 key,
                 label:
@@ -235,7 +293,8 @@ export const extractProseUnits = (
                     corrected["label"] !== ""
                         ? corrected["label"]
                         : "suggestion (non-blocking)",
-                prose: joined,
+                prose: discussion !== "" ? discussion : subject,
+                summary: subject !== "" ? subject : firstSentence(discussion),
             });
         });
     }
@@ -257,7 +316,18 @@ export const extractProseUnits = (
                 entry["severity"] === "blocking"
                     ? "issue (blocking)"
                     : "suggestion (non-blocking)";
-            units.push({key, label, prose: schemaProse});
+            const authored = entry["summary"];
+            units.push({
+                key,
+                label,
+                prose: schemaProse,
+                summary:
+                    typeof authored === "string" &&
+                    authored.trim() !== "" &&
+                    !authored.includes("\n")
+                        ? authored
+                        : firstSentence(schemaProse),
+            });
             return;
         }
         const subject =
@@ -268,13 +338,31 @@ export const extractProseUnits = (
             .filter((part) => part.trim() !== "")
             .join(" ");
         if (joined !== "") {
+            // Mirror the renderer's visible line and prose: a subject the
+            // restatement drop discards never posts (joinProse drops it
+            // from the prose, and buildClaims' visible line falls back to
+            // the discussion's own opening), so judging it could bounce
+            // on text the author cannot fix by editing what posts. The
+            // fallback reads the DISCUSSION's first sentence, not the
+            // joined text's, because the join opens with the very subject
+            // being dropped.
+            const restates =
+                discussion.trim() !== "" &&
+                subjectRestatesDiscussion(subject, discussion);
+            const postsAsSubject =
+                subject.trim() !== "" && !subject.includes("\n") && !restates;
             units.push({
                 key,
                 label:
                     typeof entry["label"] === "string" && entry["label"] !== ""
                         ? entry["label"]
                         : "suggestion (non-blocking)",
-                prose: joined,
+                prose: restates ? discussion : joined,
+                summary: postsAsSubject
+                    ? subject
+                    : firstSentence(
+                          discussion.trim() !== "" ? discussion : joined,
+                      ),
             });
         }
     });
@@ -364,8 +452,10 @@ export const buildBounceMessage = (
             "and any question or recommendation it makes; fix only the " +
             "style: name mechanisms plainly instead of metaphor or " +
             "flourish, state each point once, and keep to at most one " +
-            "claim, one line of evidence, and at most one question per " +
-            "finding.",
+            "claim and at most one question per finding, with the " +
+            "evidence chain complete enough to check the claim (long " +
+            "prose posts collapsed behind the summary line, so keep the " +
+            "checkable detail rather than compressing it out).",
         ...failures.map(
             (failure) =>
                 `- ${failure.key}: ${
@@ -395,8 +485,10 @@ export const createProseGate = (options: {
     // later attempt and consume bounce budget the author did nothing to
     // earn (the loop stays monotonic), and it saves the judge calls.
     const passedUnits = new Set<string>();
+    // The summary participates: a rewrite that only changes the visible
+    // line must re-judge (it is the line every reader sees).
     const unitMemoKey = (unit: ProseUnit): string =>
-        `${unit.key}\u0000${unit.label}\u0000${unit.prose}`;
+        `${unit.key}\u0000${unit.label}\u0000${unit.summary}\u0000${unit.prose}`;
     // The unit keys seen on the previous attempt, so a resubmission that
     // DROPS a finding is recorded: the gate never edits a payload, but the
     // author re-emits it whole, and a silent shrink would otherwise be
@@ -445,7 +537,11 @@ export const createProseGate = (options: {
                         return {
                             verdict: parseJudgeVerdict(
                                 await runner(
-                                    buildJudgePrompt(unit.prose, unit.label),
+                                    buildJudgePrompt(
+                                        unit.prose,
+                                        unit.label,
+                                        unit.summary,
+                                    ),
                                 ),
                             ),
                         };

@@ -25,6 +25,7 @@
  * substitute.
  */
 
+import {neutralizeStructuralTags} from "./attribution";
 import {isBlockingLabel} from "./render-comment";
 import {isBotLogin, isReviewBotAuthor, sameLogin} from "./threads";
 
@@ -193,18 +194,40 @@ const EXCERPT_MAX = 120;
 /**
  * The first prose line of a previously-posted comment, with the `**label:**`
  * prefix (or its markdown-stripped plain form, {@link PLAIN_LABEL_RE})
- * stripped and a hard length cap. Quoted verbatim otherwise: this text was
- * already posted to the PR by an earlier run of this workflow.
+ * stripped and a hard length cap. Quoted verbatim otherwise, except that
+ * `details`/`summary` tags are neutralized (neutralizeStructuralTags): the
+ * non-blocking excerpts render inside the recap's collapsed block, where a
+ * bare `</details>` quoted from an old comment would close the block early
+ * (the same breakage Khan/actions#401's collapsed-observations section
+ * hit). previouslyRecapped keys on the thread URL, not this text, so the
+ * damping is unaffected.
  */
 export const excerptOpeningComment = (body: string): string => {
     const withoutBold = body.replace(BOLD_LABEL_RE, "");
     const withoutLabel =
         withoutBold !== body ? withoutBold : body.replace(PLAIN_LABEL_RE, "");
-    const firstLine = withoutLabel.split("\n", 1)[0].trim();
+    const firstLine = neutralizeStructuralTags(
+        withoutLabel.split("\n", 1)[0].trim(),
+    );
     if (firstLine.length <= EXCERPT_MAX) {
         return firstLine;
     }
-    return `${firstLine.slice(0, EXCERPT_MAX).trimEnd()}...`;
+    // The cap can sever a code span the neutralize pass preserved, leaving
+    // its backtick unbalanced (no span forms, the tag inside is live) or
+    // the tag itself cut mid-way (a "<" fragment the sanitizer's tag fold
+    // matches through to the recap's own closing tag). Re-neutralize the
+    // sliced text and drop a trailing tag fragment (the fragment shape is
+    // foldXmlTags's opener: "<" then [A-Za-z!/], so a bare "a < b" tail
+    // survives). Cosmetic loss on a pathological line, never a live tag.
+    const sliced = neutralizeStructuralTags(
+        firstLine.slice(0, EXCERPT_MAX).trimEnd(),
+    );
+    return `${sliced
+        .replace(
+            /(?:<|&(?:amp;)?(?:lt|#0*60|#[xX]0*3c);)\/?[A-Za-z!][^>]*$/,
+            "",
+        )
+        .trimEnd()}...`;
 };
 
 /** A kept thread joined with its staged data, ready to render. */
