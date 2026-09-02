@@ -941,10 +941,11 @@ literals do not match the `review` package version (releases v1.3.0 through
 v1.4.0 shipped still pointing at v1.2.2, before the sync existed).
 
 A bump of this repo's own install carries one extra step the other consumers
-do not have: re-derive `.github/workflows/review-canary.md` from the updated
-install (body after the canary preamble, `source:` line) and recompile its
-lock in the same change. `.github/workflows/review-canary.test.ts` fails the
-bump PR otherwise (see the canary section below).
+do not have: run `pnpm run sync-canary` to re-derive
+`.github/workflows/review-canary.md` from the updated install (body after the
+canary preamble, `source:` line) and recompile its lock in the same change.
+`.github/workflows/review-canary.test.ts` fails the bump PR otherwise (see the
+canary section below).
 
 ### Output-shape changes belong in the changeset
 

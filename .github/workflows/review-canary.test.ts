@@ -71,16 +71,20 @@ const PREAMBLE_END = "<!-- END CANARY PREAMBLE -->\n";
 
 describe("review-canary.md vs the installed review.md", () => {
     it("shares review.md's prompt byte-for-byte after the canary preamble", () => {
-        expect(after(bodyOf(canaryMd), PREAMBLE_END)).toBe(
-            after(bodyOf(reviewMd), "# PR Reviewer\n"),
-        );
+        expect(
+            after(bodyOf(canaryMd), PREAMBLE_END),
+            "review-canary.md prompt has drifted from review.md; run 'pnpm run sync-canary' to re-derive",
+        ).toBe(after(bodyOf(reviewMd), "# PR Reviewer\n"));
     });
 
     it("records the same source: provenance as review.md", () => {
         const sourceLine = (markdown: string): string | undefined =>
             markdown.match(/^source:.*$/m)?.[0];
         expect(sourceLine(canaryMd)).toBeDefined();
-        expect(sourceLine(canaryMd)).toBe(sourceLine(reviewMd));
+        expect(
+            sourceLine(canaryMd),
+            "review-canary.md source: line has drifted from review.md; run 'pnpm run sync-canary' to re-derive",
+        ).toBe(sourceLine(reviewMd));
     });
 });
 
