@@ -54,6 +54,13 @@ export type CatalogProvider = {
  * with cacheRead at the catalog's standard 10%-of-input ratio. When a pi-ai
  * bump ships its own entry, the catalog's wins (see
  * {@link withGemini38Flash}).
+ *
+ * The thinkingLevelMap declares off AND minimal unsupported: the 3.8 API
+ * takes thinking_level LOW/MEDIUM/HIGH only (default MEDIUM; "MINIMAL is
+ * unsupported for this model", per the developer guide), where the 3.6
+ * entries this was first cloned from still accepted MINIMAL. The map keeps
+ * pi-ai's level clamp honest; the level actually REQUESTED is
+ * {@link thinkingLevelForModel}'s business.
  */
 export const GEMINI_38_FLASH_MODEL = {
     id: "gemini-3.8-flash",
@@ -66,8 +73,34 @@ export const GEMINI_38_FLASH_MODEL = {
     cost: {input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0},
     contextWindow: 1_048_576,
     maxTokens: 65_536,
-    thinkingLevelMap: {off: null},
+    thinkingLevelMap: {off: null, minimal: null},
 } as const;
+
+/**
+ * The thinking level the runner requests for a model when the caller sets
+ * none. Only Google models get one, and they MUST: pi-ai (through 0.84.4)
+ * translates "no thinking requested" on a gemini-3-flash model into a
+ * hardcoded `thinkingLevel: MINIMAL`, which 3.7+ reject with a 400 ("Thinking
+ * level MINIMAL is not supported for this model") — run 33664981308's
+ * candidate arm died on exactly that, every dispatch $0 in 2s. An explicit
+ * level routes through pi-ai's clamp instead, which respects the catalog
+ * entry's map.
+ *
+ * `high` rather than the API default MEDIUM is a measurement decision
+ * (2026-09-03): run the candidate the way an agentic-coding deployment
+ * would actually run it, per Google's own positioning of 3.8's gains at
+ * higher effort. Note what that means for the A/B: the claude incumbents
+ * run with extended thinking OFF (the runner sends no thinking config for
+ * anthropic pins, and no harness ever has — review.md's `# effort:`
+ * annotations are documented intent, not live config), so the arms differ
+ * in model AND reasoning budget, not model alone. Anthropic pins return
+ * undefined here precisely so the claude arms keep running exactly as they
+ * did through the harness A/B.
+ */
+export const thinkingLevelForModel = (model: unknown): string | undefined =>
+    (model as {api?: string}).api === "google-generative-ai"
+        ? "high"
+        : undefined;
 
 /**
  * Append {@link GEMINI_38_FLASH_MODEL} to a Google catalog that does not

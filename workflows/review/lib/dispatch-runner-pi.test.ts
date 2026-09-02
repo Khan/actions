@@ -637,6 +637,29 @@ describe("createPiRunner", () => {
         expect(streamSimpleOptions[1]?.["maxRetries"]).toBe(5);
     });
 
+    it("requests an explicit thinking level for Google models, and none for Anthropic", async () => {
+        // pi-ai's no-thinking fallback sends gemini 3.7+ a MINIMAL level the
+        // API 400s on (run 33664981308: every candidate dispatch died $0 in
+        // 2s), so a Google model must never reach streamSimple without one.
+        loop = ({streamFn}) => {
+            streamFn({id: "gemini-3.8-flash", api: "google-generative-ai"}, []);
+            streamFn({id: "claude-opus-4-8", api: "anthropic-messages"}, []);
+            streamFn(
+                {id: "gemini-3.8-flash", api: "google-generative-ai"},
+                [],
+                {reasoning: "low"},
+            );
+            return Promise.resolve([]);
+        };
+        const runner = await createPiRunner();
+        await runner(request());
+        expect(streamSimpleOptions[0]?.["reasoning"]).toBe("high");
+        // The claude arms run exactly as they did through the harness A/B.
+        expect(streamSimpleOptions[1]?.["reasoning"]).toBeUndefined();
+        // An explicit caller level still wins.
+        expect(streamSimpleOptions[2]?.["reasoning"]).toBe("low");
+    });
+
     it("wraps every tool subprocess in the OS sandbox", async () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-runner-"));
         writeFileSync(join(dir, "a.ts"), "const a = 1;\n");

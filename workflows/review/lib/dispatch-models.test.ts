@@ -5,6 +5,7 @@ import {
     providerForPin,
     rebaseModels,
     resolveModelId,
+    thinkingLevelForModel,
     withGemini38Flash,
 } from "./dispatch-models";
 
@@ -96,6 +97,33 @@ describe("withGemini38Flash", () => {
             cacheWrite: 0,
         });
         expect(GEMINI_38_FLASH_MODEL.api).toBe("google-generative-ai");
+    });
+
+    it("declares off AND minimal unsupported (the 3.8 API takes LOW/MEDIUM/HIGH only)", () => {
+        // The 3.6-shaped {off: null} map let pi-ai's clamp offer minimal,
+        // which the 3.8 API 400s on.
+        expect(GEMINI_38_FLASH_MODEL.thinkingLevelMap).toEqual({
+            off: null,
+            minimal: null,
+        });
+    });
+});
+
+describe("thinkingLevelForModel", () => {
+    it("gives Google models high and everything else nothing", () => {
+        expect(
+            thinkingLevelForModel({
+                id: "gemini-3.8-flash",
+                api: "google-generative-ai",
+            }),
+        ).toBe("high");
+        expect(
+            thinkingLevelForModel({
+                id: "claude-opus-4-8",
+                api: "anthropic-messages",
+            }),
+        ).toBeUndefined();
+        expect(thinkingLevelForModel({id: "bare"})).toBeUndefined();
     });
 });
 

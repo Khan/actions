@@ -18,6 +18,17 @@ predates it, so the runner registers the provider with one local catalog
 entry (launch intro pricing, $0.75/$3.75 per MTok) that a future pi-ai
 bump's own entry supersedes by id.
 
+Google pins always carry an explicit thinking level, pinned at `high` for
+the A/B (a measurement decision: run the candidate the way an agentic
+deployment would, while the claude arms keep extended thinking off exactly
+as they always have, so the arms differ in model and reasoning budget
+both). Explicit because pi-ai (through 0.84.4) translates "no thinking
+requested" on a gemini-3-flash model into a hardcoded `thinkingLevel:
+MINIMAL`, which the 3.7+ API rejects with a 400: the first A/B run's
+candidate arm died on exactly that, every dispatch $0 in 2 seconds. The
+catalog entry's level map declares `off` and `minimal` unsupported (the
+3.8 API takes LOW/MEDIUM/HIGH only).
+
 Every sub-agent `model:` pin in review.md moves to `gemini-3.8-flash` so the
 live A/B measures that model against main's claude baseline on the same
 harness. This is a measurement state, not a production pin decision: the
