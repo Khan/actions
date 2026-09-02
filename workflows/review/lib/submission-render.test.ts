@@ -349,6 +349,22 @@ describe("renderPrLevelFold visible-line punctuation", () => {
         );
         expect(body).toBe(`**issue (blocking):** ${discussion}`);
     });
+
+    it("keeps the fold when only the subject carries a closing tag", () => {
+        // The subject renders above the open tag at the body's top level,
+        // so a stray closing tag there has no block to end, and dropping
+        // to flat would be the burial MAX_VERBATIM_FOLD_CHARS prevents.
+        const body = renderPrLevelFold(
+            claim({
+                subject: "A `</details>` tag in the visible line",
+                discussion: "x".repeat(MAX_VERBATIM_FOLD_CHARS + 1),
+            }) as never,
+        );
+        expect(body).toContain("<summary>Full finding</summary>");
+        expect(body.split("\n")[0]).toBe(
+            "**issue (blocking):** A `</details>` tag in the visible line.",
+        );
+    });
 });
 
 describe("renderCollapsedLine", () => {

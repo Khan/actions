@@ -202,8 +202,9 @@ export const firstSentence = (prose: string): string =>
  * and the fold's opening sentence stay byte-comparable. A trailing `:`
  * or `;` stays terminal on purpose, matching joinProse's glue rule: a
  * subject that hands off mid-thought into the fold is a contract
- * violation ("never a pointer into the discussion") for the judge to
- * bounce, not a shape for the renderer to repair. Rendering-only:
+ * violation ("never a pointer into the discussion"), and LABEL_RUBRIC_EXTRA
+ * names the colon/semicolon hand-off explicitly so the judge bounces it,
+ * rather than the renderer repairing the shape. Rendering-only:
  * `claim.subject` itself is untouched, so dedup's prefix-match semantics
  * never see the added period.
  */
