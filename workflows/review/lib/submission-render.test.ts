@@ -5,7 +5,12 @@ import {
     labelAdmitsSketch,
     renderClaimComment,
 } from "./submission";
-import {COLLAPSED_ENTRY_RE, renderCollapsedLine} from "./submission-render";
+import {
+    COLLAPSED_ENTRY_RE,
+    MAX_VERBATIM_FOLD_CHARS,
+    renderCollapsedLine,
+    renderPrLevelFold,
+} from "./submission-render";
 
 /**
  * Claim-rendering tests, split out of submission.test.ts (max-lines): the
@@ -209,6 +214,20 @@ describe("renderClaimComment context fold", () => {
         );
     });
 
+    it("normalizes a headline-style subject's terminal punctuation", () => {
+        // agent-settings#105: label-shape subjects arrive without a
+        // period, joinProse repairs the copy inside the fold, and the
+        // visible line posted the raw subject, reading as truncation.
+        const body = renderClaimComment(
+            folded({
+                subject: "The baked-metadata arm cannot reach the modeled rate",
+            }) as never,
+        );
+        expect(body.split("\n")[0]).toBe(
+            "**thought (non-blocking):** The baked-metadata arm cannot reach the modeled rate.",
+        );
+    });
+
     it("keeps short discussions in today's shape (no fold under the bar)", () => {
         const body = renderClaimComment(
             claim({
@@ -295,6 +314,57 @@ describe("renderClaimComment context fold", () => {
                 "<sub>found by correctness-reviewer</sub>",
                 "</details>",
             ].join("\n"),
+        );
+    });
+});
+
+describe("renderPrLevelFold visible-line punctuation", () => {
+    it("normalizes the subject over the Full finding block", () => {
+        // Both renderers put a bare subject directly above a collapsed
+        // block, so the pr-level path gets the same terminal-punctuation
+        // repair the inline context block got (PR #408 review).
+        const body = renderPrLevelFold(
+            claim({
+                subject: "The retention pass never removes anything",
+                discussion: "x".repeat(MAX_VERBATIM_FOLD_CHARS + 1),
+            }) as never,
+        );
+        expect(body.split("\n")[0]).toBe(
+            "**issue (blocking):** The retention pass never removes anything.",
+        );
+        expect(body).toContain("<summary>Full finding</summary>");
+    });
+});
+
+describe("renderPrLevelFold block-close refusal", () => {
+    it("posts flat when the discussion carries a literal closing tag", () => {
+        // Same guard renderContextFold applies: an unescaped `</details>`
+        // in the prose would end the Full finding block early and spill
+        // the rest of the review body out of the collapse.
+        const discussion =
+            "The body quotes the `</details>` tag in a code span, which " +
+            "GitHub's HTML-block parse still honours, so this finding must " +
+            "render verbatim rather than inside a collapsed block. " +
+            "x".repeat(MAX_VERBATIM_FOLD_CHARS);
+        const body = renderPrLevelFold(
+            claim({subject: "A closing tag in prose.", discussion}) as never,
+        );
+        expect(body).toBe(`**issue (blocking):** ${discussion}`);
+    });
+
+    it("keeps the fold when only the subject carries a closing tag", () => {
+        // The subject renders above the open tag at the body's top level,
+        // so a stray closing tag there has no block to end, and dropping
+        // to flat would be the burial MAX_VERBATIM_FOLD_CHARS prevents.
+        const body = renderPrLevelFold(
+            claim({
+                subject: "A `</details>` tag in the visible line",
+                discussion: "x".repeat(MAX_VERBATIM_FOLD_CHARS + 1),
+            }) as never,
+        );
+        expect(body).toContain("<summary>Full finding</summary>");
+        expect(body.split("\n")[0]).toBe(
+            "**issue (blocking):** A `</details>` tag in the visible line.",
         );
     });
 });

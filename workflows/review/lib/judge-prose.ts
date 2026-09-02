@@ -61,11 +61,11 @@
 
 import {extractJsonObject} from "./agent-json.ts";
 import {
-    CONTEXT_FOLD_OPEN,
     firstSentence,
+    renderContextFold,
     shouldFoldContext,
 } from "./render-comment.ts";
-import {subjectRestatesDiscussion} from "./dispatch-contracts.ts";
+import {joinProse, subjectRestatesDiscussion} from "./dispatch-contracts.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Rubric and prompts                                                         */
@@ -107,7 +107,23 @@ Fail only on clear violations; when unsure, pass.`;
  * flag on" to a behavior, and it flagged "graduates the behavior", the
  * standard experiment-lifecycle word, so both joined the list verbatim.
  */
-export const LABEL_RUBRIC_EXTRA = `The MESSAGE is one inline review comment on a pull request; the LABEL line names its Conventional-Comment class. Its audience is the pull request's author, an engineer working in this repository: apply rule 5 with that audience, so compositional technical shorthand an engineer reads without translation ("config-agnostic", "no-op") is fine, and only terms private to the reviewing bot's own pipeline violate it. Figurative flourish is a rule 1 violation here even when the reader could decode it: a comment saying a change "removes the last runtime lever" instead of naming the deleted flag or experiment dresses the mechanism in style, and review comments carry no style budget. Flag, switch, and experiment-lifecycle idioms stay terms of art, not flourish: "flip a flag on", "flip a behavior on", "toggle", "kill switch", "gate", "graduate an experiment", "rollout" all name mechanisms directly and are fine. Soft length expectations, applied through rule 3: a thought, question, note, or nitpick should read in one breath, roughly 40-50 words, unless the mechanism it describes genuinely needs more; an issue, todo, or suggestion may run longer when the defect or the fix requires it. Clear overshoot built from padding, restatement, or stacked qualifications is a rule 3 violation; dense necessary mechanism is not. Some MESSAGEs post as two parts: a visible line (the text after the label, before any <details> block) and a collapsed context block (between <details><summary><sub>context</sub></summary> and </details>). Judge them differently. The visible line must stand alone in one or two lines, stating the defect or the ask directly; a visible line that only points into the block ("see below", "details inside", "expand for context") is a rule 3 violation. The collapsed block is opt-in reading: the soft length expectations above do NOT apply inside it, and it may carry the full evidence chain (tool names, file paths, the concrete detail a reader needs to check the claim) at whatever length that needs; rules 1, 2, and 4 still apply to its prose. The block restating the visible line's point in its opening is NOT a rule 2 violation: the block must read self-contained, so that restatement is structural, not padding.`;
+export const LABEL_RUBRIC_EXTRA_BASE = `The MESSAGE is one inline review comment on a pull request; the LABEL line names its Conventional-Comment class. Its audience is the pull request's author, an engineer working in this repository: apply rule 5 with that audience, so compositional technical shorthand an engineer reads without translation ("config-agnostic", "no-op") is fine, and only terms private to the reviewing bot's own pipeline violate it. Figurative flourish is a rule 1 violation here even when the reader could decode it: a comment saying a change "removes the last runtime lever" instead of naming the deleted flag or experiment dresses the mechanism in style, and review comments carry no style budget. Flag, switch, and experiment-lifecycle idioms stay terms of art, not flourish: "flip a flag on", "flip a behavior on", "toggle", "kill switch", "gate", "graduate an experiment", "rollout" all name mechanisms directly and are fine. Soft length expectations, applied through rule 3: a thought, question, note, or nitpick should read in one breath, roughly 40-50 words, unless the mechanism it describes genuinely needs more; an issue, todo, or suggestion may run longer when the defect or the fix requires it. Clear overshoot built from padding, restatement, or stacked qualifications is a rule 3 violation; dense necessary mechanism is not. Some MESSAGEs post as two parts: a visible line (the text after the label, before any <details> block) and a collapsed context block (between <details><summary><sub>context</sub></summary> and </details>). Judge them differently. The visible line is the only part of the comment a reader sees without a click: by default it is one short sentence naming the defect or the ask, two sentences when it takes both, and longer only when cutting it would drop what the reader needs to decide whether to expand; visible-line overshoot built from padding, restatement, or stacked qualifications is a rule 3 violation, length alone is not. A visible line that only points into the block ("see below", "details inside", "expand for context") is a rule 3 violation. The collapsed block is opt-in reading: the soft length expectations above do NOT apply inside it, and it may carry the full evidence chain (tool names, file paths, the concrete detail a reader needs to check the claim) at whatever length that needs; rules 1, 2, and 4 still apply to its prose. The block restating the visible line's point in its opening is NOT a rule 2 violation: the block must read self-contained, so that restatement is structural, not padding.`;
+
+/**
+ * The question rule, kept apart from {@link LABEL_RUBRIC_EXTRA_BASE} because
+ * it applies only where an author chose the label. `out_of_lane_observations`
+ * post as `question (non-blocking)` by code (dispatch-contracts.ts
+ * fromOutOfLane's labelOverride) under a contract that asks for a plain
+ * statement of the concern, so judging them against this sentence would
+ * bounce a contract-conforming observation up to MAX_PROSE_BOUNCES times
+ * (PR #408 round 4). {@link buildJudgePrompt} omits it for units whose label
+ * was assigned by code.
+ */
+export const QUESTION_VISIBLE_LINE_RULE =
+    "A question-labeled MESSAGE whose visible line contains no question is a rule 3 violation: the reader must see the ask without expanding.";
+
+/** The full rubric extra: the base plus the question rule (authored labels). */
+export const LABEL_RUBRIC_EXTRA = `${LABEL_RUBRIC_EXTRA_BASE} ${QUESTION_VISIBLE_LINE_RULE}`;
 
 /**
  * The judge prompt over one finding's posting view: the label wrapper plus
@@ -123,18 +139,21 @@ export const buildJudgePrompt = (
     prose: string,
     label: string,
     summary?: string,
+    options: {
+        /**
+         * The label was assigned by code, not chosen by the prose's author
+         * (out-of-lane observations). The question rule is withheld: the
+         * author cannot fix a label they never picked.
+         */
+        codeAssignedLabel?: boolean;
+    } = {},
 ): string => {
     const message =
         summary !== undefined && shouldFoldContext(summary, prose)
-            ? [
-                  `**${label}:** ${summary}`,
-                  "",
-                  CONTEXT_FOLD_OPEN,
-                  "",
-                  prose,
-                  "",
-                  "</details>",
-              ].join("\n")
+            ? // The renderer's own function, not a re-spelling of its
+              // output, so the judge sees the posted bytes by construction
+              // (visible-line punctuation included; PR #408 canary round).
+              renderContextFold({label, summary, prose})
             : summary !== undefined &&
               summary.trim() !== firstSentence(prose).trim()
             ? // An authored line distinct from the prose's opening posts
@@ -147,7 +166,9 @@ export const buildJudgePrompt = (
             : `**${label}:** ${prose}`;
     return [
         PLAIN_PROSE_RUBRIC,
-        LABEL_RUBRIC_EXTRA,
+        options.codeAssignedLabel === true
+            ? LABEL_RUBRIC_EXTRA_BASE
+            : LABEL_RUBRIC_EXTRA,
         "",
         `LABEL: ${label}`,
         "",
@@ -208,6 +229,12 @@ export type ProseUnit = {
      * renderer will.
      */
     summary: string;
+    /**
+     * Set when the label came from code rather than the author (out-of-lane
+     * observations post as questions by fromOutOfLane's override). The
+     * judge withholds the question rule for these units.
+     */
+    codeAssignedLabel?: true;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -248,6 +275,7 @@ export const extractProseUnits = (
                     label: "question (non-blocking)",
                     prose: observation,
                     summary: firstSentence(observation),
+                    codeAssignedLabel: true,
                 });
             }
         });
@@ -334,18 +362,15 @@ export const extractProseUnits = (
             typeof entry["subject"] === "string" ? entry["subject"] : "";
         const discussion =
             typeof entry["discussion"] === "string" ? entry["discussion"] : "";
-        const joined = [subject, discussion]
-            .filter((part) => part.trim() !== "")
-            .join(" ");
+        // The posted prose is joinProse's output (dispatch-contracts.ts
+        // fromLabelShape), so the unit reads the same function: it drops a
+        // subject that restates the discussion's opening (that subject
+        // never posts, so judging it could bounce on text the author
+        // cannot fix) and glues a non-restating one with the same sentence
+        // break the body carries. Space-joining here judged a block
+        // opening one period off the posted one (PR #408 canary round).
+        const joined = joinProse(subject, discussion);
         if (joined !== "") {
-            // Mirror the renderer's visible line and prose: a subject the
-            // restatement drop discards never posts (joinProse drops it
-            // from the prose, and buildClaims' visible line falls back to
-            // the discussion's own opening), so judging it could bounce
-            // on text the author cannot fix by editing what posts. The
-            // fallback reads the DISCUSSION's first sentence, not the
-            // joined text's, because the join opens with the very subject
-            // being dropped.
             const restates =
                 discussion.trim() !== "" &&
                 subjectRestatesDiscussion(subject, discussion);
@@ -357,7 +382,12 @@ export const extractProseUnits = (
                     typeof entry["label"] === "string" && entry["label"] !== ""
                         ? entry["label"]
                         : "suggestion (non-blocking)",
-                prose: restates ? discussion : joined,
+                prose: joined,
+                // The fallback reads the DISCUSSION's first sentence, not
+                // the joined text's: for a restating subject joinProse has
+                // already returned the discussion (same thing), and for a
+                // multi-line subject the joined text opens with the very
+                // subject being refused.
                 summary: postsAsSubject
                     ? subject
                     : firstSentence(
@@ -455,7 +485,10 @@ export const buildBounceMessage = (
             "claim and at most one question per finding, with the " +
             "evidence chain complete enough to check the claim (long " +
             "prose posts collapsed behind the summary line, so keep the " +
-            "checkable detail rather than compressing it out).",
+            "checkable detail rather than compressing it out). A problem " +
+            "with the visible line is fixed in the finding's `subject` " +
+            "(or `summary`) field, which is the text that posts above the " +
+            "collapsed block.",
         ...failures.map(
             (failure) =>
                 `- ${failure.key}: ${
@@ -541,6 +574,10 @@ export const createProseGate = (options: {
                                         unit.prose,
                                         unit.label,
                                         unit.summary,
+                                        {
+                                            codeAssignedLabel:
+                                                unit.codeAssignedLabel === true,
+                                        },
                                     ),
                                 ),
                             ),
