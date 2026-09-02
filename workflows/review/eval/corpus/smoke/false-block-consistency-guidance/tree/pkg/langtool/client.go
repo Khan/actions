@@ -18,8 +18,8 @@ func (c *Client) ListTraces(projectID string) ([]Trace, error) {
 	return traces, nil
 }
 
-// ListObservations fetches every observation for a trace, following the
-// cursor until the API reports no next page.
+// ListObservations returns the observations the API has recorded for a
+// trace, ordered as the API returns them.
 func (c *Client) ListObservations(ctx context.Context, traceID string) ([]Observation, error) {
 	req, err := c.newRequest(ctx, "GET", "/api/v2/observations?traceId="+traceID)
 	if err != nil {
