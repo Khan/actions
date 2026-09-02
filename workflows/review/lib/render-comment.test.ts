@@ -3,6 +3,7 @@ import {describe, it, expect} from "vitest";
 import {
     BLOCKING_LABELS,
     NON_BLOCKING_LABELS,
+    ensureTerminalPunctuation,
     isBlockingLabel,
     labelForFinding,
     renderComment,
@@ -493,6 +494,93 @@ describe("renderComment context fold", () => {
             confidence: 0.9,
         });
         expect(renderComment(finding)).toBe(claimBody);
+    });
+});
+
+describe("ensureTerminalPunctuation", () => {
+    it("appends a period to a headline-style line", () => {
+        expect(ensureTerminalPunctuation("The hunts land inert here")).toBe(
+            "The hunts land inert here.",
+        );
+    });
+
+    it("leaves already-terminated lines alone", () => {
+        for (const line of [
+            "Done.",
+            "Really?",
+            "Stop!",
+            "An opener that hands off:",
+        ]) {
+            expect(ensureTerminalPunctuation(line)).toBe(line);
+        }
+    });
+
+    it("sees punctuation inside closing quotes/brackets/emphasis", () => {
+        // Same core-strip as joinProse: the terminator may sit inside
+        // closers, and then the line is already terminated.
+        expect(ensureTerminalPunctuation('He said "done."')).toBe(
+            'He said "done."',
+        );
+        expect(ensureTerminalPunctuation("(a full sentence.)")).toBe(
+            "(a full sentence.)",
+        );
+    });
+
+    it("puts the period after an unterminated trailing closer", () => {
+        // joinProse places its sentence break after the whole subject,
+        // closers included, and the visible line must match it byte for
+        // byte so the fold's opening restatement stays comparable.
+        expect(ensureTerminalPunctuation("so `spawn()` never runs")).toBe(
+            "so `spawn()` never runs.",
+        );
+    });
+
+    it("trims trailing whitespace and leaves the empty line empty", () => {
+        expect(ensureTerminalPunctuation("A line ")).toBe("A line.");
+        expect(ensureTerminalPunctuation("")).toBe("");
+    });
+});
+
+describe("renderComment visible-line punctuation", () => {
+    // The agent-settings#105 shape: a headline-style summary with no
+    // terminal punctuation posted verbatim over the fold and read as a
+    // truncated comment; the fold's own prose had the period because
+    // joinProse repairs it at the join. The visible line now gets the
+    // same repair.
+    const longProse =
+        "The hunts land inert here: no routing rule matches workflow " +
+        "files, so the lens never spawns on them. The routing half is " +
+        "consumer-owned and was not added, and this run's own routing " +
+        "artifact shows lensesToSpawn empty for the workflow file.";
+
+    it("adds the missing period to the folded visible line only", () => {
+        const body = renderComment(
+            makeFinding({
+                model_authored_prose: longProse,
+                summary:
+                    "The hunts land inert here: no routing rule matches " +
+                    "workflow files, so the lens never spawns on them",
+            }),
+        );
+        const [visible] = body.split("\n");
+        expect(visible).toBe(
+            "**issue (blocking):** The hunts land inert here: no routing " +
+                "rule matches workflow files, so the lens never spawns on them.",
+        );
+        // The prose inside the fold is untouched.
+        expect(body).toContain(`\n\n${longProse}\n\n</details>`);
+    });
+
+    it("never doubles an existing terminator", () => {
+        const body = renderComment(
+            makeFinding({
+                model_authored_prose: longProse,
+                summary: "Request params reach exec() unescaped.",
+            }),
+        );
+        expect(body.split("\n")[0]).toBe(
+            "**issue (blocking):** Request params reach exec() unescaped.",
+        );
     });
 });
 

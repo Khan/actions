@@ -456,6 +456,21 @@ describe("buildJudgePrompt context fold", () => {
         expect(message).toContain(`${longProse}\n\n</details>`);
     });
 
+    it("shows the judge the renderer's normalized visible line", () => {
+        // renderContextFold appends the missing period, so the judge must
+        // see the punctuated line: judging the raw subject would report a
+        // shape that never posts.
+        const prompt = buildJudgePrompt(
+            longProse,
+            "thought (non-blocking)",
+            "The baked-metadata arm cannot reach the modeled rate",
+        );
+        const message = prompt.slice(prompt.indexOf("MESSAGE:"));
+        expect(message).toContain(
+            "**thought (non-blocking):** The baked-metadata arm cannot reach the modeled rate.",
+        );
+    });
+
     it("judges a short unit in the flat shape (no fold under the bar)", () => {
         const prompt = buildJudgePrompt(
             "Short claim.",

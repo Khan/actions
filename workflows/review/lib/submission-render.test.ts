@@ -209,6 +209,20 @@ describe("renderClaimComment context fold", () => {
         );
     });
 
+    it("normalizes a headline-style subject's terminal punctuation", () => {
+        // agent-settings#105: label-shape subjects arrive without a
+        // period, joinProse repairs the copy inside the fold, and the
+        // visible line posted the raw subject, reading as truncation.
+        const body = renderClaimComment(
+            folded({
+                subject: "The baked-metadata arm cannot reach the modeled rate",
+            }) as never,
+        );
+        expect(body.split("\n")[0]).toBe(
+            "**thought (non-blocking):** The baked-metadata arm cannot reach the modeled rate.",
+        );
+    });
+
     it("keeps short discussions in today's shape (no fold under the bar)", () => {
         const body = renderClaimComment(
             claim({
