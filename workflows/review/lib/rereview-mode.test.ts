@@ -921,6 +921,10 @@ describe("runRereviewPlanCli cache-memory fallback", () => {
         expect(plan.depth).toBe("full");
         expect(stampSource).toBeNull();
     });
+
+    // The canary guard on this fallback (and on the stamp emission) is
+    // exercised in rereview-canary.test.ts, split out by the max-lines
+    // budget.
 });
 
 describe("runRereviewStampCli", () => {

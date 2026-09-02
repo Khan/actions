@@ -104,6 +104,44 @@ describe("renderAttributionFooter", () => {
         );
     });
 
+    it("appends the canary marker on canary runs (the thread-partition discriminator)", () => {
+        // Explicit sha argument: the default reads process.env, exercised
+        // for the version footer's sibling in version-footer.test.ts.
+        expect(
+            renderAttributionFooter(
+                "correctness-reviewer",
+                [],
+                "0123456789abcdef",
+            ),
+        ).toBe(
+            renderCollapsedFooter(
+                "found by correctness-reviewer | canary 0123456789ab",
+            ),
+        );
+        // Unset (every production run): byte-identical to before.
+        expect(
+            renderAttributionFooter("correctness-reviewer", [], undefined),
+        ).toBe(renderCollapsedFooter("found by correctness-reviewer"));
+    });
+
+    it("reads REVIEW_CANARY_SHA from process.env by default (the production wiring)", () => {
+        const prior = process.env.REVIEW_CANARY_SHA;
+        process.env.REVIEW_CANARY_SHA = "fedcba9876543210";
+        try {
+            expect(renderAttributionFooter("holistic")).toBe(
+                renderCollapsedFooter(
+                    "found by holistic | canary fedcba987654",
+                ),
+            );
+        } finally {
+            if (prior === undefined) {
+                delete process.env.REVIEW_CANARY_SHA;
+            } else {
+                process.env.REVIEW_CANARY_SHA = prior;
+            }
+        }
+    });
+
     it("appends the merged copies with their differing anchors", () => {
         expect(
             renderAttributionFooter("correctness-reviewer", [

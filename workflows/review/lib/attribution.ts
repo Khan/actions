@@ -173,10 +173,21 @@ const flaggedBy = (entry: AlsoFlagged): string => {
  * footer; merged entries join with `; ` because a quoted subject can carry
  * commas.
  */
+/**
+ * The canary footer segment, spelled once for every emitter: the version
+ * footer (version-footer.ts), the inline-comment attribution footer below,
+ * and the production-side filter's expectations (hasCanaryFooter in
+ * version-footer.ts documents the match).
+ */
+export const canarySegment = (sha: string): string =>
+    `canary ${sha.slice(0, 12)}`;
+
 export const renderAttributionFooter = (
     source: string,
     alsoFlaggedBy: readonly AlsoFlagged[] = [],
-): string => renderCollapsedFooter(attributionLine(source, alsoFlaggedBy));
+    canarySha: string | undefined = process.env.REVIEW_CANARY_SHA,
+): string =>
+    renderCollapsedFooter(attributionLine(source, alsoFlaggedBy, canarySha));
 
 /**
  * The bare attribution text, without the collapsed-footer wrapper: a
@@ -184,17 +195,31 @@ export const renderAttributionFooter = (
  * line INSIDE its own fold instead of appending a second details block
  * (two stacked expandos per comment read as clutter). stripFooters'
  * whole-line `<sub>` strip removes that form too, so the boilerplate stays
- * out of text-similarity comparisons either way.
+ * out of text-similarity comparisons either way. The canary segment rides
+ * here rather than in the wrapper so BOTH shapes carry it: hasCanaryFooter
+ * (version-footer.ts) matches the segment inside any `<sub>` line, and the
+ * fold's `<sub>`-wrapped line is one of them.
  */
 export const attributionLine = (
     source: string,
     alsoFlaggedBy: readonly AlsoFlagged[] = [],
+    canarySha: string | undefined = process.env.REVIEW_CANARY_SHA,
 ): string => {
     const segments = [`found by ${source}`];
     if (alsoFlaggedBy.length > 0) {
         segments.push(
             `also flagged by ${alsoFlaggedBy.map(flaggedBy).join("; ")}`,
         );
+    }
+    // The canary marker on inline comments, mirroring the version footer's
+    // segment: an inline comment's body becomes a review THREAD's opening
+    // comment, and the production staging (stage-pr.ts) needs a
+    // discriminator to keep canary threads out of its own thread history
+    // (a canary blocking thread would otherwise feed keptBlockingCount and
+    // floor the production verdict). hasCanaryFooter (version-footer.ts)
+    // matches this segment and the version footer's with one predicate.
+    if (typeof canarySha === "string" && canarySha !== "") {
+        segments.push(canarySegment(canarySha));
     }
     return segments.join(" | ");
 };

@@ -785,6 +785,7 @@ export const runRereviewPlanCli = (
     fs: RereviewCliFs,
     eventName: string | undefined = process.env.GITHUB_EVENT_NAME,
     eventPath: string | undefined = process.env.GITHUB_EVENT_PATH,
+    canary: boolean = process.env.REVIEW_CANARY === "1",
 ): RereviewPlanCliResult => {
     const warnings: string[] = [];
 
@@ -848,7 +849,15 @@ export const runRereviewPlanCli = (
 
     let priorStamp = findLatestStamp(priorReviews);
     let stampSource: StampSource = priorStamp === null ? null : "review-body";
-    if (priorStamp === null && typeof prContext?.number === "number") {
+    // A canary run anchors on nothing: the staging already writes
+    // prior-reviews.json empty (stage-pr.ts), and this guard closes the
+    // cache-memory fallback so the knob does not depend on the canary
+    // workflow also disabling cache memory.
+    if (
+        !canary &&
+        priorStamp === null &&
+        typeof prContext?.number === "number"
+    ) {
         priorStamp = stampFromCacheMemory(
             readJsonIfPresent(
                 fs,
@@ -896,11 +905,21 @@ export const runRereviewPlanCli = (
  * Render this run's stamp from the staged plan and the decided verdict.
  * Returns null when the plan is not staged (the caller then omits the stamp;
  * the next run degrades to full, never crashes).
+ *
+ * A canary run (REVIEW_CANARY=1) never stamps: both workflows post as the
+ * same bot identity, so a canary stamp would be the newest parseable one in
+ * the production reviewer's prior-reviews staging and its next round would
+ * scope to a fingerprint unreleased code produced. Suppressing the emission
+ * costs the canary nothing (its own staging never reads stamps back).
  */
 export const runRereviewStampCli = (
     fs: RereviewCliFs,
     verdict: string,
+    canary: boolean = process.env.REVIEW_CANARY === "1",
 ): string | null => {
+    if (canary) {
+        return null;
+    }
     const plan = readJsonIfPresent(fs, PLAN_OUT) as ReReviewPlan | undefined;
     if (plan === undefined) {
         return null;

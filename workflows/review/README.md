@@ -358,8 +358,10 @@ contracts would never reach the reviewer. Repos without `REVIEW.md` files need n
 the sub-agents skip the step.
 
 Note the trust boundary: unlike `.github/` and the agent config folders (which gh-aw
-restores from the base branch before the agent runs), `REVIEW.md` files are read from
-the PR head. The prompts therefore treat contract text as guidance that can adjust
+snapshots in the activation job and restores before the agent runs; the snapshot
+checkout has no `ref:`, so on `pull_request` events it is the merge ref, per the
+canary section's Scope note below), `REVIEW.md` files are read from the PR head
+checkout directly. The prompts treat contract text as guidance that can adjust
 emphasis but never override the workflow's own rules, and an edit to a `REVIEW.md` in
 the diff is reviewed on its merits like any other change.
 
@@ -938,6 +940,12 @@ bump lands in the same Version Packages commit that gets tagged.
 literals do not match the `review` package version (releases v1.3.0 through
 v1.4.0 shipped still pointing at v1.2.2, before the sync existed).
 
+A bump of this repo's own install carries one extra step the other consumers
+do not have: re-derive `.github/workflows/review-canary.md` from the updated
+install (body after the canary preamble, `source:` line) and recompile its
+lock in the same change. `.github/workflows/review-canary.test.ts` fails the
+bump PR otherwise (see the canary section below).
+
 ### Output-shape changes belong in the changeset
 
 A change to the render path (`lib/submission.ts`, `lib/render-comment.ts`,
@@ -1017,3 +1025,71 @@ hold comment's claim list) carry the short form, a trailing
 previously-posted bodies (open-thread suppression, the adjudicated corpus)
 strip these footers first, so the shared boilerplate cannot inflate similarity
 between unrelated findings.
+
+### The canary reviewer (dogfooding an unreleased reviewer, Khan/actions only)
+
+The pinned `ref:` means a Khan/actions PR that changes this workflow is itself
+reviewed by the released lib, never by the code it carries. That is the right
+default (the evaluated release is the reviewer of record), but it also means
+nothing exercises a reviewer change on a live PR until after it has shipped.
+The canary closes that gap as an explicit opt-in: apply the `review-canary`
+label to a Khan/actions PR and `.github/workflows/review-canary.md` runs the
+reviewer with the lib checked out at the PR's own head, in addition to the
+pinned reviewer, on that push and every push after while the label stays on.
+Pull the label to stop.
+
+The canary is posting-only and history-blind, in both directions, by
+construction:
+
+1. Its lib checkout is `ref: ${{ github.event.pull_request.head.sha }}`. This
+   is not a new capability for an attacker: on `pull_request` events GitHub
+   already runs the lock from the PR's merge ref, so a same-repo writer
+   controls the workflow either way, and the fork guard plus the
+   triage-access requirement to apply a label gate who can start a run.
+2. Staging runs with `REVIEW_CANARY=1` (`lib/stage-pr.ts`): prior bot
+   reviews, bot threads, adjudicated threads, and cache memory are staged
+   empty. Both workflows post as the same bot identity, so without this the
+   canary would read the production reviewer's output as its own history and
+   scope its round accordingly. Every canary run is a full-depth first look.
+3. It has no `resolve-pull-request-review-thread` or `add-reviewer` safe
+   output and no cache memory, so it cannot close the production reviewer's
+   threads, page owning teams, or write a cache record the production
+   workflow would restore.
+4. It submits every review as COMMENT (`allowed-events: [COMMENT]`, and the
+   plan CLI demotes the verdict with a body Note stating what it would have
+   posted): GitHub moves a reviewer's state on APPROVE or REQUEST_CHANGES,
+   and under the shared bot identity a canary APPROVE would supersede the
+   pinned reviewer's standing block while a canary REQUEST_CHANGES would
+   stand with no dismissal path.
+5. It never emits the re-review fingerprint stamp (`runRereviewStampCli`
+   returns null under `REVIEW_CANARY=1`): a canary stamp would be the newest
+   parseable one in the production reviewer's prior-reviews staging, and its
+   next round would scope to a fingerprint unreleased code produced. As the
+   production-side half, `lib/stage-pr.ts` drops reviews carrying the canary
+   footer segment from `prior-reviews.json`, and keeps canary-opened threads
+   out of both thread partitions (canary inline comments carry the same
+   segment in their attribution footer, so a canary blocking thread never
+   feeds `keptBlockingCount` and floors the production verdict). One
+   predicate covers both surfaces (`hasCanaryFooter`, exported beside the
+   footer renderer), effective once a release carrying it is pinned.
+   Production also never RESOLVES canary threads as a result: a human
+   closes them, or unlabels and addresses.
+6. Its posted footer stamps `canary <sha>` (`REVIEW_CANARY_SHA`, rendered by
+   `lib/version-footer.ts`), because `package.json` still carries the last
+   released version on a head checkout and the version segment alone would
+   misattribute the run.
+
+Scope note: the canary dogfoods the lib at head via the explicit `ref:`
+checkout, and the PROMPT rides the PR as well, because gh-aw snapshots
+`.github` in the activation job whose checkout has no `ref:` and so lands on
+the `pull_request` merge ref (the restore step's "from base branch" name
+notwithstanding), which is also what lets the canary bootstrap on the PR that
+introduces it. Changes to the shared SOURCE prompt (this directory's
+`review.md`) still do not ride, since the installed copy is what
+runtime-imports; `review-eval-ab.yml` remains the measured surface for those
+until a bump PR copies them into the install. The canary's own prompt and
+pins are held in sync with the installed `review.md` by
+`.github/workflows/review-canary.test.ts` (body byte-identical after the
+canary preamble, same `source:` line), so a release bump PR that updates the
+install must re-derive the canary body and recompile its lock in the same
+change.

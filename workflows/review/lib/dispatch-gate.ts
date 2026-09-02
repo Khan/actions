@@ -183,6 +183,14 @@ export type DispatchGateInput = {
     rereviewAccounting?: unknown;
     /** Parsed `submission-plan.json` (scripted mode; slice 4). */
     submissionPlan?: unknown;
+    /**
+     * A canary run (REVIEW_CANARY=1): rule 4 inverts. A canary COMMENT
+     * legitimately carries blocking inline comments (the plan CLI's
+     * licensed demotion, submission-clearance.ts), and the rule instead
+     * requires that nothing but COMMENT is queued, since any other verdict
+     * moves the shared bot identity's review state.
+     */
+    canary?: boolean;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -423,13 +431,32 @@ export const evaluateDispatchConformance = (
         }
     }
 
+    // Rule 4 (canary form): a canary submits COMMENT or nothing; the
+    // blocking-comment check below is inverted by the licensed demotion,
+    // and any other queued verdict moves the shared bot's review state.
+    if (
+        input.canary === true &&
+        verdictEvent !== null &&
+        verdictEvent !== "COMMENT"
+    ) {
+        violations.push({
+            code: "canary-verdict-not-comment",
+            dimension: "verdict",
+            detail:
+                `${verdictEvent} queued on a canary run ` +
+                `(a canary submits only COMMENT; it must never move the bot's review state)`,
+        });
+    }
     // Rule 4: neither an APPROVE nor a COMMENT can carry a blocking inline
     // comment (Step 4 is a mechanical function of the labels: a surviving
     // validated blocking finding means REQUEST_CHANGES at every depth; the
     // COMMENT verdict exists only for the medium-and-below population). The
     // inverse direction is legitimate (a REQUEST_CHANGES may ride entirely
     // on kept prior threads), so only the non-blocking verdicts are checked.
-    if (verdictEvent === "APPROVE" || verdictEvent === "COMMENT") {
+    if (
+        input.canary !== true &&
+        (verdictEvent === "APPROVE" || verdictEvent === "COMMENT")
+    ) {
         for (const item of input.items) {
             if (item.type !== COMMENT_TYPE || typeof item.body !== "string") {
                 continue;
@@ -793,6 +820,7 @@ export const runDispatchGateCli = (fs: DispatchGateFs): DispatchGateReport => {
         rereviewAccounting,
         cacheMemory,
         submissionPlan,
+        canary: process.env.REVIEW_CANARY === "1",
     });
     evaluation.notes.unshift(...notes);
 
