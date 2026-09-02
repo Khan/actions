@@ -55,6 +55,11 @@ export const sdkRunner = (): LiveAgentRunner => async (request) => {
                 allowedTools: ALLOWED_TOOLS,
                 permissionMode: "bypassPermissions",
                 abortController: abort,
+                // Pinned for the same reason as lib/dispatch-runner.ts: this
+                // arm is the production baseline the harness A/B compares
+                // against, so its reasoning budget must not drift from what
+                // production dispatch runs.
+                effort: "high",
             },
         });
         let output = "";
