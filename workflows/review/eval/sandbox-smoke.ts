@@ -460,6 +460,40 @@ const main = async (): Promise<void> => {
                 ].join("\n"),
             );
             summaryLine("");
+            // Per-agent detail whenever anything failed or the Bash gate is
+            // about to: the signal table alone cannot say WHY a roster
+            // produced nothing (the first gemini-pin run failed here in
+            // 0.7s with every field zero and no visible cause), and a
+            // re-run per hypothesis costs a live dispatch.
+            const broken = result.perAgent.filter(
+                (agent) => agent.failed !== undefined,
+            );
+            if (bashCalls === 0 || broken.length > 0) {
+                summaryLine(
+                    [
+                        `| agent | model | turns | wall | stop | failure |`,
+                        `| --- | --- | --- | --- | --- | --- |`,
+                        ...result.perAgent.map(
+                            (agent) =>
+                                `| ${agent.name} | ${agent.model} | ${
+                                    agent.turns
+                                } | ${Math.round(agent.wallMs / 1000)}s | ${
+                                    agent.stopReason ?? ""
+                                } | ${agent.failed ?? ""} |`,
+                        ),
+                    ].join("\n"),
+                );
+                summaryLine("");
+                for (const agent of broken) {
+                    if (agent.rawOutput !== undefined) {
+                        summaryLine(
+                            `last output of \`${
+                                agent.name
+                            }\`: ${agent.rawOutput.slice(0, 500)}\n`,
+                        );
+                    }
+                }
+            }
             if (bashCalls === 0) {
                 failures.push(
                     "phase B never reached Bash: the production tool surface is unproven",
