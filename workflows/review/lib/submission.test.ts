@@ -22,6 +22,7 @@ import {
  */
 
 const REVIEW = "/tmp/gh-aw/review";
+const APPROVE_HEAD = "**✅ Approved** — no blocking issues found.";
 
 const makeFakeFs = (
     files: Record<string, string> = {},
@@ -119,7 +120,7 @@ describe("runSubmissionCli", () => {
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("REQUEST_CHANGES");
         expect(plan.body.split("\n")[0]).toBe(
-            "Changes requested — see inline comments.",
+            "**⛔ Changes requested** — see inline comments.",
         );
         expect(plan.comments).toEqual([
             {
@@ -133,13 +134,12 @@ describe("runSubmissionCli", () => {
             },
         ]);
         expect(plan.resolve).toEqual(["t1"]);
-        // The stamp is the final block (collapsed details; the old hidden
-        // HTML comment never survived the ingest sanitizer; webapp#41742).
+        // The stamp is the last line inside the body's ONE tail fold (the
+        // old hidden HTML comment never survived the ingest sanitizer;
+        // webapp#41742, which is why it stays a <sub> line).
         const tail = plan.body.split("\n").slice(-3);
-        expect(tail[0]).toBe(
-            "<details><summary><sub>review fingerprint</sub></summary>",
-        );
-        expect(tail[1]).toMatch(/^<sub>pr-reviewer:rereview .*<\/sub>$/);
+        expect(tail[0]).toMatch(/^<sub>pr-reviewer:rereview .*<\/sub>$/);
+        expect(tail[1]).toBe("");
         expect(tail[2]).toBe("</details>");
         // The plan is staged for the gate's plan-match rule.
         expect(
@@ -159,17 +159,16 @@ describe("runSubmissionCli", () => {
         );
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("APPROVE");
-        // Empty verdict head with inline comments; the note line and stamp
-        // are the body.
+        // Empty verdict head with inline comments; the note + stamp remain.
         expect(plan.body).toContain("holistic not assessed this run");
-        expect(plan.body).not.toContain("Approved — no blocking issues found.");
+        expect(plan.body).not.toContain(APPROVE_HEAD);
     });
 
     it("plans the comment-less APPROVE body when nothing posts", () => {
         const fs = makeFakeFs(staged({depth: "full", claims: []}));
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("APPROVE");
-        expect(plan.body).toContain("Approved — no blocking issues found.");
+        expect(plan.body).toContain(APPROVE_HEAD);
     });
 
     it("stages body-size stats measured over the final rendered bodies (PRA-46)", () => {
@@ -273,7 +272,9 @@ describe("runSubmissionCli", () => {
                     // What production priors actually look like: the ingest
                     // sanitizer stripped the stamp.
                     [`${REVIEW}/prior-reviews.json`]: JSON.stringify([
-                        {body: "Changes requested — see inline comments."},
+                        {
+                            body: "**⛔ Changes requested** — see inline comments.",
+                        },
                     ]),
                     [`${REVIEW}/threads.json`]: JSON.stringify([
                         {
@@ -327,14 +328,15 @@ describe("runSubmissionCli", () => {
         expect(plan.body).toContain(
             "**note (non-blocking):** The guard was removed.",
         );
-        // The fold carries the same collapsed attribution footer an inline
-        // comment gets (submission.ts's pr-level branch).
+        // The attribution is a bare <sub> line, not the collapsed footer:
+        // that footer's chip is the same `review details` chip the body's
+        // one tail fold uses, so stacking it here would put a second
+        // identically-labelled expando in the body (KORE-2632).
         expect(plan.body).toContain(
-            "<details><summary><sub>review details</sub></summary>\n" +
-                "<sub>found by correctness-reviewer | also flagged by " +
-                "completeness (at line 7)</sub>\n" +
-                "</details>",
+            "<sub>found by correctness-reviewer | also flagged by " +
+                "completeness (at line 7)</sub>",
         );
+        expect(plan.body.split("review details").length - 1).toBe(1);
         expect(plan.body).not.toContain("<summary>Full finding</summary>");
         expect(plan.notes.join(" ")).toContain("folded into the review body");
     });
@@ -571,20 +573,25 @@ describe("the gate's plan-match rule (slice 4)", () => {
         );
         const plan = runSubmissionCli(fs);
         const lines = plan.body.split("\n");
-        // Stamp block last, the collapsed footer block directly above it.
+        // ONE tail fold (KORE-2632): config line, then fingerprint line.
         expect(lines.at(-1)).toBe("</details>");
-        expect(lines.at(-2)).toMatch(/^<sub>pr-reviewer:rereview .*<\/sub>$/);
-        expect(lines.at(-3)).toBe(
-            "<details><summary><sub>review fingerprint</sub></summary>",
-        );
-        expect(lines.at(-4)).toBe("</details>");
+        expect(lines.at(-2)).toBe("");
+        expect(lines.at(-3)).toMatch(/^<sub>pr-reviewer:rereview .*<\/sub>$/);
+        expect(lines.at(-4)).toBe("");
         expect(lines.at(-5)).toMatch(/^<sub>.*schema \d+.*<\/sub>$/);
-        expect(lines.at(-6)).toBe(
+        expect(lines.at(-6)).toBe("");
+        expect(lines.at(-7)).toBe(
             "<details><summary><sub>review details</sub></summary>",
         );
-        // The CLI also staged the footer file Step 7 pastes.
+        // Exactly one top-level fold in the whole body.
+        expect(plan.body.split("<details>").length - 1).toBe(1);
+        // The CLI still staged the WRAPPED footer file Step 7 pastes.
         expect(fs.files["/tmp/gh-aw/review/version-footer.txt"]).toBe(
-            lines.slice(-6, -3).join("\n"),
+            [
+                "<details><summary><sub>review details</sub></summary>",
+                lines.at(-5),
+                "</details>",
+            ].join("\n"),
         );
     });
 

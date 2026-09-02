@@ -70,13 +70,8 @@ export type VersionFooterInputs = {
     canarySha?: string | null;
 };
 
-/**
- * Render the collapsed footer block. Pure; every segment that cannot be
- * stated is omitted rather than guessed, so a degraded staging yields a
- * shorter footer, never a wrong one. Contains no HTML comment by
- * construction (the sanitizer would delete one).
- */
-export const renderVersionFooter = (inputs: VersionFooterInputs): string => {
+/** The ` | `-joined segment text both footer forms wrap. */
+const footerSegments = (inputs: VersionFooterInputs): string => {
     const segments: string[] = [];
     if (inputs.version !== null && inputs.version !== "") {
         segments.push(`review-v${inputs.version}`);
@@ -108,8 +103,31 @@ export const renderVersionFooter = (inputs: VersionFooterInputs): string => {
     ) {
         segments.push(`non-blocking-budget ${inputs.nonBlockingInlineBudget}`);
     }
-    return renderCollapsedFooter(segments.join(" | "));
+    return segments.join(" | ");
 };
+
+/**
+ * Render the bare footer LINE (one `<sub>` span, no `<details>` wrapper).
+ * Pure; every segment that cannot be stated is omitted rather than guessed,
+ * so a degraded staging yields a shorter footer, never a wrong one. Contains
+ * no HTML comment by construction (the sanitizer would delete one).
+ *
+ * This is the form the review body carries since KORE-2632: the body's tail
+ * has ONE fold (attribution.ts's renderReviewDetailsFold) holding the
+ * collapsed observations, this line, and the fingerprint line, rather than
+ * three stacked expandos.
+ */
+export const renderVersionFooterLine = (inputs: VersionFooterInputs): string =>
+    `<sub>${footerSegments(inputs)}</sub>`;
+
+/**
+ * The footer wrapped in its own collapsed `<details>` block. Still the shape
+ * review.md Step 7 pastes into the risks/patterns guidance comment: that
+ * comment has no review body around it to fold into, so the footer carries
+ * its own chip there.
+ */
+export const renderVersionFooter = (inputs: VersionFooterInputs): string =>
+    renderCollapsedFooter(footerSegments(inputs));
 
 /**
  * Whether a posted body carries the canary footer segment. The production
@@ -164,6 +182,41 @@ export const runVersionFooterCli = (
     overrides: {depth?: string | null} = {},
     env: {REVIEW_CANARY_SHA?: string} = process.env,
 ): string => {
+    const footer = renderVersionFooter(
+        readVersionFooterInputs(fs, libDir, overrides, env),
+    );
+    fs.writeFileSync(FOOTER_OUT, footer);
+    return footer;
+};
+
+/**
+ * The same staging, returning the BARE `<sub>` line instead of the wrapped
+ * block. A sibling entrypoint rather than an options flag on
+ * {@link runVersionFooterCli} because the two callers want different things
+ * and neither wants a branch: review.md Step 7 reads the staged file and
+ * needs the self-contained block, while submission.ts folds the line into
+ * the review body's single `review details` fold (KORE-2632) and must not
+ * nest a second `<details>` inside it. Both stage the WRAPPED form at
+ * {@link FOOTER_OUT}, so Step 7 is unaffected by which one the run called.
+ */
+export const runVersionFooterLineCli = (
+    fs: VersionFooterFs,
+    libDir: string = __dirname,
+    overrides: {depth?: string | null} = {},
+    env: {REVIEW_CANARY_SHA?: string} = process.env,
+): string => {
+    const inputs = readVersionFooterInputs(fs, libDir, overrides, env);
+    fs.writeFileSync(FOOTER_OUT, renderVersionFooter(inputs));
+    return renderVersionFooterLine(inputs);
+};
+
+/** The staged-file reads both entrypoints share. */
+const readVersionFooterInputs = (
+    fs: VersionFooterFs,
+    libDir: string,
+    overrides: {depth?: string | null},
+    env: {REVIEW_CANARY_SHA?: string},
+): VersionFooterInputs => {
     const pkg = readJson(fs, `${libDir}/../package.json`) as
         | {version?: unknown}
         | undefined;
@@ -179,7 +232,7 @@ export const runVersionFooterCli = (
               nonBlockingInlineBudget?: unknown;
           }
         | undefined;
-    const footer = renderVersionFooter({
+    return {
         version: typeof pkg?.version === "string" ? pkg.version : null,
         schemaVersion: FINDING_SCHEMA_VERSION,
         depth:
@@ -204,9 +257,7 @@ export const runVersionFooterCli = (
                 ? routing.nonBlockingInlineBudget
                 : null,
         canarySha: env.REVIEW_CANARY_SHA ?? null,
-    });
-    fs.writeFileSync(FOOTER_OUT, footer);
-    return footer;
+    };
 };
 
 // Run only when executed directly (review.md Step 7 can re-stage the

@@ -4,6 +4,7 @@ import {
     computeHunkSignature,
     countRereviewStampBlocks,
     renderRereviewStamp,
+    renderRereviewStampLine,
     STAMP_SCHEMA_VERSION,
     stampHunksChain,
     stripRereviewStamp,
@@ -152,6 +153,30 @@ describe("stripRereviewStamp", () => {
             ),
         ).toBe(2);
         expect(countRereviewStampBlocks("no stamp here")).toBe(0);
+    });
+
+    it("strips the line form without tearing open the enclosing fold", () => {
+        // The `</details>` after the stamp line closes the body's shared
+        // `review details` fold, not the stamp: swallowing it would leave
+        // unbalanced HTML for rule 7 to read as a body splice.
+        const body = [
+            "Approved.",
+            "",
+            "<details><summary><sub>review details</sub></summary>",
+            "",
+            "<sub>review-v1.24.0 | schema 2</sub>",
+            "",
+            renderRereviewStampLine(stampOf()),
+            "",
+            "</details>",
+        ].join("\n");
+        const stripped = stripRereviewStamp(body);
+        expect(stripped).toContain("</details>");
+        expect(stripped).not.toContain("pr-reviewer:rereview");
+        expect(countRereviewStampBlocks(body)).toBe(1);
+        expect(stampHunksChain(body)).toBe(
+            stampHunksChain(renderRereviewStamp(stampOf())),
+        );
     });
 
     it("leaves other collapsed blocks (the version footer) alone", () => {

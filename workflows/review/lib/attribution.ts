@@ -54,6 +54,42 @@ export const renderCollapsedFooter = (content: string): string =>
     ].join("\n");
 
 /**
+ * The review body's ONE tail fold: the collapsed-observations list, the
+ * version/config line, and the re-review fingerprint line, under the same
+ * `review details` chip {@link renderCollapsedFooter} uses. Returns `""`
+ * when every section is empty, so a body with nothing to disclose grows no
+ * empty expando.
+ *
+ * Why one fold (KORE-2632): the body used to end in three stacked
+ * `<details>` blocks — observations, config footer, fingerprint stamp — two
+ * of which are machine bookkeeping no human opens. Three chips in a row read
+ * as clutter and pushed the actual review content (verdict, PR-wide
+ * findings) up against a wall of expandos.
+ *
+ * Why the blank lines: GFM does not process markdown on a line flush against
+ * raw HTML, so a `-` list starting on the line after `<summary>` renders as
+ * one literal paragraph. A blank line after the summary (and between
+ * sections) puts the list back in markdown context. `details`, `summary`,
+ * and `sub` are all sanitizer-allowed, so the whole block survives gh-aw
+ * ingest verbatim.
+ */
+export const renderReviewDetailsFold = (
+    sections: readonly string[],
+): string => {
+    const kept = sections.filter((section) => section !== "");
+    if (kept.length === 0) {
+        return "";
+    }
+    return [
+        `<details><summary><sub>${FOOTER_SUMMARY}</sub></summary>`,
+        "",
+        kept.join("\n\n"),
+        "",
+        "</details>",
+    ].join("\n");
+};
+
+/**
  * A merged copy's `subject` is model-authored text interpolated into the
  * footer's HTML. Escape the HTML-significant characters so the plan-side
  * artifact stays inert; GitHub renders the entities back as the literal
