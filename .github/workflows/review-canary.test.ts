@@ -26,6 +26,12 @@
 import * as fs from "fs";
 import {describe, expect, it} from "vitest";
 
+import {
+    after,
+    bodyOf,
+    PREAMBLE_END,
+} from "../../utils/generate-canary-lib.ts";
+
 const canaryMd = fs.readFileSync(
     new URL("./review-canary.md", import.meta.url),
     "utf-8",
@@ -39,13 +45,6 @@ const reviewMd = fs.readFileSync(
     "utf-8",
 );
 
-/** The markdown body after the frontmatter block. */
-const bodyOf = (markdown: string): string => {
-    const close = markdown.indexOf("\n---\n", 3);
-    expect(close).toBeGreaterThan(0);
-    return markdown.slice(close + "\n---\n".length);
-};
-
 /** The frontmatter's non-comment lines (the prompt body and the YAML
  * comments legitimately MENTION the absent capabilities; only a real key
  * regresses the canary). */
@@ -57,17 +56,6 @@ const frontmatterCode = (markdown: string): string => {
         .filter((line) => !/^\s*#/.test(line))
         .join("\n");
 };
-
-/** Everything after (and excluding) the first occurrence of `needle`. */
-const after = (text: string, needle: string): string => {
-    const at = text.indexOf(needle);
-    expect(at, `expected to find ${JSON.stringify(needle)}`).toBeGreaterThan(
-        -1,
-    );
-    return text.slice(at + needle.length);
-};
-
-const PREAMBLE_END = "<!-- END CANARY PREAMBLE -->\n";
 
 describe("review-canary.md vs the installed review.md", () => {
     it("shares review.md's prompt byte-for-byte after the canary preamble", () => {
