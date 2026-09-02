@@ -2,8 +2,9 @@
  * Parsing the reviewer's collapsed observations out of review bodies.
  *
  * The reviewer's posting surface collapses over-budget and reduced-depth
- * non-blocking findings into a `<details>` block in the review body, one
- * terse line each (`submission.ts`). Before this module, those findings were
+ * non-blocking findings into the review body's single collapsed
+ * `review details` fold, under a bold heading, one terse line each
+ * (`submission.ts`). Before this module, those findings were
  * invisible to autofix: the work list reads posted threads, a collapsed
  * finding never becomes a thread, and so the reviewer's budget quietly
  * shrank autofix's scope (the documentation autofix's whole selection key is
@@ -23,8 +24,16 @@
  * it, which is the same self-healing bet the reviewer's own corpus memory
  * makes.
  *
+ * Section slicing runs from the heading match ({@link COLLAPSED_SUMMARY_RE},
+ * which accepts both the current bold header and the legacy `<summary>`
+ * line) to the next `</details>`. Since KORE-2632 that closing tag belongs
+ * to the enclosing `review details` fold rather than a per-section block,
+ * so the slice additionally covers the config and fingerprint `<sub>` lines
+ * that follow the entries — neither matches the entry grammar, so they are
+ * skipped like any other unparseable line.
+ *
  * The line grammar parsed here is `submission.ts`'s render, one entry per
- * line inside the `<details>` block:
+ * line:
  *
  *     - `path:line` label: subject <sub>(source)</sub>
  *

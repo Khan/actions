@@ -6,7 +6,9 @@ import {
     FOOTER_OUT,
     hasCanaryFooter,
     renderVersionFooter,
+    renderVersionFooterLine,
     runVersionFooterCli,
+    runVersionFooterLineCli,
     type VersionFooterFs,
 } from "./version-footer";
 
@@ -309,6 +311,47 @@ describe("runVersionFooterCli", () => {
         const fs = makeFakeFs(files);
         expect(runVersionFooterCli(fs, LIB)).toContain(
             "enable holistic,conventions",
+        );
+    });
+});
+
+describe("the bare line form (the review body's carrier since KORE-2632)", () => {
+    it("renders the same segments without the collapsed wrapper", () => {
+        const inputs = {
+            version: "1.24.0",
+            schemaVersion: FINDING_SCHEMA_VERSION,
+            depth: "full",
+            reReviewMode: null,
+            blockingOnly: false,
+            blockingMedium: false,
+            enabledReviewers: [],
+            nonBlockingInlineBudget: null,
+        };
+        const line = renderVersionFooterLine(inputs);
+        expect(line).toBe(
+            `<sub>review-v1.24.0 | schema ${FINDING_SCHEMA_VERSION} | depth full</sub>`,
+        );
+        expect(line).not.toContain("<details>");
+        expect(renderVersionFooter(inputs)).toBe(wrapped(line.slice(5, -6)));
+    });
+
+    it("still stages the WRAPPED block for review.md Step 7", () => {
+        const files: Record<string, string> = {
+            "/lib/../package.json": JSON.stringify({version: "1.24.0"}),
+        };
+        const fs: VersionFooterFs = {
+            existsSync: (p) => p in files,
+            readFileSync: (p) => files[p],
+            writeFileSync: (p, data) => {
+                files[p] = data;
+            },
+        };
+        const line = runVersionFooterLineCli(fs, "/lib", {depth: "fast"});
+        expect(line.startsWith("<sub>")).toBe(true);
+        expect(files[FOOTER_OUT]).toBe(wrapped(line.slice(5, -6)));
+        // The wrapped entrypoint stages the identical file.
+        expect(runVersionFooterCli(fs, "/lib", {depth: "fast"})).toBe(
+            files[FOOTER_OUT],
         );
     });
 });

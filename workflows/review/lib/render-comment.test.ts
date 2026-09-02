@@ -268,7 +268,9 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
     it("APPROVE without inline comments", () => {
         expect(
             body({event: "APPROVE", hasInlineComments: false}),
-        ).toMatchInlineSnapshot(`"Approved — no blocking issues found."`);
+        ).toMatchInlineSnapshot(
+            `"**✅ Approved** — no blocking issues found."`,
+        );
     });
 
     it("APPROVE with inline comments has an empty body (the comments ARE the review)", () => {
@@ -280,10 +282,14 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
         // never make it non-empty; an empty body loses the blocking verdict.
         expect(
             body({event: "REQUEST_CHANGES", hasInlineComments: true}),
-        ).toMatchInlineSnapshot(`"Changes requested — see inline comments."`);
+        ).toMatchInlineSnapshot(
+            `"**⛔ Changes requested** — see inline comments."`,
+        );
         expect(
             body({event: "REQUEST_CHANGES", hasInlineComments: false}),
-        ).toMatchInlineSnapshot(`"Changes requested — see inline comments."`);
+        ).toMatchInlineSnapshot(
+            `"**⛔ Changes requested** — see inline comments."`,
+        );
     });
 
     it("HOLD_FOR_HUMAN explains itself and how to get unstuck", () => {
@@ -384,7 +390,7 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
                 ],
             }),
         ).toMatchInlineSnapshot(`
-          "Approved — no blocking issues found.
+          "**✅ Approved** — no blocking issues found.
           Note: correctness not assessed this run (correctness-reviewer output unavailable).
           Note: claim validation not assessed this run (claim-validator output unavailable)."
         `);
@@ -398,7 +404,7 @@ describe("renderReviewBody — the COMMENT verdict", () => {
             hasInlineComments: true,
         });
         expect(body).toContain(
-            "Commented — medium-importance findings found; nothing blocks.",
+            "**💬 Commented** — medium-importance findings found; nothing blocks.",
         );
     });
 });

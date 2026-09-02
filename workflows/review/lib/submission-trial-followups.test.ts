@@ -132,9 +132,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         // The section lands in the review body (never riding an inline
         // comment: the body is what the autofix's body-sourced work list
         // and both stagers can see).
-        expect(plan.body).toContain(
-            "Lower-confidence observations (2; top: `a.ts:21` issue (blocking): finding 21)",
-        );
+        expect(plan.body).toContain("**Lower-confidence observations (2):**");
         expect(plan.body).toContain("`a.ts:21`");
         expect(plan.body).toContain("`a.ts:22`");
         // A collapsed blocking claim still drives the verdict.
@@ -165,9 +163,7 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
         // collapse with the budget-shed note.
         expect(plan.comments).toHaveLength(4);
         expect(plan.comments[0].line).toBe(99);
-        expect(plan.body).toContain(
-            "Lower-confidence observations (17; top: `a.ts:4` suggestion (non-blocking): finding 4)",
-        );
+        expect(plan.body).toContain("**Lower-confidence observations (17):**");
         expect(plan.notes).toContainEqual(
             "17 non-blocking claim(s) collapsed over the inline budget (non-blocking budget 3)",
         );
@@ -290,10 +286,12 @@ describe("the inline posting bar (the Step 5 cap, as code)", () => {
             makeFakeFs(staged({depth: "full", claims})),
         );
         expect(plan.comments).toEqual([]);
-        // N=1: open section, count-only summary.
-        expect(plan.body).toContain(
-            "<details open>\n<summary>Lower-confidence observations (1)</summary>",
-        );
+        // N=1 is no longer a special case: the tail's own `<details>`
+        // block (and the `<details open>` arm that kept a one-entry preview
+        // from doubling the observation, Khan/actions#387) went away when
+        // the body collapsed to a single fold.
+        expect(plan.body).toContain("**Lower-confidence observations (1):**");
+        expect(plan.body).not.toContain("<details open>");
         expect(plan.body).toContain("a hunch");
     });
 });
@@ -404,13 +402,14 @@ describe("the nitpick posting rules", () => {
             makeFakeFs(staged({depth: "full", claims})),
         );
         // Both collapse (the nitpick by the ban, the thought by the
-        // confidence floor), and the disclosure's top slot goes to the
-        // thought: the class this surface never posts must not win the
-        // summary line built for the tail's best finding.
+        // confidence floor), and the thought leads the list: the class this
+        // surface never posts must not win the tail's first slot.
         expect(plan.comments).toEqual([]);
-        expect(plan.body).toContain(
-            "Lower-confidence observations (2; top: `a.ts:2` thought (non-blocking): a hunch)",
-        );
+        expect(plan.body).toContain("**Lower-confidence observations (2):**");
+        const entries = plan.body
+            .split("\n")
+            .filter((line) => line.startsWith("- "));
+        expect(entries[0]).toContain("thought (non-blocking): a hunch");
         expect(plan.notes).toContainEqual(
             "1 nitpick claim(s) collapsed (nitpick-class never posts inline)",
         );
@@ -452,7 +451,7 @@ describe("the budget's edge values", () => {
         );
     });
 
-    it("a pr-level claim can be the tail's named top entry", () => {
+    it("a pr-level claim can lead the tail", () => {
         const claims = [
             claim({
                 id: "pr-level",
@@ -483,9 +482,13 @@ describe("the budget's edge values", () => {
             ),
         );
         // Both collapse under blocking-only; the pr-level note outranks the
-        // low-confidence anchored thought for the summary slot.
-        expect(plan.body).toContain(
-            "Non-blocking observations (2; top: note (non-blocking): A cross-file observation.)",
+        // low-confidence anchored thought and so leads the list.
+        expect(plan.body).toContain("**Non-blocking observations (2):**");
+        const entries = plan.body
+            .split("\n")
+            .filter((line) => line.startsWith("- "));
+        expect(entries[0]).toContain(
+            "note (non-blocking): A cross-file observation.",
         );
     });
 });
@@ -532,8 +535,12 @@ describe("the budget's spend order", () => {
     });
 });
 
-describe("the named-top tag's escaping", () => {
-    it("neutralizes a model-authored subject and truncates a long one", () => {
+describe("the collapsed entries' structural neutralization", () => {
+    it("neutralizes a details/summary tag in an entry's subject", () => {
+        // The entries now sit inside the shared `review details` fold, so a
+        // live `</details>` in one bullet closes THAT fold and spills the
+        // rest of the tail (config and fingerprint lines included) into the
+        // visible body — the Khan/actions#401 failure, one level out.
         const hostile = "Breaks out</summary></details> <b>of the block</b>";
         const claims = [
             claim({
@@ -554,30 +561,20 @@ describe("the named-top tag's escaping", () => {
         const plan = runSubmissionCli(
             makeFakeFs(staged({depth: "full", claims})),
         );
-        // The hostile subject ranks first (higher confidence): the SUMMARY
-        // line parenthesises the structural tags (entities alone do not
-        // survive the ingest sanitizer, which decodes them back to live
-        // tags; the Khan/actions#401 re-review broke exactly there) and
-        // escapes the rest.
-        const summaryLine = plan.body
-            .split("\n")
-            .find((line) => line.includes("Lower-confidence observations"));
-        expect(summaryLine).toContain(
-            "Breaks out(/summary)(/details) &lt;b&gt;of the block&lt;/b&gt;",
-        );
-        expect(summaryLine).not.toContain("out</summary>");
-        // The list entries get the same neutralization: a bare </details>
-        // in ANY entry closes the section at that bullet and spills the
-        // rest of the list out of the collapse.
         expect(plan.body).toContain(
             "thought (non-blocking): Breaks out(/summary)(/details)",
         );
-        // The long subject keeps its full text in the list entry; only the
-        // summary tag truncates.
+        // The heading is a plain markdown line now: no model text rides it,
+        // so there is nothing there to escape or truncate.
+        expect(plan.body).toContain("**Lower-confidence observations (2):**");
+        // A long subject keeps its full text: only the retired summary
+        // teaser ever truncated.
         expect(plan.body).toContain("x".repeat(150));
+        // Exactly one `</details>` in the whole body: the tail fold's own.
+        expect(plan.body.split("</details>").length - 1).toBe(1);
     });
 
-    it("neutralizes a backticked tag in the summary but not the entry", () => {
+    it("leaves a backticked tag alone in an entry (markdown, not raw HTML)", () => {
         const claims = [
             claim({
                 id: "spanned",
@@ -586,59 +583,14 @@ describe("the named-top tag's escaping", () => {
                 confidence: 0.3,
                 subject: "The `</details>` guard skips the sketch.",
             }),
-            claim({
-                id: "plain",
-                line: 3,
-                label: "thought (non-blocking)",
-                confidence: 0.2,
-                subject: "Second.",
-            }),
         ];
         const plan = runSubmissionCli(
             makeFakeFs(staged({depth: "full", claims})),
         );
-        // The <summary> is raw HTML (backticks render literally, no code
-        // span forms), so the tag is rewritten even inside backticks; the
-        // list entry below the blank line is markdown, where the code
-        // span is real and the quoted tag is safe.
-        const summaryLine = plan.body
-            .split("\n")
-            .find((line) => line.includes("Lower-confidence observations"));
-        expect(summaryLine).toContain("The `(/details)` guard");
-        expect(summaryLine).not.toContain("</details>");
+        // The entry sits below the fold's blank line, so GFM parses it as
+        // markdown and the code span is real: the finding can name the tag.
         expect(plan.body).toContain(
             "thought (non-blocking): The `</details>` guard skips the sketch.",
         );
-    });
-
-    it("cannot post a live fragment when the cap lands mid-tag", () => {
-        // Truncation runs AFTER neutralization: slicing the raw subject
-        // could cut </details> in half, and the ingest sanitizer's tag
-        // fold then matches from the fragment to the section's own
-        // closing tag. A sliced "(/details)" is inert.
-        const claims = [
-            claim({
-                id: "straddler",
-                line: 2,
-                label: "thought (non-blocking)",
-                confidence: 0.3,
-                subject: `${"y".repeat(115)} </details> and more trailing text`,
-            }),
-            claim({
-                id: "plain",
-                line: 3,
-                label: "thought (non-blocking)",
-                confidence: 0.2,
-                subject: "Second.",
-            }),
-        ];
-        const plan = runSubmissionCli(
-            makeFakeFs(staged({depth: "full", claims})),
-        );
-        const summaryLine = plan.body
-            .split("\n")
-            .find((line) => line.includes("Lower-confidence observations"));
-        expect(summaryLine).toContain(`${"y".repeat(115)} (/de...`);
-        expect(summaryLine).not.toContain("</det");
     });
 });

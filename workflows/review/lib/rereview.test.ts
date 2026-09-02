@@ -359,7 +359,7 @@ describe("renderReviewBody with a re-review section", () => {
             ],
         });
         expect(body.split("\n")).toEqual([
-            "Changes requested — see inline comments.",
+            "**⛔ Changes requested** — see inline comments.",
             "1 of 1 prior review thread is still unaddressed:",
             "- **issue (blocking)** `a.go:1`: x",
             "Note: patterns not assessed this run (pattern-triage output unavailable).",
@@ -376,7 +376,7 @@ describe("renderReviewBody with a re-review section", () => {
             event: "APPROVE",
             hasInlineComments: false,
         });
-        expect(withEmpty).toBe("Approved — no blocking issues found.");
+        expect(withEmpty).toBe("**✅ Approved** — no blocking issues found.");
         expect(withEmpty).toBe(without);
     });
 

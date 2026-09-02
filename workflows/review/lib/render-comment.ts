@@ -456,6 +456,12 @@ export const HOLD_UNSTUCK_LINES = [
  * approval, for skipped-dimension notes (appended to every verdict, and
  * forming the entire body when the head is empty), and for HOLD_FOR_HUMAN,
  * which must always explain itself and how to proceed.
+ *
+ * The verdict phrase is bold with a verdict emoji (KORE-2632): the head used
+ * to be a bare sentence of the same visual weight as the PR-wide feedback
+ * paragraphs below it, so nothing separated the verdict from the findings.
+ * Nothing parses the head text (the machine-readable verdict is the review
+ * event and the stamp), so the styling is free to change.
  */
 export const renderReviewBody = (input: ReviewBodyInput): string => {
     let head: string;
@@ -468,15 +474,15 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
                 // comment. The count is code-computed; no prose about the code.
                 head =
                     obligations === 1
-                        ? "Approved with 1 pre-merge obligation — see the pre-merge obligations comment."
-                        : `Approved with ${obligations} pre-merge obligations — see the pre-merge obligations comment.`;
+                        ? "**✅ Approved** with 1 pre-merge obligation — see the pre-merge obligations comment."
+                        : `**✅ Approved** with ${obligations} pre-merge obligations — see the pre-merge obligations comment.`;
             } else {
                 // With inline comments, the comments make the review non-empty;
                 // the one-line body exists only to keep a comment-less approval
                 // submittable.
                 head = input.hasInlineComments
                     ? ""
-                    : "Approved — no blocking issues found.";
+                    : "**✅ Approved** — no blocking issues found.";
             }
             break;
         }
@@ -484,13 +490,13 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             // GitHub rejects a REQUEST_CHANGES review event with an empty
             // body, and the inline comments post separately, so they never
             // make the event non-empty: the pointer line is unconditional.
-            head = "Changes requested — see inline comments.";
+            head = "**⛔ Changes requested** — see inline comments.";
             break;
         case "COMMENT":
             // The middle verdict never has an empty body either: the head is
             // what tells an author this is deliberately not an approval.
             head =
-                "Commented — medium-importance findings found; nothing blocks.";
+                "**💬 Commented** — medium-importance findings found; nothing blocks.";
             break;
         case "HOLD_FOR_HUMAN":
             head = HOLD_HEAD;

@@ -117,9 +117,7 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         // claims included). Asserted with the wrapper: N>=2 is the closed
         // `<details>` arm (also pinned off the renderer by collapsed.test.ts's
         // N=2 round-trip case; this one covers the blocking-only wording).
-        expect(plan.body).toContain(
-            "<details>\n<summary>Non-blocking observations (2; top: note (non-blocking): A cross-file observation.)</summary>",
-        );
+        expect(plan.body).toContain("**Non-blocking observations (2):**");
         expect(plan.body).toContain(
             "- `a.ts:9` nitpick (non-blocking): Rename the helper. " +
                 "<sub>(correctness-reviewer)</sub>",
@@ -255,9 +253,7 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         expect(plan.comments).toEqual([]);
         // One entry: open section, count-only summary, the entry itself
         // visible in the body.
-        expect(plan.body).toContain(
-            "<details open>\n<summary>Non-blocking observations (1)</summary>",
-        );
+        expect(plan.body).toContain("**Non-blocking observations (1):**");
         expect(plan.body).toContain(
             "- `a.ts:2` nitpick (non-blocking): Rename the helper.",
         );
@@ -267,8 +263,8 @@ describe("runSubmissionCli: re-review blocking-only", () => {
     });
 });
 
-describe("the collapsed summary's pr-level arm", () => {
-    it("names a pr-level top entry by label and subject (no anchor to show)", () => {
+describe("the collapsed section's pr-level entries", () => {
+    it("renders an unanchored pr-level entry with label and subject only", () => {
         const fs = makeFakeFs(
             staged(
                 {
@@ -297,8 +293,10 @@ describe("the collapsed summary's pr-level arm", () => {
                 true,
             ),
         );
-        expect(runSubmissionCli(fs).body).toContain(
-            "Non-blocking observations (2; top: note (non-blocking): A cross-file observation.)",
+        const body = runSubmissionCli(fs).body;
+        expect(body).toContain("**Non-blocking observations (2):**");
+        expect(body).toContain(
+            "- note (non-blocking): A cross-file observation.",
         );
     });
 });

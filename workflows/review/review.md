@@ -912,9 +912,9 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
    (`rereview.json`), computes the verdict (Step 4's mechanical rule plus the
    reduced-depth flip floor), renders every inline comment (each with its
    collapsed per-comment attribution footer naming the producing reviewer
-   and any merged duplicates) and the full review body (note lines, the
-   collapsed version/config footer, and the fingerprint stamp included),
-   and writes
+   and any merged duplicates) and the full review body (note lines plus the
+   single collapsed `review details` fold carrying the observations, the
+   version/config line, and the fingerprint stamp), and writes
    `/tmp/gh-aw/review/submission-plan.json`. At full depth it also
    stages `/tmp/gh-aw/review/risks-patterns-key.txt`, the code-computed
    canonical signature Step 7 compares (never compose your own signature in
@@ -1018,10 +1018,10 @@ the remainder plus
 any sub-medium-confidence claims into a single collapsed section in the
 review body (always the body: the autofix's body-sourced work list reads the
 section back off posted reviews), so the plan never exceeds what the
-engine will emit. At two or more entries the collapsed section's summary line
-names its top-ranked entry, so an approving review cannot hide its best
-finding behind a bare count; a one-entry section renders `<details open>`
-with a count-only summary, the entry visible without a click. Emit the
+engine will emit. The section renders under a bold
+`**Lower-confidence observations (N):**` heading inside the body's single
+collapsed `review details` fold, ranked so the tail's best finding is the
+first bullet a reader sees on expanding it. Emit the
 plan's `comments` verbatim — one
 `create-pull-request-review-comment` per entry, all in one batched turn;
 never add, drop, reword, or re-anchor one.
@@ -1030,7 +1030,8 @@ never add, drop, reword, or re-anchor one.
 
 The review body and event are composed by the plan CLI (Step 3): the verdict
 head, the code-rendered re-review accountability section, every `Note:` line,
-the collapsed version/config footer, and the collapsed fingerprint stamp are all
+and ONE collapsed `review details` fold carrying the lower-confidence
+observations, the version/config line, and the fingerprint stamp line are all
 already in the plan's `body`. Submit
 with **one** `submit-pull-request-review` call carrying the plan's `event` and
 `body` verbatim — except when the plan's `skipSubmission` is `true` (Step 3),
