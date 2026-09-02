@@ -431,6 +431,15 @@ describe("buildBounceMessage", () => {
             "Keep every fact, identifier, number, and path",
         );
     });
+
+    it("names the subject/summary field as where a visible-line problem is fixed", () => {
+        // The fold rules judge the visible line, which posts from the
+        // finding's subject or summary, not its prose; a bounce that only
+        // said "rewrite the prose" left that line unrepairable (PR #408
+        // canary round 2).
+        const message = buildBounceMessage([{key: "f-1", problems: ["x"]}]);
+        expect(message).toContain("`subject` (or `summary`) field");
+    });
 });
 
 describe("buildProseJudgeArtifact", () => {

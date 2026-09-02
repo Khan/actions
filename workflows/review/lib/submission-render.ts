@@ -180,7 +180,8 @@ export const labelAdmitsSketch = (label: string): boolean => {
  *
  * A claim whose discussion clears the context-fold bar posts as the
  * summary-plus-fold shape instead ({@link shouldFoldContext} over the
- * claim's `subject`): the visible line is the subject, and the discussion,
+ * claim's `subject`): the visible line is the subject (terminal punctuation
+ * ensured by renderContextFold), and the discussion,
  * rule quote, sketch, and attribution collapse into one details block. The
  * committable suggestion fence stays outside the fold either way, so the
  * one-click apply never hides. `attribution` is optional so the eval

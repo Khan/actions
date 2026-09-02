@@ -189,6 +189,10 @@ export const FIRST_SENTENCE_SPLIT = /(?<=[.!?])\s/;
 export const firstSentence = (prose: string): string =>
     prose.split(FIRST_SENTENCE_SPLIT, 1)[0] ?? prose;
 
+/** Trailing closing quotes/brackets/emphasis, which may wrap a terminator. */
+const stripClosers = (line: string): string =>
+    line.trimEnd().replace(/["'`)\]*_]+$/, "");
+
 /**
  * Ensure the fold's visible line ends in terminal punctuation. Subjects
  * arrive headline-style (the contract never asked for a period and the
@@ -202,19 +206,29 @@ export const firstSentence = (prose: string): string =>
  * core-strip (terminal punctuation may sit inside closing quotes/brackets/
  * emphasis) runs before the terminator test and the period lands after
  * the closers, so a trailing code span never breaks. A trailing `:`
- * or `;` stays terminal on purpose, matching the glue rule joinProse had: a
- * subject that hands off mid-thought into the fold is a contract
- * violation ("never a pointer into the discussion"), and LABEL_RUBRIC_EXTRA
- * names the colon/semicolon hand-off explicitly so the judge bounces it,
- * rather than the renderer repairing the shape. Rendering-only:
+ * or `;` counts as terminal here (matching the glue rule joinProse had, so
+ * the joined prose never gets a period after a colon), and the fold layer
+ * handles that shape instead: {@link shouldFoldContext} posts such a
+ * comment flat, since a colon hand-off over a collapsed block is the
+ * truncated look this helper exists to remove and a period would misstate
+ * the author's sentence. Rendering-only:
  * `claim.subject` itself is untouched, so dedup's prefix-match semantics
  * never see the added period.
  */
 export const ensureTerminalPunctuation = (line: string): string => {
     const trimmed = line.trimEnd();
-    const core = trimmed.replace(/["'`)\]*_]+$/, "");
+    const core = stripClosers(trimmed);
     return /[.!?:;]$/.test(core) || trimmed === "" ? trimmed : `${trimmed}.`;
 };
+
+/**
+ * Whether a visible line ends on a colon or semicolon (closers aside): a
+ * hand-off into text that is not on the line. {@link shouldFoldContext}
+ * refuses to fold such a summary, so the clause and what completes it
+ * post together.
+ */
+export const endsInHandoff = (line: string): boolean =>
+    /[:;]$/.test(stripClosers(line));
 
 /**
  * The context fold (PR feedback on webapp#41843: a long comment front-loads
@@ -254,6 +268,12 @@ export const shouldFoldContext = (summary: string, prose: string): boolean =>
     // heading, a bullet list), the same case the restatement drop refuses
     // (dispatch-contracts.ts).
     !summary.includes("\n") &&
+    // A summary that hands off mid-thought on a colon or semicolon would
+    // post as a hanging clause over the block, the truncated look the
+    // punctuation repair exists to remove, and "repairing" it with a
+    // period would misstate the author's sentence. Posting flat keeps
+    // the clause and its completion together (PR #408 canary round 2).
+    !endsInHandoff(summary) &&
     prose.trim() !== summary.trim() &&
     prose.trim().length >= CONTEXT_FOLD_MIN_CHARS &&
     // Model-authored text interpolates into the block unescaped (it is

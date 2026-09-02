@@ -2882,7 +2882,7 @@ Return ONLY this JSON object (no prose, no code fence):
     "path": "...", "line": 0,
     "label": "suggestion (non-blocking, documentation)",
     "failure_scenario": "one sentence: the concrete cost to the next reader if this stays",
-    "subject": "the only text visible when the discussion folds: the defect and the ask, one short sentence by default, two when it takes both (a question's subject contains the question); never a pointer into the discussion", "discussion": "quote the comment and the code line; otherwise one claim with its evidence chain complete enough to check, at most one question; long discussions post collapsed behind the subject; name the mechanism plainly, no metaphor", "suggestion": "optional replacement text"
+    "subject": "the only text visible when the discussion folds: the defect and the ask, one short sentence by default, two when it takes both; never a pointer into the discussion", "discussion": "quote the comment and the code line; otherwise one claim with its evidence chain complete enough to check, at most one question; long discussions post collapsed behind the subject; name the mechanism plainly, no metaphor", "suggestion": "optional replacement text"
   }]
 }
 `label` is that one value on every finding; never emit any other label, blocking or

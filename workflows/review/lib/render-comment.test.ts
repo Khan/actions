@@ -3,6 +3,7 @@ import {describe, it, expect} from "vitest";
 import {
     BLOCKING_LABELS,
     NON_BLOCKING_LABELS,
+    endsInHandoff,
     ensureTerminalPunctuation,
     isBlockingLabel,
     labelForFinding,
@@ -589,6 +590,39 @@ describe("renderComment visible-line punctuation", () => {
         expect(body.split("\n")[0]).toBe(
             "**issue (blocking):** Request params reach exec() unescaped.",
         );
+    });
+});
+
+describe("shouldFoldContext hand-off refusal", () => {
+    const prose =
+        "Two things go wrong here: the retention pass subtracts months, " +
+        "not days, so nothing is ever removed, and the test that should " +
+        "have caught it asserts on the wrong constant, so it passes " +
+        "against the broken implementation as written.";
+
+    it("posts flat when the summary ends on a colon or semicolon", () => {
+        // A colon hand-off over a collapsed block is the truncated look
+        // the punctuation repair exists to remove, and a period would
+        // misstate the sentence, so the clause and its completion post
+        // together instead.
+        expect(shouldFoldContext("Two things go wrong here:", prose)).toBe(
+            false,
+        );
+        expect(shouldFoldContext("Two things go wrong here;", prose)).toBe(
+            false,
+        );
+        expect(shouldFoldContext('Two things go wrong "here:"', prose)).toBe(
+            false,
+        );
+        expect(endsInHandoff("A complete sentence.")).toBe(false);
+        expect(
+            renderComment(
+                makeFinding({
+                    model_authored_prose: prose,
+                    summary: "Two things go wrong here:",
+                }),
+            ),
+        ).toBe(`**issue (blocking):** ${prose}`);
     });
 });
 
