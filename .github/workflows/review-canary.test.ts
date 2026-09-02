@@ -71,16 +71,20 @@ const PREAMBLE_END = "<!-- END CANARY PREAMBLE -->\n";
 
 describe("review-canary.md vs the installed review.md", () => {
     it("shares review.md's prompt byte-for-byte after the canary preamble", () => {
-        expect(after(bodyOf(canaryMd), PREAMBLE_END)).toBe(
-            after(bodyOf(reviewMd), "# PR Reviewer\n"),
-        );
+        expect(
+            after(bodyOf(canaryMd), PREAMBLE_END),
+            "review-canary.md prompt has drifted from review.md; run 'pnpm run sync-canary' to re-derive",
+        ).toBe(after(bodyOf(reviewMd), "# PR Reviewer\n"));
     });
 
     it("records the same source: provenance as review.md", () => {
         const sourceLine = (markdown: string): string | undefined =>
             markdown.match(/^source:.*$/m)?.[0];
         expect(sourceLine(canaryMd)).toBeDefined();
-        expect(sourceLine(canaryMd)).toBe(sourceLine(reviewMd));
+        expect(
+            sourceLine(canaryMd),
+            "review-canary.md source: line has drifted from review.md; run 'pnpm run sync-canary' to re-derive",
+        ).toBe(sourceLine(reviewMd));
     });
 });
 
@@ -127,6 +131,15 @@ describe("review-canary.md deltas", () => {
         );
     });
 
+    it("fails fast before AI spend when the head lib has no REVIEW_CANARY handling", () => {
+        expect(canaryMd).toContain(
+            "name: Verify head lib supports canary execution",
+        );
+        expect(canaryMd).toContain(
+            'if ! grep -rq "REVIEW_CANARY" gh-aw-review-lib/workflows/review/lib; then',
+        );
+    });
+
     it("carries none of the capabilities that touch the production reviewer's state", () => {
         // Thread resolution would close the pinned reviewer's findings;
         // add-reviewer (via the imports: config) would page owning teams;
@@ -163,6 +176,9 @@ describe("compiled review-canary.lock.yml", () => {
         );
         expect(canaryLock).toContain('"allowed_events":["COMMENT"]');
         expect(canaryLock).toContain('REVIEW_CANARY: "1"');
+        expect(canaryLock).toContain(
+            "Verify head lib supports canary execution",
+        );
         expect(canaryLock).not.toContain("resolve_pull_request_review_thread");
         expect(canaryLock).not.toContain("add_reviewer");
         expect(canaryLock).not.toContain("cache-memory");
