@@ -18,16 +18,19 @@ predates it, so the runner registers the provider with one local catalog
 entry (launch intro pricing, $0.75/$3.75 per MTok) that a future pi-ai
 bump's own entry supersedes by id.
 
-Google pins always carry an explicit thinking level, pinned at `high` for
-the A/B (a measurement decision: run the candidate the way an agentic
-deployment would, while the claude arms keep extended thinking off exactly
-as they always have, so the arms differ in model and reasoning budget
-both). Explicit because pi-ai (through 0.84.4) translates "no thinking
-requested" on a gemini-3-flash model into a hardcoded `thinkingLevel:
-MINIMAL`, which the 3.7+ API rejects with a 400: the first A/B run's
-candidate arm died on exactly that, every dispatch $0 in 2 seconds. The
-catalog entry's level map declares `off` and `minimal` unsupported (the
-3.8 API takes LOW/MEDIUM/HIGH only).
+Every dispatch (and the prose judge) now carries an explicit thinking
+level, a blanket `high`, because pi-ai's no-reasoning default was wrong on
+both provider families. Anthropic: pi-ai sends `thinking: {type:
+"disabled"}`, but the Claude Agent SDK harness this runner replaced
+defaulted opus-4.6+ to ADAPTIVE thinking at effort high, so the pi port had
+silently turned off the thinking production reviewers run with (the
+re-anchoring harness A/B unknowingly compared SDK-adaptive-high against
+pi-thinking-disabled). Google: pi-ai translates "no thinking requested" on
+a gemini-3-flash model into a hardcoded `thinkingLevel: MINIMAL`, which the
+3.7+ API rejects with a 400: the first A/B run's candidate arm died on
+exactly that, every dispatch $0 in 2 seconds. The catalog entry's level map
+declares `off` and `minimal` unsupported (the 3.8 API takes LOW/MEDIUM/HIGH
+only). With both arms at high, the A/B isolates the model swap.
 
 Every sub-agent `model:` pin in review.md moves to `gemini-3.8-flash` so the
 live A/B measures that model against main's claude baseline on the same

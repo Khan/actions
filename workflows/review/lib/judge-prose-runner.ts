@@ -19,6 +19,7 @@ import {
     providerForPin,
     rebaseModels,
     resolveModelId,
+    thinkingLevelForModel,
 } from "./dispatch-models";
 import type {ProseRunner} from "./judge-prose";
 
@@ -121,7 +122,14 @@ export const createJudgeRunner = async (
                         },
                     ],
                 },
-                {signal: abort.signal, maxRetries: JUDGE_MAX_RETRIES},
+                {
+                    signal: abort.signal,
+                    maxRetries: JUDGE_MAX_RETRIES,
+                    // Same parity reasoning as the dispatch runner: the SDK
+                    // judge this replaced ran at the SDK's adaptive default,
+                    // and pi-ai's no-reasoning path DISABLES thinking.
+                    reasoning: thinkingLevelForModel(model),
+                },
             );
             if (
                 message.stopReason === "error" ||

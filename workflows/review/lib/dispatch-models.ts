@@ -77,30 +77,28 @@ export const GEMINI_38_FLASH_MODEL = {
 } as const;
 
 /**
- * The thinking level the runner requests for a model when the caller sets
- * none. Only Google models get one, and they MUST: pi-ai (through 0.84.4)
- * translates "no thinking requested" on a gemini-3-flash model into a
- * hardcoded `thinkingLevel: MINIMAL`, which 3.7+ reject with a 400 ("Thinking
- * level MINIMAL is not supported for this model") — run 33664981308's
- * candidate arm died on exactly that, every dispatch $0 in 2s. An explicit
- * level routes through pi-ai's clamp instead, which respects the catalog
- * entry's map.
+ * The thinking level the runner requests when the caller sets none: a
+ * blanket `high`, every provider (decided 2026-09-03; per-role levels are a
+ * later dial and this function is where they would go).
  *
- * `high` rather than the API default MEDIUM is a measurement decision
- * (2026-09-03): run the candidate the way an agentic-coding deployment
- * would actually run it, per Google's own positioning of 3.8's gains at
- * higher effort. Note what that means for the A/B: the claude incumbents
- * run with extended thinking OFF (the runner sends no thinking config for
- * anthropic pins, and no harness ever has — review.md's `# effort:`
- * annotations are documented intent, not live config), so the arms differ
- * in model AND reasoning budget, not model alone. Anthropic pins return
- * undefined here precisely so the claude arms keep running exactly as they
- * did through the harness A/B.
+ * Explicit for two reasons, one per provider family. Anthropic: pi-ai maps
+ * "no reasoning requested" to an explicit `thinking: {type: "disabled"}`,
+ * but the Claude Agent SDK harness this runner replaced never disabled
+ * anything — the SDK defaults opus-4.6+ to ADAPTIVE thinking at effort
+ * `high` — so the port had silently turned off the thinking production
+ * reviewers run with (and the re-anchoring harness A/B unknowingly compared
+ * SDK-adaptive-high against pi-thinking-disabled). `high` restores the
+ * production default and pins it where the SDK era left it implicit. For
+ * adaptive-thinking claude models pi-ai sends `{type: "adaptive"}` plus
+ * effort, the same wire shape the SDK produces. Google: pi-ai translates
+ * "no thinking requested" on a gemini-3-flash model into a hardcoded
+ * `thinkingLevel: MINIMAL`, which 3.7+ reject with a 400 (run 33664981308's
+ * candidate arm died on exactly that, every dispatch $0 in 2s); an explicit
+ * level routes through pi-ai's clamp, which respects the catalog entry's
+ * map, and `high` matches Google's positioning of 3.8's gains at higher
+ * effort. With both arms at high, the A/B isolates the model swap again.
  */
-export const thinkingLevelForModel = (model: unknown): string | undefined =>
-    (model as {api?: string}).api === "google-generative-ai"
-        ? "high"
-        : undefined;
+export const thinkingLevelForModel = (_model: unknown): string => "high";
 
 /**
  * Append {@link GEMINI_38_FLASH_MODEL} to a Google catalog that does not

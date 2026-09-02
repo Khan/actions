@@ -110,7 +110,10 @@ describe("withGemini38Flash", () => {
 });
 
 describe("thinkingLevelForModel", () => {
-    it("gives Google models high and everything else nothing", () => {
+    it("gives every model high (the blanket level, decided 2026-09-03)", () => {
+        // Anthropic: restores the SDK harness's adaptive-high default that
+        // the pi port silently disabled. Google: keeps pi-ai's broken
+        // MINIMAL fallback unreachable.
         expect(
             thinkingLevelForModel({
                 id: "gemini-3.8-flash",
@@ -122,8 +125,7 @@ describe("thinkingLevelForModel", () => {
                 id: "claude-opus-4-8",
                 api: "anthropic-messages",
             }),
-        ).toBeUndefined();
-        expect(thinkingLevelForModel({id: "bare"})).toBeUndefined();
+        ).toBe("high");
     });
 });
 

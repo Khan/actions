@@ -447,27 +447,24 @@ export const createPiRunner = async (
                 // Pi hands the stream options down from the loop; the retry
                 // budget is added here because nothing upstream sets one (see
                 // SUB_AGENT_MAX_RETRIES). A caller-supplied value wins.
-                // The reasoning level rides the same way: Google pins MUST
-                // carry an explicit one (dispatch-models.ts's
-                // thinkingLevelForModel: pi-ai's no-thinking fallback sends
-                // gemini 3.7+ a MINIMAL level the API 400s on), Anthropic
-                // pins get none.
+                // The reasoning level rides the same way: every pin carries
+                // an explicit one (dispatch-models.ts's thinkingLevelForModel
+                // carries the two per-provider reasons, both learned the
+                // hard way).
                 (
                     model_: unknown,
                     context: unknown,
                     streamOptions?: Record<string, unknown>,
-                ) => {
-                    const reasoning =
-                        streamOptions?.["reasoning"] ??
-                        thinkingLevelForModel(model_);
-                    return models.streamSimple(model_, context, {
+                ) =>
+                    models.streamSimple(model_, context, {
                         ...streamOptions,
                         maxRetries:
                             streamOptions?.["maxRetries"] ??
                             SUB_AGENT_MAX_RETRIES,
-                        ...(reasoning === undefined ? {} : {reasoning}),
-                    });
-                },
+                        reasoning:
+                            streamOptions?.["reasoning"] ??
+                            thinkingLevelForModel(model_),
+                    }),
             );
             // A styled acceptance when one happened, else the best
             // contract-valid submission the prose gate was still bouncing:
