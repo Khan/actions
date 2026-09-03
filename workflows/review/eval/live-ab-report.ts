@@ -190,6 +190,14 @@ export type AbReport = {
     adversarialFailures: string[];
     /** Best-of-three re-runs of the cases that flipped the hard gate. */
     gateRetries: GateRetry[];
+    /**
+     * Set on a checkpoint written mid-run (after every scored case), absent
+     * on a finished report. The arms cover only the cases scored so far,
+     * the gate has not been retried, and the judge has not run. The reader
+     * gets what a cancelled or timed-out run had, marked so nobody reads it
+     * as finished. `aggregate.ts` pools nothing from a partial report.
+     */
+    partial?: true;
 };
 
 /**
@@ -205,10 +213,34 @@ export type MultiAbReport = {
     gate: GateMajority[];
     /** Cases failing the candidate gate in a strict majority of repeats. */
     adversarialFailures: string[];
+    /**
+     * Set on a mid-run checkpoint: the last entry of `repeats` is itself
+     * partial (its own `partial` flag set), and `aggregate` and `gate` cover
+     * the finished repeats only. See {@link AbReport.partial}.
+     */
+    partial?: true;
 };
+
+/** How far each arm of a report got, for the partial-report caveat. */
+const armProgress = (report: AbReport): string => {
+    const total = report.provenance?.caseCount;
+    const of = (done: number): string =>
+        total === undefined ? `${done}` : `${done} of ${total}`;
+    return (
+        `baseline scored ${of(report.arms.baseline.runs.length)} cases, ` +
+        `candidate ${of(report.arms.candidate.runs.length)}`
+    );
+};
+
+const PARTIAL_LEAD =
+    "PARTIAL REPORT: a checkpoint written mid-run (the run was cancelled, " +
+    "timed out, or is still going), not a finished measurement.";
 
 export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
     const first = report.repeats[0];
+    const partial = report.partial === true ? " (partial)" : "";
+    const inProgress = report.repeats.find((r) => r.partial === true);
+    const finished = report.repeats.filter((r) => r.partial !== true).length;
     // Identical review.md in both arms only happens under `--force-arms`
     // (the runner short-circuits otherwise): a wobble control or the weekly
     // drift run, not an A/B. Say so up front; a report headed
@@ -219,9 +251,21 @@ export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
         first.reviewMdSha.baseline === first.reviewMdSha.candidate;
     const lines = [
         identicalArms
-            ? `## Review wobble control: ${report.repeatCount} repeats (identical arms)`
-            : `## Review live A/B: ${report.repeatCount} repeats`,
+            ? `## Review wobble control: ${report.repeatCount} repeats (identical arms)${partial}`
+            : `## Review live A/B: ${report.repeatCount} repeats${partial}`,
         "",
+        ...(report.partial === true
+            ? [
+                  `${PARTIAL_LEAD} ${finished} of ${report.repeatCount} ` +
+                      `repeats finished` +
+                      (inProgress === undefined
+                          ? "."
+                          : `, repeat ${finished + 1} in progress ` +
+                            `(${armProgress(inProgress)}).`) +
+                      " The aggregate and the gate below cover the finished repeats only.",
+                  "",
+              ]
+            : []),
         ...(first !== undefined
             ? [
                   identicalArms
@@ -479,11 +523,20 @@ export const renderMarkdownReport = (report: AbReport): string => {
                 format(pick(candidate) - pick(baseline)),
         );
 
+    const partial = report.partial === true ? " (partial)" : "";
     const lines = [
         identicalArms
-            ? "## Review wobble control (identical arms)"
-            : "## Review live A/B",
+            ? `## Review wobble control (identical arms)${partial}`
+            : `## Review live A/B${partial}`,
         "",
+        ...(report.partial === true
+            ? [
+                  `${PARTIAL_LEAD} So far ${armProgress(report)}. Every ` +
+                      "number below covers only those cases, the gate was not " +
+                      "retried, and the judge did not run.",
+                  "",
+              ]
+            : []),
         identicalArms
             ? `Both arms ran the same review.md (${report.reviewMdSha.baseline.slice(
                   0,

@@ -212,9 +212,9 @@ const parseArm = (
 };
 
 /**
- * Extract the arm samples one report artifact contributes. A single-run
- * report contributes one sample pair; a `--repeats n` report contributes n; a
- * no-reviewable-delta report contributes none (recorded as skipped upstream).
+ * Extract the arm samples one report artifact contributes: one pair for a
+ * single-run report, n for `--repeats n`, none for a no-reviewable-delta
+ * report or a mid-run checkpoint (`partial`, arms over different case sets).
  */
 export const extractSamples = (
     source: string,
@@ -223,14 +223,15 @@ export const extractSamples = (
     if (!isRecord(raw)) {
         throw new Error("report: not a JSON object");
     }
-    if (raw["noReviewableDelta"] === true) {
-        return [];
-    }
     // A --repeats artifact nests single-run reports under `repeats`.
     if (Array.isArray(raw["repeats"])) {
         return raw["repeats"].flatMap((repeat, i) =>
             extractSamples(`${source}#${i + 1}`, repeat),
         );
+    }
+    // Nothing to pool: identical arms, or a checkpoint a run wrote mid-case.
+    if (raw["noReviewableDelta"] === true || raw["partial"] === true) {
+        return [];
     }
     const arms = raw["arms"];
     const shas = raw["reviewMdSha"];
@@ -962,7 +963,7 @@ const main = (): void => {
             const raw = readSource(source);
             const extracted = extractSamples(source, raw);
             if (extracted.length === 0) {
-                skipped.push({source, reason: "no reviewable delta"});
+                skipped.push({source, reason: "nothing to pool"});
             }
             samples.push(...extracted);
         } catch (error) {
