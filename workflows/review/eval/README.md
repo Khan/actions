@@ -161,7 +161,10 @@ claiming a band.
 - **Noise floor** (measured on 6 identical-arm samples, run 29069228968,
   rendered in every report footer): recall 54-86%, verdict agreement
   75-100%, noise 50-60%, judge quality 0.82-0.86. A single-run delta whose
-  arms both sit inside a band is wobble. Detecting a 20-point recall change
+  arms both sit inside a band is wobble. The noise band predates the
+  may-flag and duplicate buckets (next bullet), so it reads high against
+  numbers taken after 2026-09-03 on cases that carry `mayFlagSpecs`, until
+  a drift run re-measures it. The report footer carries the same caveat. Detecting a 20-point recall change
   needs ~60 spec-samples per arm; 10 points needs ~140 (two-proportion, 80%
   power). Repeats are the cheap axis: no authoring, no review.
 - **Noise buckets:** the noise row's numerator is residual unmatched
@@ -171,7 +174,10 @@ claiming a band.
   are NOT in the numerator and get their own row. What remains after both
   is template comments ("no test covers X"), speculation, and unspecced
   findings nobody has audited yet, and on a claude arm the templates are
-  most of it. The buckets are regex classification over the finding's
+  most of it. Only audited cases carry `mayFlagSpecs` (8 of the 10 live
+  smoke cases so far, none of the rest of the live corpus), so on a case
+  without them the noise row is still the old definition, an upper bound.
+  Pooled noise over a mixed set means the mix, read the per-case rows. The buckets are regex classification over the finding's
   text: a leftover whose `failure_scenario` fits a may-flag entry is taken
   at its word, then the duplicate check runs, then may-flag against the
   full prose. A distinct finding that borrows the spec's keywords can still

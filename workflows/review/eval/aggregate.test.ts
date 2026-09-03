@@ -31,6 +31,10 @@ const rawRun = (
         blocking?: Record<string, boolean>;
         missedDetail?: {specKey: string; droppedBy?: string}[];
         unmatched?: string[];
+        /** Leftovers bucketed as a second copy of a caught spec. */
+        duplicates?: {findingId: string; specKey: string}[];
+        /** Leftovers bucketed as legitimate unspecced (may-flag matches). */
+        legitimate?: string[];
         posted?: number;
     } = {},
 ) => ({
@@ -53,6 +57,19 @@ const rawRun = (
         missedDetail: over.missedDetail ?? [],
         falseFlags: [],
         unmatchedFindingIds: over.unmatched ?? [],
+        // Absent (not empty) unless asked for, so the default run is the
+        // legacy artifact shape.
+        ...(over.duplicates !== undefined ? {duplicates: over.duplicates} : {}),
+        ...(over.legitimate !== undefined
+            ? {
+                  legitimateUnspecced: over.legitimate.map((findingId) => ({
+                      specKey: "may-1",
+                      findingId,
+                      via: "deterministic",
+                      blocking: false,
+                  })),
+              }
+            : {}),
         postedCount: over.posted ?? (over.caught ?? []).length,
     },
 });
@@ -145,12 +162,14 @@ describe("extractSamples", () => {
         expect(sample.baseline.usd).toBe(1.5);
     });
 
-    it("reads the noise numerator the same from bucketed and legacy match shapes", () => {
-        // A report predating the duplicate and may-flag buckets recorded
-        // every leftover under unmatchedFindingIds, and a bucketed report splits
-        // the same leftovers three ways. The noise numerator must read the
-        // same from both (unmatched plus duplicates), and the legitimate
-        // bucket is zero, not missing, for the legacy shape.
+    it("sums unmatched plus duplicates for noise and reads the may-flag bucket as zero on legacy shapes", () => {
+        // A report predating the buckets recorded every leftover under
+        // unmatchedFindingIds. Summing unmatched plus duplicates reconciles
+        // the duplicate bucket with that shape, and only that bucket: a
+        // leftover the new shape records as legitimate unspecced used to
+        // count as noise, so the same three leftovers read 3 under the old
+        // shape and 2 under the new. The may-flag count is 0, not missing,
+        // for the legacy shape.
         const legacy = rawRun("case-1", {
             posted: 4,
             unmatched: ["dup", "legit", "template"],
@@ -158,16 +177,9 @@ describe("extractSamples", () => {
         const bucketed = rawRun("case-1", {
             posted: 4,
             unmatched: ["template"],
-        }) as unknown as {match: Record<string, unknown>};
-        bucketed.match["duplicates"] = [{findingId: "dup", specKey: "s"}];
-        bucketed.match["legitimateUnspecced"] = [
-            {
-                specKey: "may-1",
-                findingId: "legit",
-                via: "deterministic",
-                blocking: false,
-            },
-        ];
+            duplicates: [{findingId: "dup", specKey: "s"}],
+            legitimate: ["legit"],
+        });
         const raw = rawReport({
             baselineRuns: [legacy],
             candidateRuns: [bucketed],
@@ -648,6 +660,49 @@ describe("renderAggregateMarkdown", () => {
         expect(markdown).toContain("| Judge mean quality | 0.90 |  | 0.80 |");
         // No identical arms, so no noise-floor section.
         expect(markdown).not.toContain("Noise floor");
+    });
+
+    it("pools the noise buckets: duplicates into noise, may-flag matches into their own row", () => {
+        const raw = rawReport({
+            baselineRuns: [
+                rawRun("case-1", {
+                    caught: ["spec-1"],
+                    posted: 4,
+                    unmatched: ["template"],
+                    duplicates: [{findingId: "copy", specKey: "spec-1"}],
+                    legitimate: ["legit"],
+                }),
+            ],
+            candidateRuns: [
+                rawRun("case-1", {
+                    caught: ["spec-1"],
+                    posted: 2,
+                    unmatched: ["template"],
+                }),
+            ],
+        });
+        const report = aggregateSamples([
+            ...extractSamples("r1", raw),
+            ...extractSamples("r2", raw),
+        ]);
+        expect(report.arms.baseline.pooled.noise).toMatchObject({
+            numerator: 4,
+            denominator: 8,
+        });
+        expect(report.arms.baseline.pooled.legitimateUnspecced).toMatchObject({
+            numerator: 2,
+            denominator: 8,
+        });
+        expect(report.arms.candidate.pooled.legitimateUnspecced).toMatchObject({
+            numerator: 0,
+            denominator: 4,
+        });
+        const markdown = renderAggregateMarkdown(report);
+        expect(markdown).toContain("| Noise (unmatched posted) | 4/8 (50%)");
+        expect(markdown).toContain(
+            "| Legitimate unspecced (may-flag, not noise) | 2/8 (25%)",
+        );
+        expect(markdown).toContain("| 0/4 (0%)");
     });
 
     it("renders a (blocking) row per spec and marks a split on identical arms", () => {

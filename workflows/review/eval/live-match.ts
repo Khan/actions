@@ -12,7 +12,7 @@
  *    agrees with the spec's path (and line window, when both carry one) AND
  *    any mechanism alternate matches the finding's `failure_scenario` or
  *    `model_authored_prose`, case-insensitively. When several candidates
- *    match one spec, the one whose lens is the spec's `lens` wins, otherwise
+ *    match one spec, the one whose `source` is the spec's `lens` wins, otherwise
  *    the first in posted order (run 33671015442 credited a nearby TTL
  *    suggestion from the correctness reviewer with the race-condition spec
  *    while the concurrency-async finding that actually described it sat
@@ -24,8 +24,8 @@
  *    either a LEGITIMATE UNSPECCED finding (it matches one of the case's
  *    `mayFlagSpecs`: a real defect the fixture carries that is not the
  *    case's ground truth), a DUPLICATE (it matches a must-catch spec another
- *    candidate already claimed: the cross-source merge let two copies
- *    through), or noise. Only the last two count against the noise rate;
+ *    candidate already claimed, or a second copy of an accepted may-flag
+ *    defect: the cross-source merge let two copies through), or noise. Only the last two count against the noise rate;
  *    `matchCase` documents the order the three are tested in.
  *
  * `computeLiveMetrics` then aggregates per-case matches into the live
@@ -283,7 +283,9 @@ export const matchCase = async (
      * names one. A loose mechanism alternate ("concurrent", "overwrit") is
      * meant to accept paraphrase, and a neighbouring finding from another
      * lens can hit it too. When both are present the lens the case was
-     * authored against is the finding the case is about.
+     * authored against is the finding the case is about. The comparison is
+     * against `source`, the producer the pipeline assigned, not
+     * `finding.lens`, which a specialist agent writes into its own JSON.
      */
     const deterministicClaimant = (
         spec: LiveDefectSpec,
@@ -294,7 +296,7 @@ export const matchCase = async (
         );
         if (spec.lens !== undefined) {
             const sameLens = hits.find(
-                (candidate) => candidate.lens === spec.lens,
+                (candidate) => candidate.source === spec.lens,
             );
             if (sameLens !== undefined) {
                 return sameLens;
@@ -409,7 +411,11 @@ export const matchCase = async (
     //   2. it fits a caught spec (scenario plus prose): duplicate;
     //   3. it fits a may-flag entry anywhere in its text: legitimate;
     //   4. otherwise: noise.
-    // Ground truth is safe either way: must-catch claimed first, above.
+    // Ground truth is safe either way: must-catch claimed first, above. A
+    // may-flag entry, like a must-catch spec, is satisfied by at most one
+    // candidate: a second copy of the same unspecced defect is the same
+    // merge-stage miss a second copy of a seeded one is, and lands in
+    // `duplicates` under the may-flag key.
     const duplicates: CaseMatchReport["duplicates"] = [];
     const legitimateUnspecced: SpecMatch[] = [];
     const unmatchedFindingIds: string[] = [];
@@ -417,23 +423,38 @@ export const matchCase = async (
         const spec = mustCatch.find((s) => s.key === match.specKey);
         return spec === undefined ? [] : [spec];
     });
-    const accept = (candidate: RunCandidate, spec: LiveDefectSpec): void => {
-        legitimateUnspecced.push({
-            specKey: spec.key,
-            findingId: candidate.id,
-            via: "deterministic",
-            blocking: candidate.blocking,
-        });
+    const acceptedMayFlag = new Set<string>();
+    /**
+     * Route a candidate that fits `hits` (the may-flag entries it matches at
+     * the current scope): the first entry nobody has claimed accepts it,
+     * otherwise it duplicates the first one somebody has.
+     */
+    const acceptOrDuplicate = (
+        candidate: RunCandidate,
+        hits: LiveDefectSpec[],
+    ): void => {
+        const fresh = hits.find((spec) => !acceptedMayFlag.has(spec.key));
+        if (fresh !== undefined) {
+            acceptedMayFlag.add(fresh.key);
+            legitimateUnspecced.push({
+                specKey: fresh.key,
+                findingId: candidate.id,
+                via: "deterministic",
+                blocking: candidate.blocking,
+            });
+            return;
+        }
+        duplicates.push({findingId: candidate.id, specKey: hits[0]!.key});
     };
     for (const candidate of posted) {
         if (claimed.has(candidate.id)) {
             continue;
         }
-        const aboutMayFlag = mayFlag.find((spec) =>
+        const aboutMayFlag = mayFlag.filter((spec) =>
             matchesSpec(candidate, spec, "scenario"),
         );
-        if (aboutMayFlag !== undefined) {
-            accept(candidate, aboutMayFlag);
+        if (aboutMayFlag.length > 0) {
+            acceptOrDuplicate(candidate, aboutMayFlag);
             continue;
         }
         const duplicateOf = caughtSpecs.find((spec) =>
@@ -446,11 +467,11 @@ export const matchCase = async (
             });
             continue;
         }
-        const mentionsMayFlag = mayFlag.find((spec) =>
+        const mentionsMayFlag = mayFlag.filter((spec) =>
             matchesSpec(candidate, spec),
         );
-        if (mentionsMayFlag !== undefined) {
-            accept(candidate, mentionsMayFlag);
+        if (mentionsMayFlag.length > 0) {
+            acceptOrDuplicate(candidate, mentionsMayFlag);
             continue;
         }
         unmatchedFindingIds.push(candidate.id);

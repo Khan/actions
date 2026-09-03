@@ -423,6 +423,21 @@ export const MEASURED_NOISE_FLOOR = {
         {metric: "noise (unmatched posted)", min: 0.5, max: 0.6, sd: 0.03},
         {metric: "judge mean quality", min: 0.82, max: 0.86, sd: 0.02},
     ],
+    /**
+     * Rows whose definition changed after the band was measured, with the
+     * break. The noise numerator was redefined on 2026-09-03: may-flag
+     * matches left it and duplicates of a caught spec joined it, and on
+     * run 33671015442 that moved the claude arm from 71% to 35%. Until a
+     * drift run re-measures under the new definition the band is an
+     * upper bound for a smoke case that carries `mayFlagSpecs` and the old
+     * definition everywhere else.
+     */
+    redefined: [
+        {
+            metric: "noise (unmatched posted)",
+            note: "measured before the may-flag and duplicate buckets, so it reads high against post-2026-09-03 numbers",
+        },
+    ],
 } as const;
 
 const NOISE_FLOOR_FOOTER =
@@ -434,7 +449,11 @@ const NOISE_FLOOR_FOOTER =
         .join(", ") +
     ". A single-run delta whose arms both sit inside a band is " +
     "indistinguishable from run-to-run wobble; use `--repeats` to resolve " +
-    "smaller effects.*";
+    "smaller effects." +
+    MEASURED_NOISE_FLOOR.redefined
+        .map((r) => ` The ${r.metric} band was ${r.note}.`)
+        .join("") +
+    "*";
 
 export const renderMarkdownReport = (report: AbReport): string => {
     const {baseline, candidate} = report.arms;

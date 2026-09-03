@@ -70,9 +70,13 @@ export type SampleRun = {
     missedSpecs: {specKey: string; droppedBy?: string}[];
     /**
      * The noise numerator: residual unmatched findings plus duplicates of a
-     * caught spec. Reports predating the duplicate bucket recorded every
-     * leftover under `unmatchedFindingIds`, so the sum reads the same
-     * quantity from both shapes.
+     * caught spec. Reports predating the buckets recorded every leftover
+     * under `unmatchedFindingIds`, so summing the two reconciles the
+     * duplicate bucket, but NOT the may-flag bucket: a leftover that now
+     * lands in `legitimateUnspecced` used to count here, so the same run
+     * reads a smaller numerator under the new shape. The corpus hash moves
+     * with every `mayFlagSpecs` edit, so a pool mixing the two shapes trips
+     * the mixed-ruler warning rather than blending the definitions quietly.
      */
     unmatchedPosted: number;
     /**

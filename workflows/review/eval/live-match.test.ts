@@ -192,10 +192,16 @@ const liveRun = (over: {
             changedFiles: [{path: "src/a.ts", status: "modified"}],
             expected: {verdict: over.expectedVerdict ?? "REQUEST_CHANGES"},
             diff: DIFF,
-            findings: (over.findings ?? []).map((finding) => ({
-                source: (finding as {lens?: string}).lens ?? "correctness",
-                finding,
-            })),
+            findings: (over.findings ?? []).map((raw) => {
+                const {source, ...finding} = raw as {
+                    source?: string;
+                    lens?: string;
+                };
+                return {
+                    source: source ?? finding.lens ?? "correctness",
+                    finding,
+                };
+            }),
             live: {
                 prContext: {
                     title: "t",
@@ -700,6 +706,87 @@ describe("matchCase", () => {
         ]);
         expect(match.duplicates).toEqual([]);
         expect(match.unmatchedFindingIds).toEqual([]);
+    });
+
+    it("accepts one copy of a may-flag defect and routes the second to duplicates", async () => {
+        // A may-flag entry is satisfied by at most one candidate, like a
+        // must-catch spec. Two posted findings about the same unspecced
+        // defect are the same merge-stage miss as two copies of a seeded
+        // one, and counting both as legitimate would hide it.
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [spec({key: "float-bug"})],
+            mayFlagSpecs: [
+                spec({
+                    key: "rate-unvalidated",
+                    mechanism: ["rate.{0,40}(negative|above 1|unvalidated)"],
+                }),
+            ],
+            findings: [
+                finding("f-float", "floating point totals round late."),
+                finding(
+                    "f-rate",
+                    "a negative rate is applied unvalidated.",
+                    "advisory",
+                ),
+                finding(
+                    "f-rate-copy",
+                    "an above 1 rate is applied unvalidated.",
+                    "advisory",
+                ),
+            ],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.legitimateUnspecced.map((l) => l.findingId)).toEqual([
+            "f-rate",
+        ]);
+        expect(match.duplicates).toEqual([
+            {findingId: "f-rate-copy", specKey: "rate-unvalidated"},
+        ]);
+        expect(match.unmatchedFindingIds).toEqual([]);
+        const metrics = computeLiveMetrics([{corpusCase, result, match}]);
+        expect(metrics.noise.numerator).toBe(1);
+        expect(metrics.noise.duplicates).toBe(1);
+        expect(metrics.legitimateUnspecced.numerator).toBe(1);
+    });
+
+    it("breaks the lens tie on the code-assigned source, not the finding's own lens", async () => {
+        // A specialist agent writes `lens` into its own JSON, so a
+        // correctness-reviewer finding claiming lens "concurrency-async"
+        // must not win the tie over the finding the concurrency-async
+        // agent actually produced.
+        const impostor = {
+            ...finding(
+                "f-impostor",
+                "kvSet after kvGet lets concurrent calls race.",
+                "advisory",
+            ),
+            lens: "concurrency-async",
+            source: "correctness",
+        };
+        const genuine = {
+            ...finding(
+                "f-genuine",
+                "two concurrent calls read the same value and one update is lost.",
+            ),
+            lens: "concurrency-async",
+            source: "concurrency-async",
+        };
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [
+                spec({
+                    key: "lost-update",
+                    mechanism: ["race|concurrent"],
+                    lens: "concurrency-async",
+                }),
+            ],
+            findings: [impostor, genuine],
+        });
+        expect(result.postedCandidates.map((c) => c.source)).toEqual([
+            "correctness",
+            "concurrency-async",
+        ]);
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught.map((c) => c.findingId)).toEqual(["f-genuine"]);
     });
 
     it("keeps a duplicate that mentions a may-flag defect in passing in the duplicate bucket", async () => {

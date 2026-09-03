@@ -22,7 +22,8 @@ Three changes, batched because every fixture edit moves the corpus hash:
   carries that are not the case's ground truth. A posted finding matching
   one is reported as "legitimate unspecced" and leaves the noise numerator,
   and it earns no recall. Eight of the ten live smoke cases now carry the
-  entries the audit produced (11 in all). clean-no-findings and
+  entries the audit produced (12 in all, 11 of which the recorded run
+  exercised). clean-no-findings and
   incident-cache-missing-key carry none because the reading found nothing.
   None of the audited defects changes an expected verdict, so no fixture
   moved beyond the false-block case's stub `ListTraces`, which returned an
@@ -35,7 +36,8 @@ Three changes, batched because every fixture edit moves the corpus hash:
   aggregate reads both shapes of artifact and sums unmatched plus duplicates
   so pooled noise stays comparable with older reports.
 - When several posted findings satisfy one spec, the matcher now prefers the
-  one whose lens is the spec's `lens` before falling back to posted order. On
+  one whose code-assigned `source` is the spec's `lens` before falling back
+  to posted order. On
   the recorded run that moves the credit on four cases from a correctness
   neighbour to the security-auth, money-payments, concurrency-async, and
   data-migrations findings that actually described the defect (the race
