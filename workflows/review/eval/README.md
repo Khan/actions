@@ -356,21 +356,28 @@ claiming a band.
   Reports without a "Reads denied outside the staged case" row come from a
   runner whose reviewers could read every case's spec and the scorer, and
   that also had Bash. No transcript exists from those runs to say whether one
-  did. The evidence that they did not is indirect: 5 Claude agent transcripts
-  across 2 runs on the Pi harness branch each checked once for a tooling
-  path, got nothing, and stayed in the checkout, where the Gemini reviewer on
-  the same machine went looking. Treat pre-scope numbers as probably clean
-  and the denial counter on later runs as the measurement that says so.
+  did. The evidence that they did not is indirect and comes from the Pi
+  harness branch, where transcripts were written: across 2 runs, each of the
+  5 Claude agents made one search for the `gh-aw-review-lib` tooling
+  directory, found nothing, and read only files under the staged checkout
+  from then on. The Gemini reviewer on the same machine, given the same
+  prompt, searched the filesystem and read the corpus. Treat pre-scope
+  numbers as probably clean and the denial counter on later runs as the
+  measurement that says so.
 - **The eval's reviewers have no shell, production's do.** `tools` restricts
   the SDK arm to Read, Grep, and Glob, while `lib/dispatch-runner.ts` keeps
   Bash for the investigation-cap CLI. The cap CLI was never staged in the
   eval, so that part is unchanged, but review.md's "one targeted cheap
   check per finding" shell step was runnable against the staged checkout
-  before the scope landed and is not now. Both arms lose it together, so
-  within-run deltas stay comparable, and eval recall reads as a lower bound
-  on production recall rather than an estimate of it. Scoping Bash by path
-  instead would reopen the corpus (`find /` is how the leak was found), so
-  this stays a documented limit.
+  before the scope landed and is not now. Both arms lose it together, so a
+  delta between two prompts that differ elsewhere stays comparable, and eval
+  recall reads as a lower bound on production recall rather than an estimate
+  of it. The exception is a review.md change to the shell step itself: the
+  A/B cannot see it, and its delta prints as zero rather than as not
+  measured, so that kind of change is judged by the canary and production
+  rounds, not by this eval. Scoping Bash by path instead would reopen the
+  corpus (`find /` is how the leak was found), so this stays a documented
+  limit.
 - **The arbiter's refuse bias is a prompt, not a calibration.** Its rescues
   inflate recall, the load-bearing metric, and its false-positive rate has
   not been measured against known non-matches. Audit `via: "fallback"`

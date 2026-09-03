@@ -87,7 +87,8 @@ jobs:
             echo "ANTHROPIC_API_KEY secret not configured; skipping the probe." >&2
             exit 0
           fi
-          pnpm dlx tsx workflows/review/eval/live-runner.ts --probe-read-scope
+          pnpm dlx tsx workflows/review/eval/live-runner.ts --probe-read-scope \
+            --transcripts-dir "$RUNNER_TEMP/review-transcripts"
       - name: Run the drift watch
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

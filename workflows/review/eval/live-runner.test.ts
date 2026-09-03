@@ -15,7 +15,14 @@ import {afterAll, beforeAll, describe, expect, it, vi} from "vitest";
 import {LiveAgentError} from "./live-agent-error";
 import type {LiveAgentRunner} from "./live-producer";
 // vitest hoists vi.mock above imports, so the static import sees the mock.
-import {probeReadScope, sdkRunner, PINNED_PROBE_MODEL} from "./live-runner";
+import {
+    probeReadScope,
+    runProbeGate,
+    sdkRunner,
+    PINNED_PROBE_MODEL,
+    type ProbeOptions,
+    type ProbeResult,
+} from "./live-runner";
 
 /* -------------------------------------------------------------------------- */
 /* A mocked SDK: capture the options, replay a scripted message stream       */
@@ -317,6 +324,33 @@ describe("probeReadScope", () => {
         expect(result.detail).toContain("NOT attempted by the model");
     });
 
+    it("is not 'not attempted' when the secret leaked anyway", async () => {
+        // A Bash cat that leaked with no Read attempt: a retry must never be
+        // allowed to turn this green.
+        const result = await probe("leak-no-attempt", {
+            deniedReads: 0,
+            attemptOutside: false,
+            echoOutside: true,
+        });
+        expect(result.ok).toBe(false);
+        expect(result.notAttempted).toBe(false);
+        expect(result.detail).toContain("LEAKED");
+    });
+
+    it("returns a failed verdict with a detail line when the dispatch throws", async () => {
+        const result = await probeReadScope({
+            runner: async () => {
+                throw new Error("529 overloaded");
+            },
+            transcriptsDir: join(dir, "dispatch-throws"),
+        });
+        expect(result.ok).toBe(false);
+        expect(result.notAttempted).toBe(false);
+        expect(result.detail).toContain(
+            "probe dispatch FAILED: 529 overloaded",
+        );
+    });
+
     it("fails when no transcript was written", async () => {
         const result = await probe("no-transcript", {
             deniedReads: 1,
@@ -346,5 +380,69 @@ describe("probeReadScope", () => {
                 `tool_result: ${readFileSync(inside, "utf8")}`,
         });
         expect(result.ok).toBe(true);
+    });
+});
+
+describe("runProbeGate", () => {
+    const verdict = (over: Partial<ProbeResult>): ProbeResult => ({
+        ok: false,
+        notAttempted: false,
+        detail: "d",
+        ...over,
+    });
+    const scripted = (results: ProbeResult[]) => {
+        const seen: ProbeOptions[] = [];
+        const probe = async (options: ProbeOptions): Promise<ProbeResult> => {
+            seen.push(options);
+            return results[Math.min(seen.length - 1, results.length - 1)]!;
+        };
+        return {probe, seen};
+    };
+    const quiet = (): string[] => [];
+
+    it("passes on a clean first attempt without retrying", async () => {
+        const {probe, seen} = scripted([verdict({ok: true})]);
+        const gate = await runProbeGate("/t", probe, quiet);
+        expect(gate.ok).toBe(true);
+        expect(seen).toHaveLength(1);
+        expect(seen[0]!.transcriptsDir).toBe(join("/t", "1"));
+    });
+
+    it("retries once when the model did not attempt the read, in its own subdirectory", async () => {
+        const {probe, seen} = scripted([
+            verdict({notAttempted: true}),
+            verdict({ok: true}),
+        ]);
+        const lines: string[] = [];
+        const gate = await runProbeGate("/t", probe, (l) => lines.push(l));
+        expect(gate.ok).toBe(true);
+        expect(seen.map((o) => o.transcriptsDir)).toEqual([
+            join("/t", "1"),
+            join("/t", "2"),
+        ]);
+        expect(lines[1]).toMatch(/^read-scope probe \(retry\)/);
+    });
+
+    it("fails as unproven when the model did not attempt twice", async () => {
+        const {probe, seen} = scripted([verdict({notAttempted: true})]);
+        const gate = await runProbeGate("/t", probe, quiet);
+        expect(gate.ok).toBe(false);
+        expect(seen).toHaveLength(2);
+        expect(gate.message).toContain("unproven for this run, not broken");
+    });
+
+    it("never retries a leak, a missing denial, or a dispatch failure", async () => {
+        for (const first of [
+            verdict({detail: "LEAKED"}),
+            verdict({detail: "deniedReads=0"}),
+            verdict({detail: "probe dispatch FAILED"}),
+        ]) {
+            const {probe, seen} = scripted([first, verdict({ok: true})]);
+            const gate = await runProbeGate("/t", probe, quiet);
+            expect(gate.ok).toBe(false);
+            expect(seen).toHaveLength(1);
+            expect(gate.message).toContain("Do not trust this run's recall");
+            expect(gate.message).toContain(first.detail);
+        }
     });
 });
