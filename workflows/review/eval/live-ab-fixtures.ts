@@ -67,7 +67,8 @@ export const hitFinding = {
 };
 
 /** A scripted runner in live-producer.test.ts's shape: fixed cost, a tool
- * call count only for the agent that reports one, and the requests kept. */
+ * call count only for the agent that reports one, and the dispatched agent
+ * names kept in order. */
 export const scriptedRunner = (): {
     runner: LiveAgentRunner;
     names: string[];

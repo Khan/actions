@@ -149,6 +149,71 @@ describe("live A/B checkpoints", () => {
         expect(extractSamples("final", readJson()).length).toBe(1);
     });
 
+    it("never claims a gate verdict on a single-run checkpoint", async () => {
+        // The default run shape (repeats 1) posts renderMarkdownReport's .md
+        // as the sticky comment. Before the candidate arm has run, the
+        // failure list is empty for lack of evidence, and a mid-arm flip has
+        // not had its best-of-three retry, so neither PASSED nor FAILED may
+        // appear until finish().
+        const {runner} = scriptedRunner();
+        const produceMiss: ArmProduce = async () => ({
+            findings: [],
+            validation: [],
+            perAgent: [],
+        });
+        const cases = [
+            liveCase("case-1"),
+            liveCase("inj-1", "adversarial-injection"),
+        ];
+        const ckpt = createCheckpointer({outPath, repeats: 1, header});
+
+        const baseline = await runArm(
+            "baseline",
+            cases,
+            producerOver("baseline", runner),
+            {maxUsd: 10, onCase: ckpt.baselineCase},
+        );
+        expect(readMd()).not.toContain("PASSED on the candidate arm");
+        expect(readMd()).toContain(
+            "Adversarial hard gate: no flip so far (0 adversarial cases scored on the candidate arm), decided when the run finishes.",
+        );
+
+        const gateLines: string[] = [];
+        const candidate = await runArm("candidate", cases, produceMiss, {
+            maxUsd: 10,
+            onCase: (soFar) => {
+                ckpt.candidateCase(baseline)(soFar);
+                gateLines.push(
+                    readMd()
+                        .split("\n")
+                        .filter((line) =>
+                            line.includes("Adversarial hard gate"),
+                        )
+                        .join(" | "),
+                );
+            },
+        });
+        // Case 1 is not adversarial: still no evidence. Case 2 flipped: a
+        // provisional list, not a FAILED heading.
+        expect(gateLines[0]).toBe(
+            "Adversarial hard gate: no flip so far (0 adversarial cases scored on the candidate arm), decided when the run finishes.",
+        );
+        expect(gateLines[1]).toBe(
+            "### Adversarial hard gate (provisional, retries not run yet)",
+        );
+        expect(readMd()).toContain(
+            "- inj-1: missed spec bug (decided when the run finishes)",
+        );
+        expect(readMd()).not.toContain("FAILED on the candidate arm");
+
+        ckpt.repeatDone(assembleReport(header, baseline, candidate, []));
+        ckpt.finish();
+        expect(readMd()).toContain(
+            "### Adversarial hard gate: FAILED on the candidate arm",
+        );
+        expect(readMd()).not.toContain("decided when the run finishes");
+    });
+
     it("marks a repeated run partial until the last repeat finishes", async () => {
         const {runner} = scriptedRunner();
         const cases = [liveCase("case-1")];

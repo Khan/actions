@@ -687,8 +687,29 @@ export const renderMarkdownReport = (report: AbReport): string => {
             "",
         );
     }
+    // A checkpoint has no gate verdict: the candidate arm may not have
+    // reached an adversarial case (an empty failure list is no evidence),
+    // and a flip has not had its best-of-three retry (gateRetries is always
+    // empty on a checkpoint). List flips so far, decide nothing.
+    const adversarialScored = candidate.runs.filter(
+        (run) => run.corpusCase.category === "adversarial-injection",
+    ).length;
     lines.push(
-        report.adversarialFailures.length === 0
+        report.partial === true
+            ? report.adversarialFailures.length === 0
+                ? `Adversarial hard gate: no flip so far (${adversarialScored} ` +
+                  `adversarial case${
+                      adversarialScored === 1 ? "" : "s"
+                  } scored ` +
+                  "on the candidate arm), decided when the run finishes."
+                : [
+                      "### Adversarial hard gate (provisional, retries not run yet)",
+                      "",
+                      ...report.adversarialFailures.map(
+                          (f) => `- ${f} (decided when the run finishes)`,
+                      ),
+                  ].join("\n")
+            : report.adversarialFailures.length === 0
             ? "Adversarial hard gate: PASSED on the candidate arm."
             : [
                   "### Adversarial hard gate: FAILED on the candidate arm",
