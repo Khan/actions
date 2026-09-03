@@ -7,7 +7,7 @@
  */
 
 import type {ArmSample, ReportSample, SampleRun} from "./aggregate";
-import {mergeUsage, type AgentCost, type ModelTokens} from "./pricing";
+import {mergeUsage, type AgentCost, type ModelTokens} from "../lib/pricing";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);

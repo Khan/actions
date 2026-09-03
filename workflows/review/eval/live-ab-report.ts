@@ -13,7 +13,7 @@ import {
     type AgentCost,
     type ModelTokens,
     type RateCard,
-} from "./pricing";
+} from "../lib/pricing";
 import type {
     CaseVerification,
     CorpusCase,

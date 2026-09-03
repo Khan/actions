@@ -21,7 +21,7 @@ import type {LiveDefectSpec} from "./corpus/loader";
 import type {MatchFallback} from "./live-match";
 import type {RunCandidate} from "./runner";
 import {extractJsonObject} from "./extract-json";
-import {usageOfResponse, type ModelTokens} from "./pricing";
+import {usageOfResponse, type ModelTokens} from "../lib/pricing";
 
 /**
  * Pinned snapshot, deliberately at the Haiku tier: the question is a narrow

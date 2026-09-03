@@ -7,7 +7,11 @@ import {parseCase, type CorpusCase} from "./corpus/loader";
 import {renderMarkdownReport, runArm, type ArmProduce} from "./live-ab";
 import {armCosts} from "./cost-rows";
 import {armToolCalls} from "./live-ab-report";
-import {readOverlayRates, type ModelTokens, type RateCard} from "./pricing";
+import {
+    readOverlayRates,
+    type ModelTokens,
+    type RateCard,
+} from "../lib/pricing";
 
 /**
  * The report rows that read cost and volume apart. Split from live-ab.test.ts

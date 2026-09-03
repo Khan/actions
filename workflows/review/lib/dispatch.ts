@@ -67,7 +67,14 @@ import {
     type Candidate,
     type Claim,
 } from "./dispatch-contracts";
-import {loadAgents, type AgentRunner, type DispatchFs} from "./dispatch-agents";
+import {
+    loadAgents,
+    mapConcurrent,
+    meterFields,
+    readJson,
+    type AgentRunner,
+    type DispatchFs,
+} from "./dispatch-agents";
 import {
     buildProseJudgeArtifact,
     createProseGate,
@@ -77,6 +84,7 @@ import {
     type ProseJudgeArtifact,
     type ProseRunner,
 } from "./judge-prose";
+import type {ModelTokens} from "./pricing";
 
 import {computeRoster, TRIAGE_DIMENSION} from "./dispatch-roster";
 import type {RosterShed} from "./dispatch-roster";
@@ -175,9 +183,20 @@ const VALIDATOR = "claim-validator";
 export type PerAgentReport = {
     name: string;
     model: string;
+    /** The SDK's own meter, list price (see cost-report.ts for Khan's rate). */
     usd: number;
     turns: number;
     wallMs: number;
+    /** Tokens per model behind `usd`, when the runner delivered a result record. */
+    usage?: ModelTokens[];
+    /** Tool calls the agent made, when the runner counts them. */
+    toolCalls?: number;
+    /**
+     * Tokens the prose judge spent gating this agent's submissions. The
+     * judge runs its own SDK sessions inside the agent's submit_result path,
+     * so this is not inside `usage` and would otherwise be invisible.
+     */
+    judgeUsage?: ModelTokens[];
     /** This entry is the one malformed-output retry of the same agent. */
     retried?: boolean;
     /**
@@ -264,41 +283,6 @@ export type DispatchOptions = {
      * default as every other optional model surface here.
      */
     proseRunner?: ProseRunner;
-};
-
-const readJson = (fs: DispatchFs, path: string): unknown => {
-    if (!fs.existsSync(path)) {
-        return undefined;
-    }
-    try {
-        return JSON.parse(fs.readFileSync(path, "utf8"));
-    } catch {
-        return undefined;
-    }
-};
-
-/** Bounded-concurrency map (order-preserving). */
-const mapConcurrent = async <T, R>(
-    items: T[],
-    limit: number,
-    worker: (item: T) => Promise<R>,
-): Promise<R[]> => {
-    const results: R[] = new Array(items.length) as R[];
-    let next = 0;
-    const lanes = Array.from(
-        {length: Math.max(1, Math.min(limit, items.length))},
-        async () => {
-            for (;;) {
-                const index = next++;
-                if (index >= items.length) {
-                    return;
-                }
-                results[index] = await worker(items[index]);
-            }
-        },
-    );
-    await Promise.all(lanes);
-    return results;
 };
 
 const noteLine = {
@@ -458,6 +442,7 @@ export const runDispatch = async (
                     usd: result.usd,
                     turns: result.turns,
                     wallMs: result.wallMs,
+                    ...meterFields(result, proseGate?.usage),
                     failed: "refused",
                 });
                 return dispatchAgent(name, malformedNote, fallback);
@@ -469,6 +454,7 @@ export const runDispatch = async (
                 usd: result.usd,
                 turns: result.turns,
                 wallMs: result.wallMs,
+                ...meterFields(result, proseGate?.usage),
                 ...(malformedNote === undefined ? {} : {retried: true}),
                 ...(modelOverride === undefined ? {} : {fellBackTo: model}),
                 ...(result.structured === true ? {structuredFinal: true} : {}),

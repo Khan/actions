@@ -62,7 +62,7 @@ import {
     type AgentCost,
     type ModelTokens,
     type RateCard,
-} from "./pricing";
+} from "../lib/pricing";
 
 /* -------------------------------------------------------------------------- */
 /* The report subset this module consumes (structural, version-tolerant)      */

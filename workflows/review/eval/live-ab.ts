@@ -66,7 +66,7 @@ import {aggregateSamples, extractSamples} from "./aggregate";
 import {SMOKE_TAG, loadLiveCorpus, type CorpusCase} from "./corpus/loader";
 import {aggregate, buildCorpusRequests, type JudgeModel} from "./judge";
 import {liveJudge} from "./judge-live-model";
-import {readOverlayRates, type ModelTokens} from "./pricing";
+import {readOverlayRates, type ModelTokens} from "../lib/pricing";
 import {
     renderMarkdownReport,
     renderMultiMarkdownReport,

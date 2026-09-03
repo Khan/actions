@@ -24,7 +24,7 @@ import {
     type AgentCost,
     type ModelTokens,
     type RateCard,
-} from "./pricing";
+} from "../lib/pricing";
 
 export const money = (usd: number | undefined): string =>
     usd === undefined ? "n/a" : `$${usd.toFixed(2)}`;

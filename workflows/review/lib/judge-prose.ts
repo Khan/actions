@@ -59,6 +59,7 @@
  * silently turn enforcement off.
  */
 
+import type {ModelTokens} from "./pricing";
 import {extractJsonObject} from "./agent-json.ts";
 import {
     firstSentence,
@@ -409,7 +410,15 @@ export const extractProseUnits = (
  * accepts. Injected so tests stub it and only the dispatch CLI entry loads
  * the SDK implementation (judge-prose-runner.ts).
  */
-export type ProseRunner = (prompt: string) => Promise<string>;
+export type ProseRunner = (
+    prompt: string,
+    /**
+     * Receives the call's token usage when the runner can see it, so the
+     * gate (one per agent) can attribute the judge's spend to the agent it
+     * gated. Test stubs and older runners ignore it.
+     */
+    onUsage?: (usage: ModelTokens) => void,
+) => Promise<string>;
 
 /** The four states the artifact records; see the module header for why. */
 export type JudgeState = "skipped" | "pass" | "fail" | "error";
@@ -462,6 +471,8 @@ export type ProseGate = {
     gate: (payload: Record<string, unknown>) => Promise<string | null>;
     /** Every verdict this gate issued, all attempts, for the artifact. */
     records: JudgeRecord[];
+    /** Tokens the judge spent on this gate's calls, when the runner reports them. */
+    usage: ModelTokens[];
 };
 
 /**
@@ -510,6 +521,10 @@ export const createProseGate = (options: {
     const {runner, source} = options;
     const maxBounces = options.maxBounces ?? MAX_PROSE_BOUNCES;
     const records: JudgeRecord[] = [];
+    const usage: ModelTokens[] = [];
+    const onUsage = (used: ModelTokens): void => {
+        usage.push(used);
+    };
     let bounces = 0;
     let attempt = 0;
     // (key, prose) pairs that already passed: a bounce tells the author to
@@ -579,6 +594,7 @@ export const createProseGate = (options: {
                                                 unit.codeAssignedLabel === true,
                                         },
                                     ),
+                                    onUsage,
                                 ),
                             ),
                         };
@@ -666,7 +682,7 @@ export const createProseGate = (options: {
         return buildBounceMessage(failures);
     };
 
-    return {gate, records};
+    return {gate, records, usage};
 };
 
 /**
