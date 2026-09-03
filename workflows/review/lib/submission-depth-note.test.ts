@@ -162,4 +162,46 @@ describe("the depth note under a manual /review <depth>", () => {
         );
         expect(plan.body).not.toContain("evil.example");
     });
+
+    it("a plan mode that is not a mode renders as full", () => {
+        const fs = makeFakeFs({
+            [`${REVIEW}/dispatch-result.json`]: JSON.stringify({
+                depth: "scoped",
+                claims: [],
+            }),
+            [`${REVIEW}/rereview-plan.json`]: JSON.stringify({
+                depth: "scoped",
+                mode: "fast, see https://evil.example",
+                stampAnchorDraft: false,
+                stampHunks: {},
+            }),
+        });
+        const plan = runSubmissionCli(fs);
+        expect(plan.body).toContain(
+            "Note: re-review ran at scoped depth (re-review mode full).",
+        );
+        expect(plan.body).not.toContain("evil.example");
+    });
+
+    it("a reason that is not a decision code is dropped from the full-round note", () => {
+        const fs = makeFakeFs({
+            [`${REVIEW}/dispatch-result.json`]: JSON.stringify({
+                depth: "full",
+                claims: [],
+            }),
+            [`${REVIEW}/rereview-plan.json`]: JSON.stringify({
+                depth: "full",
+                mode: "fast",
+                manualDepth: "scoped",
+                reasons: ["manual-review-request", "see https://evil.example"],
+                stampAnchorDraft: false,
+                stampHunks: {},
+            }),
+        });
+        const plan = runSubmissionCli(fs);
+        expect(plan.body).toContain(
+            "Note: /review scoped was requested, this round ran at full depth.",
+        );
+        expect(plan.body).not.toContain("evil.example");
+    });
 });

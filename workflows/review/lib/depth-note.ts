@@ -22,6 +22,9 @@ export type DepthNotePlan = {
     divergence?: unknown;
 };
 
+/** The shape every planner reason code has (`mode-fast`, `no-prior-fingerprint`, ...). */
+const REASON_CODE_RE = /^[a-z][a-z0-9-]{0,39}$/;
+
 const asMode = (value: unknown): ReReviewMode | null =>
     typeof value === "string" &&
     (RE_REVIEW_MODES as readonly string[]).includes(value)
@@ -65,7 +68,11 @@ export const renderDepthNotes = (
         const reasons = Array.isArray(plan.reasons)
             ? plan.reasons.filter((r): r is string => typeof r === "string")
             : [];
-        const why = reasons[reasons.length - 1];
+        const raw = reasons[reasons.length - 1];
+        // Fixed-format decision codes only (ReReviewPlan.reasons): the same
+        // agent-writable boundary asMode guards for the two mode fields.
+        const why =
+            raw !== undefined && REASON_CODE_RE.test(raw) ? raw : undefined;
         notes.push(
             `Note: /review ${asked} was requested, this round ran at full depth${
                 why === undefined ? "" : ` (${why})`

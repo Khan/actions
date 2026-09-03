@@ -9,9 +9,9 @@
  * on Khan/webapp the reviewer's ONLY trigger is `issue_comment`, because a
  * shim (review-kore-prs.yml) posts `/review` on every push, so treating
  * every comment-triggered run as manual would make the configured mode dead
- * config on exactly the consumer the modes are for. The comment author is
- * the signal that remains: a human's `/review` forces full, automation's
- * follows the mode dial like the push it stands in for.
+ * config on exactly the consumer the modes are for. The comment author and
+ * body are the signals that remain: a human's bare `/review` forces full,
+ * automation's follows the mode dial like the push it stands in for.
  *
  * A human may also name the depth: `/review scoped` (or `/review delta`,
  * `/review diff`, `/review diff-only`) asks for one scoped round over the
