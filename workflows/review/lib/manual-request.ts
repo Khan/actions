@@ -17,8 +17,10 @@
  * `/review diff`, `/review diff-only`) asks for one scoped round over the
  * hunks no full review has seen, whatever the dial says
  * ({@link requestedDepthFromComment}). The token is advisory to the planner,
- * which still applies every guard (no anchor fingerprint, ready-for-review
- * anchor, overflow, tripwire) and falls back to full when one trips.
+ * which honors it only at or above the configured dial (a comment may buy
+ * more review than the repo configured, never less) and still applies every
+ * guard (no anchor fingerprint, ready-for-review anchor, overflow, tripwire),
+ * falling back to full when one trips.
  */
 
 import {RE_REVIEW_MODES} from "./routing-config";
@@ -171,9 +173,3 @@ export const commentFromEvent = (
         ...(author !== undefined ? {author} : {}),
     };
 };
-
-/** Read the triggering comment's author from the runner's event payload. */
-export const commentAuthorFromEvent = (
-    fs: EventFs,
-    eventPath: string | undefined,
-): CommentAuthor | undefined => commentFromEvent(fs, eventPath)?.author;

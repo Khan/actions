@@ -1,8 +1,11 @@
 /**
- * Hunk signatures and divergence: the content-hashed fingerprint a full
- * review stamps and the drift measure the tripwire reads. Split from
- * `rereview-mode.ts` by the max-lines budget; that module re-exports every
- * public name here, so callers keep importing from it.
+ * Hunk signatures, divergence, and scoped-diff staging: the content-hashed
+ * fingerprint a full review stamps, the drift measure the tripwire reads,
+ * and the diff rebuilt from the hunks no fingerprint has seen. Split from
+ * `rereview-mode.ts` by the max-lines budget; that module re-exports the
+ * names callers imported from it before the split (every export here;
+ * `hashHunk` stays module-private as it was), so those imports do not
+ * change.
  */
 
 import {createHash} from "node:crypto";
@@ -24,7 +27,7 @@ export type HunkSignature = Record<string, string[]>;
 /** Truncation keeps the stamp compact; 16 hex chars ≈ 64 bits per hunk. */
 const HUNK_HASH_CHARS = 16;
 
-export const hashHunk = (hunkText: string): string => {
+const hashHunk = (hunkText: string): string => {
     const content = hunkText
         .split("\n")
         .filter((line) => line.startsWith("+") || line.startsWith("-"))
@@ -99,4 +102,37 @@ export const computeDivergence = (
         unreviewedHunks,
         unreviewedShare: totalHunks === 0 ? 0 : unreviewedHunks / totalHunks,
     };
+};
+
+/* -------------------------------------------------------------------------- */
+/* Scoped-diff staging                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Rebuild the diff keeping only the hunks whose hash the fingerprint does
+ * not contain; the diff a `scoped`/`flip-gated` run stages to its
+ * finding-producing reviewers. Each kept file keeps its section header lines
+ * and its in-scope hunks verbatim (original hunk headers included); files
+ * with no in-scope hunk are dropped entirely.
+ */
+export const buildScopedDiff = (
+    diffText: string,
+    reviewed: HunkSignature,
+): string => {
+    const kept: string[] = [];
+    for (const section of splitUnifiedDiff(diffText)) {
+        const seen = new Set(reviewed[section.path] ?? []);
+        const hunks = splitPatchHunks(section.text);
+        const inScope = hunks.filter((hunk) => !seen.has(hashHunk(hunk)));
+        if (inScope.length === 0) {
+            continue;
+        }
+        const firstHunkAt = section.text.search(/^@@ /m);
+        const header =
+            firstHunkAt === -1
+                ? section.text
+                : section.text.slice(0, firstHunkAt).replace(/\n$/, "");
+        kept.push([header, ...inScope].join("\n"));
+    }
+    return kept.join("\n");
 };

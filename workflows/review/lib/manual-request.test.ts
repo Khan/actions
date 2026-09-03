@@ -1,7 +1,6 @@
 import {describe, it, expect} from "vitest";
 
 import {
-    commentAuthorFromEvent,
     commentFromEvent,
     isManualReviewRequest,
     requestedDepthFromComment,
@@ -101,7 +100,7 @@ describe("isManualReviewRequest", () => {
     });
 });
 
-describe("commentAuthorFromEvent", () => {
+describe("commentFromEvent author", () => {
     const fsOf = (files: Record<string, string>) => ({
         readFileSync: (p: string) => {
             const content = files[p];
@@ -119,23 +118,23 @@ describe("commentAuthorFromEvent", () => {
                 comment: {user: {login: "someone", type: "User"}},
             }),
         });
-        expect(commentAuthorFromEvent(fs, "/e.json")).toEqual({
+        expect(commentFromEvent(fs, "/e.json")?.author).toEqual({
             login: "someone",
             type: "User",
         });
     });
 
     it("returns undefined for a missing path, bad JSON, or no comment", () => {
-        expect(commentAuthorFromEvent(fsOf({}), undefined)).toBeUndefined();
-        expect(commentAuthorFromEvent(fsOf({}), "/e.json")).toBeUndefined();
+        expect(commentFromEvent(fsOf({}), undefined)).toBeUndefined();
+        expect(commentFromEvent(fsOf({}), "/e.json")).toBeUndefined();
         expect(
-            commentAuthorFromEvent(fsOf({"/e.json": "not json"}), "/e.json"),
+            commentFromEvent(fsOf({"/e.json": "not json"}), "/e.json"),
         ).toBeUndefined();
         expect(
-            commentAuthorFromEvent(
+            commentFromEvent(
                 fsOf({"/e.json": JSON.stringify({action: "created"})}),
                 "/e.json",
-            ),
+            )?.author,
         ).toBeUndefined();
     });
 
@@ -145,7 +144,7 @@ describe("commentAuthorFromEvent", () => {
                 comment: {user: {login: 42, type: "User"}},
             }),
         });
-        expect(commentAuthorFromEvent(fs, "/e.json")).toEqual({type: "User"});
+        expect(commentFromEvent(fs, "/e.json")?.author).toEqual({type: "User"});
     });
 });
 

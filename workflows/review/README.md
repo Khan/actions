@@ -622,14 +622,21 @@ round. A human can also name the depth for that one run, `/review <depth>`
 with any mode from the table (`/review scoped` is the useful one under a
 `fast` dial: the whole roster over the hunks no full review has seen, without
 a full round; `delta`, `diff`, and `diff-only` are accepted as synonyms for
-`scoped`). The token sets the dial position, nothing more: the same guards
-below apply, so a named depth with no anchor fingerprint, a draft-taken
-anchor, an overflow, or a tripped divergence tripwire still runs full, and a
-missing staging input degrades it to full the way it degrades the configured
-mode. The plan records the ask (`manualDepth`, reason `manual-depth-<depth>`
-on success) and the review body's depth note says `requested by /review
-<depth>`. A token that names no mode (a typo) is ignored and the ask plans
-`full`. A `/review` posted by our automation (a Bot-type account, or a login
+`scoped`). The token may match or deepen the configured dial, never shallow
+it: `flip-gated` and `fast` license the reduced-depth dismissal of a standing
+block with no pass over the new code, and any collaborator (the PR author
+included) can comment, so a repo that did not configure those depths must not
+reach that route by comment. An ask below the dial plans `full` (reason
+`manual-depth-below-dial`). At or above the dial the same guards below apply,
+so a named depth with no anchor fingerprint, a draft-taken anchor, an
+overflow, or a tripped divergence tripwire still runs full, and a missing
+staging input degrades it to full the way it degrades the configured mode.
+The plan records the ask (`manualDepth`, reason `manual-depth-<depth>` on
+success), a reduced round's depth note says `requested by /review <depth>`,
+and a full round that an ask tried to reduce says `/review <depth> was
+requested, this round ran at full depth (<reason>)`. A token that names no
+mode (a typo) is ignored, plans `full`, and gets no note. A `/review` posted
+by our automation (a Bot-type account, or a login
 in the `REVIEW_AUTOMATION_LOGINS` env, comma-separated and defaulting to
 `khan-actions-bot`; Khan/webapp's shim posts one per push) is not a manual
 ask and follows the configured mode like the push it stands in for, whatever

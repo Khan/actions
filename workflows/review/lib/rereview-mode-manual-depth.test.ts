@@ -15,7 +15,10 @@ import type {ReReviewStamp} from "./rereview-mode";
  * the bare `/review` is the only way to get anything reviewed on a re-push
  * and it always plans full; `/review scoped` asks for the whole roster over
  * the unseen hunks without paying for a full round. The token never skips
- * a guard, and automation-posted comments never carry one.
+ * a guard, never shallows the configured dial (`flip-gated` and `fast`
+ * license the reduced-depth dismissal of a standing block, so a repo that
+ * did not configure them must not reach it by comment), and
+ * automation-posted comments never carry one.
  */
 
 const TWO_HUNK_DIFF = [
@@ -123,6 +126,65 @@ describe("decideReReviewDepth with a manual depth", () => {
         // The fallback still records the ask, so the artifact shows a human
         // asked for scoped and a guard answered with full.
         expect(tripped.manualDepth).toBe("scoped");
+    });
+
+    it("a manual depth below the configured dial plans the bare-/review full round", () => {
+        // `/review fast` on a full-dial repo would otherwise run
+        // reconcile-only over nothing and, with every blocking thread
+        // resolved, clear a standing REQUEST_CHANGES by dismissal without
+        // any pass over the new code. Anyone who can comment could do it.
+        const anchored = stampOf({anchorHunks: CURRENT});
+        for (const [mode, asked] of [
+            ["full", "fast"],
+            ["full", "flip-gated"],
+            ["full", "scoped"],
+            ["scoped", "fast"],
+            ["scoped", "flip-gated"],
+            ["flip-gated", "fast"],
+        ] as const) {
+            const plan = decideReReviewDepth({
+                mode,
+                isDraft: false,
+                priorStamp: anchored,
+                currentSignature: CURRENT,
+                manualRequest: true,
+                manualDepth: asked,
+            });
+            expect(plan.depth, `${asked} under ${mode}`).toBe("full");
+            expect(plan.dispatch, `${asked} under ${mode}`).toBe("all");
+            expect(plan.reasons, `${asked} under ${mode}`).toEqual([
+                "manual-review-request",
+                "manual-depth-below-dial",
+            ]);
+            // The ask is still recorded so the body can say what happened.
+            expect(plan.manualDepth, `${asked} under ${mode}`).toBe(asked);
+        }
+    });
+
+    it("a manual depth at or above the dial is honored", () => {
+        const anchored = stampOf({anchorHunks: CURRENT});
+        for (const [mode, asked] of [
+            ["fast", "fast"],
+            ["fast", "flip-gated"],
+            ["fast", "scoped"],
+            ["flip-gated", "flip-gated"],
+            ["flip-gated", "scoped"],
+            ["scoped", "scoped"],
+        ] as const) {
+            const plan = decideReReviewDepth({
+                mode,
+                isDraft: false,
+                priorStamp: anchored,
+                currentSignature: CURRENT,
+                manualRequest: true,
+                manualDepth: asked,
+            });
+            expect(plan.depth, `${asked} under ${mode}`).toBe(asked);
+            expect(plan.reasons, `${asked} under ${mode}`).toEqual([
+                "manual-review-request",
+                `manual-depth-${asked}`,
+            ]);
+        }
     });
 
     it("a manual depth is ignored without a manual request", () => {
@@ -242,6 +304,26 @@ describe("runRereviewPlanCli with a /review <depth> comment", () => {
             expect(plan.depth, word).toBe("scoped");
             expect(plan.manualDepth, word).toBe("scoped");
         }
+    });
+
+    it("a human /review fast on a full-dial repo plans full, ask recorded", () => {
+        const fs = fakeFs({
+            ...stagedInputs({
+                [`${REVIEW_DIR}/routing.json`]: JSON.stringify({
+                    reReviewMode: "full",
+                }),
+            }),
+            [EVENT_PATH]: commentEvent("a-human", "User", "/review fast"),
+        });
+        const {plan} = planCli(fs, "issue_comment", EVENT_PATH);
+        expect(plan.depth).toBe("full");
+        expect(plan.dispatch).toBe("all");
+        expect(plan.reasons).toEqual([
+            "manual-review-request",
+            "manual-depth-below-dial",
+        ]);
+        expect(plan.manualDepth).toBe("fast");
+        expect(fs.files.has(`${REVIEW_DIR}/scoped.diff`)).toBe(false);
     });
 
     it("an unrecognized token after /review plans full", () => {

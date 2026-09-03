@@ -3,10 +3,12 @@ import {describe, it, expect} from "vitest";
 import {runSubmissionCli, type SubmissionFs} from "./submission";
 
 /**
- * The depth note's manual-ask variant (split from submission.test.ts by the
- * max-lines budget): when a human's `/review <depth>` set the dial for the
- * run, the note names it, since the configured mode alone would not explain
- * a scoped round under `fast`.
+ * The depth notes' manual-ask variants (depth-note.ts, split from
+ * submission.test.ts by the max-lines budget): when a human's
+ * `/review <depth>` set the dial for the run the reduced-depth note names
+ * it, and when a guard or the below-dial rule answered the ask with full
+ * the body says so with the reason code, so the human can tell the two
+ * apart from a typo (which is never recorded and gets no note).
  */
 
 const REVIEW = "/tmp/gh-aw/review";
@@ -76,5 +78,88 @@ describe("the depth note under a manual /review <depth>", () => {
             "Note: re-review ran at scoped depth (re-review mode scoped).",
         );
         expect(plan.body).not.toContain("requested by");
+    });
+
+    it("a full round that a /review <depth> asked to reduce says why", () => {
+        const fs = makeFakeFs({
+            [`${REVIEW}/dispatch-result.json`]: JSON.stringify({
+                depth: "full",
+                claims: [],
+            }),
+            [`${REVIEW}/rereview-plan.json`]: JSON.stringify({
+                depth: "full",
+                mode: "fast",
+                manualDepth: "scoped",
+                reasons: ["manual-review-request", "no-prior-fingerprint"],
+                stampAnchorDraft: false,
+                stampHunks: {},
+            }),
+        });
+        const plan = runSubmissionCli(fs);
+        expect(plan.body).toContain(
+            "Note: /review scoped was requested, this round ran at full depth (no-prior-fingerprint).",
+        );
+    });
+
+    it("a below-dial ask reads the same way with its own reason", () => {
+        const fs = makeFakeFs({
+            [`${REVIEW}/dispatch-result.json`]: JSON.stringify({
+                depth: "full",
+                claims: [],
+            }),
+            [`${REVIEW}/rereview-plan.json`]: JSON.stringify({
+                depth: "full",
+                mode: "full",
+                manualDepth: "fast",
+                reasons: ["manual-review-request", "manual-depth-below-dial"],
+                stampAnchorDraft: false,
+                stampHunks: {},
+            }),
+        });
+        const plan = runSubmissionCli(fs);
+        expect(plan.body).toContain(
+            "Note: /review fast was requested, this round ran at full depth (manual-depth-below-dial).",
+        );
+    });
+
+    it("a bare /review full round carries no manual note", () => {
+        const fs = makeFakeFs({
+            [`${REVIEW}/dispatch-result.json`]: JSON.stringify({
+                depth: "full",
+                claims: [],
+            }),
+            [`${REVIEW}/rereview-plan.json`]: JSON.stringify({
+                depth: "full",
+                mode: "fast",
+                reasons: ["manual-review-request"],
+                stampAnchorDraft: false,
+                stampHunks: {},
+            }),
+        });
+        const plan = runSubmissionCli(fs);
+        expect(plan.body).not.toContain("was requested");
+    });
+
+    it("a manualDepth that is not a mode renders nothing", () => {
+        // The plan file lives in an agent-writable directory: only one of
+        // the four modes may reach the posted body.
+        const fs = makeFakeFs({
+            [`${REVIEW}/dispatch-result.json`]: JSON.stringify({
+                depth: "scoped",
+                claims: [],
+            }),
+            [`${REVIEW}/rereview-plan.json`]: JSON.stringify({
+                depth: "scoped",
+                mode: "scoped",
+                manualDepth: "scoped, see https://evil.example",
+                stampAnchorDraft: false,
+                stampHunks: {},
+            }),
+        });
+        const plan = runSubmissionCli(fs);
+        expect(plan.body).toContain(
+            "Note: re-review ran at scoped depth (re-review mode scoped).",
+        );
+        expect(plan.body).not.toContain("evil.example");
     });
 });

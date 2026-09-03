@@ -78,12 +78,11 @@
  * code under review.
  */
 
-import {splitPatchHunks, splitUnifiedDiff} from "./diff";
 import {
+    buildScopedDiff,
     computeDivergence,
     computeHunkSignature,
     DEFAULT_TRIPWIRE_THRESHOLD,
-    hashHunk,
 } from "./hunk-signature";
 import type {Divergence, HunkSignature} from "./hunk-signature";
 import {
@@ -94,8 +93,10 @@ import {
 import {DEFAULT_RE_REVIEW_MODE, RE_REVIEW_MODES} from "./routing-config";
 import type {ReReviewMode} from "./routing-config";
 
-// Split out by the max-lines budget; re-exported so callers keep one import.
+// Split out by the max-lines budget; re-exported so the names callers
+// imported from here before the split keep resolving.
 export {
+    buildScopedDiff,
     computeDivergence,
     computeHunkSignature,
     DEFAULT_TRIPWIRE_THRESHOLD,
@@ -477,12 +478,17 @@ export type ReReviewDecisionInput = {
     manualRequest?: boolean;
     /**
      * The depth the human's `/review <depth>` named
-     * (`manual-request.ts`'s requestedDepthFromComment), a one-run override
-     * of the mode dial. Only read when `manualRequest` is true; absent or
-     * `full` keeps the bare-`/review` behavior. A reduced ask still runs
-     * every guard below (no anchor, ready-for-review anchor, overflow,
-     * tripwire) and falls back to full when one trips: the token picks the
-     * dial position, it never skips the guards.
+     * (`manual-request.ts`'s requestedDepthFromComment), a one-run dial
+     * position. Only read when `manualRequest` is true; absent or `full`
+     * keeps the bare-`/review` behavior. The ask may match or deepen the
+     * configured mode, never shallow it: `flip-gated` and `fast` license
+     * the reduced-depth dismissal of a standing block
+     * (submission-clearance.ts) with no pass over the new code, and a repo
+     * that did not configure them must not reach that route by comment
+     * (any collaborator, the PR author included, can post one). An ask
+     * below the dial plans the bare-`/review` full round. An ask at or
+     * above it still runs every guard below (no anchor, ready-for-review
+     * anchor, overflow, tripwire) and falls back to full when one trips.
      */
     manualDepth?: ReReviewMode;
 };
@@ -508,7 +514,11 @@ export type ReReviewPlan = {
     flipGate: boolean;
     /** Fixed-format decision codes, most significant first (never prose). */
     reasons: string[];
-    /** The depth a human's `/review <depth>` named, when one did. */
+    /**
+     * The depth a human's `/review <depth>` named, when one did, whether or
+     * not the run ended at that depth (a guard or the below-dial rule may
+     * have answered with full; `reasons` says which).
+     */
     manualDepth?: ReReviewMode;
     /** Divergence vs. the anchor; null when no anchor fingerprint exists. */
     divergence: Divergence | null;
@@ -555,55 +565,68 @@ const fullPlan = (
 });
 
 /**
+ * Rank of a mode on the depth ladder, deepest first (RE_REVIEW_MODES is
+ * declared in that order: full, scoped, flip-gated, fast).
+ */
+const depthRank = (mode: ReReviewMode): number =>
+    (RE_REVIEW_MODES as readonly string[]).indexOf(mode);
+
+/**
  * Decide how deep this run reviews. Pure. Every guard resolves toward
  * `full`; a cheaper depth requires a dial position (the configured mode, or
- * the depth a human's `/review <depth>` named for this one run) AND a
- * usable, ready anchor fingerprint AND divergence under the tripwire
- * threshold.
+ * the depth a human's `/review <depth>` named for this one run, at or
+ * deeper than the configured mode) AND a usable, ready anchor fingerprint
+ * AND divergence under the tripwire threshold.
  */
 export const decideReReviewDepth = (
     input: ReReviewDecisionInput,
 ): ReReviewPlan => {
-    if (input.manualRequest === true) {
-        const asked = input.manualDepth ?? "full";
-        if (asked === "full") {
-            return fullPlan(input, ["manual-review-request"], null, false);
-        }
-        // A named reduced depth is a one-run dial position: the guards
-        // below apply as they would to the configured mode, so the ask can
-        // never buy a cheaper round than the dial itself could.
+    if (input.manualRequest !== true) {
+        return decideFromDial(input, input.mode, false);
+    }
+    const asked = input.manualDepth;
+    if (asked === undefined || asked === "full") {
+        return fullPlan(input, ["manual-review-request"], null, false);
+    }
+    // The ask exists to buy MORE review than the dial gives (`/review
+    // scoped` under `fast`), never to hand whoever comments a reduced round
+    // the repo did not configure (see ReReviewDecisionInput.manualDepth).
+    if (depthRank(asked) > depthRank(input.mode)) {
         return {
-            ...decideFromDial(input, asked, ["manual-review-request"]),
+            ...fullPlan(
+                input,
+                ["manual-review-request", "manual-depth-below-dial"],
+                null,
+                false,
+            ),
             manualDepth: asked,
         };
     }
-    return decideFromDial(input, input.mode, []);
+    // A named depth at or above the dial is a one-run dial position: the
+    // guards apply as they would to the configured mode.
+    return {...decideFromDial(input, asked, true), manualDepth: asked};
 };
 
 /**
- * The guard chain under one dial position. `leadingReasons` prefixes every
- * plan's reason list (the manual ask, when there was one); the success
- * reason is `mode-<depth>` for the configured dial and
- * `manual-depth-<depth>` for a human-named one, so the artifact tells the
- * two apart.
+ * The guard chain under one dial position. `manual` says a human named the
+ * position (`/review <depth>`): every reason list then leads with
+ * `manual-review-request`, and the success reason is
+ * `manual-depth-<depth>` rather than `mode-<depth>`, so the artifact tells
+ * the two apart.
  */
 const decideFromDial = (
     input: ReReviewDecisionInput,
     dial: ReReviewMode,
-    leadingReasons: string[],
+    manual: boolean,
 ): ReReviewPlan => {
     const threshold = input.tripwireThreshold ?? DEFAULT_TRIPWIRE_THRESHOLD;
+    const lead = manual ? ["manual-review-request"] : [];
     const full = (
         reason: string,
         divergence: Divergence | null,
         tripwireRearmed: boolean,
     ): ReReviewPlan =>
-        fullPlan(
-            input,
-            [...leadingReasons, reason],
-            divergence,
-            tripwireRearmed,
-        );
+        fullPlan(input, [...lead, reason], divergence, tripwireRearmed);
 
     if (dial === "full") {
         return full("mode-full", null, false);
@@ -630,15 +653,11 @@ const decideFromDial = (
     }
 
     const depth = dial;
-    const manual = leadingReasons.length > 0;
     return {
         mode: input.mode,
         depth,
         ...DEPTH_SHAPE[depth],
-        reasons: [
-            ...leadingReasons,
-            manual ? `manual-depth-${depth}` : `mode-${depth}`,
-        ],
+        reasons: [...lead, manual ? `manual-depth-${depth}` : `mode-${depth}`],
         divergence,
         tripwireRearmed: false,
         stampHunks:
@@ -648,39 +667,6 @@ const decideFromDial = (
         stampAnchorDraft:
             depth === "scoped" ? input.isDraft : input.priorStamp.anchorDraft,
     };
-};
-
-/* -------------------------------------------------------------------------- */
-/* Scoped-diff staging                                                        */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Rebuild the diff keeping only the hunks whose hash the fingerprint does
- * not contain; the diff a `scoped`/`flip-gated` run stages to its
- * finding-producing reviewers. Each kept file keeps its section header lines
- * and its in-scope hunks verbatim (original hunk headers included); files
- * with no in-scope hunk are dropped entirely.
- */
-export const buildScopedDiff = (
-    diffText: string,
-    reviewed: HunkSignature,
-): string => {
-    const kept: string[] = [];
-    for (const section of splitUnifiedDiff(diffText)) {
-        const seen = new Set(reviewed[section.path] ?? []);
-        const hunks = splitPatchHunks(section.text);
-        const inScope = hunks.filter((hunk) => !seen.has(hashHunk(hunk)));
-        if (inScope.length === 0) {
-            continue;
-        }
-        const firstHunkAt = section.text.search(/^@@ /m);
-        const header =
-            firstHunkAt === -1
-                ? section.text
-                : section.text.slice(0, firstHunkAt).replace(/\n$/, "");
-        kept.push([header, ...inScope].join("\n"));
-    }
-    return kept.join("\n");
 };
 
 /* -------------------------------------------------------------------------- */
