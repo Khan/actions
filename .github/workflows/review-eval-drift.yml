@@ -115,6 +115,13 @@ jobs:
             echo "no report markdown; nothing to publish" >&2
             exit 0
           fi
+          # The runner checkpoints after every scored case, so a cancelled or
+          # timed-out run leaves a report marked partial. The artifact keeps
+          # it, but the time series is finished measurements only.
+          if [ "$(jq '.partial // false' out/live-ab-report.json)" = "true" ]; then
+            echo "partial report (the run did not finish); not publishing to the drift series" >&2
+            exit 0
+          fi
           STAMP="$(date -u +%Y-%m-%d)"
           DIR=".github/review-eval/drift"
           BRANCH="drift-report/${STAMP}-${{ github.run_id }}"

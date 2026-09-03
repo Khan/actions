@@ -9,15 +9,10 @@
  * cumulative section was computed by hand from the report JSONs; this makes
  * it one command.
  *
- * The core is deterministic (parsed JSON in, aggregate out) and unit-tested;
- * the CLI at the bottom is a thin shell that also accepts GitHub Actions run
- * ids (downloaded via `gh run download`).
- *
  * When every pooled report ran IDENTICAL arms (`--force-arms` wobble
  * controls, or the scheduled drift run on main), the two arms are 2N samples
- * of the same prompt, and the aggregate additionally reports per-metric
- * noise-floor bands (min/max/mean across arm-samples); the memo's "buy the
- * noise floor" item, rendered as data instead of prose.
+ * of one prompt, and the aggregate also reports per-metric noise-floor bands
+ * (min/max/mean across arm-samples): the memo's "buy the noise floor" item.
  *
  * Alongside catch rates it reports a per-spec **blocking rate** (catch rate
  * scores detection only): `./aggregate-severity` holds that metric's
@@ -29,9 +24,8 @@
  *     [--out <path>]   JSON aggregate path (default out/live-ab-aggregate.json)
  *
  * A run id (all digits) is fetched with `gh run download <id> -n
- * live-ab-report`; local paths are read as-is. A source that cannot be
- * parsed is reported and skipped, never fatal: partial aggregation beats no
- * report (the plan's standing degrade rule).
+ * live-ab-report`; local paths are read as-is. An unparseable source is
+ * reported and skipped, never fatal (the plan's standing degrade rule).
  */
 
 /* eslint-disable no-console -- CLI entry point; console IS the interface. */
@@ -213,8 +207,9 @@ const parseArm = (
 
 /**
  * Extract the arm samples one report artifact contributes: one pair for a
- * single-run report, n for `--repeats n`, none for a no-reviewable-delta
- * report or a mid-run checkpoint (`partial`, arms over different case sets).
+ * single-run report, its finished repeats for `--repeats n` (so the `partial`
+ * check sits below the repeats branch), none for a no-reviewable-delta report
+ * or a mid-run checkpoint (`partial`, whose arms scored different case sets).
  */
 export const extractSamples = (
     source: string,
@@ -963,7 +958,11 @@ const main = (): void => {
             const raw = readSource(source);
             const extracted = extractSamples(source, raw);
             if (extracted.length === 0) {
-                skipped.push({source, reason: "nothing to pool"});
+                const reason =
+                    isRecord(raw) && raw["partial"] === true
+                        ? "partial checkpoint (the run did not finish)"
+                        : "no reviewable delta";
+                skipped.push({source, reason});
             }
             samples.push(...extracted);
         } catch (error) {
