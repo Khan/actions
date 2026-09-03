@@ -327,6 +327,12 @@ const armAsymmetryLines = (
 const ASYMMETRY_HEADING =
     "### Arm asymmetry (expected when the PR adds a reviewer)";
 
+/** Cases in the arm whose corpus entry carries `mayFlagSpecs`. */
+const auditedCases = (arm: ArmRunReport): number =>
+    arm.runs.filter(
+        (run) => (run.corpusCase.live?.mayFlagSpecs?.length ?? 0) > 0,
+    ).length;
+
 /** Total anchor-snaps across an arm's case runs (see `perCase.snapped`). */
 const snappedTotal = (arm: ArmRunReport): number =>
     arm.perCase.reduce((sum, c) => sum + c.snapped, 0);
@@ -539,8 +545,13 @@ export const renderMarkdownReport = (report: AbReport): string => {
             String(baseline.metrics.noise.duplicates),
             String(candidate.metrics.noise.duplicates),
         ),
+        // The audited-case count rides on the label: only cases carrying
+        // mayFlagSpecs can move a finding into this row, and on the rest the
+        // noise row above is still the pre-audit definition.
         metric(
-            "Legitimate unspecced (may-flag, not noise)",
+            `Legitimate unspecced (may-flag, not noise; ${auditedCases(
+                baseline,
+            )} of ${baseline.runs.length} cases audited)`,
             (a) => a.metrics.legitimateUnspecced.rate,
         ),
         row(

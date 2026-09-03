@@ -81,6 +81,7 @@ import {
 import {
     computeLiveMetrics,
     matchCase,
+    noiseCount,
     type LiveCaseRun,
     type MatchOptions,
 } from "./live-match";
@@ -240,7 +241,7 @@ export const runArm = async (
             caught: match.caught.length,
             missed: match.missed,
             posted: match.postedCount,
-            noise: match.unmatchedFindingIds.length + match.duplicates.length,
+            noise: noiseCount(match),
             duplicates: match.duplicates.length,
             legitimateUnspecced: match.legitimateUnspecced.length,
             snapped: result.snappedByProvenance.length,

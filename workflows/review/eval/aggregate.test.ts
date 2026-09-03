@@ -327,6 +327,7 @@ describe("aggregateSamples", () => {
         caughtSpecBlocking: {},
         missedSpecs: [],
         unmatchedPosted: 0,
+        duplicates: 0,
         legitimateUnspecced: 0,
         posted: 0,
         ...over,
@@ -697,8 +698,12 @@ describe("renderAggregateMarkdown", () => {
             numerator: 0,
             denominator: 4,
         });
+        expect(report.arms.baseline.pooled.duplicates).toBe(2);
         const markdown = renderAggregateMarkdown(report);
         expect(markdown).toContain("| Noise (unmatched posted) | 4/8 (50%)");
+        expect(markdown).toContain(
+            "| of which duplicates of a caught spec | 2 |  | 0 |  |",
+        );
         expect(markdown).toContain(
             "| Legitimate unspecced (may-flag, not noise) | 2/8 (25%)",
         );

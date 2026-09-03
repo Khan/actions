@@ -12,8 +12,10 @@
  *    agrees with the spec's path (and line window, when both carry one) AND
  *    any mechanism alternate matches the finding's `failure_scenario` or
  *    `model_authored_prose`, case-insensitively. When several candidates
- *    match one spec, the one whose `source` is the spec's `lens` wins, otherwise
- *    the first in posted order (run 33671015442 credited a nearby TTL
+ *    match one spec, the one whose `source` produces the spec's `lens` wins
+ *    (resolved through `lens-sources.ts`, so a `conventions` spec is won by
+ *    the skill-auditor's source `skill`), otherwise the first in posted
+ *    order (run 33671015442 credited a nearby TTL
  *    suggestion from the correctness reviewer with the race-condition spec
  *    while the concurrency-async finding that actually described it sat
  *    unmatched, and the same shape recurred on three other cases).
@@ -412,14 +414,16 @@ export const matchCase = async (
     //   2. it fits a caught spec (scenario plus prose): duplicate;
     //   3. it fits a may-flag entry anywhere in its text: legitimate;
     //   4. otherwise: noise.
-    // Ground truth is safe either way: must-catch claimed first, above. A
-    // may-flag entry, like a must-catch spec, is satisfied by at most one
-    // candidate: a second copy of the same unspecced defect is the same
-    // merge-stage miss a second copy of a seeded one is, and lands in
-    // `duplicates` under the may-flag key.
+    // The rungs run as passes over every leftover, not per candidate, so a
+    // finding that is ABOUT a may-flag defect (rung 1) claims the entry
+    // before a finding that mentions it in passing (rung 3) can, whatever
+    // their posted order. Ground truth is safe either way: must-catch
+    // claimed first, above. A may-flag entry, like a must-catch spec, is
+    // satisfied by at most one candidate: a second copy of the same
+    // unspecced defect is the same merge-stage miss a second copy of a
+    // seeded one is, and lands in `duplicates` under the may-flag key.
     const duplicates: CaseMatchReport["duplicates"] = [];
     const legitimateUnspecced: SpecMatch[] = [];
-    const unmatchedFindingIds: string[] = [];
     const caughtSpecs = caught.flatMap((match) => {
         const spec = mustCatch.find((s) => s.key === match.specKey);
         return spec === undefined ? [] : [spec];
@@ -434,6 +438,7 @@ export const matchCase = async (
         candidate: RunCandidate,
         hits: LiveDefectSpec[],
     ): void => {
+        claimed.add(candidate.id);
         const fresh = hits.find((spec) => !acceptedMayFlag.has(spec.key));
         if (fresh !== undefined) {
             acceptedMayFlag.add(fresh.key);
@@ -445,38 +450,44 @@ export const matchCase = async (
             });
             return;
         }
-        duplicates.push({findingId: candidate.id, specKey: hits[0]!.key});
-    };
-    for (const candidate of posted) {
-        if (claimed.has(candidate.id)) {
-            continue;
+        const [first] = hits;
+        if (first !== undefined) {
+            duplicates.push({findingId: candidate.id, specKey: first.key});
         }
-        const aboutMayFlag = mayFlag.filter((spec) =>
+    };
+    const leftovers = (): RunCandidate[] =>
+        posted.filter((candidate) => !claimed.has(candidate.id));
+    // Rung 1.
+    for (const candidate of leftovers()) {
+        const about = mayFlag.filter((spec) =>
             matchesSpec(candidate, spec, "scenario"),
         );
-        if (aboutMayFlag.length > 0) {
-            acceptOrDuplicate(candidate, aboutMayFlag);
-            continue;
+        if (about.length > 0) {
+            acceptOrDuplicate(candidate, about);
         }
+    }
+    // Rung 2.
+    for (const candidate of leftovers()) {
         const duplicateOf = caughtSpecs.find((spec) =>
             matchesSpec(candidate, spec),
         );
         if (duplicateOf !== undefined) {
+            claimed.add(candidate.id);
             duplicates.push({
                 findingId: candidate.id,
                 specKey: duplicateOf.key,
             });
-            continue;
         }
-        const mentionsMayFlag = mayFlag.filter((spec) =>
-            matchesSpec(candidate, spec),
-        );
-        if (mentionsMayFlag.length > 0) {
-            acceptOrDuplicate(candidate, mentionsMayFlag);
-            continue;
-        }
-        unmatchedFindingIds.push(candidate.id);
     }
+    // Rung 3.
+    for (const candidate of leftovers()) {
+        const mentions = mayFlag.filter((spec) => matchesSpec(candidate, spec));
+        if (mentions.length > 0) {
+            acceptOrDuplicate(candidate, mentions);
+        }
+    }
+    // Rung 4.
+    const unmatchedFindingIds = leftovers().map((candidate) => candidate.id);
 
     return {
         caseId: corpusCase.id,
@@ -532,6 +543,14 @@ export type LiveCaseRun = {
 const rate = (numerator: number, denominator: number): number =>
     denominator === 0 ? 0 : numerator / denominator;
 
+/**
+ * One case's contribution to the noise numerator: residual unmatched
+ * findings plus duplicates. The single definition the pooled metric and the
+ * per-case report fields both read.
+ */
+export const noiseCount = (match: CaseMatchReport): number =>
+    match.unmatchedFindingIds.length + match.duplicates.length;
+
 export const computeLiveMetrics = (runs: LiveCaseRun[]): LiveMetricsReport => {
     let caughtCount = 0;
     let specCount = 0;
@@ -548,7 +567,7 @@ export const computeLiveMetrics = (runs: LiveCaseRun[]): LiveMetricsReport => {
         if (result.verdict.event === corpusCase.expected.verdict) {
             verdictHits += 1;
         }
-        unmatched += match.unmatchedFindingIds.length;
+        unmatched += noiseCount(match) - match.duplicates.length;
         duplicates += match.duplicates.length;
         legitimate += match.legitimateUnspecced.length;
         posted += match.postedCount;

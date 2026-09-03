@@ -378,7 +378,7 @@ describe("parseCase: the live block", () => {
             },
         });
         expect(parseErrors(raw)).toMatch(
-            /lens: "concurency-async" is not a known lens/,
+            /mustCatchSpecs\[0\]\.lens: must be one of security-auth, /,
         );
     });
 

@@ -330,9 +330,7 @@ const parseDefectSpecs = (
             // The matcher resolves this to a producer; a typo or a renamed
             // agent would otherwise silently fall back to posted order.
             errors.push(
-                `${at}.lens: "${lens}" is not a known lens (${KNOWN_LENSES.join(
-                    ", ",
-                )})`,
+                `${at}.lens: must be one of ${KNOWN_LENSES.join(", ")}`,
             );
             return;
         }
