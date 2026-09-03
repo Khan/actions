@@ -131,6 +131,77 @@ const validatorOutput = (
     });
 
 describe("produceLive", () => {
+    it("hands each agent its role's contract when validatorFor is set, and none otherwise", async () => {
+        // The smoke passes contractValidator so submit_result registers on a
+        // live model (production's output path); the A/B passes nothing so
+        // the recorded corpus, calibrated on free-text finals, stays
+        // comparable. The role mapping must match lib/dispatch.ts.
+        // One finding so the validator has something to dispatch over.
+        const scripts = {
+            "correctness-reviewer": [
+                JSON.stringify({files: [], findings: [LABEL_FINDING]}),
+            ],
+            "skill-auditor": [JSON.stringify({findings: []})],
+            "money-payments": [JSON.stringify({findings: [], hunts: []})],
+            "claim-validator": [validatorOutput([])],
+        };
+        const kinds: Record<string, string> = {};
+        const marker = (payload: Record<string, unknown>): string | null =>
+            payload["ok"] === true ? null : "nope";
+        const withContracts = scriptedRunner(scripts);
+        await produceLive(CASE, AGENTS, {
+            runner: withContracts.runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+            validatorFor: (name, kind) => {
+                kinds[name] = kind;
+                return marker;
+            },
+        });
+        expect(kinds).toEqual({
+            "correctness-reviewer": "finder",
+            "skill-auditor": "finder",
+            "money-payments": "lens",
+            "claim-validator": "validator",
+        });
+        for (const request of withContracts.requests) {
+            expect(request.validate).toBe(marker);
+        }
+
+        const without = scriptedRunner(scripts);
+        await produceLive(CASE, AGENTS, {
+            runner: without.runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        for (const request of without.requests) {
+            expect(request.validate).toBeUndefined();
+        }
+    });
+
+    it("reports a structured final on the agent that delivered one", async () => {
+        const runner: LiveAgentRunner = async (request) => ({
+            output:
+                request.name === "claim-validator"
+                    ? validatorOutput([])
+                    : JSON.stringify({files: [], findings: [], hunts: []}),
+            usd: 0.1,
+            turns: 1,
+            wallMs: 10,
+            structured: request.name === "correctness-reviewer",
+        });
+        const result = await produceLive(CASE, AGENTS, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        const byName = Object.fromEntries(
+            result.perAgent.map((a) => [a.name, a.structuredFinal]),
+        );
+        expect(byName["correctness-reviewer"]).toBe(true);
+        expect(byName["skill-auditor"]).toBeUndefined();
+    });
+
     it("runs the default finders plus routed lenses and the validator", async () => {
         const {runner, requests} = scriptedRunner({
             "correctness-reviewer": [

@@ -49,6 +49,7 @@ import {isBlockingLabel, labelForFinding} from "../lib/render-comment";
 import {route, type RouterConfig} from "../lib/router";
 import {validateFinding, type Finding, type Lens} from "../lib/finding-schema";
 import {CLUSTERER} from "../lib/dispatch-cluster";
+import type {ContractKind} from "../lib/dispatch-contracts";
 import {dedupeLiveFindings, type LiveDedupReport} from "./live-dedup";
 import {
     VERIFICATION_STATES,
@@ -89,6 +90,14 @@ export type LiveAgentRequest = {
     maxTurns: number;
     /** Hard wall-clock cap, enforced by the runner. */
     timeoutMs: number;
+    /**
+     * Production's AgentRequest.validate: when set, the runner registers
+     * `submit_result` and the agent delivers through it (bounced in-session
+     * on a miss); unset, the agent ends in free text. The A/B leaves it
+     * unset (the corpus was calibrated on free-text finals), the smoke sets
+     * it so production's output path meets a live model at all.
+     */
+    validate?: (payload: Record<string, unknown>) => string | null;
 };
 
 /** What a dispatch returned, with its measured cost. */
@@ -118,6 +127,8 @@ export type LiveAgentResult = {
     tokensAtFailure?: {input: number; total: number};
     /** The provider blocked the request under its usage policy. */
     refused?: boolean;
+    /** The output arrived through `submit_result`, contract-validated. */
+    structured?: boolean;
 };
 
 /** The injected model runner; the ONLY place a real model is invoked. */
@@ -148,6 +159,8 @@ export type PerAgentReport = {
      * invisible model swap.
      */
     fellBackTo?: string;
+    /** The final arrived through `submit_result` (needs `validate` on the request). */
+    structuredFinal?: boolean;
     /** Fixed-format failure note; the agent contributed nothing when set. */
     failed?: string;
     /**
@@ -219,6 +232,11 @@ export type ProduceLiveOptions = {
      * `full`.
      */
     reReviewMode?: ReReviewMode;
+    /** Per-agent contract check (LiveAgentRequest.validate); the smoke passes contractValidator, the A/B nothing. */
+    validatorFor?: (
+        name: string,
+        kind: ContractKind,
+    ) => (payload: Record<string, unknown>) => string | null;
 };
 
 /** Keep in sync with lib/dispatch.ts so trials reproduce prod behavior. */
@@ -655,6 +673,9 @@ const dispatchWithRetry = async <R>(
             }
             lastOutput = result.output;
             report.stopReason = result.stopReason;
+            if (result.structured === true) {
+                report.structuredFinal = true;
+            }
             failureDetail = [
                 result.rawStopReason === undefined
                     ? undefined
@@ -780,6 +801,35 @@ export const produceLive = async (
             ? ["correctness-reviewer"]
             : [];
 
+    // The role mapping mirrors lib/dispatch.ts's validatorFor, so a smoke
+    // that sets `validatorFor` exercises production's exact contracts.
+    const contractKind = (name: string): ContractKind =>
+        name === VALIDATOR
+            ? "validator"
+            : name === CLUSTERER
+            ? "clusterer"
+            : name === RECONCILER
+            ? "json"
+            : (routing.lensesToSpawn as readonly string[]).includes(name)
+            ? "lens"
+            : "finder";
+    const baseRequest = (
+        agent: ExtractedAgent,
+    ): Omit<LiveAgentRequest, "prompt"> => {
+        const validate = options.validatorFor?.(
+            agent.name,
+            contractKind(agent.name),
+        );
+        return {
+            name: agent.name,
+            model: agent.model,
+            cwd: staged.checkoutDir,
+            maxTurns,
+            timeoutMs,
+            ...(validate === undefined ? {} : {validate}),
+        };
+    };
+
     /**
      * An enabled opt-in reviewer this arm's `review.md` does not define is an
      * **asymmetric arm**, not a broken one, and it is the normal shape of the
@@ -838,13 +888,7 @@ export const produceLive = async (
             dispatchWithRetry(
                 agent,
                 resolvePrompt(agent),
-                {
-                    name: agent.name,
-                    model: agent.model,
-                    cwd: staged.checkoutDir,
-                    maxTurns,
-                    timeoutMs,
-                },
+                baseRequest(agent),
                 runner,
                 (output) =>
                     parseAgentFindings(agent, output, usedIds, corpusCase.id),
@@ -871,13 +915,7 @@ export const produceLive = async (
                 dispatchWithRetry(
                     agent,
                     resolvePrompt(agent),
-                    {
-                        name: agent.name,
-                        model: agent.model,
-                        cwd: staged.checkoutDir,
-                        maxTurns,
-                        timeoutMs,
-                    },
+                    baseRequest(agent),
                     runner,
                     parse,
                 ),
@@ -910,13 +948,7 @@ export const produceLive = async (
         const {report, parsed} = await dispatchWithRetry(
             validator,
             resolvePrompt(validator),
-            {
-                name: validator.name,
-                model: validator.model,
-                cwd: staged.checkoutDir,
-                maxTurns,
-                timeoutMs,
-            },
+            baseRequest(validator),
             runner,
             (output) => parseVerifications(output, knownIds),
         );
@@ -937,13 +969,7 @@ export const produceLive = async (
         const {report, parsed} = await dispatchWithRetry(
             reconciler,
             resolvePrompt(reconciler),
-            {
-                name: reconciler.name,
-                model: reconciler.model,
-                cwd: staged.checkoutDir,
-                maxTurns,
-                timeoutMs,
-            },
+            baseRequest(reconciler),
             runner,
             parseReconciliation,
         );

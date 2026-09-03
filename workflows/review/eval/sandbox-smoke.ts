@@ -65,6 +65,7 @@ import {
     rejectStaleRunnerSelection,
     type ToolExec,
 } from "../lib/dispatch-runner-pi";
+import {contractValidator} from "../lib/dispatch-contracts";
 import {extractAgents} from "./agent-extract";
 import {runCli} from "./exit-when-flushed";
 import {loadLiveCorpus} from "./corpus/loader";
@@ -497,7 +498,19 @@ const main = async (): Promise<void> => {
                     caseId,
                 ),
                 stageDir: `${stageRoot}/${caseId}`,
+                // Production's output path: each agent gets its role's
+                // contract, so submit_result registers and the model
+                // delivers through it (bounced in-session on a miss) instead
+                // of ending in free text. The measured A/B leaves this unset;
+                // the smoke is where the production shape gets a live model.
+                validatorFor: contractValidator,
             });
+            const structured = result.perAgent.filter(
+                (a) => a.structuredFinal === true,
+            ).length;
+            const dispatched = result.perAgent.filter(
+                (a) => a.absent !== true,
+            ).length;
             const usd = result.perAgent.reduce((sum, a) => sum + a.usd, 0);
             const bashCalls = toolNames.filter(
                 (name) => name === "Bash",
@@ -513,6 +526,7 @@ const main = async (): Promise<void> => {
                     `| Bash calls | ${bashCalls} |`,
                     `| cap-journal lines added | ${journalDelta} (reported, not gated) |`,
                     `| findings | ${result.findings.length} |`,
+                    `| structured finals (submit_result) | ${structured} of ${dispatched} agents |`,
                     `| cost | $${usd.toFixed(2)} |`,
                 ].join("\n"),
             );
