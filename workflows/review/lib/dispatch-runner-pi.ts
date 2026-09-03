@@ -182,6 +182,33 @@ export type PiRunnerOptions = {
      * time to tell which one sheds findings.
      */
     systemPrompt?: string;
+    /**
+     * Receive the agent's full transcript when its loop ends (success,
+     * timeout, or error): every assistant turn (text, thinking, tool calls
+     * with arguments) and every tool result, in order. The eval writes these
+     * as artifacts so a model's tool-call pattern can be READ rather than
+     * inferred from counts: two runs on gemini-3.8-flash produced 1117 and
+     * 1044 tool calls to claude's 257 and 273 on the same 10 cases, and the
+     * count alone cannot say whether that is 4x the exploration or the same
+     * 10 commands re-run 15 times, which have opposite fixes.
+     */
+    onTranscript?: (transcript: AgentTranscript) => void;
+};
+
+/** One agent's loop, as {@link PiRunnerOptions.onTranscript} receives it. */
+export type AgentTranscript = {
+    name: string;
+    model: string;
+    /** The checkout the agent investigated (the eval's staged case dir). */
+    cwd: string;
+    /** Assistant messages and tool results, interleaved in loop order. */
+    messages: unknown[];
+    turns: number;
+    toolCalls: number;
+    usd: number;
+    wallMs: number;
+    /** How the loop ended: the last stop reason, or the thrown error. */
+    ended: string;
 };
 
 export const createPiRunner = async (
@@ -309,6 +336,8 @@ export const createPiRunner = async (
         let usd = 0;
         let turns = 0;
         let toolCalls = 0;
+        const transcript: unknown[] = [];
+        let ended = "";
         let stopReason: string | undefined;
         let errorMessage: string | undefined;
         let rawStopReason: string | undefined;
@@ -397,6 +426,13 @@ export const createPiRunner = async (
                     const message = event["message"] as
                         | Record<string, unknown>
                         | undefined;
+                    if (options.onTranscript !== undefined) {
+                        transcript.push(message);
+                        const results = event["toolResults"];
+                        if (Array.isArray(results)) {
+                            transcript.push(...results);
+                        }
+                    }
                     const reason = message?.["stopReason"];
                     if (typeof reason === "string") {
                         stopReason = reason;
@@ -540,7 +576,11 @@ export const createPiRunner = async (
                     structured: true,
                 };
             }
+            ended = `error: ${
+                error instanceof Error ? error.message : String(error)
+            }`;
             if (timedOut) {
+                ended = `timeout after ${request.timeoutMs}ms`;
                 throw new Error(
                     `sub-agent timed out after ${request.timeoutMs}ms`,
                 );
@@ -548,6 +588,24 @@ export const createPiRunner = async (
             throw error;
         } finally {
             clearTimeout(timer);
+            options.onTranscript?.({
+                name: request.name,
+                model: request.model,
+                cwd: request.cwd,
+                messages: transcript,
+                turns,
+                toolCalls,
+                usd,
+                wallMs: Date.now() - started,
+                ended:
+                    ended !== ""
+                        ? ended
+                        : captured !== undefined
+                        ? "submitted"
+                        : turns >= request.maxTurns
+                        ? "max_turns"
+                        : stopReason ?? "end",
+            });
         }
     };
 };

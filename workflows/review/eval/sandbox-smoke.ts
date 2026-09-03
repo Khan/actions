@@ -67,6 +67,7 @@ import {extractAgents} from "./agent-extract";
 import {runCli} from "./exit-when-flushed";
 import {loadLiveCorpus} from "./corpus/loader";
 import {produceLive, type LiveAgentRunner} from "./live-producer";
+import {writeTranscript} from "./transcripts";
 
 /**
  * The default smoke case: a small real defect, so the reviewers have something
@@ -345,6 +346,7 @@ const runProbes = async (
 const productionSurfaceRunner = (
     repoRoot: string,
     toolNames: string[],
+    caseId: string,
 ): LiveAgentRunner => {
     rejectStaleRunnerSelection(process.env);
     let runner: ReturnType<typeof createPiRunner> | undefined;
@@ -358,6 +360,11 @@ const productionSurfaceRunner = (
         // live-runner.ts for the same reasoning).
         runner ??= createPiRunner({
             onToolCall: (toolName) => toolNames.push(toolName),
+            // Every agent's transcript lands under out/transcripts so the
+            // investigation pattern can be read, not inferred from counts.
+            onTranscript: (transcript) => {
+                writeTranscript(caseId, transcript);
+            },
         });
         return (await runner)(request);
     };
@@ -438,7 +445,7 @@ const main = async (): Promise<void> => {
                 `Phase B: case \`${caseId}\` on the production tool surface\n`,
             );
             const result = await produceLive(corpusCase, agents, {
-                runner: productionSurfaceRunner(repoRoot, toolNames),
+                runner: productionSurfaceRunner(repoRoot, toolNames, caseId),
                 stageDir: `${stageRoot}/${caseId}`,
             });
             const usd = result.perAgent.reduce((sum, a) => sum + a.usd, 0);

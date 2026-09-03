@@ -70,6 +70,11 @@ on:
         type: boolean
         required: false
         default: false
+      transcripts:
+        description: "Live A/B: write every agent's transcript under out/transcripts (uploaded as live-ab-transcripts)"
+        type: boolean
+        required: false
+        default: false
       probes_only:
         description: "Sandbox smoke: run the free boundary probes only, skipping the live production-surface case"
         type: boolean
@@ -192,6 +197,16 @@ jobs:
             EXTRA="$EXTRA --case $SMOKE_CASE"
           fi
           pnpm dlx tsx workflows/review/eval/sandbox-smoke.ts $EXTRA
+      - name: Upload the live-phase transcripts
+        # Every agent's transcript from phase B (tool calls with arguments,
+        # trimmed results, text turns), so an investigation pattern can be
+        # read rather than inferred from the tool-call count.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sandbox-smoke-transcripts
+          path: out/transcripts/
+          if-no-files-found: ignore
 
   # One question, one dispatch: why does the Pi arm lose
   # incident-sql-missing-index:dm-default-backfill? Never runs on a PR -- it is a
@@ -290,6 +305,7 @@ jobs:
           CASES: ${{ inputs.cases || '' }}
           REPEATS: ${{ inputs.repeats || '1' }}
           FORCE_ARMS: ${{ inputs.force_arms == true }}
+          REVIEW_EVAL_TRANSCRIPTS: ${{ inputs.transcripts == true && '1' || '' }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "ANTHROPIC_API_KEY secret not configured; skipping the live A/B." >&2
@@ -322,6 +338,15 @@ jobs:
         with:
           name: live-ab-report
           path: out/live-ab-report.*
+          if-no-files-found: ignore
+      - name: Upload the transcripts
+        # Present only when REVIEW_EVAL_TRANSCRIPTS=1 was set on the run
+        # (a dispatch input); a 10-case run is ~400 files.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: live-ab-transcripts
+          path: out/transcripts/
           if-no-files-found: ignore
       - name: Post the sticky PR comment
         if: always() && github.event_name == 'pull_request'

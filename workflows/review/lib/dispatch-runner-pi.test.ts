@@ -637,6 +637,56 @@ describe("createPiRunner", () => {
         expect(streamSimpleOptions[1]?.["maxRetries"]).toBe(5);
     });
 
+    it("hands the caller a transcript when the loop ends, success or death", async () => {
+        const transcripts: {
+            ended: string;
+            messages: unknown[];
+            toolCalls: number;
+        }[] = [];
+        loop = ({emit}) => {
+            emit({type: "tool_execution_end", toolName: "Read"});
+            emit({
+                type: "turn_end",
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            name: "Read",
+                            arguments: {path: "a"},
+                        },
+                    ],
+                    usage: {cost: {total: 0.1}},
+                },
+                toolResults: [
+                    {
+                        role: "toolResult",
+                        toolName: "Read",
+                        content: [{type: "text", text: "1 x"}],
+                    },
+                ],
+            });
+            emit(turnEnd('{"findings": []}', 0.1));
+            return Promise.resolve([]);
+        };
+        const runner = await createPiRunner({
+            onTranscript: (t) => transcripts.push(t),
+        });
+        await runner(request());
+        expect(transcripts).toHaveLength(1);
+        // Assistant turn, its tool result, the final turn: loop order.
+        expect(
+            transcripts[0].messages.map((m) => (m as {role: string}).role),
+        ).toEqual(["assistant", "toolResult", "assistant"]);
+        expect(transcripts[0].toolCalls).toBe(1);
+        // The test helper's turns carry no stopReason, so the fallback label.
+        expect(transcripts[0].ended).toBe("end");
+
+        loop = () => Promise.reject(new Error("stream died"));
+        await expect(runner(request())).rejects.toThrow("stream died");
+        expect(transcripts[1].ended).toBe("error: stream died");
+    });
+
     it("requests an explicit thinking level on every turn, for every provider", async () => {
         // Never let a pin reach streamSimple without one: pi-ai's
         // no-reasoning path DISABLES thinking on anthropic (the SDK harness

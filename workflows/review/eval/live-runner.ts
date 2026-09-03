@@ -27,6 +27,7 @@
 
 import {mkdtempSync, readFileSync} from "node:fs";
 import {tmpdir} from "node:os";
+import {basename} from "node:path";
 
 import {
     createPiRunner,
@@ -35,6 +36,14 @@ import {
 import {extractAgents} from "./agent-extract";
 import {loadLiveCorpus} from "./corpus/loader";
 import {produceLive, type LiveAgentRunner} from "./live-producer";
+import {writeTranscript} from "./transcripts";
+
+/**
+ * Opt-in transcript capture for the live A/B (a 10-case run is ~400 files).
+ * The label is the staged case dir's name plus the pin, since the runner
+ * sees no arm id and on this branch the pin IS the arm.
+ */
+const TRANSCRIPTS_ENV = "REVIEW_EVAL_TRANSCRIPTS";
 
 /**
  * The eval runner: the production Pi harness on the production tool surface
@@ -58,7 +67,22 @@ export const piRunner = (): LiveAgentRunner => {
     // of every finder but one on the first case.
     let runner: ReturnType<typeof createPiRunner> | undefined;
     return async (request) => {
-        runner ??= createPiRunner();
+        // The runner is memoized across requests, so the label must come
+        // from the transcript itself, never from this closure's `request`.
+        runner ??= createPiRunner(
+            process.env[TRANSCRIPTS_ENV] === "1"
+                ? {
+                      onTranscript: (transcript) => {
+                          writeTranscript(
+                              `${basename(transcript.cwd)}--${
+                                  transcript.model
+                              }`,
+                              transcript,
+                          );
+                      },
+                  }
+                : {},
+        );
         return (await runner)(request);
     };
 };
