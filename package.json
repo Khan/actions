@@ -5,6 +5,7 @@
         "version-packages": "changeset version && node -r @swc-node/register utils/sync-workflow-versions.ts",
         "lint": "eslint --ext .js,.mjs,.ts .",
         "fix": "pnpm run lint --fix",
+        "sync-canary": "node -r @swc-node/register utils/generate-canary.ts",
         "test": "vitest",
         "typecheck": "tsc --noEmit",
         "build": "tsc -p actions/tsconfig.json"

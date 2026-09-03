@@ -3,6 +3,8 @@ import {describe, it, expect} from "vitest";
 import {
     BLOCKING_LABELS,
     NON_BLOCKING_LABELS,
+    endsInHandoff,
+    ensureTerminalPunctuation,
     isBlockingLabel,
     labelForFinding,
     renderComment,
@@ -493,6 +495,134 @@ describe("renderComment context fold", () => {
             confidence: 0.9,
         });
         expect(renderComment(finding)).toBe(claimBody);
+    });
+});
+
+describe("ensureTerminalPunctuation", () => {
+    it("appends a period to a headline-style line", () => {
+        expect(ensureTerminalPunctuation("The hunts land inert here")).toBe(
+            "The hunts land inert here.",
+        );
+    });
+
+    it("leaves already-terminated lines alone", () => {
+        for (const line of [
+            "Done.",
+            "Really?",
+            "Stop!",
+            "An opener that hands off:",
+        ]) {
+            expect(ensureTerminalPunctuation(line)).toBe(line);
+        }
+    });
+
+    it("sees punctuation inside closing quotes/brackets/emphasis", () => {
+        // Same core-strip as joinProse: the terminator may sit inside
+        // closers, and then the line is already terminated.
+        expect(ensureTerminalPunctuation('He said "done."')).toBe(
+            'He said "done."',
+        );
+        expect(ensureTerminalPunctuation("(a full sentence.)")).toBe(
+            "(a full sentence.)",
+        );
+    });
+
+    it("puts the period after an unterminated trailing closer", () => {
+        // joinProse places its sentence break after the whole subject,
+        // closers included, and the visible line must match it byte for
+        // byte so the fold's opening restatement stays comparable. The
+        // closer-ending inputs kill the core+"."+closers mutant, which
+        // would break a trailing code span (PR #408 review).
+        expect(ensureTerminalPunctuation("so `spawn()` never runs")).toBe(
+            "so `spawn()` never runs.",
+        );
+        expect(ensureTerminalPunctuation("the gate is never `flipped`")).toBe(
+            "the gate is never `flipped`.",
+        );
+        expect(ensureTerminalPunctuation('he called it "inert"')).toBe(
+            'he called it "inert".',
+        );
+    });
+
+    it("trims trailing whitespace and leaves the empty line empty", () => {
+        expect(ensureTerminalPunctuation("A line ")).toBe("A line.");
+        expect(ensureTerminalPunctuation("")).toBe("");
+    });
+});
+
+describe("renderComment visible-line punctuation", () => {
+    // The agent-settings#105 shape: a headline-style summary with no
+    // terminal punctuation posted verbatim over the fold and read as a
+    // truncated comment; the fold's own prose had the period because
+    // joinProse repairs it at the join. The visible line now gets the
+    // same repair.
+    const longProse =
+        "The hunts land inert here: no routing rule matches workflow " +
+        "files, so the lens never spawns on them. The routing half is " +
+        "consumer-owned and was not added, and this run's own routing " +
+        "artifact shows lensesToSpawn empty for the workflow file.";
+
+    it("adds the missing period to the folded visible line only", () => {
+        const body = renderComment(
+            makeFinding({
+                model_authored_prose: longProse,
+                summary:
+                    "The hunts land inert here: no routing rule matches " +
+                    "workflow files, so the lens never spawns on them",
+            }),
+        );
+        const [visible] = body.split("\n");
+        expect(visible).toBe(
+            "**issue (blocking):** The hunts land inert here: no routing " +
+                "rule matches workflow files, so the lens never spawns on them.",
+        );
+        // The prose inside the fold is untouched.
+        expect(body).toContain(`\n\n${longProse}\n\n</details>`);
+    });
+
+    it("never doubles an existing terminator", () => {
+        const body = renderComment(
+            makeFinding({
+                model_authored_prose: longProse,
+                summary: "Request params reach exec() unescaped.",
+            }),
+        );
+        expect(body.split("\n")[0]).toBe(
+            "**issue (blocking):** Request params reach exec() unescaped.",
+        );
+    });
+});
+
+describe("shouldFoldContext hand-off refusal", () => {
+    const prose =
+        "Two things go wrong here: the retention pass subtracts months, " +
+        "not days, so nothing is ever removed, and the test that should " +
+        "have caught it asserts on the wrong constant, so it passes " +
+        "against the broken implementation as written.";
+
+    it("posts flat when the summary ends on a colon or semicolon", () => {
+        // A colon hand-off over a collapsed block is the truncated look
+        // the punctuation repair exists to remove, and a period would
+        // misstate the sentence, so the clause and its completion post
+        // together instead.
+        expect(shouldFoldContext("Two things go wrong here:", prose)).toBe(
+            false,
+        );
+        expect(shouldFoldContext("Two things go wrong here;", prose)).toBe(
+            false,
+        );
+        expect(shouldFoldContext('Two things go wrong "here:"', prose)).toBe(
+            false,
+        );
+        expect(endsInHandoff("A complete sentence.")).toBe(false);
+        expect(
+            renderComment(
+                makeFinding({
+                    model_authored_prose: prose,
+                    summary: "Two things go wrong here:",
+                }),
+            ),
+        ).toBe(`**issue (blocking):** ${prose}`);
     });
 });
 

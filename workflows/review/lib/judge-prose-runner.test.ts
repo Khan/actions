@@ -77,6 +77,8 @@ describe("createJudgeRunner", () => {
         expect(lastOptions["model"]).toBe("judge-model");
         expect(lastOptions["maxTurns"]).toBe(1);
         expect(lastOptions["allowedTools"]).toEqual([]);
+        // Effort pinned explicitly (the SDK default, made immovable).
+        expect(lastOptions["effort"]).toBe("high");
         const env = lastOptions["env"] as Record<string, string | undefined>;
         expect(env["ANTHROPIC_MAX_RETRIES"]).toBe("2");
         expect(env["PATH"]).toBe(process.env["PATH"]);
