@@ -25,7 +25,7 @@
  * the fingerprint stamp emission stays (rereview-mode.ts explains why).
  */
 
-import {renderCollapsedFooter} from "./attribution";
+import {canarySegment, renderCollapsedFooter} from "./attribution";
 import {FINDING_SCHEMA_VERSION} from "./finding-schema";
 import {DEFAULT_NON_BLOCKING_INLINE_BUDGET} from "./routing-config";
 
@@ -60,6 +60,14 @@ export type VersionFooterInputs = {
      * the default value is omitted too (the footer states configuration,
      * not defaults). */
     nonBlockingInlineBudget: number | null;
+    /**
+     * The PR head sha a canary run executed (REVIEW_CANARY_SHA, set only by
+     * the canary workflow). The version segment alone would lie on a canary
+     * run: package.json still carries the last released version while the
+     * code is the PR head, so the footer names the sha that actually ran.
+     * Absent or empty drops the segment (every production run).
+     */
+    canarySha?: string | null;
 };
 
 /**
@@ -72,6 +80,9 @@ export const renderVersionFooter = (inputs: VersionFooterInputs): string => {
     const segments: string[] = [];
     if (inputs.version !== null && inputs.version !== "") {
         segments.push(`review-v${inputs.version}`);
+    }
+    if (typeof inputs.canarySha === "string" && inputs.canarySha !== "") {
+        segments.push(canarySegment(inputs.canarySha));
     }
     segments.push(`schema ${inputs.schemaVersion}`);
     if (inputs.depth !== null && inputs.depth !== "") {
@@ -100,6 +111,20 @@ export const renderVersionFooter = (inputs: VersionFooterInputs): string => {
     return renderCollapsedFooter(segments.join(" | "));
 };
 
+/**
+ * Whether a posted body carries the canary footer segment. The production
+ * staging (stage-pr.ts) drops such reviews from prior-reviews.json before
+ * anything downstream reads them: both workflows post as the same bot
+ * identity, and a canary review admitted as reviewer history would anchor
+ * the production re-review plan on a stamp unreleased code produced (and
+ * make its clearance treat a canary verdict as its own standing state).
+ * Matched inside a `<sub>` line so a review that merely QUOTES the segment
+ * in prose is not misfiled; the emission side (renderVersionFooter above)
+ * and this predicate live in one module so they cannot drift.
+ */
+export const hasCanaryFooter = (body: string): boolean =>
+    /<sub>[^<]*\bcanary [0-9a-f]{7,40}\b[^<]*<\/sub>/.test(body);
+
 const readJson = (fs: VersionFooterFs, path: string): unknown => {
     if (!fs.existsSync(path)) {
         return undefined;
@@ -125,7 +150,9 @@ const readJson = (fs: VersionFooterFs, path: string): unknown => {
  *     field). The submission CLI passes its canonical executed depth in
  *     `overrides` so the footer and the depth Note cannot contradict;
  *   - `routing.json` for the re-review mode, the blocking-only modifier,
- *     and the enable list.
+ *     and the enable list;
+ *   - the env (injectable; production reads `process.env`) for
+ *     `REVIEW_CANARY_SHA`, the canary workflow's head-sha stamp.
  *
  * Every read fails toward omission: a missing or malformed file drops its
  * segments and the footer still renders (schema is a compile-time constant,
@@ -135,6 +162,7 @@ export const runVersionFooterCli = (
     fs: VersionFooterFs,
     libDir: string = __dirname,
     overrides: {depth?: string | null} = {},
+    env: {REVIEW_CANARY_SHA?: string} = process.env,
 ): string => {
     const pkg = readJson(fs, `${libDir}/../package.json`) as
         | {version?: unknown}
@@ -175,6 +203,7 @@ export const runVersionFooterCli = (
             typeof routing?.nonBlockingInlineBudget === "number"
                 ? routing.nonBlockingInlineBudget
                 : null,
+        canarySha: env.REVIEW_CANARY_SHA ?? null,
     });
     fs.writeFileSync(FOOTER_OUT, footer);
     return footer;

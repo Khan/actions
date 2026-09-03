@@ -1,64 +1,53 @@
 ---
 description: >
-  Reviews PR code changes for correctness, conventions, and risk on every push.
-  Leaves actionable per-line feedback, and on approval posts the risk summary
-  and common patterns as a separate PR comment and requests the owning teams as
-  reviewers.
+  Canary variant of the PR reviewer (KHAN/ACTIONS ONLY, opt-in via the
+  review-canary label): runs the reviewer from the PR's own head instead of
+  the pinned release, so a PR that changes the reviewer can post a review
+  with the changed code. Runs IN ADDITION to the pinned reviewer, never
+  instead of it, with no context on that reviewer's runs (fresh eyes every
+  push). Posting-only: it never resolves threads or requests reviewers.
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-  # Run automatically on every code push to a PR (`synchronize`) and when a PR
-  # leaves draft (`ready_for_review`), not via a slash command. Reviewer requests
-  # are gated on draft status in the prompt (Step 8). Do NOT post a "review
-  # started / completed" status comment — only the review itself, the
-  # risks/patterns comment (Step 7), and reviewer requests should appear on the
-  # PR.
+    # `labeled` starts a run the moment the review-canary label lands (the
+    # `if:` below ignores every other label event); `synchronize` keeps the
+    # canary reviewing each push WHILE the label stays on. Pull the label to
+    # stop. No opened/reopened/ready_for_review: the canary is an explicit
+    # per-PR ask, never ambient.
+    types: [labeled, synchronize]
   status-comment: false
-  # Disable gh-aw's pre-activation permission + confused-deputy gate so a same-repo
-  # collaborator pushing to a PR they didn't open still triggers the review (the
-  # gate otherwise blocks `synchronize` when the pusher != the PR author).
-  # KHAN/ACTIONS LOCAL OVERRIDE (comment only): unlike webapp, this repo is PUBLIC,
-  # so "all" is safe only because the fork guard added to the `if:` condition below
-  # restricts runs to same-repo branches, which require write access to create.
+  # Same rationale as review.md: the fork guard in `if:` is the actor gate.
+  # Applying a label additionally requires triage access, so a canary run is
+  # always human-requested by someone with repo access.
   roles: all
 
-# Skip automated deploy PRs (`deploy/*`) and the changeset release PR — branch conventions
-# shared across the repos this workflow runs in. Everything else is reviewed, including
-# pushes from our bots (`khan-actions-bot` and `github-actions[bot]`), since even automated
-# commits can carry real code changes worth reviewing.
-#
-# KHAN/ACTIONS LOCAL OVERRIDE: the first condition below skips PRs from forks. This
-# repo is public; a fork PR gets no secrets anyway (the agent job would just fail),
-# and with `roles: all` disabling gh-aw's own actor gate, this `if:` is the guard
-# that keeps untrusted fork heads from triggering the workflow at all.
-#
-# Also skip any PR carrying the `skip-ai-review` label, so a human can opt a specific PR
-# out of automated review. This is a job-level gate: a labeled PR never starts the agent
-# (zero AI credits) and posts nothing. The label is evaluated on each trigger event
-# (open/synchronize/reopen/ready), so adding it prevents the *next* run — it does not
-# retroactively dismiss a review already left on an earlier push.
+# Run ONLY on same-repo PRs (fork guard, same as review.md) that carry the
+# review-canary label. On `labeled` events, only the review-canary label
+# itself triggers a run: without the event.label check, adding any other
+# label to an already-labeled PR would start a redundant review round.
+# review.md's deploy/changeset/skip-ai-review skips are deliberately absent:
+# the label is an explicit opt-in, so whoever applies it has decided this PR
+# should be canary-reviewed.
 if: >-
   github.event.pull_request.head.repo.full_name == github.repository &&
-  !startsWith(github.event.pull_request.head.ref, 'deploy/') &&
-  github.event.pull_request.head.ref != 'changeset-release/main' &&
-  !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
+  contains(github.event.pull_request.labels.*.name, 'review-canary') &&
+  (github.event.action != 'labeled' || github.event.label.name == 'review-canary')
 
-# Consumer-specific frontmatter is merged in at compile time from the consuming repo via
-# this import: the consumer's `add-reviewer` safe output, with its repo-specific
-# `allowed-team-reviewers` allowlist and bot token. That safe output lives ONLY in that
-# file and is intentionally NOT defined here, because gh-aw lets the main workflow override
-# an imported safe-output of the same type, which would silently discard the consumer's
-# allowlist.
-imports:
-  - .github/aw/review/config.md
+# No `imports:`: the consumer config (.github/aw/review/config.md) exists only
+# to carry the `add-reviewer` safe output, and the canary must never page
+# owning teams — a review from unreleased code is a test artifact, not a
+# reviewer-of-record asking humans to engage.
 
 permissions:
   contents: read
   pull-requests: read
 
 tools:
-  cache-memory: true
+  # No cache memory: a canary run reviews with fresh eyes every push (full
+  # depth, whole diff in scope), and it must never write a cache record the
+  # production reviewer could restore as its own reviewedHunks. The staging
+  # side of the same guarantee is REVIEW_CANARY=1 below (lib/stage-pr.ts
+  # stages the reviewer-history files empty and ignores any cache record).
   github:
     lockdown: false
     min-integrity: none
@@ -90,16 +79,24 @@ safe-outputs:
   create-pull-request-review-comment:
     max: 20
     side: "RIGHT"
+  # COMMENT only: GitHub moves a reviewer's state on APPROVE or
+  # REQUEST_CHANGES, and both workflows submit as the same bot identity, so
+  # a canary APPROVE would supersede the pinned reviewer's standing
+  # REQUEST_CHANGES and a canary REQUEST_CHANGES would stand with no
+  # dismissal path (the canary stages its own priors empty). The plan CLI
+  # demotes every canary verdict to COMMENT and posts the would-be verdict
+  # as a body Note (submission-clearance.ts); this allowlist is the hard
+  # enforcement if that code regresses.
   submit-pull-request-review:
     max: 1
-    allowed-events: [APPROVE, COMMENT, REQUEST_CHANGES]
+    allowed-events: [COMMENT]
     footer: false
-  # Resolve this workflow's own earlier review threads once their issue is addressed
-  # (Step 7), instead of replying. Uses the bot token because the default GITHUB_TOKEN
-  # can return "Resource not accessible by integration" resolving bot-authored threads.
-  resolve-pull-request-review-thread:
-    max: 20
-    github-token: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
+  # No resolve-pull-request-review-thread: the open bot threads on a labeled
+  # PR belong to the PINNED reviewer, and unreleased code adjudicating (and
+  # closing) the production reviewer's findings would be actively harmful.
+  # The canary preamble in the body skips Step 7's resolution pass outright,
+  # and the canary staging stages threads.json empty so there is nothing to
+  # resolve anyway.
   # On approval, post the high-risk file list and common patterns as a single
   # standalone PR comment (Step 7), separate from the review — the PR body is
   # never touched. Because this workflow runs on every push, it must stay
@@ -246,48 +243,35 @@ sandbox:
 # workflows/review/version-sync.test.ts fails CI if the ref ever diverges from
 # the `review` package version. Steps that run lib scripts invoke them from
 # `gh-aw-review-lib/` via `npx -y tsx <script>`; npx fetches the runner on first
-# use, so the checkout needs no install step. One exception: the two
-# post-agent steps (the conformance gate and the credentialed dismissal) run
-# from a pre-staged copy of this checkout under $RUNNER_TEMP, out of the
-# agent's reach, never from this agent-writable one (rationale at the copy
-# step below).
+# use, so the checkout needs no install step.
 pre-agent-steps:
-  - name: Check out shared review lib (Khan/actions)
+  - name: Check out shared review lib (Khan/actions, PR HEAD)
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      # KHAN/ACTIONS LOCAL OVERRIDE (comment only): pinned to the same release as
-      # `source:` below, so the prompt and the lib it invokes come from one version.
-      # Even though this IS Khan/actions, the reviewer runs the released lib, not
-      # the PR head; a PR must not be able to change the code that reviews it.
-      ref: review-v1.25.0
+      # THE CANARY'S WHOLE POINT: the lib comes from the PR head, not the
+      # pinned release review.md fetches. This is not a new capability for an
+      # attacker — on `pull_request` events GitHub already runs this lock.yml
+      # from the PR's merge ref, so a same-repo writer controls the workflow
+      # either way, and the fork guard in `if:` keeps fork heads out — it only
+      # trades review.md's version discipline for dogfooding, on the PRs a
+      # human explicitly labels. Note head.sha is the branch tip while the
+      # lock.yml runs from the merge ref; the difference only matters when
+      # base moved under the PR, accepted for a test flow.
+      ref: ${{ github.event.pull_request.head.sha }}
       path: gh-aw-review-lib
       persist-credentials: false
 
-  # The post-agent lib: the dispatch-conformance gate and the reduced-depth
-  # dismissal (post-steps below) execute lib code on the host AFTER the
-  # agent's turn, and nothing the agent can write may execute on the host
-  # then (host execution of a rewritten file, credentialed or not, can
-  # bridge to a sibling step's credentials: a spawned process outliving its
-  # step, a poisoned tool cache). `gh-aw-review-lib/` above sits in the
-  # workspace the agent container mounts rw (as does all of /tmp), so those
-  # two steps run from this copy under $RUNNER_TEMP instead, which the
-  # agent cannot write: the container shares only $RUNNER_TEMP/gh-aw
-  # (read-only, except its safeoutputs/upload-artifacts subdir), and the
-  # copy sits BESIDE gh-aw/, not under it (review-pins.test.ts pins those
-  # mounts here, the consumer-config checker pins them per install).
-  # A local copy of the checkout above, not a second fetch: at this point
-  # in the job that tree IS the pinned ref, un-tampered (the agent has not
-  # run), so re-cloning it from the network would add a flake surface and
-  # nothing else. Taken directly after the checkout, before the staging and
-  # npm ci steps touch anything, so the copy is pristine. A failure here
-  # reds the job before any AI spend (the posture of every pre-agent step);
-  # the rm is belt and braces for runner reuse (the agent cannot create the
-  # path).
-  - name: Copy the review lib for post-agent execution
+  # Preflight: fail fast before deterministic staging and the agent step if
+  # the head lib has no REVIEW_CANARY support (e.g. branch predates #403).
+  # Turns what would be a red dispatch-conformance run after full agent spend
+  # into an instant, zero-cost exit.
+  - name: Verify head lib supports canary execution
     run: |
-      rm -rf "${RUNNER_TEMP}/gh-aw-review-lib-postagent"
-      cp -a "${GITHUB_WORKSPACE}/gh-aw-review-lib" "${RUNNER_TEMP}/gh-aw-review-lib-postagent"
+      if ! grep -rq "REVIEW_CANARY" gh-aw-review-lib/workflows/review/lib; then
+        echo "::error title=review canary preflight::PR head lib does not support REVIEW_CANARY; rebase onto main to run the canary"
+        exit 1
+      fi
 
   # Deterministic pre-agent staging (slice 1 of the deterministic-orchestrator
   # migration; lib/stage-pr.ts): fetches the PR metadata, changed files, prior
@@ -324,6 +308,12 @@ pre-agent-steps:
       REVIEW_JIRA_BASE_URL: ${{ vars.REVIEW_JIRA_BASE_URL }}
       REVIEW_JIRA_EMAIL: ${{ secrets.REVIEW_JIRA_EMAIL }}
       REVIEW_JIRA_API_TOKEN: ${{ secrets.REVIEW_JIRA_API_TOKEN }}
+      # Canary staging: prior bot reviews, bot threads, adjudicated threads,
+      # and cache memory are staged empty, so this run has no context on the
+      # pinned reviewer's rounds (both workflows post as the same bot
+      # identity, so without this the canary would read the production run's
+      # output as its own history). Depth degrades to full every run.
+      REVIEW_CANARY: "1"
     run: cd gh-aw-review-lib && REVIEW_REPO_ROOT="$GITHUB_WORKSPACE" npx -y tsx workflows/review/lib/stage-pr.ts
 
   # Dispatcher dependencies: lib/dispatch.ts imports the Claude Agent SDK,
@@ -333,7 +323,6 @@ pre-agent-steps:
   # and pinned.
   - name: Install dispatcher dependencies
     run: cd gh-aw-review-lib/workflows/review && npm ci --ignore-scripts --no-audit --no-fund
-
 
 # The dispatch-conformance gate (workflows/review/lib/dispatch-gate.ts): a code
 # chokepoint between the agent and the review submission. gh-aw compiles
@@ -359,19 +348,11 @@ pre-agent-steps:
 # anyway. The gate writes the sentinel only after deciding a real violation
 # (and it strips the queue in the same code path).
 post-steps:
-  # POST-AGENT EXECUTION RULE: nothing the agent can write may execute on
-  # the host after its turn. Both steps below run from the pre-staged copy
-  # under $RUNNER_TEMP (the pre-agent copy step above; the agent cannot
-  # write it), never from the agent-writable workspace checkout. The copy
-  # is present whenever the agent ran at all (its step failing reds the job
-  # before AI spend); if it is somehow gone anyway, the gate's npx fails
-  # open and the dismissal skips into its warning, same as any bootstrap
-  # failure.
   - name: Dispatch-conformance gate
     if: always()
     run: |
       rm -f /tmp/gh-aw/dispatch-gate.blocked
-      if (cd "${RUNNER_TEMP}/gh-aw-review-lib-postagent" && npx -y tsx workflows/review/lib/dispatch-gate.ts); then
+      if (cd gh-aw-review-lib && npx -y tsx workflows/review/lib/dispatch-gate.ts); then
         exit 0
       fi
       if [ -f /tmp/gh-aw/dispatch-gate.blocked ]; then
@@ -380,62 +361,23 @@ post-steps:
       fi
       echo "::warning title=dispatch-conformance gate::gate could not run (infra failure; review not blocked)"
       exit 0
-  # The reduced-depth clearance: when the plan CLI staged
-  # out/dismiss-decision.json (a flip-gated/fast round over a prior
-  # REQUEST_CHANGES whose blocking objections are all resolved), dismiss the
-  # standing review via the API instead of minting an approval no full
-  # roster stands behind. Default `if:` (success()), so a run the gate
-  # blocked (exit 1) never dismisses; the gate also checks the decision
-  # itself (rule 5c) over the staged copy, and the executor trusts nothing
-  # staged at all: it re-derives the dismissable set from a live
-  # GET /pulls/{n}/reviews scoped to reviews carrying this workflow's own
-  # re-review stamp (the login alone is every Actions workflow), with the
-  # repo/PR coordinates from the runner's env, so neither the gate's
-  # fail-open path nor a rewritten staging directory can steer it. Bot
-  # token for the same reason the resolve-thread safe output carries it:
-  # dismissal needs write access.
-  # Those guards defend the executor's INPUTS; the post-agent execution
-  # rule above (pre-staged copy under $RUNNER_TEMP, out of the agent's
-  # reach) defends the EXECUTABLE, which matters most here: this is the one
-  # step handing a repo-write PAT with unfirewalled egress to lib code
-  # (gh-aw's own credentialed scripts run from $RUNNER_TEMP for the same
-  # reason). No install step: the executor's import chain is relative lib
-  # files plus node builtins, and npx fetches tsx itself.
-  # Known window: this runs before the safe_outputs job posts the COMMENT
-  # review carrying the explanatory note, so a safe_outputs infra failure
-  # can leave a dismissal whose note never posted; the dismissal message
-  # itself renders in the PR timeline, so the gap is visible, and every
-  # failure here is a warning (the block stands: more review, never less).
-  # The wrapper makes that true of the step too: an npx/tsx bootstrap
-  # failure must not red a run the gate passed (the sibling gate step above
-  # takes the same posture for the same reason).
-  - name: Clear the standing blocking review (reduced-depth dismissal)
-    env:
-      GH_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
-      # Expression-expanded when the job starts (same convention as the
-      # staging step), so the agent cannot rewrite it the way it could the
-      # on-disk event payload the CLI otherwise falls back to.
-      REVIEW_PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
-    run: |
-      if ! (cd "${RUNNER_TEMP}/gh-aw-review-lib-postagent" && npx -y tsx workflows/review/lib/dismiss-review.ts); then
-        echo "::warning title=review dismissal::step could not run (infra failure; block stands)"
-      fi
-      exit 0
 
 # Anthropic pricing overlay, so an AI credit means $0.01 of what Khan actually
 # pays.
 #
-# LIVE since the toolchain moved to gh-aw v0.85.4, which defaults the
-# firewall to v0.27.44. The history, kept because the failure mode is
-# silent: `apiProxy.providers` was added to awf-config-schema.json in AWF
-# v0.27.43, and gh-aw gates emitting it on that floor
-# (`AWFAPIProxyProvidersMinVersion`) because older AWF strict config
-# validation rejects unknown apiProxy properties. Through gh-aw v0.83.4
-# (default firewall v0.27.42, one patch below the floor) the block was
-# SILENTLY DROPPED: the compile came out clean, the rates landed only in the
-# informational `GH_AW_INFO_MODEL_COSTS` env var, and metering stayed at
-# list price. A recompile with an older gh-aw would drop it again with no
-# test failure (nothing in CI runs `gh aw compile`), hence:
+# INERT UNTIL gh-aw v0.84.x GOES STABLE. `apiProxy.providers` was added to
+# awf-config-schema.json in AWF v0.27.43, and gh-aw gates emitting it on that
+# floor (`AWFAPIProxyProvidersMinVersion`) because older AWF strict config
+# validation rejects unknown apiProxy properties. gh-aw v0.83.4 (the version
+# this lock was compiled with, and still `releases/latest`) defaults to AWF
+# v0.27.42, one patch below, so it SILENTLY DROPS this block: it compiles
+# clean, the rates land only in the informational `GH_AW_INFO_MODEL_COSTS` env
+# var, and metering stays at list price. gh-aw raises `DefaultFirewallVersion`
+# to v0.27.43 as of v0.84.0, but v0.83.5/v0.84.0/v0.84.1 are all prereleases,
+# so recompiling is blocked on that line going stable rather than on any edit
+# here. Do NOT pin the extension to a prerelease to force it: nothing in CI
+# runs `gh aw compile`, so the next compile on stable would silently drop
+# `providers` again with no test failure.
 #
 # VERIFY AFTER ANY TOOLCHAIN BUMP: `providers` must appear inside the
 # `apiProxy` object of both awf-config payloads in review.lock.yml. Its
@@ -491,10 +433,6 @@ models:
   # the `providers` overlay below live (the higher-precedence source). Do NOT
   # reach for `sandbox.agent.version: v0.27.43` to get there early; a version
   # is pinned here only to hold a release BACK, never to move one forward.
-  # That condition is met as of gh-aw v0.85.4 (firewall v0.27.44), so this
-  # fallback is now inert (the live `providers` overlay outranks it) and
-  # removable; kept for the moment so the pricing change ships separately
-  # from unrelated work.
   #
   # MINIMUM COMPILER: gh-aw >= v0.83.0 for `models.default-ai-credits-pricing`.
   # $/1M tokens. `input` and `output` are the only rates the schema accepts,
@@ -588,10 +526,48 @@ env:
   # KHAN/ACTIONS LOCAL OVERRIDE: the mirror of the raised max-ai-credits above
   # (the two values must stay in sync per the upstream comment).
   REVIEW_MAX_AI_CREDITS: "2500"
+  # The canary flag for the agent-side CLIs (the staging step sets its own
+  # copy): the submission plan demotes every verdict to COMMENT, the
+  # re-review stamp is never emitted (production would anchor its next
+  # round's scoping on it, since both workflows post as the same bot), and
+  # the dispatch gate checks the COMMENT-only rule instead of the
+  # blocking-comment one.
+  REVIEW_CANARY: "1"
+  # The sha this canary ran, stamped into the version footer
+  # (lib/version-footer.ts): package.json still carries the last released
+  # version on a head checkout, so without the stamp a canary review would be
+  # indistinguishable from a production one after the fact.
+  REVIEW_CANARY_SHA: ${{ github.event.pull_request.head.sha }}
 source: Khan/actions/workflows/review/review.md@review-v1.25.0
 ---
 
-# PR Reviewer
+# PR Reviewer Canary
+
+**Canary run.** This workflow runs the reviewer from this PR's own head
+commit instead of the pinned release, on a PR a human labeled `review-canary`.
+The pinned reviewer also runs on this PR, separately; you have no knowledge of
+its output and must not manage it. Four standing overrides, which take
+precedence over anything the steps below say:
+
+- Skip Step 7's thread-resolution pass entirely. The
+  `resolve_pull_request_review_thread` tool is not available in this workflow,
+  and the open bot threads on this PR belong to the pinned reviewer, not you.
+  (Step 7's risks/patterns comment still applies.)
+- Skip Step 8 (reviewer requests) entirely. The `add_reviewer` tool is not
+  available in this workflow; a canary review must never page owning teams.
+- Submit the review with the event the submission plan stages, which on a
+  canary run is always COMMENT: the safe output accepts nothing else, and a
+  canary must never move the bot's review state (`APPROVE`/`REQUEST_CHANGES`
+  would supersede or stand over the pinned reviewer's verdict). The plan's
+  body Note states the verdict the round would have posted.
+- The staging deliberately carries no reviewer history (prior reviews, bot
+  threads, adjudicated threads, and cache memory are staged empty), so review
+  the whole diff at full depth as a first encounter. Do not infer earlier
+  rounds from the PR surface. Step 9's cache-record write is harmless but
+  pointless here (this workflow saves no cache); perform it anyway so the run
+  artifact stays complete.
+
+<!-- END CANARY PREAMBLE -->
 
 You are a code reviewer for this repository. Your job is to review pull request
 changes, assess risk, and leave professional, actionable feedback. Be direct and

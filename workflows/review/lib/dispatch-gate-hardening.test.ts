@@ -340,6 +340,39 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
         outFiles: conformingOutFiles(),
     });
 
+    it("canary: a COMMENT with blocking inline comments conforms, any other verdict is the violation", () => {
+        // The plan CLI demotes a canary REQUEST_CHANGES to COMMENT with its
+        // blocking comments intact, so rule 4's blocking-comment check
+        // inverts: COMMENT+blocking is the conforming canary shape.
+        const comment = evaluate({
+            ...conforming(),
+            canary: true,
+            items: [
+                commentItem(2, "**issue (blocking):** guard removed"),
+                submitItem(
+                    "COMMENT",
+                    "Note: canary run. The verdict would have been REQUEST_CHANGES.",
+                ),
+            ],
+        });
+        expect(comment.violations).toEqual([]);
+        // A queued state-moving verdict is what a canary must never post.
+        for (const event of ["APPROVE", "REQUEST_CHANGES"]) {
+            const result = evaluate({
+                ...conforming(),
+                canary: true,
+                items: [submitItem(event, "body")],
+            });
+            expect(result.violations.map((v) => v.code)).toEqual([
+                "canary-verdict-not-comment",
+            ]);
+        }
+        // No submission queued at all stays conformant (the agent may have
+        // died before queueing; the gate's other rules own that story).
+        const none = evaluate({...conforming(), canary: true, items: []});
+        expect(none.violations).toEqual([]);
+    });
+
     it("rejects an APPROVE queued alongside a blocking inline comment", () => {
         const result = evaluate({
             ...conforming(),

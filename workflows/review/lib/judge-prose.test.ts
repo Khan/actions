@@ -7,6 +7,8 @@ import {
     createProseGate,
     extractProseUnits,
     LABEL_RUBRIC_EXTRA,
+    LABEL_RUBRIC_EXTRA_BASE,
+    QUESTION_VISIBLE_LINE_RULE,
     MAX_PROSE_BOUNCES,
     parseJudgeVerdict,
     PINNED_PROSE_JUDGE_MODEL,
@@ -183,8 +185,63 @@ describe("extractProseUnits", () => {
                 label: "question (non-blocking)",
                 prose: "The sibling test asserts the wrong constant.",
                 summary: "The sibling test asserts the wrong constant.",
+                codeAssignedLabel: true,
             },
         ]);
+    });
+
+    it("glues an unpunctuated subject the way the posted body does", () => {
+        // joinProse, not a space join: the judged block must open with the
+        // bytes fromLabelShape posts, the added period included (PR #408
+        // round 4).
+        const units = extractProseUnits({
+            findings: [
+                {
+                    id: "f-p",
+                    label: "thought (non-blocking)",
+                    subject:
+                        "The baked-metadata arm cannot reach the modeled rate",
+                    discussion:
+                        "The sampler caps the arm at the control's rate.",
+                },
+            ],
+        });
+        expect(units[0]?.prose).toBe(
+            "The baked-metadata arm cannot reach the modeled rate. The sampler caps the arm at the control's rate.",
+        );
+    });
+});
+
+describe("buildJudgePrompt question rule scope", () => {
+    const rubric = (prompt: string) =>
+        prompt.slice(0, prompt.indexOf("LABEL:"));
+
+    it("applies the question rule to an authored question label", () => {
+        const prompt = buildJudgePrompt(
+            "The retention pass never removes anything.",
+            "question (non-blocking)",
+        );
+        expect(rubric(prompt)).toContain(QUESTION_VISIBLE_LINE_RULE);
+    });
+
+    it("withholds it when code assigned the label (out-of-lane)", () => {
+        // fromOutOfLane posts every observation as a question under a
+        // contract that asks for a plain statement, so the author cannot
+        // fix the label; judging them against the rule would bounce a
+        // conforming observation (PR #408 round 4).
+        const [unit] = extractProseUnits({
+            out_of_lane_observations: [
+                {observation: "The sibling test asserts the wrong constant."},
+            ],
+        });
+        const prompt = buildJudgePrompt(
+            unit!.prose,
+            unit!.label,
+            unit!.summary,
+            {codeAssignedLabel: unit!.codeAssignedLabel === true},
+        );
+        expect(rubric(prompt)).not.toContain(QUESTION_VISIBLE_LINE_RULE);
+        expect(rubric(prompt)).toContain(LABEL_RUBRIC_EXTRA_BASE);
     });
 });
 
@@ -374,6 +431,15 @@ describe("buildBounceMessage", () => {
             "Keep every fact, identifier, number, and path",
         );
     });
+
+    it("names the subject/summary field as where a visible-line problem is fixed", () => {
+        // The fold rules judge the visible line, which posts from the
+        // finding's subject or summary, not its prose; a bounce that only
+        // said "rewrite the prose" left that line unrepairable (PR #408
+        // canary round 2).
+        const message = buildBounceMessage([{key: "f-1", problems: ["x"]}]);
+        expect(message).toContain("`subject` (or `summary`) field");
+    });
 });
 
 describe("buildProseJudgeArtifact", () => {
@@ -454,6 +520,21 @@ describe("buildJudgePrompt context fold", () => {
             "<details><summary><sub>context</sub></summary>",
         );
         expect(message).toContain(`${longProse}\n\n</details>`);
+    });
+
+    it("shows the judge the renderer's normalized visible line", () => {
+        // renderContextFold appends the missing period, so the judge must
+        // see the punctuated line: judging the raw subject would report a
+        // shape that never posts.
+        const prompt = buildJudgePrompt(
+            longProse,
+            "thought (non-blocking)",
+            "The baked-metadata arm cannot reach the modeled rate",
+        );
+        const message = prompt.slice(prompt.indexOf("MESSAGE:"));
+        expect(message).toContain(
+            "**thought (non-blocking):** The baked-metadata arm cannot reach the modeled rate.",
+        );
     });
 
     it("judges a short unit in the flat shape (no fold under the bar)", () => {

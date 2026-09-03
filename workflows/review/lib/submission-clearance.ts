@@ -111,6 +111,17 @@ export type ClearanceInput = {
     keptBlockingCount: number;
     /** Blocking suppressions matched to blocking threads (submission.ts). */
     suppressedBlocking: number;
+    /**
+     * A canary run (REVIEW_CANARY=1): the submitted event is always
+     * COMMENT, whatever the computed verdict. GitHub moves a reviewer's
+     * state on APPROVE or REQUEST_CHANGES, and both workflows submit as the
+     * same bot identity, so a canary APPROVE would supersede the pinned
+     * reviewer's standing REQUEST_CHANGES (and a canary REQUEST_CHANGES
+     * would stand with no dismissal path: the canary stages its own priors
+     * empty, so its clearance never sees the block). The would-be verdict
+     * still posts, as a Note line in the body.
+     */
+    canary: boolean;
 };
 
 export type ClearanceResult = {
@@ -126,7 +137,8 @@ export type ClearanceResult = {
     priorRcStands: boolean;
     /** Artifact-only observations for the plan's notes. */
     notes: string[];
-    /** A `Note:` line for the review body when a dismissal stages. */
+    /** A `Note:` line for the review body when a dismissal stages, or
+     * when a canary run demotes its verdict. */
     bodyNote: string | null;
     /** The dismissal decision to stage, or null (the common case). */
     dismissal: {reviewIds: number[]; message: string} | null;
@@ -171,7 +183,10 @@ export const decideEventAndClearance = (
         standingRcIds.length > 0;
 
     const commentWouldStrandPriorRc =
-        input.verdictEvent === "COMMENT" && priorRcStands && fullRoster;
+        !input.canary &&
+        input.verdictEvent === "COMMENT" &&
+        priorRcStands &&
+        fullRoster;
     if (commentWouldStrandPriorRc) {
         notes.push(
             "COMMENT verdict upgraded to APPROVE: a comment cannot clear the prior request-changes state, and every blocking objection is resolved",
@@ -183,17 +198,29 @@ export const decideEventAndClearance = (
             `APPROVE demoted to COMMENT: approval requires a full-roster review, and this run dispatched ${input.depth} depth`,
         );
     }
-    const event =
-        input.verdictEvent === "REQUEST_CHANGES"
-            ? "REQUEST_CHANGES"
-            : approveDemoted ||
-              (input.verdictEvent === "COMMENT" && !commentWouldStrandPriorRc)
-            ? "COMMENT"
-            : "APPROVE";
+    const event = input.canary
+        ? "COMMENT"
+        : input.verdictEvent === "REQUEST_CHANGES"
+        ? "REQUEST_CHANGES"
+        : approveDemoted ||
+          (input.verdictEvent === "COMMENT" && !commentWouldStrandPriorRc)
+        ? "COMMENT"
+        : "APPROVE";
+    if (input.canary && input.verdictEvent !== "COMMENT") {
+        notes.push(
+            `canary run: ${input.verdictEvent} submitted as COMMENT (a canary never moves the bot's review state)`,
+        );
+    }
 
     let bodyNote: string | null = null;
     let dismissal: ClearanceResult["dismissal"] = null;
+    if (input.canary && input.verdictEvent !== "COMMENT") {
+        // The would-be verdict is review content a human reading the canary
+        // output needs, so it posts in the body, not just the artifact.
+        bodyNote = `Note: canary run. The verdict would have been ${input.verdictEvent}; a canary always submits COMMENT so it never moves the bot's review state.`;
+    }
     const wantsRcDismissal =
+        !input.canary &&
         reducedRoster &&
         priorRcStands &&
         event === "COMMENT" &&

@@ -179,8 +179,9 @@ export const labelForFinding = (finding: Finding): ConventionalLabel => {
  * followed by whitespace. Owned here (the lowest rendering module) and
  * consumed by dispatch-contracts.ts's restatement drop and buildClaims'
  * subject recovery, which must agree with the renderer on what the first
- * sentence IS: the fold's visible line and the claim's `subject` are the
- * same text.
+ * sentence IS: the fold's visible line is the claim's `subject` up to
+ * terminal punctuation (`ensureTerminalPunctuation` may append one period,
+ * and does so identically on the joined prose's opening).
  */
 export const FIRST_SENTENCE_SPLIT = /(?<=[.!?])\s/;
 
@@ -188,11 +189,53 @@ export const FIRST_SENTENCE_SPLIT = /(?<=[.!?])\s/;
 export const firstSentence = (prose: string): string =>
     prose.split(FIRST_SENTENCE_SPLIT, 1)[0] ?? prose;
 
+/** Trailing closing quotes/brackets/emphasis, which may wrap a terminator. */
+const stripClosers = (line: string): string =>
+    line.trimEnd().replace(/["'`)\]*_]+$/, "");
+
+/**
+ * Ensure the fold's visible line ends in terminal punctuation. Subjects
+ * arrive headline-style (the contract never asked for a period and the
+ * models rarely supply one); the sentence break `joinProse` inserted
+ * where the subject joins the discussion used to be the only repair, and
+ * the visible line interpolated the subject verbatim, so agent-settings#105
+ * posted "…never spawns on them" directly over a collapsed block and read
+ * as a truncated comment. This helper is now the single rule: joinProse
+ * calls it for the sentence break and the renderers call it for the
+ * visible line, so the two stay byte-comparable by construction. The
+ * core-strip (terminal punctuation may sit inside closing quotes/brackets/
+ * emphasis) runs before the terminator test and the period lands after
+ * the closers, so a trailing code span never breaks. A trailing `:`
+ * or `;` counts as terminal here (matching the glue rule joinProse had, so
+ * the joined prose never gets a period after a colon), and the fold layer
+ * handles that shape instead: {@link shouldFoldContext} posts such a
+ * comment flat, since a colon hand-off over a collapsed block is the
+ * truncated look this helper exists to remove and a period would misstate
+ * the author's sentence. Rendering-only:
+ * `claim.subject` itself is untouched, so dedup's prefix-match semantics
+ * never see the added period.
+ */
+export const ensureTerminalPunctuation = (line: string): string => {
+    const trimmed = line.trimEnd();
+    const core = stripClosers(trimmed);
+    return /[.!?:;]$/.test(core) || trimmed === "" ? trimmed : `${trimmed}.`;
+};
+
+/**
+ * Whether a visible line ends on a colon or semicolon (closers aside): a
+ * hand-off into text that is not on the line. {@link shouldFoldContext}
+ * refuses to fold such a summary, so the clause and what completes it
+ * post together.
+ */
+export const endsInHandoff = (line: string): boolean =>
+    /[:;]$/.test(stripClosers(line));
+
 /**
  * The context fold (PR feedback on webapp#41843: a long comment front-loads
  * its whole mechanism; compressing it after the fact drops exactly the
  * detail a reader needs to check the claim). The posted shape becomes a
- * 1-2 line visible summary plus one collapsed block carrying the full
+ * short visible summary (one sentence by default, the judge's soft cap,
+ * not a hard renderer rule) plus one collapsed block carrying the full
  * prose, rule quote, sketch, and attribution, verbatim. The summary chip is
  * deliberately NOT attribution.ts's `review details`: stripFooters removes
  * that block wholesale before dedup-threads' text-similarity comparison,
@@ -225,6 +268,12 @@ export const shouldFoldContext = (summary: string, prose: string): boolean =>
     // heading, a bullet list), the same case the restatement drop refuses
     // (dispatch-contracts.ts).
     !summary.includes("\n") &&
+    // A summary that hands off mid-thought on a colon or semicolon would
+    // post as a hanging clause over the block, the truncated look the
+    // punctuation repair exists to remove, and "repairing" it with a
+    // period would misstate the author's sentence. Posting flat keeps
+    // the clause and its completion together (PR #408 canary round 2).
+    !endsInHandoff(summary) &&
     prose.trim() !== summary.trim() &&
     prose.trim().length >= CONTEXT_FOLD_MIN_CHARS &&
     // Model-authored text interpolates into the block unescaped (it is
@@ -263,7 +312,7 @@ export const renderContextFold = (input: {
     const inside = (input.insideFold ?? []).filter((block) => block !== "");
     const outside = (input.outsideFold ?? []).filter((block) => block !== "");
     return [
-        `**${input.label}:** ${input.summary}`,
+        `**${input.label}:** ${ensureTerminalPunctuation(input.summary)}`,
         [
             CONTEXT_FOLD_OPEN,
             "",

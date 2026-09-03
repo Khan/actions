@@ -1,5 +1,5 @@
-# gh-aw-metadata: {"schema_version":"v4","frontmatter_hash":"de59a7a63627400ff997b220cad172e1d0f74ddd5b04da710ac60f773bba4ab6","body_hash":"9c519760054fdf005edbc08a1531fe6411144dab4628531a5c074c8a1ad08e13","compiler_version":"v0.85.4","strict":true,"agent_id":"claude","agent_model":"claude-opus-5","engine_versions":{"claude":"2.1.222"}}
-# gh-aw-manifest: {"version":1,"secrets":["ANTHROPIC_API_KEY","COPILOT_GITHUB_TOKEN","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GITHUB_TOKEN","KHAN_ACTIONS_BOT_TOKEN","REVIEW_JIRA_API_TOKEN","REVIEW_JIRA_EMAIL"],"actions":[{"repo":"actions/cache/restore","sha":"55cc8345863c7cc4c66a329aec7e433d2d1c52a9","version":"v6.1.0"},{"repo":"actions/cache/save","sha":"55cc8345863c7cc4c66a329aec7e433d2d1c52a9","version":"v6.1.0"},{"repo":"actions/checkout","sha":"3d3c42e5aac5ba805825da76410c181273ba90b1","version":"v7.0.1"},{"repo":"actions/checkout","sha":"93cb6efe18208431cddfb8368fd83d5badbf9bfd","version":"93cb6efe18208431cddfb8368fd83d5badbf9bfd"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"3a2844b7e9c422d3c10d287c895573f7108da1b3","version":"v9.0.0"},{"repo":"actions/setup-node","sha":"820762786026740c76f36085b0efc47a31fe5020","version":"v7.0.0"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7.0.1"},{"repo":"github/gh-aw-actions/setup","sha":"2709137ea6c5b0e19aa621454dc643ea8dc526b1","version":"v0.85.4"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.27.44","digest":"sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4","pinned_image":"ghcr.io/github/gh-aw-firewall/agent:0.27.44@sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44","digest":"sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7","pinned_image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44@sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.27.44","digest":"sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627","pinned_image":"ghcr.io/github/gh-aw-firewall/squid:0.27.44@sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.4.8","digest":"sha256:38bbea36cdb46a3c9d04d1db05e672966f5239b431a2022eb35881688e5721d8","pinned_image":"ghcr.io/github/gh-aw-mcpg:v0.4.8@sha256:38bbea36cdb46a3c9d04d1db05e672966f5239b431a2022eb35881688e5721d8"},{"image":"ghcr.io/github/gh-aw-node","digest":"sha256:0d9f1fb5fd6610c0ac1f5194a38e45a8a1e81f8a390d5142d8e4e6f26a4b3196","pinned_image":"ghcr.io/github/gh-aw-node@sha256:0d9f1fb5fd6610c0ac1f5194a38e45a8a1e81f8a390d5142d8e4e6f26a4b3196"},{"image":"ghcr.io/github/github-mcp-server:v1.8.0","digest":"sha256:d5a18c04b92714c309eb46a2305087e91a4dbd80420f6e462656699f95093520","pinned_image":"ghcr.io/github/github-mcp-server:v1.8.0@sha256:d5a18c04b92714c309eb46a2305087e91a4dbd80420f6e462656699f95093520"}],"has_pull_request":true}
+# gh-aw-metadata: {"schema_version":"v4","frontmatter_hash":"4ce81dc42ed697198273a389f0940cc0ca4be1d3223f5053f6a8214a40218ed5","body_hash":"383f7dbd5e996010ce6fa8f70eebb67a1b962602221997ce4bfb4872ccdede80","compiler_version":"v0.85.4","strict":true,"agent_id":"claude","agent_model":"claude-opus-5","engine_versions":{"claude":"2.1.222"}}
+# gh-aw-manifest: {"version":1,"secrets":["ANTHROPIC_API_KEY","COPILOT_GITHUB_TOKEN","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GITHUB_TOKEN","REVIEW_JIRA_API_TOKEN","REVIEW_JIRA_EMAIL"],"actions":[{"repo":"actions/checkout","sha":"3d3c42e5aac5ba805825da76410c181273ba90b1","version":"v7.0.1"},{"repo":"actions/checkout","sha":"93cb6efe18208431cddfb8368fd83d5badbf9bfd","version":"93cb6efe18208431cddfb8368fd83d5badbf9bfd"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"3a2844b7e9c422d3c10d287c895573f7108da1b3","version":"v9.0.0"},{"repo":"actions/setup-node","sha":"820762786026740c76f36085b0efc47a31fe5020","version":"v7.0.0"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7.0.1"},{"repo":"github/gh-aw-actions/setup","sha":"2709137ea6c5b0e19aa621454dc643ea8dc526b1","version":"v0.85.4"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.27.44","digest":"sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4","pinned_image":"ghcr.io/github/gh-aw-firewall/agent:0.27.44@sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44","digest":"sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7","pinned_image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44@sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.27.44","digest":"sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627","pinned_image":"ghcr.io/github/gh-aw-firewall/squid:0.27.44@sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.4.8","digest":"sha256:38bbea36cdb46a3c9d04d1db05e672966f5239b431a2022eb35881688e5721d8","pinned_image":"ghcr.io/github/gh-aw-mcpg:v0.4.8@sha256:38bbea36cdb46a3c9d04d1db05e672966f5239b431a2022eb35881688e5721d8"},{"image":"ghcr.io/github/gh-aw-node","digest":"sha256:0d9f1fb5fd6610c0ac1f5194a38e45a8a1e81f8a390d5142d8e4e6f26a4b3196","pinned_image":"ghcr.io/github/gh-aw-node@sha256:0d9f1fb5fd6610c0ac1f5194a38e45a8a1e81f8a390d5142d8e4e6f26a4b3196"},{"image":"ghcr.io/github/github-mcp-server:v1.8.0","digest":"sha256:d5a18c04b92714c309eb46a2305087e91a4dbd80420f6e462656699f95093520","pinned_image":"ghcr.io/github/github-mcp-server:v1.8.0@sha256:d5a18c04b92714c309eb46a2305087e91a4dbd80420f6e462656699f95093520"}],"has_pull_request":true}
 # This file was automatically generated by gh-aw (v0.85.4). DO NOT EDIT. To debug this workflow, load the skill at https://github.com/github/gh-aw/blob/main/debug.md
 #
 #    ___                   _   _
@@ -23,15 +23,13 @@
 #
 # For more information: https://github.github.com/gh-aw/introduction/overview/
 #
-# Reviews PR code changes for correctness, conventions, and risk on every push. Leaves actionable per-line feedback, and on approval posts the risk summary and common patterns as a separate PR comment and requests the owning teams as reviewers.
+# Canary variant of the PR reviewer (KHAN/ACTIONS ONLY, opt-in via the review-canary label): runs the reviewer from the PR's own head instead of the pinned release, so a PR that changes the reviewer can post a review with the changed code. Runs IN ADDITION to the pinned reviewer, never instead of it, with no context on that reviewer's runs (fresh eyes every push). Posting-only: it never resolves threads or requests reviewers.
 #
 # Source: Khan/actions/workflows/review/review.md@review-v1.25.0
 #
-# Resolved workflow manifest:
-#   Imports:
-#     - .github/aw/review/config.md
-#
 # Frontmatter env variables:
+#   - REVIEW_CANARY: (main workflow)
+#   - REVIEW_CANARY_SHA: (main workflow)
 #   - REVIEW_MAX_AI_CREDITS: (main workflow)
 #
 # Secrets used:
@@ -40,13 +38,10 @@
 #   - GH_AW_GITHUB_MCP_SERVER_TOKEN
 #   - GH_AW_GITHUB_TOKEN
 #   - GITHUB_TOKEN
-#   - KHAN_ACTIONS_BOT_TOKEN
 #   - REVIEW_JIRA_API_TOKEN
 #   - REVIEW_JIRA_EMAIL
 #
 # Custom actions used:
-#   - actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-#   - actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
 #   - actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 #   - actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # 93cb6efe18208431cddfb8368fd83d5badbf9bfd
 #   - actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -64,14 +59,12 @@
 #   - ghcr.io/github/gh-aw-node@sha256:0d9f1fb5fd6610c0ac1f5194a38e45a8a1e81f8a390d5142d8e4e6f26a4b3196
 #   - ghcr.io/github/github-mcp-server:v1.8.0@sha256:d5a18c04b92714c309eb46a2305087e91a4dbd80420f6e462656699f95093520
 
-name: "PR Reviewer"
+name: "PR Reviewer Canary"
 on:
   pull_request:
     types:
-      - opened
+      - labeled
       - synchronize
-      - reopened
-      - ready_for_review
 # roles: all # Roles processed as role check in pre-activation job
 
 permissions: {}
@@ -80,19 +73,20 @@ concurrency:
   group: "gh-aw-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref || github.run_id }}"
   cancel-in-progress: true
 
-run-name: "PR Reviewer"
+run-name: "PR Reviewer Canary"
 
 env:
+  REVIEW_CANARY: "1"
+  REVIEW_CANARY_SHA: ${{ github.event.pull_request.head.sha }}
   REVIEW_MAX_AI_CREDITS: "2500"
 
 jobs:
   activation:
     if: >
-      ((github.event.pull_request.head.repo.full_name == github.repository && !startsWith(github.event.pull_request.head.ref, 'deploy/') &&
-      github.event.pull_request.head.ref != 'changeset-release/main' && !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')) &&
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.id == github.repository_id)) &&
-      ((github.event_name != 'pull_request' && github.event_name != 'pull_request_review') || github.event.pull_request.stack == null ||
-      github.event.pull_request.stack.position == github.event.pull_request.stack.size)
+      ((github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'review-canary') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'review-canary')) && (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.id == github.repository_id)) && ((github.event_name != 'pull_request' &&
+      github.event_name != 'pull_request_review') || github.event.pull_request.stack == null || github.event.pull_request.stack.position == github.event.pull_request.stack.size)
     runs-on: ubuntu-slim
     permissions:
       actions: read
@@ -122,8 +116,8 @@ jobs:
           destination: ${{ runner.temp }}/gh-aw/actions
           job-name: ${{ github.job }}
         env:
-          GH_AW_SETUP_WORKFLOW_NAME: "PR Reviewer"
-          GH_AW_CURRENT_WORKFLOW_REF: ${{ github.repository }}/.github/workflows/review.lock.yml@${{ github.ref }}
+          GH_AW_SETUP_WORKFLOW_NAME: "PR Reviewer Canary"
+          GH_AW_CURRENT_WORKFLOW_REF: ${{ github.repository }}/.github/workflows/review-canary.lock.yml@${{ github.ref }}
           GH_AW_INFO_VERSION: "2.1.222"
           GH_AW_INFO_AWF_VERSION: "v0.27.44"
           GH_AW_INFO_BODY_MODIFIED: "false"
@@ -137,7 +131,7 @@ jobs:
           GH_AW_INFO_VERSION: "2.1.222"
           GH_AW_INFO_AGENT_VERSION: "2.1.222"
           GH_AW_INFO_CLI_VERSION: "v0.85.4"
-          GH_AW_INFO_WORKFLOW_NAME: "PR Reviewer"
+          GH_AW_INFO_WORKFLOW_NAME: "PR Reviewer Canary"
           GH_AW_INFO_EXPERIMENTAL: "false"
           GH_AW_INFO_SUPPORTS_TOOLS_ALLOWLIST: "true"
           GH_AW_INFO_STAGED: "false"
@@ -192,7 +186,7 @@ jobs:
         id: check-lock-file
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          GH_AW_WORKFLOW_FILE: "review.lock.yml"
+          GH_AW_WORKFLOW_FILE: "review-canary.lock.yml"
           GH_AW_CONTEXT_WORKFLOW_REF: "${{ github.workflow_ref }}"
         with:
           script: |
@@ -243,21 +237,20 @@ jobs:
         run: |
           bash "${RUNNER_TEMP}/gh-aw/actions/create_prompt_first.sh"
           {
-          cat << 'GH_AW_PROMPT_ec4bcda28a7f11ea_EOF'
+          cat << 'GH_AW_PROMPT_fc6d81ed9eb1072e_EOF'
           <system>
-          GH_AW_PROMPT_ec4bcda28a7f11ea_EOF
+          GH_AW_PROMPT_fc6d81ed9eb1072e_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/xpia.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/temp_folder_prompt.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/markdown.md"
-          cat "${RUNNER_TEMP}/gh-aw/prompts/cache_memory_prompt.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/safe_outputs_prompt.md"
-          cat << 'GH_AW_PROMPT_ec4bcda28a7f11ea_EOF'
+          cat << 'GH_AW_PROMPT_fc6d81ed9eb1072e_EOF'
           <safe-output-tools>
-          Tools: add_comment, create_pull_request_review_comment(max:20), submit_pull_request_review, resolve_pull_request_review_thread(max:20), add_reviewer(max:2), missing_tool, missing_data, noop
+          Tools: add_comment, create_pull_request_review_comment(max:20), submit_pull_request_review, missing_tool, missing_data, noop
           </safe-output-tools>
-          GH_AW_PROMPT_ec4bcda28a7f11ea_EOF
+          GH_AW_PROMPT_fc6d81ed9eb1072e_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/mcp_cli_tools_prompt.md"
-          cat << 'GH_AW_PROMPT_ec4bcda28a7f11ea_EOF'
+          cat << 'GH_AW_PROMPT_fc6d81ed9eb1072e_EOF'
           <github-context>
           The following GitHub context information is available for this workflow:
           {{#if github.actor}}
@@ -286,13 +279,12 @@ jobs:
           {{/if}}
           </github-context>
 
-          GH_AW_PROMPT_ec4bcda28a7f11ea_EOF
+          GH_AW_PROMPT_fc6d81ed9eb1072e_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/github_mcp_tools_with_safeoutputs_prompt.md"
-          cat << 'GH_AW_PROMPT_ec4bcda28a7f11ea_EOF'
+          cat << 'GH_AW_PROMPT_fc6d81ed9eb1072e_EOF'
           </system>
-          {{#runtime-import .github/aw/review/config.md}}
-          {{#runtime-import .github/workflows/review.md}}
-          GH_AW_PROMPT_ec4bcda28a7f11ea_EOF
+          {{#runtime-import .github/workflows/review-canary.md}}
+          GH_AW_PROMPT_fc6d81ed9eb1072e_EOF
           } > "$GH_AW_PROMPT"
       - name: Interpolate variables and render templates
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -314,9 +306,6 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           GH_AW_PROMPT: /tmp/gh-aw/aw-prompts/prompt.txt
-          GH_AW_ALLOWED_EXTENSIONS: ''
-          GH_AW_CACHE_DESCRIPTION: ''
-          GH_AW_CACHE_DIR: '/tmp/gh-aw/cache-memory/'
           GH_AW_EXPR_1A3A194A: ${{ github.event.discussion.number || (fromJSON(github.event.inputs.aw_context || github.event.client_payload.aw_context || '{}').item_type == 'discussion' && fromJSON(github.event.inputs.aw_context || github.event.client_payload.aw_context || '{}').item_number) }}
           GH_AW_EXPR_463A214A: ${{ github.event.pull_request.number || (fromJSON(github.event.inputs.aw_context || github.event.client_payload.aw_context || '{}').item_type == 'pull_request' && fromJSON(github.event.inputs.aw_context || github.event.client_payload.aw_context || '{}').item_number) }}
           GH_AW_EXPR_802A9F6A: ${{ github.event.issue.number || (fromJSON(github.event.inputs.aw_context || github.event.client_payload.aw_context || '{}').item_type == 'issue' && fromJSON(github.event.inputs.aw_context || github.event.client_payload.aw_context || '{}').item_number) }}
@@ -340,9 +329,6 @@ jobs:
             return await substitutePlaceholders({
               file: process.env.GH_AW_PROMPT,
               substitutions: {
-                GH_AW_ALLOWED_EXTENSIONS: process.env.GH_AW_ALLOWED_EXTENSIONS,
-                GH_AW_CACHE_DESCRIPTION: process.env.GH_AW_CACHE_DESCRIPTION,
-                GH_AW_CACHE_DIR: process.env.GH_AW_CACHE_DIR,
                 GH_AW_EXPR_1A3A194A: process.env.GH_AW_EXPR_1A3A194A,
                 GH_AW_EXPR_463A214A: process.env.GH_AW_EXPR_463A214A,
                 GH_AW_EXPR_802A9F6A: process.env.GH_AW_EXPR_802A9F6A,
@@ -399,14 +385,12 @@ jobs:
       GH_AW_ASSETS_MAX_SIZE_KB: 0
       GH_AW_MCP_LOG_DIR: /tmp/gh-aw/mcp-logs/safeoutputs
       GH_AW_RUNTIME_FEATURES: ${{ vars.GH_AW_RUNTIME_FEATURES }}
-      GH_AW_WORKFLOW_ID_SANITIZED: review
+      GH_AW_WORKFLOW_ID_SANITIZED: reviewcanary
     outputs:
       agentic_engine_timeout: ${{ steps.detect-agent-errors.outputs.agentic_engine_timeout || 'false' }}
       ai_credits_rate_limit_error: ${{ steps.parse-mcp-gateway.outputs.ai_credits_rate_limit_error || 'false' }}
       aic: ${{ steps.parse-mcp-gateway.outputs.aic }}
       ambient_context: ${{ steps.parse-mcp-gateway.outputs.ambient_context }}
-      cache_memory_restore_0_cache_hit: ${{ steps.restore_cache_memory_0.outputs.cache-hit || 'false' }}
-      cache_memory_restore_0_matched_key: ${{ steps.restore_cache_memory_0.outputs.cache-matched-key || '' }}
       checkout_pr_success: ${{ steps.checkout-pr.outputs.checkout_pr_success || 'true' }}
       effective_tokens: ${{ steps.parse-mcp-gateway.outputs.effective_tokens }}
       has_patch: ${{ steps.collect_output.outputs.has_patch }}
@@ -435,8 +419,8 @@ jobs:
           trace-id: ${{ needs.activation.outputs.setup-trace-id }}
           parent-span-id: ${{ needs.activation.outputs.setup-parent-span-id || needs.activation.outputs.setup-span-id }}
         env:
-          GH_AW_SETUP_WORKFLOW_NAME: "PR Reviewer"
-          GH_AW_CURRENT_WORKFLOW_REF: ${{ github.repository }}/.github/workflows/review.lock.yml@${{ github.ref }}
+          GH_AW_SETUP_WORKFLOW_NAME: "PR Reviewer Canary"
+          GH_AW_CURRENT_WORKFLOW_REF: ${{ github.repository }}/.github/workflows/review-canary.lock.yml@${{ github.ref }}
           GH_AW_INFO_VERSION: "2.1.222"
           GH_AW_INFO_AWF_VERSION: "v0.27.44"
           GH_AW_INFO_BODY_MODIFIED: "false"
@@ -464,22 +448,6 @@ jobs:
         with:
           name: activation
           path: /tmp/gh-aw
-      # Cache memory file share configuration from frontmatter processed below
-      - name: Create cache-memory directory
-        run: bash "${RUNNER_TEMP}/gh-aw/actions/create_cache_memory_dir.sh"
-      - name: Restore cache-memory file share data
-        id: restore_cache_memory_0
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          key: memory-none-9f0b69b3-${{ env.GH_AW_WORKFLOW_ID_SANITIZED }}-${{ github.run_id }}
-          path: /tmp/gh-aw/cache-memory
-          restore-keys: |
-            memory-none-9f0b69b3-${{ env.GH_AW_WORKFLOW_ID_SANITIZED }}-
-      - name: Setup cache-memory git repository
-        env:
-          GH_AW_CACHE_DIR: /tmp/gh-aw/cache-memory
-          GH_AW_MIN_INTEGRITY: none
-        run: bash "${RUNNER_TEMP}/gh-aw/actions/setup_cache_memory_git.sh"
       - name: Configure Git credentials
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -542,19 +510,22 @@ jobs:
         env:
           GH_AW_SKILL_DIR: ".claude/skills"
         run: bash "${RUNNER_TEMP}/gh-aw/actions/restore_inline_skills.sh"
-      - name: Check out shared review lib (Khan/actions)
+      - name: Check out shared review lib (Khan/actions, PR HEAD)
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # 93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           path: gh-aw-review-lib
           persist-credentials: false
-          ref: review-v1.25.0
+          ref: ${{ github.event.pull_request.head.sha }}
           repository: Khan/actions
-      - name: Copy the review lib for post-agent execution
+      - name: Verify head lib supports canary execution
         run: |
-          rm -rf "${RUNNER_TEMP}/gh-aw-review-lib-postagent"
-          cp -a "${GITHUB_WORKSPACE}/gh-aw-review-lib" "${RUNNER_TEMP}/gh-aw-review-lib-postagent"
+          if ! grep -rq "REVIEW_CANARY" gh-aw-review-lib/workflows/review/lib; then
+            echo "::error title=review canary preflight::PR head lib does not support REVIEW_CANARY; rebase onto main to run the canary"
+            exit 1
+          fi
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REVIEW_CANARY: "1"
           REVIEW_JIRA_API_TOKEN: ${{ secrets.REVIEW_JIRA_API_TOKEN }}
           REVIEW_JIRA_BASE_URL: ${{ vars.REVIEW_JIRA_BASE_URL }}
           REVIEW_JIRA_EMAIL: ${{ secrets.REVIEW_JIRA_EMAIL }}
@@ -567,25 +538,21 @@ jobs:
       - name: Download container images
         run: bash "${RUNNER_TEMP}/gh-aw/actions/download_docker_images.sh" ghcr.io/github/gh-aw-firewall/agent:0.27.44@sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4 ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44@sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7 ghcr.io/github/gh-aw-firewall/squid:0.27.44@sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627 ghcr.io/github/gh-aw-mcpg:v0.4.8@sha256:38bbea36cdb46a3c9d04d1db05e672966f5239b431a2022eb35881688e5721d8 ghcr.io/github/gh-aw-node@sha256:0d9f1fb5fd6610c0ac1f5194a38e45a8a1e81f8a390d5142d8e4e6f26a4b3196 ghcr.io/github/github-mcp-server:v1.8.0@sha256:d5a18c04b92714c309eb46a2305087e91a4dbd80420f6e462656699f95093520
       - name: Generate Safe Outputs Config
-        env:
-          GH_AW_SECRET_KHAN_ACTIONS_BOT_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
         run: |
           mkdir -p "${RUNNER_TEMP}/gh-aw/safeoutputs"
           mkdir -p /tmp/gh-aw/safeoutputs
           mkdir -p /tmp/gh-aw/mcp-logs/safeoutputs
           mkdir -p "${RUNNER_TEMP}/gh-aw/safeoutputs/upload-artifacts"
-          cat > "${RUNNER_TEMP}/gh-aw/safeoutputs/config.json" << 'GH_AW_SAFE_OUTPUTS_CONFIG_be3cb0740da3abeb_EOF'
-          {"add_comment":{"discussions":false,"footer":false,"hide_older_comments":true,"max":1,"target":"triggering"},"add_reviewer":{"allowed_team_reviewers":["github-actions"],"github-token":"${GH_AW_SECRET_KHAN_ACTIONS_BOT_TOKEN}","max":2,"target":"triggering"},"create_pull_request_review_comment":{"max":20,"side":"RIGHT"},"create_report_incomplete_issue":{},"missing_data":{},"missing_tool":{},"noop":{"max":1,"report-as-issue":"false"},"report_incomplete":{},"resolve_pull_request_review_thread":{"github-token":"${GH_AW_SECRET_KHAN_ACTIONS_BOT_TOKEN}","max":20},"submit_pull_request_review":{"allowed_events":["APPROVE","COMMENT","REQUEST_CHANGES"],"footer":"none","max":1},"upload_artifact":{"allowed-paths":["out/**","/tmp/gh-aw/review/out/**"],"max-size-bytes":104857600,"max-uploads":1,"retention-days":30}}
-          GH_AW_SAFE_OUTPUTS_CONFIG_be3cb0740da3abeb_EOF
+          cat > "${RUNNER_TEMP}/gh-aw/safeoutputs/config.json" << 'GH_AW_SAFE_OUTPUTS_CONFIG_f93db1d410732ad9_EOF'
+          {"add_comment":{"discussions":false,"footer":false,"hide_older_comments":true,"max":1,"target":"triggering"},"create_pull_request_review_comment":{"max":20,"side":"RIGHT"},"create_report_incomplete_issue":{},"missing_data":{},"missing_tool":{},"noop":{"max":1,"report-as-issue":"false"},"report_incomplete":{},"submit_pull_request_review":{"allowed_events":["COMMENT"],"footer":"none","max":1},"upload_artifact":{"allowed-paths":["out/**","/tmp/gh-aw/review/out/**"],"max-size-bytes":104857600,"max-uploads":1,"retention-days":30}}
+          GH_AW_SAFE_OUTPUTS_CONFIG_f93db1d410732ad9_EOF
       - name: Generate Safe Outputs Tools
         env:
           GH_AW_TOOLS_META_JSON: |
             {
               "description_suffixes": {
                 "add_comment": " CONSTRAINTS: Maximum 1 comment(s) can be added. Target: triggering. Supports reply_to_id for discussion threading.",
-                "add_reviewer": " CONSTRAINTS: Maximum 2 reviewer(s) can be added.",
                 "create_pull_request_review_comment": " CONSTRAINTS: Maximum 20 review comment(s) can be created. Comments will be on the RIGHT side of the diff.",
-                "resolve_pull_request_review_thread": " CONSTRAINTS: Maximum 20 review thread(s) can be resolved.",
                 "submit_pull_request_review": " CONSTRAINTS: Maximum 1 review(s) can be submitted."
               },
               "repo_params": {},
@@ -614,31 +581,6 @@ jobs:
                     "maxLength": 256
                   }
                 }
-              },
-              "add_reviewer": {
-                "defaultMax": 3,
-                "fields": {
-                  "pull_request_number": {
-                    "issueOrPRNumber": true
-                  },
-                  "repo": {
-                    "type": "string",
-                    "maxLength": 256
-                  },
-                  "reviewers": {
-                    "type": "array",
-                    "itemType": "string",
-                    "itemSanitize": true,
-                    "itemMaxLength": 39
-                  },
-                  "team_reviewers": {
-                    "type": "array",
-                    "itemType": "string",
-                    "itemSanitize": true,
-                    "itemMaxLength": 100
-                  }
-                },
-                "customValidation": "requiresOneOf:reviewers,team_reviewers"
               },
               "create_pull_request_review_comment": {
                 "defaultMax": 1,
@@ -747,15 +689,6 @@ jobs:
                     "type": "string",
                     "sanitize": true,
                     "maxLength": 1024
-                  }
-                }
-              },
-              "resolve_pull_request_review_thread": {
-                "defaultMax": 10,
-                "fields": {
-                  "thread_id": {
-                    "required": true,
-                    "type": "string"
                   }
                 }
               },
@@ -918,7 +851,6 @@ jobs:
         # - Edit
         # - Edit(/tmp/*)
         # - Edit(/tmp/gh-aw/agent/*)
-        # - Edit(/tmp/gh-aw/cache-memory/*)
         # - ExitPlanMode
         # - Glob
         # - Grep
@@ -927,19 +859,16 @@ jobs:
         # - MultiEdit
         # - MultiEdit(/tmp/*)
         # - MultiEdit(/tmp/gh-aw/agent/*)
-        # - MultiEdit(/tmp/gh-aw/cache-memory/*)
         # - NotebookEdit
         # - NotebookRead
         # - Read
         # - Read(/tmp/*)
         # - Read(/tmp/gh-aw/agent/*)
-        # - Read(/tmp/gh-aw/cache-memory/*)
         # - Task
         # - TodoWrite
         # - Write
         # - Write(/tmp/*)
         # - Write(/tmp/gh-aw/agent/*)
-        # - Write(/tmp/gh-aw/cache-memory/*)
         # - mcp__github__actions_get
         # - mcp__github__actions_list
         # - mcp__github__get_code_scanning_alert
@@ -1013,7 +942,7 @@ jobs:
           fi
           # shellcheck disable=SC1003,SC2016,SC2086
           awf --config "${RUNNER_TEMP}/gh-aw/awf-config.json" --container-workdir "${GITHUB_WORKSPACE}" --mount "${RUNNER_TEMP}/gh-aw:${RUNNER_TEMP}/gh-aw:ro" --mount "${RUNNER_TEMP}/gh-aw:/host${RUNNER_TEMP}/gh-aw:ro" --mount "${RUNNER_TEMP}/gh-aw/safeoutputs/upload-artifacts:${RUNNER_TEMP}/gh-aw/safeoutputs/upload-artifacts:rw" ${GH_AW_TOOL_CACHE_MOUNT:+--mount "$GH_AW_TOOL_CACHE_MOUNT"} ${GH_AW_DOCKER_HOST:+--docker-host "$GH_AW_DOCKER_HOST"} --tty --env-all --exclude-env ACTIONS_ID_TOKEN_REQUEST_TOKEN --exclude-env ACTIONS_ID_TOKEN_REQUEST_URL --exclude-env ANTHROPIC_API_KEY --exclude-env GITHUB_MCP_SERVER_TOKEN --exclude-env MCP_GATEWAY_API_KEY --log-level info --skip-pull \
-            -- /bin/bash -c 'set +o histexpand; export PATH="${RUNNER_TEMP}/gh-aw/mcp-cli/bin:$PATH" && : "${RUNNER_TOOL_CACHE:?RUNNER_TOOL_CACHE must be set}"; GH_AW_TOOL_CACHE="$RUNNER_TOOL_CACHE"; export PATH="$(find "$GH_AW_TOOL_CACHE" -maxdepth 5 -type d -name bin 2>/dev/null | tr '\''\n'\'' '\'':'\'')$PATH"; [ -n "$GOROOT" ] && export PATH="$GOROOT/bin:$PATH" || true; [ -n "$ERLANG_HOME" ] && export PATH="$ERLANG_HOME/bin:$PATH" || true && GH_AW_NODE_EXEC="${GH_AW_NODE_BIN:-}"; if [ -z "$GH_AW_NODE_EXEC" ] || [ ! -x "$GH_AW_NODE_EXEC" ]; then GH_AW_NODE_EXEC="$(command -v node 2>/dev/null || true)"; fi; if [ -z "$GH_AW_NODE_EXEC" ]; then echo "node runtime missing on this runner — check runtimes.node in workflow YAML" >&2; exit 127; fi; GH_AW_NPM_GLOBAL_ROOT="$(npm root -g 2>/dev/null || true)"; if [ -n "$GH_AW_NPM_GLOBAL_ROOT" ]; then export NODE_PATH="${GH_AW_NPM_GLOBAL_ROOT}${NODE_PATH:+:${NODE_PATH}}"; fi; "$GH_AW_NODE_EXEC" ${RUNNER_TEMP}/gh-aw/actions/claude_harness.cjs claude --print --no-chrome --allowed-tools '\''Bash,BashOutput,Edit,Edit(/tmp/*),Edit(/tmp/gh-aw/agent/*),Edit(/tmp/gh-aw/cache-memory/*),ExitPlanMode,Glob,Grep,KillBash,LS,MultiEdit,MultiEdit(/tmp/*),MultiEdit(/tmp/gh-aw/agent/*),MultiEdit(/tmp/gh-aw/cache-memory/*),NotebookEdit,NotebookRead,Read,Read(/tmp/*),Read(/tmp/gh-aw/agent/*),Read(/tmp/gh-aw/cache-memory/*),Task,TodoWrite,Write,Write(/tmp/*),Write(/tmp/gh-aw/agent/*),Write(/tmp/gh-aw/cache-memory/*),mcp__github__actions_get,mcp__github__actions_list,mcp__github__get_code_scanning_alert,mcp__github__get_commit,mcp__github__get_dependabot_alert,mcp__github__get_discussion,mcp__github__get_discussion_comments,mcp__github__get_file_contents,mcp__github__get_job_logs,mcp__github__get_label,mcp__github__get_latest_release,mcp__github__get_me,mcp__github__get_notification_details,mcp__github__get_pull_request,mcp__github__get_pull_request_comments,mcp__github__get_pull_request_diff,mcp__github__get_pull_request_files,mcp__github__get_pull_request_review_comments,mcp__github__get_pull_request_reviews,mcp__github__get_pull_request_status,mcp__github__get_release_by_tag,mcp__github__get_secret_scanning_alert,mcp__github__get_tag,mcp__github__issue_read,mcp__github__list_branches,mcp__github__list_code_scanning_alerts,mcp__github__list_commits,mcp__github__list_dependabot_alerts,mcp__github__list_discussion_categories,mcp__github__list_discussions,mcp__github__list_issue_types,mcp__github__list_issues,mcp__github__list_label,mcp__github__list_notifications,mcp__github__list_pull_requests,mcp__github__list_releases,mcp__github__list_secret_scanning_alerts,mcp__github__list_starred_repositories,mcp__github__list_tags,mcp__github__pull_request_read,mcp__github__search_code,mcp__github__search_issues,mcp__github__search_orgs,mcp__github__search_pull_requests,mcp__github__search_repositories,mcp__github__search_users,mcp__safeoutputs'\'' --debug-file /tmp/gh-aw/agent-stdio.log --verbose --permission-mode acceptEdits --output-format stream-json --mcp-config "${RUNNER_TEMP}/gh-aw/mcp-config/mcp-servers.json" --prompt-file /tmp/gh-aw/aw-prompts/prompt.txt' 2>&1 | tee -a /tmp/gh-aw/agent-stdio.log
+            -- /bin/bash -c 'set +o histexpand; export PATH="${RUNNER_TEMP}/gh-aw/mcp-cli/bin:$PATH" && : "${RUNNER_TOOL_CACHE:?RUNNER_TOOL_CACHE must be set}"; GH_AW_TOOL_CACHE="$RUNNER_TOOL_CACHE"; export PATH="$(find "$GH_AW_TOOL_CACHE" -maxdepth 5 -type d -name bin 2>/dev/null | tr '\''\n'\'' '\'':'\'')$PATH"; [ -n "$GOROOT" ] && export PATH="$GOROOT/bin:$PATH" || true; [ -n "$ERLANG_HOME" ] && export PATH="$ERLANG_HOME/bin:$PATH" || true && GH_AW_NODE_EXEC="${GH_AW_NODE_BIN:-}"; if [ -z "$GH_AW_NODE_EXEC" ] || [ ! -x "$GH_AW_NODE_EXEC" ]; then GH_AW_NODE_EXEC="$(command -v node 2>/dev/null || true)"; fi; if [ -z "$GH_AW_NODE_EXEC" ]; then echo "node runtime missing on this runner — check runtimes.node in workflow YAML" >&2; exit 127; fi; GH_AW_NPM_GLOBAL_ROOT="$(npm root -g 2>/dev/null || true)"; if [ -n "$GH_AW_NPM_GLOBAL_ROOT" ]; then export NODE_PATH="${GH_AW_NPM_GLOBAL_ROOT}${NODE_PATH:+:${NODE_PATH}}"; fi; "$GH_AW_NODE_EXEC" ${RUNNER_TEMP}/gh-aw/actions/claude_harness.cjs claude --print --no-chrome --allowed-tools '\''Bash,BashOutput,Edit,Edit(/tmp/*),Edit(/tmp/gh-aw/agent/*),ExitPlanMode,Glob,Grep,KillBash,LS,MultiEdit,MultiEdit(/tmp/*),MultiEdit(/tmp/gh-aw/agent/*),NotebookEdit,NotebookRead,Read,Read(/tmp/*),Read(/tmp/gh-aw/agent/*),Task,TodoWrite,Write,Write(/tmp/*),Write(/tmp/gh-aw/agent/*),mcp__github__actions_get,mcp__github__actions_list,mcp__github__get_code_scanning_alert,mcp__github__get_commit,mcp__github__get_dependabot_alert,mcp__github__get_discussion,mcp__github__get_discussion_comments,mcp__github__get_file_contents,mcp__github__get_job_logs,mcp__github__get_label,mcp__github__get_latest_release,mcp__github__get_me,mcp__github__get_notification_details,mcp__github__get_pull_request,mcp__github__get_pull_request_comments,mcp__github__get_pull_request_diff,mcp__github__get_pull_request_files,mcp__github__get_pull_request_review_comments,mcp__github__get_pull_request_reviews,mcp__github__get_pull_request_status,mcp__github__get_release_by_tag,mcp__github__get_secret_scanning_alert,mcp__github__get_tag,mcp__github__issue_read,mcp__github__list_branches,mcp__github__list_code_scanning_alerts,mcp__github__list_commits,mcp__github__list_dependabot_alerts,mcp__github__list_discussion_categories,mcp__github__list_discussions,mcp__github__list_issue_types,mcp__github__list_issues,mcp__github__list_label,mcp__github__list_notifications,mcp__github__list_pull_requests,mcp__github__list_releases,mcp__github__list_secret_scanning_alerts,mcp__github__list_starred_repositories,mcp__github__list_tags,mcp__github__pull_request_read,mcp__github__search_code,mcp__github__search_issues,mcp__github__search_orgs,mcp__github__search_pull_requests,mcp__github__search_repositories,mcp__github__search_users,mcp__safeoutputs'\'' --debug-file /tmp/gh-aw/agent-stdio.log --verbose --permission-mode acceptEdits --output-format stream-json --mcp-config "${RUNNER_TEMP}/gh-aw/mcp-config/mcp-servers.json" --prompt-file /tmp/gh-aw/aw-prompts/prompt.txt' 2>&1 | tee -a /tmp/gh-aw/agent-stdio.log
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_MAX_RETRIES: 0
@@ -1072,12 +1001,11 @@ jobs:
             const { main } = require('${{ runner.temp }}/gh-aw/actions/redact_secrets.cjs');
             await main();
         env:
-          GH_AW_SECRET_NAMES: 'ANTHROPIC_API_KEY,GH_AW_GITHUB_MCP_SERVER_TOKEN,GH_AW_GITHUB_TOKEN,GITHUB_TOKEN,KHAN_ACTIONS_BOT_TOKEN,REVIEW_JIRA_API_TOKEN,REVIEW_JIRA_EMAIL'
+          GH_AW_SECRET_NAMES: 'ANTHROPIC_API_KEY,GH_AW_GITHUB_MCP_SERVER_TOKEN,GH_AW_GITHUB_TOKEN,GITHUB_TOKEN,REVIEW_JIRA_API_TOKEN,REVIEW_JIRA_EMAIL'
           SECRET_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SECRET_GH_AW_GITHUB_MCP_SERVER_TOKEN: ${{ secrets.GH_AW_GITHUB_MCP_SERVER_TOKEN }}
           SECRET_GH_AW_GITHUB_TOKEN: ${{ secrets.GH_AW_GITHUB_TOKEN }}
           SECRET_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SECRET_KHAN_ACTIONS_BOT_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
           SECRET_REVIEW_JIRA_API_TOKEN: ${{ secrets.REVIEW_JIRA_API_TOKEN }}
           SECRET_REVIEW_JIRA_EMAIL: ${{ secrets.REVIEW_JIRA_EMAIL }}
       - name: Append agent step summary
@@ -1159,24 +1087,6 @@ jobs:
           if [ ! -f /tmp/gh-aw/agent_output.json ]; then
             echo '{"items":[]}' > /tmp/gh-aw/agent_output.json
           fi
-      - name: Commit cache-memory changes
-        if: always()
-        env:
-          GH_AW_CACHE_DIR: /tmp/gh-aw/cache-memory
-        run: bash "${RUNNER_TEMP}/gh-aw/actions/commit_cache_memory_git.sh"
-      - name: Check cache-memory git integrity
-        if: always()
-        continue-on-error: true
-        env:
-          GH_AW_CACHE_DIR: /tmp/gh-aw/cache-memory
-        run: bash "${RUNNER_TEMP}/gh-aw/actions/check_cache_memory_git_integrity.sh"
-      - name: Upload cache-memory data as artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: cache-memory
-          include-hidden-files: true
-          path: /tmp/gh-aw/cache-memory
       # Upload safe-outputs upload-artifact staging for the upload_artifact job
       - name: Upload upload-artifact staging
         if: always()
@@ -1188,9 +1098,9 @@ jobs:
           if-no-files-found: ignore
       - if: always()
         name: Dispatch-conformance gate
-        run: |
+        run: |-
           rm -f /tmp/gh-aw/dispatch-gate.blocked
-          if (cd "${RUNNER_TEMP}/gh-aw-review-lib-postagent" && npx -y tsx workflows/review/lib/dispatch-gate.ts); then
+          if (cd gh-aw-review-lib && npx -y tsx workflows/review/lib/dispatch-gate.ts); then
             exit 0
           fi
           if [ -f /tmp/gh-aw/dispatch-gate.blocked ]; then
@@ -1198,15 +1108,6 @@ jobs:
             exit 1
           fi
           echo "::warning title=dispatch-conformance gate::gate could not run (infra failure; review not blocked)"
-          exit 0
-      - env:
-          GH_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
-          REVIEW_PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
-        name: Clear the standing blocking review (reduced-depth dismissal)
-        run: |-
-          if ! (cd "${RUNNER_TEMP}/gh-aw-review-lib-postagent" && npx -y tsx workflows/review/lib/dismiss-review.ts); then
-            echo "::warning title=review dismissal::step could not run (infra failure; block stands)"
-          fi
           exit 0
 
       - name: Upload agent artifacts
@@ -1241,7 +1142,6 @@ jobs:
       - agent
       - detection
       - safe_outputs
-      - update_cache_memory
     if: >
       always() && (needs.agent.result != 'skipped' || needs.activation.outputs.lockdown_check_failed == 'true' ||
       needs.activation.outputs.oauth_token_check_failed == 'true' || needs.activation.outputs.stale_lock_file_failed == 'true' ||
@@ -1252,7 +1152,7 @@ jobs:
       issues: write
       pull-requests: write
     concurrency:
-      group: "gh-aw-conclusion-review"
+      group: "gh-aw-conclusion-review-canary"
       cancel-in-progress: false
       queue: max
     env:
@@ -1272,8 +1172,8 @@ jobs:
           trace-id: ${{ needs.activation.outputs.setup-trace-id }}
           parent-span-id: ${{ needs.activation.outputs.setup-parent-span-id || needs.activation.outputs.setup-span-id }}
         env:
-          GH_AW_SETUP_WORKFLOW_NAME: "PR Reviewer"
-          GH_AW_CURRENT_WORKFLOW_REF: ${{ github.repository }}/.github/workflows/review.lock.yml@${{ github.ref }}
+          GH_AW_SETUP_WORKFLOW_NAME: "PR Reviewer Canary"
+          GH_AW_CURRENT_WORKFLOW_REF: ${{ github.repository }}/.github/workflows/review-canary.lock.yml@${{ github.ref }}
           GH_AW_INFO_VERSION: "2.1.222"
           GH_AW_INFO_AWF_VERSION: "v0.27.44"
           GH_AW_INFO_BODY_MODIFIED: "false"
@@ -1328,7 +1228,7 @@ jobs:
         env:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
           GH_AW_NOOP_MAX: "1"
-          GH_AW_WORKFLOW_NAME: "PR Reviewer"
+          GH_AW_WORKFLOW_NAME: "PR Reviewer Canary"
           GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.25.0"
           GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.25.0/workflows/review/review.md"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -1337,7 +1237,7 @@ jobs:
           GH_AW_AIC: ${{ needs.agent.outputs.aic }}
           GH_AW_THREAT_DETECTION_AIC: ${{ needs.detection.outputs.aic }}
           GH_AW_AMBIENT_CONTEXT: ${{ needs.agent.outputs.ambient_context }}
-          GH_AW_WORKFLOW_ID: "review"
+          GH_AW_WORKFLOW_ID: "review-canary"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -1350,7 +1250,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
-          GH_AW_WORKFLOW_NAME: "PR Reviewer"
+          GH_AW_WORKFLOW_NAME: "PR Reviewer Canary"
           GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.25.0"
           GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.25.0/workflows/review/review.md"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -1369,7 +1269,7 @@ jobs:
         env:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
           GH_AW_MISSING_TOOL_CREATE_ISSUE: "true"
-          GH_AW_WORKFLOW_NAME: "PR Reviewer"
+          GH_AW_WORKFLOW_NAME: "PR Reviewer Canary"
           GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.25.0"
           GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.25.0/workflows/review/review.md"
         with:
@@ -1385,7 +1285,7 @@ jobs:
         env:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
           GH_AW_REPORT_INCOMPLETE_CREATE_ISSUE: "true"
-          GH_AW_WORKFLOW_NAME: "PR Reviewer"
+          GH_AW_WORKFLOW_NAME: "PR Reviewer Canary"
           GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.25.0"
           GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.25.0/workflows/review/review.md"
         with:
@@ -1401,12 +1301,12 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
-          GH_AW_WORKFLOW_NAME: "PR Reviewer"
+          GH_AW_WORKFLOW_NAME: "PR Reviewer Canary"
           GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.25.0"
           GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.25.0/workflows/review/review.md"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_AGENT_CONCLUSION: ${{ needs.agent.result }}
-          GH_AW_WORKFLOW_ID: "review"
+          GH_AW_WORKFLOW_ID: "review-canary"
           GH_AW_ACTION_FAILURE_ISSUE_EXPIRES_HOURS: "168"
           GH_AW_ENGINE_ID: "claude"
           GH_AW_SECRET_VERIFICATION_RESULT: ${{ needs.activation.outputs.secret_verification_result }}
@@ -1434,9 +1334,6 @@ jobs:
           GH_AW_MISSING_TOOL_REPORT_AS_FAILURE: "true"
           GH_AW_MISSING_DATA_REPORT_AS_FAILURE: "true"
           GH_AW_TIMEOUT_MINUTES: "80"
-          GH_AW_CACHE_MEMORY_ENABLED: "true"
-          GH_AW_CACHE_MEMORY_RESTORE_0_MATCHED_KEY: ${{ needs.agent.outputs.cache_memory_restore_0_matched_key || '' }}
-          GH_AW_CACHE_MEMORY_RESTORE_0_CACHE_HIT: ${{ needs.agent.outputs.cache_memory_restore_0_cache_hit || 'false' }}
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -1450,7 +1347,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
-          GH_AW_WORKFLOW_NAME: "PR Reviewer"
+          GH_AW_WORKFLOW_NAME: "PR Reviewer Canary"
           GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.25.0"
           GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.25.0/workflows/review/review.md"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -1488,8 +1385,8 @@ jobs:
           trace-id: ${{ needs.activation.outputs.setup-trace-id }}
           parent-span-id: ${{ needs.activation.outputs.setup-parent-span-id || needs.activation.outputs.setup-span-id }}
         env:
-          GH_AW_SETUP_WORKFLOW_NAME: "PR Reviewer"
-          GH_AW_CURRENT_WORKFLOW_REF: ${{ github.repository }}/.github/workflows/review.lock.yml@${{ github.ref }}
+          GH_AW_SETUP_WORKFLOW_NAME: "PR Reviewer Canary"
+          GH_AW_CURRENT_WORKFLOW_REF: ${{ github.repository }}/.github/workflows/review-canary.lock.yml@${{ github.ref }}
           GH_AW_INFO_VERSION: "2.1.222"
           GH_AW_INFO_AWF_VERSION: "v0.27.44"
           GH_AW_INFO_BODY_MODIFIED: "false"
@@ -1566,8 +1463,8 @@ jobs:
         if: always() && steps.detection_guard.outputs.run_detection == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          WORKFLOW_NAME: "PR Reviewer"
-          WORKFLOW_DESCRIPTION: "Reviews PR code changes for correctness, conventions, and risk on every push. Leaves actionable per-line feedback, and on approval posts the risk summary and common patterns as a separate PR comment and requests the owning teams as reviewers."
+          WORKFLOW_NAME: "PR Reviewer Canary"
+          WORKFLOW_DESCRIPTION: "Canary variant of the PR reviewer (KHAN/ACTIONS ONLY, opt-in via the review-canary label): runs the reviewer from the PR's own head instead of the pinned release, so a PR that changes the reviewer can post a review with the changed code. Runs IN ADDITION to the pinned reviewer, never instead of it, with no context on that reviewer's runs (fresh eyes every push). Posting-only: it never resolves threads or requests reviewers."
           HAS_PATCH: ${{ needs.agent.outputs.has_patch }}
           GH_AW_DETECTION_CONTINUE_ON_ERROR: "true"
         with:
@@ -1734,7 +1631,7 @@ jobs:
       GH_AW_AGENT_AIC: ${{ needs.agent.outputs.aic }}
       GH_AW_AIC: ${{ needs.agent.outputs.aic }}
       GH_AW_AMBIENT_CONTEXT: ${{ needs.agent.outputs.ambient_context }}
-      GH_AW_CALLER_WORKFLOW_ID: "${{ github.repository }}/review"
+      GH_AW_CALLER_WORKFLOW_ID: "${{ github.repository }}/review-canary"
       GH_AW_DETECTION_CONCLUSION: ${{ needs.detection.outputs.detection_conclusion }}
       GH_AW_DETECTION_REASON: ${{ needs.detection.outputs.detection_reason }}
       GH_AW_EFFECTIVE_TOKENS: ${{ needs.agent.outputs.effective_tokens }}
@@ -1743,12 +1640,11 @@ jobs:
       GH_AW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       GH_AW_RUNTIME_FEATURES: ${{ vars.GH_AW_RUNTIME_FEATURES }}
       GH_AW_THREAT_DETECTION_AIC: ${{ needs.detection.outputs.aic }}
-      GH_AW_WORKFLOW_ID: "review"
-      GH_AW_WORKFLOW_NAME: "PR Reviewer"
+      GH_AW_WORKFLOW_ID: "review-canary"
+      GH_AW_WORKFLOW_NAME: "PR Reviewer Canary"
       GH_AW_WORKFLOW_SOURCE: "Khan/actions/workflows/review/review.md@review-v1.25.0"
       GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/Khan/actions/blob/review-v1.25.0/workflows/review/review.md"
     outputs:
-      add_reviewer_reviewers_added: ${{ steps.process_safe_outputs.outputs.reviewers_added }}
       code_push_failure_count: ${{ steps.process_safe_outputs.outputs.code_push_failure_count }}
       code_push_failure_errors: ${{ steps.process_safe_outputs.outputs.code_push_failure_errors }}
       comment_id: ${{ steps.process_safe_outputs.outputs.comment_id }}
@@ -1773,8 +1669,8 @@ jobs:
           parent-span-id: ${{ needs.activation.outputs.setup-parent-span-id || needs.activation.outputs.setup-span-id }}
           safe-output-artifact-client: 'true'
         env:
-          GH_AW_SETUP_WORKFLOW_NAME: "PR Reviewer"
-          GH_AW_CURRENT_WORKFLOW_REF: ${{ github.repository }}/.github/workflows/review.lock.yml@${{ github.ref }}
+          GH_AW_SETUP_WORKFLOW_NAME: "PR Reviewer Canary"
+          GH_AW_CURRENT_WORKFLOW_REF: ${{ github.repository }}/.github/workflows/review-canary.lock.yml@${{ github.ref }}
           GH_AW_INFO_VERSION: "2.1.222"
           GH_AW_INFO_AWF_VERSION: "v0.27.44"
           GH_AW_INFO_BODY_MODIFIED: "false"
@@ -1817,7 +1713,7 @@ jobs:
           GH_AW_ALLOWED_DOMAINS: "*.githubusercontent.com,*.sentry.io,anthropic.com,api.anthropic.com,api.github.com,api.snapcraft.io,archive.ubuntu.com,azure.archive.ubuntu.com,cdn.playwright.dev,claude.ai,claude.com,codeload.github.com,crl.geotrust.com,crl.globalsign.com,crl.identrust.com,crl.sectigo.com,crl.thawte.com,crl.usertrust.com,crl.verisign.com,crl3.digicert.com,crl4.digicert.com,crls.ssl.com,cursor.com,docs.github.com,docs.google.com,figma.com,files.pythonhosted.org,ghcr.io,github-cloud.githubusercontent.com,github-cloud.s3.amazonaws.com,github.blog,github.com,github.githubassets.com,host.docker.internal,json-schema.org,json.schemastore.org,keyserver.ubuntu.com,khanacademy.atlassian.net,khanacademy.dev,khanacademy.org,khanacademy.slack.com,lfs.github.com,localhost,objects.githubusercontent.com,ocsp.digicert.com,ocsp.geotrust.com,ocsp.globalsign.com,ocsp.identrust.com,ocsp.sectigo.com,ocsp.ssl.com,ocsp.thawte.com,ocsp.usertrust.com,ocsp.verisign.com,packagecloud.io,packages.cloud.google.com,packages.microsoft.com,patch-diff.githubusercontent.com,patchdiff.githubusercontent.com,playwright.download.prss.microsoft.com,ppa.launchpad.net,pypi.org,raw.githubusercontent.com,registry.npmjs.org,s.symcb.com,s.symcd.com,security.ubuntu.com,sentry.io,statsig.anthropic.com,ts-crl.ws.symantec.com,ts-ocsp.ws.symantec.com,www.googleapis.com"
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_API_URL: ${{ github.api_url }}
-          GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG: "{\"add_comment\":{\"discussions\":false,\"footer\":false,\"hide_older_comments\":true,\"max\":1,\"target\":\"triggering\"},\"add_reviewer\":{\"allowed_team_reviewers\":[\"github-actions\"],\"github-token\":\"${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}\",\"max\":2,\"target\":\"triggering\"},\"create_pull_request_review_comment\":{\"max\":20,\"side\":\"RIGHT\"},\"create_report_incomplete_issue\":{},\"missing_data\":{},\"missing_tool\":{},\"noop\":{\"max\":1,\"report-as-issue\":\"false\"},\"report_incomplete\":{},\"resolve_pull_request_review_thread\":{\"github-token\":\"${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}\",\"max\":20},\"submit_pull_request_review\":{\"allowed_events\":[\"APPROVE\",\"COMMENT\",\"REQUEST_CHANGES\"],\"footer\":\"none\",\"max\":1},\"upload_artifact\":{\"allowed-paths\":[\"out/**\",\"/tmp/gh-aw/review/out/**\"],\"max-size-bytes\":104857600,\"max-uploads\":1,\"retention-days\":30}}"
+          GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG: "{\"add_comment\":{\"discussions\":false,\"footer\":false,\"hide_older_comments\":true,\"max\":1,\"target\":\"triggering\"},\"create_pull_request_review_comment\":{\"max\":20,\"side\":\"RIGHT\"},\"create_report_incomplete_issue\":{},\"missing_data\":{},\"missing_tool\":{},\"noop\":{\"max\":1,\"report-as-issue\":\"false\"},\"report_incomplete\":{},\"submit_pull_request_review\":{\"allowed_events\":[\"COMMENT\"],\"footer\":\"none\",\"max\":1},\"upload_artifact\":{\"allowed-paths\":[\"out/**\",\"/tmp/gh-aw/review/out/**\"],\"max-size-bytes\":104857600,\"max-uploads\":1,\"retention-days\":30}}"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -1834,54 +1730,3 @@ jobs:
             /tmp/gh-aw/safe-output-items.jsonl
             /tmp/gh-aw/temporary-id-map.json
           if-no-files-found: ignore
-
-  update_cache_memory:
-    needs:
-      - activation
-      - agent
-      - detection
-    if: always() && needs.detection.result == 'success' && needs.agent.result == 'success'
-    runs-on: ubuntu-slim
-    permissions:
-      actions: write
-    env:
-      GH_AW_RUNTIME_FEATURES: ${{ vars.GH_AW_RUNTIME_FEATURES }}
-      GH_AW_WORKFLOW_ID_SANITIZED: review
-    steps:
-      - name: Setup Scripts
-        id: setup
-        uses: github/gh-aw-actions/setup@2709137ea6c5b0e19aa621454dc643ea8dc526b1 # v0.85.4
-        with:
-          destination: ${{ runner.temp }}/gh-aw/actions
-          job-name: ${{ github.job }}
-          trace-id: ${{ needs.activation.outputs.setup-trace-id }}
-          parent-span-id: ${{ needs.activation.outputs.setup-parent-span-id || needs.activation.outputs.setup-span-id }}
-        env:
-          GH_AW_SETUP_WORKFLOW_NAME: "PR Reviewer"
-          GH_AW_CURRENT_WORKFLOW_REF: ${{ github.repository }}/.github/workflows/review.lock.yml@${{ github.ref }}
-          GH_AW_INFO_VERSION: "2.1.222"
-          GH_AW_INFO_AWF_VERSION: "v0.27.44"
-          GH_AW_INFO_BODY_MODIFIED: "false"
-          GH_AW_INFO_ENGINE_ID: "claude"
-      - name: Download cache-memory artifact (default)
-        id: download_cache_default
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        continue-on-error: true
-        with:
-          name: cache-memory
-          path: /tmp/gh-aw/cache-memory
-      - name: Check if cache-memory folder has content (default)
-        id: check_cache_default
-        shell: bash
-        run: |
-          if [ -d "/tmp/gh-aw/cache-memory" ] && [ "$(ls -A /tmp/gh-aw/cache-memory 2>/dev/null)" ]; then
-            echo "has_content=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_content=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Save cache-memory to cache (default)
-        if: steps.check_cache_default.outputs.has_content == 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          key: memory-none-9f0b69b3-${{ env.GH_AW_WORKFLOW_ID_SANITIZED }}-${{ github.run_id }}
-          path: /tmp/gh-aw/cache-memory
