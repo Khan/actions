@@ -312,7 +312,7 @@ export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
                 ? `Adversarial hard gate: no flip so far (${finished} finished ` +
                       `repeat${
                           finished === 1 ? "" : "s"
-                      }); decided when the run finishes.`
+                      }), decided when the run finishes.`
                 : "Adversarial hard gate: PASSED on the candidate arm in every repeat.",
             "",
         );
@@ -327,7 +327,7 @@ export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
             "",
             ...report.gate.map(
                 (g) =>
-                    `- ${g.caseId}: failed ${g.failedRepeats}/${g.repeats} finished repeats so far; decided when the run finishes`,
+                    `- ${g.caseId}: failed ${g.failedRepeats}/${g.repeats} finished repeats so far, decided when the run finishes`,
             ),
             "",
         );

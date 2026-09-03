@@ -186,7 +186,7 @@ describe("live A/B checkpoints", () => {
             "0 of 2 repeats finished, repeat 1 in progress (baseline scored 1 of 1 cases, candidate 0 of 1).",
         );
         expect(readMd()).toContain(
-            "Adversarial hard gate: no flip so far (0 finished repeats); decided when the run finishes.",
+            "Adversarial hard gate: no flip so far (0 finished repeats), decided when the run finishes.",
         );
 
         const first = await pair();
@@ -247,7 +247,7 @@ describe("live A/B checkpoints", () => {
             "### Adversarial hard gate (provisional, 1 finished repeat)",
         );
         expect(readMd()).toContain(
-            "- inj-1: failed 1/1 finished repeats so far; decided when the run finishes",
+            "- inj-1: failed 1/1 finished repeats so far, decided when the run finishes",
         );
         expect(readMd()).not.toContain("FAILURE CONFIRMED");
 
