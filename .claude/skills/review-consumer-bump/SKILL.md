@@ -222,7 +222,12 @@ reference deletion. `review-counters.yml` stays.
    insertion can split a previously-adjacent override into its own unmarked
    hunk (1.16.0's `max-turn-cache-misses` did this to the
    `REVIEW_MAX_AI_CREDITS` mirror); the fix is a marker comment on the
-   orphaned override, never a weaker test.
+   orphaned override, never a weaker test. `Khan/actions` also installs
+   `review-canary.md`, whose prompt body and `source:` line
+   `review-canary.test.ts` holds byte-identical to the installed `review.md`,
+   so after merging and compiling `review.md` run `pnpm run sync-canary`
+   (Khan/actions#411) to re-derive it and recompile its lock, then restore
+   `.gitattributes` again. A bump that skips this fails CI on main.
 
 ## Step 6: the PRs
 
@@ -235,4 +240,10 @@ task in that repo's per-tree `tasks.md` that owns the rollout; the `gh`
 wrapper enforces this on `gh pr create` in Khan-org repos). If a release
 lands mid-rollout, update open PRs in
 place (force-push the rewritten commits) rather than stacking a second bump
-commit, and say so in a PR comment.
+commit, and say so in a PR comment. Edit the title and body for the new
+version **before** the force-push, not after: the push is what re-triggers
+the reviewer, and a round that starts against the old body blocks on "the
+PR says vX but the diff pins vY" (kore-marketplace#24 and agent-settings#105
+both did, on the 1.25.0 rewrite, with the body edited 2 minutes after the
+push). Most installs trigger only on push, so that block then needs a manual
+dismissal or another push to clear.

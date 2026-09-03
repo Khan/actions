@@ -1,6 +1,6 @@
 {
     "name": "review",
-    "version": "1.25.0",
+    "version": "1.25.1",
     "dependencies": {
         "@anthropic-ai/sandbox-runtime": "0.0.67",
         "@earendil-works/pi-agent-core": "0.84.4",
