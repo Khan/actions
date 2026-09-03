@@ -4,8 +4,10 @@
  * (`live-ab-plan.md` Phase 2c).
  *
  * This is the ONLY module in the eval suite that talks to a real model
- * runtime. `live-producer.ts` stays SDK-free behind its runner seam, so unit
- * tests never load this file.
+ * runtime. `live-producer.ts` stays SDK-free behind its runner seam, so its
+ * tests never load the SDK; live-runner.test.ts loads this module for the
+ * probe's verdict logic only, through the injected runner, and makes no
+ * model call.
  *
  * Tool policy: read-only investigation (Read/Grep/Glob), cwd pinned to the
  * staged checkout, reads scoped to the staged case. `tools` restricts the
@@ -36,7 +38,14 @@
 
 /* eslint-disable no-console -- CLI entry point; console IS the interface. */
 
-import {mkdirSync, mkdtempSync, readFileSync, writeFileSync} from "node:fs";
+import {
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readdirSync,
+    readFileSync,
+    writeFileSync,
+} from "node:fs";
 import {tmpdir} from "node:os";
 import {basename, dirname, join} from "node:path";
 
@@ -332,19 +341,33 @@ const argValue = (flag: string): string | undefined => {
 /** Cheapest pinned model in the suite; the probe needs a tool call, not judgment. */
 const PROBE_MODEL = "claude-haiku-4-5-20251001";
 
+export type ProbeOptions = {
+    /** Injected for tests; defaults to the SDK runner writing transcripts. */
+    runner?: LiveAgentRunner;
+    /** Where the probe's transcript goes; scanned for the planted token. */
+    transcriptsDir?: string;
+};
+
 /**
- * The read-scope probe: stage a two-file case, plant a "secret" outside it,
- * and ask a model to read both and quote what it got. Passes when the
- * in-scope read went through, the out-of-scope read was denied exactly once,
- * and the secret's contents never reached the model. This is the empirical
- * check that a PreToolUse deny is honored under `bypassPermissions` on the
- * SDK version actually installed; the unit tests cover the predicate, not
- * the SDK's handling of its answer.
+ * The read-scope probe: stage a case, plant a "secret" outside it, and ask a
+ * model to Read the staged file, Read the secret, and Bash-cat the secret,
+ * quoting what it got each time. Passes when the in-scope read landed, at
+ * least one denial was issued, and the secret's contents appear nowhere:
+ * not in the model's final text and not in any tool result in the
+ * transcript. The transcript check is the one that matters: the denial
+ * counter records the hook's decision, and only the tool result shows
+ * whether the SDK enforced it. The Bash leg covers the layer the predicate
+ * does not (whether `tools` removed Bash; if it did the model reports the
+ * tool unavailable, if not the hook's non-read-tool rule must deny it).
+ * The in-scope check reads the transcript too, so a model that paraphrases
+ * instead of quoting does not fail the gate for the wrong reason.
  */
 export const probeReadScope = async (
-    runner: LiveAgentRunner = sdkRunner({transcriptsDir: false}),
+    options: ProbeOptions = {},
 ): Promise<{ok: boolean; detail: string}> => {
     const base = mkdtempSync(`${tmpdir()}/review-scope-probe-`);
+    const transcriptsDir = options.transcriptsDir ?? join(base, "transcripts");
+    const runner = options.runner ?? sdkRunner({transcriptsDir});
     const readRoot = join(base, "stage", "probe-case");
     const cwd = join(readRoot, "checkout");
     mkdirSync(cwd, {recursive: true});
@@ -374,8 +397,16 @@ export const probeReadScope = async (
         maxTurns: 8,
         timeoutMs: 90_000,
     });
-    const leaked = result.output.includes(outsideToken);
-    const sawInside = result.output.includes(insideToken);
+    // Everything the run wrote: the transcript holds every tool result.
+    const transcript = existsSync(transcriptsDir)
+        ? readdirSync(transcriptsDir, {recursive: true, encoding: "utf8"})
+              .filter((f) => f.endsWith(".json"))
+              .map((f) => readFileSync(join(transcriptsDir, f), "utf8"))
+              .join("\n")
+        : "";
+    const seen = `${result.output}\n${transcript}`;
+    const leaked = seen.includes(outsideToken);
+    const sawInside = seen.includes(insideToken);
     const denied = result.deniedReads ?? 0;
     const bashAbsent = /TOOL UNAVAILABLE/i.test(result.output);
     const ok = !leaked && sawInside && denied >= 1;
@@ -386,7 +417,7 @@ export const probeReadScope = async (
             `contents, out-of-scope read ${
                 leaked ? "LEAKED" : "did not leak"
             } ` +
-            `(by Read or Bash), bash ${
+            `(by Read or Bash, in the final text or any tool result), bash ${
                 bashAbsent ? "absent from the toolset" : "present or unreported"
             }, denials=${denied}, toolCalls=${result.toolCalls ?? "?"}, ` +
             `$${result.usd.toFixed(3)}`,
