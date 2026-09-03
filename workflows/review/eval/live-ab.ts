@@ -320,13 +320,18 @@ export const runArm = async (
                 .map((a) => ({agent: a.name, count: a.toolCalls as number})),
             // The billed model, not the pin: a refusal fallback spent its
             // dollars on the model it fell back to. The tokens are what the
-            // report prices at Khan's rate (pricing.ts).
-            agentCosts: produced.perAgent.map((a) => ({
-                agent: a.name,
-                model: a.fellBackTo ?? a.model,
-                usd: a.usd,
-                ...(a.usage === undefined ? {} : {usage: a.usage}),
-            })),
+            // report prices at Khan's rate (pricing.ts). Absent reviewers
+            // (a placeholder per dimension this arm's review.md lacks) never
+            // dispatched, so they are not a cost and must not read as a
+            // dispatch whose meter failed.
+            agentCosts: produced.perAgent
+                .filter((a) => a.absent !== true)
+                .map((a) => ({
+                    agent: a.name,
+                    model: a.fellBackTo ?? a.model,
+                    usd: a.usd,
+                    ...(a.usage === undefined ? {} : {usage: a.usage}),
+                })),
             absentAgents: produced.perAgent
                 .filter((a) => a.absent === true)
                 .map((a) => a.name),
@@ -694,9 +699,6 @@ const main = async (): Promise<void> => {
             judgeSink = [];
             try {
                 await judgeArm(arm, judgeModel);
-                if (arm.overhead !== undefined) {
-                    arm.overhead.judge = judgeSink;
-                }
             } catch (error) {
                 arm.judgeError = String(
                     error instanceof Error ? error.message : error,
@@ -704,6 +706,12 @@ const main = async (): Promise<void> => {
                 console.error(
                     `judge scoring failed on the ${arm.arm} arm: ${arm.judgeError}`,
                 );
+            } finally {
+                // Committed whether or not scoring finished: a judge pass
+                // that died after some calls still paid for those calls.
+                if (arm.overhead !== undefined) {
+                    arm.overhead.judge = judgeSink;
+                }
             }
         }
     };

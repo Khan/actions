@@ -264,12 +264,32 @@ export type AgentCost = {
 };
 
 /**
+ * The overlay-over-list ratio for a pin, when both cards price it. The
+ * overlay is a flat multiple of list per model (pricing.test.ts holds it to
+ * that), so this re-prices a dollar figure exactly when no tokens exist.
+ */
+export const khanRatio = (
+    model: string,
+    khan: RateCard,
+    list: RateCard = ANTHROPIC_LIST_RATES,
+): number | undefined => {
+    const k = khan.get(pinOf(model));
+    const l = list.get(pinOf(model));
+    return k === undefined || l === undefined || l.input <= 0
+        ? undefined
+        : k.input / l.input;
+};
+
+/**
  * Per-agent costs at Khan's rate. An agent whose tokens the card prices reads
  * as tokens times the overlay. An agent it cannot price keeps its recorded
  * list dollars, which is exactly what production would meter for a model with
  * no overlay entry, and `atList` names those models. An agent with no token
- * counts at all also keeps its recorded dollars and is counted in
- * `untracked`, so a runner that lost its meter reads as list, not as free.
+ * counts at all (the field absent, or an empty list from a result that
+ * carried no per-model attribution) is counted in `untracked` and priced
+ * from its recorded dollars by the overlay ratio for its pin, which is exact
+ * given the flat overlay, or kept at list when the pin has no ratio. So a
+ * runner that lost its meter reads as its best estimate, never as free.
  */
 export const khanCost = (
     costs: readonly AgentCost[],
@@ -279,9 +299,15 @@ export const khanCost = (
     let untracked = 0;
     let usd = 0;
     for (const cost of costs) {
-        if (cost.usage === undefined) {
+        if (cost.usage === undefined || cost.usage.length === 0) {
             untracked += 1;
-            usd += cost.usd;
+            const ratio = khanRatio(cost.model, khan);
+            if (ratio === undefined) {
+                atList.add(pinOf(cost.model));
+                usd += cost.usd;
+            } else {
+                usd += cost.usd * ratio;
+            }
             continue;
         }
         const priced = priceTokens(cost.usage, khan);

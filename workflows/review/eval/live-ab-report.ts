@@ -14,8 +14,6 @@ import {
     type ModelTokens,
     type RateCard,
 } from "./pricing";
-
-export type {AgentCost};
 import type {
     CaseVerification,
     CorpusCase,
@@ -30,6 +28,8 @@ import type {
     PerAgentReport,
 } from "./live-producer";
 import type {RereviewCaseScore, RereviewMetricsReport} from "./rereview-match";
+
+export type {AgentCost};
 
 export type ArmId = "baseline" | "candidate";
 
@@ -163,7 +163,8 @@ export type ArmRunReport = {
      * Messages API calls that report `usage` but no dollars). Neither is in
      * `usd`, which is sub-agent spend only, so the report prices these from
      * tokens and adds them as their own row. Absent on artifacts predating
-     * the field and when the run disabled the judge or the arbiter.
+     * the field. A run with the judge or arbiter disabled records empty
+     * lists, not an absent field.
      */
     overhead?: {judge: ModelTokens[]; arbiter: ModelTokens[]};
 };

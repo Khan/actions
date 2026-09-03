@@ -54,6 +54,7 @@ import {
     SEVERITY_BAND_METRIC,
     SEVERITY_SPLIT_NOTE,
 } from "./aggregate-severity";
+import {extractSamples} from "./aggregate-extract";
 import {pooledCostLines} from "./cost-rows";
 import {
     mergeUsage,
@@ -128,8 +129,6 @@ export type ReportSample = {
 
 // The artifact parser lives in aggregate-extract.ts (this file is at the
 // lint line cap), re-exported so callers keep one import surface.
-import {extractSamples} from "./aggregate-extract";
-
 export {extractSamples};
 
 /* -------------------------------------------------------------------------- */

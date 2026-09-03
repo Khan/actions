@@ -30,10 +30,17 @@ const OPUS_TOKENS: ModelTokens = {
 describe("readOverlayRates", () => {
     it("reads every overlay entry in review.md as per-token rates", () => {
         const card = readOverlayRates(reviewMd);
-        // The overlay prices the engine and roster pin plus the engine
-        // override candidates. A collapse to zero means the walker rotted,
-        // not that the overlay emptied.
-        expect(card.size).toBeGreaterThanOrEqual(2);
+        // The exact pin set, so a pin the walker silently drops (which the
+        // report would then read as "no overlay entry", 2x production, and
+        // look intentional) fails here. Update this list with the overlay.
+        expect([...card.keys()].sort()).toEqual([
+            "claude-fable-5",
+            "claude-haiku-4-5",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+        ]);
         expect(card.get("claude-opus-5")).toEqual({
             input: 2.5e-6,
             output: 1.25e-5,
@@ -180,13 +187,35 @@ describe("khanCost", () => {
     it("prices tokens at the overlay and keeps recorded list dollars where it cannot", () => {
         const gemini = {...OPUS_TOKENS, model: "gemini-3.8-flash"};
         expect(
-            khanCost([cost(9.75, OPUS_TOKENS), cost(4, gemini), cost(2)], khan),
+            khanCost(
+                [
+                    cost(9.75, OPUS_TOKENS),
+                    cost(4, gemini),
+                    {agent: "u", model: "claude-opus-5", usd: 2},
+                ],
+                khan,
+            ),
         ).toEqual({
-            // 4.875 for opus, 4 for gemini at its recorded list, 2 untracked.
-            usd: 10.875,
+            // 4.875 for opus from tokens, 4 for gemini at its recorded list,
+            // and the untracked opus dispatch by ratio: 2 * 0.5.
+            usd: 9.875,
             atList: ["gemini-3.8-flash"],
             untracked: 1,
         });
+    });
+
+    it("treats an empty usage list as untracked, and an untracked model with no ratio as list", () => {
+        // A result whose modelUsage carried no per-model attribution reaches
+        // here as `[]`, and it must not read as free.
+        expect(
+            khanCost(
+                [
+                    {agent: "a", model: "claude-opus-5", usd: 2, usage: []},
+                    {agent: "b", model: "gemini-3.8-flash", usd: 3},
+                ],
+                khan,
+            ),
+        ).toEqual({usd: 4, atList: ["gemini-3.8-flash"], untracked: 2});
     });
 });
 
