@@ -10,6 +10,7 @@
  * validation error.
  */
 
+import {KNOWN_LENSES} from "../../lib/finding-schema";
 import {computeDiffProvenance, countFileLines} from "../../lib/provenance";
 import type {ChangedFile} from "../../lib/router";
 
@@ -73,7 +74,12 @@ export type LiveDefectSpec = {
      * a human reads in a miss report, so keep entries descriptive.
      */
     mechanism: string[];
-    /** Producing lens, when the defect is lens-specific (advisory only). */
+    /**
+     * Producing lens, when the defect is lens-specific. Must be a
+     * KNOWN_LENSES entry. Consulted by the matcher as a tie-break: when
+     * several posted findings satisfy the spec, the one produced by this
+     * lens wins over posted order.
+     */
     lens?: string;
     /**
      * Alternate anchor locations the spec ALSO accepts. A defect that spans
@@ -315,6 +321,19 @@ const parseDefectSpecs = (
         const lens = entry["lens"];
         if (lens !== undefined && !isNonEmptyString(lens)) {
             errors.push(`${at}.lens: must be a non-empty string when present`);
+            return;
+        }
+        if (
+            isNonEmptyString(lens) &&
+            !(KNOWN_LENSES as readonly string[]).includes(lens)
+        ) {
+            // The matcher resolves this to a producer; a typo or a renamed
+            // agent would otherwise silently fall back to posted order.
+            errors.push(
+                `${at}.lens: "${lens}" is not a known lens (${KNOWN_LENSES.join(
+                    ", ",
+                )})`,
+            );
             return;
         }
         const blockingOnly = entry["blockingOnly"];

@@ -164,9 +164,10 @@ claiming a band.
   arms both sit inside a band is wobble. The noise band predates the
   may-flag and duplicate buckets (next bullet), so it reads high against
   numbers taken after 2026-09-03 on cases that carry `mayFlagSpecs`, until
-  a drift run re-measures it. The report footer carries the same caveat. Detecting a 20-point recall change
-  needs ~60 spec-samples per arm; 10 points needs ~140 (two-proportion, 80%
-  power). Repeats are the cheap axis: no authoring, no review.
+  a drift run re-measures it. The report footer carries the same caveat.
+  Detecting a 20-point recall change needs ~60 spec-samples per arm; 10
+  points needs ~140 (two-proportion, 80% power). Repeats are the cheap
+  axis: no authoring, no review.
 - **Noise buckets:** the noise row's numerator is residual unmatched
   findings plus duplicates of a caught spec (a second posted copy of a
   defect another finding already claimed: a merge-stage miss, reported on
@@ -177,9 +178,15 @@ claiming a band.
   most of it. Only audited cases carry `mayFlagSpecs` (8 of the 10 live
   smoke cases so far, none of the rest of the live corpus), so on a case
   without them the noise row is still the old definition, an upper bound.
-  Pooled noise over a mixed set means the mix, read the per-case rows. The buckets are regex classification over the finding's
-  text: a leftover whose `failure_scenario` fits a may-flag entry is taken
-  at its word, then the duplicate check runs, then may-flag against the
+  A pooled noise rate over audited and unaudited cases together mixes the
+  two definitions, so compare per-case rows across arms, not the pooled
+  one. The entries were written from the claude arm's postings on run
+  33671015442 and cross-checked against the gemini arm where it posted, so
+  for the first few runs read the per-case buckets against the postings
+  once to catch an entry that only matches one model's vocabulary. The
+  buckets are regex classification over the finding's text: a leftover
+  whose `failure_scenario` fits a may-flag entry is taken at its word, then
+  the duplicate check runs, then may-flag against the
   full prose. A distinct finding that borrows the spec's keywords can still
   land in the duplicate bucket (the race case's TTL suggestion says
   "overwrite"), so read the per-case ids before trusting a duplicate count.

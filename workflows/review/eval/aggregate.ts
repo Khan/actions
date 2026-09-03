@@ -75,8 +75,10 @@ export type SampleRun = {
      * duplicate bucket, but NOT the may-flag bucket: a leftover that now
      * lands in `legitimateUnspecced` used to count here, so the same run
      * reads a smaller numerator under the new shape. The corpus hash moves
-     * with every `mayFlagSpecs` edit, so a pool mixing the two shapes trips
-     * the mixed-ruler warning rather than blending the definitions quietly.
+     * with every `mayFlagSpecs` edit, so a pool mixing stamped reports
+     * from both sides trips the mixed-ruler warning. Reports too old to
+     * carry a stamp show as "unstamped" in the ruler line instead, which is
+     * the only signal a pool of those and post-buckets reports gets.
      */
     unmatchedPosted: number;
     /**

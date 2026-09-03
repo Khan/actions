@@ -789,6 +789,73 @@ describe("matchCase", () => {
         expect(match.caught.map((c) => c.findingId)).toEqual(["f-genuine"]);
     });
 
+    it("routes a leftover whose prose alone names a may-flag defect to legitimate", async () => {
+        // Rung 3: the failure_scenario is about neither the caught spec nor
+        // the may-flag defect, so rungs 1 and 2 both decline, and only the
+        // prose carries the may-flag mechanism. Without rung 3 this reads
+        // as noise.
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [spec({key: "float-bug"})],
+            mayFlagSpecs: [
+                spec({
+                    key: "session-unset",
+                    mechanism: ["req\\.session.{0,40}unset"],
+                }),
+            ],
+            findings: [
+                finding("f-float", "floating point totals round late."),
+                {
+                    ...finding(
+                        "f-prose",
+                        "downstream handlers see a surprising value.",
+                        "advisory",
+                    ),
+                    model_authored_prose:
+                        "The fast path leaves req.session unset for every downstream handler.",
+                },
+            ],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught.map((c) => c.findingId)).toEqual(["f-float"]);
+        expect(match.legitimateUnspecced.map((l) => l.findingId)).toEqual([
+            "f-prose",
+        ]);
+        expect(match.duplicates).toEqual([]);
+        expect(match.unmatchedFindingIds).toEqual([]);
+    });
+
+    it("lets a conventions spec win its tie through the skill-auditor's source", async () => {
+        // The default skill-auditor stamps conventions findings with source
+        // "skill", so a raw source === lens comparison could never credit
+        // it; the tie-break resolves the lens through the producer table.
+        const correctness = finding(
+            "f-corr",
+            "the helper name shadows the imported one.",
+            "advisory",
+        );
+        const skill = {
+            ...finding(
+                "f-skill",
+                "the helper name shadows the imported one, per the naming guide.",
+                "advisory",
+            ),
+            lens: "conventions",
+            source: "skill",
+        };
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [
+                spec({
+                    key: "shadowed-name",
+                    mechanism: ["shadows"],
+                    lens: "conventions",
+                }),
+            ],
+            findings: [correctness, skill],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught.map((c) => c.findingId)).toEqual(["f-skill"]);
+    });
+
     it("keeps a duplicate that mentions a may-flag defect in passing in the duplicate bucket", async () => {
         // The other direction of the same overlap: the candidate arm's
         // correctness copy of the header-spoof finding closed its prose

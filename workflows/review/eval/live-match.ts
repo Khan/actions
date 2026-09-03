@@ -34,6 +34,7 @@
  */
 
 import type {CorpusCase, LiveDefectSpec} from "./corpus/loader";
+import {sourceProducesLens} from "./lens-sources";
 import type {RunCandidate, RunResult} from "./runner";
 
 /* -------------------------------------------------------------------------- */
@@ -285,7 +286,9 @@ export const matchCase = async (
      * lens can hit it too. When both are present the lens the case was
      * authored against is the finding the case is about. The comparison is
      * against `source`, the producer the pipeline assigned, not
-     * `finding.lens`, which a specialist agent writes into its own JSON.
+     * `finding.lens`, which a specialist agent writes into its own JSON,
+     * resolved through the producer's own lens table because the default
+     * skill-auditor stamps `conventions` findings with source `skill`.
      */
     const deterministicClaimant = (
         spec: LiveDefectSpec,
@@ -295,8 +298,8 @@ export const matchCase = async (
                 !claimed.has(candidate.id) && matchesSpec(candidate, spec),
         );
         if (spec.lens !== undefined) {
-            const sameLens = hits.find(
-                (candidate) => candidate.source === spec.lens,
+            const sameLens = hits.find((candidate) =>
+                sourceProducesLens(candidate.source, spec.lens as string),
             );
             if (sameLens !== undefined) {
                 return sameLens;

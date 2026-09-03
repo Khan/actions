@@ -356,6 +356,32 @@ describe("parseCase: the live block", () => {
         expect(parseErrors(raw)).toMatch(/duplicate spec key "dup"/);
     });
 
+    it("rejects a spec lens that is not a known lens", () => {
+        // The matcher breaks ties on it, so a typo would silently revert
+        // to posted order instead of failing the corpus.
+        const raw = liveCase({
+            live: {
+                prContext: {
+                    title: "t",
+                    description: "d",
+                    author: "a",
+                    baseBranch: "main",
+                },
+                mustCatchSpecs: [
+                    {
+                        key: "k",
+                        path: "src/a.ts",
+                        mechanism: ["m"],
+                        lens: "concurency-async",
+                    },
+                ],
+            },
+        });
+        expect(parseErrors(raw)).toMatch(
+            /lens: "concurency-async" is not a known lens/,
+        );
+    });
+
     it("parses mayFlagSpecs with the same validation as the other spec lists", () => {
         const withMayFlag = (entry: Record<string, unknown>) =>
             liveCase({
