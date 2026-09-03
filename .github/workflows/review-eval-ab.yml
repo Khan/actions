@@ -67,8 +67,13 @@ permissions:
   contents: read
   pull-requests: write
 
+# A `labeled` event for any label other than `full-eval` runs nothing (every
+# job's `if` skips it), but until this key sent it to its own group it still
+# cancelled the PR's in-flight A/B: run 33802457289 lost 45 minutes and its
+# spend to a `skip-ai-review` label added mid-run. A no-op event must never
+# share a group with a live one.
 concurrency:
-  group: review-eval-ab-${{ github.event.pull_request.number || github.run_id }}
+  group: review-eval-ab-${{ github.event.pull_request.number || github.run_id }}-${{ (github.event.action == 'labeled' && github.event.label.name != 'full-eval') && 'noop' || 'live' }}
   cancel-in-progress: true
 
 jobs:
