@@ -12,7 +12,17 @@
  * config on exactly the consumer the modes are for. The comment author is
  * the signal that remains: a human's `/review` forces full, automation's
  * follows the mode dial like the push it stands in for.
+ *
+ * A human may also name the depth: `/review scoped` (or `/review delta`,
+ * `/review diff`, `/review diff-only`) asks for one scoped round over the
+ * hunks no full review has seen, whatever the dial says
+ * ({@link requestedDepthFromComment}). The token is advisory to the planner,
+ * which still applies every guard (no anchor fingerprint, ready-for-review
+ * anchor, overflow, tripwire) and falls back to full when one trips.
  */
+
+import {RE_REVIEW_MODES} from "./routing-config";
+import type {ReReviewMode} from "./routing-config";
 
 /** The automation logins assumed when `REVIEW_AUTOMATION_LOGINS` is unset. */
 export const DEFAULT_AUTOMATION_LOGINS = "khan-actions-bot";
@@ -71,17 +81,62 @@ export const isManualReviewRequest = (
     return !automationCommentAuthors().has((author.login ?? "").toLowerCase());
 };
 
+/**
+ * Synonyms a human may type in place of a mode name. `delta`, `diff`, and
+ * `diff-only` all read as "just the new stuff", which is what `scoped`
+ * stages.
+ */
+export const DEPTH_SYNONYMS: Readonly<Record<string, ReReviewMode>> = {
+    delta: "scoped",
+    diff: "scoped",
+    "diff-only": "scoped",
+};
+
+/**
+ * The depth a `/review` comment asks for: the first whitespace-separated
+ * token after `/review` on the comment's first line, case-folded, resolved
+ * through {@link DEPTH_SYNONYMS} and validated against the mode list.
+ * Returns null for a bare `/review`, for a token that names no mode (the
+ * ask still counts as manual, so the planner's default of full applies:
+ * a typo never buys a cheaper round), and for a body that is not a
+ * `/review` command at all.
+ */
+export const requestedDepthFromComment = (
+    body: string | undefined,
+): ReReviewMode | null => {
+    if (body === undefined) {
+        return null;
+    }
+    const firstLine = body.split(/\r?\n/, 1)[0] ?? "";
+    const match = /^\s*\/review[ \t]+(\S+)/.exec(firstLine);
+    if (match === null) {
+        return null;
+    }
+    const token = match[1].toLowerCase();
+    const resolved = DEPTH_SYNONYMS[token] ?? token;
+    return (RE_REVIEW_MODES as readonly string[]).includes(resolved)
+        ? (resolved as ReReviewMode)
+        : null;
+};
+
 /** The slice of `fs` the event-payload read needs (injectable for tests). */
 export type EventFs = {
     readFileSync: (p: string, enc: "utf8") => string;
     existsSync: (p: string) => boolean;
 };
 
-/** Read the triggering comment's author from the runner's event payload. */
-export const commentAuthorFromEvent = (
+/** The triggering comment as the planner reads it from the event payload. */
+export type TriggeringComment = {author?: CommentAuthor; body?: string};
+
+/**
+ * Read the triggering comment (author and body) from the runner's event
+ * payload. Undefined when the payload is missing or unparseable; each field
+ * is undefined when the payload does not carry it.
+ */
+export const commentFromEvent = (
     fs: EventFs,
     eventPath: string | undefined,
-): CommentAuthor | undefined => {
+): TriggeringComment | undefined => {
     if (eventPath === undefined || !fs.existsSync(eventPath)) {
         return undefined;
     }
@@ -91,14 +146,34 @@ export const commentAuthorFromEvent = (
     } catch {
         return undefined;
     }
-    const user = (
-        event as {comment?: {user?: {login?: unknown; type?: unknown}}}
-    )?.comment?.user;
-    if (user === undefined || user === null || typeof user !== "object") {
-        return undefined;
+    const comment = (event as {comment?: unknown})?.comment;
+    if (
+        comment === undefined ||
+        comment === null ||
+        typeof comment !== "object"
+    ) {
+        return {};
     }
+    const {body, user} = comment as {body?: unknown; user?: unknown};
+    const author =
+        user === undefined || user === null || typeof user !== "object"
+            ? undefined
+            : {
+                  ...(typeof (user as {login?: unknown}).login === "string"
+                      ? {login: (user as {login: string}).login}
+                      : {}),
+                  ...(typeof (user as {type?: unknown}).type === "string"
+                      ? {type: (user as {type: string}).type}
+                      : {}),
+              };
     return {
-        ...(typeof user.login === "string" ? {login: user.login} : {}),
-        ...(typeof user.type === "string" ? {type: user.type} : {}),
+        ...(typeof body === "string" ? {body} : {}),
+        ...(author !== undefined ? {author} : {}),
     };
 };
+
+/** Read the triggering comment's author from the runner's event payload. */
+export const commentAuthorFromEvent = (
+    fs: EventFs,
+    eventPath: string | undefined,
+): CommentAuthor | undefined => commentFromEvent(fs, eventPath)?.author;

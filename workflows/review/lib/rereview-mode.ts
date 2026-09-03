@@ -78,104 +78,29 @@
  * code under review.
  */
 
-import {createHash} from "node:crypto";
-
 import {splitPatchHunks, splitUnifiedDiff} from "./diff";
-import {commentAuthorFromEvent, isManualReviewRequest} from "./manual-request";
+import {
+    computeDivergence,
+    computeHunkSignature,
+    DEFAULT_TRIPWIRE_THRESHOLD,
+    hashHunk,
+} from "./hunk-signature";
+import type {Divergence, HunkSignature} from "./hunk-signature";
+import {
+    commentFromEvent,
+    isManualReviewRequest,
+    requestedDepthFromComment,
+} from "./manual-request";
 import {DEFAULT_RE_REVIEW_MODE, RE_REVIEW_MODES} from "./routing-config";
 import type {ReReviewMode} from "./routing-config";
 
-/* -------------------------------------------------------------------------- */
-/* Hunk signatures                                                            */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Per-file content-hashed hunk signature: `path → [hunkHash, …]`, one
- * truncated SHA-256 per hunk over its `+`/`-` lines (markers kept, trailing
- * whitespace trimmed). Content-based, so force-pushes and rebases that do not
- * change what the diff adds or removes do not move the signature.
- */
-export type HunkSignature = Record<string, string[]>;
-
-/** Truncation keeps the stamp compact; 16 hex chars ≈ 64 bits per hunk. */
-const HUNK_HASH_CHARS = 16;
-
-const hashHunk = (hunkText: string): string => {
-    const content = hunkText
-        .split("\n")
-        .filter((line) => line.startsWith("+") || line.startsWith("-"))
-        .map((line) => line.replace(/\s+$/, ""))
-        .join("\n");
-    return createHash("sha256")
-        .update(content)
-        .digest("hex")
-        .slice(0, HUNK_HASH_CHARS);
-};
-
-/**
- * Compute the hunk signature of a unified diff. Pure: same diff text, same
- * signature. Files whose section carries no hunks (e.g. a binary file's
- * header-only section) get an empty list.
- */
-export const computeHunkSignature = (diffText: string): HunkSignature => {
-    const signature: HunkSignature = {};
-    for (const section of splitUnifiedDiff(diffText)) {
-        signature[section.path] = splitPatchHunks(section.text).map(hashHunk);
-    }
-    return signature;
-};
-
-/* -------------------------------------------------------------------------- */
-/* Divergence                                                                 */
-/* -------------------------------------------------------------------------- */
-
-/** How far the current diff has drifted from the anchoring fingerprint. */
-export type Divergence = {
-    /** Hunks in the current diff. */
-    totalHunks: number;
-    /** Current hunks whose hash the fingerprint does not contain. */
-    unreviewedHunks: number;
-    /** `unreviewedHunks / totalHunks` (0 when the diff has no hunks). */
-    unreviewedShare: number;
-};
-
-/**
- * Unreviewed share at or above which the tripwire re-arms a full review.
- * Sized so a routine fix push on a reviewed PR (a small fraction of its
- * hunks) stays cheap while a rewrite-after-approval (share 1.0) or a payload
- * pushed onto a sparse PR (share near 1.0) always re-arms. Exported so the
- * eval suite and the live A/B can price other settings.
- */
-export const DEFAULT_TRIPWIRE_THRESHOLD = 0.4;
-
-/**
- * Compare the current signature against the last fully-reviewed fingerprint.
- * A hunk is unreviewed when its hash is absent from the fingerprint's set
- * for that path (a path absent from the fingerprint is entirely unreviewed).
- * Hunks that existed at the last full review and are gone now do not count:
- * share measures what the current diff contains that no full review saw.
- */
-export const computeDivergence = (
-    current: HunkSignature,
-    reviewed: HunkSignature,
-): Divergence => {
-    let totalHunks = 0;
-    let unreviewedHunks = 0;
-    for (const [path, hashes] of Object.entries(current)) {
-        const seen = new Set(reviewed[path] ?? []);
-        for (const hash of hashes) {
-            totalHunks++;
-            if (!seen.has(hash)) {
-                unreviewedHunks++;
-            }
-        }
-    }
-    return {
-        totalHunks,
-        unreviewedHunks,
-        unreviewedShare: totalHunks === 0 ? 0 : unreviewedHunks / totalHunks,
-    };
-};
+// Split out by the max-lines budget; re-exported so callers keep one import.
+export {
+    computeDivergence,
+    computeHunkSignature,
+    DEFAULT_TRIPWIRE_THRESHOLD,
+} from "./hunk-signature";
+export type {Divergence, HunkSignature} from "./hunk-signature";
 
 /* -------------------------------------------------------------------------- */
 /* The review-body stamp                                                      */
@@ -550,6 +475,16 @@ export type ReReviewDecisionInput = {
      * the mode dial like the push they stand in for.
      */
     manualRequest?: boolean;
+    /**
+     * The depth the human's `/review <depth>` named
+     * (`manual-request.ts`'s requestedDepthFromComment), a one-run override
+     * of the mode dial. Only read when `manualRequest` is true; absent or
+     * `full` keeps the bare-`/review` behavior. A reduced ask still runs
+     * every guard below (no anchor, ready-for-review anchor, overflow,
+     * tripwire) and falls back to full when one trips: the token picks the
+     * dial position, it never skips the guards.
+     */
+    manualDepth?: ReReviewMode;
 };
 
 /** Which sub-agents a depth dispatches (the prompt maps this to the roster). */
@@ -573,6 +508,8 @@ export type ReReviewPlan = {
     flipGate: boolean;
     /** Fixed-format decision codes, most significant first (never prose). */
     reasons: string[];
+    /** The depth a human's `/review <depth>` named, when one did. */
+    manualDepth?: ReReviewMode;
     /** Divergence vs. the anchor; null when no anchor fingerprint exists. */
     divergence: Divergence | null;
     /** True when the divergence tripwire re-armed a full review. */
@@ -619,31 +556,69 @@ const fullPlan = (
 
 /**
  * Decide how deep this run reviews. Pure. Every guard resolves toward
- * `full`; a cheaper depth requires a configured mode AND a usable, ready
- * anchor fingerprint AND divergence under the tripwire threshold.
+ * `full`; a cheaper depth requires a dial position (the configured mode, or
+ * the depth a human's `/review <depth>` named for this one run) AND a
+ * usable, ready anchor fingerprint AND divergence under the tripwire
+ * threshold.
  */
 export const decideReReviewDepth = (
     input: ReReviewDecisionInput,
 ): ReReviewPlan => {
-    const threshold = input.tripwireThreshold ?? DEFAULT_TRIPWIRE_THRESHOLD;
-
     if (input.manualRequest === true) {
-        return fullPlan(input, ["manual-review-request"], null, false);
+        const asked = input.manualDepth ?? "full";
+        if (asked === "full") {
+            return fullPlan(input, ["manual-review-request"], null, false);
+        }
+        // A named reduced depth is a one-run dial position: the guards
+        // below apply as they would to the configured mode, so the ask can
+        // never buy a cheaper round than the dial itself could.
+        return {
+            ...decideFromDial(input, asked, ["manual-review-request"]),
+            manualDepth: asked,
+        };
     }
-    if (input.mode === "full") {
-        return fullPlan(input, ["mode-full"], null, false);
+    return decideFromDial(input, input.mode, []);
+};
+
+/**
+ * The guard chain under one dial position. `leadingReasons` prefixes every
+ * plan's reason list (the manual ask, when there was one); the success
+ * reason is `mode-<depth>` for the configured dial and
+ * `manual-depth-<depth>` for a human-named one, so the artifact tells the
+ * two apart.
+ */
+const decideFromDial = (
+    input: ReReviewDecisionInput,
+    dial: ReReviewMode,
+    leadingReasons: string[],
+): ReReviewPlan => {
+    const threshold = input.tripwireThreshold ?? DEFAULT_TRIPWIRE_THRESHOLD;
+    const full = (
+        reason: string,
+        divergence: Divergence | null,
+        tripwireRearmed: boolean,
+    ): ReReviewPlan =>
+        fullPlan(
+            input,
+            [...leadingReasons, reason],
+            divergence,
+            tripwireRearmed,
+        );
+
+    if (dial === "full") {
+        return full("mode-full", null, false);
     }
     if (input.priorStamp === null) {
-        return fullPlan(input, ["no-prior-fingerprint"], null, false);
+        return full("no-prior-fingerprint", null, false);
     }
     // Ready-for-review anchor: a fingerprint taken on a draft skeleton must
     // not anchor cheap re-reviews of the ready PR; the ready PR gets the
     // one full review the cheaper modes lean on.
     if (!input.isDraft && input.priorStamp.anchorDraft) {
-        return fullPlan(input, ["ready-for-review-anchor"], null, false);
+        return full("ready-for-review-anchor", null, false);
     }
     if (input.priorStamp.anchorHunks === "overflow") {
-        return fullPlan(input, ["fingerprint-overflow"], null, false);
+        return full("fingerprint-overflow", null, false);
     }
 
     const divergence = computeDivergence(
@@ -651,15 +626,19 @@ export const decideReReviewDepth = (
         input.priorStamp.anchorHunks,
     );
     if (divergence.unreviewedShare >= threshold) {
-        return fullPlan(input, ["tripwire-divergence"], divergence, true);
+        return full("tripwire-divergence", divergence, true);
     }
 
-    const depth = input.mode;
+    const depth = dial;
+    const manual = leadingReasons.length > 0;
     return {
         mode: input.mode,
         depth,
         ...DEPTH_SHAPE[depth],
-        reasons: [`mode-${depth}`],
+        reasons: [
+            ...leadingReasons,
+            manual ? `manual-depth-${depth}` : `mode-${depth}`,
+        ],
         divergence,
         tripwireRearmed: false,
         stampHunks:
@@ -777,9 +756,11 @@ export type RereviewPlanCliResult = {
  * name and event-payload path likewise) so it is testable without touching
  * the real filesystem or process env. A comment-triggered run whose comment
  * a human posted ({@link isManualReviewRequest}) is an explicit ask and
- * plans full depth whatever the configured mode says; automation-posted
- * `/review` comments (Khan/webapp's shim fires one per push) follow the
- * mode dial like any push.
+ * plans full depth whatever the configured mode says, unless the comment
+ * named a depth (`/review scoped`, {@link requestedDepthFromComment}), which
+ * sets the dial for this one run; automation-posted `/review` comments
+ * (Khan/webapp's shim fires one per push) follow the configured mode dial
+ * like any push, token or not.
  */
 export const runRereviewPlanCli = (
     fs: RereviewCliFs,
@@ -868,18 +849,25 @@ export const runRereviewPlanCli = (
             stampSource = "cache-memory";
         }
     }
+    // GITHUB_EVENT_NAME/GITHUB_EVENT_PATH are the runner's own event env;
+    // the CLI runs in pre-agent staging on the runner, never in the agent
+    // sandbox.
+    const comment = commentFromEvent(fs, eventPath);
+    const manualRequest = isManualReviewRequest(eventName, comment?.author);
+    // A missing staging input degrades the configured mode to full above;
+    // hold a human-named depth to the same rule, so `/review scoped` on a
+    // run with no staged diff cannot plan a scoped round over nothing.
+    const manualDepth =
+        manualRequest && warnings.length === 0
+            ? requestedDepthFromComment(comment?.body)
+            : null;
     const plan = decideReReviewDepth({
         mode,
         isDraft,
         priorStamp,
         currentSignature,
-        // GITHUB_EVENT_NAME/GITHUB_EVENT_PATH are the runner's own event
-        // env; the CLI runs in pre-agent staging on the runner, never in
-        // the agent sandbox.
-        manualRequest: isManualReviewRequest(
-            eventName,
-            commentAuthorFromEvent(fs, eventPath),
-        ),
+        manualRequest,
+        ...(manualDepth === null ? {} : {manualDepth}),
     });
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});

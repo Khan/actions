@@ -596,21 +596,26 @@ export const runSubmissionCli = (
         mediumCount,
     });
 
-    // The depth note (Step 3), when the run reduced.
+    // The depth note (Step 3), when the run reduced. A human's
+    // `/review <depth>` is named when it set the dial, since the configured
+    // mode alone would not explain a scoped round under `fast`.
     const plan = readJson(fs, `${REVIEW_DIR}/rereview-plan.json`) as
-        | {mode?: unknown; tripwireRearmed?: unknown; divergence?: unknown}
+        | Record<string, unknown>
         | undefined;
     const depthNotes: string[] = [];
     if (plan !== undefined && depth !== "full") {
         const mode = typeof plan.mode === "string" ? plan.mode : "full";
+        const asked =
+            typeof plan.manualDepth === "string"
+                ? `requested by /review ${plan.manualDepth}, `
+                : "";
+        const dial = blockingOnly
+            ? ", blocking-only"
+            : blockingMedium
+            ? ", blocking-medium"
+            : "";
         depthNotes.push(
-            `Note: re-review ran at ${depth} depth (re-review mode ${mode}${
-                blockingOnly
-                    ? ", blocking-only"
-                    : blockingMedium
-                    ? ", blocking-medium"
-                    : ""
-            }).`,
+            `Note: re-review ran at ${depth} depth (${asked}re-review mode ${mode}${dial}).`,
         );
     }
     if (plan?.tripwireRearmed === true) {
