@@ -5,8 +5,8 @@
  * it with `runArm` and a stub producer and read the files back.
  */
 
-import {mkdirSync, writeFileSync} from "node:fs";
-import {dirname} from "node:path";
+import {mkdirSync, renameSync, writeFileSync} from "node:fs";
+import {basename, dirname, join} from "node:path";
 
 import {aggregateSamples, extractSamples} from "./aggregate";
 import {
@@ -22,14 +22,9 @@ import {
     type ArmRunReport,
     type GateRetry,
     type MultiAbReport,
+    type RunHeader,
 } from "./live-ab-report";
 import {computeLiveMetrics} from "./live-match";
-
-/** What every report of one run shares, fixed before any arm runs. */
-export type RunHeader = Pick<
-    AbReport,
-    "baseRef" | "reviewMdSha" | "provenance"
->;
 
 /** The single-run report over two arms. `gateRetries` is empty until the
  * best-of-three has run, so a checkpoint never has any. */
@@ -131,11 +126,20 @@ export const createCheckpointer = (options: {
 } => {
     const {outPath, repeats, header} = options;
     const finished: AbReport[] = [];
+    // Stage and rename: a cancel that lands mid-write must not truncate the
+    // very file the checkpoint exists to preserve (rename is atomic on the
+    // same filesystem). The staging file is a dotfile beside its target so
+    // CI's `live-ab-report.*` artifact glob never picks up a torn one.
+    const put = (path: string, text: string): void => {
+        const staging = join(dirname(path), `.${basename(path)}.tmp`);
+        writeFileSync(staging, text);
+        renameSync(staging, path);
+    };
     const write = (payload: AbReport | MultiAbReport, markdown: string) => {
         mkdirSync(dirname(outPath), {recursive: true});
-        writeFileSync(outPath, JSON.stringify(payload, null, 2));
+        put(outPath, JSON.stringify(payload, null, 2));
         // A sibling .md rides along for CI's sticky PR comment.
-        writeFileSync(outPath.replace(/\.json$/, ".md"), `${markdown}\n`);
+        put(outPath.replace(/\.json$/, ".md"), `${markdown}\n`);
     };
     const single = (report: AbReport): void => {
         write(report, renderMarkdownReport(report));

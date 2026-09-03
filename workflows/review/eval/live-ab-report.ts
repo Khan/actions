@@ -200,6 +200,12 @@ export type AbReport = {
     partial?: true;
 };
 
+/** What every report of one run shares, fixed before any arm runs. */
+export type RunHeader = Pick<
+    AbReport,
+    "baseRef" | "reviewMdSha" | "provenance"
+>;
+
 /**
  * The `--repeats n` report: every repeat's full single-run report (so any
  * one repeat stays diagnosable and re-aggregatable), the pooled aggregate,

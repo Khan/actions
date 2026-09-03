@@ -101,9 +101,12 @@ permissions:
 # job's `if` skips it), but until this key sent it to its own group it still
 # cancelled the PR's in-flight A/B: run 33802457289 lost 45 minutes and its
 # spend to a `skip-ai-review` label added mid-run. A no-op event must never
-# share a group with a live one.
+# share a group with a live one. `skip-live-eval` is the one exception: it is
+# the opt-out, and adding it mid-run is how a run that is burning budget gets
+# stopped from inside the repo, so it stays in the live group and cancels
+# (the run's per-case checkpoint keeps what it had scored).
 concurrency:
-  group: review-eval-ab-${{ github.event.pull_request.number || github.run_id }}-${{ (github.event.action == 'labeled' && github.event.label.name != 'full-eval') && 'noop' || 'live' }}
+  group: review-eval-ab-${{ github.event.pull_request.number || github.run_id }}-${{ (github.event.action == 'labeled' && github.event.label.name != 'full-eval' && github.event.label.name != 'skip-live-eval') && 'noop' || 'live' }}
   cancel-in-progress: true
 
 jobs:

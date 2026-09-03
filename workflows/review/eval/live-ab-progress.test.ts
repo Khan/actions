@@ -7,6 +7,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import {extractSamples} from "./aggregate";
 import {parseCase, type CorpusCase} from "./corpus/loader";
 import {
+    assembleReport,
     createCheckpointer,
     runArm,
     type AbReport,
@@ -29,12 +30,12 @@ const DIFF = [
     "",
 ].join("\n");
 
-const liveCase = (id: string): CorpusCase =>
+const liveCase = (id: string, category = "incident-repro"): CorpusCase =>
     parseCase(
         {
             id,
             tags: ["live"],
-            category: "incident-repro",
+            category,
             description: "progress fixture",
             changedFiles: [{path: "src/a.ts", status: "modified"}],
             expected: {verdict: "REQUEST_CHANGES"},
@@ -227,6 +228,34 @@ describe("live A/B progress lines", () => {
         );
     });
 
+    it("carries a refusal and a runner-visible error on the dispatch line", async () => {
+        const failing: LiveAgentRunner = async () => ({
+            output: "",
+            usd: 0.03,
+            turns: 1,
+            wallMs: 2000,
+            toolCalls: 0,
+            refused: true,
+            errorMessage: "usage policy",
+        });
+        const dispatch = withDispatchProgress(failing, {
+            arm: "candidate",
+            caseId: "case-1",
+        });
+        await dispatch({
+            name: "security-reviewer",
+            model: "m",
+            prompt: "p",
+            cwd: "/",
+            maxTurns: 1,
+            timeoutMs: 1,
+        });
+        expect(stderr.join("")).toBe(
+            "[candidate/case-1] security-reviewer (m): $0.03, 1 turns, 2s, " +
+                "0 tool calls, refused, error: usage policy\n",
+        );
+    });
+
     it("reports a dispatch that threw, then rethrows", async () => {
         const failing: LiveAgentRunner = async () => {
             throw new Error("boom");
@@ -277,6 +306,7 @@ describe("live A/B checkpoints", () => {
 
         const seen: {baseline: number; candidate: number; partial?: true}[] =
             [];
+        const caveats: string[] = [];
         const observe = (): void => {
             const report = readJson() as AbReport;
             seen.push({
@@ -284,6 +314,9 @@ describe("live A/B checkpoints", () => {
                 candidate: report.arms.candidate.runs.length,
                 ...(report.partial === true ? {partial: true} : {}),
             });
+            caveats.push(
+                readMd().match(/So far baseline scored [^.]*\./)?.[0] ?? "",
+            );
         };
 
         const baseline = await runArm(
@@ -299,13 +332,19 @@ describe("live A/B checkpoints", () => {
             },
         );
         // After case 1 of 2 on the baseline arm: a partial report with the
-        // candidate arm still empty, and the markdown header says so.
+        // candidate arm still empty, and the markdown caveat says exactly how
+        // far each arm got at that checkpoint.
         expect(seen[0]).toEqual({baseline: 1, candidate: 0, partial: true});
+        expect(caveats[0]).toBe(
+            "So far baseline scored 1 of 2 cases, candidate 0 of 2.",
+        );
+        // The arm has finished by now: the latest checkpoint's header still
+        // says partial (the candidate arm has not run).
         expect(readMd()).toContain("## Review live A/B (partial)");
         expect(readMd()).toContain(
             "PARTIAL REPORT: a checkpoint written mid-run",
         );
-        expect(readMd()).toContain(
+        expect(caveats[1]).toBe(
             "So far baseline scored 2 of 2 cases, candidate 0 of 2.",
         );
 
@@ -327,6 +366,13 @@ describe("live A/B checkpoints", () => {
             {baseline: 2, candidate: 1, partial: true},
             {baseline: 2, candidate: 2, partial: true},
         ]);
+        expect(caveats[2]).toBe(
+            "So far baseline scored 2 of 2 cases, candidate 1 of 2.",
+        );
+        // No torn or leftover staging file beside the report.
+        expect(existsSync(join(dir, "out", ".live-ab-report.json.tmp"))).toBe(
+            false,
+        );
         // A partial single-run report pools nothing.
         expect(extractSamples("ckpt", readJson())).toEqual([]);
 
@@ -398,5 +444,55 @@ describe("live A/B checkpoints", () => {
         expect((readJson() as MultiAbReport).partial).toBeUndefined();
         expect(readMd()).toContain("## Review live A/B: 2 repeats\n");
         expect(extractSamples("final", readJson()).length).toBe(2);
+    });
+});
+
+describe("assembleReport", () => {
+    beforeEach(() => {
+        vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    });
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("drops a gate flip the best-of-three settled as a flake, keeps a confirmed one", async () => {
+        const produceMiss: ArmProduce = async () => ({
+            findings: [],
+            validation: [],
+            perAgent: [],
+        });
+        const cases = [liveCase("inj-1", "adversarial-injection")];
+        const baseline = await runArm("baseline", cases, produceMiss, {
+            maxUsd: 10,
+        });
+        const candidate = await runArm("candidate", cases, produceMiss, {
+            maxUsd: 10,
+        });
+        const attempt = {pass: true, failures: [], usd: 1};
+
+        // No retries yet (the shape every checkpoint has): the gate reads
+        // the flip as a failure.
+        expect(
+            assembleReport(header, baseline, candidate, []).adversarialFailures,
+        ).toEqual([
+            "inj-1: verdict APPROVE, expected REQUEST_CHANGES",
+            "inj-1: missed spec bug",
+        ]);
+        // Both retries passed: the flip was a flake and the report is clean.
+        const flake = assembleReport(header, baseline, candidate, [
+            {caseId: "inj-1", attempts: [attempt, attempt], settledPass: true},
+        ]);
+        expect(flake.adversarialFailures).toEqual([]);
+        expect(flake.gateRetries.length).toBe(1);
+        // A failed retry confirms it.
+        expect(
+            assembleReport(header, baseline, candidate, [
+                {
+                    caseId: "inj-1",
+                    attempts: [{pass: false, failures: ["x"], usd: 1}],
+                    settledPass: false,
+                },
+            ]).adversarialFailures.length,
+        ).toBe(2);
     });
 });

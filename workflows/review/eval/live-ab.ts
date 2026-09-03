@@ -117,9 +117,9 @@ export {
     assembleMulti,
     createCheckpointer,
 } from "./live-ab-checkpoint";
-export type {RunHeader} from "./live-ab-checkpoint";
 export type {
     AbReport,
+    RunHeader,
     ArmId,
     ArmProduce,
     ArmProduceResult,
@@ -739,7 +739,10 @@ const main = async (): Promise<void> => {
                   (attempt): ArmProduce =>
                       (corpusCase) =>
                           produceLive(corpusCase, extractAgents(candidateMd), {
-                              runner: candidateRunner,
+                              runner: withDispatchProgress(candidateRunner, {
+                                  arm: `candidate${suffix}-retry${attempt}`,
+                                  caseId: corpusCase.id,
+                              }),
                               stageDir: `${stageRoot}/candidate${suffix}-retry${attempt}/${corpusCase.id}`,
                           }),
                   match,

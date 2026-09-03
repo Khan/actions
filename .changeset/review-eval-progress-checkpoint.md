@@ -20,4 +20,8 @@ The cancel itself came from a `skip-ai-review` label: the `labeled` event
 fired the workflow, the per-PR concurrency group cancelled the live run, and
 the new run then skipped every job. A `labeled` event for any label other than
 `full-eval` now gets its own concurrency group, so a no-op event can't cancel
-a live run.
+a live run. `skip-live-eval` stays in the live group on purpose: it's the
+opt-out, and adding it mid-run is how a run that's burning budget gets
+stopped from inside the repo (the checkpoint keeps what it had scored). The
+drift workflow skips its visibility PR on a partial report, so the in-repo
+time series stays finished measurements only.
