@@ -455,6 +455,14 @@ const auditedCases = (arm: ArmRunReport): number =>
 const snappedTotal = (arm: ArmRunReport): number =>
     arm.perCase.reduce((sum, c) => sum + c.snapped, 0);
 
+/** Read-scope denials across the arm's agents; zero is the expected value. */
+const deniedTotal = (arm: ArmRunReport): number =>
+    arm.perCase.reduce(
+        (sum, c) =>
+            sum + (c.deniedReads ?? []).reduce((n, d) => n + d.count, 0),
+        0,
+    );
+
 /**
  * The arm's cross-source merge rate: claims absorbed over claims produced,
  * with tier 2's share and any rejected cluster MEMBER in parentheses (one
@@ -474,13 +482,6 @@ const snappedTotal = (arm: ArmRunReport): number =>
  * folded into the zero: the arm paid for it and measured nothing, which is not
  * the same claim as "tier 2 found no duplicates here".
  */
-const deniedTotal = (arm: ArmRunReport): number =>
-    arm.perCase.reduce(
-        (sum, c) =>
-            sum + (c.deniedReads ?? []).reduce((n, d) => n + d.count, 0),
-        0,
-    );
-
 const mergedTotal = (arm: ArmRunReport, khan?: RateCard): string => {
     const dedup = arm.perCase.flatMap((c) => (c.dedup ? [c.dedup] : []));
     if (dedup.length === 0) {

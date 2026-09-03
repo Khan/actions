@@ -120,7 +120,7 @@ export const outOfScopeRead = (
 };
 
 /** The denial text the model sees. It says what is in scope, not just "no". */
-export const READ_SCOPE_REASON = (root: string, target: string): string =>
+export const readScopeReason = (root: string, target: string): string =>
     `Out of scope for this review: ${target}. Reads are limited to the ` +
     `staged case under ${root} (the checkout and its context files). The ` +
     `review tooling and anything else on this machine are not part of the ` +

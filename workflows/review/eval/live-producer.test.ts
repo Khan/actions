@@ -2,6 +2,7 @@ import {describe, it, expect} from "vitest";
 import {Volume} from "memfs";
 
 import {parseCase} from "./corpus/loader";
+import {LiveAgentError} from "./live-agent-error";
 import {
     produceLive,
     resolveRuntimeImports,
@@ -142,6 +143,49 @@ const validatorOutput = (
     });
 
 describe("produceLive", () => {
+    it("keeps the counters a failed attempt measured before it threw", async () => {
+        // A timed-out or non-success attempt is the one most likely to have
+        // gone looking outside the case; its denials must reach the report.
+        let correctnessAttempts = 0;
+        const runner: LiveAgentRunner = async (request) => {
+            if (request.name === "correctness-reviewer") {
+                correctnessAttempts += 1;
+                if (correctnessAttempts === 1) {
+                    throw new LiveAgentError("sub-agent timed out", {
+                        toolCalls: 40,
+                        deniedReads: 2,
+                    });
+                }
+                return {
+                    output: JSON.stringify({files: [], findings: []}),
+                    usd: 0.25,
+                    turns: 3,
+                    wallMs: 1000,
+                    toolCalls: 5,
+                    deniedReads: 1,
+                };
+            }
+            return {
+                output: JSON.stringify({findings: []}),
+                usd: 0.1,
+                turns: 1,
+                wallMs: 100,
+            };
+        };
+        const result = await produceLive(CASE, AGENTS, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        const correctness = result.perAgent.find(
+            (a) => a.name === "correctness-reviewer",
+        );
+        expect(correctness?.retried).toBe(true);
+        expect(correctness?.failed).toBeUndefined();
+        expect(correctness?.toolCalls).toBe(45);
+        expect(correctness?.deniedReads).toBe(3);
+    });
+
     it("runs the default finders plus routed lenses and the validator", async () => {
         const {runner, requests} = scriptedRunner({
             "correctness-reviewer": [

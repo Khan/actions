@@ -78,20 +78,23 @@ runs, and the transcript showed it in one.
 The SDK runner (`live-runner.ts`) now closes both routes. The toolset is
 restricted to Read, Grep, and Glob (the SDK's `allowedTools` only
 pre-approves, so before this every default tool including Bash was reachable
-under `bypassPermissions`), and a PreToolUse hook denies any read that
-resolves outside the staged case directory (the checkout plus its `context/`
-sibling), symlinks followed. Denials are counted per agent and rendered in
+under `bypassPermissions`), and a PreToolUse hook denies two things: any tool
+outside those three (a second layer under the `tools` restriction), and any
+read that resolves outside the staged case directory (the checkout plus its
+`context/` sibling), symlinks followed. Denials are counted per agent and rendered in
 the report ("Reads denied outside the staged case"). The expected value is
 zero, and a nonzero count names a reviewer whose transcript should be read.
 Transcripts are written outside the staging root so no reviewer can read a
 sibling's mid-run.
 
 Every live workflow starts with `live-runner.ts --probe-read-scope`, one
-Haiku call that reads a staged file and then a planted file outside the case
-and fails the job unless the first succeeded, the second was denied, and the
-planted contents never reached the model. The unit tests cover the scope
-predicate; the probe covers the SDK honoring its answer under
-`bypassPermissions`, on the version the checkout installs.
+Haiku call that reads a staged file, then a planted file outside the case,
+then tries to `cat` the planted file through Bash, and fails the job unless
+the first succeeded, at least one denial was issued, and the planted contents
+never reached the model by either route. The unit tests cover the scope
+predicate; the probe covers the SDK honoring the hook under
+`bypassPermissions` and `tools` actually removing Bash, on the version the
+checkout installs. Its log line says which of the two kept Bash out.
 
 ### Recipes
 

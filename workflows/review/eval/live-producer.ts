@@ -51,6 +51,7 @@ import {validateFinding, type Finding, type Lens} from "../lib/finding-schema";
 import {CLUSTERER} from "../lib/dispatch-cluster";
 import {LABEL_SHAPE_REVIEWERS} from "./lens-sources";
 import {dedupeLiveFindings, type LiveDedupReport} from "./live-dedup";
+import {LiveAgentError} from "./live-agent-error";
 import {
     VERIFICATION_STATES,
     type CaseVerification,
@@ -88,10 +89,9 @@ export type LiveAgentRequest = {
     /** The staged checkout the agent investigates (its cwd). */
     cwd: string;
     /**
-     * The staged case root (the checkout plus its `context/` sibling the
-     * prompts read). The runner denies any read that resolves outside it:
-     * the eval's corpus and scorer live on the same machine, and a reviewer
-     * that can read them is scoring itself.
+     * The staged case root (checkout plus its `context/` sibling). The runner
+     * denies any read outside it: the eval's corpus and scorer live on the
+     * same machine, and a reviewer that can read them is scoring itself.
      */
     readRoot: string;
     /** Hard turn cap. */
@@ -124,9 +124,8 @@ export type LiveAgentResult = {
      */
     toolCalls?: number;
     /**
-     * Read-tool calls the runner denied for resolving outside the staged
-     * case. Zero is the expected value; anything else names a reviewer that
-     * went looking beyond the change (and says the denial did its job).
+     * Tool calls the runner's scope hook denied (a read outside the staged
+     * case, or a tool outside Read/Grep/Glob). Zero is the expected value.
      */
     deniedReads?: number;
     /** Provider stop reason for the last assistant message, when visible. */
@@ -737,6 +736,12 @@ const dispatchWithRetry = async <R>(
             failure = `dispatch failed: ${String(
                 runError instanceof Error ? runError.message : runError,
             )}`;
+            // Keep what the failed attempt counted (see LiveAgentError).
+            if (runError instanceof LiveAgentError) {
+                const {toolCalls = 0, deniedReads = 0} = runError.partial;
+                report.toolCalls = (report.toolCalls ?? 0) + toolCalls;
+                report.deniedReads = (report.deniedReads ?? 0) + deniedReads;
+            }
         }
         if (attempt === 0) {
             report.retried = true;

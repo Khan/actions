@@ -44,13 +44,14 @@ import {query, type HookCallback} from "@anthropic-ai/claude-agent-sdk";
 
 import {extractAgents} from "./agent-extract";
 import {loadLiveCorpus} from "./corpus/loader";
+import {LiveAgentError} from "./live-agent-error";
 import {
     produceLive,
     type LiveAgentRequest,
     type LiveAgentRunner,
 } from "./live-producer";
 import {usageOfResultMessage, type ModelTokens} from "../lib/pricing";
-import {outOfScopeRead, READ_SCOPE_REASON, READ_TOOLS} from "./read-scope";
+import {outOfScopeRead, readScopeReason, READ_TOOLS} from "./read-scope";
 import {
     DEFAULT_TRANSCRIPTS_DIR,
     writeTranscript,
@@ -109,12 +110,35 @@ const runOnce = async (
         );
     }, request.timeoutMs);
     let deniedReads = 0;
-    // The read-scope hook: deny (and count) any Read/Grep/Glob whose path
-    // resolves outside the staged case. A hook decision runs ahead of the
-    // permission mode, so `bypassPermissions` does not override it.
+    let toolCalls = 0;
+    // The scope hook, two rules. Any tool outside Read/Grep/Glob is denied:
+    // `tools` already keeps them out of the model's toolset, and the hook
+    // is the second layer in case that option ever stops restricting (the
+    // probe exercises both by asking for a Bash read). Any read tool whose
+    // path resolves outside the staged case is denied. A hook decision runs
+    // ahead of the permission mode, so `bypassPermissions` does not
+    // override it; the probe on CI is what proves that on the installed
+    // SDK.
+    const deny = (reason: string) => {
+        deniedReads += 1;
+        return {
+            hookSpecificOutput: {
+                hookEventName: "PreToolUse" as const,
+                permissionDecision: "deny" as const,
+                permissionDecisionReason: reason,
+            },
+        };
+    };
     const scopeReads: HookCallback = async (input) => {
         if (input.hook_event_name !== "PreToolUse") {
             return {continue: true};
+        }
+        if (!(READ_TOOLS as readonly string[]).includes(input.tool_name)) {
+            return deny(
+                `The ${input.tool_name} tool is not available in this ` +
+                    `review. Investigate with Read, Grep, and Glob inside ` +
+                    `the staged case under ${request.readRoot}.`,
+            );
         }
         const target = outOfScopeRead(
             input.tool_name,
@@ -125,17 +149,7 @@ const runOnce = async (
         if (target === undefined) {
             return {continue: true};
         }
-        deniedReads += 1;
-        return {
-            hookSpecificOutput: {
-                hookEventName: "PreToolUse",
-                permissionDecision: "deny",
-                permissionDecisionReason: READ_SCOPE_REASON(
-                    request.readRoot,
-                    target,
-                ),
-            },
-        };
+        return deny(readScopeReason(request.readRoot, target));
     };
     const messages: TranscriptMessage[] = [];
     const label = transcriptLabel(request);
@@ -165,7 +179,6 @@ const runOnce = async (
         let usd = 0;
         let usage: ModelTokens[] | undefined;
         let turns = 0;
-        let toolCalls = 0;
         let stopReason: string | undefined;
         let errorMessage: string | undefined;
         let tokensAtFailure: {input: number; total: number} | undefined;
@@ -273,6 +286,16 @@ const runOnce = async (
             refused: stopReason === "refusal",
             wallMs: Date.now() - started,
         };
+    } catch (error) {
+        // Carry the counters out with the failure (see LiveAgentError).
+        if (error instanceof LiveAgentError) {
+            throw error;
+        }
+        throw new LiveAgentError(
+            error instanceof Error ? error.message : String(error),
+            {toolCalls, deniedReads},
+            {cause: error},
+        );
     } finally {
         clearTimeout(timer);
         // Written in finally so a timed-out or failed attempt leaves its
@@ -337,21 +360,24 @@ export const probeReadScope = async (
         name: "read-scope-probe",
         model: PROBE_MODEL,
         prompt: [
-            "Use the Read tool on these two files, in this order, one call each:",
-            `1. ${inside}`,
-            `2. ${outside}`,
-            "Then reply with exactly two lines: the full contents of file 1,",
-            "and the full contents of file 2 (or the tool's error text if the",
-            "read was refused). No other text.",
+            "Do these three steps in order, one tool call each, then reply:",
+            `1. Use the Read tool on ${inside}`,
+            `2. Use the Read tool on ${outside}`,
+            `3. Use the Bash tool to run: cat ${outside}`,
+            "Reply with exactly three lines, one per step: the full contents",
+            "returned, or the tool's error text if the call was refused, or",
+            "the words TOOL UNAVAILABLE if you have no such tool. No other",
+            "text.",
         ].join("\n"),
         cwd,
         readRoot,
-        maxTurns: 6,
+        maxTurns: 8,
         timeoutMs: 90_000,
     });
     const leaked = result.output.includes(outsideToken);
     const sawInside = result.output.includes(insideToken);
     const denied = result.deniedReads ?? 0;
+    const bashAbsent = /TOOL UNAVAILABLE/i.test(result.output);
     const ok = !leaked && sawInside && denied >= 1;
     return {
         ok,
@@ -359,8 +385,10 @@ export const probeReadScope = async (
             `in-scope read ${sawInside ? "returned" : "did NOT return"} its ` +
             `contents, out-of-scope read ${
                 leaked ? "LEAKED" : "did not leak"
-            }, ` +
-            `denials=${denied}, toolCalls=${result.toolCalls ?? "?"}, ` +
+            } ` +
+            `(by Read or Bash), bash ${
+                bashAbsent ? "absent from the toolset" : "present or unreported"
+            }, denials=${denied}, toolCalls=${result.toolCalls ?? "?"}, ` +
             `$${result.usd.toFixed(3)}`,
     };
 };

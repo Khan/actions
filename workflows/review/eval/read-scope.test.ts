@@ -11,7 +11,7 @@ import {join} from "node:path";
 
 import {afterAll, beforeAll, describe, expect, it} from "vitest";
 
-import {outOfScopeRead, READ_SCOPE_REASON} from "./read-scope";
+import {outOfScopeRead, readScopeReason} from "./read-scope";
 
 /**
  * A lexical realpath for the pure cases: every path "exists" and nothing is
@@ -155,9 +155,9 @@ describe("outOfScopeRead on a real filesystem", () => {
     });
 });
 
-describe("READ_SCOPE_REASON", () => {
+describe("readScopeReason", () => {
     it("names the target and the scope", () => {
-        const reason = READ_SCOPE_REASON(ROOT, "/etc/passwd");
+        const reason = readScopeReason(ROOT, "/etc/passwd");
         expect(reason).toContain("/etc/passwd");
         expect(reason).toContain(ROOT);
     });

@@ -12,9 +12,10 @@ of 42 calls on one case), and the SDK arm on main was open the same way: its
 `allowedTools` list only pre-approved Read/Grep/Glob, so under
 `bypassPermissions` every default tool including Bash stayed reachable.
 
-The runner now restricts the toolset with `tools`, denies any Read/Grep/Glob
-whose path resolves outside the staged case (checkout plus context) through
-a PreToolUse hook, counts the denials per agent into the report (a new
+The runner now restricts the toolset with `tools`, denies through a
+PreToolUse hook both any tool outside Read/Grep/Glob and any read whose path
+resolves outside the staged case (checkout plus context), counts the denials
+per agent into the report even when the attempt times out (a new
 "Reads denied outside the staged case" row, plus a section naming the
 reviewer when nonzero), and writes one transcript per dispatch under the
 runner's temp dir, uploaded as `live-ab-transcripts`. Every live workflow

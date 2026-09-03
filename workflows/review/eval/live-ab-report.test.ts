@@ -4,9 +4,9 @@ import {join} from "node:path";
 import {describe, it, expect} from "vitest";
 
 import {parseCase, type CorpusCase} from "./corpus/loader";
-import {renderMarkdownReport, runArm, type ArmProduce} from "./live-ab";
+import {runArm, type ArmProduce} from "./live-ab";
 import {armCosts} from "./cost-rows";
-import {armToolCalls} from "./live-ab-report";
+import {armToolCalls, renderMarkdownReport} from "./live-ab-report";
 import {
     readOverlayRates,
     type ModelTokens,

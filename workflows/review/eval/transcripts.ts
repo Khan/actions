@@ -5,11 +5,13 @@
  * on the Pi harness branch (actions#406); a transcript showed it in one.
  *
  * One file per dispatch attempt: `<dir>/<stage>/<case>/<agent>-<n>.json`,
- * holding a tool-call index (one line per call, arguments whole) at the top
- * and the trimmed message stream below. Tool results and long text are cut
- * to {@link TRIM_CHARS} with the trimmed length recorded, so nothing looks
- * shorter than it was. Tool-call arguments are never trimmed: a Read path
- * or Glob pattern is what the investigation pattern is made of.
+ * holding a tool-call index (one line per call, capped at
+ * {@link INDEX_LINE_CHARS} characters so it scans) at the top and the
+ * trimmed message stream below. Tool results and long text in the messages
+ * are cut to {@link TRIM_CHARS} with the trimmed length recorded, so nothing
+ * looks shorter than it was. Tool-call inputs in the messages are never
+ * trimmed: a Read path or Glob pattern is what the investigation pattern is
+ * made of, and the index line is a pointer into them, not the record.
  *
  * Transcripts must land somewhere no reviewer can reach mid-run. The runner
  * scopes reads to the staged case, and the default directory sits beside
@@ -22,6 +24,9 @@ import {join} from "node:path";
 
 /** Per-block character cap for tool results and assistant text. */
 export const TRIM_CHARS = 2_000;
+
+/** Per-line cap for the tool-call index; the messages hold the full input. */
+export const INDEX_LINE_CHARS = 300;
 
 /** Where transcripts go unless a caller says otherwise. */
 export const DEFAULT_TRANSCRIPTS_DIR = join(tmpdir(), "review-transcripts");
@@ -108,7 +113,12 @@ export const toolCallIndex = (messages: TranscriptMessage[]): string[] => {
             const argText = Object.entries(args)
                 .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
                 .join(" ");
-            lines.push(`${String(block["name"])} ${argText}`.slice(0, 300));
+            lines.push(
+                `${String(block["name"])} ${argText}`.slice(
+                    0,
+                    INDEX_LINE_CHARS,
+                ),
+            );
         }
     }
     return lines;
