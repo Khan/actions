@@ -14,6 +14,8 @@ import {afterAll, beforeAll, describe, expect, it, vi} from "vitest";
 
 import {LiveAgentError} from "./live-agent-error";
 import type {LiveAgentRunner} from "./live-producer";
+// vitest hoists vi.mock above imports, so the static import sees the mock.
+import {probeReadScope, sdkRunner, PINNED_PROBE_MODEL} from "./live-runner";
 
 /* -------------------------------------------------------------------------- */
 /* A mocked SDK: capture the options, replay a scripted message stream       */
@@ -37,11 +39,6 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
         })();
     },
 }));
-
-// Imported after the mock is registered.
-const {probeReadScope, sdkRunner, PINNED_PROBE_MODEL} = await import(
-    "./live-runner"
-);
 
 type Hook = (input: unknown) => Promise<{
     continue?: boolean;
@@ -316,6 +313,7 @@ describe("probeReadScope", () => {
             attemptOutside: false,
         });
         expect(result.ok).toBe(false);
+        expect(result.notAttempted).toBe(true);
         expect(result.detail).toContain("NOT attempted by the model");
     });
 
@@ -325,6 +323,8 @@ describe("probeReadScope", () => {
             noTranscript: true,
         });
         expect(result.ok).toBe(false);
+        // No transcript is not "not attempted": it never retries.
+        expect(result.notAttempted).toBe(false);
         expect(result.detail).toContain("NO TRANSCRIPT");
         expect(existsSync(join(dir, "no-transcript"))).toBe(false);
     });

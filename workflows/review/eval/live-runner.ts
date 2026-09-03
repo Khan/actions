@@ -59,6 +59,7 @@ import {LiveAgentError} from "./live-agent-error";
 import {
     produceLive,
     type LiveAgentRequest,
+    type LiveAgentResult,
     type LiveAgentRunner,
 } from "./live-producer";
 import {usageOfResultMessage, type ModelTokens} from "../lib/pricing";
@@ -112,7 +113,7 @@ const runOnce = async (
     request: LiveAgentRequest,
     transcriptsDir: string | false,
     attempts: Map<string, number>,
-) => {
+): Promise<LiveAgentResult> => {
     const started = Date.now();
     const abort = new AbortController();
     const timer = setTimeout(() => {
@@ -376,9 +377,20 @@ export type ProbeOptions = {
  * so a model that paraphrases instead of quoting does not fail the gate for
  * the wrong reason.
  */
+export type ProbeResult = {
+    ok: boolean;
+    detail: string;
+    /**
+     * The model never issued the out-of-scope Read, so the hook was never
+     * exercised. A model-behavior failure, not a scope failure: the CLI
+     * retries this case once before failing the job.
+     */
+    notAttempted: boolean;
+};
+
 export const probeReadScope = async (
     options: ProbeOptions = {},
-): Promise<{ok: boolean; detail: string}> => {
+): Promise<ProbeResult> => {
     const base = mkdtempSync(`${tmpdir()}/review-scope-probe-`);
     const transcriptsDir = options.transcriptsDir ?? join(base, "transcripts");
     const runner = options.runner ?? sdkRunner({transcriptsDir});
@@ -449,6 +461,7 @@ export const probeReadScope = async (
             : "not reported by the model";
     return {
         ok,
+        notAttempted: files.length > 0 && !attemptedOutside,
         detail:
             (files.length === 0 ? "NO TRANSCRIPT written, " : "") +
             `in-scope read ${sawInside ? "returned" : "did NOT return"} its ` +
@@ -466,13 +479,25 @@ const main = async (): Promise<void> => {
         throw new Error("ANTHROPIC_API_KEY is required for a live run.");
     }
     if (process.argv.includes("--probe-read-scope")) {
-        const probe = await probeReadScope();
+        // One retry, only when the model declined to attempt the read: that
+        // is model behavior, not the scope, and it should not red three
+        // workflows on one refusal. A leak or a missing denial never retries.
+        let probe = await probeReadScope();
         console.error(`read-scope probe: ${probe.detail}`);
+        if (!probe.ok && probe.notAttempted) {
+            probe = await probeReadScope();
+            console.error(`read-scope probe (retry): ${probe.detail}`);
+        }
         if (!probe.ok) {
             throw new Error(
-                "read-scope probe FAILED: the runner let a read outside the " +
-                    "staged case through (or the in-scope read failed). Do " +
-                    "not trust this run's recall.",
+                probe.notAttempted
+                    ? "read-scope probe FAILED: the model did not attempt the " +
+                      "out-of-scope read on two tries, so the hook was " +
+                      "never exercised. The scope is unproven for this " +
+                      "run, not broken; check the probe model's behavior."
+                    : "read-scope probe FAILED: the runner let a read outside " +
+                      "the staged case through (or the in-scope read " +
+                      "failed). Do not trust this run's recall.",
             );
         }
         return;

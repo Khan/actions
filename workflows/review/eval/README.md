@@ -361,6 +361,16 @@ claiming a band.
   path, got nothing, and stayed in the checkout, where the Gemini reviewer on
   the same machine went looking. Treat pre-scope numbers as probably clean
   and the denial counter on later runs as the measurement that says so.
+- **The eval's reviewers have no shell, production's do.** `tools` restricts
+  the SDK arm to Read, Grep, and Glob, while `lib/dispatch-runner.ts` keeps
+  Bash for the investigation-cap CLI. The cap CLI was never staged in the
+  eval, so that part is unchanged, but review.md's "one targeted cheap
+  check per finding" shell step was runnable against the staged checkout
+  before the scope landed and is not now. Both arms lose it together, so
+  within-run deltas stay comparable, and eval recall reads as a lower bound
+  on production recall rather than an estimate of it. Scoping Bash by path
+  instead would reopen the corpus (`find /` is how the leak was found), so
+  this stays a documented limit.
 - **The arbiter's refuse bias is a prompt, not a calibration.** Its rescues
   inflate recall, the load-bearing metric, and its false-positive rate has
   not been measured against known non-matches. Audit `via: "fallback"`
