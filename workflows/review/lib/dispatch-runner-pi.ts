@@ -44,7 +44,7 @@
  */
 
 import type {AgentRequest, AgentResult, AgentRunner} from "./dispatch";
-import {createToolExec} from "./dispatch-exec";
+import {createToolExec, type SandboxOptions} from "./dispatch-exec";
 import {
     ANTHROPIC_BASE_URL_ENV,
     providerForPin,
@@ -78,6 +78,7 @@ export {
     makeSandboxedExec,
     plainExec,
     shellQuote,
+    type SandboxOptions,
     type ToolExec,
 } from "./dispatch-exec";
 export {
@@ -132,6 +133,23 @@ export const SYSTEM_PROMPT = [
     "conclude. Your final message must be your output contract and nothing",
     "else: emit the JSON object your instructions specify, with no prose",
     "before or after it.",
+    // Scope, added after the gemini-3.8-flash transcripts (runs 33793491316
+    // and 33795650180): that model read "investigating a pull request in
+    // the working directory" as "investigate the working directory", and
+    // spent 37 of 42 tool calls on the review tooling and the eval harness
+    // (`find / -name investigation-cap.ts`, then the output-contract
+    // source, the scorer, and the case spec) to get the JSON exactly right
+    // and to run the cap CLI the reviewer prompt names. Claude on the same
+    // prompt stayed on the diff and stopped at 8. The lines below say what
+    // claude inferred. The cap CLI carve-out is deliberate: production
+    // checks the lib out beside the PR and the prompts run the CLI from it.
+    "Scope is the changed files and the code they call. The review",
+    "tooling, the eval or CI machinery, and anything outside the working",
+    "directory are not in scope: do not search for or read them. Running",
+    "the investigation-cap CLI your instructions name is fine; if it is",
+    "unavailable, treat that as a denied budget and conclude. Emit the",
+    "output contract exactly as your instructions describe it; do not",
+    "read or run the review tooling's source to validate it.",
 ].join(" ");
 
 /**
@@ -193,6 +211,12 @@ export type PiRunnerOptions = {
      * 10 commands re-run 15 times, which have opposite fixes.
      */
     onTranscript?: (transcript: AgentTranscript) => void;
+    /**
+     * Additions to the tool sandbox policy (dispatch-exec.ts). The eval uses
+     * it to deny reads of its own repo root so the corpus and the scorer
+     * are unreachable from a reviewer; production leaves it unset.
+     */
+    sandbox?: SandboxOptions;
 };
 
 /** One agent's loop, as {@link PiRunnerOptions.onTranscript} receives it. */
@@ -255,7 +279,7 @@ export const createPiRunner = async (
         ) => Promise<unknown[]>;
     };
 
-    const exec = await createToolExec();
+    const exec = await createToolExec(options.sandbox ?? {});
 
     const models = ai.createModels();
     const baseUrl = process.env[ANTHROPIC_BASE_URL_ENV];

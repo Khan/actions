@@ -210,7 +210,24 @@ export const makeSandboxedExec =
  * would be testing a second policy, and the only interesting question is
  * whether THIS one holds.
  */
-export const createToolExec = async (): Promise<ToolExec> => {
+/**
+ * Caller additions to the sandbox policy. `denyRead` extends the read denial:
+ * the eval passes its own repo root, because the runner VM has this repo
+ * checked out and a reviewer that searches the filesystem finds the eval
+ * corpus (each case's must-catch spec), the matcher, and the contracts
+ * source. Run 33795650180's gemini correctness-reviewer did exactly that
+ * (`find / -name investigation-cap.ts`, then read the case's own case.json
+ * and live-match.ts), so the eval's answer key was reachable on every run.
+ * Production passes nothing: the lib checkout beside the PR is what the
+ * reviewer prompts invoke the cap CLI from.
+ */
+export type SandboxOptions = {
+    denyRead?: readonly string[];
+};
+
+export const createToolExec = async (
+    sandbox: SandboxOptions = {},
+): Promise<ToolExec> => {
     if (process.env[REVIEW_SANDBOX_ENV] === "off") {
         // eslint-disable-next-line no-console
         console.error(
@@ -230,7 +247,16 @@ export const createToolExec = async (): Promise<ToolExec> => {
         if (!existsSync(CAP_JOURNAL_PATH)) {
             writeFileSync(CAP_JOURNAL_PATH, "");
         }
-        await srt.SandboxManager.initialize(SANDBOX_CONFIG);
+        await srt.SandboxManager.initialize({
+            ...SANDBOX_CONFIG,
+            filesystem: {
+                ...SANDBOX_CONFIG.filesystem,
+                denyRead: [
+                    ...SANDBOX_CONFIG.filesystem.denyRead,
+                    ...(sandbox.denyRead ?? []),
+                ],
+            },
+        });
     } catch (error) {
         throw new Error(
             `the review tool sandbox failed to initialize; refusing to ` +

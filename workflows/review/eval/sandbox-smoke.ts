@@ -46,14 +46,16 @@
 /* eslint-disable no-console -- CLI entry point; console IS the interface. */
 
 import {
+    appendFileSync,
+    copyFileSync,
     existsSync,
+    mkdirSync,
     mkdtempSync,
     readFileSync,
     rmSync,
     symlinkSync,
-    appendFileSync,
 } from "node:fs";
-import {resolve} from "node:path";
+import {dirname, resolve} from "node:path";
 
 import {
     CAP_JOURNAL_PATH,
@@ -89,6 +91,44 @@ const LIB_DIR_NAME = "gh-aw-review-lib";
  */
 const CAP_CLI_COMMAND =
     "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON workflows/review/lib/investigation-cap.ts";
+
+/**
+ * The cap CLI's path inside the lib, the ONE file the reviewer prompts run
+ * from `gh-aw-review-lib/`. It is self-contained (node:fs plus a type-only
+ * import), so a staging dir holding just this file at the same relative
+ * path is a working lib for the CLI's purposes and nothing else's.
+ */
+const CAP_CLI_RELATIVE = "workflows/review/lib/investigation-cap.ts";
+
+/**
+ * Stage a lib that contains only the cap CLI, and return its root. The smoke
+ * used to link the whole repo in as `gh-aw-review-lib`, which also put the
+ * eval corpus (each case's must-catch spec), the scorer, the contracts
+ * source, and the other agents' prompts inside the reviewer's cwd. Run
+ * 33793491316's gemini correctness-reviewer read the case's own case.json,
+ * live-match.ts, and dispatch-contracts.ts from there (37 of its 42 tool
+ * calls), which is a reviewer reading the answer key, not a measurement.
+ */
+const stageNarrowLib = (repoRoot: string, stageRoot: string): string => {
+    const libRoot = `${stageRoot}/${LIB_DIR_NAME}`;
+    const target = `${libRoot}/${CAP_CLI_RELATIVE}`;
+    mkdirSync(dirname(target), {recursive: true});
+    copyFileSync(`${repoRoot}/${CAP_CLI_RELATIVE}`, target);
+    return libRoot;
+};
+
+/**
+ * Repo subtrees the sandbox denies reads of during the smoke: the review
+ * workflow source (corpus, scorer, contracts, prompts) and the gh-aw
+ * configuration. The probe dir stays readable (it must, probe 1 is "read
+ * the checkout"), which is why this denies subtrees rather than the root.
+ * The live A/B denies the whole repo root instead (live-runner.ts): its
+ * cases live under /tmp and need nothing from here.
+ */
+const smokeDenyRead = (repoRoot: string): string[] => [
+    `${repoRoot}/workflows`,
+    `${repoRoot}/.github`,
+];
 
 /** The prompt the eval measures (live-runner.ts's default), overridable. */
 const DEFAULT_REVIEW_MD = "workflows/review/review.md";
@@ -338,13 +378,16 @@ const runProbes = async (
 /**
  * The production surface runner: `createPiRunner()` with NO `allowedTools`,
  * which is what production does. Two smoke-only additions: it records every
- * tool name so the job can assert Bash was reached, and it links this repo in
- * as `gh-aw-review-lib` inside the case checkout, because that is where the
+ * tool name so the job can assert Bash was reached, and it links the
+ * narrow lib ({@link stageNarrowLib}, the cap CLI alone) in as
+ * `gh-aw-review-lib` inside the case checkout, because that is where the
  * prompts' cap-CLI command looks for it (in production the lock file checks
- * the repo out under that name next to the PR checkout).
+ * the repo out under that name next to the PR checkout). The rest of the
+ * repo is read-denied to the tools ({@link smokeDenyRead}).
  */
 const productionSurfaceRunner = (
     repoRoot: string,
+    libRoot: string,
     toolNames: string[],
     caseId: string,
 ): LiveAgentRunner => {
@@ -353,12 +396,13 @@ const productionSurfaceRunner = (
     return async (request) => {
         const link = `${request.cwd}/${LIB_DIR_NAME}`;
         if (!existsSync(link)) {
-            symlinkSync(repoRoot, link, "dir");
+            symlinkSync(libRoot, link, "dir");
         }
         // Memoize the PROMISE, not the resolved runner: the roster fans out
         // concurrently, and one sandbox initialization is the point (see
         // live-runner.ts for the same reasoning).
         runner ??= createPiRunner({
+            sandbox: {denyRead: smokeDenyRead(repoRoot)},
             onToolCall: (toolName) => toolNames.push(toolName),
             // Every agent's transcript lands under out/transcripts so the
             // investigation pattern can be read, not inferred from counts.
@@ -395,10 +439,12 @@ const main = async (): Promise<void> => {
     // The probe dir stands in for production's checkout (see runProbes), and
     // the lib link mirrors the layout the prompts assume.
     const probeDir = mkdtempSync(`${repoRoot}/.sandbox-smoke-`);
+    const stageRoot = mkdtempSync("/tmp/review-sandbox-smoke-");
+    const libRoot = stageNarrowLib(repoRoot, stageRoot);
     let failures: string[] = [];
     try {
         appendFileSync(`${probeDir}/sentinel.txt`, "sandbox-smoke-sentinel\n");
-        symlinkSync(repoRoot, `${probeDir}/${LIB_DIR_NAME}`, "dir");
+        symlinkSync(libRoot, `${probeDir}/${LIB_DIR_NAME}`, "dir");
 
         // Fail-closed by construction: this throws when srt cannot initialize.
         // REVIEW_SANDBOX=off would make every probe below meaningless, so the
@@ -408,7 +454,7 @@ const main = async (): Promise<void> => {
                 "REVIEW_SANDBOX=off disables the boundary this job exists to prove; unset it.",
             );
         }
-        const exec = await createToolExec();
+        const exec = await createToolExec({denyRead: smokeDenyRead(repoRoot)});
         summaryLine("### Sandbox smoke\n");
         summaryLine("Phase A: boundary probes (srt active, no model)\n");
 
@@ -427,7 +473,6 @@ const main = async (): Promise<void> => {
         } else {
             const toolNames: string[] = [];
             const journalBefore = journalLines();
-            const stageRoot = mkdtempSync("/tmp/review-sandbox-smoke-");
             const cases = loadLiveCorpus();
             const corpusCase = cases.find((entry) => entry.id === caseId);
             if (corpusCase === undefined) {
@@ -445,7 +490,12 @@ const main = async (): Promise<void> => {
                 `Phase B: case \`${caseId}\` on the production tool surface\n`,
             );
             const result = await produceLive(corpusCase, agents, {
-                runner: productionSurfaceRunner(repoRoot, toolNames, caseId),
+                runner: productionSurfaceRunner(
+                    repoRoot,
+                    libRoot,
+                    toolNames,
+                    caseId,
+                ),
                 stageDir: `${stageRoot}/${caseId}`,
             });
             const usd = result.perAgent.reduce((sum, a) => sum + a.usd, 0);

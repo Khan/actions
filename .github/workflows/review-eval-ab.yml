@@ -205,7 +205,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sandbox-smoke-transcripts
-          path: out/transcripts/
+          path: /tmp/review-transcripts/
           if-no-files-found: ignore
 
   # One question, one dispatch: why does the Pi arm lose
@@ -346,7 +346,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: live-ab-transcripts
-          path: out/transcripts/
+          path: /tmp/review-transcripts/
           if-no-files-found: ignore
       - name: Post the sticky PR comment
         if: always() && github.event_name == 'pull_request'

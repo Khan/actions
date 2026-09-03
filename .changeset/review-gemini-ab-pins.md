@@ -54,6 +54,24 @@ and production gemini traffic is deliberately not wired (the awf api-proxy
 meters Anthropic only, so a production move needs firewall and proxy work
 first).
 
+The eval was not isolated from its own answer key, found by reading the
+gemini transcripts rather than the tool-call count. The runner VM has this
+repo checked out beside the staged cases, srt's read denial covered only
+`~/.ssh`, and a reviewer that searches the filesystem (`find / -name
+investigation-cap.ts`) finds the corpus with each case's must-catch spec,
+the scorer, and the contracts source. gemini-3.8-flash did, on every run;
+claude checked once for the lib and stayed in the checkout, which is luck,
+not a property of the eval. The tool sandbox now takes caller-supplied
+`denyRead` paths: the live A/B denies the repo root (its cases live under
+/tmp and need nothing from it), the smoke denies `workflows/` and `.github/`
+and links a lib containing only the cap CLI in place of the whole repo, and
+transcripts are written under /tmp instead of the repo's `out/` (a reviewer
+read a sibling agent's transcript through the old link). The system prompt
+gains scope lines saying what claude inferred and gemini did not: the
+changed files and what they call are in scope, the review tooling and
+anything outside the working directory are not, and the output contract is
+emitted as described rather than validated against the tooling's source.
+
 Also fixed on the way: the `ANTHROPIC_BASE_URL` steer used to re-register
 the provider through `createProvider({...provider, baseUrl})`, which throws
 in pi-ai 0.83.0 and 0.84.4 (createProvider wants the provider's input shape, and the

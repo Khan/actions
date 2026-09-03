@@ -16,7 +16,14 @@ import type {AgentTranscript} from "../lib/dispatch-runner-pi";
 /** Per-block character cap for tool results and assistant text. */
 const TRIM_CHARS = 2_000;
 
-export const TRANSCRIPTS_DIR = "out/transcripts";
+/**
+ * Outside the repo tree on purpose. The first version wrote under the
+ * repo's `out/`, and the smoke linked the repo into the case checkout, so
+ * a reviewer read a sibling agent's transcript mid-run (run 33793491316,
+ * `tail -n 30 .../skill-auditor.json`). Nothing a reviewer can reach may
+ * be written during a run.
+ */
+export const TRANSCRIPTS_DIR = "/tmp/review-transcripts";
 
 const trimText = (text: string): string =>
     text.length <= TRIM_CHARS

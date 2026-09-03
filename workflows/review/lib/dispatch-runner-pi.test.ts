@@ -751,6 +751,23 @@ describe("createPiRunner", () => {
         });
     });
 
+    it("extends the sandbox's read denial with the caller's paths, and only then", async () => {
+        // The eval denies its own repo root so a reviewer cannot read the
+        // corpus, the scorer, or the contracts (run 33795650180's gemini
+        // agent found all three via `find /`). Production passes nothing,
+        // and the policy above must be exactly what it was.
+        await createPiRunner({sandbox: {denyRead: ["/work/actions"]}});
+        const config = sandboxConfigs[0] as {
+            filesystem: {denyRead: string[]; allowWrite: string[]};
+        };
+        expect(config.filesystem.denyRead).toEqual(["~/.ssh", "/work/actions"]);
+        // Nothing else moved.
+        expect(config.filesystem.allowWrite).toEqual([
+            "/tmp/gh-aw/review/investigation-journal.log",
+            "/tmp/review-agent-scratch",
+        ]);
+    });
+
     it("fails closed when the sandbox cannot initialize", async () => {
         sandboxInit = () => Promise.reject(new Error("bwrap missing"));
         await expect(createPiRunner()).rejects.toThrow(
