@@ -22,6 +22,15 @@ import {dirname, isAbsolute, resolve, sep} from "node:path";
 /** The read-only investigation tools the eval hands a reviewer. */
 export const READ_TOOLS = ["Read", "Grep", "Glob"] as const;
 
+/**
+ * The runner's tool policy as a ruler stamp (see ReportProvenance). Reports
+ * before the scope carry no such field and read as `unscoped` in the
+ * aggregate, so a drift pool spanning the boundary warns the way a matcher
+ * change does. Bump the string whenever the toolset or the scope rule
+ * changes what a reviewer can reach.
+ */
+export const READ_TOOL_POLICY = `read-scoped:${READ_TOOLS.join(",")}`;
+
 export type ReadScopeOptions = {
     /**
      * Canonicalize a path that exists (symlink-aware). Defaults to

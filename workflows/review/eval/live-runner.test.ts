@@ -346,6 +346,7 @@ describe("probeReadScope", () => {
         });
         expect(result.ok).toBe(false);
         expect(result.notAttempted).toBe(false);
+        expect(result.dispatchFailed).toBe(true);
         expect(result.detail).toContain(
             "probe dispatch FAILED: 529 overloaded",
         );
@@ -387,6 +388,7 @@ describe("runProbeGate", () => {
     const verdict = (over: Partial<ProbeResult>): ProbeResult => ({
         ok: false,
         notAttempted: false,
+        dispatchFailed: false,
         detail: "d",
         ...over,
     });
@@ -431,11 +433,33 @@ describe("runProbeGate", () => {
         expect(gate.message).toContain("unproven for this run, not broken");
     });
 
-    it("never retries a leak, a missing denial, or a dispatch failure", async () => {
+    it("retries once on a dispatch failure, and fails as unproven if it repeats", async () => {
+        const {probe, seen} = scripted([
+            verdict({
+                dispatchFailed: true,
+                detail: "probe dispatch FAILED: 529",
+            }),
+            verdict({ok: true}),
+        ]);
+        expect((await runProbeGate("/t", probe, quiet)).ok).toBe(true);
+        expect(seen).toHaveLength(2);
+        const twice = scripted([
+            verdict({
+                dispatchFailed: true,
+                detail: "probe dispatch FAILED: 529",
+            }),
+        ]);
+        const gate = await runProbeGate("/t", twice.probe, quiet);
+        expect(gate.ok).toBe(false);
+        expect(twice.seen).toHaveLength(2);
+        expect(gate.message).toContain("unproven for this run, not broken");
+        expect(gate.message).toContain("529");
+    });
+
+    it("never retries a leak or a missing denial", async () => {
         for (const first of [
             verdict({detail: "LEAKED"}),
             verdict({detail: "deniedReads=0"}),
-            verdict({detail: "probe dispatch FAILED"}),
         ]) {
             const {probe, seen} = scripted([first, verdict({ok: true})]);
             const gate = await runProbeGate("/t", probe, quiet);

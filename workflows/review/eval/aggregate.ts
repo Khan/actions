@@ -54,6 +54,7 @@ import {
     type ReportSample,
 } from "./aggregate-extract";
 import {renderAggregateMarkdown} from "./aggregate-render";
+import {stampedValues} from "./aggregate-ruler";
 import {caughtBlocking, SEVERITY_BAND_METRIC} from "./aggregate-severity";
 import {
     mergeUsage,
@@ -182,6 +183,7 @@ export type AggregateReport = {
     /** Distinct ruler stamps across the pool (empty for legacy reports). */
     matchers: string[];
     corpusShas: string[];
+    toolPolicies: string[];
     arms: {baseline: ArmAggregate; candidate: ArmAggregate};
     /** Set iff every sample ran byte-identical arms. */
     noiseFloor?: NoiseFloor;
@@ -451,15 +453,6 @@ export const computeNoiseFloor = (armSamples: ArmSample[]): NoiseFloor => {
     return {armSamples: armSamples.length, bands, caseAsymmetry};
 };
 
-/** Distinct ruler values, with "unstamped" added iff only some are set. */
-const rulerValues = (values: (string | undefined)[]): string[] => {
-    const set = new Set(values.filter((v): v is string => v !== undefined));
-    if (set.size > 0 && values.some((v) => v === undefined)) {
-        set.add("unstamped");
-    }
-    return [...set].sort();
-};
-
 /**
  * Pool report samples into the aggregate. Sources that failed to parse are
  * carried in `skippedSources`; identical-arm pools additionally get the
@@ -481,11 +474,9 @@ export const aggregateSamples = (
         skippedSources,
         samples: samples.length,
         baseRefs: [...new Set(samples.map((s) => s.baseRef))].sort(),
-        // A pool that mixes stamped and unstamped reports lists "unstamped"
-        // as a second ruler value, so the mixed-ruler warning fires; an
-        // all-unstamped pool stays silent as before (nothing to compare).
-        matchers: rulerValues(samples.map((s) => s.matcher)),
-        corpusShas: rulerValues(samples.map((s) => s.corpusSha)),
+        matchers: stampedValues(samples, "matcher"),
+        corpusShas: stampedValues(samples, "corpusSha"),
+        toolPolicies: stampedValues(samples, "toolPolicy"),
         arms: {
             baseline: aggregateArm(
                 "baseline",

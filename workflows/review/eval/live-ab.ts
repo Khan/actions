@@ -100,6 +100,7 @@ import {
 } from "./live-match";
 import {produceLive} from "./live-producer";
 import {DEFAULT_TRANSCRIPTS_DIR, sdkRunner} from "./live-runner";
+import {READ_TOOL_POLICY} from "./read-scope";
 import {haikuMatchArbiter} from "./match-arbiter";
 import {
     computeRereviewMetrics,
@@ -727,6 +728,7 @@ const main = async (): Promise<void> => {
                 : "deterministic-v2",
         corpusSha: sha256(JSON.stringify(cases)),
         caseCount: cases.length,
+        toolPolicy: READ_TOOL_POLICY,
     };
 
     const ckpt = createCheckpointer({

@@ -248,6 +248,13 @@ export type ReportProvenance = {
     /** Content hash of the loaded corpus cases this run was scored against. */
     corpusSha: string;
     caseCount: number;
+    /**
+     * What the runner let reviewers reach (`READ_TOOL_POLICY` in
+     * read-scope.ts). Absent on reports before the read scope, which the
+     * aggregate reads as `unscoped`: those reviewers had every default tool
+     * and could read the corpus, so their rates are a different instrument.
+     */
+    toolPolicy?: string;
 };
 
 export type AbReport = {
@@ -702,7 +709,8 @@ export const renderMarkdownReport = (
             ? [
                   `Ruler: matcher ${report.provenance.matcher}; corpus ` +
                       `${report.provenance.corpusSha.slice(0, 12)} ` +
-                      `(${report.provenance.caseCount} cases).`,
+                      `(${report.provenance.caseCount} cases); tools ` +
+                      `${report.provenance.toolPolicy ?? "unscoped"}.`,
                   "",
               ]
             : []),

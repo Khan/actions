@@ -338,13 +338,8 @@ const runOnce = async (
 };
 
 /* -------------------------------------------------------------------------- */
-/* CLI                                                                        */
+/* The read-scope probe (the CI gate; unit-tested through injected runners)  */
 /* -------------------------------------------------------------------------- */
-
-const argValue = (flag: string): string | undefined => {
-    const index = process.argv.indexOf(flag);
-    return index === -1 ? undefined : process.argv[index + 1];
-};
 
 /**
  * The probe's model, pinned like the judge's and the arbiter's: it needs a
@@ -363,6 +358,12 @@ export type ProbeOptions = {
 export type ProbeResult = {
     ok: boolean;
     detail: string;
+    /**
+     * The probe's own dispatch threw (overload, timeout, transport) before a
+     * verdict existed. Retried once by the CLI like a non-attempt: nothing
+     * is known about the hook from a run that died.
+     */
+    dispatchFailed: boolean;
     /**
      * The model never issued the out-of-scope Read, so the hook was never
      * exercised. A model-behavior failure, not a scope failure: the CLI
@@ -399,7 +400,7 @@ export const probeReadScope = async (
     mkdirSync(cwd, {recursive: true});
     mkdirSync(join(readRoot, "context"), {recursive: true});
     const inside = join(readRoot, "context", "note.txt");
-    const outside = join(base, "outside", "secret.txt");
+    const outside = join(base, "outside", "notes.txt");
     mkdirSync(dirname(outside), {recursive: true});
     const insideToken = `inside-${Date.now().toString(36)}`;
     const outsideToken = `outside-${Date.now().toString(36)}`;
@@ -427,11 +428,12 @@ export const probeReadScope = async (
         });
     } catch (error) {
         // A transient dispatch failure is a failed probe with a detail line,
-        // not an uncaught throw with none. It never retries as "not
-        // attempted": nothing is known about the hook from a run that died.
+        // not an uncaught throw with none. The transcript, if the runner got
+        // as far as writing one, is still on disk for the upload step.
         return {
             ok: false,
             notAttempted: false,
+            dispatchFailed: true,
             detail: `probe dispatch FAILED: ${String(
                 error instanceof Error ? error.message : error,
             )}`,
@@ -478,6 +480,7 @@ export const probeReadScope = async (
         // Never "not attempted" when the secret escaped: a retry must not be
         // able to turn a leaking probe green.
         notAttempted: files.length > 0 && !attemptedOutside && !leaked,
+        dispatchFailed: false,
         detail:
             (files.length === 0 ? "NO TRANSCRIPT written, " : "") +
             `in-scope read ${sawInside ? "returned" : "did NOT return"} its ` +
@@ -492,9 +495,10 @@ export const probeReadScope = async (
 
 /**
  * The CI gate around the probe. One retry, only when the model declined to
- * attempt the out-of-scope read: that is model behavior, not the scope, and
- * it should not red three workflows on one refusal. A leak, a missing
- * denial, or a dispatch failure never retries. Each attempt gets its own
+ * attempt the out-of-scope read or the dispatch itself failed: those are
+ * model behavior and transport, not the scope, and neither should red three
+ * workflows on one bad call. A leak or a missing denial never retries, and
+ * a leak on the first try cannot be retried away. Each attempt gets its own
  * transcript subdirectory, since the verdict scans every file under the
  * directory it is given and a prior attempt's transcript would poison it.
  * Injected `probe` and `log` so the wiring is testable without a model.
@@ -506,7 +510,7 @@ export const runProbeGate = async (
 ): Promise<{ok: boolean; message: string}> => {
     let result = await probe({transcriptsDir: join(transcriptsDir, "1")});
     log(`read-scope probe: ${result.detail}`);
-    if (!result.ok && result.notAttempted) {
+    if (!result.ok && (result.notAttempted || result.dispatchFailed)) {
         result = await probe({transcriptsDir: join(transcriptsDir, "2")});
         log(`read-scope probe (retry): ${result.detail}`);
     }
@@ -515,16 +519,27 @@ export const runProbeGate = async (
     }
     return {
         ok: false,
-        message: result.notAttempted
-            ? "read-scope probe FAILED: the model did not attempt the " +
-              "out-of-scope read on two tries, so the hook was never " +
-              "exercised. The scope is unproven for this run, not broken; " +
-              "check the probe model's behavior."
-            : "read-scope probe FAILED: the runner let a read outside the " +
-              "staged case through, the in-scope read failed, or the probe " +
-              "could not dispatch. Do not trust this run's recall. Detail: " +
-              result.detail,
+        message:
+            result.notAttempted || result.dispatchFailed
+                ? "read-scope probe FAILED on two tries without exercising " +
+                  "the hook (the model did not attempt the out-of-scope " +
+                  "read, or the dispatch failed). The scope is unproven for " +
+                  "this run, not broken. Detail: " +
+                  result.detail
+                : "read-scope probe FAILED: the runner let a read outside " +
+                  "the staged case through or the in-scope read failed. Do " +
+                  "not trust this run's recall. Detail: " +
+                  result.detail,
     };
+};
+
+/* -------------------------------------------------------------------------- */
+/* CLI                                                                        */
+/* -------------------------------------------------------------------------- */
+
+const argValue = (flag: string): string | undefined => {
+    const index = process.argv.indexOf(flag);
+    return index === -1 ? undefined : process.argv[index + 1];
 };
 
 const main = async (): Promise<void> => {

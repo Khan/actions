@@ -324,13 +324,15 @@ claiming a band.
   Absolute columns do not compare across reports.
 - **Ruler provenance:** every report stamps the matcher configuration
   (`deterministic-v2`, `+arbiter` when the fallback ran; v1 is the
-  unsuffixed stamp from before the lens tie-break and leftover buckets) and a
-  corpus content hash (`provenance` in the JSON, the "Ruler" line in the
-  markdown). Rates are only comparable when BOTH the review.md sha and the
-  ruler match; `aggregate.ts` warns loudly on mixed pools. Instrument
-  changes (arbiter on/off, corpus growth) move every rate without the
-  reviewer changing, and the stamps are what keep the drift series honest
-  across them.
+  unsuffixed stamp from before the lens tie-break and leftover buckets), a
+  corpus content hash, and the runner's tool policy (`provenance` in the
+  JSON, the "Ruler" line in the markdown). Rates are only comparable when
+  BOTH the review.md sha and the ruler match; `aggregate.ts` warns loudly on
+  mixed pools. Instrument changes (arbiter on/off, corpus growth, what the
+  reviewer can reach) move every rate without the reviewer changing, and the
+  stamps are what keep the drift series honest across them. Reports from
+  before the read scope carry no tool policy and pool as `unscoped`, so a
+  drift series crossing that boundary warns.
 
 ### Statistical honesty (limits to keep in mind)
 

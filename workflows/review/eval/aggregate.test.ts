@@ -694,7 +694,7 @@ describe("renderAggregateMarkdown", () => {
         ]);
         const uniformMd = renderAggregateMarkdown(uniform);
         expect(uniformMd).toContain(
-            "Ruler: matcher deterministic; corpus cccccccccccc.",
+            "Ruler: matcher deterministic; corpus cccccccccccc; tools unscoped.",
         );
         expect(uniformMd).not.toContain("mix rulers");
 
@@ -740,6 +740,45 @@ describe("renderAggregateMarkdown", () => {
         ]);
         expect(legacyOnly.matchers).toEqual([]);
         expect(renderAggregateMarkdown(legacyOnly)).not.toContain("mix rulers");
+    });
+
+    it("treats a stamped report without a tool policy as unscoped, and warns across that boundary", () => {
+        const base = rawReport({
+            baselineRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+            candidateRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+        });
+        const ruler = {matcher: "deterministic", corpusSha: "c".repeat(64)};
+        const preScope = {...base, provenance: {...ruler, caseCount: 1}};
+        const scoped = {
+            ...base,
+            provenance: {
+                ...ruler,
+                caseCount: 1,
+                toolPolicy: "read-scoped:Read,Grep,Glob",
+            },
+        };
+        const uniform = aggregateSamples([
+            ...extractSamples("r1", scoped),
+            ...extractSamples("r2", scoped),
+        ]);
+        expect(renderAggregateMarkdown(uniform)).toContain(
+            "tools read-scoped:Read,Grep,Glob.",
+        );
+        expect(renderAggregateMarkdown(uniform)).not.toContain("mix rulers");
+        const mixed = aggregateSamples([
+            ...extractSamples("r1", preScope),
+            ...extractSamples("r2", scoped),
+        ]);
+        expect(mixed.toolPolicies).toEqual([
+            "read-scoped:Read,Grep,Glob",
+            "unscoped",
+        ]);
+        expect(renderAggregateMarkdown(mixed)).toContain(
+            "WARNING: pooled runs mix rulers",
+        );
+        // A report with no stamp at all stays unstamped, not "unscoped".
+        const unstamped = aggregateSamples([...extractSamples("r1", base)]);
+        expect(unstamped.toolPolicies).toEqual([]);
     });
 
     it("warns on asymmetric samples under the noise-floor bands", () => {
