@@ -96,7 +96,7 @@ export {
  * engine step, and pi-ai does not read that env var at all: its Anthropic
  * provider calls the SDK with a hardcoded `maxRetries: 0` and delegates to its
  * own `retryProviderRequest` helper, whose default is also 0 unless the caller
- * passes one (pi-ai 0.83.0, `dist/api/anthropic-messages.js`). So without this
+ * passes one (pi-ai 0.84.4, `dist/api/anthropic-messages.js`). So without this
  * option a single transient overload on ANY turn ends the sub-agent, and
  * `dispatch.ts` records the thrown error as a failed dimension with no
  * transient retry of its own: one 529 sheds a whole review lens.
@@ -242,7 +242,7 @@ export const createPiRunner = async (
             : rebaseModels(anthropic, baseUrl),
     );
     // Register Google (Gemini API) with the catalog extended by the
-    // gemini-3.8-flash entry pi-ai 0.83.0 predates. Auth (GEMINI_API_KEY)
+    // gemini-3.8-flash entry pi-ai 0.84.4 predates. Auth (GEMINI_API_KEY)
     // resolves lazily at call time, so registering the provider costs
     // nothing on runs whose pins never leave Anthropic.
     const google = googleProvider();

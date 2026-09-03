@@ -46,8 +46,8 @@ export type CatalogProvider = {
 };
 
 /**
- * `gemini-3.8-flash` shipped 2026-09-02; the pinned pi-ai 0.83.0 catalog
- * (and 0.84.4, published 2026-08-28) stops at earlier Flash releases, so
+ * `gemini-3.8-flash` shipped 2026-09-02; the pinned pi-ai 0.84.4 catalog
+ * (published 2026-08-28) stops at gemini-3.7-flash, so
  * the entry is supplied here and merged into the provider's catalog at
  * registration. Shaped exactly like the catalog's own Flash entries; cost
  * is the launch intro price ($0.75/$3.75 per MTok, through 2026-12-31),
@@ -117,7 +117,8 @@ export const withGemini38Flash = (
  * api-proxy steer. The override lives on `getModels` because the model's
  * own `baseUrl` is the field Pi's API layer reads; the provider-level field
  * is advisory. (The earlier `createProvider({...provider, baseUrl})` form
- * threw in pi-ai 0.83.0: createProvider wants the provider's INPUT shape,
+ * threw in pi-ai 0.83.0 and still throws in 0.84.4: createProvider wants the
+ * provider's INPUT shape,
  * `models` array and `api` streams, neither of which the built provider
  * re-exposes. The eval VM runs unsteered, which is why no run tripped it.)
  */
