@@ -102,6 +102,7 @@ describe("writeTranscript", () => {
             model: "claude-opus-4-6",
             attempt: 2,
             deniedReads: 1,
+            deniedTools: 0,
             messages: MESSAGES,
         });
         expect(file).toBe(
@@ -115,6 +116,7 @@ describe("writeTranscript", () => {
             "toolCallIndex",
             "toolCalls",
             "deniedReads",
+            "deniedTools",
             "messages",
         ]);
         expect(body.toolCalls).toBe(2);
@@ -129,6 +131,7 @@ describe("writeTranscript", () => {
             model: "m",
             attempt: 1,
             deniedReads: 0,
+            deniedTools: 0,
             messages: [],
         });
         expect(file).toBe(join(dir, "a_b", "c_d", "x_y-1.json"));

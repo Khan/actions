@@ -390,6 +390,9 @@ export const runArm = async (
             deniedReads: produced.perAgent
                 .filter((a) => (a.deniedReads ?? 0) > 0)
                 .map((a) => ({agent: a.name, count: a.deniedReads as number})),
+            deniedTools: produced.perAgent
+                .filter((a) => (a.deniedTools ?? 0) > 0)
+                .map((a) => ({agent: a.name, count: a.deniedTools as number})),
             absentAgents: produced.perAgent
                 .filter((a) => a.absent === true)
                 .map((a) => a.name),

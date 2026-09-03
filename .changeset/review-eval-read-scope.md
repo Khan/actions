@@ -16,8 +16,9 @@ The runner now restricts the toolset with `tools`, denies through a
 PreToolUse hook both any tool outside Read/Grep/Glob and any read whose path
 resolves outside the staged case (checkout plus context), counts the denials
 per agent into the report even when the attempt times out (a new
-"Reads denied outside the staged case" row, plus a section naming the
-reviewer when nonzero), and writes one transcript per dispatch under the
+"Reads denied outside the staged case" row on single runs and pooled line on
+repeats reports, plus a section naming the reviewer when nonzero, with
+tool-policy denials listed apart), and writes one transcript per dispatch under the
 runner's temp dir, uploaded as `live-ab-transcripts`. Every live workflow
 starts with `live-runner.ts --probe-read-scope`, one Haiku call that fails
 the job if an out-of-scope read goes through. The README's read protocol now

@@ -9,6 +9,11 @@
 import {renderAggregateMarkdown, type AggregateReport} from "./aggregate";
 import {money, pricedRows, toolCallRows} from "./cost-rows";
 import {
+    deniedSection,
+    deniedTotal,
+    pooledDeniedLines,
+} from "./live-ab-report-denials";
+import {
     khanCost,
     type AgentCost,
     type ModelTokens,
@@ -166,6 +171,13 @@ export type ArmRunReport = {
          * looking, and the denial is why its recall still counts.
          */
         deniedReads?: {agent: string; count: number}[];
+        /**
+         * Calls to tools outside Read/Grep/Glob the runner denied, per agent
+         * that had any. Nonzero means the SDK's `tools` restriction stopped
+         * restricting and the hook caught it; reported apart from reads so
+         * a tool-policy denial is never read as a corpus peek.
+         */
+        deniedTools?: {agent: string; count: number}[];
         /**
          * Reviewers the case enabled that this arm's `review.md` does not
          * define, so the arm never had the dimension. Expected on the baseline
@@ -368,6 +380,7 @@ export const renderMultiMarkdownReport = (
             "",
         );
     }
+    lines.push(...pooledDeniedLines(report));
     if (report.gate.length === 0) {
         lines.push(
             report.partial === true
@@ -454,14 +467,6 @@ const auditedCases = (arm: ArmRunReport): number =>
 /** Total anchor-snaps across an arm's case runs (see `perCase.snapped`). */
 const snappedTotal = (arm: ArmRunReport): number =>
     arm.perCase.reduce((sum, c) => sum + c.snapped, 0);
-
-/** Read-scope denials across the arm's agents; zero is the expected value. */
-const deniedTotal = (arm: ArmRunReport): number =>
-    arm.perCase.reduce(
-        (sum, c) =>
-            sum + (c.deniedReads ?? []).reduce((n, d) => n + d.count, 0),
-        0,
-    );
 
 /**
  * The arm's cross-source merge rate: claims absorbed over claims produced,
@@ -961,26 +966,7 @@ export const renderMarkdownReport = (
             "",
         );
     }
-    const denied = [
-        ["baseline", baseline],
-        ["candidate", candidate],
-    ].flatMap(([arm, report]) =>
-        (report as ArmRunReport).perCase.flatMap((c) =>
-            (c.deniedReads ?? []).map(
-                (d) =>
-                    `${arm} / ${c.caseId} / ${d.agent}: ${d.count} read(s) ` +
-                    `denied; read its transcript`,
-            ),
-        ),
-    );
-    if (denied.length > 0) {
-        lines.push(
-            "### Reviewers that read outside the staged case",
-            "",
-            ...denied.map((d) => `- ${d}`),
-            "",
-        );
-    }
+    lines.push(...deniedSection([{baseline, candidate}]));
     const asymmetry = armAsymmetryLines([{baseline, candidate}]);
     if (asymmetry.length > 0) {
         lines.push(

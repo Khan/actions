@@ -47,8 +47,10 @@ export type Transcript = {
     /** `Tool key=value ...` per call, in order. */
     toolCallIndex: string[];
     toolCalls: number;
-    /** Read-scope denials the runner's hook issued during this attempt. */
+    /** Out-of-scope reads the runner's hook denied during this attempt. */
     deniedReads: number;
+    /** Non-read tools the hook denied (the `tools` restriction's backstop). */
+    deniedTools: number;
     messages: TranscriptMessage[];
 };
 
@@ -152,6 +154,7 @@ export const writeTranscript = (
         toolCallIndex: index,
         toolCalls: index.length,
         deniedReads: transcript.deniedReads,
+        deniedTools: transcript.deniedTools,
         messages,
     };
     writeFileSync(file, JSON.stringify(body, null, 2));

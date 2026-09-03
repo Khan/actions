@@ -13,8 +13,27 @@
 export type PartialAccounting = {
     /** Tool calls the attempt made (see `LiveAgentResult.toolCalls`). */
     toolCalls?: number;
-    /** Read-scope denials the attempt drew (see `LiveAgentResult.deniedReads`). */
+    /** Out-of-scope reads denied (see `LiveAgentResult.deniedReads`). */
     deniedReads?: number;
+    /** Non-read tools denied (see `LiveAgentResult.deniedTools`). */
+    deniedTools?: number;
+};
+
+/**
+ * Add one attempt's counters into a running total (the per-agent report).
+ * A counter the attempt did not report leaves the total untouched, so a
+ * runner that cannot count still reports nothing rather than a false zero.
+ */
+export const addAccounting = (
+    into: PartialAccounting,
+    from: PartialAccounting,
+): void => {
+    for (const key of ["toolCalls", "deniedReads", "deniedTools"] as const) {
+        const n = from[key];
+        if (n !== undefined) {
+            into[key] = (into[key] ?? 0) + n;
+        }
+    }
 };
 
 export class LiveAgentError extends Error {

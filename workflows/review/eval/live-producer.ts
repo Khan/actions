@@ -51,7 +51,7 @@ import {validateFinding, type Finding, type Lens} from "../lib/finding-schema";
 import {CLUSTERER} from "../lib/dispatch-cluster";
 import {LABEL_SHAPE_REVIEWERS} from "./lens-sources";
 import {dedupeLiveFindings, type LiveDedupReport} from "./live-dedup";
-import {LiveAgentError} from "./live-agent-error";
+import {addAccounting, LiveAgentError} from "./live-agent-error";
 import {
     VERIFICATION_STATES,
     type CaseVerification,
@@ -124,10 +124,18 @@ export type LiveAgentResult = {
      */
     toolCalls?: number;
     /**
-     * Tool calls the runner's scope hook denied (a read outside the staged
-     * case, or a tool outside Read/Grep/Glob). Zero is the expected value.
+     * Read/Grep/Glob calls the runner denied for resolving outside the staged
+     * case. Zero is the expected value; anything else is a reviewer that
+     * went looking, and the transcript says where.
      */
     deniedReads?: number;
+    /**
+     * Calls to tools outside Read/Grep/Glob the runner denied. `tools` keeps
+     * those out of the model's toolset, so this is the signal that the
+     * restriction stopped restricting; it is not a corpus read and is never
+     * reported as one.
+     */
+    deniedTools?: number;
     /** Provider stop reason for the last assistant message, when visible. */
     stopReason?: string;
     /** Why the call failed, when the runner can see it. */
@@ -164,6 +172,8 @@ export type PerAgentReport = {
     usage?: ModelTokens[];
     /** Denied reads across every attempt (see `LiveAgentResult.deniedReads`). */
     deniedReads?: number;
+    /** Denied non-read tools across every attempt (`LiveAgentResult.deniedTools`). */
+    deniedTools?: number;
     /** Stop reason of the last attempt; set alongside `failed`. */
     stopReason?: string;
     /**
@@ -656,18 +666,12 @@ const dispatchWithRetry = async <R>(
             report.usd += result.usd;
             report.turns += result.turns;
             report.wallMs += result.wallMs;
-            if (result.toolCalls !== undefined) {
-                report.toolCalls = (report.toolCalls ?? 0) + result.toolCalls;
-            }
+            addAccounting(report, result);
             if (result.usage !== undefined) {
                 report.usage = mergeUsage([
                     ...(report.usage ?? []),
                     ...result.usage,
                 ]);
-            }
-            if (result.deniedReads !== undefined) {
-                report.deniedReads =
-                    (report.deniedReads ?? 0) + result.deniedReads;
             }
             lastOutput = result.output;
             report.stopReason = result.stopReason;
@@ -738,9 +742,7 @@ const dispatchWithRetry = async <R>(
             )}`;
             // Keep what the failed attempt counted (see LiveAgentError).
             if (runError instanceof LiveAgentError) {
-                const {toolCalls = 0, deniedReads = 0} = runError.partial;
-                report.toolCalls = (report.toolCalls ?? 0) + toolCalls;
-                report.deniedReads = (report.deniedReads ?? 0) + deniedReads;
+                addAccounting(report, runError.partial);
             }
         }
         if (attempt === 0) {

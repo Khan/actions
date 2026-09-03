@@ -81,20 +81,28 @@ pre-approves, so before this every default tool including Bash was reachable
 under `bypassPermissions`), and a PreToolUse hook denies two things: any tool
 outside those three (a second layer under the `tools` restriction), and any
 read that resolves outside the staged case directory (the checkout plus its
-`context/` sibling), symlinks followed. Denials are counted per agent and rendered in
-the report ("Reads denied outside the staged case"). The expected value is
-zero, and a nonzero count names a reviewer whose transcript should be read.
+`context/` sibling), symlinks followed. Denials are counted per agent, reads apart from
+tools, and rendered in every report shape: the single-run table row and the
+repeats report's pooled line both say "Reads denied outside the staged case",
+and a nonzero count adds a section naming the reviewer whose transcript
+should be read. A tool-policy denial (the hook catching a tool `tools`
+should have removed) gets its own section and is never counted as a read.
+The expected value of both is zero.
 Transcripts are written outside the staging root so no reviewer can read a
 sibling's mid-run.
 
 Every live workflow starts with `live-runner.ts --probe-read-scope`, one
 Haiku call that reads a staged file, then a planted file outside the case,
-then tries to `cat` the planted file through Bash, and fails the job unless
-the first succeeded, at least one denial was issued, and the planted contents
-never reached the model by either route. The unit tests cover the scope
-predicate; the probe covers the SDK honoring the hook under
-`bypassPermissions` and `tools` actually removing Bash, on the version the
-checkout installs. Its log line says which of the two kept Bash out.
+then tries to `cat` the planted file through Bash. It fails the job unless a
+transcript was written, the in-scope read landed, the model actually
+attempted the out-of-scope read, the read-scope rule denied it, and the
+planted contents appear nowhere (final text and every tool result are both
+checked, so a leak through Bash fails it too). The Bash leg is otherwise
+informational: the log line says whether the hook denied Bash (`tools`
+stopped restricting and the second layer held), the model reported it
+unavailable (`tools` restricting), or neither was reported. The unit tests
+cover the scope predicate and the verdict; the probe covers the SDK honoring
+the hook under `bypassPermissions` on the version the checkout installs.
 
 ### Recipes
 
