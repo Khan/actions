@@ -65,6 +65,7 @@ import {
     type ReReviewMode,
 } from "../lib/routing-config";
 import {extractJsonObject} from "./extract-json";
+import {mergeUsage, type ModelTokens} from "./pricing";
 import {
     rewriteAgentPrompt,
     stageCase,
@@ -96,8 +97,14 @@ export type LiveAgentRequest = {
 export type LiveAgentResult = {
     /** The agent's final text (expected to be the JSON contract). */
     output: string;
-    /** Billed cost in USD (0 when the runner cannot price it). */
+    /** Billed cost in USD at list (0 when the runner cannot price it). */
     usd: number;
+    /**
+     * Tokens per model, the measurement `usd` was derived from. What lets the
+     * report price the dispatch at any rate (pricing.ts). Optional because a
+     * runner that cannot see token counts reports nothing rather than zeros.
+     */
+    usage?: ModelTokens[];
     /** Turns consumed. */
     turns: number;
     /** Wall-clock milliseconds. */
@@ -141,6 +148,8 @@ export type PerAgentReport = {
     retried: boolean;
     /** Tool calls across every attempt; see `LiveAgentResult.toolCalls`. */
     toolCalls?: number;
+    /** Tokens per model across every attempt; see `LiveAgentResult.usage`. */
+    usage?: ModelTokens[];
     /** Stop reason of the last attempt; set alongside `failed`. */
     stopReason?: string;
     /**
@@ -635,6 +644,12 @@ const dispatchWithRetry = async <R>(
             report.wallMs += result.wallMs;
             if (result.toolCalls !== undefined) {
                 report.toolCalls = (report.toolCalls ?? 0) + result.toolCalls;
+            }
+            if (result.usage !== undefined) {
+                report.usage = mergeUsage([
+                    ...(report.usage ?? []),
+                    ...result.usage,
+                ]);
             }
             lastOutput = result.output;
             report.stopReason = result.stopReason;

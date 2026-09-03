@@ -25,6 +25,7 @@ import {
     type RunHeader,
 } from "./live-ab-report";
 import {computeLiveMetrics} from "./live-match";
+import type {RateCard} from "./pricing";
 
 /** The single-run report over two arms. `gateRetries` is empty until the
  * best-of-three has run, so a checkpoint never has any. */
@@ -108,6 +109,8 @@ export const createCheckpointer = (options: {
     outPath: string;
     repeats: number;
     header: RunHeader;
+    /** Khan's rate card (pricing.ts); every render prices with it. */
+    khanRates?: RateCard;
 }): {
     header: RunHeader;
     /** `runArm`'s `onCase` for the baseline arm of the current repeat. */
@@ -125,6 +128,7 @@ export const createCheckpointer = (options: {
     };
 } => {
     const {outPath, repeats, header} = options;
+    const render = {khanRates: options.khanRates};
     const finished: AbReport[] = [];
     // Stage and rename: a cancel that lands mid-write must not truncate the
     // very file the checkpoint exists to preserve (rename is atomic on the
@@ -142,11 +146,11 @@ export const createCheckpointer = (options: {
         put(outPath.replace(/\.json$/, ".md"), `${markdown}\n`);
     };
     const single = (report: AbReport): void => {
-        write(report, renderMarkdownReport(report));
+        write(report, renderMarkdownReport(report, render));
     };
     const multi = (reports: AbReport[]): MultiAbReport => {
         const report = assembleMulti(repeats, reports);
-        write(report, renderMultiMarkdownReport(report));
+        write(report, renderMultiMarkdownReport(report, render));
         return report;
     };
     const checkpoint = (inProgress: AbReport): void => {
@@ -186,14 +190,14 @@ export const createCheckpointer = (options: {
                 single(only);
                 return {
                     payload: only,
-                    markdown: renderMarkdownReport(only),
+                    markdown: renderMarkdownReport(only, render),
                     candidateRunCount,
                 };
             }
             const report = multi(finished);
             return {
                 payload: report,
-                markdown: renderMultiMarkdownReport(report),
+                markdown: renderMultiMarkdownReport(report, render),
                 candidateRunCount,
             };
         },

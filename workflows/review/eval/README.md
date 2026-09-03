@@ -311,11 +311,43 @@ claiming a band.
 
 ## Costs and models
 
-Measured ~$0.72-0.75 per case per arm. Smoke run ~$10/PR; full 14-case
+Measured ~$0.72-0.75 per case per arm, sub-agent spend at list (the judge
+and arbiter are not in these figures). Smoke run ~$10/PR; full 14-case
 corpus x3 repeats x both arms ~$60 (cap it at $85 to avoid budget skips).
 The judge and the match arbiter are pinned to `claude-haiku-4-5-20251001`.
 Every model-spending path degrades to a partial report rather than dying
 at a cap, and judge/arbiter failures degrade to notes/non-matches.
+
+Every dollar figure the eval records is provider **list price**, and the
+report prices the same tokens twice. "Cost (list price)" is the recorded
+number: the runner's `total_cost_usd`, which is what Anthropic bills a bare API
+key (claude-opus-5 at $5/$25 per million tokens). "Cost (Khan rate)" is what
+production would have metered for the same tokens: the per-model token counts
+the runner records (`perCase[].agentCosts[].usage`, from the SDK result's
+`modelUsage`) priced at the `models.providers` overlay in review.md's
+frontmatter (#314, 50% of list for every claude pin it lists), priced per
+agent. An agent on a model with no overlay entry keeps its recorded list
+dollars in the Khan-rate figure (production bills it at list too) and the model
+is named in the note under the table, and so is a dispatch that recorded no
+token counts. The eval cannot inherit the proxy's rate directly because the
+overlay applies inside the awf api-proxy, and the eval never crosses it (bare
+runner VM, real API key), so a claude arm's list row reads at 2x production and
+a cross-provider comparison at list skews against any model the overlay does
+not cover.
+
+`pricing.ts` is the only place tokens become dollars. Khan's rates are read off
+review.md at render time (nothing else in the repo restates them), and list
+rates live in one table there, which the report checks against the runner's
+own meter on every run and flags when the two disagree by more than 1%. The
+judge and the match arbiter (haiku, direct Messages API calls that return
+`usage` but no dollars) are priced from their tokens at both rates and reported
+as their own row, "Judge + arbiter", with "Run total" adding them to the
+sub-agent cost. "Cost per tool call", the clusterer's price in the merge row,
+the gate-retry spend, and the repeats aggregate's pooled cost all read in both
+currencies the same way. The recorded `usd` stays list so every prior artifact
+remains comparable (older artifacts render n/a on the Khan-rate rows), and the
+budget cap (`--max-usd`) is still enforced in list dollars, so a claude arm's
+cap is 2x tighter in production dollars than a gemini arm's.
 
 When an agent fails contract parsing, the report keeps the **raw final text**
 of its last attempt (truncated to 4000 chars) and renders it inline under
