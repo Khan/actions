@@ -308,7 +308,27 @@ export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
     }
     if (report.gate.length === 0) {
         lines.push(
-            "Adversarial hard gate: PASSED on the candidate arm in every repeat.",
+            report.partial === true
+                ? `Adversarial hard gate: no flip so far (${finished} finished ` +
+                      `repeat${
+                          finished === 1 ? "" : "s"
+                      }); decided when the run finishes.`
+                : "Adversarial hard gate: PASSED on the candidate arm in every repeat.",
+            "",
+        );
+    } else if (report.partial === true) {
+        // A strict majority over one or two finished repeats is not a
+        // majority anyone should act on: a single flip at n=1 would render
+        // as confirmed. List the flips, decide nothing.
+        lines.push(
+            `### Adversarial hard gate (provisional, ${finished} finished repeat${
+                finished === 1 ? "" : "s"
+            })`,
+            "",
+            ...report.gate.map(
+                (g) =>
+                    `- ${g.caseId}: failed ${g.failedRepeats}/${g.repeats} finished repeats so far; decided when the run finishes`,
+            ),
             "",
         );
     } else {
@@ -494,12 +514,22 @@ export const renderMarkdownReport = (report: AbReport): string => {
     const [armALabel, armBLabel] = identicalArms
         ? ["Arm A", "Arm B"]
         : ["Baseline", "Candidate"];
+    // A checkpoint taken before an arm has scored anything must not render
+    // that arm as 0% (or $0.00) and the delta as a total regression: the
+    // sticky comment replaces the last finished result, so for the whole
+    // baseline half of a run the table would read as the candidate having
+    // lost everything. Every row goes through here.
+    const notRun = (arm: ArmRunReport): boolean =>
+        report.partial === true && arm.runs.length === 0;
     const row = (
         label: string,
         base: string,
         cand: string,
         delta = "",
-    ): string => `| ${label} | ${base} | ${cand} | ${delta} |`;
+    ): string =>
+        `| ${label} | ${notRun(baseline) ? "not run yet" : base} | ${
+            notRun(candidate) ? "not run yet" : cand
+        } | ${notRun(baseline) || notRun(candidate) ? "" : delta} |`;
     const metric = (
         label: string,
         pick: (arm: ArmRunReport) => number,

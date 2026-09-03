@@ -20,7 +20,8 @@
 # a `full-eval` label lifts that to every live case. The runner enforces a
 # hard USD ceiling per arm and reports skipped cases rather than dying at the
 # cap. A new push cancels a superseded run (concurrency below). A
-# `skip-live-eval` label skips the job entirely.
+# `skip-live-eval` label skips the job entirely (added mid-run, it cancels
+# the in-flight run too, see the concurrency key).
 #
 # NOTE: this workflow's name must stay distinct from any gh-aw workflow a
 # consumer runs (same-named workflows share a gh-aw concurrency group per PR
