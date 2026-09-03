@@ -1,4 +1,4 @@
-import {describe, it, expect} from "vitest";
+import {afterAll, beforeAll, describe, it, expect, vi} from "vitest";
 
 import {aggregateSamples, extractSamples} from "./aggregate";
 import {parseCase, type CorpusCase} from "./corpus/loader";
@@ -17,6 +17,15 @@ import {
     type ArmRunReport,
     type MultiAbReport,
 } from "./live-ab";
+
+// runArm prints a progress line per case to stderr (live-ab-progress.ts,
+// asserted in live-ab-progress.test.ts), so keep this suite's output clean.
+beforeAll(() => {
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+});
+afterAll(() => {
+    vi.restoreAllMocks();
+});
 
 const DIFF = [
     "diff --git a/src/a.ts b/src/a.ts",
