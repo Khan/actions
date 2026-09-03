@@ -297,9 +297,10 @@ export const matchCase = async (
             (candidate) =>
                 !claimed.has(candidate.id) && matchesSpec(candidate, spec),
         );
-        if (spec.lens !== undefined) {
+        const lens = spec.lens;
+        if (lens !== undefined) {
             const sameLens = hits.find((candidate) =>
-                sourceProducesLens(candidate.source, spec.lens as string),
+                sourceProducesLens(candidate.source, lens),
             );
             if (sameLens !== undefined) {
                 return sameLens;
@@ -384,20 +385,17 @@ export const matchCase = async (
     // A false flag is a real posting failure; the deterministic rule alone
     // decides it (the fallback exists to rescue recall, not to indict).
     for (const spec of mustNotFlag) {
-        for (const candidate of posted) {
-            if (claimed.has(candidate.id)) {
-                continue;
-            }
-            if (matchesSpec(candidate, spec)) {
-                claimed.add(candidate.id);
-                falseFlags.push({
-                    specKey: spec.key,
-                    findingId: candidate.id,
-                    via: "deterministic",
-                    blocking: candidate.blocking,
-                });
-                break;
-            }
+        // Same claimant rule as must-catch, so a trap that names a lens
+        // reports the finding that lens produced as the false flag.
+        const claimant = deterministicClaimant(spec);
+        if (claimant !== undefined) {
+            claimed.add(claimant.id);
+            falseFlags.push({
+                specKey: spec.key,
+                findingId: claimant.id,
+                via: "deterministic",
+                blocking: claimant.blocking,
+            });
         }
     }
 

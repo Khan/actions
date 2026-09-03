@@ -179,8 +179,8 @@ claiming a band.
   smoke cases so far, none of the rest of the live corpus), so on a case
   without them the noise row is still the old definition, an upper bound.
   A pooled noise rate over audited and unaudited cases together mixes the
-  two definitions, so compare per-case rows across arms, not the pooled
-  one. The entries were written from the claude arm's postings on run
+  two definitions, so compare `perCase[].noise` / `legitimateUnspecced` in
+  the report JSON across arms rather than the pooled row. The entries were written from the claude arm's postings on run
   33671015442 and cross-checked against the gemini arm where it posted, so
   for the first few runs read the per-case buckets against the postings
   once to catch an entry that only matches one model's vocabulary. The

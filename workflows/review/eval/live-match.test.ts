@@ -554,6 +554,26 @@ describe("matchCase", () => {
         ]);
         expect(match.unmatchedFindingIds).toEqual([]);
 
+        // A spec naming a lens no posted candidate came from falls back to
+        // posted order rather than refusing the match.
+        const crossLens = liveRun({
+            mustCatchSpecs: [
+                spec({
+                    key: "lost-update",
+                    mechanism: ["race|concurrent"],
+                    lens: "data-migrations",
+                }),
+            ],
+            findings: [ttl, race],
+        });
+        const crossLensMatch = await matchCase(
+            crossLens.corpusCase,
+            crossLens.result,
+        );
+        expect(crossLensMatch.caught.map((c) => c.findingId)).toEqual([
+            "f-ttl",
+        ]);
+
         // Without a lens on the spec, posted order still decides.
         const unlensed = liveRun({
             mustCatchSpecs: [

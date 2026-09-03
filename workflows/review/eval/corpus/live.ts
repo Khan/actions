@@ -10,7 +10,7 @@
  * validation error.
  */
 
-import {KNOWN_LENSES} from "../../lib/finding-schema";
+import {KNOWN_LENSES, type Lens} from "../../lib/finding-schema";
 import {computeDiffProvenance, countFileLines} from "../../lib/provenance";
 import type {ChangedFile} from "../../lib/router";
 
@@ -80,7 +80,7 @@ export type LiveDefectSpec = {
      * several posted findings satisfy the spec, the one produced by this
      * lens wins over posted order.
      */
-    lens?: string;
+    lens?: Lens;
     /**
      * Alternate anchor locations the spec ALSO accepts. A defect that spans
      * files has more than one correct anchor site (a migration missing an
@@ -423,7 +423,7 @@ const parseDefectSpecs = (
             spec.lineEnd = lineEnd as number;
         }
         if (isNonEmptyString(lens)) {
-            spec.lens = lens;
+            spec.lens = lens as Lens; // validated against KNOWN_LENSES above
         }
         if (altLocations !== undefined) {
             spec.altLocations = altLocations;

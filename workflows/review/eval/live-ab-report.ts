@@ -52,6 +52,20 @@ export type ArmRunReport = {
         caught: number;
         missed: string[];
         /**
+         * The case's posted count and its noise buckets, so the per-case
+         * noise picture is readable from the report without opening each
+         * run's match record: `noise` is unmatched plus duplicates (the
+         * pooled numerator's contribution), `legitimateUnspecced` the
+         * may-flag matches that left it. Cases without `mayFlagSpecs`
+         * report the old definition, so compare these per case across arms
+         * rather than reading a pooled rate over audited and unaudited
+         * cases as one number.
+         */
+        posted: number;
+        noise: number;
+        duplicates: number;
+        legitimateUnspecced: number;
+        /**
          * Findings the provenance gate anchor-snapped this run. The direct
          * observable for anchor fidelity: a prompt change that fixes
          * anchoring at the source (line-number-annotated diffs) shows up

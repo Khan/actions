@@ -239,6 +239,10 @@ export const runArm = async (
             expected: corpusCase.expected.verdict,
             caught: match.caught.length,
             missed: match.missed,
+            posted: match.postedCount,
+            noise: match.unmatchedFindingIds.length + match.duplicates.length,
+            duplicates: match.duplicates.length,
+            legitimateUnspecced: match.legitimateUnspecced.length,
             snapped: result.snappedByProvenance.length,
             ...(produced.dedup === undefined
                 ? {}
