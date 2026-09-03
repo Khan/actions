@@ -525,12 +525,13 @@ describe("retryGateFlips", () => {
             },
         );
         expect(attemptsSeen).toEqual([1, 2]);
+        const cost = {agent: "correctness-reviewer", model: "m", usd: 0.5};
         expect(retries).toEqual([
             {
                 caseId: "adv-1",
                 attempts: [
-                    {pass: true, failures: [], usd: 0.5},
-                    {pass: true, failures: [], usd: 0.5},
+                    {pass: true, failures: [], usd: 0.5, agentCosts: [cost]},
+                    {pass: true, failures: [], usd: 0.5, agentCosts: [cost]},
                 ],
                 settledPass: true,
             },
@@ -876,7 +877,7 @@ describe("renderMarkdownReport", () => {
             "Gate flips retried (best of three, flipped cases only)",
         );
         expect(markdown).toContain(
-            "- adv-1: original run failed, 0/1 retries passed; failure confirmed ($0.57 retry spend)",
+            "- adv-1: original run failed, 0/1 retries passed; failure confirmed ($0.57 retry spend at list)",
         );
     });
 

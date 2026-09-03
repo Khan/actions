@@ -21,6 +21,7 @@ import type {LiveDefectSpec} from "./corpus/loader";
 import type {MatchFallback} from "./live-match";
 import type {RunCandidate} from "./runner";
 import {extractJsonObject} from "./extract-json";
+import {usageOfResponse, type ModelTokens} from "./pricing";
 
 /**
  * Pinned snapshot, deliberately at the Haiku tier: the question is a narrow
@@ -91,8 +92,11 @@ export const parseArbiterAnswer = (text: string): boolean => {
  */
 export const haikuMatchArbiter = (options?: {
     onError?: (message: string) => void;
+    /** Each call's token counts, so the A/B can price the arbiter. */
+    onUsage?: (usage: ModelTokens) => void;
 }): MatchFallback => {
     const onError = options?.onError ?? (() => {});
+    const onUsage = options?.onUsage ?? (() => {});
     return async (candidate, spec) => {
         const prompt = buildArbiterPrompt(candidate, spec);
         try {
@@ -138,7 +142,10 @@ export const haikuMatchArbiter = (options?: {
             }
             const data = (await response.json()) as {
                 content: {type: string; text?: string}[];
+                model?: string;
+                usage?: Record<string, unknown>;
             };
+            onUsage(usageOfResponse(data, PINNED_ARBITER_MODEL));
             const text =
                 data.content.find((block) => block.type === "text")?.text ?? "";
             return parseArbiterAnswer(text);

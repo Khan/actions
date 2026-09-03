@@ -1,8 +1,13 @@
+import {readFileSync} from "node:fs";
+import {join} from "node:path";
+
 import {describe, it, expect} from "vitest";
 
 import {parseCase, type CorpusCase} from "./corpus/loader";
 import {renderMarkdownReport, runArm, type ArmProduce} from "./live-ab";
+import {armCosts} from "./cost-rows";
 import {armToolCalls} from "./live-ab-report";
+import {readOverlayRates, type ModelTokens, type RateCard} from "./pricing";
 
 /**
  * The report rows that read cost and volume apart. Split from live-ab.test.ts
@@ -138,5 +143,236 @@ describe("renderMarkdownReport cost rows", () => {
             "| Cost per tool call | $0.0200 | $0.0075 |",
         );
         expect(markdown).toContain("| Cost (list price) | $6.00 | $9.00 |");
+    });
+});
+
+describe("renderMarkdownReport priced rows", () => {
+    // Every recorded usd is list price. Production meters claude at the
+    // review.md overlay's rate (50% of list), and a model with no overlay
+    // entry at list, so a mixed run needs both numbers side by side.
+    const KHAN: RateCard = new Map([
+        [
+            "claude-opus-5",
+            {
+                input: 2.5e-6,
+                output: 1.25e-5,
+                cacheRead: 2.5e-7,
+                cacheWrite: 3.125e-6,
+            },
+        ],
+        [
+            "claude-haiku-4-5",
+            {input: 5e-7, output: 2.5e-6, cacheRead: 5e-8, cacheWrite: 6.25e-7},
+        ],
+    ]);
+    /** Tokens that price to exactly $6.00 at opus-5 list ($3.00 Khan). */
+    const OPUS_6_LIST: ModelTokens = {
+        model: "claude-opus-5",
+        input: 400_000,
+        output: 160_000,
+        cacheRead: 0,
+        cacheWrite: 0,
+    };
+    /** Tokens priced by nothing in either card. */
+    const GEMINI: ModelTokens = {
+        model: "gemini-3.8-flash",
+        input: 3_000_000,
+        output: 500_000,
+        cacheRead: 0,
+        cacheWrite: 0,
+    };
+    const agent = (
+        name: string,
+        usd: number,
+        usage: ModelTokens | undefined,
+        toolCalls?: number,
+    ) => ({
+        name,
+        model: usage?.model ?? "m",
+        usd,
+        turns: 1,
+        wallMs: 10,
+        retried: false,
+        ...(usage === undefined ? {} : {usage: [usage]}),
+        ...(toolCalls === undefined ? {} : {toolCalls}),
+    });
+    const producing =
+        (...agents: ReturnType<typeof agent>[]): ArmProduce =>
+        async () => ({findings: [], validation: [], perAgent: agents});
+    const report = (
+        baseline: Awaited<ReturnType<typeof runArm>>,
+        candidate: Awaited<ReturnType<typeof runArm>>,
+    ) => ({
+        baseRef: "origin/main",
+        reviewMdSha: {baseline: "a".repeat(12), candidate: "b".repeat(12)},
+        arms: {baseline, candidate},
+        regressions: {lost: [], gained: []},
+        adversarialFailures: [],
+        gateRetries: [],
+    });
+
+    it("prices a claude arm at half its list row and leaves a gemini arm at list, and says so", async () => {
+        const baseline = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            producing(agent("correctness-reviewer", 6, OPUS_6_LIST, 300)),
+            {maxUsd: 10},
+        );
+        const candidate = await runArm(
+            "candidate",
+            [liveCase("case-1")],
+            producing(agent("correctness-reviewer", 9, GEMINI, 1200)),
+            {maxUsd: 10},
+        );
+        expect(baseline.perCase[0]?.agentCosts).toEqual([
+            {
+                agent: "correctness-reviewer",
+                model: "claude-opus-5",
+                usd: 6,
+                usage: [OPUS_6_LIST],
+            },
+        ]);
+        expect(armCosts(baseline)?.map((c) => c.usage)).toEqual([
+            [OPUS_6_LIST],
+        ]);
+        const markdown = renderMarkdownReport(report(baseline, candidate), {
+            khanRates: KHAN,
+        });
+        expect(markdown).toContain("| Cost (list price) | $6.00 | $9.00 |");
+        // The gemini arm's two rows are equal: no overlay entry means
+        // production bills it at list too.
+        expect(markdown).toContain("| Cost (Khan rate) | $3.00 | $9.00 |");
+        expect(markdown).toContain(
+            "| Cost per tool call (list / Khan rate) | $0.0200 / $0.0100 | $0.0075 / $0.0075 |",
+        );
+        expect(markdown).toContain(
+            "Cost (Khan rate) prices the same tokens at the `models.providers` overlay in review.md, which is what production meters (claude-opus-5). No overlay entry, so read at list: gemini-3.8-flash. Cost (list price) is the SDK's own meter",
+        );
+        // The list table agrees with the SDK's meter here, so no drift note.
+        expect(markdown).not.toContain("List-rate check");
+        // No judge or arbiter ran, so no overhead rows.
+        expect(markdown).not.toContain("Judge + arbiter");
+    });
+
+    it("re-prices a mixed arm per model, not per arm", async () => {
+        const arm = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            producing(
+                agent("correctness-reviewer", 6, OPUS_6_LIST),
+                agent("security-reviewer", 4, GEMINI),
+            ),
+            {maxUsd: 20},
+        );
+        expect(arm.usd).toBe(10);
+        const markdown = renderMarkdownReport(report(arm, arm), {
+            khanRates: KHAN,
+        });
+        // 6 * 0.5 for claude plus gemini's recorded 4 at list.
+        expect(markdown).toContain("| Cost (Khan rate) | $7.00 | $7.00 |");
+    });
+
+    it("adds the judge and arbiter from their tokens and totals the run", async () => {
+        const arm = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            producing(agent("correctness-reviewer", 6, OPUS_6_LIST)),
+            {maxUsd: 10},
+        );
+        // 1M haiku input at list is $1.00 (Khan $0.50).
+        const haiku: ModelTokens = {
+            model: "claude-haiku-4-5-20251001",
+            input: 1_000_000,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+        };
+        const metered = {...arm, overhead: {judge: [haiku], arbiter: [haiku]}};
+        const markdown = renderMarkdownReport(report(metered, arm), {
+            khanRates: KHAN,
+        });
+        expect(markdown).toContain(
+            "| Judge + arbiter (list / Khan rate) | $2.00 / $1.00 | n/a |",
+        );
+        expect(markdown).toContain(
+            "| Run total (list / Khan rate) | $8.00 / $4.00 | n/a |",
+        );
+    });
+
+    it("flags a list table that disagrees with the SDK's meter", async () => {
+        // Same tokens, but the runner reported twice what the table prices
+        // them at: one of the two has moved and the report must not pick.
+        const arm = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            producing(agent("correctness-reviewer", 12, OPUS_6_LIST)),
+            {maxUsd: 20},
+        );
+        const markdown = renderMarkdownReport(report(arm, arm), {
+            khanRates: KHAN,
+        });
+        expect(markdown).toContain(
+            "List-rate check (baseline): the eval's list table prices these tokens at $6.00 and the SDK metered $12.00 (0.50x). One of the two has moved, see pricing.ts.",
+        );
+        // The Khan figure still comes from tokens, not from the drifted meter.
+        expect(markdown).toContain("| Cost (Khan rate) | $3.00 | $3.00 |");
+    });
+
+    it("omits the priced rows without a rate card, and prints n/a on an artifact predating tokens", async () => {
+        const arm = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            producing(agent("correctness-reviewer", 6, OPUS_6_LIST)),
+            {maxUsd: 10},
+        );
+        const plain = renderMarkdownReport(report(arm, arm));
+        expect(plain).not.toContain("Khan rate");
+        expect(plain).toContain("| Cost (list price) | $6.00 | $6.00 |");
+        const legacy = {
+            ...arm,
+            perCase: arm.perCase.map(({agentCosts: _, ...rest}) => rest),
+        };
+        const markdown = renderMarkdownReport(report(legacy, legacy), {
+            khanRates: KHAN,
+        });
+        expect(markdown).toContain("| Cost (Khan rate) | n/a | n/a |");
+        expect(markdown).toContain(
+            "Khan rate: n/a, this artifact predates per-agent cost.",
+        );
+    });
+
+    it("reads a dispatch with no token counts at its recorded list price, and says so", async () => {
+        const arm = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            producing(
+                agent("correctness-reviewer", 6, OPUS_6_LIST),
+                agent("security-reviewer", 2, undefined),
+            ),
+            {maxUsd: 10},
+        );
+        const markdown = renderMarkdownReport(report(arm, arm), {
+            khanRates: KHAN,
+        });
+        expect(markdown).toContain("| Cost (Khan rate) | $5.00 | $5.00 |");
+        // One per arm, and the same arm is rendered on both sides.
+        expect(markdown).toContain(
+            "2 dispatch(es) recorded no token counts and read at list.",
+        );
+    });
+
+    it("prices the real review.md overlay at half of list for opus 5", async () => {
+        const arm = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            producing(agent("correctness-reviewer", 6, OPUS_6_LIST)),
+            {maxUsd: 10},
+        );
+        const markdown = renderMarkdownReport(report(arm, arm), {
+            khanRates: readOverlayRates(
+                readFileSync(join(__dirname, "..", "review.md"), "utf8"),
+            ),
+        });
+        expect(markdown).toContain("| Cost (Khan rate) | $3.00 | $3.00 |");
     });
 });

@@ -28,6 +28,7 @@ import {query} from "@anthropic-ai/claude-agent-sdk";
 import {extractAgents} from "./agent-extract";
 import {loadLiveCorpus} from "./corpus/loader";
 import {produceLive, type LiveAgentRunner} from "./live-producer";
+import type {ModelTokens} from "./pricing";
 
 /** Read-only investigation tools; see the module doc for the rationale. */
 const ALLOWED_TOOLS = ["Read", "Grep", "Glob"];
@@ -64,6 +65,7 @@ export const sdkRunner = (): LiveAgentRunner => async (request) => {
         });
         let output = "";
         let usd = 0;
+        let usage: ModelTokens[] | undefined;
         let turns = 0;
         let toolCalls = 0;
         let stopReason: string | undefined;
@@ -120,6 +122,16 @@ export const sdkRunner = (): LiveAgentRunner => async (request) => {
                 result?: string;
                 total_cost_usd?: number;
                 num_turns?: number;
+                modelUsage?: Record<
+                    string,
+                    {
+                        inputTokens?: number;
+                        outputTokens?: number;
+                        cacheReadInputTokens?: number;
+                        cacheCreationInputTokens?: number;
+                        canonicalModel?: string;
+                    }
+                >;
             };
             if (result.subtype !== "success") {
                 throw new Error(
@@ -129,6 +141,21 @@ export const sdkRunner = (): LiveAgentRunner => async (request) => {
             output = result.result ?? "";
             usd = result.total_cost_usd ?? 0;
             turns = result.num_turns ?? 0;
+            // The tokens behind total_cost_usd, per model, so the report can
+            // price the dispatch at Khan's rate as well as list (pricing.ts).
+            // Keyed by the SDK's canonical id when it names one (the id it
+            // priced under), else by the raw key.
+            if (result.modelUsage !== undefined) {
+                usage = Object.entries(result.modelUsage).map(
+                    ([key, used]) => ({
+                        model: used.canonicalModel ?? key,
+                        input: Number(used.inputTokens ?? 0),
+                        output: Number(used.outputTokens ?? 0),
+                        cacheRead: Number(used.cacheReadInputTokens ?? 0),
+                        cacheWrite: Number(used.cacheCreationInputTokens ?? 0),
+                    }),
+                );
+            }
             // The result subtype is the runner-level outcome; keep it when no
             // assistant stop reason was seen at all.
             stopReason = stopReason ?? result.subtype;
@@ -142,6 +169,7 @@ export const sdkRunner = (): LiveAgentRunner => async (request) => {
         return {
             output,
             usd,
+            ...(usage === undefined ? {} : {usage}),
             turns,
             toolCalls,
             stopReason,
