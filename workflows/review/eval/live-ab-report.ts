@@ -160,6 +160,13 @@ export type ArmRunReport = {
          */
         agentCosts?: AgentCost[];
         /**
+         * Read-tool calls the runner denied for resolving outside the
+         * staged case, per agent that had any. The eval's corpus and scorer
+         * sit on the same machine; a nonzero count is a reviewer that went
+         * looking, and the denial is why its recall still counts.
+         */
+        deniedReads?: {agent: string; count: number}[];
+        /**
          * Reviewers the case enabled that this arm's `review.md` does not
          * define, so the arm never had the dimension. Expected on the baseline
          * arm of a new-reviewer A/B, and reported so a missing dimension is
@@ -467,6 +474,13 @@ const snappedTotal = (arm: ArmRunReport): number =>
  * folded into the zero: the arm paid for it and measured nothing, which is not
  * the same claim as "tier 2 found no duplicates here".
  */
+const deniedTotal = (arm: ArmRunReport): number =>
+    arm.perCase.reduce(
+        (sum, c) =>
+            sum + (c.deniedReads ?? []).reduce((n, d) => n + d.count, 0),
+        0,
+    );
+
 const mergedTotal = (arm: ArmRunReport, khan?: RateCard): string => {
     const dedup = arm.perCase.flatMap((c) => (c.dedup ? [c.dedup] : []));
     if (dedup.length === 0) {
@@ -792,6 +806,11 @@ export const renderMarkdownReport = (
             mergedTotal(baseline, options.khanRates),
             mergedTotal(candidate, options.khanRates),
         ),
+        row(
+            "Reads denied outside the staged case",
+            String(deniedTotal(baseline)),
+            String(deniedTotal(candidate)),
+        ),
         "",
         ...(priced === undefined ? [] : priced.notes.flatMap((n) => [n, ""])),
     ];
@@ -938,6 +957,26 @@ export const renderMarkdownReport = (
             "### Agent failures",
             "",
             ...failedAgents.map((f) => `- ${f}`),
+            "",
+        );
+    }
+    const denied = [
+        ["baseline", baseline],
+        ["candidate", candidate],
+    ].flatMap(([arm, report]) =>
+        (report as ArmRunReport).perCase.flatMap((c) =>
+            (c.deniedReads ?? []).map(
+                (d) =>
+                    `${arm} / ${c.caseId} / ${d.agent}: ${d.count} read(s) ` +
+                    `denied; read its transcript`,
+            ),
+        ),
+    );
+    if (denied.length > 0) {
+        lines.push(
+            "### Reviewers that read outside the staged case",
+            "",
+            ...denied.map((d) => `- ${d}`),
             "",
         );
     }

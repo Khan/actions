@@ -50,6 +50,20 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: ./actions/shared-node-cache
+      - name: Prove the read scope bites
+        # One Haiku call: an in-scope Read must succeed and an out-of-scope
+        # Read must be denied, on the SDK version this checkout installs. A
+        # runner that lets a reviewer read the corpus produces recall numbers
+        # that are not recall numbers, so this fails the job before any arm
+        # spends.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY secret not configured; skipping the probe." >&2
+            exit 0
+          fi
+          pnpm dlx tsx workflows/review/eval/live-runner.ts --probe-read-scope
       - name: Run the sweep
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -62,6 +76,7 @@ jobs:
             exit 0
           fi
           ARGS="--modes $MODES --max-usd $MAX_USD --out out/rereview-sweep.json"
+          ARGS="$ARGS --transcripts-dir $RUNNER_TEMP/review-transcripts"
           if [ -n "$CASES" ]; then
             ARGS="$ARGS --cases $CASES"
           fi
@@ -73,6 +88,15 @@ jobs:
         with:
           name: rereview-sweep-report
           path: out/rereview-sweep.json
+          if-no-files-found: ignore
+      - name: Upload the sub-agent transcripts
+        # One file per dispatch. Read at least one per arm before trusting a
+        # recall or noise delta (eval/README.md, "Reading a report").
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rereview-sweep-transcripts
+          path: ${{ runner.temp }}/review-transcripts
           if-no-files-found: ignore
       - name: Post the sticky PR comment
         if: always() && github.event_name == 'pull_request'

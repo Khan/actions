@@ -31,6 +31,9 @@
  *                             capped Haiku fallback arbiter on unmatched
  *                             specs; see match-arbiter.ts)
  *     [--stage-root <dir>]    staging root (default: a fresh temp dir)
+ *     [--transcripts-dir <d>] where per-agent transcripts go (default
+ *                             <tmpdir>/review-transcripts, outside the
+ *                             staging root; see transcripts.ts)
  *     [--out <path>]          JSON report path (default out/live-ab-report.json)
  *     [--re-review-mode <m>]  re-review mode for the CANDIDATE arm on open-PR
  *                             (rereview) cases: full|scoped|flip-gated|fast.
@@ -96,7 +99,7 @@ import {
     type MatchOptions,
 } from "./live-match";
 import {produceLive} from "./live-producer";
-import {sdkRunner} from "./live-runner";
+import {DEFAULT_TRANSCRIPTS_DIR, sdkRunner} from "./live-runner";
 import {haikuMatchArbiter} from "./match-arbiter";
 import {
     computeRereviewMetrics,
@@ -384,6 +387,9 @@ export const runArm = async (
                     usd: a.usd,
                     ...(a.usage === undefined ? {} : {usage: a.usage}),
                 })),
+            deniedReads: produced.perAgent
+                .filter((a) => (a.deniedReads ?? 0) > 0)
+                .map((a) => ({agent: a.name, count: a.deniedReads as number})),
             absentAgents: produced.perAgent
                 .filter((a) => a.absent === true)
                 .map((a) => a.name),
@@ -524,6 +530,7 @@ const main = async (): Promise<void> => {
     const outPath = argValue("--out") ?? "out/live-ab-report.json";
     const stageRoot =
         argValue("--stage-root") ?? mkdtempSync(`${tmpdir()}/review-ab-`);
+    const transcriptsDir = argValue("--transcripts-dir");
     const caseFilter = argValue("--cases")
         ?.split(",")
         .map((id) => id.trim())
@@ -636,7 +643,12 @@ const main = async (): Promise<void> => {
         candidate: reviewMdHasAnchorSnap(candidateMd),
     };
 
-    const runner = sdkRunner();
+    const runner = sdkRunner({
+        ...(transcriptsDir !== undefined ? {transcriptsDir} : {}),
+    });
+    console.error(
+        `transcripts under ${transcriptsDir ?? DEFAULT_TRANSCRIPTS_DIR}`,
+    );
     const armProduce =
         (stage: string, markdown: string, mode: ReReviewMode): ArmProduce =>
         (corpusCase) =>

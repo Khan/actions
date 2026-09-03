@@ -179,9 +179,13 @@ describe("produceLive", () => {
             "money-payments",
             "skill-auditor",
         ]);
-        // Every dispatch runs in the staged checkout.
+        // Every dispatch runs in the staged checkout, and its read scope is
+        // the staged case (checkout plus the context sibling), nothing wider.
         expect(new Set(requests.map((r) => r.cwd))).toEqual(
             new Set(["/stage/checkout"]),
+        );
+        expect(new Set(requests.map((r) => r.readRoot))).toEqual(
+            new Set(["/stage"]),
         );
 
         // The label-shape finding is mapped into the schema.

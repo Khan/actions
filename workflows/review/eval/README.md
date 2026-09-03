@@ -37,6 +37,7 @@ pnpm dlx tsx workflows/review/eval/live-ab.ts \
   [--no-judge]              # skip prose-quality judging
   [--no-match-arbiter]      # deterministic spec matching only
   [--out <path>]            # default out/live-ab-report.json (+ sibling .md)
+  [--transcripts-dir <d>]   # per-agent transcripts (default <tmpdir>/review-transcripts)
 ```
 
 Byte-identical review.md in both arms short-circuits to a $0 "no reviewable
@@ -53,14 +54,44 @@ the actions log reads as a running tally.
 - **Per-PR** (`.github/workflows/review-eval-ab.yml`): triggers on PRs
   touching `workflows/review/**`; smoke subset by default, the `full-eval`
   label lifts to every live case, `skip-live-eval` opts out. Report goes to
-  a sticky PR comment, the job summary, and the `live-ab-report` artifact.
+  a sticky PR comment, the job summary, and the `live-ab-report` artifact;
+  every sub-agent's transcript goes to the `live-ab-transcripts` artifact.
 - **Dispatch** (same workflow): inputs `base_ref`, `max_usd`, `full`,
   `cases`, `repeats`, `force_arms`. This is how powered runs launch.
 - **Weekly drift** (`.github/workflows/review-eval-drift.yml`): cron; full
   corpus x3 repeats, both arms pinned to main's review.md, so it watches
   cumulative drift AND re-measures the noise floor every week. Report goes
   to the job summary, the `live-ab-report` artifact, and a visibility PR
-  adding the report under `.github/review-eval/drift/`.
+  adding the report under `.github/review-eval/drift/`, and transcripts to
+  `live-ab-transcripts`.
+
+### What a reviewer can reach
+
+The live A/B runs on a machine that also holds this repo, and this repo holds
+the corpus (every case's must-catch spec) and the scorer. A reviewer that
+reads across is scoring itself, and on the Pi harness branch (actions#406)
+one did: gemini's correctness-reviewer found the repo with `find /`, read its
+own case's `case.json`, another case's, and `live-match.ts`, 37 of its 42
+calls on one case. The tool-call count showed nothing unusual for two full
+runs, and the transcript showed it in one.
+
+The SDK runner (`live-runner.ts`) now closes both routes. The toolset is
+restricted to Read, Grep, and Glob (the SDK's `allowedTools` only
+pre-approves, so before this every default tool including Bash was reachable
+under `bypassPermissions`), and a PreToolUse hook denies any read that
+resolves outside the staged case directory (the checkout plus its `context/`
+sibling), symlinks followed. Denials are counted per agent and rendered in
+the report ("Reads denied outside the staged case"). The expected value is
+zero, and a nonzero count names a reviewer whose transcript should be read.
+Transcripts are written outside the staging root so no reviewer can read a
+sibling's mid-run.
+
+Every live workflow starts with `live-runner.ts --probe-read-scope`, one
+Haiku call that reads a staged file and then a planted file outside the case
+and fails the job unless the first succeeded, the second was denied, and the
+planted contents never reached the model. The unit tests cover the scope
+predicate; the probe covers the SDK honoring its answer under
+`bypassPermissions`, on the version the checkout installs.
 
 ### Recipes
 
@@ -270,6 +301,13 @@ claiming a band.
 - **Gates:** single runs retry a flipped adversarial case best-of-three;
   `--repeats` runs decide by strict majority across repeats instead. Only
   confirmed failures exit non-zero.
+- **Read at least one transcript per arm** before trusting a recall or noise
+  delta (the `live-ab-transcripts` artifact, one file per dispatch, tool-call
+  index at the top). A count of tool calls cannot tell investigation from a
+  reviewer reading the answer key, shaping its JSON from the contract source,
+  or looping on one file. The index can, in under a minute. Start with the
+  agent that had the most calls on the case that moved, and with any agent
+  the report lists under "Reviewers that read outside the staged case".
 - **Stacked PRs:** a per-PR report's baseline is the PR's base branch tip
   (the parent PR in a stack), so it prices the marginal delta only.
   Absolute columns do not compare across reports.
@@ -303,6 +341,15 @@ claiming a band.
   structure is the evidence), but it IS a relaxation of "handle every
   adversarial case outright"; per-case fail counts print either way, read
   them.
+- **Runs before the read scope landed were not isolated from the corpus.**
+  Reports without a "Reads denied outside the staged case" row come from a
+  runner whose reviewers could read every case's spec and the scorer, and
+  that also had Bash. No transcript exists from those runs to say whether one
+  did. The evidence that they did not is indirect: 5 Claude agent transcripts
+  across 2 runs on the Pi harness branch each checked once for a tooling
+  path, got nothing, and stayed in the checkout, where the Gemini reviewer on
+  the same machine went looking. Treat pre-scope numbers as probably clean
+  and the denial counter on later runs as the measurement that says so.
 - **The arbiter's refuse bias is a prompt, not a calibration.** Its rescues
   inflate recall, the load-bearing metric, and its false-positive rate has
   not been measured against known non-matches. Audit `via: "fallback"`

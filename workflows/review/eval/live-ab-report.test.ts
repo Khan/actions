@@ -507,3 +507,96 @@ describe("renderMarkdownReport priced rows", () => {
         expect(markdown).toContain("| Cost (Khan rate) | $3.00 | $3.00 |");
     });
 });
+
+/** A producer that finds nothing and reads nothing it should not. */
+const produceMiss: ArmProduce = async () => ({
+    findings: [],
+    validation: [],
+    perAgent: [
+        {
+            name: "correctness-reviewer",
+            model: "m",
+            usd: 1,
+            turns: 1,
+            wallMs: 10,
+            retried: false,
+        },
+    ],
+});
+
+describe("renderMarkdownReport: read scope", () => {
+    it("renders denied reads as a row and names the reviewer that went looking", async () => {
+        const produceDenied: ArmProduce = async () => ({
+            findings: [],
+            validation: [],
+            perAgent: [
+                {
+                    name: "correctness-reviewer",
+                    model: "m",
+                    usd: 1,
+                    turns: 1,
+                    wallMs: 10,
+                    retried: false,
+                    toolCalls: 42,
+                    deniedReads: 3,
+                },
+                {
+                    name: "skill-auditor",
+                    model: "m",
+                    usd: 1,
+                    turns: 1,
+                    wallMs: 10,
+                    retried: false,
+                    toolCalls: 8,
+                    deniedReads: 0,
+                },
+            ],
+        });
+        const baseline = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            produceMiss,
+            {maxUsd: 10},
+        );
+        const candidate = await runArm(
+            "candidate",
+            [liveCase("case-1")],
+            produceDenied,
+            {maxUsd: 10},
+        );
+        // Only the agent with denials is recorded; a zero is the norm.
+        expect(candidate.perCase[0].deniedReads).toEqual([
+            {agent: "correctness-reviewer", count: 3},
+        ]);
+        const markdown = renderMarkdownReport({
+            baseRef: "origin/main",
+            reviewMdSha: {baseline: "a".repeat(12), candidate: "b".repeat(12)},
+            arms: {baseline, candidate},
+            regressions: {lost: [], gained: []},
+            adversarialFailures: [],
+            gateRetries: [],
+        });
+        expect(markdown).toContain(
+            "| Reads denied outside the staged case | 0 | 3 |",
+        );
+        expect(markdown).toContain(
+            "### Reviewers that read outside the staged case",
+        );
+        expect(markdown).toContain(
+            "- candidate / case-1 / correctness-reviewer: 3 read(s) denied",
+        );
+        // An arm with no denials renders the row and nothing else.
+        const clean = renderMarkdownReport({
+            baseRef: "origin/main",
+            reviewMdSha: {baseline: "a".repeat(12), candidate: "b".repeat(12)},
+            arms: {baseline, candidate: baseline},
+            regressions: {lost: [], gained: []},
+            adversarialFailures: [],
+            gateRetries: [],
+        });
+        expect(clean).toContain(
+            "| Reads denied outside the staged case | 0 | 0 |",
+        );
+        expect(clean).not.toContain("Reviewers that read outside");
+    });
+});

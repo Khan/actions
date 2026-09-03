@@ -87,6 +87,13 @@ export type LiveAgentRequest = {
     prompt: string;
     /** The staged checkout the agent investigates (its cwd). */
     cwd: string;
+    /**
+     * The staged case root (the checkout plus its `context/` sibling the
+     * prompts read). The runner denies any read that resolves outside it:
+     * the eval's corpus and scorer live on the same machine, and a reviewer
+     * that can read them is scoring itself.
+     */
+    readRoot: string;
     /** Hard turn cap. */
     maxTurns: number;
     /** Hard wall-clock cap, enforced by the runner. */
@@ -116,6 +123,12 @@ export type LiveAgentResult = {
      * count them reports nothing rather than a misleading zero.
      */
     toolCalls?: number;
+    /**
+     * Read-tool calls the runner denied for resolving outside the staged
+     * case. Zero is the expected value; anything else names a reviewer that
+     * went looking beyond the change (and says the denial did its job).
+     */
+    deniedReads?: number;
     /** Provider stop reason for the last assistant message, when visible. */
     stopReason?: string;
     /** Why the call failed, when the runner can see it. */
@@ -150,6 +163,8 @@ export type PerAgentReport = {
     toolCalls?: number;
     /** Tokens per model across every attempt; see `LiveAgentResult.usage`. */
     usage?: ModelTokens[];
+    /** Denied reads across every attempt (see `LiveAgentResult.deniedReads`). */
+    deniedReads?: number;
     /** Stop reason of the last attempt; set alongside `failed`. */
     stopReason?: string;
     /**
@@ -651,6 +666,10 @@ const dispatchWithRetry = async <R>(
                     ...result.usage,
                 ]);
             }
+            if (result.deniedReads !== undefined) {
+                report.deniedReads =
+                    (report.deniedReads ?? 0) + result.deniedReads;
+            }
             lastOutput = result.output;
             report.stopReason = result.stopReason;
             failureDetail = [
@@ -840,6 +859,7 @@ export const produceLive = async (
                     name: agent.name,
                     model: agent.model,
                     cwd: staged.checkoutDir,
+                    readRoot: staged.rootDir,
                     maxTurns,
                     timeoutMs,
                 },
@@ -873,6 +893,7 @@ export const produceLive = async (
                         name: agent.name,
                         model: agent.model,
                         cwd: staged.checkoutDir,
+                        readRoot: staged.rootDir,
                         maxTurns,
                         timeoutMs,
                     },
@@ -912,6 +933,7 @@ export const produceLive = async (
                 name: validator.name,
                 model: validator.model,
                 cwd: staged.checkoutDir,
+                readRoot: staged.rootDir,
                 maxTurns,
                 timeoutMs,
             },
@@ -939,6 +961,7 @@ export const produceLive = async (
                 name: reconciler.name,
                 model: reconciler.model,
                 cwd: staged.checkoutDir,
+                readRoot: staged.rootDir,
                 maxTurns,
                 timeoutMs,
             },
