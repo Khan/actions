@@ -341,23 +341,150 @@ describe("renderMarkdownReport priced rows", () => {
         );
     });
 
-    it("reads a dispatch with no token counts at its recorded list price, and says so", async () => {
+    it("prices a dispatch with no token counts by the overlay ratio, and says so", async () => {
         const arm = await runArm(
             "baseline",
             [liveCase("case-1")],
-            producing(
-                agent("correctness-reviewer", 6, OPUS_6_LIST),
-                agent("security-reviewer", 2, undefined),
-            ),
+            producing(agent("correctness-reviewer", 6, OPUS_6_LIST), {
+                ...agent("security-reviewer", 2, undefined),
+                model: "claude-opus-5",
+            }),
             {maxUsd: 10},
         );
         const markdown = renderMarkdownReport(report(arm, arm), {
             khanRates: KHAN,
         });
-        expect(markdown).toContain("| Cost (Khan rate) | $5.00 | $5.00 |");
+        // 3 from tokens plus the untracked opus dispatch by ratio, 2 * 0.5.
+        expect(markdown).toContain("| Cost (Khan rate) | $4.00 | $4.00 |");
         // One per arm, and the same arm is rendered on both sides.
         expect(markdown).toContain(
-            "2 dispatch(es) recorded no token counts and read at list.",
+            "2 dispatch(es) recorded no token counts and are priced from the SDK's list figure by the overlay ratio (at list where the model has none).",
+        );
+    });
+
+    it("bills a refusal fallback on the model it fell back to, and skips absent reviewers", async () => {
+        const arm = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            async () => ({
+                findings: [],
+                validation: [],
+                perAgent: [
+                    // Pinned to a model with no overlay entry, fell back to
+                    // opus: the dollars were spent on opus and price at 0.5x.
+                    {
+                        name: "correctness-reviewer",
+                        model: "gemini-3.8-flash",
+                        fellBackTo: "claude-opus-5",
+                        usd: 6,
+                        turns: 1,
+                        wallMs: 10,
+                        retried: true,
+                        usage: [OPUS_6_LIST],
+                    },
+                    // The placeholder live-producer seeds per reviewer this
+                    // arm's review.md lacks: never dispatched, not a cost.
+                    {
+                        name: "documentation",
+                        model: "",
+                        usd: 0,
+                        turns: 0,
+                        wallMs: 0,
+                        retried: false,
+                        absent: true,
+                    },
+                ],
+            }),
+            {maxUsd: 10},
+        );
+        expect(arm.perCase[0]?.agentCosts).toEqual([
+            {
+                agent: "correctness-reviewer",
+                model: "claude-opus-5",
+                usd: 6,
+                usage: [OPUS_6_LIST],
+            },
+        ]);
+        const markdown = renderMarkdownReport(report(arm, arm), {
+            khanRates: KHAN,
+        });
+        expect(markdown).toContain("| Cost (Khan rate) | $3.00 | $3.00 |");
+        expect(markdown).not.toContain("recorded no token counts");
+    });
+
+    it("prices the gate-retry spend in both currencies when rates are in hand", async () => {
+        const arm = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            producing(agent("correctness-reviewer", 6, OPUS_6_LIST)),
+            {maxUsd: 10},
+        );
+        const markdown = renderMarkdownReport(
+            {
+                ...report(arm, arm),
+                adversarialFailures: ["adv-1: missed spec bug"],
+                gateRetries: [
+                    {
+                        caseId: "adv-1",
+                        attempts: [
+                            {
+                                pass: false,
+                                failures: ["adv-1: missed spec bug"],
+                                usd: 6,
+                                agentCosts: [
+                                    {
+                                        agent: "correctness-reviewer",
+                                        model: "claude-opus-5",
+                                        usd: 6,
+                                        usage: [OPUS_6_LIST],
+                                    },
+                                ],
+                            },
+                        ],
+                        settledPass: false,
+                    },
+                ],
+            },
+            {khanRates: KHAN},
+        );
+        expect(markdown).toContain(
+            "failure confirmed ($6.00 retry spend at list, $3.00 at Khan's rate)",
+        );
+    });
+
+    it("prices the clusterer's merge-row figure in both currencies", async () => {
+        const arm = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            async () => ({
+                findings: [],
+                validation: [],
+                perAgent: [
+                    agent("correctness-reviewer", 6, OPUS_6_LIST),
+                    {
+                        name: "claim-clusterer",
+                        model: "claude-opus-5",
+                        usd: 6,
+                        turns: 2,
+                        wallMs: 21_000,
+                        retried: false,
+                        usage: [OPUS_6_LIST],
+                    },
+                ],
+                dedup: {
+                    candidates: 4,
+                    merges: [],
+                    rejected: [],
+                    clustererAbsent: false,
+                },
+            }),
+            {maxUsd: 20},
+        );
+        const markdown = renderMarkdownReport(report(arm, arm), {
+            khanRates: KHAN,
+        });
+        expect(markdown).toContain(
+            "0 by clusterer at $6.00 list, $3.00 Khan rate / 21s",
         );
     });
 

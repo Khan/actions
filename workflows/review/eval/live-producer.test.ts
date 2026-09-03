@@ -10,6 +10,7 @@ import {
 } from "./live-producer";
 import type {ExtractedAgent} from "./agent-extract";
 import type {StageFs} from "./live-stage";
+import type {ModelTokens} from "./pricing";
 
 /** Adapt a memfs volume to the staging fs seam. */
 const volFs = (vol: InstanceType<typeof Volume>): StageFs => ({
@@ -106,9 +107,13 @@ const SCHEMA_FINDING = {
     model_authored_prose: "Money should stay in integer cents.",
 };
 
-/** A scripted runner: outputs queued per agent name, requests recorded. */
+/**
+ * A scripted runner: outputs queued per agent name, requests recorded. With
+ * `usage`, every call also reports that token usage (the SDK's modelUsage).
+ */
 const scriptedRunner = (
     scripts: Record<string, string[]>,
+    usage?: ModelTokens[],
 ): {runner: LiveAgentRunner; requests: LiveAgentRequest[]} => {
     const requests: LiveAgentRequest[] = [];
     const cursors: Record<string, number> = {};
@@ -118,7 +123,13 @@ const scriptedRunner = (
         const cursor = cursors[request.name] ?? 0;
         cursors[request.name] = cursor + 1;
         const output = queue[Math.min(cursor, queue.length - 1)] ?? "{}";
-        return {output, usd: 0.25, turns: 3, wallMs: 1000};
+        return {
+            output,
+            usd: 0.25,
+            turns: 3,
+            wallMs: 1000,
+            ...(usage === undefined ? {} : {usage}),
+        };
     };
     return {runner, requests};
 };
@@ -428,6 +439,8 @@ describe("produceLive", () => {
         expect(report?.retried).toBe(true);
         expect(report?.failed).toBeUndefined();
         expect(report?.usd).toBeCloseTo(0.5, 10); // both attempts billed
+        // No usage from this runner: the field stays absent, never `[]`.
+        expect(report?.usage).toBeUndefined();
         expect(result.findings.length).toBe(1);
         // The retry prompt carries the rejection reason.
         const retryPrompt = requests.filter(
@@ -493,6 +506,48 @@ describe("produceLive", () => {
         expect(models[1]).toBe("claude-opus-4-8");
         expect(report?.fellBackTo).toBe("claude-opus-4-8");
         expect(report?.failed).toBeUndefined();
+    });
+
+    it("carries the runner's token usage onto the report, merged across the retry", async () => {
+        const tokens: ModelTokens = {
+            model: "claude-opus-5",
+            input: 1000,
+            output: 100,
+            cacheRead: 5000,
+            cacheWrite: 200,
+        };
+        const {runner} = scriptedRunner(
+            {
+                "correctness-reviewer": [
+                    "sorry, here is prose instead of JSON",
+                    JSON.stringify({findings: [LABEL_FINDING]}),
+                ],
+                "skill-auditor": [JSON.stringify({findings: []})],
+                "money-payments": [JSON.stringify({findings: []})],
+                "claim-validator": [validatorOutput([])],
+            },
+            [tokens],
+        );
+        const result = await produceLive(CASE, AGENTS, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        const retried = result.perAgent.find(
+            (a) => a.name === "correctness-reviewer",
+        );
+        // Two attempts, one model: summed into one entry.
+        expect(retried?.usage).toEqual([
+            {
+                model: "claude-opus-5",
+                input: 2000,
+                output: 200,
+                cacheRead: 10_000,
+                cacheWrite: 400,
+            },
+        ]);
+        const single = result.perAgent.find((a) => a.name === "skill-auditor");
+        expect(single?.usage).toEqual([tokens]);
     });
 
     it("names an empty final as empty output, not malformed", async () => {

@@ -93,6 +93,50 @@ describe("pooled cost at Khan's rate", () => {
             "| Judge + arbiter (list / Khan rate) | $2.00 / $1.00 |  | $2.00 / $1.00 |  |",
         );
         expect(markdown).not.toContain("cover only the samples");
+        // The same provenance the single-run table carries, so a pooled
+        // fallback-to-list figure cannot pass for an overlay price.
+        expect(markdown).toContain(
+            "Cost (Khan rate) prices the same tokens at the `models.providers` overlay in review.md, which is what production meters (claude-opus-5).",
+        );
+        expect(markdown).not.toContain("List-rate check");
+    });
+
+    it("carries the list-rate check and the at-list note into the pooled table", () => {
+        const drifted = {
+            ...withTokens,
+            perCase: [
+                {
+                    caseId: "case-1",
+                    agentCosts: [
+                        // The SDK metered twice what the table prices.
+                        {
+                            agent: "correctness-reviewer",
+                            model: "claude-opus-5",
+                            usd: 3,
+                            usage: [opusTokens],
+                        },
+                        {
+                            agent: "gemini-lens",
+                            model: "gemini-3.8-flash",
+                            usd: 1,
+                            usage: [{...opusTokens, model: "gemini-3.8-flash"}],
+                        },
+                    ],
+                },
+            ],
+        };
+        const markdown = renderAggregateMarkdown(
+            aggregateSamples(
+                extractSamples("r1", rawReport({baselineTokens: drifted})),
+            ),
+            {khanRates: KHAN},
+        );
+        expect(markdown).toContain(
+            "No overlay entry, so read at list: gemini-3.8-flash.",
+        );
+        expect(markdown).toContain(
+            "List-rate check (baseline): the eval's list table prices these tokens at $1.50 and the SDK metered $3.00 (0.50x).",
+        );
     });
 
     it("says when only some pooled samples recorded tokens", () => {

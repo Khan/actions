@@ -75,10 +75,27 @@ const khanNotes = (
             : `No overlay entry, so read at list: ${atList.join(", ")}. `) +
         (untracked === 0
             ? ""
-            : `${untracked} dispatch(es) recorded no token counts and read at list. `) +
+            : `${untracked} dispatch(es) recorded no token counts and are priced from the SDK's list figure by the overlay ratio (at list where the model has none). `) +
         "Cost (list price) is the SDK's own meter, what a bare API key bills, " +
         "and the eval bills at list because it never crosses the api-proxy."
     );
+};
+
+/**
+ * The list-rate check as a note, or undefined when the eval's list table and
+ * the SDK's meter agree on these agents' tokens (pricing.ts's tolerance).
+ */
+const driftNote = (
+    arm: string,
+    costs: readonly AgentCost[],
+): string | undefined => {
+    const drift = listDrift(costs);
+    return drift === undefined
+        ? undefined
+        : `List-rate check (${arm}): the eval's list table prices these ` +
+              `tokens at ${money(drift.computedUsd)} and the SDK metered ` +
+              `${money(drift.recordedUsd)} (${drift.ratio.toFixed(2)}x). ` +
+              "One of the two has moved, see pricing.ts.";
 };
 
 /* -------------------------------------------------------------------------- */
@@ -139,16 +156,9 @@ export const pricedRows = (
         );
         arms.forEach((arm, i) => {
             const c = costs[i];
-            const drift = c === undefined ? undefined : listDrift(c);
-            if (drift !== undefined) {
-                notes.push(
-                    `List-rate check (${arm.arm}): the eval's list table ` +
-                        `prices these tokens at ${money(drift.computedUsd)} ` +
-                        `and the SDK metered ${money(
-                            drift.recordedUsd,
-                        )} (${drift.ratio.toFixed(2)}x). One of the two has ` +
-                        "moved, see pricing.ts.",
-                );
+            const note = c === undefined ? undefined : driftNote(arm.arm, c);
+            if (note !== undefined) {
+                notes.push(note);
             }
         });
     }
@@ -319,13 +329,35 @@ export const pooledCostLines = (
             )} |  | ${overheadCell(arms[1])} |  |`,
         );
     }
+    // The same provenance the single-run table carries: which models the
+    // overlay priced, which read at list, how many dispatches had no meter,
+    // and whether the list table still agrees with the SDK. A pooled Khan
+    // figure without them is indistinguishable from a real overlay price
+    // when it is in fact a fallback.
+    const notes: string[] = [];
+    const priced = arms.filter((arm) => arm.pooled.costSamples > 0);
+    if (priced.length === 0) {
+        notes.push("Khan rate: n/a, no pooled sample carries per-agent cost.");
+    } else {
+        notes.push(
+            khanNotes(
+                priced.map((arm) => khanCost(arm.pooled.agentCosts, khan)),
+                priced.flatMap((arm) => arm.pooled.agentCosts),
+            ),
+        );
+        for (const arm of priced) {
+            const note = driftNote(arm.arm, arm.pooled.agentCosts);
+            if (note !== undefined) {
+                notes.push(note);
+            }
+        }
+    }
     const partial = arms.filter(
         (arm) =>
             arm.pooled.costSamples > 0 && arm.pooled.costSamples < arm.samples,
     );
     if (partial.length > 0) {
-        lines.push(
-            "",
+        notes.push(
             "Khan-rate figures cover only the samples that recorded per-agent " +
                 `cost (${partial
                     .map(
@@ -335,5 +367,5 @@ export const pooledCostLines = (
                     .join(", ")}), the list figure covers every sample.`,
         );
     }
-    return lines;
+    return [...lines, ...notes.flatMap((n) => ["", n])];
 };

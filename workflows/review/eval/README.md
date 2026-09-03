@@ -328,8 +328,10 @@ the runner records (`perCase[].agentCosts[].usage`, from the SDK result's
 frontmatter (#314, 50% of list for every claude pin it lists), priced per
 agent. An agent on a model with no overlay entry keeps its recorded list
 dollars in the Khan-rate figure (production bills it at list too) and the model
-is named in the note under the table, and so is a dispatch that recorded no
-token counts. The eval cannot inherit the proxy's rate directly because the
+is named in the note under the table. A dispatch that recorded no token counts
+is priced from its recorded list dollars by the overlay ratio for its model
+(exact, since the overlay is a flat multiple of list), and the note counts
+those. The eval cannot inherit the proxy's rate directly because the
 overlay applies inside the awf api-proxy, and the eval never crosses it (bare
 runner VM, real API key), so a claude arm's list row reads at 2x production and
 a cross-provider comparison at list skews against any model the overlay does
