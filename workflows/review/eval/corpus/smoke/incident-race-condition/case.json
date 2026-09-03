@@ -74,6 +74,19 @@
                 "lineStart": 15,
                 "lineEnd": 27
             }
+        ],
+        "mayFlagSpecs": [
+            {
+                "key": "ceiling-clamp-hides-overage",
+                "path": "src/services/quota.ts",
+                "lineStart": 7,
+                "lineEnd": 23,
+                "mechanism": [
+                    "clamp.{0,100}(overage|unobservable|hides?|discard|indistinguishable|cannot distinguish)",
+                    "(overage|excess).{0,100}(unobservable|lost|discard|hidden|indistinguishable|under.?report)",
+                    "saturat.{0,100}(under.?report|cannot distinguish|indistinguishable)"
+                ]
+            }
         ]
     },
     "routerConfig": {

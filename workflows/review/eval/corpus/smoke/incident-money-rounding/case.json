@@ -74,6 +74,19 @@
                 "lineStart": 29,
                 "lineEnd": 45
             }
+        ],
+        "mayFlagSpecs": [
+            {
+                "key": "discount-rate-unvalidated",
+                "path": "src/payments/pricing.ts",
+                "lineStart": 13,
+                "lineEnd": 38,
+                "mechanism": [
+                    "rate.{0,80}(never |not |un)(validated|checked|clamped|guarded|enforced)",
+                    "(negative|NaN|above 1|greater than 1|> ?1|out[- ]of[- ]range|outside \\[0, ?1\\]).{0,60}rate",
+                    "rate.{0,60}(negative|NaN|above 1|greater than 1|> ?1|out[- ]of[- ]range|outside \\[0, ?1\\])"
+                ]
+            }
         ]
     },
     "routerConfig": {

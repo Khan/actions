@@ -145,6 +145,40 @@ describe("extractSamples", () => {
         expect(sample.baseline.usd).toBe(1.5);
     });
 
+    it("reads the noise numerator the same from bucketed and legacy match shapes", () => {
+        // A report predating the duplicate and may-flag buckets recorded
+        // every leftover under unmatchedFindingIds, and a bucketed report splits
+        // the same leftovers three ways. The noise numerator must read the
+        // same from both (unmatched plus duplicates), and the legitimate
+        // bucket is zero, not missing, for the legacy shape.
+        const legacy = rawRun("case-1", {
+            posted: 4,
+            unmatched: ["dup", "legit", "template"],
+        });
+        const bucketed = rawRun("case-1", {
+            posted: 4,
+            unmatched: ["template"],
+        }) as unknown as {match: Record<string, unknown>};
+        bucketed.match["duplicates"] = [{findingId: "dup", specKey: "s"}];
+        bucketed.match["legitimateUnspecced"] = [
+            {
+                specKey: "may-1",
+                findingId: "legit",
+                via: "deterministic",
+                blocking: false,
+            },
+        ];
+        const raw = rawReport({
+            baselineRuns: [legacy],
+            candidateRuns: [bucketed],
+        });
+        const sample = extractSamples("r1", raw)[0]!;
+        expect(sample.baseline.runs[0]?.unmatchedPosted).toBe(3);
+        expect(sample.baseline.runs[0]?.legitimateUnspecced).toBe(0);
+        expect(sample.candidate.runs[0]?.unmatchedPosted).toBe(2);
+        expect(sample.candidate.runs[0]?.legitimateUnspecced).toBe(1);
+    });
+
     it("carries recorded catch labels and omits unrecorded ones", () => {
         // Version tolerance, and the reason it matters: a report predating
         // SpecMatch.blocking carries no label, and reading that as
@@ -281,6 +315,7 @@ describe("aggregateSamples", () => {
         caughtSpecBlocking: {},
         missedSpecs: [],
         unmatchedPosted: 0,
+        legitimateUnspecced: 0,
         posted: 0,
         ...over,
     });

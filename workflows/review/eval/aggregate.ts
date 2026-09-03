@@ -48,6 +48,7 @@ import {
     SEVERITY_BAND_METRIC,
     SEVERITY_SPLIT_NOTE,
 } from "./aggregate-severity";
+import {rateStat, type RateStat} from "./wilson";
 
 /* -------------------------------------------------------------------------- */
 /* The report subset this module consumes (structural, version-tolerant)      */
@@ -67,7 +68,18 @@ export type SampleRun = {
     caughtSpecBlocking: Record<string, boolean>;
     /** Missed spec key -> drop bucket ("" for a true miss). */
     missedSpecs: {specKey: string; droppedBy?: string}[];
+    /**
+     * The noise numerator: residual unmatched findings plus duplicates of a
+     * caught spec. Reports predating the duplicate bucket recorded every
+     * leftover under `unmatchedFindingIds`, so the sum reads the same
+     * quantity from both shapes.
+     */
     unmatchedPosted: number;
+    /**
+     * Posted findings that matched a `mayFlagSpecs` entry (0 for reports
+     * predating the field): legitimate, not noise, not recall.
+     */
+    legitimateUnspecced: number;
     posted: number;
     /**
      * Findings the provenance gate anchor-snapped (0 for reports predating
@@ -165,8 +177,15 @@ const parseArm = (
                 )
                 .map((specKey) => ({specKey})),
         ];
-        const unmatched = Array.isArray(match["unmatchedFindingIds"])
-            ? match["unmatchedFindingIds"].length
+        const unmatched =
+            (Array.isArray(match["unmatchedFindingIds"])
+                ? match["unmatchedFindingIds"].length
+                : 0) +
+            (Array.isArray(match["duplicates"])
+                ? match["duplicates"].length
+                : 0);
+        const legitimateUnspecced = Array.isArray(match["legitimateUnspecced"])
+            ? match["legitimateUnspecced"].length
             : 0;
         return {
             caseId: asString(corpusCase["id"]),
@@ -190,6 +209,7 @@ const parseArm = (
             ),
             missedSpecs,
             unmatchedPosted: unmatched,
+            legitimateUnspecced,
             posted: asNumber(match["postedCount"]),
             snapped: Array.isArray(result["snappedByProvenance"])
                 ? result["snappedByProvenance"].length
@@ -262,41 +282,7 @@ export const extractSamples = (
 /* Binomial interval                                                          */
 /* -------------------------------------------------------------------------- */
 
-export type RateStat = {
-    numerator: number;
-    denominator: number;
-    rate: number;
-    /** 95% Wilson score interval; [0,1] when the denominator is 0. */
-    interval: {lo: number; hi: number};
-};
-
-/**
- * The Wilson score interval (95%, z=1.96): the standard binomial interval
- * that stays sane at the small n these runs live at (a 5/6 pass rate reads
- * 44-97%, not the Wald interval's overconfident nonsense).
- */
-export const wilsonInterval = (
-    successes: number,
-    n: number,
-): {lo: number; hi: number} => {
-    if (n === 0) {
-        return {lo: 0, hi: 1};
-    }
-    const z = 1.96;
-    const p = successes / n;
-    const z2 = z * z;
-    const denom = 1 + z2 / n;
-    const center = (p + z2 / (2 * n)) / denom;
-    const half = (z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / denom;
-    return {lo: Math.max(0, center - half), hi: Math.min(1, center + half)};
-};
-
-export const rateStat = (numerator: number, denominator: number): RateStat => ({
-    numerator,
-    denominator,
-    rate: denominator === 0 ? 0 : numerator / denominator,
-    interval: wilsonInterval(numerator, denominator),
-});
+export {rateStat, wilsonInterval, type RateStat} from "./wilson";
 
 /* -------------------------------------------------------------------------- */
 /* Aggregation                                                                */
@@ -336,6 +322,8 @@ export type ArmAggregate = {
         recall: RateStat;
         verdictAgreement: RateStat;
         noise: RateStat;
+        /** May-flag matches over posted: legitimate unspecced findings. */
+        legitimateUnspecced: RateStat;
         trueMisses: number;
         foundButDropped: Record<string, number>;
         /** Total anchor-snapped findings across the arm's case-runs. */
@@ -408,6 +396,7 @@ const aggregateArm = (
     let verdictOk = 0;
     let caseRuns = 0;
     let unmatched = 0;
+    let legitimateUnspecced = 0;
     let posted = 0;
     let snapped = 0;
     let usd = 0;
@@ -431,6 +420,7 @@ const aggregateArm = (
                 verdictOk += 1;
             }
             unmatched += run.unmatchedPosted;
+            legitimateUnspecced += run.legitimateUnspecced;
             posted += run.posted;
             snapped += run.snapped;
             const spec = (key: string) => {
@@ -523,6 +513,7 @@ const aggregateArm = (
             recall: rateStat(specCaught, specTotal),
             verdictAgreement: rateStat(verdictOk, caseRuns),
             noise: rateStat(unmatched, posted),
+            legitimateUnspecced: rateStat(legitimateUnspecced, posted),
             trueMisses,
             foundButDropped,
             snapped,
@@ -900,6 +891,10 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
         pooledRow("Must-catch recall", (a) => a.pooled.recall),
         pooledRow("Verdict agreement", (a) => a.pooled.verdictAgreement),
         pooledRow("Noise (unmatched posted)", (a) => a.pooled.noise),
+        pooledRow(
+            "Legitimate unspecced (may-flag, not noise)",
+            (a) => a.pooled.legitimateUnspecced,
+        ),
         `| Misses (true / dropped) | ${dropSummary(
             baseline,
         )} |  | ${dropSummary(candidate)} |  |`,

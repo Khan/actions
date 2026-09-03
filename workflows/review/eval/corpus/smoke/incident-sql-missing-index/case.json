@@ -99,6 +99,29 @@
                     }
                 ]
             }
+        ],
+        "mayFlagSpecs": [
+            {
+                "key": "add-column-not-null-default-rewrite",
+                "path": "db/migrations/20260601_add_status.sql",
+                "lineStart": 1,
+                "lineEnd": 3,
+                "mechanism": [
+                    "rewrit(e|es|ing|ten).{0,100}(table|lock)|(table|lock).{0,60}rewrit",
+                    "(exclusive|table|access ?exclusive)[- ]lock",
+                    "instant (DDL|ADD COLUMN)|PostgreSQL (before|<|prior to) ?11"
+                ]
+            },
+            {
+                "key": "status-typed-as-bare-string",
+                "path": "src/models/order.ts",
+                "lineStart": 3,
+                "lineEnd": 8,
+                "mechanism": [
+                    "union (type|of)|string[- ]literal (union|type)|bare `?string`?|(type|typed) (it |status )?as `?string`?",
+                    "status: string.{0,100}(union|literal|enum)"
+                ]
+            }
         ]
     },
     "routerConfig": {

@@ -82,6 +82,29 @@
                 "lineStart": 27,
                 "lineEnd": 37
             }
+        ],
+        "mayFlagSpecs": [
+            {
+                "key": "dedup-limit-retention-cap-unenforced",
+                "path": "services/notes/save.go",
+                "lineStart": 8,
+                "lineEnd": 11,
+                "mechanism": [
+                    "retention cap",
+                    "(newest|only|first|latest) (200|dedupCheckLimit).{0,200}(duplicate|stored again|not in `?seen)",
+                    "dedupCheckLimit.{0,200}(degrade|window|bound|guarantee)"
+                ]
+            },
+            {
+                "key": "test-fake-order-contradicts-store",
+                "path": "services/notes/save_test.go",
+                "lineStart": 9,
+                "lineEnd": 33,
+                "mechanism": [
+                    "(insertion|oldest[- ]first|forward|append) order.{0,160}newest[- ]first|newest[- ]first.{0,160}(insertion|oldest|forward|append)",
+                    "fake.{0,100}(order|sort).{0,100}(contract|document|store)"
+                ]
+            }
         ]
     }
 }

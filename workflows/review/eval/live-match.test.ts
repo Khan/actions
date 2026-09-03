@@ -179,6 +179,7 @@ const liveRun = (over: {
     category?: string;
     mustCatchSpecs?: LiveDefectSpec[];
     mustNotFlagSpecs?: LiveDefectSpec[];
+    mayFlagSpecs?: LiveDefectSpec[];
     findings?: unknown[];
     expectedVerdict?: string;
 }) => {
@@ -192,7 +193,7 @@ const liveRun = (over: {
             expected: {verdict: over.expectedVerdict ?? "REQUEST_CHANGES"},
             diff: DIFF,
             findings: (over.findings ?? []).map((finding) => ({
-                source: "correctness",
+                source: (finding as {lens?: string}).lens ?? "correctness",
                 finding,
             })),
             live: {
@@ -208,6 +209,7 @@ const liveRun = (over: {
                 ...(over.mustNotFlagSpecs
                     ? {mustNotFlagSpecs: over.mustNotFlagSpecs}
                     : {}),
+                ...(over.mayFlagSpecs ? {mayFlagSpecs: over.mayFlagSpecs} : {}),
             },
         },
         `test://${over.id ?? "match-case"}`,
@@ -507,6 +509,243 @@ describe("matchCase", () => {
             {specKey: "never-found"},
         ]);
     });
+
+    it("prefers the spec's own lens when several posted candidates match", async () => {
+        // Run 33671015442, incident-race-condition: the correctness
+        // reviewer's TTL suggestion two lines away hit the loose
+        // "concurrent" alternate and was credited with the spec in posted
+        // order, while the concurrency-async finding that actually
+        // described the lost update sat in the noise column. Posted order
+        // is the tiebreak only when no candidate carries the spec's lens.
+        const ttl = finding(
+            "f-ttl",
+            "kvSet without a TTL means concurrent tenants keep the key forever.",
+            "advisory",
+        );
+        const race = {
+            ...finding(
+                "f-race",
+                "two concurrent calls read the same value and one update is lost.",
+            ),
+            lens: "concurrency-async",
+        };
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [
+                spec({
+                    key: "lost-update",
+                    mechanism: ["race|concurrent"],
+                    lens: "concurrency-async",
+                }),
+            ],
+            findings: [ttl, race],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught.map((c) => c.findingId)).toEqual(["f-race"]);
+        // The TTL suggestion also matches the (already caught) spec's
+        // location and mechanism, so it is a duplicate rather than noise.
+        expect(match.duplicates).toEqual([
+            {findingId: "f-ttl", specKey: "lost-update"},
+        ]);
+        expect(match.unmatchedFindingIds).toEqual([]);
+
+        // Without a lens on the spec, posted order still decides.
+        const unlensed = liveRun({
+            mustCatchSpecs: [
+                spec({key: "lost-update", mechanism: ["race|concurrent"]}),
+            ],
+            findings: [ttl, race],
+        });
+        const unlensedMatch = await matchCase(
+            unlensed.corpusCase,
+            unlensed.result,
+        );
+        expect(unlensedMatch.caught.map((c) => c.findingId)).toEqual(["f-ttl"]);
+    });
+
+    it("buckets a second copy of a caught defect as a duplicate, still noise", async () => {
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [spec({key: "float-bug"})],
+            findings: [
+                finding("f-first", "floating point totals round late."),
+                {
+                    ...finding("f-copy", "float math here rounds late."),
+                    lens: "money-payments",
+                },
+            ],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught.map((c) => c.findingId)).toEqual(["f-first"]);
+        expect(match.duplicates).toEqual([
+            {findingId: "f-copy", specKey: "float-bug"},
+        ]);
+        expect(match.unmatchedFindingIds).toEqual([]);
+        const metrics = computeLiveMetrics([{corpusCase, result, match}]);
+        expect(metrics.noise).toEqual({
+            numerator: 1,
+            denominator: 2,
+            rate: 0.5,
+            duplicates: 1,
+        });
+    });
+
+    it("moves a may-flag match out of the noise numerator and reports it", async () => {
+        // The fixture really does have an unvalidated discount rate, and the
+        // case is about float rounding. A reviewer that says so is right,
+        // and the noise column should not charge it.
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [spec({key: "float-bug"})],
+            mayFlagSpecs: [
+                spec({
+                    key: "rate-unvalidated",
+                    mechanism: ["rate.{0,40}(negative|above 1|unvalidated)"],
+                }),
+            ],
+            findings: [
+                finding("f-float", "floating point totals round late."),
+                finding(
+                    "f-rate",
+                    "a negative or above-1 rate is applied unvalidated.",
+                    "advisory",
+                ),
+                finding("f-template", "no test covers this.", "advisory"),
+            ],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught.map((c) => c.findingId)).toEqual(["f-float"]);
+        expect(match.legitimateUnspecced).toEqual([
+            {
+                specKey: "rate-unvalidated",
+                findingId: "f-rate",
+                via: "deterministic",
+                blocking: false,
+            },
+        ]);
+        expect(match.duplicates).toEqual([]);
+        expect(match.unmatchedFindingIds).toEqual(["f-template"]);
+        const metrics = computeLiveMetrics([{corpusCase, result, match}]);
+        expect(metrics.noise).toEqual({
+            numerator: 1,
+            denominator: 3,
+            rate: 1 / 3,
+            duplicates: 0,
+        });
+        expect(metrics.legitimateUnspecced).toEqual({
+            numerator: 1,
+            denominator: 3,
+            rate: 1 / 3,
+        });
+    });
+
+    it("never lets a may-flag entry claim the case's own ground truth", async () => {
+        // Must-catch claims first, so a may-flag entry loose enough to also
+        // describe the seeded defect cannot steal the catch. Among the
+        // leftovers, a finding whose failure_scenario fits a may-flag entry
+        // is taken at its word about what it is about, before the duplicate
+        // check. The cost is visible here: a true second copy whose
+        // scenario also fits a sloppy may-flag entry reads as legitimate,
+        // so keep the entries tight.
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [spec({key: "float-bug"})],
+            mayFlagSpecs: [spec({key: "loose", mechanism: ["round"]})],
+            findings: [
+                finding("f-float", "floating point totals round late."),
+                finding("f-copy", "float math rounds late here too."),
+            ],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught.map((c) => c.findingId)).toEqual(["f-float"]);
+        expect(match.legitimateUnspecced.map((l) => l.findingId)).toEqual([
+            "f-copy",
+        ]);
+        expect(match.duplicates).toEqual([]);
+    });
+
+    it("keeps a legitimate finding that borrows the spec's keywords out of the duplicate bucket", async () => {
+        // incident-auth-bypass: the correctness finding about the fast path
+        // leaving req.session unset said "if the bypass is kept", hitting
+        // the spec's "bypass" alternate. It is a distinct real defect the
+        // case does not spec, not a second copy of the header-spoof finding.
+        const spoof = {
+            ...finding(
+                "f-spoof",
+                "an attacker sets the header and bypasses authentication.",
+            ),
+            lens: "security-auth",
+        };
+        const session = finding(
+            "f-session",
+            "the fast path calls next() with req.session unset, so if the bypass is kept it should populate a service identity.",
+            "advisory",
+        );
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [
+                spec({
+                    key: "bypass",
+                    mechanism: ["bypass", "attacker"],
+                    lens: "security-auth",
+                }),
+            ],
+            mayFlagSpecs: [
+                spec({
+                    key: "session-unset",
+                    mechanism: ["req\\.session.{0,40}unset"],
+                }),
+            ],
+            findings: [session, spoof],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught.map((c) => c.findingId)).toEqual(["f-spoof"]);
+        expect(match.legitimateUnspecced.map((l) => l.specKey)).toEqual([
+            "session-unset",
+        ]);
+        expect(match.duplicates).toEqual([]);
+        expect(match.unmatchedFindingIds).toEqual([]);
+    });
+
+    it("keeps a duplicate that mentions a may-flag defect in passing in the duplicate bucket", async () => {
+        // The other direction of the same overlap: the candidate arm's
+        // correctness copy of the header-spoof finding closed its prose
+        // with "downstream handlers are also left with an undefined
+        // session". Its failure_scenario is about the spoof, so it is the
+        // second copy of the caught defect, not the session finding.
+        const spoofSecurity = {
+            ...finding(
+                "f-spoof",
+                "an attacker sets the header and bypasses authentication.",
+            ),
+            lens: "security-auth",
+        };
+        const spoofCorrectness = {
+            ...finding(
+                "f-copy",
+                "an unauthenticated caller spoofs the header and bypasses the session check.",
+            ),
+            model_authored_prose:
+                "Trusting the header bypasses authentication. Downstream handlers relying on req.session are also left unset.",
+        };
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [
+                spec({
+                    key: "bypass",
+                    mechanism: ["bypass", "attacker"],
+                    lens: "security-auth",
+                }),
+            ],
+            mayFlagSpecs: [
+                spec({
+                    key: "session-unset",
+                    mechanism: ["req\\.session.{0,40}unset"],
+                }),
+            ],
+            findings: [spoofCorrectness, spoofSecurity],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught.map((c) => c.findingId)).toEqual(["f-spoof"]);
+        expect(match.duplicates).toEqual([
+            {findingId: "f-copy", specKey: "bypass"},
+        ]);
+        expect(match.legitimateUnspecced).toEqual([]);
+    });
 });
 
 describe("computeLiveMetrics", () => {
@@ -555,6 +794,12 @@ describe("computeLiveMetrics", () => {
             numerator: 2,
             denominator: 3,
             rate: 2 / 3,
+            duplicates: 0,
+        });
+        expect(metrics.legitimateUnspecced).toEqual({
+            numerator: 0,
+            denominator: 3,
+            rate: 0,
         });
     });
 });

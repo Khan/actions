@@ -495,6 +495,21 @@ export const renderMarkdownReport = (report: AbReport): string => {
         metric("Must-catch recall", (a) => a.metrics.mustCatchRecall.rate),
         metric("Verdict agreement", (a) => a.metrics.verdictAgreement.rate),
         metric("Noise (unmatched posted)", (a) => a.metrics.noise.rate),
+        // The noise numerator, decomposed: a duplicate is a second posted
+        // copy of a defect the run already caught (a merge-stage miss), and a
+        // legitimate unspecced finding matched a `mayFlagSpecs` entry and is
+        // NOT in the numerator (a real defect the fixture carries that the
+        // case is not about). What remains is template comments,
+        // speculation, and unspecced findings nobody has audited yet.
+        row(
+            "of which duplicates of a caught spec",
+            String(baseline.metrics.noise.duplicates),
+            String(candidate.metrics.noise.duplicates),
+        ),
+        metric(
+            "Legitimate unspecced (may-flag, not noise)",
+            (a) => a.metrics.legitimateUnspecced.rate,
+        ),
         row(
             "Clean false flags",
             String(baseline.metrics.cleanFalseFlag.count),

@@ -105,7 +105,24 @@ migration missing an index is correctly flagged at the migration OR at the
 hot query; a single-location spec turns anchor-site preference into fake
 recall noise). Matching is deterministic first (location AND mechanism);
 specs left unmatched go to a capped Haiku arbiter (`match-arbiter.ts`)
-whose claims are recorded `via: "fallback"` for audit.
+whose claims are recorded `via: "fallback"` for audit. When several
+posted findings satisfy one spec, the one produced by the spec's `lens`
+wins, then posted order.
+
+A case may also carry `live.mayFlagSpecs`: real defects the fixture has
+that are NOT the case's ground truth. "Unmatched posted" only means the
+spec did not list a finding, and reading run 33671015442's postings showed
+10 of the claude arm's 22 unmatched findings were correct about the code
+(an unvalidated discount rate, a NOT NULL DEFAULT table rewrite, a test
+fake ordering rows opposite to the store's contract). A posted finding
+matching a may-flag entry is reported as legitimate unspecced and leaves
+the noise numerator, with no recall credit. When you audit a fixture and
+find a defect the author did not intend: if it changes the expected verdict,
+fix the fixture (as #412 did for the false-block case's pagination doc
+comment) or spec it, otherwise add a may-flag entry. Keep the mechanism
+alternates tight, they are what tells a legitimate finding from a second
+copy of the seeded one. Clean cases can carry them too, but a clean case
+with a real defect in its diff is a fixture bug first.
 
 Growing the corpus: target the 20-80% catch band, where discrimination
 lives. Saturated cases (caught 100% on both arms) are tripwires; they add
@@ -147,6 +164,19 @@ claiming a band.
   arms both sit inside a band is wobble. Detecting a 20-point recall change
   needs ~60 spec-samples per arm; 10 points needs ~140 (two-proportion, 80%
   power). Repeats are the cheap axis: no authoring, no review.
+- **Noise buckets:** the noise row's numerator is residual unmatched
+  findings plus duplicates of a caught spec (a second posted copy of a
+  defect another finding already claimed: a merge-stage miss, reported on
+  its own sub-row). Legitimate unspecced findings (may-flag matches, above)
+  are NOT in the numerator and get their own row. What remains after both
+  is template comments ("no test covers X"), speculation, and unspecced
+  findings nobody has audited yet, and on a claude arm the templates are
+  most of it. The buckets are regex classification over the finding's
+  text: a leftover whose `failure_scenario` fits a may-flag entry is taken
+  at its word, then the duplicate check runs, then may-flag against the
+  full prose. A distinct finding that borrows the spec's keywords can still
+  land in the duplicate bucket (the race case's TTL suggestion says
+  "overwrite"), so read the per-case ids before trusting a duplicate count.
 - **Miss classes:** a true miss is a recall problem; found-but-dropped
   (provenance/scope/validation buckets) is an anchoring or gate-calibration
   problem. They route to different fixes; never collapse them. The
