@@ -106,6 +106,38 @@ describe("parseCollapsedObservations", () => {
             parseCollapsedObservations([{body: "Changes requested."}]),
         ).toEqual([]);
     });
+
+    it("still parses a legacy body whose section had its own <details> fold", () => {
+        // Every PR in flight when KORE-2632 landed has a prior review body
+        // in the old shape, and the work list reads the LATEST body: the
+        // legacy `<summary>` carrier (named-top teaser included) must keep
+        // parsing.
+        const observations = parseCollapsedObservations([
+            {
+                body: [
+                    "Approved.",
+                    "",
+                    "<details>",
+                    "<summary>Lower-confidence observations (1; top: " +
+                        "`lib/legacy.ts:9` suggestion (non-blocking): Old shape.</summary>",
+                    "",
+                    "- `lib/legacy.ts:9` suggestion (non-blocking): " +
+                        "Old shape. <sub>(documentation)</sub>",
+                    "",
+                    "</details>",
+                ].join("\n"),
+            },
+        ]);
+        expect(observations).toEqual([
+            {
+                path: "lib/legacy.ts",
+                line: 9,
+                label: "suggestion (non-blocking)",
+                subject: "Old shape.",
+                source: "documentation",
+            },
+        ]);
+    });
 });
 
 describe("body item ids", () => {
@@ -119,6 +151,38 @@ describe("body item ids", () => {
         expect(id).toBe("review-body:lib/a.ts:3:note");
         expect(isBodyItemId(id)).toBe(true);
         expect(isBodyItemId("PRRT_kwDOAbc123")).toBe(false);
+    });
+
+    it("still parses a legacy body whose section had its own <details> fold", () => {
+        // Every PR in flight when KORE-2632 landed has a prior review body
+        // in the old shape, and the work list reads the LATEST body: the
+        // legacy `<summary>` carrier (named-top teaser included) must keep
+        // parsing.
+        const observations = parseCollapsedObservations([
+            {
+                body: [
+                    "Approved.",
+                    "",
+                    "<details>",
+                    "<summary>Lower-confidence observations (1; top: " +
+                        "`lib/legacy.ts:9` suggestion (non-blocking): Old shape.</summary>",
+                    "",
+                    "- `lib/legacy.ts:9` suggestion (non-blocking): " +
+                        "Old shape. <sub>(documentation)</sub>",
+                    "",
+                    "</details>",
+                ].join("\n"),
+            },
+        ]);
+        expect(observations).toEqual([
+            {
+                path: "lib/legacy.ts",
+                line: 9,
+                label: "suggestion (non-blocking)",
+                subject: "Old shape.",
+                source: "documentation",
+            },
+        ]);
     });
 });
 
@@ -199,12 +263,12 @@ describe("the render/parse round trip", () => {
         ]);
     });
 
-    it("round-trips the closed N>=2 form off a rendered body", async () => {
-        // The N=1 case above renders `<details open>` with a count-only
-        // summary, so it no longer exercises the closed `<details>` +
-        // named-top arm. This case sheds two claims so the renderer takes
-        // that arm, pins the wrapper on the rendered body (not a hand-built
-        // fixture), and parses both entries back.
+    it("round-trips the N>=2 form off a body rendered in the new shape", async () => {
+        // Two shed claims, so the section carries more than one entry, and
+        // the assertions pin the CURRENT shape off the renderer (not a
+        // hand-built fixture): one `review details` fold, a bold heading
+        // instead of a per-section `<summary>`, and both entries parsed
+        // back out from under it (KORE-2632).
         const {runSubmissionCli} = await import(
             "../../review/lib/submission.ts"
         );
@@ -253,12 +317,12 @@ describe("the render/parse round trip", () => {
             }),
         };
         const plan = runSubmissionCli(makeFakeFs(files));
-        // The closed wrapper and the named-top summary, off the renderer.
-        // Prefix-only: the top entry's identity is ranking's business, the
-        // arm shape is this test's.
         expect(plan.body).toContain(
-            "<details>\n<summary>Lower-confidence observations (2; top: ",
+            "**Lower-confidence observations (2):**\n\n- ",
         );
+        // One fold for the whole tail, and no per-section wrapper.
+        expect(plan.body.split("<details>").length - 1).toBe(1);
+        expect(plan.body).not.toContain("<summary>Lower-confidence");
         expect(plan.body).not.toContain("<details open>");
         const observations = parseCollapsedObservations([{body: plan.body}]);
         expect(observations).toHaveLength(2);
@@ -280,5 +344,37 @@ describe("the render/parse round trip", () => {
                 },
             ]),
         );
+    });
+
+    it("still parses a legacy body whose section had its own <details> fold", () => {
+        // Every PR in flight when KORE-2632 landed has a prior review body
+        // in the old shape, and the work list reads the LATEST body: the
+        // legacy `<summary>` carrier (named-top teaser included) must keep
+        // parsing.
+        const observations = parseCollapsedObservations([
+            {
+                body: [
+                    "Approved.",
+                    "",
+                    "<details>",
+                    "<summary>Lower-confidence observations (1; top: " +
+                        "`lib/legacy.ts:9` suggestion (non-blocking): Old shape.</summary>",
+                    "",
+                    "- `lib/legacy.ts:9` suggestion (non-blocking): " +
+                        "Old shape. <sub>(documentation)</sub>",
+                    "",
+                    "</details>",
+                ].join("\n"),
+            },
+        ]);
+        expect(observations).toEqual([
+            {
+                path: "lib/legacy.ts",
+                line: 9,
+                label: "suggestion (non-blocking)",
+                subject: "Old shape.",
+                source: "documentation",
+            },
+        ]);
     });
 });

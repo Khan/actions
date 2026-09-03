@@ -309,11 +309,19 @@ export const COLLAPSED_ENTRY_RE =
     /^- `([^`\s:]+):(\d+)` ([a-z]+ \([^)]*\)): (.*?)(?: <sub>\(([^)]+)\)<\/sub>)?$/;
 
 /**
- * The parse of the collapsed section's `<summary>` line (matched loosely,
- * prefix only: the count and the named-top tag vary per run, and a
- * one-entry section renders `<details open>` with a count-only summary;
- * keying on the `<summary>` text matches both forms). Lives beside the
- * renderer for the same no-drift reason as {@link COLLAPSED_ENTRY_RE}.
+ * The parse of the collapsed section's HEADING (matched loosely, prefix
+ * only: the count varies per run). Two carriers, deliberately:
+ *
+ *   - `**Lower-confidence observations (N):**`, the bold markdown header
+ *     the section renders since KORE-2632, now that it lives inside the
+ *     body's single `review details` fold rather than a fold of its own;
+ *   - `<summary>Lower-confidence observations (N…)</summary>`, the legacy
+ *     per-section `<summary>` line. Still matched because the autofix reads
+ *     the LATEST posted review body, and every body posted before the
+ *     change carries that shape.
+ *
+ * Lives beside the renderer for the same no-drift reason as
+ * {@link COLLAPSED_ENTRY_RE}.
  */
 export const COLLAPSED_SUMMARY_RE =
-    /<summary>(?:Non-blocking|Lower-confidence) observations \(/;
+    /(?:<summary>|\*\*)(?:Non-blocking|Lower-confidence) observations \(/;

@@ -54,15 +54,16 @@
  * accountability section spliced verbatim, one note line per shed / skipped
  * dimension / depth reduction (the dispatcher already rendered those), any
  * PR-level claims folded into the body (the inline-comment safe output needs
- * a path and line), and the collapsed fingerprint stamp as the final block
- * (a `<details>` wrapper, sanitizer-surviving; see renderRereviewStamp).
+ * a path and line), and ONE collapsed `review details` fold as the final
+ * block, carrying the observations, the version/config line, and the
+ * fingerprint stamp line (KORE-2632, sanitizer-surviving).
  *
  * Determinism boundary: pure composition of staged files through the same
  * lib functions the eval runner uses; no model call, no prose about the code
  * under review.
  */
 
-import {neutralizeThenEscape, renderAttributionFooter} from "./attribution";
+import {attributionLine, renderReviewDetailsFold} from "./attribution";
 import {computeRisksPatternsKey, RISKS_PATTERNS_KEY_PATH} from "./cache-record";
 import type {Claim} from "./dispatch-contracts";
 import {applyMediumVeto} from "./dispatch-contracts";
@@ -98,7 +99,7 @@ import {
 } from "./rereview-mode";
 import {computeVerdict} from "./verdict";
 import type {DimensionStatus, VerdictReason} from "./verdict";
-import {runVersionFooterCli} from "./version-footer";
+import {runVersionFooterLineCli} from "./version-footer";
 
 /* -------------------------------------------------------------------------- */
 /* Types and paths                                                            */
@@ -286,9 +287,6 @@ export const MAX_INLINE_COMMENTS = 20;
 
 /** The medium-confidence inline floor (the Step 5 posting bar). */
 const MIN_INLINE_CONFIDENCE = 0.5;
-
-/** The collapsed summary's named-top subject cap: one line, not a wall. */
-const TOP_SUBJECT_MAX_CHARS = 120;
 
 /* -------------------------------------------------------------------------- */
 /* The plan                                                                   */
@@ -515,6 +513,10 @@ export const runSubmissionCli = (
     // here by construction).
     const anchored: Claim[] = [];
     const prLevelLines: string[] = [];
+    /** The body's single `review details` fold, in render order (KORE-2632). */
+    const detailsSections: string[] = [];
+    /** Whether that fold carries an observations list (review content). */
+    let hasCollapsedSection = false;
     const prLevelCollapsed: Claim[] = [];
     for (const claim of vetoed) {
         if (claim.path !== undefined && claim.line !== undefined) {
@@ -522,13 +524,19 @@ export const runSubmissionCli = (
         } else if (reducedSurface && !isBlockingLabel(claim.label)) {
             prLevelCollapsed.push(claim);
         } else {
-            // The fold carries the same collapsed attribution footer an
-            // inline comment gets: a pr-level finding names its reviewer too.
+            // A pr-level finding names its reviewer as a bare `<sub>` line,
+            // not the collapsed footer an inline comment gets: this renders
+            // in the review BODY, and that footer's chip is the same
+            // `review details` chip the body's one tail fold uses
+            // (KORE-2632), so stacking it put a second identically labelled
+            // expando above the fold. Same choice the context fold makes
+            // for a folded inline comment; stripFooters' whole-line `<sub>`
+            // strip removes this form too, so dedup is unaffected.
             prLevelLines.push(
-                `${renderPrLevelFold(claim)}\n${renderAttributionFooter(
+                `${renderPrLevelFold(claim)}\n<sub>${attributionLine(
                     claim.source,
                     claim.also_flagged_by,
-                )}`,
+                )}</sub>`,
             );
             notes.push(
                 `pr-level claim ${claim.id} folded into the review body`,
@@ -708,8 +716,8 @@ export const runSubmissionCli = (
     const isNitpick = (claim: Claim): boolean =>
         labelToken(claim.label) === labelToken(NITPICK_LABEL);
     // Named so the collapsed list below can re-sort with the same rank
-    // once the pr-level claims join it: the disclosure names the tail's
-    // first entry, so the ordering IS the disclosure's selection rule.
+    // once the pr-level claims join it: the tail renders in rank order, so
+    // the best of the whole tail leads the list a reader opens.
     const rankClaims = (a: Claim, b: Claim): number => {
         const blocking =
             Number(isBlockingLabel(b.label)) - Number(isBlockingLabel(a.label));
@@ -764,8 +772,8 @@ export const runSubmissionCli = (
     });
     const inlineClaims = new Set(inlineWorthy.slice(0, MAX_INLINE_COMMENTS));
     // Re-sorted rather than appended: a pr-level claim joins the tail at
-    // its rank, so the disclosure's named top entry is the tail's best
-    // claim, not merely its best ANCHORED claim.
+    // its rank, so the list leads with the tail's best claim, not merely
+    // its best ANCHORED claim.
     const collapsed = [
         ...ranked.filter((claim) => !inlineClaims.has(claim)),
         ...prLevelCollapsed,
@@ -808,43 +816,26 @@ export const runSubmissionCli = (
         const collapsedNonBlockingOnly = !collapsed.some((entry) =>
             isBlockingLabel(entry.label),
         );
-        // The disclosure names the tail's top-ranked entry, subject and
-        // all, not only the count: collapsed sections once hid "the reply
-        // guard never fires" behind "Non-blocking observations (6)" on an
-        // approving review (Khan/actions#367), and the subject is what
-        // tells a reader whether the expando is worth opening. `collapsed`
-        // re-sorts with rankClaims after the pr-level claims join it, so
-        // entry 0 is the best of the whole tail. The subject is model
-        // text inside a <summary>, a raw-HTML line where backticks stay
-        // literal, so neutralizeThenEscape rewrites tags unconditionally
-        // and truncates only after the rewrite (a sliced tag posts live).
-        // A one-entry tail: at N=1 the "preview" is the whole payload, so
-        // a closed <details> shows the observation twice and reads as a
-        // stray comment (Khan/actions#387). It renders <details open> with
-        // a count-only summary, still a <details> block for the autofix's
-        // section slicing (<summary> to </details>, collapsed.ts).
-        const singleEntry = collapsed.length === 1;
-        const top = collapsed[0];
-        const topSubject = neutralizeThenEscape(
-            top.subject,
-            TOP_SUBJECT_MAX_CHARS,
-        );
-        const topTag = singleEntry
-            ? ""
-            : top.path !== undefined && top.line !== undefined
-            ? `; top: \`${top.path}:${top.line}\` ${top.label}: ${topSubject}`
-            : `; top: ${top.label}: ${topSubject}`;
-        const summary =
+        // A bold markdown header plus one bullet per entry, inside the
+        // body's single `review details` fold rather than a `<details>`
+        // block of its own (KORE-2632). Gone with that block: the summary
+        // quoting the top entry's whole subject (Khan/actions#367, where a
+        // bare count hid a real finding) and the `<details open>`
+        // single-entry case (Khan/actions#387, a closed one-entry fold
+        // showing the observation twice). Both made a bare count worth
+        // opening; the fold is generic now, and the teaser had come to read
+        // as a duplicate of the first bullet under it.
+        const header =
             reducedSurface && collapsedNonBlockingOnly
-                ? `Non-blocking observations (${collapsed.length}${topTag})`
-                : `Lower-confidence observations (${collapsed.length}${topTag})`;
+                ? `**Non-blocking observations (${collapsed.length}):**`
+                : `**Lower-confidence observations (${collapsed.length}):**`;
+        // The blank line is load-bearing: GFM will not parse a `-` list
+        // whose first item sits flush against the raw-HTML `<summary>` the
+        // fold opens with.
         const section = [
-            singleEntry ? "<details open>" : "<details>",
-            `<summary>${summary}</summary>`,
+            header,
             "",
             ...collapsed.map(renderCollapsedLine),
-            "",
-            "</details>",
         ].join("\n");
         // The section ALWAYS lands in the review body, never riding an
         // inline comment. It used to ride the top-ranked comment at full
@@ -854,7 +845,8 @@ export const runSubmissionCli = (
         // work list blind exactly where the budget sheds; the review-side
         // README contract (the budget shrinks the notification surface,
         // never the autofix scope) only holds with the section here.
-        prLevelLines.push(section);
+        detailsSections.push(section);
+        hasCollapsedSection = true;
         notes.push(
             reducedSurface && collapsedNonBlockingOnly
                 ? `${
@@ -909,16 +901,22 @@ export const runSubmissionCli = (
         .filter((line) => line !== "")
         .join("\n");
     // The version/config footer (version-footer.ts): code-rendered,
-    // collapsed, sanitizer-surviving; also staged as version-footer.txt
-    // for Step 7. The depth override comes from the SAME read that keys
-    // the depth Note, so the two cannot contradict; null drops the segment.
-    const footer = runVersionFooterCli(fs, undefined, {
+    // sanitizer-surviving; the BARE line here (the fold below supplies the
+    // chip), while version-footer.txt still stages the wrapped block for
+    // Step 7. The depth override comes from the SAME read that keys the
+    // depth Note, so the two cannot contradict; null drops the segment.
+    const footer = runVersionFooterLineCli(fs, undefined, {
         depth: typeof dispatch.depth === "string" ? dispatch.depth : null,
     });
-    const body = [coreBody, footer]
+    detailsSections.push(footer);
+    if (stamp !== null) {
+        detailsSections.push(stamp);
+    }
+    // One fold for the whole tail (KORE-2632): observations, config, then
+    // fingerprint, where the body used to end in three stacked expandos.
+    const body = [coreBody, renderReviewDetailsFold(detailsSections)]
         .filter((line) => line !== "")
         .join("\n")
-        .concat(stamp === null ? "" : `\n${stamp}`)
         .replace(/^\n+/, "");
 
     // The skip predicate lives in submission-clearance.ts (prompt, gate, and
@@ -935,15 +933,26 @@ export const runSubmissionCli = (
         priorRcStands,
         inlineCount: inline.length,
         resolveCount: resolveIds.length,
+        // The observations list left `coreBody` for the tail fold
+        // (KORE-2632), so a body carrying nothing BUT that list would
+        // compare equal to the bare approve line and skip submission with
+        // real review content in hand.
         bareApproveBody:
+            !hasCollapsedSection &&
             normalizeBody(coreBody) ===
-            normalizeBody(
-                renderReviewBody({event: "APPROVE", hasInlineComments: false}),
-            ),
+                normalizeBody(
+                    renderReviewBody({
+                        event: "APPROVE",
+                        hasInlineComments: false,
+                    }),
+                ),
         priorApproveStands:
             priorStamp !== null && priorStamp.verdict === "APPROVE",
         bodyCarriesOnlyDepthNote:
             prLevelLines.length === 0 &&
+            // Same reason as `bareApproveBody` above: the list is review
+            // content wherever it renders.
+            !hasCollapsedSection &&
             noteLines.length === 0 &&
             rereview.section === "",
     });

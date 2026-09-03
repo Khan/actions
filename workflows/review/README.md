@@ -410,13 +410,11 @@ re-review scoped
 - `non-blocking-budget` sets how many non-blocking findings may post as inline
   comments per review (default 3). Blocking findings never count against it;
   `nitpick (non-blocking)` findings never post inline at all. Findings over
-  budget collapse into a `<details>` block in the review body whose summary
-  names the top-ranked entry when it holds two or more; a one-entry
-  observation section renders `<details open>` with a count-only summary,
-  since the entry is its own preview (metadata chips such as the version
-  footer stay closed at any count; always the body, never riding an inline
-  comment: the body is the surface the autofix's body-sourced work list
-  reads back); nothing is dropped, the verdict counts every validated
+  budget collapse into the review body's single collapsed `review details`
+  fold, under a bold `**Lower-confidence observations (N):**` heading,
+  ranked so the tail's best finding is the first bullet (always the body,
+  never riding an inline comment: the body is the surface the autofix's
+  body-sourced work list reads back); nothing is dropped, the verdict counts every validated
   finding, and the autofix still reaches collapsed findings through that
   work list, so the budget shrinks the notification surface, never the
   autofix scope. A malformed value warns and keeps the previous value (the
@@ -1009,12 +1007,21 @@ in `lib/rereview-mode.ts`), so the marker never reached a posted comment; `sub`,
 ingest. There is no separate config-hash or drift-stamp mechanism; the release
 tag plus the footer's config segments are the version surface.
 
-After the footer, a submitted review body ends with one more collapsed block:
-the re-review fingerprint stamp (summary chip `review fingerprint`, rendered
-by `lib/rereview-mode.ts`), the hunk-signature record the next run's re-review
-planner and autofix's currency check read back. It rides the same
-sanitizer-surviving `details`/`summary`/`sub` mechanism as the footer, so the
-footer is second-to-last and the stamp is the final block.
+A submitted review body ends with exactly ONE collapsed block (chip
+`review details`), and the footer is a `<sub>` line inside it. The fold
+carries, in order: the collapsed observations section, the version/config
+line, and the re-review fingerprint stamp line (rendered by
+`lib/rereview-mode.ts`), the hunk-signature record the next run's re-review
+planner and autofix's currency check read back. The stamp rides the same
+sanitizer-surviving `sub` mechanism as the footer rather than becoming an
+HTML comment, because the ingest sanitizer deletes every HTML comment.
+
+Before KORE-2632 those were three separate stacked folds — observations,
+footer, stamp — two of them machine bookkeeping no reader opens. Bodies
+posted in that shape are still parsed: `COLLAPSED_SUMMARY_RE` matches the
+legacy `<summary>` heading as well as the current bold one, and the stamp
+readers accept both carriers, so an in-flight PR's next re-review and
+autofix run behave exactly as before.
 
 Every inline review comment (and each pr-level finding folded into the review
 body) additionally carries per-comment attribution, naming the reviewer that
