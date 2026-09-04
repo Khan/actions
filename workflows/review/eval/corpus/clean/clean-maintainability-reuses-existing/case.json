@@ -15,6 +15,8 @@
     ],
     "routerConfig": {
         "enabledReviewers": [
+            "holistic",
+            "conventions",
             "maintainability"
         ]
     },
@@ -25,7 +27,7 @@
         "postedCommentCount": 0,
         "mustNotPost": []
     },
-    "diff": "diff --git a/src/reports/export.ts b/src/reports/export.ts\n--- a/src/reports/export.ts\n+++ b/src/reports/export.ts\n@@ -1,4 +1,16 @@\n+import {dollarsToCents, formatCents} from \"../money/cents\";\n import type {LineItem} from \"./types\";\n \n-export const toCsv = (items: readonly LineItem[]): string =>\n-    items.map((item) => `${item.id},${item.category},${item.cents ?? 0}`).join(\"\\n\");\n+// RFC 4180: a field containing a comma, a quote, or a newline is quoted, and\n+// quotes inside it are doubled.\n+const csvEscape = (field: string): string =>\n+    /[\",\\n]/.test(field) ? `\"${field.replace(/\"/g, '\"\"')}\"` : field;\n+\n+export const toCsv = (items: readonly LineItem[]): string => {\n+    const rows = [[\"id\", \"category\", \"amount\"].join(\",\")];\n+    for (const item of items) {\n+        const cents = item.cents ?? dollarsToCents(item.dollars ?? 0);\n+        rows.push([item.id, csvEscape(item.category), formatCents(cents)].join(\",\"));\n+    }\n+    return rows.join(\"\\n\");\n+};\n",
+    "diff": "diff --git a/src/reports/export.ts b/src/reports/export.ts\n--- a/src/reports/export.ts\n+++ b/src/reports/export.ts\n@@ -1,4 +1,16 @@\n+import {dollarsToCents, formatCents} from \"../money/cents\";\n import type {LineItem} from \"./types\";\n \n-export const toCsv = (items: readonly LineItem[]): string =>\n-    items.map((item) => `${item.id},${item.category},${item.cents ?? 0}`).join(\"\\n\");\n+// RFC 4180: a field containing a comma, a quote, or a newline is quoted, and\n+// quotes inside it are doubled.\n+const csvEscape = (field: string): string =>\n+    /[\",\\n]/.test(field) ? `\"${field.replace(/\"/g, '\"\"')}\"` : field;\n+\n+export const toCsv = (items: readonly LineItem[]): string => {\n+    const rows = [[\"id\", \"category\", \"amount\"].join(\",\")];\n+    for (const item of items) {\n+        const cents = item.cents ?? dollarsToCents(item.dollars ?? 0);\n+        rows.push([csvEscape(item.id), csvEscape(item.category), formatCents(cents)].join(\",\"));\n+    }\n+    return rows.join(\"\\n\");\n+};\n",
     "live": {
         "prContext": {
             "title": "reports: CSV export escapes fields and formats amounts as dollars",

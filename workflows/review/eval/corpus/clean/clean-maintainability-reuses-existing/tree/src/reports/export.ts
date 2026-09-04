@@ -10,7 +10,7 @@ export const toCsv = (items: readonly LineItem[]): string => {
     const rows = [["id", "category", "amount"].join(",")];
     for (const item of items) {
         const cents = item.cents ?? dollarsToCents(item.dollars ?? 0);
-        rows.push([item.id, csvEscape(item.category), formatCents(cents)].join(","));
+        rows.push([csvEscape(item.id), csvEscape(item.category), formatCents(cents)].join(","));
     }
     return rows.join("\n");
 };

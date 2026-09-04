@@ -27,6 +27,8 @@
     ],
     "routerConfig": {
         "enabledReviewers": [
+            "holistic",
+            "conventions",
             "maintainability"
         ]
     },

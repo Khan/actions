@@ -26,10 +26,10 @@ import type {RiskTier} from "./routing-config";
  * defaults plus the five opt-ins both current consumers enable), so an
  * invocation cap of 4 deterministically shed dimensions on every low run. Low and medium now fit the roster;
  * trivial stays deliberately small (the two default reviewers; the rest are
- * declared budget sheds). The low cap of 9 lets a lens-free low-tier run
- * dispatch the full roster of two defaults plus every opt-in (seven since
- * `maintainability` joined; router.test.ts pins the cap to the roster size
- * so the next reviewer cannot join without a bump); path-matched lenses also consume slots, so a low
+ * declared budget sheds). The low cap of 9 is the size of the largest
+ * lens-free roster: the two defaults plus all of ENABLEABLE_REVIEWERS
+ * (router.test.ts pins the cap to that sum, so a reviewer cannot join the
+ * list without a bump here); path-matched lenses also consume slots, so a low
  * PR matching two or more lenses still sheds from the bottom of the value
  * ranking (that residual is sized when the modes are priced, not here).
  * `maxUsd` is deliberately left uncalibrated (per-run cost measurement is

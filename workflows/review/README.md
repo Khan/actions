@@ -612,12 +612,16 @@ The eval corpus carries five golden cases, one per finding type
 `golden-maintainability-hidden-flag`, `golden-maintainability-dead-branch`,
 `golden-maintainability-one-caller-wrapper`), each seeded inside a diff that also does
 real logic work, plus a clean case (`clean-maintainability-reuses-existing`) whose
-change reuses the existing helper and must draw no comment. None carries the `smoke`
-tag, so the per-PR A/B skips them. Price this reviewer with a targeted
-`workflow_dispatch` of *Review Eval A/B* over those six cases with `repeats=3`. The
-gate is the one `documentation` had: a positive recall delta against the current roster
-on the seeded cases with the clean case silent, or the reviewer does not earn an
-`enable` line.
+change reuses the existing helper and must draw no comment. Every case enables
+`holistic` and `conventions` beside `maintainability`, because those are the two
+reviewers whose lanes border this one (wrong-layer and idiom deviation): with them in
+the baseline arm, the delta measures what the new reviewer adds over the reviewers
+most likely to have caught the defect already, which is the question the gate asks.
+None carries the `smoke` tag, so the per-PR A/B skips them. Price this reviewer with a
+targeted `workflow_dispatch` of *Review Eval A/B* over those six cases with
+`repeats=3` (recipe in the eval README). The gate is the one `documentation` had: a
+positive recall delta on the seeded cases with the clean case silent, or the reviewer
+does not earn an `enable` line.
 
 ### The `.github/NOTIFIED` file (optional)
 

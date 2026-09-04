@@ -3,10 +3,12 @@ export type FailureKind = "transient" | "throttled" | "fatal";
 const MAX_ATTEMPTS = 6;
 // The throttled ceiling is the upstream's documented retry-after maximum.
 const THROTTLE_CAP_MS = 60_000;
+// Kinds that never retry, whatever the attempt count.
+const NO_RETRY = new Set<FailureKind>(["fatal"]);
 
 /** Milliseconds to wait before the next attempt, or null to stop retrying. */
 export const nextDelay = (attempt: number, kind: FailureKind): number | null => {
-    if (kind === "fatal" || attempt >= MAX_ATTEMPTS) {
+    if (NO_RETRY.has(kind) || attempt >= MAX_ATTEMPTS) {
         return null;
     }
     switch (kind) {

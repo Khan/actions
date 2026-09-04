@@ -292,7 +292,11 @@ describe("produceLive", () => {
                         {pattern: "src/**", lenses: ["money-payments"]},
                     ],
                     // Listed out of canonical order deliberately.
-                    enabledReviewers: ["documentation", "conventions"],
+                    enabledReviewers: [
+                        "maintainability",
+                        "documentation",
+                        "conventions",
+                    ],
                 },
             },
             "/corpus/incidents/produce-enabled/case.json",
@@ -302,6 +306,22 @@ describe("produceLive", () => {
             "skill-auditor": [JSON.stringify({findings: []})],
             "money-payments": [JSON.stringify({findings: [], hunts: []})],
             conventions: [JSON.stringify({findings: []})],
+            maintainability: [
+                JSON.stringify({
+                    findings: [
+                        {
+                            path: "src/a.ts",
+                            line: 1,
+                            label: "suggestion (non-blocking, maintainability)",
+                            failure_scenario:
+                                "the next reader has two names for one value.",
+                            subject: "`a` duplicates `b`",
+                            discussion:
+                                "`const a = 2` at line 1 and `const b = 2` in src/b.ts.",
+                        },
+                    ],
+                }),
+            ],
             documentation: [
                 JSON.stringify({
                     findings: [
@@ -340,12 +360,17 @@ describe("produceLive", () => {
                         id: "produce-enabled:live-documentation-2",
                         verification: "confirmed",
                     },
+                    {
+                        id: "produce-enabled:live-maintainability-1",
+                        verification: "confirmed",
+                    },
                 ]),
             ],
         });
         const agents = new Map(AGENTS);
         agents.set("conventions", agent("conventions"));
         agents.set("documentation", agent("documentation"));
+        agents.set("maintainability", agent("maintainability"));
 
         const result = await produceLive(enabledCase, agents, {
             runner,
@@ -367,7 +392,9 @@ describe("produceLive", () => {
             "skill-auditor",
             "money-payments",
             "conventions",
+            "maintainability",
             "documentation",
+
         ]);
 
         // The opt-in reviewer's label-shape output is mapped, not thrown on.
@@ -381,6 +408,16 @@ describe("produceLive", () => {
         expect(prLevel?.finding.anchor).toEqual({type: "pr"});
         expect(
             result.perAgent.find((a) => a.name === "documentation")?.failed,
+        ).toBeFalsy();
+        // The maintainability parse path: label shape, mapped to its lens,
+        // so the first time it runs is not the graduation A/B.
+        const maint = result.findings.find(
+            (f) => f.source === "maintainability",
+        );
+        expect(maint?.finding.lens).toBe("maintainability");
+        expect(maint?.finding.severity).toBe("advisory");
+        expect(
+            result.perAgent.find((a) => a.name === "maintainability")?.failed,
         ).toBeFalsy();
     });
 
