@@ -253,9 +253,21 @@ export const outOfScopeRead = (
     }
 };
 
-/** The denial text the model sees. It says what is in scope, not just "no". */
-export const readScopeReason = (root: string, target: string): string =>
+/**
+ * The denial text the model sees. It says what is in scope, not just "no",
+ * and names the two directories by absolute path: in the first forced run
+ * every one of the 8 denials was a reviewer that had guessed
+ * `<case>/src/...` for a changed file, missed, and widened its search to
+ * the staging root. Naming `<case>/checkout` is what turns that into one
+ * retry instead of a hunt.
+ */
+export const readScopeReason = (
+    root: string,
+    target: string,
+    cwd?: string,
+): string =>
     `Out of scope for this review: ${target}. Reads are limited to the ` +
-    `staged case under ${root} (the checkout and its context files). The ` +
-    `review tooling and anything else on this machine are not part of the ` +
-    `change under review.`;
+    `staged case under ${root}: the changed files are in ` +
+    `${cwd ?? `${root}/checkout`} (your working directory) and the review ` +
+    `context files are in ${root}/context. The review tooling and anything ` +
+    `else on this machine are not part of the change under review.`;

@@ -87,7 +87,14 @@ repeats report's pooled line both say "Reads denied outside the staged case",
 and a nonzero count adds a section naming the reviewer whose transcript
 should be read. A tool-policy denial (the hook catching a tool `tools`
 should have removed) gets its own section and is never counted as a read.
-The expected value of both is zero.
+The expected value of both is zero for a corpus hunt, but not every denial
+is one: in the first scoped run (33902871639) all 8 denials were reviewers
+that guessed `<case>/src/...` for a changed file, missed, and widened a Glob
+to the staging root, or climbed out of `context/` with a relative path.
+Before the scope those searches returned other cases' files (and the other
+arm's copy of the same case) without anyone noticing. The transcript shows
+which kind a denial was in one line, and the denial message now names the
+checkout and context directories so the recovery is one retry.
 Transcripts are written outside the staging root so no reviewer can read a
 sibling's mid-run.
 

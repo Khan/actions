@@ -164,7 +164,7 @@ const runOnce = async (
             return {continue: true};
         }
         deniedReads += 1;
-        return deny(readScopeReason(request.readRoot, target));
+        return deny(readScopeReason(request.readRoot, target, request.cwd));
     };
     const messages: TranscriptMessage[] = [];
     const label = transcriptLabel(request);

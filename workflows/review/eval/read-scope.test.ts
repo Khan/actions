@@ -236,9 +236,12 @@ describe("outOfScopeRead on a real filesystem", () => {
 });
 
 describe("readScopeReason", () => {
-    it("names the target and the scope", () => {
-        const reason = readScopeReason(ROOT, "/etc/passwd");
+    it("names the target, the checkout, and the context dir", () => {
+        const reason = readScopeReason(ROOT, "/etc/passwd", CWD);
         expect(reason).toContain("/etc/passwd");
-        expect(reason).toContain(ROOT);
+        expect(reason).toContain(`${CWD} (your working directory)`);
+        expect(reason).toContain(`${ROOT}/context`);
+        // Without a cwd the checkout is named by the staging convention.
+        expect(readScopeReason(ROOT, "/x")).toContain(`${ROOT}/checkout`);
     });
 });
