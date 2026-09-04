@@ -151,12 +151,12 @@ const MAINTAINABILITY_LENSES: ReadonlySet<Lens> = new Set<Lens>([
  * The Conventional-Comment label a finding renders with. Deterministic function
  * of the finding's `severity` and `lens` only:
  *
- *   - blocking  + best-practice lens  -> `issue (blocking, best-practice)`
- *   - blocking  + other lens          -> `issue (blocking)`
- *   - advisory  + best-practice lens  -> `suggestion (non-blocking, best-practice)`
- *   - advisory  + documentation lens  -> `suggestion (non-blocking, documentation)`
- *   - advisory  + maintainability lens -> `suggestion (non-blocking, maintainability)`
- *   - advisory  + other lens          -> `suggestion (non-blocking)`
+ *   - blocking  + best-practice lens    -> `issue (blocking, best-practice)`
+ *   - blocking  + other lens            -> `issue (blocking)`
+ *   - advisory  + best-practice lens    -> `suggestion (non-blocking, best-practice)`
+ *   - advisory  + documentation lens    -> `suggestion (non-blocking, documentation)`
+ *   - advisory  + maintainability lens  -> `suggestion (non-blocking, maintainability)`
+ *   - advisory  + other lens            -> `suggestion (non-blocking)`
  *
  * `medium` severity renders exactly as `advisory` does (the non-blocking
  * rows above). That is the tier's design invariant, not an omission:

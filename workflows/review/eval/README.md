@@ -90,11 +90,12 @@ gh workflow run review-eval-ab.yml --ref <branch> \
   -f cases=golden-documentation-stale-and-narrated,golden-documentation-restated-docstring,golden-documentation-missing-why,golden-documentation-commented-out-code,clean-documentation-earned-comments \
   -f repeats=5 -f max_usd=50
 
-# Graduation run for the `maintainability` reviewer (roughly $30 at 3 repeats,
-# by analogy with the documentation run above): the five seeded cases plus the
-# clean precision guard, the candidate arm being the branch that enables it in
-# the cases' routerConfig and the baseline arm main. The gate is a positive
-# recall delta on the seeded cases with the clean case silent.
+# Graduation run for the `maintainability` reviewer (roughly $50 at 3 repeats:
+# each case also enables holistic and conventions, the two reviewers whose
+# lanes border the new one, so the baseline arm runs them and the delta is
+# what maintainability adds over them rather than over the two defaults
+# alone). The five seeded cases plus the clean precision guard. The gate is a
+# positive recall delta on the seeded cases with the clean case silent.
 gh workflow run review-eval-ab.yml --ref <branch> \
   -f base_ref=origin/main \
   -f cases=golden-maintainability-duplicate-helper,golden-maintainability-misleading-name,golden-maintainability-hidden-flag,golden-maintainability-dead-branch,golden-maintainability-one-caller-wrapper,clean-maintainability-reuses-existing \

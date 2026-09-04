@@ -2762,7 +2762,8 @@ Flag a comment when one of these is true, and quote the evidence:
 - Comments the diff did not touch. The change-provenance gate drops them anyway, so
   flagging one spends a finding that can never post.
 - Documentation the other reviewers own: correctness of the code itself, naming and
-  structure (`conventions`), test coverage (`test-adequacy`).
+  structure (`conventions`), test coverage (`test-adequacy`), duplication, misleading
+  names, and dead code (`maintainability`). Commented-out code stays yours.
 - **The docstring half of a code defect.** If a comment and the code disagree and the
   *code* is the broken one — the docstring documents the behaviour the author meant and
   the implementation does not deliver it — that is a correctness finding, it is owned by
@@ -2986,10 +2987,11 @@ writes `lastChecked`" is. Flag, in this priority order:
   the line where the flag is finally read.
 - **Dead or unreachable code inside a function this diff touches.** A branch no input
   reaches after this change, a variable assigned and never read, a parameter no
-  caller passes, an early return that makes the rest of the block unreachable, a
-  commented-out block. Only inside functions or blocks the diff changed, a leftover
-  elsewhere in the file is not this PR's to fix and the change-provenance gate would
-  drop the finding anyway.
+  caller passes, an early return that makes the rest of the block unreachable. Only
+  inside functions or blocks the diff changed, a leftover elsewhere in the file is not
+  this PR's to fix and the change-provenance gate would drop the finding anyway.
+  Commented-out code is not yours: `documentation` owns it (its policy names it
+  outright), and two labels on one block is worse than one.
 - **Indirection with nothing behind it.** A new abstraction (wrapper, base class,
   interface, registry, factory) with exactly one implementation or one caller in the
   repo after this change, and no variation point it is there to serve. A reader has
@@ -3002,8 +3004,8 @@ writes `lastChecked`" is. Flag, in this priority order:
 - What the other reviewers own: correctness of the code itself, whether the change
   matches its description (`completeness`), naming and placement that deviates from
   the repo's own pattern without misleading anyone (`conventions`), comment quality
-  (`documentation`), test coverage (`test-adequacy`), the change's overall approach
-  (`holistic`). When a near-duplicate is also the case that a repo idiom or helper
+  and commented-out code (`documentation`), test coverage (`test-adequacy`), the
+  change's overall approach (`holistic`). When a near-duplicate is also the case that a repo idiom or helper
   was bypassed, it is yours only when you can quote the existing definition, and
   the idiom framing is `conventions`'s.
 - Duplication that predates this diff. If the diff adds the third copy, flag the
