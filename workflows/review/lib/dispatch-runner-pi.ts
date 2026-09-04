@@ -158,6 +158,22 @@ export const SYSTEM_PROMPT = [
     // cost gap at equal investigation depth. Says what claude does.
     "When several files or searches are needed at once, batch them into",
     "one Bash command rather than one call each.",
+    // Two more, from the erasure transcript (run 33823474609). Gemini read
+    // the same three files claude did by call 5, then spent calls 7 to 19
+    // trying to RUN the tests in a read-only sandbox (go test, then TMPDIR,
+    // GOTMPDIR, GOCACHE, mkdir, df, copying the package to scratch), got
+    // them green at call 18, and concluded "the tests smartly leverage flag
+    // fakes": it judged the suite by running it and read the hardcoded flag
+    // as a feature. Claude reasoned about the suite's structure and wrote
+    // the finding in 5 calls. 6 of gemini's 22 calls were toolchain
+    // attempts, each a dead end that also bloated the context (23k tokens
+    // per turn to claude's 10k). The first line removes the dead ends, the
+    // second names the reasoning step claude takes unprompted.
+    "Do not run the code, its tests, or its toolchain: the checkout is",
+    "read-only and the review is done by reading. A passing test run is",
+    "not evidence a suite is adequate. For each test in the diff, ask what",
+    "defect it would fail on; a test that cannot fail on the behavior it",
+    "names is a finding.",
 ].join(" ");
 
 /**
