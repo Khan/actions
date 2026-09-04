@@ -114,6 +114,13 @@ export type ArmAggregate = {
         duplicates: number;
         /** May-flag matches over posted: legitimate unspecced findings. */
         legitimateUnspecced: RateStat;
+        /**
+         * Case-runs whose case carries `mayFlagSpecs`, over all case-runs.
+         * Only those can move a finding into the row above; the rest still
+         * read the pre-audit noise definition.
+         */
+        auditedRuns: number;
+        caseRuns: number;
         trueMisses: number;
         foundButDropped: Record<string, number>;
         /** Total anchor-snapped findings across the arm's case-runs. */
@@ -188,6 +195,7 @@ const aggregateArm = (
     let unmatched = 0;
     let duplicates = 0;
     let legitimateUnspecced = 0;
+    let auditedRuns = 0;
     let posted = 0;
     let snapped = 0;
     let usd = 0;
@@ -213,6 +221,9 @@ const aggregateArm = (
             unmatched += run.unmatchedPosted;
             duplicates += run.duplicates;
             legitimateUnspecced += run.legitimateUnspecced;
+            if (run.audited) {
+                auditedRuns += 1;
+            }
             posted += run.posted;
             snapped += run.snapped;
             const spec = (key: string) => {
@@ -307,6 +318,8 @@ const aggregateArm = (
             noise: rateStat(unmatched, posted),
             duplicates,
             legitimateUnspecced: rateStat(legitimateUnspecced, posted),
+            auditedRuns,
+            caseRuns,
             trueMisses,
             foundButDropped,
             snapped,
@@ -405,6 +418,15 @@ export const computeNoiseFloor = (armSamples: ArmSample[]): NoiseFloor => {
  * carried in `skippedSources`; identical-arm pools additionally get the
  * noise-floor bands.
  */
+/** Distinct ruler values, with "unstamped" added iff only some are set. */
+const rulerValues = (values: (string | undefined)[]): string[] => {
+    const set = new Set(values.filter((v): v is string => v !== undefined));
+    if (set.size > 0 && values.some((v) => v === undefined)) {
+        set.add("unstamped");
+    }
+    return [...set].sort();
+};
+
 export const aggregateSamples = (
     samples: ReportSample[],
     skippedSources: {source: string; reason: string}[] = [],
@@ -421,20 +443,11 @@ export const aggregateSamples = (
         skippedSources,
         samples: samples.length,
         baseRefs: [...new Set(samples.map((s) => s.baseRef))].sort(),
-        matchers: [
-            ...new Set(
-                samples
-                    .map((s) => s.matcher)
-                    .filter((m): m is string => m !== undefined),
-            ),
-        ].sort(),
-        corpusShas: [
-            ...new Set(
-                samples
-                    .map((s) => s.corpusSha)
-                    .filter((c): c is string => c !== undefined),
-            ),
-        ].sort(),
+        // A pool that mixes stamped and unstamped reports lists "unstamped"
+        // as a second ruler value, so the mixed-ruler warning fires; an
+        // all-unstamped pool stays silent as before (nothing to compare).
+        matchers: rulerValues(samples.map((s) => s.matcher)),
+        corpusShas: rulerValues(samples.map((s) => s.corpusSha)),
         arms: {
             baseline: aggregateArm(
                 "baseline",
@@ -689,6 +702,7 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
             "Legitimate unspecced (may-flag, not noise)",
             (a) => a.pooled.legitimateUnspecced,
         ),
+        `| Case-runs with may-flag entries (audited) | ${baseline.pooled.auditedRuns} / ${baseline.pooled.caseRuns} |  | ${candidate.pooled.auditedRuns} / ${candidate.pooled.caseRuns} |  |`,
         `| Misses (true / dropped) | ${dropSummary(
             baseline,
         )} |  | ${dropSummary(candidate)} |  |`,

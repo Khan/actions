@@ -406,6 +406,119 @@ describe("matchCase: lens tie-break and leftover buckets", () => {
         ]);
     });
 
+    it("applies the lens preference within a tier, not across the may-flag boundary", async () => {
+        // A may-flag-thesis candidate that happens to carry the spec's lens
+        // must not beat an available first-tier candidate from another
+        // lens; the lens only orders candidates inside a tier.
+        const rewriteFromSpecialist = {
+            ...finding(
+                "f-rewrite",
+                "the table rewrite under an exclusive lock stamps every existing row pending.",
+                "advisory",
+            ),
+            lens: "data-migrations",
+            source: "data-migrations",
+        };
+        const backfillFromCorrectness = finding(
+            "f-backfill",
+            "every existing row is backfilled pending and floods the queue.",
+        );
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [
+                spec({
+                    key: "backfill",
+                    mechanism: ["existing row.{0,40}pending"],
+                    lens: "data-migrations",
+                }),
+            ],
+            mayFlagSpecs: [
+                spec({key: "rewrite-lock", mechanism: ["rewrite.{0,40}lock"]}),
+            ],
+            findings: [rewriteFromSpecialist, backfillFromCorrectness],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught.map((c) => c.findingId)).toEqual(["f-backfill"]);
+        expect(match.legitimateUnspecced.map((l) => l.findingId)).toEqual([
+            "f-rewrite",
+        ]);
+    });
+
+    it("asks the arbiter fallback in the same ranking the deterministic pass uses", async () => {
+        // Neither candidate matches the spec's mechanism, so both go to the
+        // arbiter. It must be asked about the spec's own lens first, and a
+        // may-flag-thesis finding last; posted order put them the other way.
+        const rewrite = finding(
+            "f-rewrite",
+            "the table rewrite under an exclusive lock blocks reads.",
+            "advisory",
+        );
+        const neighbour = finding("f-neighbour", "the query will be slow.");
+        const specialist = {
+            ...finding("f-specialist", "the filter has nothing to use."),
+            lens: "data-migrations",
+            source: "data-migrations",
+        };
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [
+                spec({
+                    key: "index",
+                    mechanism: ["no index on status"],
+                    lens: "data-migrations",
+                }),
+            ],
+            mayFlagSpecs: [
+                spec({key: "rewrite-lock", mechanism: ["rewrite.{0,40}lock"]}),
+            ],
+            findings: [rewrite, neighbour, specialist],
+        });
+        const asked: string[] = [];
+        const match = await matchCase(corpusCase, result, {
+            fallback: async (candidate) => {
+                asked.push(candidate.id);
+                return true;
+            },
+        });
+        expect(asked).toEqual(["f-specialist"]);
+        expect(match.caught).toEqual([
+            {
+                specKey: "index",
+                findingId: "f-specialist",
+                via: "fallback",
+                blocking: true,
+            },
+        ]);
+        expect(match.legitimateUnspecced.map((l) => l.findingId)).toEqual([
+            "f-rewrite",
+        ]);
+    });
+
+    it("reports the trap's own lens as the false flag when two candidates fit", async () => {
+        const correctness = finding(
+            "f-corr",
+            "the delete exceeds the 500-entity cap.",
+        );
+        const specialist = {
+            ...finding("f-spec", "the batch cap is exceeded here."),
+            lens: "data-migrations",
+            source: "data-migrations",
+        };
+        const {corpusCase, result} = liveRun({
+            mustNotFlagSpecs: [
+                spec({
+                    key: "trap",
+                    mechanism: ["500.entity|batch cap"],
+                    lens: "data-migrations",
+                }),
+            ],
+            findings: [correctness, specialist],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.falseFlags.map((f) => f.findingId)).toEqual(["f-spec"]);
+        // The other copy is a second description of the same trapped
+        // pattern, not unspecced noise.
+        expect(match.unmatchedFindingIds).toEqual(["f-corr"]);
+    });
+
     it("routes a leftover whose prose alone names a may-flag defect to legitimate", async () => {
         // Rung 3: the failure_scenario is about neither the caught spec nor
         // the may-flag defect, so rungs 1 and 2 both decline, and only the

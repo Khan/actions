@@ -189,6 +189,18 @@ describe("extractSamples", () => {
         expect(sample.baseline.runs[0]?.legitimateUnspecced).toBe(0);
         expect(sample.candidate.runs[0]?.unmatchedPosted).toBe(2);
         expect(sample.candidate.runs[0]?.legitimateUnspecced).toBe(1);
+        expect(sample.candidate.runs[0]?.audited).toBe(false);
+
+        // The audited flag reads the case's own may-flag list.
+        const audited = rawRun("case-1", {posted: 1}) as unknown as {
+            corpusCase: Record<string, unknown>;
+        };
+        audited.corpusCase["live"] = {mayFlagSpecs: [{key: "m"}]};
+        const auditedSample = extractSamples(
+            "r2",
+            rawReport({baselineRuns: [audited], candidateRuns: [audited]}),
+        )[0]!;
+        expect(auditedSample.baseline.runs[0]?.audited).toBe(true);
     });
 
     it("carries recorded catch labels and omits unrecorded ones", () => {
@@ -329,6 +341,7 @@ describe("aggregateSamples", () => {
         unmatchedPosted: 0,
         duplicates: 0,
         legitimateUnspecced: 0,
+        audited: false,
         posted: 0,
         ...over,
     });
@@ -699,7 +712,13 @@ describe("renderAggregateMarkdown", () => {
             denominator: 4,
         });
         expect(report.arms.baseline.pooled.duplicates).toBe(2);
+        // Neither raw run carries a live block, so nothing counts as audited.
+        expect(report.arms.baseline.pooled.auditedRuns).toBe(0);
+        expect(report.arms.baseline.pooled.caseRuns).toBe(2);
         const markdown = renderAggregateMarkdown(report);
+        expect(markdown).toContain(
+            "| Case-runs with may-flag entries (audited) | 0 / 2 |  | 0 / 2 |  |",
+        );
         expect(markdown).toContain("| Noise (unmatched posted) | 4/8 (50%)");
         expect(markdown).toContain(
             "| of which duplicates of a claimed defect | 2 |  | 0 |  |",
@@ -794,6 +813,38 @@ describe("renderAggregateMarkdown", () => {
         expect(renderAggregateMarkdown(mixed)).toContain(
             "WARNING: pooled runs mix rulers",
         );
+
+        // A stamped report pooled with a legacy unstamped one is a mixed
+        // ruler too: "unstamped" is listed as the second value so the same
+        // warning fires. An all-unstamped pool stays silent as before.
+        const halfStamped = aggregateSamples([
+            ...extractSamples(
+                "r1",
+                withRuler("deterministic-v2", "c".repeat(64)),
+            ),
+            ...extractSamples(
+                "r2",
+                rawReport({
+                    baselineRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+                    candidateRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+                }),
+            ),
+        ]);
+        expect(halfStamped.matchers).toEqual(["deterministic-v2", "unstamped"]);
+        const halfMd = renderAggregateMarkdown(halfStamped);
+        expect(halfMd).toContain("matcher deterministic-v2, unstamped;");
+        expect(halfMd).toContain("WARNING: pooled runs mix rulers");
+        const legacyOnly = aggregateSamples([
+            ...extractSamples(
+                "r1",
+                rawReport({
+                    baselineRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+                    candidateRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+                }),
+            ),
+        ]);
+        expect(legacyOnly.matchers).toEqual([]);
+        expect(renderAggregateMarkdown(legacyOnly)).not.toContain("mix rulers");
     });
 
     it("warns on asymmetric samples under the noise-floor bands", () => {

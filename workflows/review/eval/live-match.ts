@@ -12,9 +12,11 @@
  *    agrees with the spec's path (and line window, when both carry one) AND
  *    any mechanism alternate matches the finding's `failure_scenario` or
  *    `model_authored_prose`, case-insensitively. When several candidates
- *    match one spec, the one whose `source` produces the spec's `lens` wins
- *    (resolved through `lens-sources.ts`, so a `conventions` spec is won by
- *    the skill-auditor's source `skill`), otherwise the first in posted
+ *    match one spec, a candidate whose thesis is one of the case's
+ *    `mayFlagSpecs` ranks behind the rest, then within a tier the one whose
+ *    `source` produces the spec's `lens` wins (resolved through
+ *    `lens-sources.ts`, so a `conventions` spec is won by the skill-auditor's
+ *    source `skill`), otherwise the first in posted
  *    order (run 33671015442 credited a nearby TTL
  *    suggestion from the correctness reviewer with the race-condition spec
  *    while the concurrency-async finding that actually described it sat
@@ -80,6 +82,13 @@ export type SpecMatch = {
     blocking: boolean;
 };
 
+/** A posted candidate that re-describes a defect another one claimed. */
+export type DuplicateMatch = {
+    findingId: string;
+    /** The must-catch spec or may-flag entry the other candidate claimed. */
+    specKey: string;
+};
+
 /** The deterministic gate a produced-but-not-posted candidate died at. */
 export type DroppedBucket = "provenance" | "scope" | "validation";
 
@@ -115,7 +124,7 @@ export type CaseMatchReport = {
      * author reads two comments about one bug) but routes to the merge stage
      * rather than the finders.
      */
-    duplicates: {findingId: string; specKey: string}[];
+    duplicates: DuplicateMatch[];
     /**
      * Posted candidates that satisfied a `mayFlagSpecs` entry: legitimate,
      * code-grounded findings the case does not spec as ground truth. Not
@@ -293,34 +302,57 @@ export const matchCase = async (
      * resolved through the producer's own lens table because the default
      * skill-auditor stamps `conventions` findings with source `skill`.
      */
+    /**
+     * Unclaimed posted candidates that could satisfy `spec`, best first: the
+     * deterministic hits ranked as below, then (for the arbiter fallback)
+     * the rest of the candidates on the spec's file in the same ranking.
+     *
+     * Two rules, tier before lens. A candidate whose thesis IS a labeled
+     * may-flag defect is about that defect, not this spec
+     * (incident-sql-missing-index: the NOT NULL DEFAULT rewrite finding can
+     * say "every existing row" and "pending" and hit the backfill spec,
+     * which has no lens or window to arbitrate with), so it sits in a
+     * second tier that is consulted only when the first is empty. Within a
+     * tier, when the spec names a lens, the candidate produced by that lens
+     * comes first: a loose mechanism alternate ("concurrent", "overwrit")
+     * is meant to accept paraphrase and a neighbouring finding from another
+     * lens can hit it too, and the lens the case was authored against is the
+     * finding the case is about. The comparison is against `source`, the
+     * producer the pipeline assigned, not `finding.lens`, which a specialist
+     * agent writes into its own JSON, resolved through the producer's own
+     * lens table because the default skill-auditor stamps `conventions`
+     * findings with source `skill`.
+     */
+    const rankedCandidates = (
+        spec: LiveDefectSpec,
+        pool: RunCandidate[],
+    ): RunCandidate[] => {
+        const aboutMayFlag = (candidate: RunCandidate): boolean =>
+            mayFlag.some((entry) => matchesSpec(candidate, entry, "scenario"));
+        const lensFirst = (tier: RunCandidate[]): RunCandidate[] => {
+            const lens = spec.lens;
+            if (lens === undefined) {
+                return tier;
+            }
+            const same = (candidate: RunCandidate): boolean =>
+                sourceProducesLens(candidate.source, lens);
+            return [...tier.filter(same), ...tier.filter((c) => !same(c))];
+        };
+        return [
+            ...lensFirst(pool.filter((candidate) => !aboutMayFlag(candidate))),
+            ...lensFirst(pool.filter(aboutMayFlag)),
+        ];
+    };
+    const unclaimed = (): RunCandidate[] =>
+        posted.filter((candidate) => !claimed.has(candidate.id));
     const deterministicClaimant = (
         spec: LiveDefectSpec,
     ): RunCandidate | undefined => {
-        const hits = posted.filter(
-            (candidate) =>
-                !claimed.has(candidate.id) && matchesSpec(candidate, spec),
+        const [best] = rankedCandidates(
+            spec,
+            unclaimed().filter((candidate) => matchesSpec(candidate, spec)),
         );
-        // A candidate whose thesis IS a labeled may-flag defect is about
-        // that defect, not this spec (incident-sql-missing-index: the NOT
-        // NULL DEFAULT rewrite finding can say "every existing row" and
-        // "pending" and hit the backfill spec, which has no lens or window
-        // to arbitrate with). It claims only if nothing else can.
-        const aboutMayFlag = (candidate: RunCandidate): boolean =>
-            mayFlag.some((entry) => matchesSpec(candidate, entry, "scenario"));
-        const ranked = [
-            ...hits.filter((candidate) => !aboutMayFlag(candidate)),
-            ...hits.filter(aboutMayFlag),
-        ];
-        const lens = spec.lens;
-        if (lens !== undefined) {
-            const sameLens = ranked.find((candidate) =>
-                sourceProducesLens(candidate.source, lens),
-            );
-            if (sameLens !== undefined) {
-                return sameLens;
-            }
-        }
-        return ranked[0];
+        return best;
     };
 
     const claim = async (
@@ -339,11 +371,15 @@ export const matchCase = async (
         if (options.fallback === undefined) {
             return undefined;
         }
-        // Fallback: only candidates sharing a spec file, in posted order.
-        for (const candidate of posted) {
-            if (claimed.has(candidate.id) || !onSpecFile(candidate, spec)) {
-                continue;
-            }
+        // Fallback: only candidates sharing a spec file, in the same
+        // ranking the deterministic pass uses, so the arbiter is asked about
+        // the spec's own lens before a neighbour and about a may-flag-thesis
+        // finding last.
+        const onFile = rankedCandidates(
+            spec,
+            unclaimed().filter((candidate) => onSpecFile(candidate, spec)),
+        );
+        for (const candidate of onFile) {
             if (fallbackCalls >= maxFallbackCalls) {
                 return undefined;
             }
@@ -436,7 +472,7 @@ export const matchCase = async (
     // satisfied by at most one candidate: a second copy of the same
     // unspecced defect is the same merge-stage miss a second copy of a
     // seeded one is, and lands in `duplicates` under the may-flag key.
-    const duplicates: CaseMatchReport["duplicates"] = [];
+    const duplicates: DuplicateMatch[] = [];
     const legitimateUnspecced: SpecMatch[] = [];
     const caughtSpecs = caught.flatMap((match) => {
         const spec = mustCatch.find((s) => s.key === match.specKey);
@@ -469,8 +505,7 @@ export const matchCase = async (
             duplicates.push({findingId: candidate.id, specKey: first.key});
         }
     };
-    const leftovers = (): RunCandidate[] =>
-        posted.filter((candidate) => !claimed.has(candidate.id));
+    const leftovers = unclaimed;
     // Rung 1.
     for (const candidate of leftovers()) {
         const about = mayFlag.filter((spec) =>

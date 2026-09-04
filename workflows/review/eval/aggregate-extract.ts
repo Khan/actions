@@ -30,17 +30,18 @@ export type SampleRun = {
      * under `unmatchedFindingIds`, so summing the two reconciles the
      * duplicate bucket, but NOT the may-flag bucket: a leftover that now
      * lands in `legitimateUnspecced` used to count here, so the same run
-     * reads a smaller numerator under the new shape. The corpus hash moves
-     * with every `mayFlagSpecs` edit, so a pool mixing stamped reports
-     * from both sides trips the mixed-ruler warning. Reports too old to
-     * carry a stamp show as "unstamped" in the ruler line instead, which is
-     * the only signal a pool of those and post-buckets reports gets.
+     * reads a smaller numerator under the new shape (see `duplicates` for
+     * how a mixed pool is flagged).
      */
     unmatchedPosted: number;
     /**
      * How many of `unmatchedPosted` are second copies of a defect another
      * comment already claimed, a caught spec or an accepted may-flag entry
-     * (0 for reports predating the bucket, which could not tell).
+     * (0 for reports predating the bucket, which could not tell). The
+     * corpus hash moves with every `mayFlagSpecs` edit, so a pool mixing
+     * stamped reports from both sides trips the mixed-ruler warning, and a
+     * pool mixing stamped with unstamped legacy reports lists "unstamped" as
+     * a second ruler value and trips it too.
      */
     duplicates: number;
     /**
@@ -48,6 +49,8 @@ export type SampleRun = {
      * predating the field): legitimate, not noise, not recall.
      */
     legitimateUnspecced: number;
+    /** Whether the case carried `mayFlagSpecs` (false for legacy reports). */
+    audited: boolean;
     posted: number;
     /**
      * Findings the provenance gate anchor-snapped (0 for reports predating
@@ -179,6 +182,10 @@ const parseArm = (
             unmatchedPosted: unmatched,
             duplicates,
             legitimateUnspecced,
+            audited:
+                isRecord(corpusCase["live"]) &&
+                Array.isArray(corpusCase["live"]["mayFlagSpecs"]) &&
+                corpusCase["live"]["mayFlagSpecs"].length > 0,
             posted: asNumber(match["postedCount"]),
             snapped: Array.isArray(result["snappedByProvenance"])
                 ? result["snappedByProvenance"].length
