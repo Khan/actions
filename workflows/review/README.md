@@ -562,9 +562,8 @@ are pure gain by construction rather than a measured improvement.
 codebase no harder for the next reader to understand, navigate, or change than it
 found it. It is advisory-only and opt-in like `conventions` and `documentation`, and
 it exists for the failure mode of a codebase that grows mostly by generated changes:
-no single PR is wrong, but each one adds a helper that already exists under another
-name, a flag that changes behavior three calls away, a wrapper with one caller, or a
-branch nothing reaches, and nobody reads the whole file again. Under a team norm of
+no single PR is wrong, but each one leaves the next reader a little more to untangle,
+and nobody reads the whole file again. Under a team norm of
 not reading tooling code by hand unless the tooling has a known gap, this reviewer is
 the thing that reads it.
 
@@ -623,7 +622,11 @@ None carries the `smoke` tag, so the per-PR A/B skips them. Price this reviewer 
 targeted `workflow_dispatch` of *Review Eval A/B* over those six cases with
 `repeats=3` (recipe in the eval README). The gate is the one `documentation` had: a
 positive recall delta on the seeded cases with the clean case silent, or the reviewer
-does not earn an `enable` line.
+does not earn an `enable` line. Read the delta with the eval README's power note in
+mind: 5 cases at 3 repeats is 15 spec-samples per arm, enough only for a large effect.
+The baseline arm has no lane for these defects, so the expected shape is a large
+delta or none. A small one reads as "fold the checks into an existing reviewer", the
+same fork `documentation` had, not as a signal to add repeats.
 
 ### The `.github/NOTIFIED` file (optional)
 

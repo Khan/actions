@@ -2648,7 +2648,11 @@ Flag deviations from the repo's own established patterns:
 - **Idiom** — a hand-rolled construct where the repo has an established idiom or helper.
 
 Do **not** flag anything CI already enforces (formatting, import ordering, lint rules) or
-anything the other reviewers own (correctness, best-practice skills, tests). A convention
+anything the other reviewers own (correctness, best-practice skills, tests). A second
+copy of a function that already exists under another name, a name that misleads about
+what the body does, and dead code are `maintainability`'s when that reviewer is
+enabled (its findings carry their own label); yours is the idiom or helper the repo
+established and this change bypassed, which is a different claim. A convention
 is only real if the surrounding code actually follows it — confirm before flagging.
 **Quote the rule, quote the line:** flag a deviation only when you can quote both the
 evidence that the convention is real (the exact existing usage you grepped, or the
@@ -2961,8 +2965,8 @@ is still cheap to adjust.
 
 **The test for a finding is a concrete reader who is misled or made to do more work.**
 Name that reader's mistake or extra step in `failure_scenario`. "Could be cleaner" is
-not a finding; "a caller reading `isValid` will assume it does not mutate, and it
-writes `lastChecked`" is. Flag, in this priority order:
+not a finding; "a caller reading `hasQuota` will assume it only reads, and it
+decrements the counter" is. Flag, in this priority order:
 
 - **A second copy of something that exists.** The diff adds a function, type, or
   constant whose behavior an existing symbol in the repo already provides (same job,
@@ -3046,7 +3050,7 @@ type the new one does not.
 
 **Suggestions.** Include `suggestion` when there is replacement code: the call to the
 existing helper in place of the new body, the corrected name at the definition, the
-flag read moved to the call site. A pure deletion (dead branch, commented-out block)
+flag read moved to the call site. A pure deletion (a dead branch, an unused parameter)
 cannot be a non-empty suggestion, so say "delete" in the prose and omit it.
 
 **Anchoring.** Anchor on a line the diff **added or changed** (RIGHT-side line
@@ -3054,8 +3058,8 @@ number): the new definition for a duplicate, the definition line for a misleadin
 name, the flag's declaration for a hidden flag, the new wrapper's definition for
 indirection. For dead code the branch itself is usually untouched and what the diff
 added is the guard or early return that killed it, so anchor on that added line and
-name the dead lines in the prose ("the `case \"fatal\"` arm eight lines below can no
-longer be reached"). Only when the dead lines are themselves added by the diff is the
+name the dead lines in the prose ("the arm eight lines below can no longer be
+reached"). Only when the dead lines are themselves added by the diff is the
 first of them the anchor. A finding anchored on an untouched line is dropped by the
 change-provenance gate before it posts.
 
