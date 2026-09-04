@@ -3051,9 +3051,13 @@ cannot be a non-empty suggestion, so say "delete" in the prose and omit it.
 
 **Anchoring.** Anchor on a line the diff **added or changed** (RIGHT-side line
 number): the new definition for a duplicate, the definition line for a misleading
-name, the flag's declaration for a hidden flag, the first dead line for dead code, the
-new wrapper's definition for indirection. A finding anchored on an untouched line is
-dropped by the change-provenance gate before it posts.
+name, the flag's declaration for a hidden flag, the new wrapper's definition for
+indirection. For dead code the branch itself is usually untouched and what the diff
+added is the guard or early return that killed it, so anchor on that added line and
+name the dead lines in the prose ("the `case \"fatal\"` arm eight lines below can no
+longer be reached"). Only when the dead lines are themselves added by the diff is the
+first of them the anchor. A finding anchored on an untouched line is dropped by the
+change-provenance gate before it posts.
 
 Return ONLY this JSON object (no prose, no code fence):
 {

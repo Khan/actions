@@ -3,6 +3,7 @@ import {join} from "node:path";
 
 import {describe, it, expect} from "vitest";
 
+import {DOCUMENTATION_LABEL, MAINTAINABILITY_LABEL} from "./render-comment.ts";
 import {SPECIALIST_LENSES} from "./router.ts";
 
 /**
@@ -246,6 +247,28 @@ describe("the label-shape reviewers still carry their own disciplines", () => {
     ]) {
         it(`${agent}: keeps its own bounded-investigation block`, () => {
             expect(lensSection(agent)).toContain("**Bounded investigation.**");
+        });
+    }
+});
+
+describe("the single-label reviewers declare the label the code renders", () => {
+    // Each of these prompts tells its agent to emit exactly one label, and
+    // the code assigns the lens from the agent name and renders the label
+    // from the lens. If the prompt's string drifted from the constant, the
+    // parse would still succeed (the label is re-derived from the lens), so
+    // no test downstream would catch the prompt promising one thing and the
+    // posted comment carrying another.
+    for (const [agent, label] of [
+        ["documentation", DOCUMENTATION_LABEL],
+        ["maintainability", MAINTAINABILITY_LABEL],
+    ] as const) {
+        it(`${agent}: its output schema names ${label}`, () => {
+            const section = lensSection(agent);
+            expect(section).toContain(`"label": "${label}"`);
+            // And no other label appears in the schema block.
+            const schema = section.slice(section.indexOf('"findings": [{'));
+            const labels = schema.match(/"label": "[^"]+"/g) ?? [];
+            expect(labels).toEqual([`"label": "${label}"`]);
         });
     }
 });

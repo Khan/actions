@@ -99,7 +99,7 @@ gh workflow run review-eval-ab.yml --ref <branch> \
 gh workflow run review-eval-ab.yml --ref <branch> \
   -f base_ref=origin/main \
   -f cases=golden-maintainability-duplicate-helper,golden-maintainability-misleading-name,golden-maintainability-hidden-flag,golden-maintainability-dead-branch,golden-maintainability-one-caller-wrapper,clean-maintainability-reuses-existing \
-  -f repeats=3 -f max_usd=40
+  -f repeats=3 -f max_usd=60
 
 # Pool reports across dispatches (run ids or local paths)
 pnpm dlx tsx workflows/review/eval/aggregate.ts <run-id> <run-id> ... [--out <path>]
