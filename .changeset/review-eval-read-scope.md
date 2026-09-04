@@ -19,7 +19,11 @@ per agent into the report even when the attempt times out (a new
 "Reads denied outside the staged case" row on single runs and pooled line on
 repeats reports, plus a section naming the reviewer when nonzero, with
 tool-policy denials listed apart), and writes one transcript per dispatch under the
-runner's temp dir, uploaded as `live-ab-transcripts`. Every live workflow
+runner's temp dir, uploaded as `live-ab-transcripts`. The ruler stamp gains
+the runner's tool policy, so every report's "Ruler:" line now ends with
+`tools read-scoped:v1:Read,Grep,Glob`, reports from before this change pool
+as `unscoped`, and a drift series crossing the boundary warns as mixed
+rulers. Every live workflow
 starts with `live-runner.ts --probe-read-scope`, one Haiku call that fails
 the job if an out-of-scope read goes through. The README's read protocol now
 says to read at least one transcript per arm before trusting a delta, and

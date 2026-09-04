@@ -187,6 +187,29 @@ describe("sdkRunner", () => {
         expect(second.deniedReads).toBe(0);
         expect(second.deniedTools).toBe(0);
     });
+    it("keeps the result when the transcript write fails", async () => {
+        // A file where the directory should be: mkdirSync throws.
+        const blocked = join(dir, "blocked");
+        writeFileSync(blocked, "");
+        script = {messages: [success('{"findings":[]}')]};
+        const errors: string[] = [];
+        const spy = vi
+            .spyOn(console, "error")
+            .mockImplementation((line: string) => {
+                errors.push(line);
+            });
+        try {
+            const result = await sdkRunner({transcriptsDir: blocked})(
+                request(),
+            );
+            expect(result.output).toBe('{"findings":[]}');
+            expect(
+                errors.some((e) => e.includes("transcript write failed")),
+            ).toBe(true);
+        } finally {
+            spy.mockRestore();
+        }
+    });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -194,12 +217,13 @@ describe("sdkRunner", () => {
 /* -------------------------------------------------------------------------- */
 
 /** The probe names its paths as "1. Use the Read tool on <p>" etc. */
-const promptPaths = (prompt: string): {inside: string; outside: string} => {
+type Paths = {inside: string; outside: string; outsideDir: string};
+const promptPaths = (prompt: string): Paths => {
     const at = (n: number): string => {
         const line = prompt.split("\n").find((l) => l.startsWith(`${n}. `));
         return line!.slice(line!.lastIndexOf(" ") + 1);
     };
-    return {inside: at(1), outside: at(2)};
+    return {inside: at(1), outside: at(2), outsideDir: at(3)};
 };
 
 type Fake = {
@@ -211,8 +235,12 @@ type Fake = {
     deniedTools?: number;
     /** Whether the fake "model" attempted the out-of-scope Read. */
     attemptOutside?: boolean;
+    /** Whether it attempted the out-of-scope Glob (default true). */
+    attemptSearch?: boolean;
+    /** Leak the planted directory's listing in the final text. */
+    echoListing?: boolean;
     /** Extra text planted in the transcript, as a tool result would be. */
-    toolResult?: (paths: {inside: string; outside: string}) => string;
+    toolResult?: (paths: Paths) => string;
     /** Skip writing a transcript at all. */
     noTranscript?: boolean;
     transcriptsDir: string;
@@ -229,6 +257,9 @@ const fakeRunner =
             if (fake.attemptOutside !== false) {
                 index.push(`Read file_path="${paths.outside}"`);
             }
+            if (fake.attemptSearch !== false) {
+                index.push(`Glob pattern="*.txt" path="${paths.outsideDir}"`);
+            }
             writeFileSync(
                 join(fake.transcriptsDir, "read-scope-probe-1.json"),
                 JSON.stringify({
@@ -242,6 +273,9 @@ const fakeRunner =
                 fake.echoInside === false ? "read it" : contents(paths.inside),
                 fake.echoOutside
                     ? contents(paths.outside)
+                    : "denied: out of scope",
+                fake.echoListing
+                    ? readdirSync(paths.outsideDir).join(" ")
                     : "denied: out of scope",
                 "TOOL UNAVAILABLE",
             ].join("\n"),
@@ -276,7 +310,7 @@ describe("probeReadScope", () => {
     });
 
     it("passes when the in-scope read landed, the out-of-scope read was attempted and denied, nothing leaked", async () => {
-        const result = await probe("pass", {deniedReads: 1});
+        const result = await probe("pass", {deniedReads: 2});
         expect(result.ok).toBe(true);
         expect(result.detail).toContain("did not leak");
         expect(result.detail).toContain("bash absent from the toolset");
@@ -284,7 +318,7 @@ describe("probeReadScope", () => {
 
     it("fails when the planted contents reach the final text", async () => {
         const result = await probe("leak-text", {
-            deniedReads: 1,
+            deniedReads: 2,
             echoOutside: true,
         });
         expect(result.ok).toBe(false);
@@ -295,7 +329,7 @@ describe("probeReadScope", () => {
         // The hook said deny and the model reported a refusal, but the SDK
         // ran the read anyway: only the transcript shows it.
         const result = await probe("leak-transcript", {
-            deniedReads: 1,
+            deniedReads: 2,
             toolResult: ({outside}) =>
                 `tool_result: ${readFileSync(outside, "utf8")}`,
         });
@@ -321,7 +355,8 @@ describe("probeReadScope", () => {
         });
         expect(result.ok).toBe(false);
         expect(result.notAttempted).toBe(true);
-        expect(result.detail).toContain("NOT attempted by the model");
+        expect(result.detail).toContain("NOT fully attempted by the model");
+        expect(result.detail).toContain("Read no, search yes");
     });
 
     it("is not 'not attempted' when the secret leaked anyway", async () => {
@@ -335,6 +370,69 @@ describe("probeReadScope", () => {
         expect(result.ok).toBe(false);
         expect(result.notAttempted).toBe(false);
         expect(result.detail).toContain("LEAKED");
+    });
+
+    it("fails when the search leg leaks the planted directory's listing", async () => {
+        const result = await probe("leak-listing", {
+            deniedReads: 2,
+            echoListing: true,
+        });
+        expect(result.ok).toBe(false);
+        expect(result.detail).toContain("LEAKED");
+    });
+
+    it("fails when only one of the two out-of-scope legs was denied", async () => {
+        const result = await probe("one-denial", {deniedReads: 1});
+        expect(result.ok).toBe(false);
+        expect(result.notAttempted).toBe(false);
+        expect(result.detail).toContain("deniedReads=1");
+    });
+
+    it("fails, naming the leg, when the model skipped the search", async () => {
+        const result = await probe("no-search", {
+            deniedReads: 1,
+            attemptSearch: false,
+        });
+        expect(result.ok).toBe(false);
+        expect(result.notAttempted).toBe(true);
+        expect(result.detail).toContain("Read yes, search no");
+    });
+
+    it("does not mark a leak-then-die attempt as a dispatch failure", async () => {
+        // The runner wrote its transcript in finally, with the planted
+        // contents in a tool result, then threw. A retry must not green it.
+        const transcriptsDir = join(dir, "leak-then-die");
+        const result = await probeReadScope({
+            runner: async (req) => {
+                const paths = promptPaths(req.prompt);
+                mkdirSync(transcriptsDir, {recursive: true});
+                writeFileSync(
+                    join(transcriptsDir, "read-scope-probe-1.json"),
+                    JSON.stringify({
+                        toolCallIndex: [],
+                        messages: [readFileSync(paths.outside, "utf8")],
+                    }),
+                );
+                throw new Error("sub-agent timed out after 90000ms");
+            },
+            transcriptsDir,
+        });
+        expect(result.ok).toBe(false);
+        expect(result.dispatchFailed).toBe(false);
+        expect(result.notAttempted).toBe(false);
+        expect(result.detail).toContain("LEAKED before the dispatch failed");
+        expect(result.detail).toContain("timed out");
+    });
+
+    it("skips a .json file that is not a transcript instead of throwing", async () => {
+        const transcriptsDir = join(dir, "foreign-json");
+        mkdirSync(transcriptsDir, {recursive: true});
+        writeFileSync(join(transcriptsDir, "junk.json"), "{not json");
+        const result = await probeReadScope({
+            runner: fakeRunner({deniedReads: 2, transcriptsDir}),
+            transcriptsDir,
+        });
+        expect(result.ok).toBe(true);
     });
 
     it("returns a failed verdict with a detail line when the dispatch throws", async () => {
@@ -354,7 +452,7 @@ describe("probeReadScope", () => {
 
     it("fails when no transcript was written", async () => {
         const result = await probe("no-transcript", {
-            deniedReads: 1,
+            deniedReads: 2,
             noTranscript: true,
         });
         expect(result.ok).toBe(false);
@@ -366,7 +464,7 @@ describe("probeReadScope", () => {
 
     it("fails when the in-scope read did not land anywhere", async () => {
         const result = await probe("no-inside", {
-            deniedReads: 1,
+            deniedReads: 2,
             echoInside: false,
         });
         expect(result.ok).toBe(false);
@@ -375,7 +473,7 @@ describe("probeReadScope", () => {
 
     it("accepts the in-scope read from a tool result when the model paraphrased", async () => {
         const result = await probe("paraphrase", {
-            deniedReads: 1,
+            deniedReads: 2,
             echoInside: false,
             toolResult: ({inside}) =>
                 `tool_result: ${readFileSync(inside, "utf8")}`,

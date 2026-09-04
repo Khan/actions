@@ -315,8 +315,11 @@ claiming a band.
 - **Read at least one transcript per arm** before trusting a recall or noise
   delta (the `live-ab-transcripts` artifact, one file per dispatch, tool-call
   index at the top). A count of tool calls cannot tell investigation from a
-  reviewer reading the answer key, shaping its JSON from the contract source,
-  or looping on one file. The index can, in under a minute. Start with the
+  reviewer reading the answer key (index lines naming `case.json`,
+  `mustCatch`, or `live-match.ts`), shaping its JSON from the contract
+  source (Read lines on `dispatch-contracts.ts` or `finding-schema.ts`
+  rather than the change under review), or looping on one file (the same
+  Read path many times). The index can, in under a minute. Start with the
   agent that had the most calls on the case that moved, and with any agent
   the report lists under "Reviewers that read outside the staged case".
 - **Stacked PRs:** a per-PR report's baseline is the PR's base branch tip

@@ -23,13 +23,23 @@ import {dirname, isAbsolute, resolve, sep} from "node:path";
 export const READ_TOOLS = ["Read", "Grep", "Glob"] as const;
 
 /**
+ * Bump when {@link outOfScopeRead}'s semantics change (what counts as
+ * inside the root, how patterns are judged, which tools it covers). The
+ * toolset is in the stamp by name; this is the part of the ruler that a
+ * rule change would otherwise leave looking identical.
+ */
+export const SCOPE_RULE_VERSION = 1;
+
+/**
  * The runner's tool policy as a ruler stamp (see ReportProvenance). Reports
  * before the scope carry no such field and read as `unscoped` in the
  * aggregate, so a drift pool spanning the boundary warns the way a matcher
- * change does. Bump the string whenever the toolset or the scope rule
- * changes what a reviewer can reach.
+ * change does. The stamp moves when the toolset changes or when
+ * {@link SCOPE_RULE_VERSION} is bumped.
  */
-export const READ_TOOL_POLICY = `read-scoped:${READ_TOOLS.join(",")}`;
+export const READ_TOOL_POLICY = `read-scoped:v${SCOPE_RULE_VERSION}:${READ_TOOLS.join(
+    ",",
+)}`;
 
 export type ReadScopeOptions = {
     /**

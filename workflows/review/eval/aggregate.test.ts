@@ -754,7 +754,7 @@ describe("renderAggregateMarkdown", () => {
             provenance: {
                 ...ruler,
                 caseCount: 1,
-                toolPolicy: "read-scoped:Read,Grep,Glob",
+                toolPolicy: "read-scoped:v1:Read,Grep,Glob",
             },
         };
         const uniform = aggregateSamples([
@@ -762,7 +762,7 @@ describe("renderAggregateMarkdown", () => {
             ...extractSamples("r2", scoped),
         ]);
         expect(renderAggregateMarkdown(uniform)).toContain(
-            "tools read-scoped:Read,Grep,Glob.",
+            "tools read-scoped:v1:Read,Grep,Glob.",
         );
         expect(renderAggregateMarkdown(uniform)).not.toContain("mix rulers");
         const mixed = aggregateSamples([
@@ -770,7 +770,7 @@ describe("renderAggregateMarkdown", () => {
             ...extractSamples("r2", scoped),
         ]);
         expect(mixed.toolPolicies).toEqual([
-            "read-scoped:Read,Grep,Glob",
+            "read-scoped:v1:Read,Grep,Glob",
             "unscoped",
         ]);
         expect(renderAggregateMarkdown(mixed)).toContain(
