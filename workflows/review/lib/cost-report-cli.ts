@@ -11,8 +11,8 @@
  *     review.md-defined names, never from model text, and every cell is
  *     escaped.
  *  2. The step summary, so the run page shows it without opening the PR.
- *  3. `/tmp/gh-aw/review/cost-report.json` for the run artifact, so the
- *     weekly counters can pool it.
+ *  3. `/tmp/gh-aw/agent/cost-report.json`, beside the gate's report in the
+ *     `agent` artifact, so the weekly counters can pool it.
  *
  * Runs here rather than inside the agent step because two of its inputs
  * only exist afterwards: the api-proxy's `token-usage.jsonl` (the whole run
@@ -53,7 +53,20 @@ export type CostReportFs = {
 const AGENT_OUTPUT_PATH = "/tmp/gh-aw/agent_output.json";
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const DISPATCH_RESULT_PATH = `${REVIEW_DIR}/dispatch-result.json`;
-export const COST_REPORT_PATH = `${REVIEW_DIR}/cost-report.json`;
+/**
+ * Under /tmp/gh-aw/agent/ beside the gate's report: that directory is in the
+ * "Upload agent artifacts" step, which runs after the post-steps. The
+ * review's own out/ artifact is staged and uploaded during the agent step,
+ * so a file written there now would never leave the runner.
+ */
+const REPORT_DIR = "/tmp/gh-aw/agent";
+export const COST_REPORT_PATH = `${REPORT_DIR}/cost-report.json`;
+/**
+ * gh-aw caps a queued review body at 65000 characters at ingest, and GitHub
+ * rejects a body over 65536. The block is spliced in after that check, so
+ * it must fit under the same cap or the whole review would fail to post.
+ */
+export const BODY_CAP = 65000;
 const AGENT_USAGE_PATH = "/tmp/gh-aw/agent_usage.json";
 /** gh-aw's merged rate table (the overlay over its catalog), when present. */
 const MODELS_JSON_PATH = "/tmp/gh-aw/models.json";
@@ -188,14 +201,48 @@ export const runCostReportCli = (
         );
     }
 
-    // 3. The artifact, first: it is the record even if the body edit fails.
-    fs.mkdirSync(REVIEW_DIR, {recursive: true});
+    // The review body in the queue, decided first so a block that does not
+    // fit is noted in the artifact and summary too. A gate-stripped queue
+    // has no submit item and that is fine: the other two surfaces carry it.
+    let bodyUpdated = false;
+    const queue = readJsonIfPresent(fs, AGENT_OUTPUT_PATH);
+    const details = renderCostDetails(report);
+    const items =
+        isRecord(queue) && Array.isArray(queue["items"])
+            ? queue["items"].map((item) => {
+                  if (
+                      !isRecord(item) ||
+                      item["type"] !== SUBMIT_TYPE ||
+                      typeof item["body"] !== "string"
+                  ) {
+                      return item;
+                  }
+                  const body = withCostDetails(item["body"], details);
+                  if (body.length > BODY_CAP) {
+                      // A review that posts without its price tag beats one
+                      // that GitHub rejects.
+                      report.notes.push(
+                          "The review body was within " +
+                              `${body.length - BODY_CAP} characters of ` +
+                              "GitHub's limit, so the cost block was left " +
+                              "out of it.",
+                      );
+                      return item;
+                  }
+                  bodyUpdated = true;
+                  return {...item, body};
+              })
+            : undefined;
+
+    // The artifact, before the queue write: it is the record even if that
+    // write fails.
+    fs.mkdirSync(REPORT_DIR, {recursive: true});
     fs.writeFileSync(
         COST_REPORT_PATH,
         `${JSON.stringify({...report, rateSource: source}, null, 2)}\n`,
     );
 
-    // 2. The step summary.
+    // The step summary.
     if (
         options.stepSummaryPath !== undefined &&
         options.stepSummaryPath !== ""
@@ -206,29 +253,12 @@ export const runCostReportCli = (
         );
     }
 
-    // 1. The review body in the queue. A gate-stripped queue has no submit
-    // item and that is fine: the summary and artifact still carry it.
-    let bodyUpdated = false;
-    const queue = readJsonIfPresent(fs, AGENT_OUTPUT_PATH);
-    if (isRecord(queue) && Array.isArray(queue["items"])) {
-        const details = renderCostDetails(report);
-        const items = queue["items"].map((item) => {
-            if (
-                !isRecord(item) ||
-                item["type"] !== SUBMIT_TYPE ||
-                typeof item["body"] !== "string"
-            ) {
-                return item;
-            }
-            bodyUpdated = true;
-            return {...item, body: withCostDetails(item["body"], details)};
-        });
-        if (bodyUpdated) {
-            fs.writeFileSync(
-                AGENT_OUTPUT_PATH,
-                `${JSON.stringify({...queue, items}, null, 2)}\n`,
-            );
-        }
+    // The queue, last.
+    if (bodyUpdated && isRecord(queue) && items !== undefined) {
+        fs.writeFileSync(
+            AGENT_OUTPUT_PATH,
+            `${JSON.stringify({...queue, items}, null, 2)}\n`,
+        );
     }
     return {report, rateSource: source, bodyUpdated};
 };

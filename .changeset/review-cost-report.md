@@ -9,7 +9,12 @@ at the end of the review body with one row per sub-agent (model, tool calls,
 turns, wall clock, tokens by class), a row for the prose judge, a row for the
 orchestrator, and a total, at Khan's rate with the SDK's list figure beside
 it. The same table lands in the run's step summary and as
-`cost-report.json` in the run artifact.
+`cost-report.json` in the run's `agent` artifact. Body size: every review
+body grows by one collapsed block, roughly 1,000 to 2,000 characters for a
+default-roster run (one table row per sub-agent), which the reader sees as a
+one-line `review cost: $x.xx at Khan's rate` chip. The block is left out,
+with a note in the summary and artifact, when the body would otherwise cross
+GitHub's 65000-character cap.
 
 Before this, a run's cost lived in three places that never met:
 `dispatch-result.json`'s per-agent `usd` was the Claude Agent SDK's own meter

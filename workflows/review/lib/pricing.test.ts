@@ -10,8 +10,10 @@ import {
     mergeUsage,
     pinOf,
     priceTokens,
+    rateCardFromProviders,
     readOverlayRates,
     usageOfResponse,
+    usageOfResultMessage,
     type AgentCost,
     type ModelTokens,
 } from "./pricing";
@@ -122,6 +124,81 @@ describe("readOverlayRates", () => {
             expect(khan.cacheWrite / list.cacheWrite).toBeCloseTo(ratio, 9);
             expect(ratio).toBeCloseTo(0.5, 9);
         }
+    });
+});
+
+describe("rateCardFromProviders", () => {
+    it("lets anthropic's entry win over another provider's copy of the same pin", () => {
+        // gh-aw's models.json carries claude-opus-5 under anthropic (the
+        // overlay, 2.5e-06) and github-copilot (list, 5e-06). Object order
+        // must not decide which one prices the run.
+        const providers = {
+            "github-copilot": {
+                models: {
+                    "claude-opus-5": {
+                        cost: {input: "5e-06", output: "2.5e-05"},
+                    },
+                },
+            },
+            anthropic: {
+                models: {
+                    "claude-opus-5": {
+                        cost: {input: "2.5e-06", output: "1.25e-05"},
+                    },
+                },
+            },
+            google: {
+                models: {
+                    "gemini-3.8-flash": {cost: {input: 1e-7, output: 4e-7}},
+                },
+            },
+        };
+        const card = rateCardFromProviders(providers);
+        expect(card.get("claude-opus-5")?.input).toBe(2.5e-6);
+        expect(card.get("gemini-3.8-flash")?.input).toBe(1e-7);
+        expect(
+            rateCardFromProviders({anthropic: providers.anthropic}).size,
+        ).toBe(1);
+        expect(rateCardFromProviders(null).size).toBe(0);
+    });
+});
+
+describe("usageOfResultMessage", () => {
+    it("reads modelUsage keyed by canonical model, and is undefined without it", () => {
+        expect(
+            usageOfResultMessage({
+                modelUsage: {
+                    "claude-opus-5": {
+                        inputTokens: 10,
+                        outputTokens: 20,
+                        cacheReadInputTokens: 30,
+                        cacheCreationInputTokens: 40,
+                        costUSD: 0.01,
+                    },
+                    "claude-haiku-4-5-20251001": {
+                        inputTokens: 1,
+                        canonicalModel: "claude-haiku-4-5",
+                    },
+                },
+            }),
+        ).toEqual([
+            {
+                model: "claude-opus-5",
+                input: 10,
+                output: 20,
+                cacheRead: 30,
+                cacheWrite: 40,
+            },
+            {
+                model: "claude-haiku-4-5",
+                input: 1,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+            },
+        ]);
+        expect(usageOfResultMessage({})).toBeUndefined();
+        expect(usageOfResultMessage({modelUsage: {}})).toBeUndefined();
     });
 });
 

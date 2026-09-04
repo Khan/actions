@@ -1,5 +1,6 @@
 /**
- * The one place the eval turns tokens into dollars.
+ * The one place the review turns tokens into dollars, in production (the
+ * per-review cost report) and in the eval (the A/B tables) alike.
  *
  * Every `usd` the eval records is provider LIST price: the SDK harness's
  * `total_cost_usd` is what Anthropic bills a bare API key. Production meters
@@ -41,6 +42,9 @@ export type Rates = {
 
 /** Rates by model pin (the undated id, see {@link pinOf}). */
 export type RateCard = ReadonlyMap<string, Rates>;
+
+/** The provider whose entry wins when a pin is priced under several. */
+export const PREFERRED_PROVIDER = "anthropic";
 
 /** Token counts for one model across some unit of work. */
 export type TokenUsage = {
@@ -117,9 +121,16 @@ export const rateCardFromProviders = (providers: unknown): RateCard => {
     if (typeof providers !== "object" || providers === null) {
         return card;
     }
-    for (const provider of Object.values(
-        providers as Record<string, unknown>,
-    )) {
+    // gh-aw's models.json lists the same claude pins under more than one
+    // provider (anthropic at the overlay's rate, github-copilot at list),
+    // and a flat pin-keyed card would let whichever came last win. The
+    // overlay is written under `anthropic`, and that is the provider the
+    // runs bill through, so it is read first and the rest only fill gaps.
+    const entries = Object.entries(providers as Record<string, unknown>).sort(
+        ([a], [b]) =>
+            Number(b === PREFERRED_PROVIDER) - Number(a === PREFERRED_PROVIDER),
+    );
+    for (const [, provider] of entries) {
         const models = (provider as {models?: unknown} | null)?.models;
         if (typeof models !== "object" || models === null) {
             continue;
@@ -143,7 +154,7 @@ export const rateCardFromProviders = (providers: unknown): RateCard => {
             };
             const input = rate("input");
             const output = rate("output");
-            if (input === undefined || output === undefined) {
+            if (input === undefined || output === undefined || card.has(pin)) {
                 continue;
             }
             card.set(pin, {

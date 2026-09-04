@@ -172,7 +172,7 @@ describe("buildCostReport", () => {
         ]);
     });
 
-    it("keeps an untracked or un-overlaid dispatch at its recorded list figure, and says which", () => {
+    it("prices an untracked dispatch by ratio and an un-overlaid one at list when there is no proxy log", () => {
         const report = buildCostReport({
             perAgent: [
                 agent("correctness-reviewer"),
@@ -185,12 +185,60 @@ describe("buildCostReport", () => {
             ],
             khan: KHAN,
         });
-        // 3 + 2 (untracked, list) + 4 (no overlay entry, list).
-        expect(report.total.khanUsd).toBe(9);
+        // 3 from tokens, 2 * 0.5 by ratio (untracked opus), 4 at list.
+        expect(report.total.khanUsd).toBe(8);
         expect(report.notes.slice(0, 2)).toEqual([
             "No Khan-rate entry, so read at list: gemini-3.8-flash.",
-            "1 dispatch(es) recorded no token counts and read at the SDK's list figure.",
+            "1 dispatch(es) recorded no token counts and are priced from the SDK's list figure by the overlay ratio (at list where the model has none).",
         ]);
+    });
+
+    it("leaves an untracked dispatch inside the orchestrator remainder when the proxy log is in hand", () => {
+        // The proxy saw both agents' tokens, and only one agent attributed
+        // them. Pricing the other's recorded dollars as well would count
+        // those tokens twice, once in its row and once in the remainder.
+        const report = buildCostReport({
+            perAgent: [
+                agent("correctness-reviewer"),
+                agent("security-reviewer", {usage: undefined, usd: 6}),
+            ],
+            khan: KHAN,
+            proxyUsage: [{...OPUS_6, input: 800_000, output: 320_000}],
+            agentUsage: {ai_credits: 600},
+        });
+        const security = report.agents.find(
+            (r) => r.label === "security-reviewer",
+        );
+        expect(security).toMatchObject({attempts: 1, khanUsd: 0, listUsd: 0});
+        expect(report.engine?.khanUsd).toBe(3);
+        expect(report.total).toEqual({khanUsd: 6, listUsd: 12});
+        expect(report.reconciliation?.ratio).toBe(1);
+        expect(report.notes).toEqual([
+            "1 dispatch(es) recorded no token counts, so their spend is inside the orchestrator row rather than their own.",
+        ]);
+    });
+
+    it("adds up two proxy model ids that share a pin before taking the remainder", () => {
+        const report = buildCostReport({
+            perAgent: [agent("correctness-reviewer")],
+            khan: KHAN,
+            proxyUsage: [
+                {...OPUS_6, model: "claude-opus-5-20260401"},
+                {...OPUS_6, model: "claude-opus-5-20260615"},
+            ],
+        });
+        // 2 * $6 list seen by the proxy, $6 attributed: $6 list left, $3 Khan.
+        expect(report.engine).toMatchObject({khanUsd: 3, listUsd: 6});
+    });
+
+    it("cross-checks the list table against the SDK's meter on the sub-agents", () => {
+        const report = buildCostReport({
+            perAgent: [agent("correctness-reviewer", {usd: 12})],
+            khan: KHAN,
+        });
+        expect(report.notes).toContain(
+            "List-rate check: the list table prices the sub-agents' tokens at $6.00 and the SDK metered $12.00 (0.50x), so one of the two has moved (see pricing.ts).",
+        );
     });
 });
 
@@ -236,6 +284,15 @@ describe("renderCostTable and renderCostDetails", () => {
         );
         expect(renderCostTable(report)).toContain(
             "| weird&#124;&#60;name&#62; |",
+        );
+        // Notes carry proxy-log model ids too, so they are escaped as well.
+        const proxied = buildCostReport({
+            perAgent: [agent("correctness-reviewer")],
+            khan: KHAN,
+            proxyUsage: [OPUS_6, {...OPUS_6, model: "<img>|x"}],
+        });
+        expect(renderCostTable(proxied)).toContain(
+            "- The proxy saw models this report cannot price: &#60;img&#62;&#124;x.",
         );
     });
 

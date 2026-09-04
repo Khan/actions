@@ -37,6 +37,7 @@ import {
     ANTHROPIC_LIST_RATES,
     EMPTY_USAGE,
     khanCost,
+    listDrift,
     mergeUsage,
     pinOf,
     priceTokens,
@@ -132,9 +133,13 @@ const remainder = (
     total: readonly ModelTokens[],
     spent: readonly ModelTokens[],
 ): {usage: ModelTokens[]; overrun: string[]} => {
+    // Merge by pin first: the proxy logs dated ids, and two of them for one
+    // pin must add up, not overwrite.
     const byPin = new Map<string, ModelTokens>();
-    for (const t of mergeUsage(total)) {
-        byPin.set(pinOf(t.model), {...t, model: pinOf(t.model)});
+    for (const t of mergeUsage(
+        total.map((u) => ({...u, model: pinOf(u.model)})),
+    )) {
+        byPin.set(t.model, t);
     }
     const overrun: string[] = [];
     for (const s of mergeUsage(spent)) {
@@ -180,27 +185,38 @@ export const buildCostReport = (inputs: CostReportInputs): CostReport => {
     const {khan} = inputs;
     const notes: string[] = [];
 
-    // Agents: group attempts by name. `khanCost` handles the fallbacks (no
-    // tokens, or a model the card cannot price) and names them.
+    // Agents: group attempts by name. `khanCost` handles the fallbacks (a
+    // model the card cannot price reads at its recorded list dollars) and
+    // names them. A dispatch with no token counts is handled here instead:
+    // with a proxy log in hand its tokens are already inside the orchestrator
+    // remainder (the proxy saw them, the dispatcher just could not attribute
+    // them), so pricing its recorded dollars here as well would count it
+    // twice. Without a proxy log there is nothing else to carry it, so it
+    // is priced from its recorded dollars by the overlay ratio.
+    const hasProxy =
+        inputs.proxyUsage !== undefined && inputs.proxyUsage.length > 0;
+    const isUntracked = (a: CostAgentEntry): boolean =>
+        a.usage === undefined || a.usage.length === 0;
     const byName = new Map<string, CostAgentEntry[]>();
     for (const entry of inputs.perAgent) {
         byName.set(entry.name, [...(byName.get(entry.name) ?? []), entry]);
     }
     const atList = new Set<string>();
     let untracked = 0;
+    const asCost = (a: CostAgentEntry) => ({
+        agent: a.name,
+        model: a.fellBackTo ?? a.model,
+        usd: a.usd,
+        ...(a.usage === undefined ? {} : {usage: a.usage}),
+    });
     const agents: CostRow[] = [...byName.entries()]
         .map(([name, attempts]): CostRow => {
-            const priced = khanCost(
-                attempts.map((a) => ({
-                    agent: a.name,
-                    model: a.fellBackTo ?? a.model,
-                    usd: a.usd,
-                    ...(a.usage === undefined ? {} : {usage: a.usage}),
-                })),
-                khan,
-            );
+            const counted = hasProxy
+                ? attempts.filter((a) => !isUntracked(a))
+                : attempts;
+            untracked += attempts.filter(isUntracked).length;
+            const priced = khanCost(counted.map(asCost), khan);
             priced.atList.forEach((m) => atList.add(m));
-            untracked += priced.untracked;
             const usage = mergeUsage(attempts.flatMap((a) => a.usage ?? []));
             const judgeUsage = attempts.flatMap((a) => a.judgeUsage ?? []);
             const toolCalls = attempts.flatMap((a) =>
@@ -224,7 +240,7 @@ export const buildCostReport = (inputs: CostReportInputs): CostReport => {
                 wallMs: attempts.reduce((s, a) => s + a.wallMs, 0),
                 usage,
                 khanUsd: priced.usd,
-                listUsd: attempts.reduce((s, a) => s + a.usd, 0),
+                listUsd: counted.reduce((s, a) => s + a.usd, 0),
                 ...(judgeUsage.length === 0
                     ? {}
                     : {judgeKhanUsd: priceTokens(judgeUsage, khan).usd}),
@@ -242,7 +258,21 @@ export const buildCostReport = (inputs: CostReportInputs): CostReport => {
     }
     if (untracked > 0) {
         notes.push(
-            `${untracked} dispatch(es) recorded no token counts and read at the SDK's list figure.`,
+            hasProxy
+                ? `${untracked} dispatch(es) recorded no token counts, so their spend is inside the orchestrator row rather than their own.`
+                : `${untracked} dispatch(es) recorded no token counts and are priced from the SDK's list figure by the overlay ratio (at list where the model has none).`,
+        );
+    }
+    // The one real cross-check on the split: the eval's list table against
+    // the SDK's own meter, over the agents whose tokens it prices in full.
+    const drift = listDrift(inputs.perAgent.map(asCost));
+    if (drift !== undefined) {
+        notes.push(
+            `List-rate check: the list table prices the sub-agents' tokens at ` +
+                `$${drift.computedUsd.toFixed(2)} and the SDK metered ` +
+                `$${drift.recordedUsd.toFixed(2)} (${drift.ratio.toFixed(
+                    2,
+                )}x), so one of the two has moved (see pricing.ts).`,
         );
     }
 
@@ -267,7 +297,7 @@ export const buildCostReport = (inputs: CostReportInputs): CostReport => {
     // The orchestrator: whatever crossed the proxy that the dispatcher did
     // not account for.
     let engine: CostRow | undefined;
-    if (inputs.proxyUsage !== undefined && inputs.proxyUsage.length > 0) {
+    if (hasProxy && inputs.proxyUsage !== undefined) {
         const spent = [
             ...inputs.perAgent.flatMap((a) => a.usage ?? []),
             ...judgeUsage,
@@ -378,8 +408,22 @@ const tokensCell = (usage: readonly ModelTokens[]): string => {
     )} / ${compactTokens(t.cacheRead)} / ${compactTokens(t.cacheWrite)}`;
 };
 
-const escapeCell = (text: string): string =>
-    text.replace(/[<>&|]/g, (c) => `&#${c.charCodeAt(0)};`).slice(0, 80);
+/**
+ * Neutralise markup and table pipes in text that is interpolated into the
+ * body post-sanitizer. Agent and model names come from review.md and the
+ * proxy log, never from model output, but the block lands after gh-aw's
+ * ingest step has already sanitised the queue, so nothing here may trust
+ * its inputs.
+ */
+const escapeText = (text: string): string =>
+    text.replace(/[<>&|]/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/**
+ * A table cell: escaped and capped at 80 characters, so a runaway model id
+ * from the proxy log cannot stretch the table past readability (a pin is
+ * under 30 characters, a dated id under 40).
+ */
+const escapeCell = (text: string): string => escapeText(text).slice(0, 80);
 
 /**
  * The markdown table plus its notes. Khan's rate is the headline column,
@@ -427,7 +471,7 @@ export const renderCostTable = (report: CostReport): string => {
         ...meter,
         ...(report.notes.length === 0
             ? []
-            : ["", ...report.notes.map((n) => `- ${n}`)]),
+            : ["", ...report.notes.map((n) => `- ${escapeText(n)}`)]),
     ].join("\n");
 };
 

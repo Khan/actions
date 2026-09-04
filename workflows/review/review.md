@@ -370,8 +370,10 @@ post-steps:
   # rows, reconciled against gh-aw's ai_credits. It lands as a collapsed
   # block in the review body (edited into the validated queue the same way
   # the gate strips it, code-rendered from numbers and review.md-defined
-  # names, every cell escaped), in the step summary, and as
-  # /tmp/gh-aw/review/cost-report.json in the run artifact. Runs here and
+  # names, every cell and note escaped), in the step summary, and as
+  # /tmp/gh-aw/agent/cost-report.json beside the gate's report in the agent
+  # artifact (the review's own out/ upload runs during the agent step, so a
+  # file written there now would never leave the runner). Runs here and
   # not in the agent step because two inputs only exist afterwards: the
   # proxy's token-usage.jsonl and agent_usage.json, both written between the
   # agent step and these post-steps. `if: always()` so a gate-blocked run

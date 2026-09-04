@@ -10,7 +10,7 @@ import {
 } from "./live-producer";
 import type {ExtractedAgent} from "./agent-extract";
 import type {StageFs} from "./live-stage";
-import type {ModelTokens} from "./pricing";
+import type {ModelTokens} from "../lib/pricing";
 
 /** Adapt a memfs volume to the staging fs seam. */
 const volFs = (vol: InstanceType<typeof Volume>): StageFs => ({

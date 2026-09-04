@@ -1,6 +1,7 @@
 import {describe, it, expect} from "vitest";
 
 import {
+    BODY_CAP,
     COST_REPORT_PATH,
     resolveRateCard,
     runCostReportCli,
@@ -173,6 +174,31 @@ describe("runCostReportCli", () => {
         const artifact = JSON.parse(fs.files[COST_REPORT_PATH] as string);
         expect(artifact.rateSource).toBe("/tmp/gh-aw/models.json");
         expect(artifact.total).toEqual({khanUsd: 6, listUsd: 12});
+    });
+
+    it("leaves the block out of a body that would cross GitHub's limit, and says so everywhere", () => {
+        const long = "x".repeat(BODY_CAP - 200);
+        const fs = memFs({
+            "/tmp/gh-aw/review/dispatch-result.json": DISPATCH_RESULT,
+            "/tmp/gh-aw/models.json": MODELS_JSON,
+            "/tmp/gh-aw/agent_output.json": JSON.stringify({
+                items: [{type: "submit_pull_request_review", body: long}],
+            }),
+        });
+        const outcome = runCostReportCli(fs, {
+            reviewMdPath: "workflows/review/review.md",
+            stepSummaryPath: "/summary.md",
+        });
+        expect(outcome.bodyUpdated).toBe(false);
+        const queue = JSON.parse(
+            fs.files["/tmp/gh-aw/agent_output.json"] as string,
+        );
+        expect(queue.items[0].body).toBe(long);
+        expect(outcome.report.notes.at(-1)).toMatch(
+            /^The review body was within \d+ characters of GitHub's limit, so the cost block was left out of it\.$/,
+        );
+        expect(fs.files["/summary.md"]).toContain("cost block was left out");
+        expect(fs.files[COST_REPORT_PATH]).toContain("cost block was left out");
     });
 
     it("still writes the summary and artifact when the gate stripped the queue, and notes a missing proxy log", () => {
