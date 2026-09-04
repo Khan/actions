@@ -136,21 +136,26 @@ const expandBraces = (pattern: string): string[] | undefined => {
     return out;
 };
 
+const GLOB_CHARS = /[*?[]/;
+
 /**
- * Does any path the pattern can expand to leave the search root? A glob
- * pattern is not a path the resolver can canonicalize, so this is a lexical
- * test over every brace expansion: one that is absolute, or has a `..`
- * segment, escapes. `{/**,x}/case.json` and `{..,x}/live-match.ts` are the
- * shapes that slip a check on the raw string.
+ * The literal directory prefix of one pattern expansion: every leading
+ * segment up to the first one that contains a glob character. That prefix
+ * is a real path and can be resolved and canonicalized like a Read target;
+ * the glob tail cannot. A `..` in the tail is treated as escaping, since
+ * what it climbs from is not known until match time.
  */
-const escapesRoot = (pattern: string): boolean => {
-    const expansions = expandBraces(pattern);
-    if (expansions === undefined) {
-        return true;
-    }
-    return expansions.some(
-        (piece) => isAbsolute(piece) || piece.split(/[\\/]/).includes(".."),
-    );
+const literalPrefix = (
+    expansion: string,
+): {prefix: string; tailClimbs: boolean} => {
+    const segments = expansion.split(/[\\/]/);
+    const firstGlob = segments.findIndex((seg) => GLOB_CHARS.test(seg));
+    const literal = firstGlob === -1 ? segments : segments.slice(0, firstGlob);
+    const tail = firstGlob === -1 ? [] : segments.slice(firstGlob);
+    return {
+        prefix: (isAbsolute(expansion) ? "/" : "") + literal.join("/"),
+        tailClimbs: tail.includes(".."),
+    };
 };
 
 /**
@@ -160,11 +165,16 @@ const escapesRoot = (pattern: string): boolean => {
  *
  * - `Read` reads `file_path`.
  * - `Grep` searches `path` (a file or directory; default cwd).
- * - `Glob` matches `pattern` under `path` (default cwd). A pattern with any
- *   absolute or `..`-climbing piece (brace alternatives included) is denied
- *   outright: a pattern is not a path the resolver can canonicalize, and
- *   `/**\/case.json` is exactly the query a reviewer hunting for the corpus
- *   would make.
+ * - `Glob` matches `pattern` under `path` (default cwd). The base is checked
+ *   like a Read target, then every brace expansion of the pattern: its
+ *   literal prefix (the segments before the first glob character) resolves
+ *   against the base and must land inside the root, so `../context/*.diff`
+ *   from the checkout is in scope while `/**\/case.json` and
+ *   `../../case-2/**` are not. A `..` inside the glob tail, or a pattern
+ *   past the brace-expansion cap, is denied since it cannot be resolved.
+ *   The glob tail itself is not canonicalized (a symlink matched by `*`
+ *   would not be seen); the staged tree is a plain copy of the fixture with
+ *   no symlinks in it, which is what keeps that acceptable.
  */
 export const outOfScopeRead = (
     toolName: string,
@@ -193,11 +203,44 @@ export const outOfScopeRead = (
         case "Grep":
             return check(input["path"]);
         case "Glob": {
+            // The search base first (a file or directory, default cwd).
+            const baseHit = check(input["path"]);
+            if (baseHit !== undefined) {
+                return baseHit;
+            }
             const pattern = input["pattern"];
-            if (typeof pattern === "string" && escapesRoot(pattern)) {
+            if (typeof pattern !== "string") {
+                return undefined;
+            }
+            const base =
+                typeof input["path"] === "string" && input["path"] !== ""
+                    ? isAbsolute(input["path"])
+                        ? input["path"]
+                        : resolve(cwd, input["path"])
+                    : cwd;
+            // Every brace expansion: its literal prefix resolves against the
+            // base like a Read target (so `../context/*.diff` from the
+            // checkout is in scope, and `../../case-2/**` is not), and a
+            // `..` inside the glob tail or a pattern past the expansion cap
+            // is treated as escaping.
+            const expansions = expandBraces(pattern);
+            if (expansions === undefined) {
                 return pattern;
             }
-            return check(input["path"]);
+            for (const expansion of expansions) {
+                const {prefix, tailClimbs} = literalPrefix(expansion);
+                if (tailClimbs) {
+                    return pattern;
+                }
+                const target = canonical(
+                    isAbsolute(prefix) ? prefix : resolve(base, prefix),
+                    realpath,
+                );
+                if (!isWithin(target, canonicalRoot)) {
+                    return pattern;
+                }
+            }
+            return undefined;
         }
         default:
             return undefined;

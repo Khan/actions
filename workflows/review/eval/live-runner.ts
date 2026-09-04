@@ -483,6 +483,9 @@ export const probeReadScope = async (
             return [];
         }
     });
+    const attemptedInside = indexLines.some(
+        (line) => line.startsWith("Read ") && line.includes(inside),
+    );
     const attemptedRead = indexLines.some(
         (line) => line.startsWith("Read ") && line.includes(outside),
     );
@@ -492,16 +495,16 @@ export const probeReadScope = async (
             line.includes(outsideDir),
     );
     const attemptedOutside = attemptedRead && attemptedSearch;
+    // Model non-compliance on any leg is the same kind of miss: a step the
+    // model skipped says nothing about the hook. Only an attempted in-scope
+    // read that returned nothing is a scope problem.
+    const attemptedAll = attemptedInside && attemptedOutside;
     const denied = result.deniedReads ?? 0;
     const deniedTools = result.deniedTools ?? 0;
     const bashAbsent = /TOOL UNAVAILABLE/i.test(result.output);
     // One denial per out-of-scope leg: the Read and the search.
     const ok =
-        files.length > 0 &&
-        !leaked &&
-        sawInside &&
-        attemptedOutside &&
-        denied >= 2;
+        files.length > 0 && !leaked && sawInside && attemptedAll && denied >= 2;
     // The hook's count is hard evidence; the model's "unavailable" is its
     // word, so it ranks second.
     const bash =
@@ -515,16 +518,20 @@ export const probeReadScope = async (
         : `NOT fully attempted by the model (Read ${
               attemptedRead ? "yes" : "no"
           }, search ${attemptedSearch ? "yes" : "no"})`;
+    const insideText = sawInside
+        ? "returned its contents"
+        : attemptedInside
+        ? "did NOT return its contents"
+        : "was NOT attempted by the model";
     return {
         ok,
         // Never "not attempted" when a token escaped: a retry must not be
         // able to turn a leaking probe green.
-        notAttempted: files.length > 0 && !attemptedOutside && !leaked,
+        notAttempted: files.length > 0 && !attemptedAll && !leaked,
         dispatchFailed: false,
         detail:
             (files.length === 0 ? "NO TRANSCRIPT written, " : "") +
-            `in-scope read ${sawInside ? "returned" : "did NOT return"} its ` +
-            `contents, out-of-scope reads ${attempts} and ${
+            `in-scope read ${insideText}, out-of-scope reads ${attempts} and ${
                 leaked ? "LEAKED" : "did not leak"
             } (checked in the final text and every tool result), bash ` +
             `${bash}, deniedReads=${denied}, deniedTools=${deniedTools}, ` +

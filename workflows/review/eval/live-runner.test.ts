@@ -187,6 +187,53 @@ describe("sdkRunner", () => {
         expect(second.deniedReads).toBe(0);
         expect(second.deniedTools).toBe(0);
     });
+    it("records tool results in the transcript, where the probe scans for a leak", async () => {
+        const transcriptsDir = join(dir, "tool-results");
+        script = {
+            messages: [
+                assistant([
+                    {
+                        type: "tool_use",
+                        id: "t1",
+                        name: "Read",
+                        input: {file_path: `${ROOT}/checkout/src/a.ts`},
+                    },
+                ]),
+                {
+                    type: "user",
+                    message: {
+                        role: "user",
+                        content: [
+                            {
+                                type: "tool_result",
+                                tool_use_id: "t1",
+                                content: "planted-token-in-a-tool-result",
+                            },
+                        ],
+                    },
+                },
+                success('{"findings":[]}'),
+            ],
+        };
+        await sdkRunner({transcriptsDir})(request());
+        const written = JSON.parse(
+            readFileSync(
+                join(
+                    transcriptsDir,
+                    "candidate",
+                    "case-1",
+                    "correctness-reviewer-1.json",
+                ),
+                "utf8",
+            ),
+        );
+        expect(written.messages).toHaveLength(2);
+        expect(written.messages[1].role).toBe("user");
+        expect(JSON.stringify(written)).toContain(
+            "planted-token-in-a-tool-result",
+        );
+    });
+
     it("keeps the result when the transcript write fails", async () => {
         // A file where the directory should be: mkdirSync throws.
         const blocked = join(dir, "blocked");
@@ -233,6 +280,8 @@ type Fake = {
     echoOutside?: boolean;
     deniedReads: number;
     deniedTools?: number;
+    /** Whether the fake "model" attempted the in-scope Read (default true). */
+    attemptInside?: boolean;
     /** Whether the fake "model" attempted the out-of-scope Read. */
     attemptOutside?: boolean;
     /** Whether it attempted the out-of-scope Glob (default true). */
@@ -253,7 +302,10 @@ const fakeRunner =
         const contents = (p: string): string => readFileSync(p, "utf8").trim();
         if (!fake.noTranscript) {
             mkdirSync(fake.transcriptsDir, {recursive: true});
-            const index = [`Read file_path="${paths.inside}"`];
+            const index =
+                fake.attemptInside === false
+                    ? []
+                    : [`Read file_path="${paths.inside}"`];
             if (fake.attemptOutside !== false) {
                 index.push(`Read file_path="${paths.outside}"`);
             }
@@ -462,13 +514,25 @@ describe("probeReadScope", () => {
         expect(existsSync(join(dir, "no-transcript"))).toBe(false);
     });
 
-    it("fails when the in-scope read did not land anywhere", async () => {
+    it("is broken when the in-scope read was attempted and returned nothing", async () => {
         const result = await probe("no-inside", {
             deniedReads: 2,
             echoInside: false,
         });
         expect(result.ok).toBe(false);
-        expect(result.detail).toContain("did NOT return");
+        expect(result.notAttempted).toBe(false);
+        expect(result.detail).toContain("did NOT return its contents");
+    });
+
+    it("is unproven, not broken, when the model skipped the in-scope read", async () => {
+        const result = await probe("skip-inside", {
+            deniedReads: 2,
+            echoInside: false,
+            attemptInside: false,
+        });
+        expect(result.ok).toBe(false);
+        expect(result.notAttempted).toBe(true);
+        expect(result.detail).toContain("was NOT attempted by the model");
     });
 
     it("accepts the in-scope read from a tool result when the model paraphrased", async () => {

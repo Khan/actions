@@ -93,15 +93,15 @@ sibling's mid-run.
 
 Every live workflow starts with `live-runner.ts --probe-read-scope`, one
 Haiku call that reads a staged file, then a planted file outside the case,
-then tries to `cat` the planted file through Bash. It fails the job unless a
-transcript was written, the in-scope read landed, the model actually
-attempted the out-of-scope read, the read-scope rule denied it, and the
-planted contents appear nowhere (final text and every tool result are both
-checked, so a leak through Bash fails it too). A run where the model never
-attempted the out-of-scope reads, or the probe's own dispatch failed, twice,
-is `unproven`: the job proceeds under a warning annotation rather than
-failing, since nothing was learned against the hook either, and the arms
-retry their own dispatches. The Bash leg is otherwise
+Globs the planted directory, then tries to `cat` the planted file through
+Bash. It fails the job when the planted contents or the planted file name
+appear anywhere (final text and every tool result are both checked, so a leak
+through Bash fails it too), when an attempted out-of-scope read was not
+denied, or when the attempted in-scope read returned nothing. A run where the
+model skipped a step, or the probe's own dispatch failed, twice, is
+`unproven`: the job proceeds under a warning annotation rather than failing,
+since nothing was learned against the hook either, and the arms retry their
+own dispatches. The Bash leg is otherwise
 informational: the log line says whether the hook denied Bash (`tools`
 stopped restricting and the second layer held), the model reported it
 unavailable (`tools` restricting), or neither was reported. The unit tests

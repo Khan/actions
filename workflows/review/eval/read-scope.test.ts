@@ -79,7 +79,7 @@ describe("outOfScopeRead", () => {
         expect(inScope("Read", {file_path: `${ROOT}-b/x`})).toBe(`${ROOT}-b/x`);
     });
 
-    it("denies an absolute or climbing glob pattern outright", () => {
+    it("judges a glob pattern by where its literal prefix lands", () => {
         expect(inScope("Glob", {pattern: "/**/case.json"})).toBe(
             "/**/case.json",
         );
@@ -87,15 +87,31 @@ describe("outOfScopeRead", () => {
             "../../**/live-match.ts",
         );
         expect(inScope("Glob", {pattern: "src/**/..*"})).toBeUndefined();
+        // Climbing to the context sibling is inside the root: allowed.
+        expect(inScope("Glob", {pattern: "../context/*.diff"})).toBeUndefined();
+        // Climbing past the root is not.
+        expect(inScope("Glob", {pattern: "../../case-2/**"})).toBe(
+            "../../case-2/**",
+        );
+        // A `..` after a glob segment cannot be resolved: denied.
+        expect(inScope("Glob", {pattern: "*/../../etc/*"})).toBe(
+            "*/../../etc/*",
+        );
         // Brace alternation: any alternative that escapes denies the pattern.
         expect(inScope("Glob", {pattern: "{/**,src}/case.json"})).toBe(
             "{/**,src}/case.json",
         );
-        expect(inScope("Glob", {pattern: "{..,src}/live-match.ts"})).toBe(
-            "{..,src}/live-match.ts",
+        expect(inScope("Glob", {pattern: "{../..,src}/live-match.ts"})).toBe(
+            "{../..,src}/live-match.ts",
         );
         expect(inScope("Glob", {pattern: "src/{a,b}/**/*.ts"})).toBeUndefined();
         expect(inScope("Glob", {pattern: "**/*.{ts,tsx}"})).toBeUndefined();
+        // Past the expansion cap the pattern cannot be checked: denied.
+        const wide = `{${"a,".repeat(20)}b}`;
+        const blowup = `${wide}/${wide}/${wide}/*.ts`;
+        expect(inScope("Glob", {pattern: blowup})).toBe(blowup);
+        // The base path is checked before the pattern.
+        expect(inScope("Glob", {pattern: "*.ts", path: "/etc"})).toBe("/etc");
     });
 
     it("leaves unknown tools and malformed input alone", () => {
