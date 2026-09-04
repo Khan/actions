@@ -41,8 +41,15 @@ import {mkdirSync, mkdtempSync, readFileSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {dirname} from "node:path";
 
+import {
+    extractSamples,
+    isRecord,
+    type ArmSample,
+    type ReportSample,
+} from "./aggregate-extract";
 import {renderAggregateMarkdown} from "./aggregate-render";
 import {caughtBlocking, SEVERITY_BAND_METRIC} from "./aggregate-severity";
+import {rateStat, type RateStat} from "./wilson";
 
 // The markdown renderer lives in ./aggregate-render, re-exported so the CLI
 // and every existing consumer keep one import surface.
@@ -52,252 +59,17 @@ export {renderAggregateMarkdown};
 /* The report subset this module consumes (structural, version-tolerant)      */
 /* -------------------------------------------------------------------------- */
 
-/** One case-run as it appears in a report's `arms.<arm>.runs[]`. */
-export type SampleRun = {
-    caseId: string;
-    expectedVerdict: string;
-    verdict: string;
-    caughtSpecKeys: string[];
-    /**
-     * Caught spec key -> whether the matching candidate blocked. Sparse on
-     * purpose: an absent key means the report recorded no label, which is no
-     * evidence rather than "non-blocking". See `./aggregate-severity`.
-     */
-    caughtSpecBlocking: Record<string, boolean>;
-    /** Missed spec key -> drop bucket ("" for a true miss). */
-    missedSpecs: {specKey: string; droppedBy?: string}[];
-    unmatchedPosted: number;
-    posted: number;
-    /**
-     * Findings the provenance gate anchor-snapped (0 for reports predating
-     * the field). The anchor-fidelity observable: a prompt fix that anchors
-     * correctly at the source drives this to zero.
-     */
-    snapped: number;
-};
-
-/** One arm-run: a single pass of one arm over its cases. */
-export type ArmSample = {
-    arm: "baseline" | "candidate";
-    reviewMdSha: string;
-    runs: SampleRun[];
-    /** Cases never dispatched (budget skips); asymmetric samples bias bands. */
-    skippedCount: number;
-    usd: number;
-    judgeMeanQuality?: number;
-};
-
-/** One report artifact, reduced to what aggregation needs. */
-export type ReportSample = {
-    source: string;
-    baseRef: string;
-    /**
-     * Ruler provenance, when the report carries it (reports predating the
-     * stamps parse with both undefined): the matcher configuration and a
-     * content hash of the loaded corpus. Rates are only comparable across
-     * runs whose ruler matches; the aggregate warns on a mixed pool.
-     */
-    matcher?: string;
-    corpusSha?: string;
-    baseline: ArmSample;
-    candidate: ArmSample;
-};
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-    typeof value === "object" && value !== null && !Array.isArray(value);
-
-const asString = (value: unknown): string =>
-    typeof value === "string" ? value : "";
-
-const asNumber = (value: unknown): number =>
-    typeof value === "number" && Number.isFinite(value) ? value : 0;
-
-/** Parse one arm out of a raw report; throws a descriptive error on shape. */
-const parseArm = (
-    raw: unknown,
-    arm: "baseline" | "candidate",
-    reviewMdSha: string,
-): ArmSample => {
-    if (!isRecord(raw) || !Array.isArray(raw["runs"])) {
-        throw new Error(`arms.${arm}.runs: missing or not an array`);
-    }
-    const runs = raw["runs"].map((run, i): SampleRun => {
-        if (!isRecord(run)) {
-            throw new Error(`arms.${arm}.runs[${i}]: not an object`);
-        }
-        const corpusCase = run["corpusCase"];
-        const result = run["result"];
-        const match = run["match"];
-        if (!isRecord(corpusCase) || !isRecord(result) || !isRecord(match)) {
-            throw new Error(
-                `arms.${arm}.runs[${i}]: missing corpusCase/result/match`,
-            );
-        }
-        const expected = isRecord(corpusCase["expected"])
-            ? corpusCase["expected"]
-            : {};
-        const verdict = isRecord(result["verdict"]) ? result["verdict"] : {};
-        const caught = Array.isArray(match["caught"]) ? match["caught"] : [];
-        const missedDetail = Array.isArray(match["missedDetail"])
-            ? match["missedDetail"]
-            : [];
-        // Older reports carry `missed` only; missedDetail supersedes it.
-        const missed = Array.isArray(match["missed"]) ? match["missed"] : [];
-        const detailKeys = new Set(
-            missedDetail
-                .filter(isRecord)
-                .map((d) => asString(d["specKey"]))
-                .filter((k) => k !== ""),
-        );
-        const missedSpecs = [
-            ...missedDetail.filter(isRecord).map((d) => {
-                const droppedBy = asString(d["droppedBy"]);
-                return {
-                    specKey: asString(d["specKey"]),
-                    ...(droppedBy !== "" ? {droppedBy} : {}),
-                };
-            }),
-            ...missed
-                .filter(
-                    (k): k is string =>
-                        typeof k === "string" && !detailKeys.has(k),
-                )
-                .map((specKey) => ({specKey})),
-        ];
-        const unmatched = Array.isArray(match["unmatchedFindingIds"])
-            ? match["unmatchedFindingIds"].length
-            : 0;
-        return {
-            caseId: asString(corpusCase["id"]),
-            expectedVerdict: asString(expected["verdict"]),
-            verdict: asString(verdict["event"]),
-            caughtSpecKeys: caught
-                .filter(isRecord)
-                .map((c) => asString(c["specKey"]))
-                .filter((k) => k !== ""),
-            // Only entries carrying the flag: a legacy report contributes no
-            // severity samples rather than a run of `false`.
-            caughtSpecBlocking: Object.fromEntries(
-                caught
-                    .filter(isRecord)
-                    .filter((c) => typeof c["blocking"] === "boolean")
-                    .map((c): [string, boolean] => [
-                        asString(c["specKey"]),
-                        c["blocking"] === true,
-                    ])
-                    .filter(([key]) => key !== ""),
-            ),
-            missedSpecs,
-            unmatchedPosted: unmatched,
-            posted: asNumber(match["postedCount"]),
-            snapped: Array.isArray(result["snappedByProvenance"])
-                ? result["snappedByProvenance"].length
-                : 0,
-        };
-    });
-    const judge = raw["judge"];
-    return {
-        arm,
-        reviewMdSha,
-        runs,
-        skippedCount: Array.isArray(raw["skippedCases"])
-            ? raw["skippedCases"].length
-            : 0,
-        usd: asNumber(raw["usd"]),
-        ...(isRecord(judge) && typeof judge["meanQuality"] === "number"
-            ? {judgeMeanQuality: judge["meanQuality"]}
-            : {}),
-    };
-};
-
-/**
- * Extract the arm samples one report artifact contributes: one pair for a
- * single-run report, its finished repeats for `--repeats n` (so the `partial`
- * check sits below the repeats branch), none for a no-reviewable-delta report
- * or a mid-run checkpoint (`partial`, whose arms scored different case sets).
- */
-export const extractSamples = (
-    source: string,
-    raw: unknown,
-): ReportSample[] => {
-    if (!isRecord(raw)) {
-        throw new Error("report: not a JSON object");
-    }
-    // A --repeats artifact nests single-run reports under `repeats`.
-    if (Array.isArray(raw["repeats"])) {
-        return raw["repeats"].flatMap((repeat, i) =>
-            extractSamples(`${source}#${i + 1}`, repeat),
-        );
-    }
-    // Nothing to pool: identical arms, or a checkpoint a run wrote mid-case.
-    if (raw["noReviewableDelta"] === true || raw["partial"] === true) {
-        return [];
-    }
-    const arms = raw["arms"];
-    const shas = raw["reviewMdSha"];
-    if (!isRecord(arms)) {
-        throw new Error("report: missing arms");
-    }
-    const sha = (key: string): string =>
-        isRecord(shas) ? asString(shas[key]) : "";
-    const provenance = isRecord(raw["provenance"]) ? raw["provenance"] : {};
-    const matcher = asString(provenance["matcher"]);
-    const corpusSha = asString(provenance["corpusSha"]);
-    return [
-        {
-            source,
-            baseRef: asString(raw["baseRef"]),
-            ...(matcher !== "" ? {matcher} : {}),
-            ...(corpusSha !== "" ? {corpusSha} : {}),
-            baseline: parseArm(arms["baseline"], "baseline", sha("baseline")),
-            candidate: parseArm(
-                arms["candidate"],
-                "candidate",
-                sha("candidate"),
-            ),
-        },
-    ];
-};
-
+export {
+    extractSamples,
+    type ArmSample,
+    type ReportSample,
+    type SampleRun,
+} from "./aggregate-extract";
 /* -------------------------------------------------------------------------- */
 /* Binomial interval                                                          */
 /* -------------------------------------------------------------------------- */
 
-export type RateStat = {
-    numerator: number;
-    denominator: number;
-    rate: number;
-    /** 95% Wilson score interval; [0,1] when the denominator is 0. */
-    interval: {lo: number; hi: number};
-};
-
-/**
- * The Wilson score interval (95%, z=1.96): the standard binomial interval
- * that stays sane at the small n these runs live at (a 5/6 pass rate reads
- * 44-97%, not the Wald interval's overconfident nonsense).
- */
-export const wilsonInterval = (
-    successes: number,
-    n: number,
-): {lo: number; hi: number} => {
-    if (n === 0) {
-        return {lo: 0, hi: 1};
-    }
-    const z = 1.96;
-    const p = successes / n;
-    const z2 = z * z;
-    const denom = 1 + z2 / n;
-    const center = (p + z2 / (2 * n)) / denom;
-    const half = (z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / denom;
-    return {lo: Math.max(0, center - half), hi: Math.min(1, center + half)};
-};
-
-export const rateStat = (numerator: number, denominator: number): RateStat => ({
-    numerator,
-    denominator,
-    rate: denominator === 0 ? 0 : numerator / denominator,
-    interval: wilsonInterval(numerator, denominator),
-});
+export {rateStat, wilsonInterval, type RateStat} from "./wilson";
 
 /* -------------------------------------------------------------------------- */
 /* Aggregation                                                                */
@@ -337,6 +109,17 @@ export type ArmAggregate = {
         recall: RateStat;
         verdictAgreement: RateStat;
         noise: RateStat;
+        /** Of the noise numerator, second copies of an already-claimed defect. */
+        duplicates: number;
+        /** May-flag matches over posted: legitimate unspecced findings. */
+        legitimateUnspecced: RateStat;
+        /**
+         * Case-runs whose case carries `mayFlagSpecs`, over all case-runs.
+         * Only those can move a finding into the row above; the rest still
+         * read the pre-audit noise definition.
+         */
+        auditedRuns: number;
+        caseRuns: number;
         trueMisses: number;
         foundButDropped: Record<string, number>;
         /** Total anchor-snapped findings across the arm's case-runs. */
@@ -409,6 +192,9 @@ const aggregateArm = (
     let verdictOk = 0;
     let caseRuns = 0;
     let unmatched = 0;
+    let duplicates = 0;
+    let legitimateUnspecced = 0;
+    let auditedRuns = 0;
     let posted = 0;
     let snapped = 0;
     let usd = 0;
@@ -432,6 +218,11 @@ const aggregateArm = (
                 verdictOk += 1;
             }
             unmatched += run.unmatchedPosted;
+            duplicates += run.duplicates;
+            legitimateUnspecced += run.legitimateUnspecced;
+            if (run.audited) {
+                auditedRuns += 1;
+            }
             posted += run.posted;
             snapped += run.snapped;
             const spec = (key: string) => {
@@ -524,6 +315,10 @@ const aggregateArm = (
             recall: rateStat(specCaught, specTotal),
             verdictAgreement: rateStat(verdictOk, caseRuns),
             noise: rateStat(unmatched, posted),
+            duplicates,
+            legitimateUnspecced: rateStat(legitimateUnspecced, posted),
+            auditedRuns,
+            caseRuns,
             trueMisses,
             foundButDropped,
             snapped,
@@ -617,6 +412,15 @@ export const computeNoiseFloor = (armSamples: ArmSample[]): NoiseFloor => {
     return {armSamples: armSamples.length, bands, caseAsymmetry};
 };
 
+/** Distinct ruler values, with "unstamped" added iff only some are set. */
+const rulerValues = (values: (string | undefined)[]): string[] => {
+    const set = new Set(values.filter((v): v is string => v !== undefined));
+    if (set.size > 0 && values.some((v) => v === undefined)) {
+        set.add("unstamped");
+    }
+    return [...set].sort();
+};
+
 /**
  * Pool report samples into the aggregate. Sources that failed to parse are
  * carried in `skippedSources`; identical-arm pools additionally get the
@@ -638,20 +442,11 @@ export const aggregateSamples = (
         skippedSources,
         samples: samples.length,
         baseRefs: [...new Set(samples.map((s) => s.baseRef))].sort(),
-        matchers: [
-            ...new Set(
-                samples
-                    .map((s) => s.matcher)
-                    .filter((m): m is string => m !== undefined),
-            ),
-        ].sort(),
-        corpusShas: [
-            ...new Set(
-                samples
-                    .map((s) => s.corpusSha)
-                    .filter((c): c is string => c !== undefined),
-            ),
-        ].sort(),
+        // A pool that mixes stamped and unstamped reports lists "unstamped"
+        // as a second ruler value, so the mixed-ruler warning fires; an
+        // all-unstamped pool stays silent as before (nothing to compare).
+        matchers: rulerValues(samples.map((s) => s.matcher)),
+        corpusShas: rulerValues(samples.map((s) => s.corpusSha)),
         arms: {
             baseline: aggregateArm(
                 "baseline",

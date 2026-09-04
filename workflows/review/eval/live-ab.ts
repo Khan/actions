@@ -90,6 +90,7 @@ import {
 import {
     computeLiveMetrics,
     matchCase,
+    noiseCount,
     type LiveCaseRun,
     type MatchOptions,
 } from "./live-match";
@@ -286,6 +287,10 @@ export const runArm = async (
             expected: corpusCase.expected.verdict,
             caught: match.caught.length,
             missed: match.missed,
+            posted: match.postedCount,
+            noise: noiseCount(match),
+            duplicates: match.duplicates.length,
+            legitimateUnspecced: match.legitimateUnspecced.length,
             snapped: result.snappedByProvenance.length,
             ...(produced.dedup === undefined
                 ? {}
@@ -647,9 +652,14 @@ const main = async (): Promise<void> => {
     // The ruler stamp: which matcher and which corpus produced this
     // report's rates. Comparisons across runs are only valid when the stamp
     // matches (see ReportProvenance in live-ab-report.ts).
+    // The matcher version rides on the stamp: v2 is the lens tie-break and
+    // the leftover buckets (2026-09-03), so a pool mixing v1 and v2 reports
+    // over one corpus warns as a mixed ruler rather than blending them.
     const provenance = {
         matcher:
-            match !== undefined ? "deterministic+arbiter" : "deterministic",
+            match !== undefined
+                ? "deterministic-v2+arbiter"
+                : "deterministic-v2",
         corpusSha: sha256(JSON.stringify(cases)),
         caseCount: cases.length,
     };

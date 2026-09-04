@@ -11,10 +11,26 @@
  *  - Deterministic first pass: a candidate matches a spec when its anchor
  *    agrees with the spec's path (and line window, when both carry one) AND
  *    any mechanism alternate matches the finding's `failure_scenario` or
- *    `model_authored_prose`, case-insensitively.
+ *    `model_authored_prose`, case-insensitively. When several candidates
+ *    match one spec, a candidate whose thesis is one of the case's
+ *    `mayFlagSpecs` ranks behind the rest, then within a tier the one whose
+ *    `source` produces the spec's `lens` wins (resolved through
+ *    `lens-sources.ts`, so a `conventions` spec is won by the skill-auditor's
+ *    source `skill`), otherwise the first in posted
+ *    order (run 33671015442 credited a nearby TTL
+ *    suggestion from the correctness reviewer with the race-condition spec
+ *    while the concurrency-async finding that actually described it sat
+ *    unmatched, and the same shape recurred on three other cases).
  *  - Judge fallback (injected, hard-capped): when a spec stays unmatched but
  *    posted candidates share its file, an async yes/no arbiter may claim the
  *    match. Fallback matches are recorded as such so a human can audit them.
+ *  - Leftover classification: a posted candidate that satisfied no spec is
+ *    either a LEGITIMATE UNSPECCED finding (it matches one of the case's
+ *    `mayFlagSpecs`: a real defect the fixture carries that is not the
+ *    case's ground truth), a DUPLICATE (it matches a must-catch spec another
+ *    candidate already claimed, or a second copy of an accepted may-flag
+ *    defect: the cross-source merge let two copies through), or noise. Only the last two count against the noise rate;
+ *    `matchCase` documents the order the three are tested in.
  *
  * `computeLiveMetrics` then aggregates per-case matches into the live
  * analogues of the recorded suite's numbers: must-catch recall, clean
@@ -22,6 +38,7 @@
  */
 
 import type {CorpusCase, LiveDefectSpec} from "./corpus/loader";
+import {sourceProducesLens} from "./lens-sources";
 import type {RunCandidate, RunResult} from "./runner";
 
 /* -------------------------------------------------------------------------- */
@@ -65,6 +82,13 @@ export type SpecMatch = {
     blocking: boolean;
 };
 
+/** A posted candidate that re-describes a defect another one claimed. */
+export type DuplicateMatch = {
+    findingId: string;
+    /** The must-catch spec or may-flag entry the other candidate claimed. */
+    specKey: string;
+};
+
 /** The deterministic gate a produced-but-not-posted candidate died at. */
 export type DroppedBucket = "provenance" | "scope" | "validation";
 
@@ -92,7 +116,28 @@ export type CaseMatchReport = {
     missedDetail: MissedSpecDetail[];
     /** mustNotFlagSpecs a posted candidate satisfied (false flags). */
     falseFlags: SpecMatch[];
-    /** Posted candidate ids that satisfied no spec (the noise numerator). */
+    /**
+     * Posted candidates that describe a defect ANOTHER candidate already
+     * claimed (same location and mechanism): a caught must-catch spec, or an
+     * accepted may-flag entry, named by `specKey`. A second copy is a dedup
+     * miss, not an unspecced finding. It still counts toward noise (the PR
+     * author reads two comments about one bug) but routes to the merge stage
+     * rather than the finders.
+     */
+    duplicates: DuplicateMatch[];
+    /**
+     * Posted candidates that satisfied a `mayFlagSpecs` entry: legitimate,
+     * code-grounded findings the case does not spec as ground truth. Not
+     * recall, not noise, reported so the noise column stops charging the
+     * reviewer for being right about something the fixture author did not
+     * intend to plant.
+     */
+    legitimateUnspecced: SpecMatch[];
+    /**
+     * Posted candidate ids that satisfied no spec of any kind and duplicate
+     * nothing: the residual noise (template comments, speculation, and
+     * whatever the may-flag list has not been taught yet).
+     */
     unmatchedFindingIds: string[];
     /** Number of posted candidates (the noise denominator contribution). */
     postedCount: number;
@@ -181,12 +226,25 @@ const anchorAgrees = (
     });
 };
 
+/**
+ * Which of the finding's texts a mechanism alternate is tested against.
+ * `all` is the matching rule (scenario plus prose, so paraphrase in either
+ * counts). `scenario` is the finding's one-paragraph thesis alone, used when
+ * the question is what a leftover finding is ABOUT rather than whether it
+ * mentions something (see the leftover classification in {@link matchCase}).
+ */
+export type MechanismScope = "all" | "scenario";
+
 /** Whether any mechanism alternate matches the finding's own description. */
 const mechanismAgrees = (
     candidate: RunCandidate,
     spec: LiveDefectSpec,
+    scope: MechanismScope = "all",
 ): boolean => {
-    const haystack = `${candidate.finding.failure_scenario}\n${candidate.finding.model_authored_prose}`;
+    const haystack =
+        scope === "scenario"
+            ? candidate.finding.failure_scenario
+            : `${candidate.finding.failure_scenario}\n${candidate.finding.model_authored_prose}`;
     return spec.mechanism.some((alternate) => {
         try {
             return new RegExp(alternate, "i").test(haystack);
@@ -202,10 +260,11 @@ const mechanismAgrees = (
 export const matchesSpec = (
     candidate: RunCandidate,
     spec: LiveDefectSpec,
+    scope: MechanismScope = "all",
 ): boolean =>
     (spec.blockingOnly !== true || candidate.blocking) &&
     anchorAgrees(candidate, spec) &&
-    mechanismAgrees(candidate, spec);
+    mechanismAgrees(candidate, spec, scope);
 
 /**
  * Match one case's POSTED candidates against its live specs. Each posted
@@ -220,6 +279,7 @@ export const matchCase = async (
 ): Promise<CaseMatchReport> => {
     const mustCatch = corpusCase.live?.mustCatchSpecs ?? [];
     const mustNotFlag = corpusCase.live?.mustNotFlagSpecs ?? [];
+    const mayFlag = corpusCase.live?.mayFlagSpecs ?? [];
     const maxFallbackCalls =
         options.maxFallbackCalls ?? DEFAULT_MAX_FALLBACK_CALLS;
 
@@ -230,31 +290,85 @@ export const matchCase = async (
     const falseFlags: SpecMatch[] = [];
     let fallbackCalls = 0;
 
+    /**
+     * Unclaimed posted candidates that could satisfy `spec`, best first: the
+     * deterministic hits ranked as below, then (for the arbiter fallback)
+     * the rest of the candidates on the spec's file in the same ranking.
+     *
+     * Two rules, tier before lens. A candidate whose thesis IS a labeled
+     * may-flag defect is about that defect, not this spec
+     * (incident-sql-missing-index: the NOT NULL DEFAULT rewrite finding can
+     * say "every existing row" and "pending" and hit the backfill spec,
+     * which has no lens or window to arbitrate with), so it sits in a
+     * second tier that is consulted only when the first is empty. Within a
+     * tier, when the spec names a lens, the candidate produced by that lens
+     * comes first: a loose mechanism alternate ("concurrent", "overwrit")
+     * is meant to accept paraphrase and a neighbouring finding from another
+     * lens can hit it too, and the lens the case was authored against is the
+     * finding the case is about. The comparison is against `source`, the
+     * producer the pipeline assigned, not `finding.lens`, which a specialist
+     * agent writes into its own JSON, resolved through the producer's own
+     * lens table because the default skill-auditor stamps `conventions`
+     * findings with source `skill`.
+     */
+    const rankedCandidates = (
+        spec: LiveDefectSpec,
+        pool: RunCandidate[],
+    ): RunCandidate[] => {
+        const aboutMayFlag = (candidate: RunCandidate): boolean =>
+            mayFlag.some((entry) => matchesSpec(candidate, entry, "scenario"));
+        const lensFirst = (tier: RunCandidate[]): RunCandidate[] => {
+            const lens = spec.lens;
+            if (lens === undefined) {
+                return tier;
+            }
+            const same = (candidate: RunCandidate): boolean =>
+                sourceProducesLens(candidate.source, lens);
+            return [...tier.filter(same), ...tier.filter((c) => !same(c))];
+        };
+        return [
+            ...lensFirst(pool.filter((candidate) => !aboutMayFlag(candidate))),
+            ...lensFirst(pool.filter(aboutMayFlag)),
+        ];
+    };
+    const unclaimed = (): RunCandidate[] =>
+        posted.filter((candidate) => !claimed.has(candidate.id));
+    /** The best-ranked unclaimed candidate that deterministically fits `spec`. */
+    const deterministicClaimant = (
+        spec: LiveDefectSpec,
+    ): RunCandidate | undefined => {
+        const [best] = rankedCandidates(
+            spec,
+            unclaimed().filter((candidate) => matchesSpec(candidate, spec)),
+        );
+        return best;
+    };
+
     const claim = async (
         spec: LiveDefectSpec,
     ): Promise<SpecMatch | undefined> => {
-        for (const candidate of posted) {
-            if (claimed.has(candidate.id)) {
-                continue;
-            }
-            if (matchesSpec(candidate, spec)) {
-                claimed.add(candidate.id);
-                return {
-                    specKey: spec.key,
-                    findingId: candidate.id,
-                    via: "deterministic",
-                    blocking: candidate.blocking,
-                };
-            }
+        const claimant = deterministicClaimant(spec);
+        if (claimant !== undefined) {
+            claimed.add(claimant.id);
+            return {
+                specKey: spec.key,
+                findingId: claimant.id,
+                via: "deterministic",
+                blocking: claimant.blocking,
+            };
         }
         if (options.fallback === undefined) {
             return undefined;
         }
-        // Fallback: only candidates sharing a spec file, in posted order.
-        for (const candidate of posted) {
-            if (claimed.has(candidate.id) || !onSpecFile(candidate, spec)) {
-                continue;
-            }
+        // Fallback: only candidates sharing a spec file, in the same
+        // ranking the deterministic pass uses, so the arbiter is asked about
+        // the spec's own lens before a neighbour and about a may-flag-thesis
+        // finding last.
+        const onFile = rankedCandidates(
+            spec,
+            unclaimed().filter((candidate) => onSpecFile(candidate, spec)),
+        );
+        for (const candidate of onFile) {
             if (fallbackCalls >= maxFallbackCalls) {
                 return undefined;
             }
@@ -310,22 +424,118 @@ export const matchCase = async (
     // A false flag is a real posting failure; the deterministic rule alone
     // decides it (the fallback exists to rescue recall, not to indict).
     for (const spec of mustNotFlag) {
-        for (const candidate of posted) {
-            if (claimed.has(candidate.id)) {
-                continue;
-            }
-            if (matchesSpec(candidate, spec)) {
-                claimed.add(candidate.id);
-                falseFlags.push({
-                    specKey: spec.key,
-                    findingId: candidate.id,
-                    via: "deterministic",
-                    blocking: candidate.blocking,
-                });
-                break;
-            }
+        // Same claimant rule as must-catch, so a trap that names a lens
+        // reports the finding that lens produced as the false flag.
+        const claimant = deterministicClaimant(spec);
+        if (claimant !== undefined) {
+            claimed.add(claimant.id);
+            falseFlags.push({
+                specKey: spec.key,
+                findingId: claimant.id,
+                via: "deterministic",
+                blocking: claimant.blocking,
+            });
         }
     }
+
+    // Classify what is left. The texts overlap in both directions: must-catch
+    // mechanisms are loose on purpose (they accept paraphrase: "bypass",
+    // "unauthenticated", "backfill"), so a distinct legitimate finding on the
+    // same lines often hits one (run 33671015442: the finding that surfaced
+    // the injection comment said "unauthenticated", the NOT NULL DEFAULT
+    // rewrite finding said "backfill"), and a true second copy of the caught
+    // defect can mention a may-flag defect in passing (the header-spoof
+    // finding closed with "downstream handlers are also left with an
+    // undefined session"). So the order asks what the finding is ABOUT:
+    //   1. its failure_scenario alone fits a may-flag entry: legitimate;
+    //   2. it fits a spec another candidate claimed (scenario plus prose):
+    //      duplicate;
+    //   3. it fits a may-flag entry anywhere in its text: legitimate;
+    //   4. otherwise: noise.
+    // The rungs run as passes over every leftover, not per candidate, so a
+    // finding that is ABOUT a may-flag defect (rung 1) claims the entry
+    // before a finding that mentions it in passing (rung 3) can, whatever
+    // their posted order. Ground truth was claimed first, above, and the
+    // claimant ranked may-flag-thesis candidates last, so a may-flag entry
+    // cannot steal a catch and a may-flag finding cannot be credited with
+    // one while another candidate fits. A may-flag entry, like a must-catch spec, is
+    // satisfied by at most one candidate: a second copy of the same
+    // unspecced defect is the same merge-stage miss a second copy of a
+    // seeded one is, and lands in `duplicates` under the may-flag key.
+    const duplicates: DuplicateMatch[] = [];
+    const legitimateUnspecced: SpecMatch[] = [];
+    // Every spec some candidate already claimed: caught must-catch specs and
+    // matched traps alike. A second copy of a false flag is still a second
+    // copy, and belongs in the duplicates sub-row, not in residual noise.
+    const claimedSpecs = [
+        ...caught.flatMap((match) => {
+            const spec = mustCatch.find((s) => s.key === match.specKey);
+            return spec === undefined ? [] : [spec];
+        }),
+        ...falseFlags.flatMap((flag) => {
+            const spec = mustNotFlag.find((s) => s.key === flag.specKey);
+            return spec === undefined ? [] : [spec];
+        }),
+    ];
+    const acceptedMayFlag = new Set<string>();
+    /**
+     * Route a candidate that fits `hits` (the may-flag entries it matches at
+     * the current scope): the first entry nobody has claimed accepts it,
+     * otherwise it duplicates the first one somebody has.
+     */
+    const acceptOrDuplicate = (
+        candidate: RunCandidate,
+        hits: LiveDefectSpec[],
+    ): void => {
+        claimed.add(candidate.id);
+        const fresh = hits.find((spec) => !acceptedMayFlag.has(spec.key));
+        if (fresh !== undefined) {
+            acceptedMayFlag.add(fresh.key);
+            legitimateUnspecced.push({
+                specKey: fresh.key,
+                findingId: candidate.id,
+                via: "deterministic",
+                blocking: candidate.blocking,
+            });
+            return;
+        }
+        const [first] = hits;
+        if (first !== undefined) {
+            duplicates.push({findingId: candidate.id, specKey: first.key});
+        }
+    };
+    const leftovers = unclaimed;
+    // Rung 1.
+    for (const candidate of leftovers()) {
+        const about = mayFlag.filter((spec) =>
+            matchesSpec(candidate, spec, "scenario"),
+        );
+        if (about.length > 0) {
+            acceptOrDuplicate(candidate, about);
+        }
+    }
+    // Rung 2.
+    for (const candidate of leftovers()) {
+        const duplicateOf = claimedSpecs.find((spec) =>
+            matchesSpec(candidate, spec),
+        );
+        if (duplicateOf !== undefined) {
+            claimed.add(candidate.id);
+            duplicates.push({
+                findingId: candidate.id,
+                specKey: duplicateOf.key,
+            });
+        }
+    }
+    // Rung 3.
+    for (const candidate of leftovers()) {
+        const mentions = mayFlag.filter((spec) => matchesSpec(candidate, spec));
+        if (mentions.length > 0) {
+            acceptOrDuplicate(candidate, mentions);
+        }
+    }
+    // Rung 4.
+    const unmatchedFindingIds = leftovers().map((candidate) => candidate.id);
 
     return {
         caseId: corpusCase.id,
@@ -333,9 +543,9 @@ export const matchCase = async (
         missed,
         missedDetail,
         falseFlags,
-        unmatchedFindingIds: posted
-            .filter((candidate) => !claimed.has(candidate.id))
-            .map((candidate) => candidate.id),
+        duplicates,
+        legitimateUnspecced,
+        unmatchedFindingIds,
         postedCount: posted.length,
     };
 };
@@ -353,8 +563,23 @@ export type LiveMetricsReport = {
     verdictAgreement: {numerator: number; denominator: number; rate: number};
     /** must-not-flag specs matched, plus clean cases that blocked. */
     cleanFalseFlag: {count: number; details: string[]};
-    /** Posted candidates matching no spec / posted candidates. */
-    noise: {numerator: number; denominator: number; rate: number};
+    /**
+     * Posted candidates that are noise / posted candidates. The numerator is
+     * residual unmatched findings plus duplicates of caught specs;
+     * `duplicates` breaks out how many of the numerator are the latter.
+     */
+    noise: {
+        numerator: number;
+        denominator: number;
+        rate: number;
+        duplicates: number;
+    };
+    /**
+     * Posted candidates that satisfied a `mayFlagSpecs` entry / posted
+     * candidates. Not noise and not recall: the share of the review that
+     * was right about something the case does not spec.
+     */
+    legitimateUnspecced: {numerator: number; denominator: number; rate: number};
 };
 
 export type LiveCaseRun = {
@@ -366,11 +591,21 @@ export type LiveCaseRun = {
 const rate = (numerator: number, denominator: number): number =>
     denominator === 0 ? 0 : numerator / denominator;
 
+/**
+ * One case's contribution to the noise numerator: residual unmatched
+ * findings plus duplicates. The single definition the pooled metric and the
+ * per-case report fields both read.
+ */
+export const noiseCount = (match: CaseMatchReport): number =>
+    match.unmatchedFindingIds.length + match.duplicates.length;
+
 export const computeLiveMetrics = (runs: LiveCaseRun[]): LiveMetricsReport => {
     let caughtCount = 0;
     let specCount = 0;
     let verdictHits = 0;
     let unmatched = 0;
+    let duplicates = 0;
+    let legitimate = 0;
     let posted = 0;
     const falseFlagDetails: string[] = [];
 
@@ -380,7 +615,9 @@ export const computeLiveMetrics = (runs: LiveCaseRun[]): LiveMetricsReport => {
         if (result.verdict.event === corpusCase.expected.verdict) {
             verdictHits += 1;
         }
-        unmatched += match.unmatchedFindingIds.length;
+        unmatched += noiseCount(match) - match.duplicates.length;
+        duplicates += match.duplicates.length;
+        legitimate += match.legitimateUnspecced.length;
         posted += match.postedCount;
         for (const flag of match.falseFlags) {
             falseFlagDetails.push(`${corpusCase.id}:${flag.specKey}`);
@@ -411,9 +648,15 @@ export const computeLiveMetrics = (runs: LiveCaseRun[]): LiveMetricsReport => {
             details: falseFlagDetails,
         },
         noise: {
-            numerator: unmatched,
+            numerator: unmatched + duplicates,
             denominator: posted,
-            rate: rate(unmatched, posted),
+            rate: rate(unmatched + duplicates, posted),
+            duplicates,
+        },
+        legitimateUnspecced: {
+            numerator: legitimate,
+            denominator: posted,
+            rate: rate(legitimate, posted),
         },
     };
 };

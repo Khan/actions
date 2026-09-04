@@ -817,9 +817,14 @@ describe("renderMarkdownReport", () => {
             "Measured noise floor (identical arms, run 29069228968",
         );
         expect(markdown).toContain("must-catch recall 54%-86% (sd 10%)");
-        expect(markdown.trimEnd().endsWith("resolve smaller effects.*")).toBe(
-            true,
-        );
+        // A band whose row was redefined after measurement says so in the
+        // same footer, so the two numbers cannot be read as one series.
+        expect(markdown).toContain("resolve smaller effects. The noise");
+        expect(
+            markdown
+                .trimEnd()
+                .endsWith("reads high against post-2026-09-03 numbers.*"),
+        ).toBe(true);
     });
 
     it("relabels the arm columns on an identical-arm single run", async () => {
@@ -852,7 +857,8 @@ describe("renderMarkdownReport", () => {
                 mustCatchRecall: {numerator: 0, denominator: 0, rate: 0},
                 verdictAgreement: {numerator: 0, denominator: 0, rate: 0},
                 cleanFalseFlag: {count: 0, details: []},
-                noise: {numerator: 0, denominator: 0, rate: 0},
+                noise: {numerator: 0, denominator: 0, rate: 0, duplicates: 0},
+                legitimateUnspecced: {numerator: 0, denominator: 0, rate: 0},
             },
             skippedCases: [],
             usd: 0,

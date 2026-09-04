@@ -242,6 +242,12 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
         pooledRow("Must-catch recall", (a) => a.pooled.recall),
         pooledRow("Verdict agreement", (a) => a.pooled.verdictAgreement),
         pooledRow("Noise (unmatched posted)", (a) => a.pooled.noise),
+        `| of which duplicates of a claimed defect | ${baseline.pooled.duplicates} |  | ${candidate.pooled.duplicates} |  |`,
+        pooledRow(
+            "Legitimate unspecced (may-flag, not noise)",
+            (a) => a.pooled.legitimateUnspecced,
+        ),
+        `| Case-runs with may-flag entries (audited) | ${baseline.pooled.auditedRuns} / ${baseline.pooled.caseRuns} |  | ${candidate.pooled.auditedRuns} / ${candidate.pooled.caseRuns} |  |`,
         `| Misses (true / dropped) | ${dropSummary(
             baseline,
         )} |  | ${dropSummary(candidate)} |  |`,

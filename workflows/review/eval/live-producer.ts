@@ -49,6 +49,7 @@ import {isBlockingLabel, labelForFinding} from "../lib/render-comment";
 import {route, type RouterConfig} from "../lib/router";
 import {validateFinding, type Finding, type Lens} from "../lib/finding-schema";
 import {CLUSTERER} from "../lib/dispatch-cluster";
+import {LABEL_SHAPE_REVIEWERS} from "./lens-sources";
 import {dedupeLiveFindings, type LiveDedupReport} from "./live-dedup";
 import {
     VERIFICATION_STATES,
@@ -440,25 +441,7 @@ const parseAgentFindings = (
         throw new Error("output JSON has no findings array");
     }
 
-    // Every reviewer that emits the label-bearing shape rather than the
-    // structured finding schema: the two defaults, plus the opt-in
-    // whole-change reviewers (reachable since a case may `enable` them). A
-    // name missing here falls through to the specialist-lens branch and
-    // throws on the first finding, so keep this in step with
-    // ENABLEABLE_REVIEWERS.
-    const labelLens: Record<string, {lens: Lens; source: string}> = {
-        "correctness-reviewer": {lens: "correctness", source: "correctness"},
-        "skill-auditor": {lens: "conventions", source: "skill"},
-        holistic: {lens: "holistic", source: "holistic"},
-        completeness: {lens: "completeness", source: "completeness"},
-        "test-adequacy": {lens: "test-adequacy", source: "test-adequacy"},
-        "first-principles": {
-            lens: "first-principles",
-            source: "first-principles",
-        },
-        conventions: {lens: "conventions", source: "conventions"},
-        documentation: {lens: "documentation", source: "documentation"},
-    };
+    const labelLens = LABEL_SHAPE_REVIEWERS;
 
     const findings = rawFindings.map((raw, index): LiveFinding => {
         const label = labelLens[agent.name];

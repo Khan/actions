@@ -53,7 +53,7 @@
             "consistency-ctx-param"
         ]
     },
-    "diff": "diff --git a/pkg/langtool/client.go b/pkg/langtool/client.go\n--- a/pkg/langtool/client.go\n+++ b/pkg/langtool/client.go\n@@ -18,5 +18,15 @@ func (c *Client) ListTraces(projectID string) ([]Trace, error) {\n \treturn traces, nil\n }\n \n+// ListObservations returns the observations the API has recorded for a\n+// trace, ordered as the API returns them.\n+func (c *Client) ListObservations(ctx context.Context, traceID string) ([]Observation, error) {\n+\treq, err := c.newRequest(ctx, \"GET\", \"/api/v2/observations?traceId=\"+traceID)\n+\tif err != nil {\n+\t\treturn nil, err\n+\t}\n+\treturn decodeObservations(c.http.Do(req))\n+}\n+\n // ListScores returns the scores recorded for a trace.\n func (c *Client) ListScores(traceID string) ([]Score, error) {\n",
+    "diff": "diff --git a/pkg/langtool/client.go b/pkg/langtool/client.go\n--- a/pkg/langtool/client.go\n+++ b/pkg/langtool/client.go\n@@ -18,5 +18,15 @@ func (c *Client) ListTraces(projectID string) ([]Trace, error) {\n \treturn decodeTraces(c.http.Do(req))\n }\n \n+// ListObservations returns the observations the API has recorded for a\n+// trace, ordered as the API returns them.\n+func (c *Client) ListObservations(ctx context.Context, traceID string) ([]Observation, error) {\n+\treq, err := c.newRequest(ctx, \"GET\", \"/api/v2/observations?traceId=\"+traceID)\n+\tif err != nil {\n+\t\treturn nil, err\n+\t}\n+\treturn decodeObservations(c.http.Do(req))\n+}\n+\n // ListScores returns the scores recorded for a trace.\n func (c *Client) ListScores(traceID string) ([]Score, error) {\n",
     "live": {
         "prContext": {
             "title": "langtool: add ListObservations",
@@ -72,6 +72,18 @@
                     "use the struct's ctx field for consistency",
                     "match the sibling methods' stored context",
                     "drop the ctx parameter"
+                ]
+            }
+        ],
+        "mayFlagSpecs": [
+            {
+                "key": "traceid-unescaped-in-query",
+                "path": "pkg/langtool/client.go",
+                "lineStart": 21,
+                "lineEnd": 30,
+                "mechanism": [
+                    "(url|query)[- ]?escap|QueryEscape|url\\.Values",
+                    "(concatenat|inject).{0,80}(query|param)"
                 ]
             }
         ]
