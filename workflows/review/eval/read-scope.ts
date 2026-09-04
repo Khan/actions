@@ -218,11 +218,6 @@ export const outOfScopeRead = (
                         ? input["path"]
                         : resolve(cwd, input["path"])
                     : cwd;
-            // Every brace expansion: its literal prefix resolves against the
-            // base like a Read target (so `../context/*.diff` from the
-            // checkout is in scope, and `../../case-2/**` is not), and a
-            // `..` inside the glob tail or a pattern past the expansion cap
-            // is treated as escaping.
             const expansions = expandBraces(pattern);
             if (expansions === undefined) {
                 return pattern;

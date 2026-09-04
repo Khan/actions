@@ -112,6 +112,27 @@ describe("outOfScopeRead", () => {
         expect(inScope("Glob", {pattern: blowup})).toBe(blowup);
         // The base path is checked before the pattern.
         expect(inScope("Glob", {pattern: "*.ts", path: "/etc"})).toBe("/etc");
+        // The prefix resolves against the supplied base, not the cwd: from
+        // context, `../checkout/src` is in scope and `../../case-2` is not.
+        expect(
+            inScope("Glob", {
+                pattern: "../checkout/src/*.ts",
+                path: `${ROOT}/context`,
+            }),
+        ).toBeUndefined();
+        expect(
+            inScope("Glob", {
+                pattern: "../../case-2/*.json",
+                path: `${ROOT}/context`,
+            }),
+        ).toBe("../../case-2/*.json");
+        // A relative base resolves against the cwd first.
+        expect(
+            inScope("Glob", {pattern: "*.diff", path: "../context"}),
+        ).toBeUndefined();
+        expect(inScope("Glob", {pattern: "*.json", path: "../../case-2"})).toBe(
+            `/stage/candidate/case-2`,
+        );
     });
 
     it("leaves unknown tools and malformed input alone", () => {
