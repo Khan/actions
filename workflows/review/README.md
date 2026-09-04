@@ -592,8 +592,10 @@ its absence changes nothing else.
 the only channel by which a downstream consumer reading posted threads can tell a
 maintainability finding from any other nit, and these findings (call the existing
 helper, delete the dead branch, rename at the definition) are the shape a scoped
-autofix does well. Today `autofix: nits` covers them by inclusion, since the label is
-in `NON_BLOCKING_LABELS`. A dedicated selector is a later change.
+autofix does well. `autofix: nits` covers them by inclusion once the installed autofix
+is pinned to a release carrying the label (it reads `NON_BLOCKING_LABELS` from its own
+pinned tag, which a review-only release does not move, the same coupling the `docs`
+scope shipped with). A dedicated selector is a later change.
 
 **Volume is part of its policy**: one finding per defect, two per file, five per
 review, the tail dropped from the bottom of the priority order. The claim-validator

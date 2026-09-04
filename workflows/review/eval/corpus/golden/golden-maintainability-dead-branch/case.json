@@ -42,7 +42,7 @@
                 ],
                 "failure_scenario": "The next reader of the switch sees two places that decide what fatal means, changes the one that never runs, and ships a fix that does nothing.",
                 "producing_hunt": "maintainability:dead-code",
-                "model_authored_prose": "The `case \"fatal\"` arm at retry.ts:19 is unreachable: the guard at line 11 already returns null for every kind in NO_RETRY, and NO_RETRY is `fatal`. Delete the arm so the switch says what still varies."
+                "model_authored_prose": "The `case \"fatal\"` arm at retry.ts:19 is unreachable: the guard at line 11 already returns null for every kind in NO_RETRY, and NO_RETRY is `fatal`. Replace the arm with `default: return null;` (the switch is over the unnarrowed union, so it still needs a fall-through to compile) so the switch says what still varies and the guard is the one place fatal is decided."
             }
         }
     ],
@@ -76,7 +76,8 @@
                     "guard already returns null for fatal",
                     "NO_RETRY already",
                     "unreachable case",
-                    "remove the fatal arm"
+                    "remove the fatal arm",
+                    "replace the fatal arm with default"
                 ]
             }
         ],
