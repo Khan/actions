@@ -1,7 +1,7 @@
 import {describe, it, expect} from "vitest";
 
 import {computeLiveMetrics, matchCase} from "./live-match";
-import {finding, liveRun, spec} from "./live-match.fixtures";
+import {finding, liveRun, spec} from "./live-match-fixtures";
 
 /**
  * The matcher's tie-break and leftover classification: which of several
@@ -342,6 +342,67 @@ describe("matchCase: lens tie-break and leftover buckets", () => {
         ]);
         expect(match.duplicates).toEqual([
             {findingId: "f-mention", specKey: "session-unset"},
+        ]);
+    });
+
+    it("ranks a candidate whose thesis is a may-flag defect last when claiming a spec", async () => {
+        // incident-sql-missing-index's backfill spec has no lens and no
+        // window, so a NOT NULL DEFAULT rewrite finding that says "every
+        // existing row" and "pending" fits it. Posted first, it used to
+        // take the catch and its advisory label with it; the finding about
+        // the backfill went to duplicates.
+        const rewrite = finding(
+            "f-rewrite",
+            "the table rewrite under an exclusive lock stamps every existing row pending.",
+            "advisory",
+        );
+        const backfill = finding(
+            "f-backfill",
+            "every existing row is backfilled pending and floods the queue.",
+        );
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [
+                spec({
+                    key: "backfill",
+                    mechanism: ["existing row.{0,40}pending"],
+                }),
+            ],
+            mayFlagSpecs: [
+                spec({key: "rewrite-lock", mechanism: ["rewrite.{0,40}lock"]}),
+            ],
+            findings: [rewrite, backfill],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(match.caught).toEqual([
+            {
+                specKey: "backfill",
+                findingId: "f-backfill",
+                via: "deterministic",
+                blocking: true,
+            },
+        ]);
+        expect(match.legitimateUnspecced.map((l) => l.findingId)).toEqual([
+            "f-rewrite",
+        ]);
+        expect(match.duplicates).toEqual([]);
+
+        // When it is the only fit, it still claims: a may-flag entry cannot
+        // turn a catch into a miss.
+        const alone = liveRun({
+            mustCatchSpecs: [
+                spec({
+                    key: "backfill",
+                    mechanism: ["existing row.{0,40}pending"],
+                }),
+            ],
+            mayFlagSpecs: [
+                spec({key: "rewrite-lock", mechanism: ["rewrite.{0,40}lock"]}),
+            ],
+            findings: [rewrite],
+        });
+        const aloneMatch = await matchCase(alone.corpusCase, alone.result);
+        expect(aloneMatch.caught.map((c) => c.findingId)).toEqual([
+            "f-rewrite",
         ]);
     });
 

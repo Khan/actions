@@ -2,6 +2,7 @@ import {describe, it, expect} from "vitest";
 
 import {parseCase} from "./corpus/loader";
 import {runArm, type ArmProduce} from "./live-ab";
+import {renderMarkdownReport} from "./live-ab-report";
 
 /**
  * The per-case noise buckets `runArm` writes into `perCase` (posted, noise,
@@ -126,5 +127,26 @@ describe("runArm per-case noise buckets", () => {
             duplicates: 1,
         });
         expect(report.metrics.legitimateUnspecced.numerator).toBe(1);
+
+        // The rendered report carries the buckets and the audited count per
+        // arm, beside the rates they qualify.
+        const markdown = renderMarkdownReport({
+            baseRef: "origin/main",
+            reviewMdSha: {baseline: "a".repeat(64), candidate: "b".repeat(64)},
+            arms: {baseline: report, candidate: report},
+            regressions: {lost: [], gained: []},
+            adversarialFailures: [],
+            gateRetries: [],
+        });
+        expect(markdown).toContain("| Noise (unmatched posted) | 50% | 50% |");
+        expect(markdown).toContain(
+            "| of which duplicates of a claimed defect | 1 | 1 |",
+        );
+        expect(markdown).toContain(
+            "| Legitimate unspecced (may-flag, not noise) | 25% | 25% |",
+        );
+        expect(markdown).toContain(
+            "| Cases with may-flag entries (audited) | 1 / 1 | 1 / 1 |",
+        );
     });
 });

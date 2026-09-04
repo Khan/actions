@@ -186,7 +186,11 @@ export type GateMajority = {
  * what keeps the weekly drift series honest across instrument upgrades.
  */
 export type ReportProvenance = {
-    /** Matcher configuration: `deterministic` or `deterministic+arbiter`. */
+    /**
+     * Matcher configuration: `deterministic-v2` or
+     * `deterministic-v2+arbiter` (v1, unsuffixed, predates the lens
+     * tie-break and the leftover buckets).
+     */
     matcher: string;
     /** Content hash of the loaded corpus cases this run was scored against. */
     corpusSha: string;
@@ -535,24 +539,28 @@ export const renderMarkdownReport = (report: AbReport): string => {
         metric("Verdict agreement", (a) => a.metrics.verdictAgreement.rate),
         metric("Noise (unmatched posted)", (a) => a.metrics.noise.rate),
         // The noise numerator, decomposed: a duplicate is a second posted
-        // copy of a defect the run already caught (a merge-stage miss), and a
+        // copy of a defect another comment already claimed, a caught spec or
+        // an accepted may-flag entry (a merge-stage miss), and a
         // legitimate unspecced finding matched a `mayFlagSpecs` entry and is
         // NOT in the numerator (a real defect the fixture carries that the
         // case is not about). What remains is template comments,
         // speculation, and unspecced findings nobody has audited yet.
         row(
-            "of which duplicates of a caught spec",
+            "of which duplicates of a claimed defect",
             String(baseline.metrics.noise.duplicates),
             String(candidate.metrics.noise.duplicates),
         ),
-        // The audited-case count rides on the label: only cases carrying
-        // mayFlagSpecs can move a finding into this row, and on the rest the
-        // noise row above is still the pre-audit definition.
         metric(
-            `Legitimate unspecced (may-flag, not noise; ${auditedCases(
-                baseline,
-            )} of ${baseline.runs.length} cases audited)`,
+            "Legitimate unspecced (may-flag, not noise)",
             (a) => a.metrics.legitimateUnspecced.rate,
+        ),
+        // Only cases carrying mayFlagSpecs can move a finding into the row
+        // above, and on the rest the noise row is still the pre-audit
+        // definition, so the count is per arm beside the rates it qualifies.
+        row(
+            "Cases with may-flag entries (audited)",
+            `${auditedCases(baseline)} / ${baseline.runs.length}`,
+            `${auditedCases(candidate)} / ${candidate.runs.length}`,
         ),
         row(
             "Clean false flags",

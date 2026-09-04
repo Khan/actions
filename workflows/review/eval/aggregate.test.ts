@@ -702,7 +702,7 @@ describe("renderAggregateMarkdown", () => {
         const markdown = renderAggregateMarkdown(report);
         expect(markdown).toContain("| Noise (unmatched posted) | 4/8 (50%)");
         expect(markdown).toContain(
-            "| of which duplicates of a caught spec | 2 |  | 0 |  |",
+            "| of which duplicates of a claimed defect | 2 |  | 0 |  |",
         );
         expect(markdown).toContain(
             "| Legitimate unspecced (may-flag, not noise) | 2/8 (25%)",

@@ -7,7 +7,7 @@ import {
     matchesSpec,
     type LiveCaseRun,
 } from "./live-match";
-import {candidate, finding, liveRun, spec} from "./live-match.fixtures";
+import {candidate, finding, liveRun, spec} from "./live-match-fixtures";
 import {runCase} from "./runner";
 
 describe("matchesSpec", () => {

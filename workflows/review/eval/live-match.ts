@@ -108,11 +108,12 @@ export type CaseMatchReport = {
     /** mustNotFlagSpecs a posted candidate satisfied (false flags). */
     falseFlags: SpecMatch[];
     /**
-     * Posted candidates that describe a must-catch spec ANOTHER candidate
-     * already claimed (same location and mechanism). A second copy of a
-     * caught defect is a dedup miss, not an unspecced finding. It still
-     * counts toward noise (the PR author reads two comments about one bug)
-     * but routes to the merge stage rather than the finders.
+     * Posted candidates that describe a defect ANOTHER candidate already
+     * claimed (same location and mechanism): a caught must-catch spec, or an
+     * accepted may-flag entry, named by `specKey`. A second copy is a dedup
+     * miss, not an unspecced finding. It still counts toward noise (the PR
+     * author reads two comments about one bug) but routes to the merge stage
+     * rather than the finders.
      */
     duplicates: {findingId: string; specKey: string}[];
     /**
@@ -299,16 +300,27 @@ export const matchCase = async (
             (candidate) =>
                 !claimed.has(candidate.id) && matchesSpec(candidate, spec),
         );
+        // A candidate whose thesis IS a labeled may-flag defect is about
+        // that defect, not this spec (incident-sql-missing-index: the NOT
+        // NULL DEFAULT rewrite finding can say "every existing row" and
+        // "pending" and hit the backfill spec, which has no lens or window
+        // to arbitrate with). It claims only if nothing else can.
+        const aboutMayFlag = (candidate: RunCandidate): boolean =>
+            mayFlag.some((entry) => matchesSpec(candidate, entry, "scenario"));
+        const ranked = [
+            ...hits.filter((candidate) => !aboutMayFlag(candidate)),
+            ...hits.filter(aboutMayFlag),
+        ];
         const lens = spec.lens;
         if (lens !== undefined) {
-            const sameLens = hits.find((candidate) =>
+            const sameLens = ranked.find((candidate) =>
                 sourceProducesLens(candidate.source, lens),
             );
             if (sameLens !== undefined) {
                 return sameLens;
             }
         }
-        return hits[0];
+        return ranked[0];
     };
 
     const claim = async (
@@ -417,8 +429,10 @@ export const matchCase = async (
     // The rungs run as passes over every leftover, not per candidate, so a
     // finding that is ABOUT a may-flag defect (rung 1) claims the entry
     // before a finding that mentions it in passing (rung 3) can, whatever
-    // their posted order. Ground truth is safe either way: must-catch
-    // claimed first, above. A may-flag entry, like a must-catch spec, is
+    // their posted order. Ground truth was claimed first, above, and the
+    // claimant ranked may-flag-thesis candidates last, so a may-flag entry
+    // cannot steal a catch and a may-flag finding cannot be credited with
+    // one while another candidate fits. A may-flag entry, like a must-catch spec, is
     // satisfied by at most one candidate: a second copy of the same
     // unspecced defect is the same merge-stage miss a second copy of a
     // seeded one is, and lands in `duplicates` under the may-flag key.

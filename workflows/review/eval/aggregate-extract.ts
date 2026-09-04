@@ -38,8 +38,9 @@ export type SampleRun = {
      */
     unmatchedPosted: number;
     /**
-     * How many of `unmatchedPosted` are duplicates of a caught spec (0 for
-     * reports predating the bucket, which could not tell).
+     * How many of `unmatchedPosted` are second copies of a defect another
+     * comment already claimed, a caught spec or an accepted may-flag entry
+     * (0 for reports predating the bucket, which could not tell).
      */
     duplicates: number;
     /**

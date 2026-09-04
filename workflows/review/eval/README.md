@@ -169,9 +169,9 @@ claiming a band.
   points needs ~140 (two-proportion, 80% power). Repeats are the cheap
   axis: no authoring, no review.
 - **Noise buckets:** the noise row's numerator is residual unmatched
-  findings plus duplicates of a caught spec (a second posted copy of a
-  defect another finding already claimed: a merge-stage miss, reported on
-  its own sub-row). Legitimate unspecced findings (may-flag matches, above)
+  findings plus duplicates (a second posted copy of a defect another
+  finding already claimed, a caught spec or an accepted may-flag entry: a
+  merge-stage miss, reported on its own sub-row). Legitimate unspecced findings (may-flag matches, above)
   are NOT in the numerator and get their own row. What remains after both
   is template comments ("no test covers X"), speculation, and unspecced
   findings nobody has audited yet, and on a claude arm the templates are
@@ -269,7 +269,9 @@ claiming a band.
 - **Stacked PRs:** a per-PR report's baseline is the PR's base branch tip
   (the parent PR in a stack), so it prices the marginal delta only.
   Absolute columns do not compare across reports.
-- **Ruler provenance:** every report stamps the matcher configuration and a
+- **Ruler provenance:** every report stamps the matcher configuration
+  (`deterministic-v2`, `+arbiter` when the fallback ran; v1 is the
+  unsuffixed stamp from before the lens tie-break and leftover buckets) and a
   corpus content hash (`provenance` in the JSON, the "Ruler" line in the
   markdown). Rates are only comparable when BOTH the review.md sha and the
   ruler match; `aggregate.ts` warns loudly on mixed pools. Instrument

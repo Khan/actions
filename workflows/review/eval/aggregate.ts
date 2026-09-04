@@ -110,7 +110,7 @@ export type ArmAggregate = {
         recall: RateStat;
         verdictAgreement: RateStat;
         noise: RateStat;
-        /** Of the noise numerator, second copies of a caught spec. */
+        /** Of the noise numerator, second copies of an already-claimed defect. */
         duplicates: number;
         /** May-flag matches over posted: legitimate unspecced findings. */
         legitimateUnspecced: RateStat;
@@ -684,7 +684,7 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
         pooledRow("Must-catch recall", (a) => a.pooled.recall),
         pooledRow("Verdict agreement", (a) => a.pooled.verdictAgreement),
         pooledRow("Noise (unmatched posted)", (a) => a.pooled.noise),
-        `| of which duplicates of a caught spec | ${baseline.pooled.duplicates} |  | ${candidate.pooled.duplicates} |  |`,
+        `| of which duplicates of a claimed defect | ${baseline.pooled.duplicates} |  | ${candidate.pooled.duplicates} |  |`,
         pooledRow(
             "Legitimate unspecced (may-flag, not noise)",
             (a) => a.pooled.legitimateUnspecced,
