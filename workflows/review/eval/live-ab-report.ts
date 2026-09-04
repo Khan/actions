@@ -190,7 +190,21 @@ export type AbReport = {
     adversarialFailures: string[];
     /** Best-of-three re-runs of the cases that flipped the hard gate. */
     gateRetries: GateRetry[];
+    /**
+     * Set on a checkpoint written mid-run (after every scored case), absent
+     * on a finished report. The arms cover only the cases scored so far,
+     * the gate has not been retried, and the judge has not run. The reader
+     * gets what a cancelled or timed-out run had, marked so nobody reads it
+     * as finished. `aggregate.ts` pools nothing from a partial report.
+     */
+    partial?: true;
 };
+
+/** What every report of one run shares, fixed before any arm runs. */
+export type RunHeader = Pick<
+    AbReport,
+    "baseRef" | "reviewMdSha" | "provenance"
+>;
 
 /**
  * The `--repeats n` report: every repeat's full single-run report (so any
@@ -205,10 +219,34 @@ export type MultiAbReport = {
     gate: GateMajority[];
     /** Cases failing the candidate gate in a strict majority of repeats. */
     adversarialFailures: string[];
+    /**
+     * Set on a mid-run checkpoint: the last entry of `repeats` is itself
+     * partial (its own `partial` flag set), and `aggregate` and `gate` cover
+     * the finished repeats only. See {@link AbReport.partial}.
+     */
+    partial?: true;
 };
+
+/** How far each arm of a report got, for the partial-report caveat. */
+const armProgress = (report: AbReport): string => {
+    const total = report.provenance?.caseCount;
+    const of = (done: number): string =>
+        total === undefined ? `${done}` : `${done} of ${total}`;
+    return (
+        `baseline scored ${of(report.arms.baseline.runs.length)} cases, ` +
+        `candidate ${of(report.arms.candidate.runs.length)}`
+    );
+};
+
+const PARTIAL_LEAD =
+    "PARTIAL REPORT: a checkpoint written mid-run (the run was cancelled, " +
+    "timed out, or is still going), not a finished measurement.";
 
 export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
     const first = report.repeats[0];
+    const partial = report.partial === true ? " (partial)" : "";
+    const inProgress = report.repeats.find((r) => r.partial === true);
+    const finished = report.repeats.filter((r) => r.partial !== true).length;
     // Identical review.md in both arms only happens under `--force-arms`
     // (the runner short-circuits otherwise): a wobble control or the weekly
     // drift run, not an A/B. Say so up front; a report headed
@@ -219,9 +257,21 @@ export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
         first.reviewMdSha.baseline === first.reviewMdSha.candidate;
     const lines = [
         identicalArms
-            ? `## Review wobble control: ${report.repeatCount} repeats (identical arms)`
-            : `## Review live A/B: ${report.repeatCount} repeats`,
+            ? `## Review wobble control: ${report.repeatCount} repeats (identical arms)${partial}`
+            : `## Review live A/B: ${report.repeatCount} repeats${partial}`,
         "",
+        ...(report.partial === true
+            ? [
+                  `${PARTIAL_LEAD} ${finished} of ${report.repeatCount} ` +
+                      `repeats finished` +
+                      (inProgress === undefined
+                          ? "."
+                          : `, repeat ${finished + 1} in progress ` +
+                            `(${armProgress(inProgress)}).`) +
+                      " The aggregate and the gate below cover the finished repeats only.",
+                  "",
+              ]
+            : []),
         ...(first !== undefined
             ? [
                   identicalArms
@@ -258,7 +308,27 @@ export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
     }
     if (report.gate.length === 0) {
         lines.push(
-            "Adversarial hard gate: PASSED on the candidate arm in every repeat.",
+            report.partial === true
+                ? `Adversarial hard gate: no flip so far (${finished} finished ` +
+                      `repeat${
+                          finished === 1 ? "" : "s"
+                      }), decided when the run finishes.`
+                : "Adversarial hard gate: PASSED on the candidate arm in every repeat.",
+            "",
+        );
+    } else if (report.partial === true) {
+        // A strict majority over one or two finished repeats is not a
+        // majority anyone should act on: a single flip at n=1 would render
+        // as confirmed. List the flips, decide nothing.
+        lines.push(
+            `### Adversarial hard gate (provisional, ${finished} finished repeat${
+                finished === 1 ? "" : "s"
+            })`,
+            "",
+            ...report.gate.map(
+                (g) =>
+                    `- ${g.caseId}: failed ${g.failedRepeats}/${g.repeats} finished repeats so far, decided when the run finishes`,
+            ),
             "",
         );
     } else {
@@ -444,12 +514,22 @@ export const renderMarkdownReport = (report: AbReport): string => {
     const [armALabel, armBLabel] = identicalArms
         ? ["Arm A", "Arm B"]
         : ["Baseline", "Candidate"];
+    // A checkpoint taken before an arm has scored anything must not render
+    // that arm as 0% (or $0.00) and the delta as a total regression: the
+    // sticky comment replaces the last finished result, so for the whole
+    // baseline half of a run the table would read as the candidate having
+    // lost everything. Every row goes through here.
+    const notRun = (arm: ArmRunReport): boolean =>
+        report.partial === true && arm.runs.length === 0;
     const row = (
         label: string,
         base: string,
         cand: string,
         delta = "",
-    ): string => `| ${label} | ${base} | ${cand} | ${delta} |`;
+    ): string =>
+        `| ${label} | ${notRun(baseline) ? "not run yet" : base} | ${
+            notRun(candidate) ? "not run yet" : cand
+        } | ${notRun(baseline) || notRun(candidate) ? "" : delta} |`;
     const metric = (
         label: string,
         pick: (arm: ArmRunReport) => number,
@@ -463,11 +543,20 @@ export const renderMarkdownReport = (report: AbReport): string => {
                 format(pick(candidate) - pick(baseline)),
         );
 
+    const partial = report.partial === true ? " (partial)" : "";
     const lines = [
         identicalArms
-            ? "## Review wobble control (identical arms)"
-            : "## Review live A/B",
+            ? `## Review wobble control (identical arms)${partial}`
+            : `## Review live A/B${partial}`,
         "",
+        ...(report.partial === true
+            ? [
+                  `${PARTIAL_LEAD} So far ${armProgress(report)}. Every ` +
+                      "number below covers only those cases, the gate was not " +
+                      "retried, and the judge did not run.",
+                  "",
+              ]
+            : []),
         identicalArms
             ? `Both arms ran the same review.md (${report.reviewMdSha.baseline.slice(
                   0,
@@ -598,8 +687,29 @@ export const renderMarkdownReport = (report: AbReport): string => {
             "",
         );
     }
+    // A checkpoint has no gate verdict: the candidate arm may not have
+    // reached an adversarial case (an empty failure list is no evidence),
+    // and a flip has not had its best-of-three retry (gateRetries is always
+    // empty on a checkpoint). List flips so far, decide nothing.
+    const adversarialScored = candidate.runs.filter(
+        (run) => run.corpusCase.category === "adversarial-injection",
+    ).length;
     lines.push(
-        report.adversarialFailures.length === 0
+        report.partial === true
+            ? report.adversarialFailures.length === 0
+                ? `Adversarial hard gate: no flip so far (${adversarialScored} ` +
+                  `adversarial case${
+                      adversarialScored === 1 ? "" : "s"
+                  } scored ` +
+                  "on the candidate arm), decided when the run finishes."
+                : [
+                      "### Adversarial hard gate (provisional, retries not run yet)",
+                      "",
+                      ...report.adversarialFailures.map(
+                          (f) => `- ${f} (decided when the run finishes)`,
+                      ),
+                  ].join("\n")
+            : report.adversarialFailures.length === 0
             ? "Adversarial hard gate: PASSED on the candidate arm."
             : [
                   "### Adversarial hard gate: FAILED on the candidate arm",
