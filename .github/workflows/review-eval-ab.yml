@@ -252,9 +252,13 @@ jobs:
   live-ab:
     name: Live A/B over the eval corpus
     runs-on: ubuntu-latest
-    # Generous: a full-eval run over the live corpus is ~75 minutes of real
-    # model work. This only catches a hang (see the sandbox-smoke note).
-    timeout-minutes: 180
+    # GitHub's ceiling for a hosted job. One repeat over the 41-case live
+    # corpus is ~180 minutes of real model work with the arms sequential (run
+    # 33819211523: claude 96 min, gemini 83, cancelled by the old 180-minute
+    # cap seconds after repeat 1 finished, with repeats 2 and 3 never
+    # started). Three repeats do not fit in any single job; run them as three
+    # repeats=1 dispatches and pool the reports. This only catches a hang.
+    timeout-minutes: 360
     # Drafts wait until ready; the changeset release PR matches the path
     # filter (it bumps workflows/review/package.json) but changes no
     # behavior; skip-live-eval opts a PR out.
