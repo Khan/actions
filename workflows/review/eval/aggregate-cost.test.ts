@@ -93,6 +93,11 @@ describe("pooled cost at Khan's rate", () => {
             "| Judge + arbiter (list / Khan rate) | $2.00 / $1.00 |  | $2.00 / $1.00 |  |",
         );
         expect(markdown).not.toContain("cover only the samples");
+        // Sub-agents (3.00 / 1.50 pooled) plus the instrument, like the
+        // single-run table's row.
+        expect(markdown).toContain(
+            "| Run total (list / Khan rate) | $5.00 / $2.50 |  | $7.00 / $2.50 |  |",
+        );
         // The same provenance the single-run table carries, so a pooled
         // fallback-to-list figure cannot pass for an overlay price.
         expect(markdown).toContain(

@@ -26,15 +26,6 @@ import {
     type RateCard,
 } from "./pricing";
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-    typeof value === "object" && value !== null && !Array.isArray(value);
-
-const asNumber = (value: unknown): number =>
-    typeof value === "number" && Number.isFinite(value) ? value : 0;
-
-const asString = (value: unknown): string =>
-    typeof value === "string" ? value : "";
-
 export const money = (usd: number | undefined): string =>
     usd === undefined ? "n/a" : `$${usd.toFixed(2)}`;
 
@@ -48,8 +39,9 @@ const pair = (usage: ModelTokens[] | undefined, khan: RateCard): string =>
 
 /**
  * The notes that explain a Khan-rate figure: which models the overlay
- * priced, which read at list for want of an entry, how many dispatches read
- * at list for want of token counts, and what the list row is.
+ * priced, which read at list for want of an entry, how many dispatches had
+ * no token counts (priced from their list dollars by the overlay ratio), and
+ * what the list row is.
  */
 const khanNotes = (
     priced: ReturnType<typeof khanCost>[],
@@ -266,36 +258,6 @@ export const toolCallRows = (
     ];
 };
 
-/** One `ModelTokens` entry off a raw artifact, or undefined on a bad shape. */
-export const parseTokens = (raw: unknown): ModelTokens | undefined =>
-    isRecord(raw) && typeof raw["model"] === "string"
-        ? {
-              model: raw["model"],
-              input: asNumber(raw["input"]),
-              output: asNumber(raw["output"]),
-              cacheRead: asNumber(raw["cacheRead"]),
-              cacheWrite: asNumber(raw["cacheWrite"]),
-          }
-        : undefined;
-
-/** One `agentCosts[]` entry off a raw artifact, or undefined on a bad shape. */
-export const parseAgentCost = (raw: unknown): AgentCost | undefined => {
-    if (!isRecord(raw) || typeof raw["agent"] !== "string") {
-        return undefined;
-    }
-    const usage = Array.isArray(raw["usage"])
-        ? raw["usage"]
-              .map(parseTokens)
-              .filter((t): t is ModelTokens => t !== undefined)
-        : undefined;
-    return {
-        agent: raw["agent"],
-        model: asString(raw["model"]),
-        usd: asNumber(raw["usd"]),
-        ...(usage === undefined ? {} : {usage}),
-    };
-};
-
 /**
  * The pooled cost rows that need a rate card (see {@link pricedRows} for the
  * single-run equivalents and what each currency is). A pool where only some
@@ -323,10 +285,24 @@ export const pooledCostLines = (
         )} |  |`,
     ];
     if (arms.some((arm) => arm.pooled.overheadSamples > 0)) {
+        const total = (arm: ArmAggregate): string =>
+            arm.pooled.costSamples === 0 || arm.pooled.overheadSamples === 0
+                ? "n/a"
+                : `${money(
+                      arm.pooled.usd +
+                          priceTokens(arm.pooled.overhead, ANTHROPIC_LIST_RATES)
+                              .usd,
+                  )} / ${money(
+                      khanCost(arm.pooled.agentCosts, khan).usd +
+                          priceTokens(arm.pooled.overhead, khan).usd,
+                  )}`;
         lines.push(
             `| Judge + arbiter (list / Khan rate) | ${overheadCell(
                 arms[0],
             )} |  | ${overheadCell(arms[1])} |  |`,
+            `| Run total (list / Khan rate) | ${total(arms[0])} |  | ${total(
+                arms[1],
+            )} |  |`,
         );
     }
     // The same provenance the single-run table carries: which models the
