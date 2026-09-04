@@ -7,7 +7,7 @@ import {
     writeFileSync,
 } from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {join, normalize} from "node:path";
 
 import {afterAll, beforeAll, describe, expect, it} from "vitest";
 
@@ -15,9 +15,10 @@ import {outOfScopeRead, READ_TOOLS, readScopeReason} from "./read-scope";
 
 /**
  * A lexical realpath for the pure cases: every path "exists" and nothing is
- * a symlink, so the predicate is exercised without touching the disk.
+ * a symlink, so the predicate is exercised without touching the disk. It
+ * normalizes, as the real one does; the predicate hands it raw joins.
  */
-const lexical = (p: string): string => p;
+const lexical = (p: string): string => normalize(p);
 
 const ROOT = "/stage/candidate/case-1";
 const CWD = `${ROOT}/checkout`;
@@ -210,6 +211,57 @@ describe("outOfScopeRead on a real filesystem", () => {
         expect(hit).toBeDefined();
         expect(hit).toMatch(/repo[\\/]case\.json$/);
         expect(hit).not.toContain("escape");
+    });
+
+    it("follows a symlink before climbing with `..`, not after", () => {
+        // `path.resolve` would collapse `escape/..` to the checkout; the
+        // kernel resolves `escape` to the repo first and climbs from there.
+        const cwd = join(root, "checkout");
+        const hit = outOfScopeRead(
+            "Read",
+            {file_path: "escape/../secret.json"},
+            root,
+            cwd,
+        );
+        expect(hit).toBe(join(realpathSync.native(base), "secret.json"));
+        // Same through Grep's path and Glob's base.
+        expect(
+            outOfScopeRead(
+                "Grep",
+                {pattern: "x", path: "escape/.."},
+                root,
+                cwd,
+            ),
+        ).toBe(realpathSync.native(base));
+        expect(
+            outOfScopeRead(
+                "Glob",
+                {pattern: "*.json", path: "escape/.."},
+                root,
+                cwd,
+            ),
+        ).toBe(realpathSync.native(base));
+    });
+
+    it("follows a symlink out of the root in a glob's literal prefix", () => {
+        const cwd = join(root, "checkout");
+        // The pattern's own prefix is canonicalized, not just the base.
+        expect(
+            outOfScopeRead("Glob", {pattern: "escape/*.json"}, root, cwd),
+        ).toBe("escape/*.json");
+        // And the base, when it is the symlink.
+        expect(
+            outOfScopeRead(
+                "Glob",
+                {pattern: "*.json", path: "escape"},
+                root,
+                cwd,
+            ),
+        ).toMatch(/repo$/);
+        // A real prefix inside the root still passes.
+        expect(
+            outOfScopeRead("Glob", {pattern: "src/*.ts"}, root, cwd),
+        ).toBeUndefined();
     });
 
     it("allows a real file inside the root", () => {

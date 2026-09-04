@@ -59,6 +59,12 @@ const defaultRealpath = (path: string): string => realpathSync.native(path);
  * its nearest existing ancestor joined with the rest. A path that does not
  * exist yet is still checked lexically, so `../../etc/passwd` is denied even
  * when nothing is there to read.
+ *
+ * `path` must arrive UNnormalized. `path.resolve` collapses `x/..` as text,
+ * and when `x` is a symlink that is the wrong answer: the kernel resolves
+ * `x` to its target first and climbs from there. Handing realpath the raw
+ * concatenation lets it do the climbing, so `<symlink>/../secret` is judged
+ * by where it really lands.
  */
 const canonical = (path: string, realpath: (p: string) => string): string => {
     const missing: string[] = [];
@@ -72,13 +78,16 @@ const canonical = (path: string, realpath: (p: string) => string): string => {
         } catch {
             const parent = dirname(probe);
             if (parent === probe) {
-                return path;
+                return resolve(path);
             }
             missing.push(probe.slice(parent.length).replace(/^[\\/]/, ""));
             probe = parent;
         }
     }
 };
+
+/** Join without normalizing, so `canonical` sees `..` after a symlink. */
+const rawJoin = (base: string, rel: string): string => `${base}${sep}${rel}`;
 
 const isWithin = (candidate: string, root: string): boolean =>
     candidate === root || candidate.startsWith(root + sep);
@@ -202,7 +211,7 @@ export const outOfScopeRead = (
         if (typeof raw !== "string" || raw === "") {
             return undefined;
         }
-        const absolute = isAbsolute(raw) ? raw : resolve(cwd, raw);
+        const absolute = isAbsolute(raw) ? raw : rawJoin(cwd, raw);
         const target = canonical(absolute, realpath);
         return isWithin(target, canonicalRoot) ? undefined : target;
     };
@@ -225,7 +234,7 @@ export const outOfScopeRead = (
                 typeof input["path"] === "string" && input["path"] !== ""
                     ? isAbsolute(input["path"])
                         ? input["path"]
-                        : resolve(cwd, input["path"])
+                        : rawJoin(cwd, input["path"])
                     : cwd;
             const expansions = expandBraces(pattern);
             if (expansions === undefined) {
@@ -237,7 +246,7 @@ export const outOfScopeRead = (
                     return pattern;
                 }
                 const target = canonical(
-                    isAbsolute(prefix) ? prefix : resolve(base, prefix),
+                    isAbsolute(prefix) ? prefix : rawJoin(base, prefix),
                     realpath,
                 );
                 if (!isWithin(target, canonicalRoot)) {
