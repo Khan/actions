@@ -383,6 +383,22 @@ const armAsymmetryLines = (
 const ASYMMETRY_HEADING =
     "### Arm asymmetry (expected when the PR adds a reviewer)";
 
+/**
+ * Total tool calls across an arm's case runs, or undefined when no agent
+ * reported a count (the SDK-era harness did not). Read beside cost: the
+ * gemini-3.8-flash A/B (runs 33671015442 and 33783322586) showed a 1.5x
+ * cost delta that was entirely a 3.8x tool-call delta at 2.8x cheaper per
+ * call, and the table could not say so.
+ */
+export const armToolCalls = (arm: ArmRunReport): number | undefined => {
+    const counts = arm.perCase.flatMap((c) =>
+        (c.toolCalls ?? []).map((t) => t.count),
+    );
+    return counts.length === 0
+        ? undefined
+        : counts.reduce((sum, n) => sum + n, 0);
+};
+
 /** Total anchor-snaps across an arm's case runs (see `perCase.snapped`). */
 const snappedTotal = (arm: ArmRunReport): number =>
     arm.perCase.reduce((sum, c) => sum + c.snapped, 0);
@@ -608,10 +624,36 @@ export const renderMarkdownReport = (report: AbReport): string => {
               ]
             : []),
         row(
-            "Cost",
+            "Cost (list price)",
             `$${baseline.usd.toFixed(2)}`,
             `$${candidate.usd.toFixed(2)}`,
         ),
+        ...(() => {
+            const b = armToolCalls(baseline);
+            const c = armToolCalls(candidate);
+            if (b === undefined && c === undefined) {
+                return [];
+            }
+            const perCall = (usd: number, calls: number | undefined): string =>
+                calls === undefined || calls === 0
+                    ? "n/a"
+                    : `$${(usd / calls).toFixed(4)}`;
+            return [
+                row(
+                    "Tool calls",
+                    b === undefined ? "n/a" : String(b),
+                    c === undefined ? "n/a" : String(c),
+                    b !== undefined && c !== undefined && b > 0
+                        ? `${(c / b).toFixed(2)}x`
+                        : "",
+                ),
+                row(
+                    "Cost per tool call",
+                    perCall(baseline.usd, b),
+                    perCall(candidate.usd, c),
+                ),
+            ];
+        })(),
         row(
             "Wall clock",
             `${Math.round(baseline.wallMs / 1000)}s`,

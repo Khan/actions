@@ -23,6 +23,14 @@
 # `skip-live-eval` label skips the job entirely (added mid-run, it cancels
 # the in-flight run too, see the concurrency key).
 #
+# Two jobs: `live-ab` measures quality arm to arm on the eval's three-tool
+# surface, and `sandbox-smoke` proves the PRODUCTION tool surface (Bash plus the
+# investigation-cap CLI) actually works inside the srt sandbox. They are
+# separate because the corpus is calibrated on the three-tool surface: giving
+# the measured arms Bash would move every number, and leaving the production
+# surface unexercised is how a fail-closed sandbox gets discovered on a
+# consumer's PR.
+#
 # NOTE: this workflow's name must stay distinct from any gh-aw workflow a
 # consumer runs (same-named workflows share a gh-aw concurrency group per PR
 # and cancel each other; see the round-two doc's operational floor).
@@ -63,6 +71,28 @@ on:
         type: boolean
         required: false
         default: false
+      transcripts:
+        description: "Live A/B: write every agent's transcript under out/transcripts (uploaded as live-ab-transcripts)"
+        type: boolean
+        required: false
+        default: false
+      probes_only:
+        description: "Sandbox smoke: run the free boundary probes only, skipping the live production-surface case"
+        type: boolean
+        required: false
+        default: false
+      smoke_case:
+        description: "Sandbox smoke: live case id for the production-surface phase (default incident-cache-missing-key)"
+        required: false
+      harness_probe:
+        description: "Run the harness probe for the lost finding instead of the eval (dispatch only)"
+        type: boolean
+        required: false
+        default: false
+      harness_probe_config:
+        description: "Harness probe config: all | as-is | fortified | no-submit"
+        required: false
+        default: "all"
 
 permissions:
   contents: read
@@ -81,15 +111,162 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The sandbox smoke, separate from the measured arms on purpose: the A/B runs
+  # the eval's three-tool surface (Read/Grep/Glob) because the corpus was
+  # calibrated on it, so nothing in this workflow exercised the surface
+  # PRODUCTION runs — Bash, and the investigation-cap CLI writing its journal
+  # from inside a sandbox built to deny writes. This job covers exactly that,
+  # and reports no quality metrics.
+  #
+  # Cost shape: Phase A (the boundary probes) is free and always runs, and it
+  # is the hard gate. Phase B dispatches one live case on the production tool
+  # surface, so drafts get probes only; a ready PR and workflow_dispatch run
+  # both. See workflows/review/eval/sandbox-smoke.ts.
+  sandbox-smoke:
+    name: Production tool surface under srt
+    runs-on: ubuntu-latest
+    # A hung sandbox must fail the check, not squat a runner for six hours.
+    # srt starts a proxy it never shuts down, so a process that finishes its
+    # work can still outlive it (run 30867526519 printed a PASSED verdict and
+    # then held the runner for 25 minutes). The script now exits explicitly;
+    # this is the backstop for the next thing that holds the loop open.
+    timeout-minutes: 20
+    # `inputs.harness_probe != true` matters: a dispatch asking only for the
+    # probe used to start this job too, because "any workflow_dispatch" is how
+    # the eval is run by hand. Two probe dispatches therefore ran two full A/Bs
+    # nobody asked for (~$18). A dispatch now means what it says.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.harness_probe != true) ||
+      (github.event_name != 'workflow_dispatch' &&
+       github.head_ref != 'changeset-release/main' &&
+       !contains(github.event.pull_request.labels.*.name, 'skip-live-eval') &&
+       (github.event.action != 'labeled' ||
+        github.event.label.name == 'full-eval'))
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      # node 24 is load-bearing, not incidental: the cap CLI runs inside the
+      # sandbox as `node <file>.ts` on native type stripping, because npx
+      # cannot resolve tsx with the network denied and tsx cannot start there
+      # at all (it opens a unix socket, which bubblewrap refuses). The agent
+      # job pins node 24 for the same reason; this job proves the pairing.
+      - uses: ./actions/shared-node-cache
+        with:
+          node-version: "24.x"
+      - name: Install sandbox dependencies
+        # srt's Linux runtime dependencies, none of them in the runner image.
+        # ripgrep is not optional and not obvious: srt calls it to expand
+        # deny-path globs into concrete paths for bwrap, so a missing rg fails
+        # initialization outright -- which is how this job first failed (run
+        # 30867013094, "Sandbox dependencies not available: ripgrep (rg) not
+        # found").
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat ripgrep
+          # bwrap needs a usable user namespace, and Ubuntu 24.04 runners
+          # restrict unprivileged userns under AppArmor, at which point bwrap
+          # cannot bring up loopback in its netns ("bwrap: loopback: Failed
+          # RTM_NEWADDR: Operation not permitted", run 30867350588) and every
+          # sandboxed command dies before it executes. The runner is ephemeral
+          # and ours, so relax it here, with before/after probes so the log
+          # says whether that was actually the cause. Production runs in a
+          # different environment and has to answer this separately.
+          . /etc/os-release && echo "runner: ${PRETTY_NAME}"
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
+          bwrap --unshare-net --dev-bind / / true \
+            && echo "bwrap netns: OK before" || echo "bwrap netns: FAILS before"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --unshare-net --dev-bind / / true \
+            && echo "bwrap netns: OK after" || echo "bwrap netns: FAILS after"
+      - name: Run the sandbox smoke
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The reviewer pins on this branch are Google models (the gemini
+          # A/B); the judges and arbiter stay Anthropic, so both keys ride.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Drafts pay nothing: probes only. A ready PR or a dispatch runs the
+          # live phase too, which is the only check of the tool DEFINITIONS.
+          PROBES_ONLY: ${{ inputs.probes_only == true || (github.event_name == 'pull_request' && github.event.pull_request.draft == true) }}
+          SMOKE_CASE: ${{ inputs.smoke_case || '' }}
+        run: |
+          EXTRA=""
+          if [ "$PROBES_ONLY" = "true" ]; then
+            EXTRA="--probes-only"
+          fi
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            # A fork PR gets no secrets; the boundary probes still run and
+            # still gate. Said out loud so a green check is not read as
+            # "the production tool surface was exercised".
+            echo "ANTHROPIC_API_KEY not available; running the boundary probes only." >&2
+            EXTRA="--probes-only"
+          fi
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "GEMINI_API_KEY not available; the gemini-pinned live phase cannot run." >&2
+            EXTRA="--probes-only"
+          fi
+          if [ -n "$SMOKE_CASE" ]; then
+            EXTRA="$EXTRA --case $SMOKE_CASE"
+          fi
+          pnpm dlx tsx workflows/review/eval/sandbox-smoke.ts $EXTRA
+      - name: Upload the live-phase transcripts
+        # Every agent's transcript from phase B (tool calls with arguments,
+        # trimmed results, text turns), so an investigation pattern can be
+        # read rather than inferred from the tool-call count.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sandbox-smoke-transcripts
+          path: /tmp/review-transcripts/
+          if-no-files-found: ignore
+
+  # One question, one dispatch: why does the Pi arm lose
+  # incident-sql-missing-index:dm-default-backfill? Never runs on a PR -- it is a
+  # diagnosis, not a check, and it costs real model dollars (~$0.50 per config).
+  # Runs here rather than on a dev box because the Anthropic key lives in CI,
+  # which is also where every other eval dollar is already spent.
+  harness-probe:
+    name: Harness probe (lost finding)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: github.event_name == 'workflow_dispatch' && inputs.harness_probe == true
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: ./actions/shared-node-cache
+        with:
+          node-version: "24.x"
+      - name: Install sandbox dependencies
+        # The probe dispatches real sub-agents through the production runner, so
+        # it initializes srt and needs the same three dependencies and the same
+        # userns relaxation the other jobs do (see their notes).
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat ripgrep
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Run the harness probe
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROBE_CONFIG: ${{ inputs.harness_probe_config || 'all' }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY is required for the harness probe." >&2
+            exit 1
+          fi
+          pnpm dlx tsx workflows/review/eval/harness-probe.ts --config "$PROBE_CONFIG"
+
   live-ab:
     name: Live A/B over the eval corpus
     runs-on: ubuntu-latest
+    # GitHub's ceiling for a hosted job. One repeat over the 41-case live
+    # corpus is ~180 minutes of real model work with the arms sequential (run
+    # 33819211523: claude 96 min, gemini 83, cancelled by the old 180-minute
+    # cap seconds after repeat 1 finished, with repeats 2 and 3 never
+    # started). Three repeats do not fit in any single job; run them as three
+    # repeats=1 dispatches and pool the reports. This only catches a hang.
+    timeout-minutes: 360
     # Drafts wait until ready; the changeset release PR matches the path
     # filter (it bumps workflows/review/package.json) but changes no
     # behavior; skip-live-eval opts a PR out.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.pull_request.draft == false &&
+      (github.event_name == 'workflow_dispatch' && inputs.harness_probe != true) ||
+      (github.event_name != 'workflow_dispatch' &&
+       github.event.pull_request.draft == false &&
        github.head_ref != 'changeset-release/main' &&
        !contains(github.event.pull_request.labels.*.name, 'skip-live-eval') &&
        (github.event.action != 'labeled' ||
@@ -101,9 +278,38 @@ jobs:
           # `git show`, so the full history is needed.
           fetch-depth: 0
       - uses: ./actions/shared-node-cache
+      - name: Install sandbox dependencies
+        # The eval runs the review sub-agents through the same srt tool
+        # sandbox production dispatch uses (dispatch-runner-pi.ts,
+        # fail-closed); bubblewrap, socat, and ripgrep are its Linux runtime
+        # dependencies and none is in the runner image. rg is the easy one to
+        # miss: srt shells out to it to expand deny-path globs for bwrap, and
+        # without it initialization throws before any case runs -- which is
+        # why this job has produced no green srt measurement yet.
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat ripgrep
+          # bwrap needs a usable user namespace, and Ubuntu 24.04 runners
+          # restrict unprivileged userns under AppArmor, at which point bwrap
+          # cannot bring up loopback in its netns ("bwrap: loopback: Failed
+          # RTM_NEWADDR: Operation not permitted", run 30867350588) and every
+          # sandboxed command dies before it executes. The runner is ephemeral
+          # and ours, so relax it here, with before/after probes so the log
+          # says whether that was actually the cause. Production runs in a
+          # different environment and has to answer this separately.
+          . /etc/os-release && echo "runner: ${PRETTY_NAME}"
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
+          bwrap --unshare-net --dev-bind / / true \
+            && echo "bwrap netns: OK before" || echo "bwrap netns: FAILS before"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --unshare-net --dev-bind / / true \
+            && echo "bwrap netns: OK after" || echo "bwrap netns: FAILS after"
       - name: Run the live A/B
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The candidate arm's reviewer pins are gemini-3.8-flash on this
+          # branch; the baseline arm, the judges, and the arbiter stay on
+          # Anthropic pins, so the run needs both keys.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # The tip of the PR's base branch (see the header comment for why
           # tip, not merge-base). workflow_dispatch may override it.
           BASE_REF: ${{ inputs.base_ref || format('origin/{0}', github.base_ref || 'main') }}
@@ -112,9 +318,14 @@ jobs:
           CASES: ${{ inputs.cases || '' }}
           REPEATS: ${{ inputs.repeats || '1' }}
           FORCE_ARMS: ${{ inputs.force_arms == true }}
+          REVIEW_EVAL_TRANSCRIPTS: ${{ inputs.transcripts == true && '1' || '' }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "ANTHROPIC_API_KEY secret not configured; skipping the live A/B." >&2
+            exit 0
+          fi
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "GEMINI_API_KEY secret not configured; the candidate arm's gemini pins cannot run. Skipping." >&2
             exit 0
           fi
           SCOPE="--smoke-only"
@@ -140,6 +351,15 @@ jobs:
         with:
           name: live-ab-report
           path: out/live-ab-report.*
+          if-no-files-found: ignore
+      - name: Upload the transcripts
+        # Present only when REVIEW_EVAL_TRANSCRIPTS=1 was set on the run
+        # (a dispatch input); a 10-case run is ~400 files.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: live-ab-transcripts
+          path: /tmp/review-transcripts/
           if-no-files-found: ignore
       - name: Post the sticky PR comment
         if: always() && github.event_name == 'pull_request'

@@ -30,8 +30,13 @@ const reviewMd = readFileSync(join(__dirname, "..", "review.md"), "utf8");
 const frontmatter = reviewMd.split(/^---$/m)[1] ?? "";
 
 /**
- * Every model pin in the file: the engine's indented `model:` line in the
- * frontmatter plus each sub-agent's `model:` line in its block frontmatter.
+ * Every ANTHROPIC model pin in the file: the engine's indented `model:` line
+ * in the frontmatter plus each sub-agent's `model:` line in its block
+ * frontmatter. Deliberately claude-only: the overlay and the credit guard
+ * both live on the awf api-proxy, which only Anthropic traffic crosses.
+ * Gemini pins (this branch's A/B) are priced by the Pi catalog instead
+ * (dispatch-runner-pi.ts's GEMINI_38_FLASH_MODEL), asserted in that
+ * module's tests.
  */
 const pins = [
     ...new Set(
@@ -53,9 +58,11 @@ const priced = new Set(
 
 describe("model pricing coverage (review.md frontmatter)", () => {
     it("finds the pins and the overlay (guards the extraction itself)", () => {
-        // 22 agents plus the engine; a collapse to zero means the regexes
-        // rotted, not that the roster emptied.
-        expect(pins.length).toBeGreaterThanOrEqual(2);
+        // At minimum the engine; the sub-agents are gemini-pinned on this
+        // branch (the gemini-3.8-flash A/B), so only the engine's claude pin
+        // remains. A collapse to zero means the regexes rotted, not that the
+        // roster emptied.
+        expect(pins.length).toBeGreaterThanOrEqual(1);
         expect(priced.size).toBeGreaterThanOrEqual(2);
     });
 

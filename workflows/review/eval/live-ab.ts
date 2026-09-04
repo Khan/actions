@@ -81,6 +81,7 @@ import {
     type GateRetry,
     type GateRetryAttempt,
 } from "./live-ab-report";
+import {runCli} from "./exit-when-flushed";
 import {
     caseLine,
     stderrLog,
@@ -93,8 +94,8 @@ import {
     type LiveCaseRun,
     type MatchOptions,
 } from "./live-match";
-import {produceLive} from "./live-producer";
-import {sdkRunner} from "./live-runner";
+import {produceLive, type LiveAgentRunner} from "./live-producer";
+import {piRunner} from "./live-runner";
 import {haikuMatchArbiter} from "./match-arbiter";
 import {
     computeRereviewMetrics,
@@ -588,9 +589,20 @@ const main = async (): Promise<void> => {
         candidate: reviewMdHasAnchorSnap(candidateMd),
     };
 
-    const runner = sdkRunner();
+    // ONE harness for both arms. Per-arm runners existed while the Claude
+    // Agent SDK loop was A/B'd against the Pi loop (the re-anchoring, run
+    // 30666183461); with the SDK harness removed, the A/B is back to
+    // measuring review.md deltas through the single Pi runner, and sharing
+    // the instance also shares its lazy Pi/sandbox initialization.
+    const baselineRunner = piRunner();
+    const candidateRunner = baselineRunner;
     const armProduce =
-        (stage: string, markdown: string, mode: ReReviewMode): ArmProduce =>
+        (
+            stage: string,
+            markdown: string,
+            mode: ReReviewMode,
+            runner: LiveAgentRunner,
+        ): ArmProduce =>
         (corpusCase) =>
             produceLive(corpusCase, extractAgents(markdown), {
                 // One stderr line per dispatch end, labeled with the arm
@@ -680,7 +692,12 @@ const main = async (): Promise<void> => {
             await runArm(
                 "baseline",
                 cases,
-                armProduce(`baseline${suffix}`, baselineMd, "full"),
+                armProduce(
+                    `baseline${suffix}`,
+                    baselineMd,
+                    "full",
+                    baselineRunner,
+                ),
                 {
                     maxUsd: nextArmBudget(),
                     anchorSnap: armSnap.baseline,
@@ -694,7 +711,12 @@ const main = async (): Promise<void> => {
             await runArm(
                 "candidate",
                 cases,
-                armProduce(`candidate${suffix}`, candidateMd, candidateMode),
+                armProduce(
+                    `candidate${suffix}`,
+                    candidateMd,
+                    candidateMode,
+                    candidateRunner,
+                ),
                 {
                     maxUsd: nextArmBudget(),
                     anchorSnap: armSnap.candidate,
@@ -717,7 +739,7 @@ const main = async (): Promise<void> => {
                   (attempt): ArmProduce =>
                       (corpusCase) =>
                           produceLive(corpusCase, extractAgents(candidateMd), {
-                              runner: withDispatchProgress(runner, {
+                              runner: withDispatchProgress(candidateRunner, {
                                   arm: `candidate${suffix}-retry${attempt}`,
                                   caseId: corpusCase.id,
                               }),
@@ -757,10 +779,20 @@ const main = async (): Promise<void> => {
     }
 };
 
+/**
+ * Exit explicitly, once stdout has drained.
+ *
+ * srt's initialize starts a proxy and nothing here shuts it down, so the event
+ * loop never empties and the process outlives its own output. That is why no
+ * A/B run has ever concluded green: runs 30872172052, 30872187609 and
+ * 30877187141 each scored all nine cases on both arms, wrote their report, and
+ * were then killed by the job timeout with the work already finished.
+ *
+ * The drain-then-exit mechanics live in exit-when-flushed.ts (shared with
+ * sandbox-smoke and harness-probe).
+ */
+
 // CLI entry point (mirrors live-runner.ts): run when executed, not imported.
 if (process.argv[1]?.endsWith("live-ab.ts")) {
-    main().catch((error) => {
-        console.error(error);
-        process.exit(1);
-    });
+    runCli(main);
 }

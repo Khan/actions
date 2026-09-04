@@ -11,8 +11,10 @@
         "build": "tsc -p actions/tsconfig.json"
     },
     "devDependencies": {
-        "@anthropic-ai/claude-agent-sdk": "^0.3.219",
+        "@anthropic-ai/sandbox-runtime": "0.0.67",
         "@changesets/cli": "^2.29.8",
+        "@earendil-works/pi-agent-core": "0.84.4",
+        "@earendil-works/pi-ai": "0.84.4",
         "@khanacademy/eslint-config": "^0.1.0",
         "@swc-node/register": "^1.11.1",
         "@types/node": "^25.3.3",
@@ -27,8 +29,7 @@
         "memfs": "^4.51.0",
         "prettier": "^2.6.2",
         "typescript": "^5.9.3",
-        "vitest": "^4.0.10",
-        "zod": "^4.4.3"
+        "vitest": "^4.0.10"
     },
     "packageManager": "pnpm@10.0.0+sha512.b8fef5494bd3fe4cbd4edabd0745df2ee5be3e4b0b8b08fa643aa3e4c6702ccc0f00d68fa8a8c9858a735a0032485a44990ed2810526c875e416f001b17df12b"
 }

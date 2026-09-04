@@ -68,10 +68,9 @@ import {
     type Claim,
 } from "./dispatch-contracts";
 import {loadAgents, type AgentRunner, type DispatchFs} from "./dispatch-agents";
+import {createAgentDispatcher, type PerAgentReport} from "./dispatch-calls";
 import {
     buildProseJudgeArtifact,
-    createProseGate,
-    fallbackSkippedRecord,
     stageProseJudgeArtifact,
     type JudgeRecord,
     type ProseJudgeArtifact,
@@ -80,7 +79,6 @@ import {
 
 import {computeRoster, TRIAGE_DIMENSION} from "./dispatch-roster";
 import type {RosterShed} from "./dispatch-roster";
-import {refusalFallbackFor} from "./refusal-fallback";
 import {
     applyProvenanceGate,
     type DiffProvenance,
@@ -136,12 +134,19 @@ export {type ClusterRejection} from "./dedup-cluster";
 
 // The model-facing contract types live in dispatch-agents.ts (the same
 // max-lines split that placed agent loading there); re-exported so every
-// existing importer keeps this module as the one surface.
+// existing importer keeps this module as the one surface. The dispatcher
+// itself (calling one agent, plus its recovery behaviors) lives in
+// dispatch-calls.ts and is re-exported the same way.
 export {
     type AgentRequest,
     type AgentResult,
     type AgentRunner,
 } from "./dispatch-agents";
+export {
+    createAgentDispatcher,
+    type AgentDispatcher,
+    type PerAgentReport,
+} from "./dispatch-calls";
 
 /* -------------------------------------------------------------------------- */
 /* Fixed paths and contracts                                                  */
@@ -171,25 +176,6 @@ const VALIDATOR = "claim-validator";
 /* -------------------------------------------------------------------------- */
 /* The dispatch run                                                           */
 /* -------------------------------------------------------------------------- */
-
-export type PerAgentReport = {
-    name: string;
-    model: string;
-    usd: number;
-    turns: number;
-    wallMs: number;
-    /** This entry is the one malformed-output retry of the same agent. */
-    retried?: boolean;
-    /**
-     * The pinned model refused under the provider's usage policy and this
-     * dispatch ran on the fallback instead. Recorded, never silent: the whole
-     * failure mode is invisibility, and a hidden model swap would just move it.
-     */
-    fellBackTo?: string;
-    /** The result arrived via the structured-final tool (pre-validated). */
-    structuredFinal?: boolean;
-    failed?: string;
-};
 
 export type DispatchSkippedDimension = {
     dimension: string;
@@ -376,157 +362,20 @@ export const runDispatch = async (
         fs.writeFileSync(`${OUT_DIR}/${name}.json`, content);
     };
 
-    /**
-     * Dispatch one agent; stage its raw output; report cost and failure.
-     * `malformedNote` marks the one contract-parse retry: it appends the
-     * corrective instruction to the prompt and flags the report entry.
-     */
-    const dispatchAgent = async (
-        name: string,
-        malformedNote?: string,
-        modelOverride?: string,
-    ): Promise<string | null> => {
-        const definition = agents.get(name);
-        if (definition === undefined) {
-            writeOut(name, JSON.stringify({error: "agent definition missing"}));
-            perAgent.push({
-                name,
-                model: "",
-                usd: 0,
-                turns: 0,
-                wallMs: 0,
-                failed: "definition-missing",
-            });
-            return null;
-        }
-        try {
-            const corrective =
-                malformedNote === undefined
-                    ? ""
-                    : `\n\nYour previous reply could not be used (${malformedNote}). Submit again now, and this time deliver the complete corrected JSON object through the submit_result tool (or, if that tool is unavailable, as your ENTIRE message: no prose before or after it, no code fence).`;
-            const model = modelOverride ?? definition.model;
-            // One prose gate per dispatch attempt: per-session bounce cap,
-            // records accumulate into the run artifact whatever the fate.
-            const proseGate =
-                options.proseRunner === undefined
-                    ? undefined
-                    : createProseGate({
-                          runner: options.proseRunner,
-                          source: name,
-                      });
-            const result = await runner({
-                name,
-                model,
-                prompt: `${definition.prompt}\n\nProceed now per your definition. Deliver your result by calling the submit_result tool ONCE, passing the ENTIRE JSON object your definition's output contract specifies as its \`result\` argument; if the tool rejects it, correct the object and call the tool again. After it is accepted, end the turn without repeating the JSON. If the submit_result tool is unavailable, your final message must be exactly that JSON object, nothing else.${corrective}`,
-                cwd: repoRoot,
-                maxTurns,
-                timeoutMs,
-                validate: validatorFor(name),
-                ...(proseGate === undefined
-                    ? {}
-                    : {judgeProse: proseGate.gate}),
-            });
-            if (proseGate !== undefined) {
-                proseVerdicts.push(...proseGate.records);
-                if (result.structured !== true) {
-                    proseVerdicts.push(fallbackSkippedRecord(name));
-                }
-            }
-            // A usage-policy refusal is intermittent (probe 30658862532 saw
-            // the same pin clear cases it blocked in 30656579898), but the
-            // contract-parse retry still cannot recover it: that retry appends
-            // a corrective note about output shape, and a blocked request
-            // never had one. Only a different refusal profile reliably helps.
-            // Production is where this actually costs coverage — a refused
-            // reviewer emits no error, just nothing, and the review proceeds
-            // without it (run 30656579898: correctness-reviewer on Fable 5,
-            // blocked on security-adjacent diffs).
-            const fallback =
-                result.refused === true && modelOverride === undefined
-                    ? refusalFallbackFor(model)
-                    : undefined;
-            if (fallback !== undefined) {
-                // Record the refused attempt before recursing. It really ran
-                // and really cost money, and `totalUsd` sums over `perAgent`,
-                // so dropping it undercounts the run. A separate entry also
-                // keeps the refusal itself visible rather than letting the
-                // fallback's success paper over it (the malformed-output
-                // retry pushes its own entry for the same reason).
-                perAgent.push({
-                    name,
-                    model,
-                    usd: result.usd,
-                    turns: result.turns,
-                    wallMs: result.wallMs,
-                    failed: "refused",
-                });
-                return dispatchAgent(name, malformedNote, fallback);
-            }
-            writeOut(name, result.output);
-            perAgent.push({
-                name,
-                model,
-                usd: result.usd,
-                turns: result.turns,
-                wallMs: result.wallMs,
-                ...(malformedNote === undefined ? {} : {retried: true}),
-                ...(modelOverride === undefined ? {} : {fellBackTo: model}),
-                ...(result.structured === true ? {structuredFinal: true} : {}),
-            });
-            return result.output;
-        } catch (error) {
-            writeOut(
-                name,
-                JSON.stringify({
-                    error:
-                        error instanceof Error ? error.message : String(error),
-                }),
-            );
-            perAgent.push({
-                name,
-                model: modelOverride ?? definition.model,
-                usd: 0,
-                turns: 0,
-                wallMs: 0,
-                ...(modelOverride === undefined
-                    ? {}
-                    : {fellBackTo: modelOverride}),
-                failed: "run-failed",
-            });
-            return null;
-        }
-    };
-
-    /**
-     * Parse an agent's output per its contract, re-dispatching ONCE with a
-     * corrective note when the parse fails (the eval producer's
-     * malformed-output rule). The retry's output overwrites the staged
-     * out-file, so the gate reads whatever the run actually acted on. A
-     * second failure returns null and the caller sheds the dimension with
-     * its disclosure note; without the retry, one prose-wrapped reply
-     * silently voids a dispatched (and paid-for) reviewer, which is how the
-     * mandatory correctness pass went missing in trial run 29893634730.
-     */
-    const parseWithRetry = async <T>(
-        name: string,
-        output: string,
-        parse: (output: string) => T,
-    ): Promise<T | null> => {
-        try {
-            return parse(output);
-        } catch (error) {
-            const note = error instanceof Error ? error.message : String(error);
-            const second = await dispatchAgent(name, note);
-            if (second === null) {
-                return null;
-            }
-            try {
-                return parse(second);
-            } catch {
-                return null;
-            }
-        }
-    };
+    const {dispatchAgent, parseWithRetry} = createAgentDispatcher({
+        runner,
+        agents,
+        writeOut,
+        report: (entry) => perAgent.push(entry),
+        repoRoot,
+        maxTurns,
+        timeoutMs,
+        validatorFor,
+        ...(options.proseRunner === undefined
+            ? {}
+            : {proseRunner: options.proseRunner}),
+        recordProseVerdicts: (records) => proseVerdicts.push(...records),
+    });
 
     // Phase 1: triage (full/scoped), staging pr.diff and review-files.json.
     let excludedFiles: string[] | undefined;
@@ -954,15 +803,24 @@ export const runDispatch = async (
 /* -------------------------------------------------------------------------- */
 
 // Run only when executed directly (review.md Step 3, scripted dispatch mode),
-// never on import (tests). The SDK-backed runner (dispatch-runner.ts) is
-// loaded lazily so unit tests and the task-mode path never require the SDK;
-// the staging pre-step installs it (workflows/review/package.json) before
-// the agent starts.
+// never on import (tests). The Pi-backed runner (dispatch-runner-pi.ts) is
+// loaded lazily so unit tests and the task-mode path never require Pi's
+// libraries; the staging pre-step installs them
+// (workflows/review/package.json) before the agent starts. The per-role
+// `model:` pins resolve through Pi's catalog for each pin's provider
+// (dispatch-models.ts: providerForPin routes gemini-* pins to Google,
+// everything else to Anthropic; resolveModelId names the concrete id).
 if (typeof require !== "undefined" && require.main === module) {
     const nodeFs = require("node:fs") as DispatchFs;
     void (async () => {
-        const {createSdkRunner} = await import("./dispatch-runner");
-        const runner = await createSdkRunner();
+        const {createPiRunner, rejectStaleRunnerSelection} = await import(
+            "./dispatch-runner-pi"
+        );
+        // The runner-selection seam was removed with the Claude Agent SDK
+        // harness; a leftover REVIEW_DISPATCH_RUNNER=sdk must fail loudly
+        // rather than silently running the other harness.
+        rejectStaleRunnerSelection(process.env);
+        const runner = await createPiRunner();
         const {createDefaultProseRunner} = await import("./judge-prose-runner");
         const proseRunner = await createDefaultProseRunner();
         const repoRoot =
