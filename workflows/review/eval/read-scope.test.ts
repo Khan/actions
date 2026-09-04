@@ -87,6 +87,15 @@ describe("outOfScopeRead", () => {
             "../../**/live-match.ts",
         );
         expect(inScope("Glob", {pattern: "src/**/..*"})).toBeUndefined();
+        // Brace alternation: any alternative that escapes denies the pattern.
+        expect(inScope("Glob", {pattern: "{/**,src}/case.json"})).toBe(
+            "{/**,src}/case.json",
+        );
+        expect(inScope("Glob", {pattern: "{..,src}/live-match.ts"})).toBe(
+            "{..,src}/live-match.ts",
+        );
+        expect(inScope("Glob", {pattern: "src/{a,b}/**/*.ts"})).toBeUndefined();
+        expect(inScope("Glob", {pattern: "**/*.{ts,tsx}"})).toBeUndefined();
     });
 
     it("leaves unknown tools and malformed input alone", () => {

@@ -534,10 +534,12 @@ export const probeReadScope = async (
 
 /**
  * The CI gate around the probe. One retry, only when the model declined to
- * attempt the out-of-scope read or the dispatch itself failed: those are
- * model behavior and transport, not the scope, and neither should red three
- * workflows on one bad call. A leak or a missing denial never retries, and
- * a leak on the first try cannot be retried away. Each attempt gets its own
+ * attempt the out-of-scope reads or the dispatch itself failed: those are
+ * model behavior and transport, not the scope. If that happens twice the
+ * run is `unproven` and proceeds under a warning annotation rather than
+ * failing; only a demonstrated leak, a missing denial, or a failed in-scope
+ * read is `broken` and fails the job. A leak on the first try cannot be
+ * retried away. Each attempt gets its own
  * transcript subdirectory, since the verdict scans every file under the
  * directory it is given and a prior attempt's transcript would poison it.
  * Injected `probe` and `log` so the wiring is testable without a model.
@@ -546,7 +548,7 @@ export const runProbeGate = async (
     transcriptsDir: string,
     probe: (options: ProbeOptions) => Promise<ProbeResult>,
     log: (line: string) => void,
-): Promise<{ok: boolean; message: string}> => {
+): Promise<ProbeGateResult> => {
     let result = await probe({transcriptsDir: join(transcriptsDir, "1")});
     log(`read-scope probe: ${result.detail}`);
     if (!result.ok && (result.notAttempted || result.dispatchFailed)) {
@@ -554,22 +556,46 @@ export const runProbeGate = async (
         log(`read-scope probe (retry): ${result.detail}`);
     }
     if (result.ok) {
-        return {ok: true, message: result.detail};
+        return {verdict: "proven", message: result.detail};
+    }
+    if (result.notAttempted || result.dispatchFailed) {
+        // Nothing was learned about the hook, and nothing was learned
+        // against it either. The hook and predicate are unit-tested; what
+        // this run lacks is the live proof on the installed SDK. Say so
+        // where the run's reader will see it, and let the run proceed: on a
+        // per-PR run that short-circuits at $0 this is otherwise the only
+        // failure source, and on a spending run the arms retry their own
+        // dispatches.
+        return {
+            verdict: "unproven",
+            message:
+                "read-scope probe UNPROVEN on two tries: the hook was never " +
+                "exercised (the model did not attempt the out-of-scope " +
+                "reads, or the dispatch failed). Not a scope failure; read " +
+                "the probe transcripts before trusting this run's recall. " +
+                "Detail: " +
+                result.detail,
+        };
     }
     return {
-        ok: false,
+        verdict: "broken",
         message:
-            result.notAttempted || result.dispatchFailed
-                ? "read-scope probe FAILED on two tries without exercising " +
-                  "the hook (the model did not attempt the out-of-scope " +
-                  "read, or the dispatch failed). The scope is unproven for " +
-                  "this run, not broken. Detail: " +
-                  result.detail
-                : "read-scope probe FAILED: the runner let a read outside " +
-                  "the staged case through or the in-scope read failed. Do " +
-                  "not trust this run's recall. Detail: " +
-                  result.detail,
+            "read-scope probe FAILED: the runner let a read outside the " +
+            "staged case through or the in-scope read failed. Do not trust " +
+            "this run's recall. Detail: " +
+            result.detail,
     };
+};
+
+export type ProbeGateResult = {
+    /**
+     * `proven`: the hook denied both out-of-scope legs and nothing leaked.
+     * `unproven`: the hook was never exercised (twice); the job proceeds
+     * with a warning annotation. `broken`: a leak, a missing denial, or a
+     * failed in-scope read; the job fails.
+     */
+    verdict: "proven" | "unproven" | "broken";
+    message: string;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -596,8 +622,13 @@ const main = async (): Promise<void> => {
             probeReadScope,
             (line) => console.error(line),
         );
-        if (!gate.ok) {
+        if (gate.verdict === "broken") {
             throw new Error(gate.message);
+        }
+        if (gate.verdict === "unproven") {
+            // A GitHub Actions warning annotation: visible on the run page
+            // and in the job summary, without failing the job.
+            console.log(`::warning title=read-scope probe::${gate.message}`);
         }
         return;
     }

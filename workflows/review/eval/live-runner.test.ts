@@ -503,7 +503,7 @@ describe("runProbeGate", () => {
     it("passes on a clean first attempt without retrying", async () => {
         const {probe, seen} = scripted([verdict({ok: true})]);
         const gate = await runProbeGate("/t", probe, quiet);
-        expect(gate.ok).toBe(true);
+        expect(gate.verdict).toBe("proven");
         expect(seen).toHaveLength(1);
         expect(seen[0]!.transcriptsDir).toBe(join("/t", "1"));
     });
@@ -515,7 +515,7 @@ describe("runProbeGate", () => {
         ]);
         const lines: string[] = [];
         const gate = await runProbeGate("/t", probe, (l) => lines.push(l));
-        expect(gate.ok).toBe(true);
+        expect(gate.verdict).toBe("proven");
         expect(seen.map((o) => o.transcriptsDir)).toEqual([
             join("/t", "1"),
             join("/t", "2"),
@@ -523,15 +523,15 @@ describe("runProbeGate", () => {
         expect(lines[1]).toMatch(/^read-scope probe \(retry\)/);
     });
 
-    it("fails as unproven when the model did not attempt twice", async () => {
+    it("is unproven, not broken, when the model did not attempt twice", async () => {
         const {probe, seen} = scripted([verdict({notAttempted: true})]);
         const gate = await runProbeGate("/t", probe, quiet);
-        expect(gate.ok).toBe(false);
+        expect(gate.verdict).toBe("unproven");
         expect(seen).toHaveLength(2);
-        expect(gate.message).toContain("unproven for this run, not broken");
+        expect(gate.message).toContain("UNPROVEN on two tries");
     });
 
-    it("retries once on a dispatch failure, and fails as unproven if it repeats", async () => {
+    it("retries once on a dispatch failure, unproven if it repeats", async () => {
         const {probe, seen} = scripted([
             verdict({
                 dispatchFailed: true,
@@ -539,7 +539,7 @@ describe("runProbeGate", () => {
             }),
             verdict({ok: true}),
         ]);
-        expect((await runProbeGate("/t", probe, quiet)).ok).toBe(true);
+        expect((await runProbeGate("/t", probe, quiet)).verdict).toBe("proven");
         expect(seen).toHaveLength(2);
         const twice = scripted([
             verdict({
@@ -548,9 +548,8 @@ describe("runProbeGate", () => {
             }),
         ]);
         const gate = await runProbeGate("/t", twice.probe, quiet);
-        expect(gate.ok).toBe(false);
+        expect(gate.verdict).toBe("unproven");
         expect(twice.seen).toHaveLength(2);
-        expect(gate.message).toContain("unproven for this run, not broken");
         expect(gate.message).toContain("529");
     });
 
@@ -561,7 +560,7 @@ describe("runProbeGate", () => {
         ]) {
             const {probe, seen} = scripted([first, verdict({ok: true})]);
             const gate = await runProbeGate("/t", probe, quiet);
-            expect(gate.ok).toBe(false);
+            expect(gate.verdict).toBe("broken");
             expect(seen).toHaveLength(1);
             expect(gate.message).toContain("Do not trust this run's recall");
             expect(gate.message).toContain(first.detail);

@@ -81,9 +81,77 @@ const canonical = (path: string, realpath: (p: string) => string): string => {
 const isWithin = (candidate: string, root: string): boolean =>
     candidate === root || candidate.startsWith(root + sep);
 
-/** Segment-wise check for `..` in a glob pattern (`a/../b`, `../x`). */
-const climbs = (pattern: string): boolean =>
-    pattern.split(/[\\/]/).includes("..");
+/**
+ * Expand brace alternation (`a{b,c}d` to `abd`, `acd`), nesting included,
+ * capped so a hostile pattern cannot blow up; past the cap the pattern is
+ * treated as escaping, since it cannot be checked.
+ */
+const EXPANSION_CAP = 256;
+const expandBraces = (pattern: string): string[] | undefined => {
+    const open = pattern.indexOf("{");
+    if (open === -1) {
+        return [pattern];
+    }
+    let depth = 0;
+    let close = -1;
+    const cuts: number[] = [];
+    for (let i = open; i < pattern.length; i++) {
+        const ch = pattern[i];
+        if (ch === "{") {
+            depth += 1;
+        } else if (ch === "}") {
+            depth -= 1;
+            if (depth === 0) {
+                close = i;
+                break;
+            }
+        } else if (ch === "," && depth === 1) {
+            cuts.push(i);
+        }
+    }
+    if (close === -1) {
+        // Unbalanced: a literal brace, nothing to expand.
+        return [pattern];
+    }
+    const head = pattern.slice(0, open);
+    const tail = pattern.slice(close + 1);
+    const inner = pattern.slice(open + 1, close);
+    const alternatives: string[] = [];
+    let from = 0;
+    for (const cut of [...cuts.map((c) => c - open - 1), inner.length]) {
+        alternatives.push(inner.slice(from, cut));
+        from = cut + 1;
+    }
+    const out: string[] = [];
+    for (const alt of alternatives) {
+        const rest = expandBraces(`${head}${alt}${tail}`);
+        if (rest === undefined) {
+            return undefined;
+        }
+        out.push(...rest);
+        if (out.length > EXPANSION_CAP) {
+            return undefined;
+        }
+    }
+    return out;
+};
+
+/**
+ * Does any path the pattern can expand to leave the search root? A glob
+ * pattern is not a path the resolver can canonicalize, so this is a lexical
+ * test over every brace expansion: one that is absolute, or has a `..`
+ * segment, escapes. `{/**,x}/case.json` and `{..,x}/live-match.ts` are the
+ * shapes that slip a check on the raw string.
+ */
+const escapesRoot = (pattern: string): boolean => {
+    const expansions = expandBraces(pattern);
+    if (expansions === undefined) {
+        return true;
+    }
+    return expansions.some(
+        (piece) => isAbsolute(piece) || piece.split(/[\\/]/).includes(".."),
+    );
+};
 
 /**
  * The path a read-tool call would touch outside `root`, or `undefined` when
@@ -92,10 +160,11 @@ const climbs = (pattern: string): boolean =>
  *
  * - `Read` reads `file_path`.
  * - `Grep` searches `path` (a file or directory; default cwd).
- * - `Glob` matches `pattern` under `path` (default cwd). An absolute pattern
- *   or one that climbs with `..` is denied outright: a pattern is not a path
- *   the resolver can canonicalize, and `/**\/case.json` is exactly the query
- *   a reviewer hunting for the corpus would make.
+ * - `Glob` matches `pattern` under `path` (default cwd). A pattern with any
+ *   absolute or `..`-climbing piece (brace alternatives included) is denied
+ *   outright: a pattern is not a path the resolver can canonicalize, and
+ *   `/**\/case.json` is exactly the query a reviewer hunting for the corpus
+ *   would make.
  */
 export const outOfScopeRead = (
     toolName: string,
@@ -125,10 +194,7 @@ export const outOfScopeRead = (
             return check(input["path"]);
         case "Glob": {
             const pattern = input["pattern"];
-            if (
-                typeof pattern === "string" &&
-                (isAbsolute(pattern) || climbs(pattern))
-            ) {
+            if (typeof pattern === "string" && escapesRoot(pattern)) {
                 return pattern;
             }
             return check(input["path"]);
