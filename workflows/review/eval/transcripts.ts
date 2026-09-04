@@ -90,6 +90,47 @@ const toolCallIndex = (messages: unknown[]): string[] => {
     return lines;
 };
 
+/**
+ * Token totals across the agent's assistant turns, from the usage pi-ai puts
+ * on every assistant message. Tool calls are a proxy for cost; this is the
+ * cost's actual composition. `reasoning` is the share billed as output that
+ * no tool-call change touches (gemini at effort high, claude adaptive), and
+ * `cacheRead` is what re-reading the context each turn cost.
+ */
+export type TokenTotals = {
+    input: number;
+    output: number;
+    reasoning: number;
+    cacheRead: number;
+    cacheWrite: number;
+};
+
+export const tokenTotals = (messages: unknown[]): TokenTotals => {
+    const totals: TokenTotals = {
+        input: 0,
+        output: 0,
+        reasoning: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+    };
+    for (const message of messages) {
+        const record = message as {
+            role?: string;
+            usage?: Record<string, unknown>;
+        };
+        if (record.role !== "assistant" || record.usage === undefined) {
+            continue;
+        }
+        for (const key of Object.keys(totals) as (keyof TokenTotals)[]) {
+            const value = record.usage[key];
+            if (typeof value === "number") {
+                totals[key] += value;
+            }
+        }
+    }
+    return totals;
+};
+
 const safe = (part: string): string => part.replaceAll(/[^A-Za-z0-9._-]/g, "_");
 
 /**
@@ -119,6 +160,7 @@ export const writeTranscript = (
                 toolCalls: transcript.toolCalls,
                 distinctToolCalls: distinct,
                 usd: transcript.usd,
+                tokens: tokenTotals(transcript.messages),
                 wallMs: transcript.wallMs,
                 toolCallIndex: index,
                 messages: transcript.messages.map(trimMessage),

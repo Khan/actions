@@ -150,6 +150,14 @@ export const SYSTEM_PROMPT = [
     "unavailable, treat that as a denied budget and conclude. Emit the",
     "output contract exactly as your instructions describe it; do not",
     "read or run the review tooling's source to validate it.",
+    // Batching, from the same transcripts: claude did a whole review in 8
+    // calls by bundling (`cat a && cat b && grep x` in one Bash), gemini
+    // made one Read per file and one Grep per pattern for the same
+    // investigation, 30 to 50 calls. Each call is a round trip and a
+    // re-read of the context, so the shape of the calls is most of the
+    // cost gap at equal investigation depth. Says what claude does.
+    "When several files or searches are needed at once, batch them into",
+    "one Bash command rather than one call each.",
 ].join(" ");
 
 /**

@@ -4,7 +4,7 @@ import {join} from "node:path";
 
 import {describe, expect, it} from "vitest";
 
-import {writeTranscript} from "./transcripts";
+import {tokenTotals, writeTranscript} from "./transcripts";
 
 describe("writeTranscript", () => {
     it("indexes every tool call and counts the distinct ones", () => {
@@ -54,6 +54,44 @@ describe("writeTranscript", () => {
         // Tool-call arguments are kept whole.
         expect(written.messages[0].content[0].arguments).toEqual({
             path: "a.ts",
+        });
+    });
+});
+
+describe("tokenTotals", () => {
+    it("sums every assistant turn's usage and ignores tool results", () => {
+        const totals = tokenTotals([
+            {
+                role: "assistant",
+                content: [],
+                usage: {
+                    input: 1000,
+                    output: 50,
+                    reasoning: 400,
+                    cacheRead: 800,
+                    cacheWrite: 0,
+                },
+            },
+            {role: "toolResult", content: [], usage: {input: 999999}},
+            {
+                role: "assistant",
+                content: [],
+                usage: {
+                    input: 1200,
+                    output: 70,
+                    reasoning: 300,
+                    cacheRead: 900,
+                    cacheWrite: 100,
+                },
+            },
+            {role: "assistant", content: []},
+        ]);
+        expect(totals).toEqual({
+            input: 2200,
+            output: 120,
+            reasoning: 700,
+            cacheRead: 1700,
+            cacheWrite: 100,
         });
     });
 });
