@@ -11,7 +11,7 @@ import {join} from "node:path";
 
 import {afterAll, beforeAll, describe, expect, it} from "vitest";
 
-import {outOfScopeRead, readScopeReason} from "./read-scope";
+import {outOfScopeRead, READ_TOOLS, readScopeReason} from "./read-scope";
 
 /**
  * A lexical realpath for the pure cases: every path "exists" and nothing is
@@ -110,6 +110,21 @@ describe("outOfScopeRead", () => {
         const wide = `{${"a,".repeat(20)}b}`;
         const blowup = `${wide}/${wide}/${wide}/*.ts`;
         expect(inScope("Glob", {pattern: blowup})).toBe(blowup);
+        // An absolute pattern with a literal directory resolves that
+        // directory (not a "//" form of it): inside the root passes.
+        expect(
+            inScope("Glob", {pattern: `${ROOT}/context/*.diff`}),
+        ).toBeUndefined();
+        expect(inScope("Glob", {pattern: "/home/runner/**/case.json"})).toBe(
+            "/home/runner/**/case.json",
+        );
+        // Nested brace groups expand through every level.
+        expect(
+            inScope("Glob", {pattern: "src/{a,{b,c}}/*.ts"}),
+        ).toBeUndefined();
+        expect(
+            inScope("Glob", {pattern: "{src,{lib,../../case-2}}/*.ts"}),
+        ).toBe("{src,{lib,../../case-2}}/*.ts");
         // The base path is checked before the pattern.
         expect(inScope("Glob", {pattern: "*.ts", path: "/etc"})).toBe("/etc");
         // The prefix resolves against the supplied base, not the cwd: from
@@ -133,6 +148,25 @@ describe("outOfScopeRead", () => {
         expect(inScope("Glob", {pattern: "*.json", path: "../../case-2"})).toBe(
             `/stage/candidate/case-2`,
         );
+    });
+
+    it("has a case for every tool in READ_TOOLS, and denies one it does not know", () => {
+        // Each read tool, given an out-of-root path, must be judged.
+        for (const tool of READ_TOOLS) {
+            const input =
+                tool === "Read"
+                    ? {file_path: "/etc/passwd"}
+                    : {pattern: "x", path: "/etc"};
+            expect(inScope(tool, input)).toBeDefined();
+        }
+        // A tool that appears in READ_TOOLS without a case falls closed.
+        const widened = [...READ_TOOLS, "LS"];
+        expect(
+            outOfScopeRead("LS", {path: "/etc"}, ROOT, CWD, {
+                realpath: lexical,
+                readTools: widened,
+            }),
+        ).toContain("LS");
     });
 
     it("leaves unknown tools and malformed input alone", () => {

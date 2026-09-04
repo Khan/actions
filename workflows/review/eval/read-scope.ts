@@ -48,6 +48,8 @@ export type ReadScopeOptions = {
      * touching the disk.
      */
     realpath?: (path: string) => string;
+    /** The read-tool list to fall closed against; defaults to READ_TOOLS. */
+    readTools?: readonly string[];
 };
 
 const defaultRealpath = (path: string): string => realpathSync.native(path);
@@ -152,16 +154,23 @@ const literalPrefix = (
     const firstGlob = segments.findIndex((seg) => GLOB_CHARS.test(seg));
     const literal = firstGlob === -1 ? segments : segments.slice(0, firstGlob);
     const tail = firstGlob === -1 ? [] : segments.slice(firstGlob);
+    // An absolute expansion splits to a leading "" segment, so the join
+    // already starts with "/"; a pattern that is only "/**" has no literal
+    // and resolves to the root of the filesystem.
+    const prefix = literal.join("/");
     return {
-        prefix: (isAbsolute(expansion) ? "/" : "") + literal.join("/"),
+        prefix: prefix === "" && isAbsolute(expansion) ? "/" : prefix,
         tailClimbs: tail.includes(".."),
     };
 };
 
 /**
  * The path a read-tool call would touch outside `root`, or `undefined` when
- * the call is in scope. Unknown tools and inputs without a path field are in
- * scope (the tool list, not this predicate, decides which tools exist).
+ * the call is in scope. Inputs without a path field are in scope. A tool
+ * that is not in {@link READ_TOOLS} is in scope too (the hook denies those
+ * by name before asking), but a tool that IS in READ_TOOLS and has no case
+ * below is denied: adding a tool to the constant must not ship an unchecked
+ * read path.
  *
  * - `Read` reads `file_path`.
  * - `Grep` searches `path` (a file or directory; default cwd).
@@ -238,7 +247,9 @@ export const outOfScopeRead = (
             return undefined;
         }
         default:
-            return undefined;
+            return (options.readTools ?? READ_TOOLS).includes(toolName)
+                ? `${toolName} (a read tool this predicate does not know)`
+                : undefined;
     }
 };
 
