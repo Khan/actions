@@ -218,6 +218,20 @@ describe("buildCostReport", () => {
         ]);
     });
 
+    it("flags a dispatcher model the proxy log never saw at all", () => {
+        // The `t === undefined` arm: the dispatcher billed opus, the proxy
+        // log only has haiku. No negative row is invented, the note says so.
+        const report = buildCostReport({
+            perAgent: [agent("correctness-reviewer")],
+            khan: KHAN,
+            proxyUsage: [HAIKU_1],
+        });
+        expect(report.engine).toMatchObject({models: ["claude-haiku-4-5"]});
+        expect(report.notes[0]).toBe(
+            "The dispatcher's meters exceed the proxy's total on claude-opus-5, so the orchestrator row is floored at zero there and the proxy log is likely partial.",
+        );
+    });
+
     it("adds up two proxy model ids that share a pin before taking the remainder", () => {
         const report = buildCostReport({
             perAgent: [agent("correctness-reviewer")],
@@ -316,6 +330,14 @@ describe("withCostDetails", () => {
                 details +
                 "\n\n<details><summary><sub>review fingerprint</sub></summary>\n<sub>x</sub>\n</details>",
         );
+    });
+
+    it("ignores a body that merely quotes the chip's markup mid-line", () => {
+        const body =
+            "The bot writes `<details><summary><sub>review cost` blocks, and this sentence must survive.\n";
+        const out = withCostDetails(body, details);
+        expect(out.startsWith(body.trimEnd())).toBe(true);
+        expect(out.match(/review cost/g)).toHaveLength(2);
     });
 
     it("appends when there is no stamp, and replaces an existing block rather than stacking", () => {

@@ -176,7 +176,7 @@ describe("runCostReportCli", () => {
         expect(artifact.total).toEqual({khanUsd: 6, listUsd: 12});
     });
 
-    it("leaves the block out of a body that would cross GitHub's limit, and says so everywhere", () => {
+    it("leaves the block out of a body that would cross the ingest cap, and says so everywhere", () => {
         const long = "x".repeat(BODY_CAP - 200);
         const fs = memFs({
             "/tmp/gh-aw/review/dispatch-result.json": DISPATCH_RESULT,
@@ -195,10 +195,10 @@ describe("runCostReportCli", () => {
         );
         expect(queue.items[0].body).toBe(long);
         expect(outcome.report.notes.at(-1)).toMatch(
-            /^The review body was within \d+ characters of GitHub's limit, so the cost block was left out of it\.$/,
+            /^The cost block would have pushed the review body \d+ characters over gh-aw's 65000-character cap, so it was left out of the body\.$/,
         );
-        expect(fs.files["/summary.md"]).toContain("cost block was left out");
-        expect(fs.files[COST_REPORT_PATH]).toContain("cost block was left out");
+        expect(fs.files["/summary.md"]).toContain("left out of the body");
+        expect(fs.files[COST_REPORT_PATH]).toContain("left out of the body");
     });
 
     it("still writes the summary and artifact when the gate stripped the queue, and notes a missing proxy log", () => {

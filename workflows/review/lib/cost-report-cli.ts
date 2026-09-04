@@ -222,10 +222,10 @@ export const runCostReportCli = (
                       // A review that posts without its price tag beats one
                       // that GitHub rejects.
                       report.notes.push(
-                          "The review body was within " +
-                              `${body.length - BODY_CAP} characters of ` +
-                              "GitHub's limit, so the cost block was left " +
-                              "out of it.",
+                          "The cost block would have pushed the review body " +
+                              `${body.length - BODY_CAP} characters over ` +
+                              `gh-aw's ${BODY_CAP}-character cap, so it was ` +
+                              "left out of the body.",
                       );
                       return item;
                   }

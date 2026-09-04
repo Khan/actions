@@ -14,7 +14,7 @@ body grows by one collapsed block, roughly 1,000 to 2,000 characters for a
 default-roster run (one table row per sub-agent), which the reader sees as a
 one-line `review cost: $x.xx at Khan's rate` chip. The block is left out,
 with a note in the summary and artifact, when the body would otherwise cross
-GitHub's 65000-character cap.
+gh-aw's 65000-character ingest cap.
 
 Before this, a run's cost lived in three places that never met:
 `dispatch-result.json`'s per-agent `usd` was the Claude Agent SDK's own meter

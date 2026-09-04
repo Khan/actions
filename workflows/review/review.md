@@ -343,7 +343,7 @@ pre-agent-steps:
 # (and it strips the queue in the same code path).
 post-steps:
   # POST-AGENT EXECUTION RULE: nothing the agent can write may execute on
-  # the host after its turn. Both steps below run from the pre-staged copy
+  # the host after its turn. Every step below runs from the pre-staged copy
   # under $RUNNER_TEMP (the pre-agent copy step above; the agent cannot
   # write it), never from the agent-writable workspace checkout. The copy
   # is present whenever the agent ran at all (its step failing reds the job

@@ -17,7 +17,9 @@
  *
  *  - Sub-agents: `perAgent[].usage` (the SDK result's `modelUsage`) at
  *    Khan's rate, grouped by agent across attempts. An entry with no tokens
- *    keeps its recorded list dollars and the report says so.
+ *    is left to the orchestrator row when the proxy log is in hand (the
+ *    proxy saw its tokens) and priced from its recorded dollars by the
+ *    overlay ratio otherwise, and the report says which.
  *  - Prose judge: `perAgent[].judgeUsage`, attributed to the agent it gated
  *    in the per-agent rows and summed into its own row.
  *  - Orchestrator: the remainder. The api-proxy's `token-usage.jsonl` is the
@@ -44,6 +46,7 @@ import {
     type ModelTokens,
     type RateCard,
 } from "./pricing";
+import {STAMP_SUMMARY} from "./rereview-mode";
 
 /**
  * The per-agent entry this report prices: the subset of dispatch.ts's
@@ -497,6 +500,16 @@ export const renderCostDetails = (report: CostReport): string =>
         "</details>",
     ].join("\n");
 
+/** Index of a collapsed block's opening line by chip, at a line start only. */
+const blockStart = (body: string, chip: string): number => {
+    const opener = `<details><summary><sub>${chip}`;
+    if (body.startsWith(opener)) {
+        return 0;
+    }
+    const at = body.indexOf(`\n${opener}`);
+    return at === -1 ? -1 : at + 1;
+};
+
 /**
  * Insert the cost block into a review body, before the fingerprint stamp
  * when the body carries one (the stamp is documented as the final block and
@@ -505,7 +518,9 @@ export const renderCostDetails = (report: CostReport): string =>
  * stack two.
  */
 export const withCostDetails = (body: string, details: string): string => {
-    const start = body.indexOf(`<details><summary><sub>${COST_SUMMARY}`);
+    // Anchored to a line start, so a body that merely quotes the chip's
+    // markup mid-sentence is not mistaken for a previous block.
+    const start = blockStart(body, COST_SUMMARY);
     let base = body;
     if (start !== -1) {
         const end = body.indexOf("</details>", start);
@@ -515,7 +530,7 @@ export const withCostDetails = (body: string, details: string): string => {
                 : body.slice(0, start) + body.slice(end + "</details>".length);
         base = base.replace(/\n{3,}/g, "\n\n");
     }
-    const stamp = base.indexOf("<details><summary><sub>review fingerprint");
+    const stamp = blockStart(base, STAMP_SUMMARY);
     if (stamp === -1) {
         return `${base.replace(/\s+$/, "")}\n\n${details}\n`;
     }

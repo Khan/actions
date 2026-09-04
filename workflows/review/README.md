@@ -864,7 +864,8 @@ The report is a `post-steps` entry after the dispatch-conformance gate
 (`lib/cost-report-cli.ts`), because two of its inputs only exist after the
 agent step. It edits the review body in the validated safe-output queue the
 same way the gate edits it (skipping the block, with a note, when the body
-would cross GitHub's 65000-character cap), writes `cost-report.json` beside
+would cross gh-aw's 65000-character ingest cap, which sits under GitHub's own
+65536), writes `cost-report.json` beside
 the gate's report under `/tmp/gh-aw/agent/` so the `agent` artifact carries
 it, and it fails open: a review without its price tag still posts.
 
