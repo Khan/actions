@@ -839,6 +839,55 @@ analysis, and a refused security lens would be a silent coverage hole. Any
 further per-role promotion (or Sonnet step-down) earns its line through its
 own eval-suite arm.
 
+### What a review costs (the per-review cost report)
+
+Every review carries its own price tag: a collapsed `review cost` block at the
+end of the review body (before the fingerprint stamp), with one row per
+sub-agent (model, tool calls, turns, wall clock, tokens by class), a row for
+the prose judge, a row for the orchestrator, and a total, in two currencies.
+The same table lands in the run's step summary and as `cost-report.json` in
+the run's `agent` artifact.
+
+The two currencies matter because the pieces a run leaves behind never agreed.
+`dispatch-result.json`'s `perAgent[].usd` is the Claude Agent SDK's own meter,
+which prices from its bundled table at Anthropic **list** price regardless of
+the api-proxy. gh-aw's `agent_usage.json` is the whole run at **Khan's rate**
+(the `models.providers` overlay in `review.md`, 50% of list), as `ai_credits`
+with no per-agent split. And the prose judge runs its own SDK sessions, so its
+spend was in neither. The cost report prices tokens instead of re-pricing
+dollars (`lib/pricing.ts`, the one place tokens become dollars):
+
+- Each sub-agent's row prices the tokens the SDK reported for it
+  (`perAgent[].usage`) at Khan's rate, with the SDK's list figure beside it.
+  A dispatch that recorded no tokens is not priced in its own row when the
+  proxy log is in hand (its tokens are already inside the orchestrator
+  remainder, and counting its dollars too would pay for them twice), and is
+  priced from its list figure by the overlay ratio otherwise. The notes say
+  which happened.
+- The list table (the one copy the repo keeps, in `lib/pricing.ts`) is checked
+  against the SDK's own meter on the sub-agents' tokens on every run, and a
+  disagreement over 1% is a note.
+- The prose judge's tokens are recorded per agent it gated
+  (`perAgent[].judgeUsage`), shown in that agent's row and summed into their
+  own row.
+- The orchestrator's row is the remainder: the api-proxy's `token-usage.jsonl`
+  is the run's whole spend by model (every request crosses the proxy), minus
+  everything the dispatcher accounted for.
+- The total is reconciled against gh-aw's `ai_credits`. Both are computed from
+  the proxy log at the overlay rate, so they agree to rounding, and a gap over
+  1% is printed as a note, since it means the report priced with a different
+  table than gh-aw did. The report reads gh-aw's own `/tmp/gh-aw/models.json`
+  when the runner has it, else the overlay in `review.md`.
+
+The report is a `post-steps` entry after the dispatch-conformance gate
+(`lib/cost-report-cli.ts`), because two of its inputs only exist after the
+agent step. It edits the review body in the validated safe-output queue the
+same way the gate edits it (skipping the block, with a note, when the body
+would cross gh-aw's 65000-character ingest cap, which sits under GitHub's own
+65536), writes `cost-report.json` beside
+the gate's report under `/tmp/gh-aw/agent/` so the `agent` artifact carries
+it, and it fails open: a review without its price tag still posts.
+
 ### Feedback signal: live counters
 
 One small scheduled workflow in each consumer repo turns on the tuning loop's
@@ -849,7 +898,9 @@ and never touches review semantics:
 - **Live counters** (`lib/counters-report.ts`, weekly): the workflow downloads
   the review runs' per-run artifacts (bounded window), and the script
   aggregates them with `lib/counters.ts` into the job summary — verdict mix,
-  comments/run, validator drop rate, cost/run. Needs only `actions: read`,
+  comments/run, validator drop rate, cost/run (from `agent_usage.json`, so
+  Khan's rate for the whole run, the per-agent split is in each run's
+  `cost-report.json` and not yet pooled here). Needs only `actions: read`,
   and no `npm ci`: the lib scripts consumers run are dependency-free.
 
 There used to be a second workflow here, the thumbs sweep (a 2-hourly poll
@@ -1028,12 +1079,15 @@ in `lib/rereview-mode.ts`), so the marker never reached a posted comment; `sub`,
 ingest. There is no separate config-hash or drift-stamp mechanism; the release
 tag plus the footer's config segments are the version surface.
 
-After the footer, a submitted review body ends with one more collapsed block:
-the re-review fingerprint stamp (summary chip `review fingerprint`, rendered
-by `lib/rereview-mode.ts`), the hunk-signature record the next run's re-review
-planner and autofix's currency check read back. It rides the same
-sanitizer-surviving `details`/`summary`/`sub` mechanism as the footer, so the
-footer is second-to-last and the stamp is the final block.
+After the footer, a submitted review body ends with two more collapsed blocks:
+the cost report (summary chip `review cost`, spliced in by the
+`lib/cost-report-cli.ts` post-step, see "What a review costs"), then the
+re-review fingerprint stamp (summary chip `review fingerprint`, rendered by
+`lib/rereview-mode.ts`), the hunk-signature record the next run's re-review
+planner and autofix's currency check read back. All three ride the same
+sanitizer-surviving `details`/`summary`/`sub` mechanism, and the stamp is
+always the final block (the cost block is inserted before it, and is absent
+when the post-step could not run).
 
 Every inline review comment (and each pr-level finding folded into the review
 body) additionally carries per-comment attribution, naming the reviewer that

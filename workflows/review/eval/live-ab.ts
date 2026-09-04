@@ -71,7 +71,7 @@ import {
     diffRegressions,
     majorityGateFailures,
 } from "./live-ab-gates";
-import {readOverlayRates, type ModelTokens} from "./pricing";
+import {readOverlayRates, type ModelTokens} from "../lib/pricing";
 import {
     renderMarkdownReport,
     renderMultiMarkdownReport,

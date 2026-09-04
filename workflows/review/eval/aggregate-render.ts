@@ -17,7 +17,7 @@ import {
     SEVERITY_SPLIT_NOTE,
 } from "./aggregate-severity";
 import {pooledCostLines} from "./cost-rows";
-import type {RateCard} from "./pricing";
+import type {RateCard} from "../lib/pricing";
 
 const pct = (value: number): string => `${(value * 100).toFixed(0)}%`;
 

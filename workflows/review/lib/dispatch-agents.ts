@@ -5,6 +5,8 @@
  * split in #304); the concern is self-contained and has no dispatch state.
  */
 
+import {mergeUsage, type ModelTokens} from "./pricing";
+
 export type DispatchFs = {
     readFileSync: (p: string, enc: "utf8") => string;
     writeFileSync: (p: string, data: string) => void;
@@ -97,7 +99,14 @@ export type AgentRequest = {
 export type AgentResult = {
     /** The agent's final text (expected to be its JSON contract). */
     output: string;
+    /** The SDK's own meter, list price. */
     usd: number;
+    /**
+     * Tokens per model behind `usd` (the SDK result's `modelUsage`), so the
+     * cost report can price the dispatch at Khan's rate (pricing.ts). Absent
+     * when the stream died without a result record.
+     */
+    usage?: ModelTokens[];
     turns: number;
     wallMs: number;
     /**
@@ -140,3 +149,63 @@ export type AgentResult = {
 
 /** The model seam; the SDK-backed production runner lives in the CLI entry. */
 export type AgentRunner = (request: AgentRequest) => Promise<AgentResult>;
+
+/* -------------------------------------------------------------------------- */
+/* Small helpers dispatch.ts shares (moved here at its max-lines cap)          */
+/* -------------------------------------------------------------------------- */
+
+export const readJson = (fs: DispatchFs, path: string): unknown => {
+    if (!fs.existsSync(path)) {
+        return undefined;
+    }
+    try {
+        return JSON.parse(fs.readFileSync(path, "utf8"));
+    } catch {
+        return undefined;
+    }
+};
+
+/** Bounded-concurrency map (order-preserving). */
+export const mapConcurrent = async <T, R>(
+    items: T[],
+    limit: number,
+    worker: (item: T) => Promise<R>,
+): Promise<R[]> => {
+    const results: R[] = new Array(items.length) as R[];
+    let next = 0;
+    const lanes = Array.from(
+        {length: Math.max(1, Math.min(limit, items.length))},
+        async () => {
+            for (;;) {
+                const index = next++;
+                if (index >= items.length) {
+                    return;
+                }
+                results[index] = await worker(items[index]);
+            }
+        },
+    );
+    await Promise.all(lanes);
+    return results;
+};
+
+/**
+ * The optional meter fields of a per-agent report entry, present only when
+ * the runner (and the prose gate, when one ran) could see them: the tokens
+ * behind the SDK's dollar figure, the tool-call count, and the judge's own
+ * tokens on this agent's submissions. The cost report prices all three.
+ */
+export const meterFields = (
+    result: Pick<AgentResult, "usage" | "toolCalls">,
+    judgeUsage: readonly ModelTokens[] | undefined,
+): {
+    usage?: ModelTokens[];
+    toolCalls?: number;
+    judgeUsage?: ModelTokens[];
+} => ({
+    ...(result.usage === undefined ? {} : {usage: result.usage}),
+    ...(result.toolCalls === undefined ? {} : {toolCalls: result.toolCalls}),
+    ...(judgeUsage === undefined || judgeUsage.length === 0
+        ? {}
+        : {judgeUsage: mergeUsage(judgeUsage)}),
+});

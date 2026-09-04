@@ -1,5 +1,6 @@
 /**
- * The one place the eval turns tokens into dollars.
+ * The one place the review turns tokens into dollars, in production (the
+ * per-review cost report) and in the eval (the A/B tables) alike.
  *
  * Every `usd` the eval records is provider LIST price: the SDK harness's
  * `total_cost_usd` is what Anthropic bills a bare API key. Production meters
@@ -11,13 +12,16 @@
  * entry (run 33671015442 read gemini-3.8-flash at 1.5x claude by list and
  * about 3x at Khan's rate).
  *
- * Dollars cannot be re-priced exactly, so the runner records TOKENS per model
- * (the SDK result's `modelUsage`, the Messages API's `usage` for the judge and
- * the arbiter) and every dollar the report prints is computed here from those
- * tokens against one of two rate cards:
+ * Dollars cannot be re-priced exactly, so the runners record TOKENS per model
+ * (the SDK result's `modelUsage` for every sub-agent and the prose judge, in
+ * production and in the eval alike, and the Messages API's `usage` for the
+ * eval's judge and arbiter) and every dollar a report prints is computed here
+ * from those tokens against one of two rate cards:
  *
- *  - Khan's rate: read off review.md's overlay, the same numbers production
- *    bills with. Nothing else in the repo restates them.
+ *  - Khan's rate: read off review.md's overlay (or, on the runner, gh-aw's
+ *    `/tmp/gh-aw/models.json`, which is that overlay merged over the bundled
+ *    catalog), the same numbers production bills with. Nothing else in the
+ *    repo restates them.
  *  - List: {@link ANTHROPIC_LIST_RATES}, the published Anthropic rates. The
  *    SDK does not expose its own table, so this is the one copy the repo
  *    keeps. The report checks it against the SDK's metered `usd` on every run
@@ -38,6 +42,9 @@ export type Rates = {
 
 /** Rates by model pin (the undated id, see {@link pinOf}). */
 export type RateCard = ReadonlyMap<string, Rates>;
+
+/** The provider whose entry wins when a pin is priced under several. */
+export const PREFERRED_PROVIDER = "anthropic";
 
 /** Token counts for one model across some unit of work. */
 export type TokenUsage = {
@@ -100,6 +107,68 @@ const frontmatterOf = (reviewMd: string): string =>
     reviewMd.split(/^---$/m)[1] ?? "";
 
 /**
+ * Build a rate card from the `providers.<provider>.models.<pin>.cost.*`
+ * shape (per-token dollars, values as numbers or numeric strings). The
+ * shape review.md's overlay uses, and the shape gh-aw writes to
+ * `/tmp/gh-aw/models.json` on the runner (the overlay merged over its
+ * bundled catalog, the exact table its `ai_credits` were computed with). An
+ * entry missing `input` or `output` is dropped rather than half-priced, and
+ * missing cache rates fall back to Anthropic's multipliers on the entry's
+ * own input rate.
+ */
+export const rateCardFromProviders = (providers: unknown): RateCard => {
+    const card = new Map<string, Rates>();
+    if (typeof providers !== "object" || providers === null) {
+        return card;
+    }
+    // gh-aw's models.json lists the same claude pins under more than one
+    // provider (anthropic at the overlay's rate, github-copilot at list),
+    // and a flat pin-keyed card would let whichever came last win. The
+    // overlay is written under `anthropic`, and that is the provider the
+    // runs bill through, so it is read first and the rest only fill gaps.
+    const entries = Object.entries(providers as Record<string, unknown>).sort(
+        ([a], [b]) =>
+            Number(b === PREFERRED_PROVIDER) - Number(a === PREFERRED_PROVIDER),
+    );
+    for (const [, provider] of entries) {
+        const models = (provider as {models?: unknown} | null)?.models;
+        if (typeof models !== "object" || models === null) {
+            continue;
+        }
+        for (const [pin, model] of Object.entries(
+            models as Record<string, unknown>,
+        )) {
+            const cost = (model as {cost?: unknown} | null)?.cost;
+            if (typeof cost !== "object" || cost === null) {
+                continue;
+            }
+            const rate = (key: string): number | undefined => {
+                const value = (cost as Record<string, unknown>)[key];
+                const n =
+                    typeof value === "string"
+                        ? Number(value.replace(/^["']|["']$/g, ""))
+                        : typeof value === "number"
+                        ? value
+                        : NaN;
+                return Number.isFinite(n) ? n : undefined;
+            };
+            const input = rate("input");
+            const output = rate("output");
+            if (input === undefined || output === undefined || card.has(pin)) {
+                continue;
+            }
+            card.set(pin, {
+                input,
+                output,
+                cacheRead: rate("cache_read") ?? input * 0.1,
+                cacheWrite: rate("cache_write") ?? input * 1.25,
+            });
+        }
+    }
+    return card;
+};
+
+/**
  * Read `models.providers.<provider>.models.<pin>.cost.*` out of review.md as
  * a rate card in $/token. Walks the frontmatter by indentation (the same
  * YAML-ish line reading agent-extract.ts does for the agent blocks) rather
@@ -111,14 +180,9 @@ const frontmatterOf = (reviewMd: string): string =>
  * to Anthropic's multipliers on the entry's own input rate.
  */
 export const readOverlayRates = (reviewMd: string): RateCard => {
-    const partial = new Map<string, Partial<Rates>>();
+    // providers -> provider -> models -> pin -> cost -> leaf
+    const providers: Record<string, Record<string, unknown>> = {};
     const path: {indent: number; key: string}[] = [];
-    const leafKeys: Record<string, keyof Rates> = {
-        input: "input",
-        output: "output",
-        cache_read: "cacheRead",
-        cache_write: "cacheWrite",
-    };
     for (const raw of frontmatterOf(reviewMd).split("\n")) {
         const line = raw.replace(/\s+$/, "");
         if (line.trim() === "" || line.trim().startsWith("#")) {
@@ -142,37 +206,105 @@ export const readOverlayRates = (reviewMd: string): RateCard => {
         }
         // models / providers / <provider> / models / <pin> / cost / <leaf>
         const keys = path.map((p) => p.key);
-        const leaf = leafKeys[keys[6] ?? ""];
         if (
             keys.length === 7 &&
             keys[0] === "models" &&
             keys[1] === "providers" &&
             keys[3] === "models" &&
-            keys[5] === "cost" &&
-            leaf !== undefined
+            keys[5] === "cost"
         ) {
-            const rate = Number(value.replace(/^["']|["']$/g, ""));
-            if (!Number.isFinite(rate)) {
-                continue;
-            }
-            const entry = partial.get(keys[4]) ?? {};
-            entry[leaf] = rate;
-            partial.set(keys[4], entry);
+            const provider = (providers[keys[2]] ??= {models: {}});
+            const models = provider["models"] as Record<
+                string,
+                {cost: Record<string, string>}
+            >;
+            const model = (models[keys[4]] ??= {cost: {}});
+            model.cost[keys[6]] = value;
         }
     }
-    const card = new Map<string, Rates>();
-    for (const [pin, rates] of partial) {
-        if (rates.input === undefined || rates.output === undefined) {
+    return rateCardFromProviders(providers);
+};
+
+/**
+ * Per-request token usage off the firewall api-proxy's `token-usage.jsonl`
+ * (one JSON object per line: `model`, `input_tokens`, `output_tokens`,
+ * `cache_read_tokens`, `cache_write_tokens`), merged by model. The proxy sees
+ * every request the sandboxed agent job makes, so this is the run's whole
+ * spend: engine, sub-agents, and the prose judge alike. Malformed lines are
+ * skipped, as gh-aw's own parser does.
+ */
+export const parseProxyTokenUsage = (jsonl: string): ModelTokens[] => {
+    const entries: ModelTokens[] = [];
+    for (const line of jsonl.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed === "") {
             continue;
         }
-        card.set(pin, {
-            input: rates.input,
-            output: rates.output,
-            cacheRead: rates.cacheRead ?? rates.input * 0.1,
-            cacheWrite: rates.cacheWrite ?? rates.input * 1.25,
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(trimmed);
+        } catch {
+            continue;
+        }
+        if (typeof parsed !== "object" || parsed === null) {
+            continue;
+        }
+        const entry = parsed as Record<string, unknown>;
+        const count = (key: string): number => {
+            const value = entry[key];
+            return typeof value === "number" && Number.isFinite(value)
+                ? value
+                : 0;
+        };
+        entries.push({
+            model:
+                typeof entry["model"] === "string" ? entry["model"] : "unknown",
+            input: count("input_tokens"),
+            output: count("output_tokens"),
+            cacheRead: count("cache_read_tokens"),
+            cacheWrite: count("cache_write_tokens"),
         });
     }
-    return card;
+    return mergeUsage(entries);
+};
+
+/**
+ * Token usage off a Claude Agent SDK result message's `modelUsage` (keyed by
+ * model, with inputTokens, outputTokens, cacheReadInputTokens,
+ * cacheCreationInputTokens, and an optional `canonicalModel` the SDK priced
+ * under). Undefined when the message carries none, so a runner reports
+ * nothing rather than zeros.
+ */
+export const usageOfResultMessage = (
+    message: Record<string, unknown>,
+): ModelTokens[] | undefined => {
+    const modelUsage = message["modelUsage"];
+    if (typeof modelUsage !== "object" || modelUsage === null) {
+        return undefined;
+    }
+    const entries = Object.entries(modelUsage as Record<string, unknown>);
+    if (entries.length === 0) {
+        return undefined;
+    }
+    return entries.map(([key, raw]) => {
+        const used = (raw ?? {}) as Record<string, unknown>;
+        const count = (field: string): number => {
+            const value = used[field];
+            return typeof value === "number" && Number.isFinite(value)
+                ? value
+                : 0;
+        };
+        return {
+            model:
+                typeof used["canonicalModel"] === "string"
+                    ? used["canonicalModel"]
+                    : key,
+            input: count("inputTokens"),
+            output: count("outputTokens"),
+            cacheRead: count("cacheReadInputTokens"),
+            cacheWrite: count("cacheCreationInputTokens"),
+        };
+    });
 };
 
 /**

@@ -179,7 +179,7 @@ const decodeSignature = (encoded: string): HunkSignature | null => {
 };
 
 /** The summary chip the stamp's collapsed block renders under. */
-const STAMP_SUMMARY = "review fingerprint";
+export const STAMP_SUMMARY = "review fingerprint";
 
 /**
  * Render the stamp as a collapsed `<details>` block appended to the review

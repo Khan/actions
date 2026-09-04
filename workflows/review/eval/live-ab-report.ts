@@ -13,7 +13,7 @@ import {
     type AgentCost,
     type ModelTokens,
     type RateCard,
-} from "./pricing";
+} from "../lib/pricing";
 
 export type {AgentCost};
 export {armToolCalls} from "./cost-rows";

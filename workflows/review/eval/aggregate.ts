@@ -60,7 +60,7 @@ import {
     readOverlayRates,
     type AgentCost,
     type ModelTokens,
-} from "./pricing";
+} from "../lib/pricing";
 import {rateStat, type RateStat} from "./wilson";
 
 // The markdown renderer lives in ./aggregate-render, re-exported so the CLI

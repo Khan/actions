@@ -15,7 +15,7 @@ import {
     type JudgeScore,
 } from "./judge";
 import {extractJsonObject} from "./extract-json";
-import {usageOfResponse, type ModelTokens} from "./pricing";
+import {usageOfResponse, type ModelTokens} from "../lib/pricing";
 
 const API_URL = "https://api.anthropic.com/v1/messages";
 const CONCURRENCY = 4;

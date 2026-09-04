@@ -343,7 +343,7 @@ pre-agent-steps:
 # (and it strips the queue in the same code path).
 post-steps:
   # POST-AGENT EXECUTION RULE: nothing the agent can write may execute on
-  # the host after its turn. Both steps below run from the pre-staged copy
+  # the host after its turn. Every step below runs from the pre-staged copy
   # under $RUNNER_TEMP (the pre-agent copy step above; the agent cannot
   # write it), never from the agent-writable workspace checkout. The copy
   # is present whenever the agent ran at all (its step failing reds the job
@@ -362,6 +362,30 @@ post-steps:
         exit 1
       fi
       echo "::warning title=dispatch-conformance gate::gate could not run (infra failure; review not blocked)"
+      exit 0
+  # The per-review cost report (workflows/review/lib/cost-report.ts): every
+  # model call the run made, per sub-agent, priced at Khan's rate from the
+  # tokens the dispatcher recorded, with the prose judge and the orchestrator
+  # (the api-proxy total minus what the dispatcher accounted for) as their own
+  # rows, reconciled against gh-aw's ai_credits. It lands as a collapsed
+  # block in the review body (edited into the validated queue the same way
+  # the gate strips it, code-rendered from numbers and review.md-defined
+  # names, every cell and note escaped), in the step summary, and as
+  # /tmp/gh-aw/agent/cost-report.json beside the gate's report in the agent
+  # artifact (the review's own out/ upload runs during the agent step, so a
+  # file written there now would never leave the runner). Runs here and
+  # not in the agent step because two inputs only exist afterwards: the
+  # proxy's token-usage.jsonl and agent_usage.json, both written between the
+  # agent step and these post-steps. `if: always()` so a gate-blocked run
+  # still gets the summary and artifact (the queue has no review to edit
+  # then). Fail-open in both the CLI and this wrapper: a review without its
+  # price tag beats a review that did not post.
+  - name: Review cost report
+    if: always()
+    run: |
+      if ! (cd "${RUNNER_TEMP}/gh-aw-review-lib-postagent" && npx -y tsx workflows/review/lib/cost-report-cli.ts); then
+        echo "::warning title=review cost report::step could not run (review posts without it)"
+      fi
       exit 0
   # The reduced-depth clearance: when the plan CLI staged
   # out/dismiss-decision.json (a flip-gated/fast round over a prior

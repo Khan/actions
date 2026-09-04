@@ -6,7 +6,7 @@
  * the tolerance rules are unchanged.
  */
 
-import {mergeUsage, type AgentCost, type ModelTokens} from "./pricing";
+import {mergeUsage, type AgentCost, type ModelTokens} from "../lib/pricing";
 
 /* -------------------------------------------------------------------------- */
 /* The report subset this module consumes (structural, version-tolerant)      */

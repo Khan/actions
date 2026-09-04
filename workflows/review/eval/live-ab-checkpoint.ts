@@ -25,7 +25,7 @@ import {
     type RunHeader,
 } from "./live-ab-report";
 import {computeLiveMetrics} from "./live-match";
-import type {RateCard} from "./pricing";
+import type {RateCard} from "../lib/pricing";
 
 /** The single-run report over two arms. `gateRetries` is empty until the
  * best-of-three has run, so a checkpoint never has any. */
