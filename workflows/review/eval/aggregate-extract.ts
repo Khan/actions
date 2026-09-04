@@ -7,7 +7,6 @@
  */
 
 import type {ArmSample, ReportSample, SampleRun} from "./aggregate";
-import {parseAgentCost, parseTokens} from "./cost-rows";
 import {mergeUsage, type AgentCost, type ModelTokens} from "./pricing";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -179,4 +178,34 @@ export const extractSamples = (
             ),
         },
     ];
+};
+
+/** One `ModelTokens` entry off a raw artifact, or undefined on a bad shape. */
+const parseTokens = (raw: unknown): ModelTokens | undefined =>
+    isRecord(raw) && typeof raw["model"] === "string"
+        ? {
+              model: raw["model"],
+              input: asNumber(raw["input"]),
+              output: asNumber(raw["output"]),
+              cacheRead: asNumber(raw["cacheRead"]),
+              cacheWrite: asNumber(raw["cacheWrite"]),
+          }
+        : undefined;
+
+/** One `agentCosts[]` entry off a raw artifact, or undefined on a bad shape. */
+const parseAgentCost = (raw: unknown): AgentCost | undefined => {
+    if (!isRecord(raw) || typeof raw["agent"] !== "string") {
+        return undefined;
+    }
+    const usage = Array.isArray(raw["usage"])
+        ? raw["usage"]
+              .map(parseTokens)
+              .filter((t): t is ModelTokens => t !== undefined)
+        : undefined;
+    return {
+        agent: raw["agent"],
+        model: asString(raw["model"]),
+        usd: asNumber(raw["usd"]),
+        ...(usage === undefined ? {} : {usage}),
+    };
 };
