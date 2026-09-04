@@ -58,6 +58,7 @@ export const ENABLEABLE_REVIEWERS = [
     "first-principles",
     "conventions",
     "documentation",
+    "maintainability",
 ] as const;
 
 export type EnableableReviewer = typeof ENABLEABLE_REVIEWERS[number];

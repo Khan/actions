@@ -433,11 +433,14 @@ const fromOutOfLane = (
  * finding post as `suggestion (non-blocking, documentation)` — the only
  * channel by which a downstream consumer (autofix, which parses the label off
  * the posted comment) can tell a documentation thread from any other
- * non-blocking one. A reviewer absent from this map is correctness-shaped.
+ * non-blocking one. `maintainability` is in the map for the same reason: its
+ * label is the selection key a maintainability-scoped autofix would use. A
+ * reviewer absent from this map is correctness-shaped.
  */
 const LABEL_SHAPE_LENS: Record<string, Lens> = {
     "skill-auditor": "conventions",
     documentation: "documentation",
+    maintainability: "maintainability",
 };
 
 /**

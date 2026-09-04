@@ -242,6 +242,7 @@ describe("the label-shape reviewers still carry their own disciplines", () => {
         "first-principles",
         "conventions",
         "documentation",
+        "maintainability",
     ]) {
         it(`${agent}: keeps its own bounded-investigation block`, () => {
             expect(lensSection(agent)).toContain("**Bounded investigation.**");

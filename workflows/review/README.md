@@ -389,7 +389,7 @@ re-review scoped
   several rules match a path their lenses are unioned (lenses are additive).
 - `enable` lines turn on the opt-in whole-change reviewers (`holistic`,
   `completeness`, `test-adequacy`, `first-principles`, `conventions`,
-  `documentation`). Neither lenses nor opt-in reviewers run anywhere by default:
+  `documentation`, `maintainability`). Neither lenses nor opt-in reviewers run anywhere by default:
   a repo opts into each explicitly, and the policy is that a reviewer earns its
   line here through the eval suite.
 - `tier=` assigns the path a risk tier. When several rules match, the **last
@@ -555,6 +555,69 @@ A/B that introduces any new reviewer the **baseline arm cannot define it**: the
 producer records that as an absent dimension rather than failing the run, and the
 report flags it under *Arm asymmetry*, because the candidate arm's findings there
 are pure gain by construction rather than a measured improvement.
+
+### The `maintainability` reviewer (opt-in)
+
+`enable maintainability` turns on a reviewer that checks whether the change leaves the
+codebase no harder for the next reader to understand, navigate, or change than it
+found it. It is advisory-only and opt-in like `conventions` and `documentation`, and
+it exists for the failure mode of a codebase that grows mostly by generated changes:
+no single PR is wrong, but each one adds a helper that already exists under another
+name, a flag that changes behavior three calls away, a wrapper with one caller, or a
+branch nothing reaches, and nobody reads the whole file again. Under a team norm of
+not reading tooling code by hand unless the tooling has a known gap, this reviewer is
+the thing that reads it.
+
+The policy lives inline in the reviewer's definition in `review.md`, like the
+`documentation` policy, and names five finding types in priority order: a second copy
+of something that exists (both definitions quoted, equivalence stated in one sentence),
+a name that misleads (the prediction a reader makes from the name, and the line that
+breaks it), a behavior change hidden from the call site (a flag threaded two or more
+calls before it is read), dead or unreachable code inside a function the diff touched,
+and indirection with one caller. Every finding names a concrete reader who is misled
+or made to do more work. Length, terseness, and elegance as such are not findings,
+duplication that predates the diff is not a finding, and the reviewer never audits
+beyond the touched code.
+
+The duplication check is a search before it is a judgment, and every reviewer runs
+under the bounded-investigation cap, so the search is meant to be done for it: when
+`/tmp/gh-aw/review/symbol-candidates.json` is staged (same-name and same-arity symbols
+elsewhere in the checkout for each function the diff adds), the reviewer starts from
+it. The staging step for that file is a separate change; until it lands the reviewer
+falls back to its own bounded grep, and the prompt describes the file as optional so
+its absence changes nothing else.
+
+**The label is the selection key.** Its findings render as
+`suggestion (non-blocking, maintainability)`. As with `documentation`, the variant is
+the only channel by which a downstream consumer reading posted threads can tell a
+maintainability finding from any other nit, and these findings (call the existing
+helper, delete the dead branch, rename at the definition) are the shape a scoped
+autofix does well. Today `autofix: nits` covers them by inclusion, since the label is
+in `NON_BLOCKING_LABELS`. A dedicated selector is a later change.
+
+**Volume is part of its policy**: one finding per defect, two per file, five per
+review, the tail dropped from the bottom of the priority order. The claim-validator
+carries a maintainability rule whose refutation case is this reviewer's characteristic
+false positive, a "duplicate" whose existing counterpart handles an error, a type, or a
+side effect the new one does not.
+
+The same prompt is meant to be usable by hand as an audit: point an agent at the
+`maintainability` definition in `review.md` as its template and a repo as its subject,
+and the finding types and evidence bar carry over. Do that before enabling the
+reviewer in a repo that already has several copies of the same thing, so per-PR
+findings have one canonical target to point at instead of several candidates.
+
+The eval corpus carries five golden cases, one per finding type
+(`golden-maintainability-duplicate-helper`, `golden-maintainability-misleading-name`,
+`golden-maintainability-hidden-flag`, `golden-maintainability-dead-branch`,
+`golden-maintainability-one-caller-wrapper`), each seeded inside a diff that also does
+real logic work, plus a clean case (`clean-maintainability-reuses-existing`) whose
+change reuses the existing helper and must draw no comment. None carries the `smoke`
+tag, so the per-PR A/B skips them. Price this reviewer with a targeted
+`workflow_dispatch` of *Review Eval A/B* over those six cases with `repeats=3`. The
+gate is the one `documentation` had: a positive recall delta against the current roster
+on the seeded cases with the clean case silent, or the reviewer does not earn an
+`enable` line.
 
 ### The `.github/NOTIFIED` file (optional)
 
@@ -809,6 +872,7 @@ sub-agent models — this table is the human-facing summary:
 | `test-adequacy` | `claude-opus-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
 | `conventions` | `claude-opus-5` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
 | `documentation` | `claude-opus-5` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
+| `maintainability` | `claude-opus-5` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
 | `first-principles` | `claude-opus-5` | high | Opt-in advisory-only; reviews the change's justification |
 | `claim-validator` | `claude-opus-5` | xhigh | Adversarial claim validation; stays Opus (the Fable arm did not improve precision) |
 | prose judge | `claude-opus-4-8` | (single completion) | In-session style gate on submitted finding prose (`judge-prose.ts`); haiku's verdicts flickered run to run, and opus-4-8 is proven invokable and curated-priced through the stable firewall |

@@ -40,6 +40,7 @@ export const TRIAGE_DIMENSION = "pattern triage";
  */
 export const SHED_RANKING = [
     "documentation",
+    "maintainability",
     "conventions",
     "first-principles",
     "holistic",
