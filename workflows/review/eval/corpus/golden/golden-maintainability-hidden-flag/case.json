@@ -1,0 +1,110 @@
+{
+    "id": "golden-maintainability-hidden-flag",
+    "tags": [
+        "golden",
+        "maintainability",
+        "live"
+    ],
+    "category": "golden",
+    "description": "The hidden-flag half of the policy. The real work is making unknown config keys fatal in production. The shape it ships in is a bare boolean threaded from main.ts through loadConfig and parseConfig to the one line in validate.ts that reads it: at the call site `loadConfig(path, true)` says nothing about what true does, and loadConfig's own default of false means every existing caller silently keeps the old behavior. The strict check itself in validate.ts is the logic work and must not be flagged; the finding is the flag's shape, anchored where the parameter enters the public signature.",
+    "changedFiles": [
+        {
+            "path": "src/config/load.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/config/parse.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/config/validate.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/main.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "maintainability"
+        ]
+    },
+    "findings": [
+        {
+            "source": "maintainability",
+            "finding": {
+                "schema_version": 2,
+                "id": "maint-hidden-strict-flag",
+                "lens": "maintainability",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/config/load.ts",
+                    "line": 5,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/config/load.ts:5 adds `strict = false` to the public signature and passes it straight through",
+                    "src/config/parse.ts:4-6 passes it through again without reading it",
+                    "src/config/validate.ts:11 is the first and only line that reads `strict`",
+                    "src/main.ts:4 calls `loadConfig(..., true)`; the reader there cannot tell what true changes"
+                ],
+                "failure_scenario": "A reader at main.ts sees `loadConfig(path, true)`, has to open three files to learn that true means unknown keys throw, and a second caller copies the pattern with false without knowing they opted out of validation.",
+                "producing_hunt": "maintainability:hidden-flag",
+                "model_authored_prose": "`strict` enters at loadConfig (load.ts:5) and is threaded through parseConfig before validate.ts:11 reads it, so `loadConfig(path, true)` at main.ts:4 tells its reader nothing. An options object (`{unknownKeys: \"throw\"}`) or a separately named `loadConfigStrict` puts the meaning at the call site."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "maint-hidden-strict-flag"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/config/load.ts b/src/config/load.ts\n--- a/src/config/load.ts\n+++ b/src/config/load.ts\n@@ -2,5 +2,5 @@\n import {parseConfig} from \"./parse\";\n import type {Config} from \"./types\";\n \n-export const loadConfig = (path: string): Config =>\n-    parseConfig(readFileSync(path, \"utf8\"));\n+export const loadConfig = (path: string, strict = false): Config =>\n+    parseConfig(readFileSync(path, \"utf8\"), strict);\ndiff --git a/src/config/parse.ts b/src/config/parse.ts\n--- a/src/config/parse.ts\n+++ b/src/config/parse.ts\n@@ -1,7 +1,7 @@\n import {validateKeys} from \"./validate\";\n import type {Config} from \"./types\";\n \n-export const parseConfig = (text: string): Config => {\n+export const parseConfig = (text: string, strict: boolean): Config => {\n     const raw: unknown = JSON.parse(text);\n-    return validateKeys(raw);\n+    return validateKeys(raw, strict);\n };\ndiff --git a/src/config/validate.ts b/src/config/validate.ts\n--- a/src/config/validate.ts\n+++ b/src/config/validate.ts\n@@ -2,12 +2,15 @@\n \n const KNOWN = new Set([\"name\", \"port\", \"logLevel\"]);\n \n-export const validateKeys = (raw: unknown): Config => {\n+export const validateKeys = (raw: unknown, strict: boolean): Config => {\n     if (typeof raw !== \"object\" || raw === null) {\n         throw new Error(\"config must be an object\");\n     }\n     for (const key of Object.keys(raw)) {\n         if (!KNOWN.has(key)) {\n+            if (strict) {\n+                throw new Error(`config: unknown key \"${key}\"`);\n+            }\n             console.warn(`config: unknown key \"${key}\" ignored`);\n         }\n     }\ndiff --git a/src/main.ts b/src/main.ts\n--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1,4 +1,4 @@\n import {loadConfig} from \"./config/load\";\n import {serve} from \"./server\";\n \n-serve(loadConfig(process.env.CONFIG_PATH ?? \"config.json\"));\n+serve(loadConfig(process.env.CONFIG_PATH ?? \"config.json\", true));\n",
+    "live": {
+        "prContext": {
+            "title": "config: make unknown keys fatal in production",
+            "description": "A misspelled config key was being warned about and ignored, which is how a prod deploy ran with the default log level for a week. The loader now takes a strict flag that turns the warning into an error, and main.ts passes it.",
+            "author": "dev-platform",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "maint-hidden-strict-flag",
+                "path": "src/config/load.ts",
+                "lineStart": 5,
+                "lineEnd": 6,
+                "lens": "maintainability",
+                "mechanism": [
+                    "boolean flag threaded",
+                    "strict is passed through",
+                    "bare boolean at the call site",
+                    "loadConfig(path, true)",
+                    "what true means",
+                    "options object instead of a boolean",
+                    "flag read three calls away",
+                    "strict parameter"
+                ]
+            }
+        ],
+        "mustNotFlagSpecs": [
+            {
+                "key": "maint-trap-strict-check",
+                "path": "src/config/validate.ts",
+                "lineStart": 11,
+                "lineEnd": 14,
+                "lens": "maintainability",
+                "mechanism": [
+                    "throw inside the loop",
+                    "warn and throw duplicated",
+                    "unknown key check could be a filter"
+                ]
+            }
+        ]
+    }
+}

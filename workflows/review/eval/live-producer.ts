@@ -458,6 +458,7 @@ const parseAgentFindings = (
         },
         conventions: {lens: "conventions", source: "conventions"},
         documentation: {lens: "documentation", source: "documentation"},
+        maintainability: {lens: "maintainability", source: "maintainability"},
     };
 
     const findings = rawFindings.map((raw, index): LiveFinding => {

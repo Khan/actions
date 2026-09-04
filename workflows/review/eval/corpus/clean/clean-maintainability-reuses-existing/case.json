@@ -1,0 +1,69 @@
+{
+    "id": "clean-maintainability-reuses-existing",
+    "tags": [
+        "clean",
+        "maintainability",
+        "live"
+    ],
+    "category": "clean",
+    "description": "The maintainability reviewer's precision guard. The change does exactly what the reviewer asks for: it imports the existing dollarsToCents and formatCents from src/money/cents.ts instead of writing local copies, names its one new helper for what it does, and that helper (csvEscape) has no counterpart anywhere in the tree (a grep for `replace(/\"/g` or for `csv` finds only this file). The header row, the loop, and the RFC comment are the shapes a reviewer reaching for a finding would pick on. The run must post nothing.",
+    "changedFiles": [
+        {
+            "path": "src/reports/export.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "maintainability"
+        ]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 0,
+        "mustNotPost": []
+    },
+    "diff": "diff --git a/src/reports/export.ts b/src/reports/export.ts\n--- a/src/reports/export.ts\n+++ b/src/reports/export.ts\n@@ -1,4 +1,16 @@\n+import {dollarsToCents, formatCents} from \"../money/cents\";\n import type {LineItem} from \"./types\";\n \n-export const toCsv = (items: readonly LineItem[]): string =>\n-    items.map((item) => `${item.id},${item.category},${item.cents ?? 0}`).join(\"\\n\");\n+// RFC 4180: a field containing a comma, a quote, or a newline is quoted, and\n+// quotes inside it are doubled.\n+const csvEscape = (field: string): string =>\n+    /[\",\\n]/.test(field) ? `\"${field.replace(/\"/g, '\"\"')}\"` : field;\n+\n+export const toCsv = (items: readonly LineItem[]): string => {\n+    const rows = [[\"id\", \"category\", \"amount\"].join(\",\")];\n+    for (const item of items) {\n+        const cents = item.cents ?? dollarsToCents(item.dollars ?? 0);\n+        rows.push([item.id, csvEscape(item.category), formatCents(cents)].join(\",\"));\n+    }\n+    return rows.join(\"\\n\");\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "reports: CSV export escapes fields and formats amounts as dollars",
+            "description": "Category names with commas were breaking the CSV, and amounts exported as raw cents. Fields are now RFC 4180 escaped, amounts render through the shared cents formatter, and imported items with float dollars are normalized with the shared converter.",
+            "author": "dev-reports",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "maint-trap-csv-escape-duplicate",
+                "path": "src/reports/export.ts",
+                "lineStart": 4,
+                "lineEnd": 7,
+                "lens": "maintainability",
+                "mechanism": [
+                    "csvEscape duplicates",
+                    "csvEscape already exists",
+                    "use an existing escape helper",
+                    "escape helper elsewhere",
+                    "csvEscape comment restates",
+                    "delete the RFC comment"
+                ]
+            },
+            {
+                "key": "maint-trap-to-csv-shape",
+                "path": "src/reports/export.ts",
+                "lineStart": 9,
+                "lineEnd": 16,
+                "lens": "maintainability",
+                "mechanism": [
+                    "toCsv could be a map",
+                    "loop could be a reduce",
+                    "toCsv is too long",
+                    "header row should be a constant",
+                    "split toCsv",
+                    "extract a row builder"
+                ]
+            }
+        ]
+    }
+}
