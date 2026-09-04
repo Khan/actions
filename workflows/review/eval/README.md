@@ -41,8 +41,12 @@ pnpm dlx tsx workflows/review/eval/live-ab.ts \
 
 Byte-identical review.md in both arms short-circuits to a $0 "no reviewable
 delta" report unless `--force-arms` is passed. Budgets are enforced between
-cases; a capped run reports skipped cases instead of dying. Multi-repeat
-runs checkpoint the artifact after every repeat.
+cases; a capped run reports skipped cases instead of dying. Every run
+checkpoints the artifact (JSON and markdown) after every scored case, marked
+`partial: true` in the JSON and `(partial)` in the markdown header, so a
+cancelled or timed-out run leaves what it had scored for the `always()`
+upload. Progress goes to stderr, one line per dispatch and one per case, so
+the actions log reads as a running tally.
 
 ### CI entry points
 

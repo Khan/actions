@@ -832,11 +832,16 @@ the scoped contents and refreshed its annotated sibling, so the whole-change
 surfaces you and the sub-agents read are pre-shrunk to the unseen hunks.
 Read the plan; it is deterministic and final: never deepen or shallow it yourself,
 and never run the CLI yourself. A comment-triggered run whose `/review` a
-human posted always plans `full` (reason `manual-review-request`), whatever
-the mode dial says; a `/review` posted by our automation (a Bot-type account,
-or a `REVIEW_AUTOMATION_LOGINS` login, default `khan-actions-bot`, whose shim
-fires one per push in Khan/webapp) follows
-the mode dial like the push it stands in for. Its three guards are code, not your
+human posted plans `full` (reason `manual-review-request`), whatever the
+mode dial says, unless the comment named a depth (`/review scoped`, or its
+synonyms `delta`, `diff`, `diff-only`; also `flip-gated`, `fast`), which sets
+the dial for this one run (`manualDepth` in the plan, reason
+`manual-depth-<depth>`) when it is at or deeper than the configured mode
+(an ask below the dial plans full, reason `manual-depth-below-dial`) and
+still passes through the same guards; a `/review` posted by our automation
+(a Bot-type account, or a `REVIEW_AUTOMATION_LOGINS` login, default
+`khan-actions-bot`, whose shim fires one per push in Khan/webapp) follows
+the mode dial like the push it stands in for, token or not. Its three guards are code, not your
 judgment: the one anchoring full review is taken at ready-for-review, a fingerprint
 overflow or a missing input forces `full`, and the divergence tripwire re-arms
 `full` when too much of the diff is unreviewed. The dispatcher implements each depth (the

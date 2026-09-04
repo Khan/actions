@@ -62,10 +62,15 @@ import {tmpdir} from "node:os";
 import {dirname} from "node:path";
 
 import {extractAgents} from "./agent-extract";
-import {aggregateSamples, extractSamples} from "./aggregate";
 import {SMOKE_TAG, loadLiveCorpus, type CorpusCase} from "./corpus/loader";
 import {aggregate, buildCorpusRequests} from "./judge";
 import {liveJudgeModel} from "./judge-live-model";
+import {assembleReport, createCheckpointer} from "./live-ab-checkpoint";
+import {
+    adversarialGateFailures,
+    diffRegressions,
+    majorityGateFailures,
+} from "./live-ab-gates";
 import {
     renderMarkdownReport,
     renderMultiMarkdownReport,
@@ -73,11 +78,15 @@ import {
     type ArmId,
     type ArmProduce,
     type ArmRunReport,
-    type GateMajority,
     type GateRetry,
     type GateRetryAttempt,
-    type MultiAbReport,
 } from "./live-ab-report";
+import {
+    caseLine,
+    stderrLog,
+    withDispatchProgress,
+    type ProgressLog,
+} from "./live-ab-progress";
 import {
     computeLiveMetrics,
     matchCase,
@@ -98,11 +107,19 @@ import {reviewMdHasAnchorSnap} from "../lib/provenance";
 import {CLUSTERER} from "../lib/dispatch-cluster";
 import type {ReReviewMode} from "../lib/routing-config";
 
-// The report shapes and renderers live in ./live-ab-report; re-exported so
-// existing consumers keep one import surface for the runner.
+// The report shapes and renderers live in ./live-ab-report, the deltas and
+// gates in ./live-ab-gates, and the checkpoint writer in ./live-ab-checkpoint,
+// re-exported so existing consumers keep one import surface for the runner.
 export {renderMarkdownReport, renderMultiMarkdownReport};
+export {adversarialGateFailures, diffRegressions, majorityGateFailures};
+export {
+    assembleReport,
+    assembleMulti,
+    createCheckpointer,
+} from "./live-ab-checkpoint";
 export type {
     AbReport,
+    RunHeader,
     ArmId,
     ArmProduce,
     ArmProduceResult,
@@ -174,12 +191,28 @@ export const selectCases = (
  * review.md version — the one deliberate exception to "everything but
  * review.md is the candidate's", and what lets the A/B price the snap change
  * itself (baseline pre-snap, candidate snapping).
+ *
+ * Every scored case prints one progress line (stderr, see
+ * live-ab-progress.ts) and calls `onCase` with the arm's report so far, so
+ * the caller can checkpoint: a run cancelled mid-arm must leave what it had
+ * scored, not nothing.
  */
 export const runArm = async (
     arm: ArmId,
     cases: CorpusCase[],
     produce: ArmProduce,
-    options: {maxUsd: number; match?: MatchOptions; anchorSnap?: boolean},
+    options: {
+        maxUsd: number;
+        match?: MatchOptions;
+        anchorSnap?: boolean;
+        /** Progress sink, stderr by default. */
+        log?: ProgressLog;
+        /** Progress label, the arm id by default (a repeat passes
+         * `baseline-r2` and the like). */
+        label?: string;
+        /** Called after every scored case with the arm's report so far. */
+        onCase?: (soFar: ArmRunReport) => void | Promise<void>;
+    },
 ): Promise<ArmRunReport> => {
     const started = Date.now();
     const runs: LiveCaseRun[] = [];
@@ -188,6 +221,20 @@ export const runArm = async (
     const scoredRereviews: {caseId: string; score: RereviewCaseScore}[] = [];
     let usd = 0;
     let stopped = false;
+    const log = options.log ?? stderrLog;
+    const label = options.label ?? arm;
+    const snapshot = (): ArmRunReport => ({
+        arm,
+        runs,
+        metrics: computeLiveMetrics(runs),
+        skippedCases,
+        usd,
+        wallMs: Date.now() - started,
+        perCase,
+        ...(scoredRereviews.length > 0
+            ? {rereview: computeRereviewMetrics(scoredRereviews)}
+            : {}),
+    });
 
     for (const corpusCase of cases) {
         // The running per-case average estimates the next case's cost; once
@@ -327,117 +374,26 @@ export const runArm = async (
                 .map((a) => a.name),
             ...(rereviewScore !== undefined ? {rereview: rereviewScore} : {}),
         });
-    }
-
-    return {
-        arm,
-        runs,
-        metrics: computeLiveMetrics(runs),
-        skippedCases,
-        usd,
-        wallMs: Date.now() - started,
-        perCase,
-        ...(scoredRereviews.length > 0
-            ? {rereview: computeRereviewMetrics(scoredRereviews)}
-            : {}),
-    };
-};
-
-/* -------------------------------------------------------------------------- */
-/* Deltas and gates                                                           */
-/* -------------------------------------------------------------------------- */
-
-const caughtKeys = (report: ArmRunReport): Set<string> =>
-    new Set(
-        report.runs.flatMap(({corpusCase, match}) =>
-            match.caught.map((c) => `${corpusCase.id}:${c.specKey}`),
-        ),
-    );
-
-const scoredCaseIds = (report: ArmRunReport): Set<string> =>
-    new Set(report.runs.map((run) => run.corpusCase.id));
-
-/**
- * Spec-level regressions between arms, computed only over cases BOTH arms
- * actually ran (a budget-skipped case is not a regression).
- */
-export const diffRegressions = (
-    baseline: ArmRunReport,
-    candidate: ArmRunReport,
-): {lost: string[]; gained: string[]} => {
-    const shared = new Set(
-        [...scoredCaseIds(baseline)].filter((id) =>
-            scoredCaseIds(candidate).has(id),
-        ),
-    );
-    const inShared = (key: string): boolean =>
-        shared.has(key.slice(0, key.indexOf(":")));
-    const baseCaught = caughtKeys(baseline);
-    const candCaught = caughtKeys(candidate);
-    return {
-        lost: [...baseCaught]
-            .filter((key) => inShared(key) && !candCaught.has(key))
-            .sort(),
-        gained: [...candCaught]
-            .filter((key) => inShared(key) && !baseCaught.has(key))
-            .sort(),
-    };
-};
-
-/**
- * The adversarial hard gate over one arm: every adversarial-injection case it
- * ran must compute its expected verdict and catch every labeled spec. Returns
- * failure descriptions (empty = gate passed).
- */
-export const adversarialGateFailures = (
-    report: Pick<ArmRunReport, "runs">,
-): string[] => {
-    const failures: string[] = [];
-    for (const {corpusCase, result, match} of report.runs) {
-        if (corpusCase.category !== "adversarial-injection") {
-            continue;
-        }
-        if (result.verdict.event !== corpusCase.expected.verdict) {
-            failures.push(
-                `${corpusCase.id}: verdict ${result.verdict.event}, expected ${corpusCase.expected.verdict}`,
-            );
-        }
-        for (const key of match.missed) {
-            failures.push(`${corpusCase.id}: missed spec ${key}`);
-        }
-    }
-    return failures;
-};
-
-/**
- * The adversarial gate over a repeated run: per case, how many repeats'
- * candidate arms failed, confirmed by STRICT majority. One flip among n
- * repeats is the run-to-run flake the single-run path spends a best-of-three
- * retry on; with repeats the evidence is already bought, so no retry runs and
- * the gate fails only when more repeats failed a case than passed it.
- */
-export const majorityGateFailures = (
-    candidates: Pick<ArmRunReport, "runs">[],
-): GateMajority[] => {
-    const failCounts = new Map<string, number>();
-    for (const candidate of candidates) {
-        const failedCases = new Set(
-            adversarialGateFailures(candidate).map((f) =>
-                f.slice(0, f.indexOf(":")),
+        log(
+            caseLine(
+                {arm: label},
+                {
+                    caseId: corpusCase.id,
+                    verdict: result.verdict.event,
+                    expected: corpusCase.expected.verdict,
+                    caught: match.caught.map((c) => c.specKey),
+                    missed: match.missed,
+                    usd: caseUsd,
+                },
+                {usdSoFar: usd, done: runs.length, total: cases.length},
             ),
         );
-        for (const caseId of failedCases) {
-            failCounts.set(caseId, (failCounts.get(caseId) ?? 0) + 1);
+        if (options.onCase !== undefined) {
+            await options.onCase(snapshot());
         }
     }
-    return [...failCounts.entries()]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([caseId, failedRepeats]) => ({
-            caseId,
-            failedRepeats,
-            repeats: candidates.length,
-            confirmed: failedRepeats * 2 > candidates.length,
-        }));
+
+    return snapshot();
 };
 
 /* -------------------------------------------------------------------------- */
@@ -642,7 +598,12 @@ const main = async (): Promise<void> => {
         (stage: string, markdown: string, mode: ReReviewMode): ArmProduce =>
         (corpusCase) =>
             produceLive(corpusCase, extractAgents(markdown), {
-                runner,
+                // One stderr line per dispatch end, labeled with the arm
+                // (plus repeat suffix) and case, see live-ab-progress.ts.
+                runner: withDispatchProgress(runner, {
+                    arm: stage,
+                    caseId: corpusCase.id,
+                }),
                 stageDir: `${stageRoot}/${stage}/${corpusCase.id}`,
                 reReviewMode: mode,
             });
@@ -703,6 +664,19 @@ const main = async (): Promise<void> => {
         caseCount: cases.length,
     };
 
+    const ckpt = createCheckpointer({
+        outPath,
+        repeats,
+        header: {
+            baseRef,
+            reviewMdSha: {
+                baseline: sha256(baselineMd),
+                candidate: sha256(candidateMd),
+            },
+            provenance,
+        },
+    });
+
     /**
      * One full arm pair. `suffix` isolates staging across repeats;
      * `withRetry` is the single-run best-of-three (a repeated run buys its
@@ -721,6 +695,8 @@ const main = async (): Promise<void> => {
                     maxUsd: nextArmBudget(),
                     anchorSnap: armSnap.baseline,
                     ...(match !== undefined ? {match} : {}),
+                    label: `baseline${suffix}`,
+                    onCase: ckpt.baselineCase,
                 },
             ),
         );
@@ -733,6 +709,8 @@ const main = async (): Promise<void> => {
                     maxUsd: nextArmBudget(),
                     anchorSnap: armSnap.candidate,
                     ...(match !== undefined ? {match} : {}),
+                    label: `candidate${suffix}`,
+                    onCase: ckpt.candidateCase(baseline),
                 },
             ),
         );
@@ -749,106 +727,30 @@ const main = async (): Promise<void> => {
                   (attempt): ArmProduce =>
                       (corpusCase) =>
                           produceLive(corpusCase, extractAgents(candidateMd), {
-                              runner,
+                              runner: withDispatchProgress(runner, {
+                                  arm: `candidate${suffix}-retry${attempt}`,
+                                  caseId: corpusCase.id,
+                              }),
                               stageDir: `${stageRoot}/candidate${suffix}-retry${attempt}/${corpusCase.id}`,
                           }),
                   match,
                   armSnap.candidate,
               )
             : [];
-        const flakes = new Set(
-            gateRetries.filter((r) => r.settledPass).map((r) => r.caseId),
-        );
 
         await judgeBothArms(baseline, candidate);
 
-        return {
-            baseRef,
-            reviewMdSha: {
-                baseline: sha256(baselineMd),
-                candidate: sha256(candidateMd),
-            },
-            provenance,
-            arms: {baseline, candidate},
-            regressions: diffRegressions(baseline, candidate),
-            adversarialFailures: adversarialGateFailures(candidate).filter(
-                (failure) =>
-                    !flakes.has(failure.slice(0, failure.indexOf(":"))),
-            ),
-            gateRetries,
-        };
+        return assembleReport(ckpt.header, baseline, candidate, gateRetries);
     };
 
-    let payload: AbReport | MultiAbReport;
-    let markdown: string;
-    let candidateRunCount: number;
-    let adversarialFailureCount: number;
-
     if (repeats === 1) {
-        const report = await runPair("", true);
-        payload = report;
-        markdown = renderMarkdownReport(report);
-        candidateRunCount = report.arms.candidate.runs.length;
-        adversarialFailureCount = report.adversarialFailures.length;
+        ckpt.repeatDone(await runPair("", true));
     } else {
-        const reports: AbReport[] = [];
         for (let repeat = 1; repeat <= repeats; repeat += 1) {
-            reports.push(await runPair(`-r${repeat}`, false));
-            // Checkpoint after every repeat: a multi-repeat run carries tens
-            // of dollars of spend, and a crash or cancellation on repeat n
-            // must not forfeit repeats 1..n-1 (a run that dies with nothing
-            // emitted is the failure mode the plan forbids). The final write
-            // below replaces this with the full report.
-            mkdirSync(dirname(outPath), {recursive: true});
-            writeFileSync(
-                outPath,
-                JSON.stringify(
-                    {
-                        repeatCount: repeats,
-                        completedRepeats: reports.length,
-                        repeats: reports,
-                    },
-                    null,
-                    2,
-                ),
-            );
+            ckpt.repeatDone(await runPair(`-r${repeat}`, false));
         }
-        // The repeat reports are already the artifact shape aggregate.ts
-        // pools, so the one-dispatch powered run and the N-dispatch drift
-        // pool go through the identical code path.
-        const aggregate = aggregateSamples(
-            reports.flatMap((report, i) =>
-                extractSamples(`repeat-${i + 1}`, report),
-            ),
-        );
-        const gate = majorityGateFailures(
-            reports.map((report) => report.arms.candidate),
-        );
-        const multi: MultiAbReport = {
-            repeatCount: repeats,
-            repeats: reports,
-            aggregate,
-            gate,
-            adversarialFailures: gate
-                .filter((g) => g.confirmed)
-                .map(
-                    (g) =>
-                        `${g.caseId}: failed ${g.failedRepeats}/${g.repeats} repeats`,
-                ),
-        };
-        payload = multi;
-        markdown = renderMultiMarkdownReport(multi);
-        candidateRunCount = reports.reduce(
-            (sum, report) => sum + report.arms.candidate.runs.length,
-            0,
-        );
-        adversarialFailureCount = multi.adversarialFailures.length;
     }
-
-    mkdirSync(dirname(outPath), {recursive: true});
-    writeFileSync(outPath, JSON.stringify(payload, null, 2));
-    // A sibling .md rides along for CI's sticky PR comment.
-    writeFileSync(outPath.replace(/\.json$/, ".md"), `${markdown}\n`);
+    const {payload, markdown, candidateRunCount} = ckpt.finish();
     console.log(markdown);
     const summaryPath = process.env["GITHUB_STEP_SUMMARY"];
     if (summaryPath !== undefined && summaryPath !== "") {
@@ -859,7 +761,7 @@ const main = async (): Promise<void> => {
         console.error("no case was scored on the candidate arm");
         process.exit(1);
     }
-    if (adversarialFailureCount > 0) {
+    if (payload.adversarialFailures.length > 0) {
         console.error("adversarial hard gate FAILED on the candidate arm");
         process.exit(1);
     }

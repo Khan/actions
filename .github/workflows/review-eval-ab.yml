@@ -20,7 +20,8 @@
 # a `full-eval` label lifts that to every live case. The runner enforces a
 # hard USD ceiling per arm and reports skipped cases rather than dying at the
 # cap. A new push cancels a superseded run (concurrency below). A
-# `skip-live-eval` label skips the job entirely.
+# `skip-live-eval` label skips the job entirely (added mid-run, it cancels
+# the in-flight run too, see the concurrency key).
 #
 # NOTE: this workflow's name must stay distinct from any gh-aw workflow a
 # consumer runs (same-named workflows share a gh-aw concurrency group per PR
@@ -67,8 +68,16 @@ permissions:
   contents: read
   pull-requests: write
 
+# A `labeled` event for any label other than `full-eval` runs nothing (every
+# job's `if` skips it), but until this key sent it to its own group it still
+# cancelled the PR's in-flight A/B: run 33802457289 lost 45 minutes and its
+# spend to a `skip-ai-review` label added mid-run. A no-op event must never
+# share a group with a live one. `skip-live-eval` is the one exception: it is
+# the opt-out, and adding it mid-run is how a run that is burning budget gets
+# stopped from inside the repo, so it stays in the live group and cancels
+# (the run's per-case checkpoint keeps what it had scored).
 concurrency:
-  group: review-eval-ab-${{ github.event.pull_request.number || github.run_id }}
+  group: review-eval-ab-${{ github.event.pull_request.number || github.run_id }}-${{ (github.event.action == 'labeled' && github.event.label.name != 'full-eval' && github.event.label.name != 'skip-live-eval') && 'noop' || 'live' }}
   cancel-in-progress: true
 
 jobs:

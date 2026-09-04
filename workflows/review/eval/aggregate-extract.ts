@@ -87,7 +87,7 @@ export type ReportSample = {
     candidate: ArmSample;
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
 
 const asString = (value: unknown): string =>
@@ -208,9 +208,10 @@ const parseArm = (
 };
 
 /**
- * Extract the arm samples one report artifact contributes. A single-run
- * report contributes one sample pair; a `--repeats n` report contributes n; a
- * no-reviewable-delta report contributes none (recorded as skipped upstream).
+ * Extract the arm samples one report artifact contributes: one pair for a
+ * single-run report, its finished repeats for `--repeats n` (so the `partial`
+ * check sits below the repeats branch), none for a no-reviewable-delta report
+ * or a mid-run checkpoint (`partial`, whose arms scored different case sets).
  */
 export const extractSamples = (
     source: string,
@@ -219,14 +220,15 @@ export const extractSamples = (
     if (!isRecord(raw)) {
         throw new Error("report: not a JSON object");
     }
-    if (raw["noReviewableDelta"] === true) {
-        return [];
-    }
     // A --repeats artifact nests single-run reports under `repeats`.
     if (Array.isArray(raw["repeats"])) {
         return raw["repeats"].flatMap((repeat, i) =>
             extractSamples(`${source}#${i + 1}`, repeat),
         );
+    }
+    // Nothing to pool: identical arms, or a checkpoint a run wrote mid-case.
+    if (raw["noReviewableDelta"] === true || raw["partial"] === true) {
+        return [];
     }
     const arms = raw["arms"];
     const shas = raw["reviewMdSha"];

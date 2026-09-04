@@ -614,14 +614,33 @@ everything, whatever the mode:
 | `flip-gated` | Thread reconciliation plus the correctness pass over the new hunks. Reduced depths never approve (approval requires a full-roster round): a standing REQUEST_CHANGES whose blocking objections are all resolved is cleared by dismissing it, and any validated blocking finding from the pass vetoes that clearance. | Cheap re-reviews that still cannot clear a standing block over a fresh validated defect. |
 | `fast` | Thread reconciliation only. | Maximum savings; fresh code on a re-push is guarded only by the tripwire below. |
 
-The dial governs push-shaped triggers. A `/review` comment a human posts on a
-consumer that keeps the comment trigger always plans `full` (reason
+The dial governs push-shaped triggers. A bare `/review` comment a human posts
+on a consumer that keeps the comment trigger plans `full` (reason
 `manual-review-request`): the point of the manual ask is "give me a real
 review now", and a reduced mode would otherwise answer it with a cheaper
-round. A `/review` posted by our automation (a Bot-type account, or a login
+round. A human can also name the depth for that one run, `/review <depth>`
+with any mode from the table (`/review scoped` is the useful one under a
+`fast` dial: the whole roster over the hunks no full review has seen, without
+a full round; `delta`, `diff`, and `diff-only` are accepted as synonyms for
+`scoped`). The token may match or deepen the configured dial, never shallow
+it: `flip-gated` and `fast` license the reduced-depth dismissal of a standing
+block with no pass over the new code, and any collaborator (the PR author
+included) can comment, so a repo that did not configure those depths must not
+reach that route by comment. An ask below the dial plans `full` (reason
+`manual-depth-below-dial`). At or above the dial the same guards below apply,
+so a named depth with no anchor fingerprint, a draft-taken anchor, an
+overflow, or a tripped divergence tripwire still runs full, and a missing
+staging input degrades it to full the way it degrades the configured mode.
+The plan records the ask (`manualDepth`, reason `manual-depth-<depth>` on
+success), a reduced round's depth note says `requested by /review <depth>`,
+and a full round that an ask tried to reduce says `/review <depth> was
+requested, this round ran at full depth (<reason>)`. A token that names no
+mode (a typo) is ignored, plans `full`, and gets no note. A `/review` posted
+by our automation (a Bot-type account, or a login
 in the `REVIEW_AUTOMATION_LOGINS` env, comma-separated and defaulting to
 `khan-actions-bot`; Khan/webapp's shim posts one per push) is not a manual
-ask and follows the configured mode like the push it stands in for.
+ask and follows the configured mode like the push it stands in for, whatever
+token it carries.
 
 Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministic):
 
