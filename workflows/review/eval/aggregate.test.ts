@@ -719,6 +719,26 @@ describe("renderAggregateMarkdown", () => {
         expect(markdown).toContain(
             "| Case-runs with may-flag entries (audited) | 0 / 2 |  | 0 / 2 |  |",
         );
+
+        // A case that carries mayFlagSpecs counts on every run it appears in.
+        const auditedRun = rawRun("case-1", {
+            caught: ["spec-1"],
+            posted: 1,
+        }) as unknown as {corpusCase: Record<string, unknown>};
+        auditedRun.corpusCase["live"] = {mayFlagSpecs: [{key: "m"}]};
+        const auditedRaw = rawReport({
+            baselineRuns: [auditedRun],
+            candidateRuns: [rawRun("case-1", {caught: ["spec-1"], posted: 1})],
+        });
+        const audited = aggregateSamples([
+            ...extractSamples("r1", auditedRaw),
+            ...extractSamples("r2", auditedRaw),
+        ]);
+        expect(audited.arms.baseline.pooled.auditedRuns).toBe(2);
+        expect(audited.arms.candidate.pooled.auditedRuns).toBe(0);
+        expect(renderAggregateMarkdown(audited)).toContain(
+            "| Case-runs with may-flag entries (audited) | 2 / 2 |  | 0 / 2 |  |",
+        );
         expect(markdown).toContain("| Noise (unmatched posted) | 4/8 (50%)");
         expect(markdown).toContain(
             "| of which duplicates of a claimed defect | 2 |  | 0 |  |",

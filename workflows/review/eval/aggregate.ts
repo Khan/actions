@@ -413,11 +413,6 @@ export const computeNoiseFloor = (armSamples: ArmSample[]): NoiseFloor => {
     return {armSamples: armSamples.length, bands, caseAsymmetry};
 };
 
-/**
- * Pool report samples into the aggregate. Sources that failed to parse are
- * carried in `skippedSources`; identical-arm pools additionally get the
- * noise-floor bands.
- */
 /** Distinct ruler values, with "unstamped" added iff only some are set. */
 const rulerValues = (values: (string | undefined)[]): string[] => {
     const set = new Set(values.filter((v): v is string => v !== undefined));
@@ -427,6 +422,11 @@ const rulerValues = (values: (string | undefined)[]): string[] => {
     return [...set].sort();
 };
 
+/**
+ * Pool report samples into the aggregate. Sources that failed to parse are
+ * carried in `skippedSources`; identical-arm pools additionally get the
+ * noise-floor bands.
+ */
 export const aggregateSamples = (
     samples: ReportSample[],
     skippedSources: {source: string; reason: string}[] = [],

@@ -291,18 +291,6 @@ export const matchCase = async (
     let fallbackCalls = 0;
 
     /**
-     * The unclaimed posted candidate that deterministically satisfies
-     * `spec`, preferring one produced by the spec's own lens when the spec
-     * names one. A loose mechanism alternate ("concurrent", "overwrit") is
-     * meant to accept paraphrase, and a neighbouring finding from another
-     * lens can hit it too. When both are present the lens the case was
-     * authored against is the finding the case is about. The comparison is
-     * against `source`, the producer the pipeline assigned, not
-     * `finding.lens`, which a specialist agent writes into its own JSON,
-     * resolved through the producer's own lens table because the default
-     * skill-auditor stamps `conventions` findings with source `skill`.
-     */
-    /**
      * Unclaimed posted candidates that could satisfy `spec`, best first: the
      * deterministic hits ranked as below, then (for the arbiter fallback)
      * the rest of the candidates on the spec's file in the same ranking.
@@ -345,6 +333,7 @@ export const matchCase = async (
     };
     const unclaimed = (): RunCandidate[] =>
         posted.filter((candidate) => !claimed.has(candidate.id));
+    /** The best-ranked unclaimed candidate that deterministically fits `spec`. */
     const deterministicClaimant = (
         spec: LiveDefectSpec,
     ): RunCandidate | undefined => {
@@ -459,7 +448,8 @@ export const matchCase = async (
     // finding closed with "downstream handlers are also left with an
     // undefined session"). So the order asks what the finding is ABOUT:
     //   1. its failure_scenario alone fits a may-flag entry: legitimate;
-    //   2. it fits a caught spec (scenario plus prose): duplicate;
+    //   2. it fits a spec another candidate claimed (scenario plus prose):
+    //      duplicate;
     //   3. it fits a may-flag entry anywhere in its text: legitimate;
     //   4. otherwise: noise.
     // The rungs run as passes over every leftover, not per candidate, so a
@@ -474,10 +464,19 @@ export const matchCase = async (
     // seeded one is, and lands in `duplicates` under the may-flag key.
     const duplicates: DuplicateMatch[] = [];
     const legitimateUnspecced: SpecMatch[] = [];
-    const caughtSpecs = caught.flatMap((match) => {
-        const spec = mustCatch.find((s) => s.key === match.specKey);
-        return spec === undefined ? [] : [spec];
-    });
+    // Every spec some candidate already claimed: caught must-catch specs and
+    // matched traps alike. A second copy of a false flag is still a second
+    // copy, and belongs in the duplicates sub-row, not in residual noise.
+    const claimedSpecs = [
+        ...caught.flatMap((match) => {
+            const spec = mustCatch.find((s) => s.key === match.specKey);
+            return spec === undefined ? [] : [spec];
+        }),
+        ...falseFlags.flatMap((flag) => {
+            const spec = mustNotFlag.find((s) => s.key === flag.specKey);
+            return spec === undefined ? [] : [spec];
+        }),
+    ];
     const acceptedMayFlag = new Set<string>();
     /**
      * Route a candidate that fits `hits` (the may-flag entries it matches at
@@ -517,7 +516,7 @@ export const matchCase = async (
     }
     // Rung 2.
     for (const candidate of leftovers()) {
-        const duplicateOf = caughtSpecs.find((spec) =>
+        const duplicateOf = claimedSpecs.find((spec) =>
             matchesSpec(candidate, spec),
         );
         if (duplicateOf !== undefined) {

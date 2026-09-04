@@ -34,7 +34,11 @@ Three changes, batched because every fixture edit moves the corpus hash:
   counts as noise), or residual noise. The report gets an "of which
   duplicates" row under noise and a "Legitimate unspecced" row. The
   aggregate reads both shapes of artifact and sums unmatched plus duplicates
-  so pooled noise stays comparable with older reports.
+  so pooled noise stays comparable with older reports for the duplicate
+  bucket (may-flag matches do not reconcile). The matcher stamp is
+  `deterministic-v2`, and a pool that mixes stamped reports with unstamped
+  legacy ones now lists "unstamped" as a second ruler and trips the
+  mixed-ruler warning.
 - When several posted findings satisfy one spec, the matcher now prefers the
   one whose code-assigned `source` is the spec's `lens` before falling back
   to posted order. On

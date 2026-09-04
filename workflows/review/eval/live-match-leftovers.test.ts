@@ -515,8 +515,50 @@ describe("matchCase: lens tie-break and leftover buckets", () => {
         const match = await matchCase(corpusCase, result);
         expect(match.falseFlags.map((f) => f.findingId)).toEqual(["f-spec"]);
         // The other copy is a second description of the same trapped
-        // pattern, not unspecced noise.
-        expect(match.unmatchedFindingIds).toEqual(["f-corr"]);
+        // pattern: a duplicate of a claimed spec, not residual noise.
+        expect(match.duplicates).toEqual([
+            {findingId: "f-corr", specKey: "trap"},
+        ]);
+        expect(match.unmatchedFindingIds).toEqual([]);
+    });
+
+    it("picks the first unclaimed entry when a leftover fits two may-flag entries", async () => {
+        // Two entries, one leftover fitting both: it takes the first free
+        // one, and a later leftover fitting only that one is the duplicate.
+        const both = finding(
+            "f-both",
+            "the discount rate is unvalidated and the rounding drifts.",
+            "advisory",
+        );
+        const rateOnly = finding(
+            "f-rate",
+            "the discount rate is unvalidated.",
+            "advisory",
+        );
+        const {corpusCase, result} = liveRun({
+            mustCatchSpecs: [
+                spec({key: "float-bug", mechanism: ["float(ing)?[- ]?point"]}),
+            ],
+            mayFlagSpecs: [
+                spec({
+                    key: "rate-unvalidated",
+                    mechanism: ["rate is unvalidated"],
+                }),
+                spec({key: "drift", mechanism: ["rounding drifts"]}),
+            ],
+            findings: [
+                finding("f-float", "floating point totals accumulate."),
+                both,
+                rateOnly,
+            ],
+        });
+        const match = await matchCase(corpusCase, result);
+        expect(
+            match.legitimateUnspecced.map((l) => [l.findingId, l.specKey]),
+        ).toEqual([["f-both", "rate-unvalidated"]]);
+        expect(match.duplicates).toEqual([
+            {findingId: "f-rate", specKey: "rate-unvalidated"},
+        ]);
     });
 
     it("routes a leftover whose prose alone names a may-flag defect to legitimate", async () => {
