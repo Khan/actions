@@ -74,6 +74,18 @@
                 "lineStart": 70,
                 "lineEnd": 80
             }
+        ],
+        "mayFlagSpecs": [
+            {
+                "key": "infallible-store-fakes",
+                "path": "services/notes/erasure_test.go",
+                "lineStart": 18,
+                "lineEnd": 56,
+                "mechanism": [
+                    "infallible|always returns? nil|never returns? an error|cannot (fail|return an error)",
+                    "error[- ](wrapping|path|branch)(s|es)?.{0,100}(never|not|un)[- ]?(executed|covered|exercised|tested|run)"
+                ]
+            }
         ]
     }
 }

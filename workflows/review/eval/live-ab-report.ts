@@ -52,6 +52,20 @@ export type ArmRunReport = {
         caught: number;
         missed: string[];
         /**
+         * The case's posted count and its noise buckets, so the per-case
+         * noise picture is readable from the report without opening each
+         * run's match record: `noise` is unmatched plus duplicates (the
+         * pooled numerator's contribution), `legitimateUnspecced` the
+         * may-flag matches that left it. Cases without `mayFlagSpecs`
+         * report the old definition, so compare these per case across arms
+         * rather than reading a pooled rate over audited and unaudited
+         * cases as one number.
+         */
+        posted: number;
+        noise: number;
+        duplicates: number;
+        legitimateUnspecced: number;
+        /**
          * Findings the provenance gate anchor-snapped this run. The direct
          * observable for anchor fidelity: a prompt change that fixes
          * anchoring at the source (line-number-annotated diffs) shows up
@@ -172,7 +186,11 @@ export type GateMajority = {
  * what keeps the weekly drift series honest across instrument upgrades.
  */
 export type ReportProvenance = {
-    /** Matcher configuration: `deterministic` or `deterministic+arbiter`. */
+    /**
+     * Matcher configuration: `deterministic-v2` or
+     * `deterministic-v2+arbiter` (v1, unsuffixed, predates the lens
+     * tie-break and the leftover buckets).
+     */
     matcher: string;
     /** Content hash of the loaded corpus cases this run was scored against. */
     corpusSha: string;
@@ -383,6 +401,12 @@ const armAsymmetryLines = (
 const ASYMMETRY_HEADING =
     "### Arm asymmetry (expected when the PR adds a reviewer)";
 
+/** Cases in the arm whose corpus entry carries `mayFlagSpecs`. */
+const auditedCases = (arm: ArmRunReport): number =>
+    arm.runs.filter(
+        (run) => (run.corpusCase.live?.mayFlagSpecs?.length ?? 0) > 0,
+    ).length;
+
 /** Total anchor-snaps across an arm's case runs (see `perCase.snapped`). */
 const snappedTotal = (arm: ArmRunReport): number =>
     arm.perCase.reduce((sum, c) => sum + c.snapped, 0);
@@ -493,6 +517,21 @@ export const MEASURED_NOISE_FLOOR = {
         {metric: "noise (unmatched posted)", min: 0.5, max: 0.6, sd: 0.03},
         {metric: "judge mean quality", min: 0.82, max: 0.86, sd: 0.02},
     ],
+    /**
+     * Rows whose definition changed after the band was measured, with the
+     * break. The noise numerator was redefined on 2026-09-03: may-flag
+     * matches left it and duplicates of a caught spec joined it, and on
+     * run 33671015442 that moved the claude arm from 71% to 35%. Until a
+     * drift run re-measures under the new definition the band is an
+     * upper bound for a smoke case that carries `mayFlagSpecs` and the old
+     * definition everywhere else.
+     */
+    redefined: [
+        {
+            metric: "noise (unmatched posted)",
+            note: "measured before the may-flag and duplicate buckets, so it reads high against post-2026-09-03 numbers",
+        },
+    ],
 } as const;
 
 const NOISE_FLOOR_FOOTER =
@@ -504,7 +543,11 @@ const NOISE_FLOOR_FOOTER =
         .join(", ") +
     ". A single-run delta whose arms both sit inside a band is " +
     "indistinguishable from run-to-run wobble; use `--repeats` to resolve " +
-    "smaller effects.*";
+    "smaller effects." +
+    MEASURED_NOISE_FLOOR.redefined
+        .map((r) => ` The ${r.metric} band was ${r.note}.`)
+        .join("") +
+    "*";
 
 export const renderMarkdownReport = (report: AbReport): string => {
     const {baseline, candidate} = report.arms;
@@ -584,6 +627,30 @@ export const renderMarkdownReport = (report: AbReport): string => {
         metric("Must-catch recall", (a) => a.metrics.mustCatchRecall.rate),
         metric("Verdict agreement", (a) => a.metrics.verdictAgreement.rate),
         metric("Noise (unmatched posted)", (a) => a.metrics.noise.rate),
+        // The noise numerator, decomposed: a duplicate is a second posted
+        // copy of a defect another comment already claimed, a caught spec or
+        // an accepted may-flag entry (a merge-stage miss), and a
+        // legitimate unspecced finding matched a `mayFlagSpecs` entry and is
+        // NOT in the numerator (a real defect the fixture carries that the
+        // case is not about). What remains is template comments,
+        // speculation, and unspecced findings nobody has audited yet.
+        row(
+            "of which duplicates of a claimed defect",
+            String(baseline.metrics.noise.duplicates),
+            String(candidate.metrics.noise.duplicates),
+        ),
+        metric(
+            "Legitimate unspecced (may-flag, not noise)",
+            (a) => a.metrics.legitimateUnspecced.rate,
+        ),
+        // Only cases carrying mayFlagSpecs can move a finding into the row
+        // above, and on the rest the noise row is still the pre-audit
+        // definition, so the count is per arm beside the rates it qualifies.
+        row(
+            "Cases with may-flag entries (audited)",
+            `${auditedCases(baseline)} / ${baseline.runs.length}`,
+            `${auditedCases(candidate)} / ${candidate.runs.length}`,
+        ),
         row(
             "Clean false flags",
             String(baseline.metrics.cleanFalseFlag.count),

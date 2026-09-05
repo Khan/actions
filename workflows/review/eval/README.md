@@ -124,7 +124,24 @@ migration missing an index is correctly flagged at the migration OR at the
 hot query; a single-location spec turns anchor-site preference into fake
 recall noise). Matching is deterministic first (location AND mechanism);
 specs left unmatched go to a capped Haiku arbiter (`match-arbiter.ts`)
-whose claims are recorded `via: "fallback"` for audit.
+whose claims are recorded `via: "fallback"` for audit. When several
+posted findings satisfy one spec, the one produced by the spec's `lens`
+wins, then posted order.
+
+A case may also carry `live.mayFlagSpecs`: real defects the fixture has
+that are NOT the case's ground truth. "Unmatched posted" only means the
+spec did not list a finding, and reading run 33671015442's postings showed
+10 of the claude arm's 22 unmatched findings were correct about the code
+(an unvalidated discount rate, a NOT NULL DEFAULT table rewrite, a test
+fake ordering rows opposite to the store's contract). A posted finding
+matching a may-flag entry is reported as legitimate unspecced and leaves
+the noise numerator, with no recall credit. When you audit a fixture and
+find a defect the author did not intend: if it changes the expected verdict,
+fix the fixture (as #412 did for the false-block case's pagination doc
+comment) or spec it, otherwise add a may-flag entry. Keep the mechanism
+alternates tight, they are what tells a legitimate finding from a second
+copy of the seeded one. Clean cases can carry them too, but a clean case
+with a real defect in its diff is a fixture bug first.
 
 Growing the corpus: target the 20-80% catch band, where discrimination
 lives. Saturated cases (caught 100% on both arms) are tripwires; they add
@@ -163,9 +180,35 @@ claiming a band.
 - **Noise floor** (measured on 6 identical-arm samples, run 29069228968,
   rendered in every report footer): recall 54-86%, verdict agreement
   75-100%, noise 50-60%, judge quality 0.82-0.86. A single-run delta whose
-  arms both sit inside a band is wobble. Detecting a 20-point recall change
-  needs ~60 spec-samples per arm; 10 points needs ~140 (two-proportion, 80%
-  power). Repeats are the cheap axis: no authoring, no review.
+  arms both sit inside a band is wobble. The noise band predates the
+  may-flag and duplicate buckets (next bullet), so it reads high against
+  numbers taken after 2026-09-03 on cases that carry `mayFlagSpecs`, until
+  a drift run re-measures it. The report footer carries the same caveat.
+  Detecting a 20-point recall change needs ~60 spec-samples per arm; 10
+  points needs ~140 (two-proportion, 80% power). Repeats are the cheap
+  axis: no authoring, no review.
+- **Noise buckets:** the noise row's numerator is residual unmatched
+  findings plus duplicates (a second posted copy of a defect another
+  finding already claimed, a caught spec or an accepted may-flag entry: a
+  merge-stage miss, reported on its own sub-row). Legitimate unspecced findings (may-flag matches, above)
+  are NOT in the numerator and get their own row. What remains after both
+  is template comments ("no test covers X"), speculation, and unspecced
+  findings nobody has audited yet, and on a claude arm the templates are
+  most of it. Only audited cases carry `mayFlagSpecs` (8 of the 10 live
+  smoke cases so far, none of the rest of the live corpus), so on a case
+  without them the noise row is still the old definition, an upper bound.
+  A pooled noise rate over audited and unaudited cases together mixes the
+  two definitions, so compare `perCase[].noise` / `legitimateUnspecced` in
+  the report JSON across arms rather than the pooled row. The entries were written from the claude arm's postings on run
+  33671015442 and cross-checked against the gemini arm where it posted, so
+  for the first few runs read the per-case buckets against the postings
+  once to catch an entry that only matches one model's vocabulary. The
+  buckets are regex classification over the finding's text: a leftover
+  whose `failure_scenario` fits a may-flag entry is taken at its word, then
+  the duplicate check runs, then may-flag against the
+  full prose. A distinct finding that borrows the spec's keywords can still
+  land in the duplicate bucket (the race case's TTL suggestion says
+  "overwrite"), so read the per-case ids before trusting a duplicate count.
 - **Miss classes:** a true miss is a recall problem; found-but-dropped
   (provenance/scope/validation buckets) is an anchoring or gate-calibration
   problem. They route to different fixes; never collapse them. The
@@ -245,7 +288,9 @@ claiming a band.
 - **Stacked PRs:** a per-PR report's baseline is the PR's base branch tip
   (the parent PR in a stack), so it prices the marginal delta only.
   Absolute columns do not compare across reports.
-- **Ruler provenance:** every report stamps the matcher configuration and a
+- **Ruler provenance:** every report stamps the matcher configuration
+  (`deterministic-v2`, `+arbiter` when the fallback ran; v1 is the
+  unsuffixed stamp from before the lens tie-break and leftover buckets) and a
   corpus content hash (`provenance` in the JSON, the "Ruler" line in the
   markdown). Rates are only comparable when BOTH the review.md sha and the
   ruler match; `aggregate.ts` warns loudly on mixed pools. Instrument

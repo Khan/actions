@@ -31,6 +31,10 @@ const rawRun = (
         blocking?: Record<string, boolean>;
         missedDetail?: {specKey: string; droppedBy?: string}[];
         unmatched?: string[];
+        /** Leftovers bucketed as a second copy of a caught spec. */
+        duplicates?: {findingId: string; specKey: string}[];
+        /** Leftovers bucketed as legitimate unspecced (may-flag matches). */
+        legitimate?: string[];
         posted?: number;
     } = {},
 ) => ({
@@ -53,6 +57,19 @@ const rawRun = (
         missedDetail: over.missedDetail ?? [],
         falseFlags: [],
         unmatchedFindingIds: over.unmatched ?? [],
+        // Absent (not empty) unless asked for, so the default run is the
+        // legacy artifact shape.
+        ...(over.duplicates !== undefined ? {duplicates: over.duplicates} : {}),
+        ...(over.legitimate !== undefined
+            ? {
+                  legitimateUnspecced: over.legitimate.map((findingId) => ({
+                      specKey: "may-1",
+                      findingId,
+                      via: "deterministic",
+                      blocking: false,
+                  })),
+              }
+            : {}),
         postedCount: over.posted ?? (over.caught ?? []).length,
     },
 });
@@ -143,6 +160,47 @@ describe("extractSamples", () => {
         expect(sample.candidate.runs[0]?.unmatchedPosted).toBe(1);
         expect(sample.candidate.runs[0]?.posted).toBe(2);
         expect(sample.baseline.usd).toBe(1.5);
+    });
+
+    it("sums unmatched plus duplicates for noise and reads the may-flag bucket as zero on legacy shapes", () => {
+        // A report predating the buckets recorded every leftover under
+        // unmatchedFindingIds. Summing unmatched plus duplicates reconciles
+        // the duplicate bucket with that shape, and only that bucket: a
+        // leftover the new shape records as legitimate unspecced used to
+        // count as noise, so the same three leftovers read 3 under the old
+        // shape and 2 under the new. The may-flag count is 0, not missing,
+        // for the legacy shape.
+        const legacy = rawRun("case-1", {
+            posted: 4,
+            unmatched: ["dup", "legit", "template"],
+        });
+        const bucketed = rawRun("case-1", {
+            posted: 4,
+            unmatched: ["template"],
+            duplicates: [{findingId: "dup", specKey: "s"}],
+            legitimate: ["legit"],
+        });
+        const raw = rawReport({
+            baselineRuns: [legacy],
+            candidateRuns: [bucketed],
+        });
+        const sample = extractSamples("r1", raw)[0]!;
+        expect(sample.baseline.runs[0]?.unmatchedPosted).toBe(3);
+        expect(sample.baseline.runs[0]?.legitimateUnspecced).toBe(0);
+        expect(sample.candidate.runs[0]?.unmatchedPosted).toBe(2);
+        expect(sample.candidate.runs[0]?.legitimateUnspecced).toBe(1);
+        expect(sample.candidate.runs[0]?.audited).toBe(false);
+
+        // The audited flag reads the case's own may-flag list.
+        const audited = rawRun("case-1", {posted: 1}) as unknown as {
+            corpusCase: Record<string, unknown>;
+        };
+        audited.corpusCase["live"] = {mayFlagSpecs: [{key: "m"}]};
+        const auditedSample = extractSamples(
+            "r2",
+            rawReport({baselineRuns: [audited], candidateRuns: [audited]}),
+        )[0]!;
+        expect(auditedSample.baseline.runs[0]?.audited).toBe(true);
     });
 
     it("carries recorded catch labels and omits unrecorded ones", () => {
@@ -281,6 +339,9 @@ describe("aggregateSamples", () => {
         caughtSpecBlocking: {},
         missedSpecs: [],
         unmatchedPosted: 0,
+        duplicates: 0,
+        legitimateUnspecced: 0,
+        audited: false,
         posted: 0,
         ...over,
     });
@@ -615,6 +676,79 @@ describe("renderAggregateMarkdown", () => {
         expect(markdown).not.toContain("Noise floor");
     });
 
+    it("pools the noise buckets: duplicates into noise, may-flag matches into their own row", () => {
+        const raw = rawReport({
+            baselineRuns: [
+                rawRun("case-1", {
+                    caught: ["spec-1"],
+                    posted: 4,
+                    unmatched: ["template"],
+                    duplicates: [{findingId: "copy", specKey: "spec-1"}],
+                    legitimate: ["legit"],
+                }),
+            ],
+            candidateRuns: [
+                rawRun("case-1", {
+                    caught: ["spec-1"],
+                    posted: 2,
+                    unmatched: ["template"],
+                }),
+            ],
+        });
+        const report = aggregateSamples([
+            ...extractSamples("r1", raw),
+            ...extractSamples("r2", raw),
+        ]);
+        expect(report.arms.baseline.pooled.noise).toMatchObject({
+            numerator: 4,
+            denominator: 8,
+        });
+        expect(report.arms.baseline.pooled.legitimateUnspecced).toMatchObject({
+            numerator: 2,
+            denominator: 8,
+        });
+        expect(report.arms.candidate.pooled.legitimateUnspecced).toMatchObject({
+            numerator: 0,
+            denominator: 4,
+        });
+        expect(report.arms.baseline.pooled.duplicates).toBe(2);
+        // Neither raw run carries a live block, so nothing counts as audited.
+        expect(report.arms.baseline.pooled.auditedRuns).toBe(0);
+        expect(report.arms.baseline.pooled.caseRuns).toBe(2);
+        const markdown = renderAggregateMarkdown(report);
+        expect(markdown).toContain(
+            "| Case-runs with may-flag entries (audited) | 0 / 2 |  | 0 / 2 |  |",
+        );
+
+        // A case that carries mayFlagSpecs counts on every run it appears in.
+        const auditedRun = rawRun("case-1", {
+            caught: ["spec-1"],
+            posted: 1,
+        }) as unknown as {corpusCase: Record<string, unknown>};
+        auditedRun.corpusCase["live"] = {mayFlagSpecs: [{key: "m"}]};
+        const auditedRaw = rawReport({
+            baselineRuns: [auditedRun],
+            candidateRuns: [rawRun("case-1", {caught: ["spec-1"], posted: 1})],
+        });
+        const audited = aggregateSamples([
+            ...extractSamples("r1", auditedRaw),
+            ...extractSamples("r2", auditedRaw),
+        ]);
+        expect(audited.arms.baseline.pooled.auditedRuns).toBe(2);
+        expect(audited.arms.candidate.pooled.auditedRuns).toBe(0);
+        expect(renderAggregateMarkdown(audited)).toContain(
+            "| Case-runs with may-flag entries (audited) | 2 / 2 |  | 0 / 2 |  |",
+        );
+        expect(markdown).toContain("| Noise (unmatched posted) | 4/8 (50%)");
+        expect(markdown).toContain(
+            "| of which duplicates of a claimed defect | 2 |  | 0 |  |",
+        );
+        expect(markdown).toContain(
+            "| Legitimate unspecced (may-flag, not noise) | 2/8 (25%)",
+        );
+        expect(markdown).toContain("| 0/4 (0%)");
+    });
+
     it("renders a (blocking) row per spec and marks a split on identical arms", () => {
         // Three identical-arm repeats: the spec is always caught, and the
         // label flips. Recall shows 6/6 and nothing else; the blocking row is
@@ -699,6 +833,38 @@ describe("renderAggregateMarkdown", () => {
         expect(renderAggregateMarkdown(mixed)).toContain(
             "WARNING: pooled runs mix rulers",
         );
+
+        // A stamped report pooled with a legacy unstamped one is a mixed
+        // ruler too: "unstamped" is listed as the second value so the same
+        // warning fires. An all-unstamped pool stays silent as before.
+        const halfStamped = aggregateSamples([
+            ...extractSamples(
+                "r1",
+                withRuler("deterministic-v2", "c".repeat(64)),
+            ),
+            ...extractSamples(
+                "r2",
+                rawReport({
+                    baselineRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+                    candidateRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+                }),
+            ),
+        ]);
+        expect(halfStamped.matchers).toEqual(["deterministic-v2", "unstamped"]);
+        const halfMd = renderAggregateMarkdown(halfStamped);
+        expect(halfMd).toContain("matcher deterministic-v2, unstamped;");
+        expect(halfMd).toContain("WARNING: pooled runs mix rulers");
+        const legacyOnly = aggregateSamples([
+            ...extractSamples(
+                "r1",
+                rawReport({
+                    baselineRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+                    candidateRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+                }),
+            ),
+        ]);
+        expect(legacyOnly.matchers).toEqual([]);
+        expect(renderAggregateMarkdown(legacyOnly)).not.toContain("mix rulers");
     });
 
     it("warns on asymmetric samples under the noise-floor bands", () => {
