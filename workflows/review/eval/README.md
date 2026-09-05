@@ -90,6 +90,21 @@ gh workflow run review-eval-ab.yml --ref <branch> \
   -f cases=golden-documentation-stale-and-narrated,golden-documentation-restated-docstring,golden-documentation-missing-why,golden-documentation-commented-out-code,clean-documentation-earned-comments \
   -f repeats=5 -f max_usd=50
 
+# Graduation run for the `maintainability` reviewer (roughly $50 at 3 repeats:
+# each case also enables holistic and conventions, the two reviewers whose
+# lanes border the new one, so the baseline arm runs them and the delta is
+# what maintainability adds over them rather than over the two defaults
+# alone). The five seeded cases plus the clean precision guard. The gate is a
+# positive recall delta on the seeded cases with the clean case silent. 15
+# spec-samples per arm resolves a large effect only, which is the expected
+# shape (the baseline has no lane for these); a small delta is the fold
+# outcome, not a call for repeats. Run the identical-arm calibration
+# (force_arms=true, same cases) once before claiming a band for any of them.
+gh workflow run review-eval-ab.yml --ref <branch> \
+  -f base_ref=origin/main \
+  -f cases=golden-maintainability-duplicate-helper,golden-maintainability-misleading-name,golden-maintainability-hidden-flag,golden-maintainability-dead-branch,golden-maintainability-one-caller-wrapper,clean-maintainability-reuses-existing \
+  -f repeats=3 -f max_usd=60
+
 # Pool reports across dispatches (run ids or local paths)
 pnpm dlx tsx workflows/review/eval/aggregate.ts <run-id> <run-id> ... [--out <path>]
 ```

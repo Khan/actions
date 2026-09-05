@@ -1,0 +1,109 @@
+{
+    "id": "golden-maintainability-misleading-name",
+    "tags": [
+        "golden",
+        "maintainability",
+        "live"
+    ],
+    "category": "golden",
+    "description": "The misleading-name half of the policy. The change adds a grace window (real logic, explained by a comment that earns its line) and, in the same edit, makes `isSessionValid` write `lastChecked` on every call. An `is` predicate that mutates its argument is the shape a reader will not predict from the name: every caller that calls it twice, or calls it from a read path, now has a side effect nobody at the call site can see. The grace comment and the new `remainingMs` are must-not-flag: one is documentation that earns its line, the other is a well-named pure function.",
+    "changedFiles": [
+        {
+            "path": "src/auth/session.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "conventions",
+            "maintainability"
+        ]
+    },
+    "findings": [
+        {
+            "source": "maintainability",
+            "finding": {
+                "schema_version": 2,
+                "id": "maint-misleading-is-session-valid",
+                "lens": "maintainability",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/auth/session.ts",
+                    "line": 12,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/auth/session.ts:12 keeps the name `isSessionValid` and the boolean return",
+                    "src/auth/session.ts:14 adds `session.lastChecked = now;`, a write to the argument",
+                    "the name and signature predict a pure predicate; no caller can see the write from its call site"
+                ],
+                "failure_scenario": "A caller on a read path (a metrics sweep, a test asserting lastChecked) calls isSessionValid expecting no side effect, and the session's lastChecked moves under it.",
+                "producing_hunt": "maintainability:misleading-name",
+                "model_authored_prose": "`isSessionValid` (session.ts:12) reads as a pure predicate and now writes `session.lastChecked` (line 14). Either move the write to the caller that wants it (a `touchSession`) or rename so the mutation is in the name."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "maint-misleading-is-session-valid"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/auth/session.ts b/src/auth/session.ts\n--- a/src/auth/session.ts\n+++ b/src/auth/session.ts\n@@ -5,5 +5,15 @@\n     lastChecked?: number;\n };\n \n-export const isSessionValid = (session: Session, now = Date.now()): boolean =>\n-    session.expiresAt > now;\n+// A session that expired inside the grace window still validates, so a request\n+// that raced the expiry does not fail on the last hop.\n+const GRACE_MS = 30_000;\n+\n+export const isSessionValid = (session: Session, now = Date.now()): boolean => {\n+    const valid = session.expiresAt + GRACE_MS > now;\n+    session.lastChecked = now;\n+    return valid;\n+};\n+\n+export const remainingMs = (session: Session, now = Date.now()): number =>\n+    Math.max(0, session.expiresAt - now);\n",
+    "live": {
+        "prContext": {
+            "title": "auth: tolerate a 30s grace window on session expiry",
+            "description": "Requests that raced the session expiry were failing on their last hop. Sessions now validate for 30 seconds past expiresAt, and the check records when it last ran. Adds remainingMs for the client-side countdown.",
+            "author": "dev-auth",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "maint-misleading-is-session-valid",
+                "path": "src/auth/session.ts",
+                "lineStart": 12,
+                "lineEnd": 15,
+                "lens": "maintainability",
+                "mechanism": [
+                    "isSessionValid mutates",
+                    "predicate with a side effect",
+                    "is-prefixed function writes lastChecked",
+                    "name promises a pure check",
+                    "side effect hidden in isSessionValid",
+                    "rename or move the write"
+                ]
+            }
+        ],
+        "mustNotFlagSpecs": [
+            {
+                "key": "maint-trap-grace-comment",
+                "path": "src/auth/session.ts",
+                "lineStart": 8,
+                "lineEnd": 10,
+                "lens": "maintainability",
+                "mechanism": [
+                    "GRACE_MS comment restates",
+                    "delete the grace comment",
+                    "magic number 30000"
+                ]
+            },
+            {
+                "key": "maint-trap-remaining-ms",
+                "path": "src/auth/session.ts",
+                "lineStart": 18,
+                "lineEnd": 20,
+                "lens": "maintainability",
+                "mechanism": [
+                    "remainingMs duplicates",
+                    "remainingMs is unused",
+                    "remainingMs unnecessary"
+                ]
+            }
+        ]
+    }
+}

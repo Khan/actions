@@ -1,0 +1,98 @@
+{
+    "id": "golden-maintainability-duplicate-helper",
+    "tags": [
+        "golden",
+        "maintainability",
+        "live"
+    ],
+    "category": "golden",
+    "description": "The duplication half of the policy. The change does real work (a per-category breakdown and a dollars fallback for imported items) and, to get there, adds a local `toCents` whose body is character-for-character the body of `dollarsToCents` in src/money/cents.ts, two directories over. Neither name appears in the other file, so a reviewer that only reads the diff cannot see it; one grep for `Math.round(Math.abs` or for `Cents` finds it. The one comment in the diff explains the fallback and is not a documentation finding; the per-category loop is the logic work and must draw nothing.",
+    "changedFiles": [
+        {
+            "path": "src/reports/summary.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "conventions",
+            "maintainability"
+        ]
+    },
+    "findings": [
+        {
+            "source": "maintainability",
+            "finding": {
+                "schema_version": 2,
+                "id": "maint-duplicate-to-cents",
+                "lens": "maintainability",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/reports/summary.ts",
+                    "line": 7,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/reports/summary.ts:7-8 adds `const toCents = (dollars: number): number => Math.sign(dollars) * Math.round(Math.abs(dollars) * 100);`",
+                    "src/money/cents.ts:4-5 exports `dollarsToCents` with the identical body",
+                    "grep for dollarsToCents finds no import in src/reports/summary.ts"
+                ],
+                "failure_scenario": "The next reader of a cents bug has two names for one conversion and fixes the one they found first, and the two drift the first time either changes its rounding rule.",
+                "producing_hunt": "maintainability:duplicate",
+                "model_authored_prose": "`toCents` (summary.ts:7) is `dollarsToCents` from src/money/cents.ts with a new name: same sign handling, same rounding, same return type. Import the existing one instead of carrying a second copy."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "maint-duplicate-to-cents"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/reports/summary.ts b/src/reports/summary.ts\n--- a/src/reports/summary.ts\n+++ b/src/reports/summary.ts\n@@ -1,8 +1,19 @@\n import type {LineItem} from \"./types\";\n \n-export type Summary = {count: number; totalCents: number};\n+export type Summary = {count: number; totalCents: number; byCategory: Record<string, number>};\n \n-export const summarize = (items: readonly LineItem[]): Summary => ({\n-    count: items.length,\n-    totalCents: items.reduce((sum, item) => sum + item.cents, 0),\n-});\n+// Imported line items carry dollar amounts as floats; everything downstream\n+// is integer cents.\n+const toCents = (dollars: number): number =>\n+    Math.sign(dollars) * Math.round(Math.abs(dollars) * 100);\n+\n+export const summarize = (items: readonly LineItem[]): Summary => {\n+    const byCategory: Record<string, number> = {};\n+    let totalCents = 0;\n+    for (const item of items) {\n+        const cents = item.cents ?? toCents(item.dollars ?? 0);\n+        totalCents += cents;\n+        byCategory[item.category] = (byCategory[item.category] ?? 0) + cents;\n+    }\n+    return {count: items.length, totalCents, byCategory};\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "reports: break the summary down by category and accept imported dollar amounts",
+            "description": "The summary now carries a per-category total alongside the grand total. Imported line items arrive with float dollars instead of cents, so those are normalized on the way in.",
+            "author": "dev-reports",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "maint-duplicate-to-cents",
+                "path": "src/reports/summary.ts",
+                "lineStart": 5,
+                "lineEnd": 8,
+                "lens": "maintainability",
+                "mechanism": [
+                    "toCents duplicates dollarsToCents",
+                    "dollarsToCents already exists",
+                    "same body as dollarsToCents",
+                    "reuse dollarsToCents",
+                    "src/money/cents.ts already",
+                    "second copy of the cents conversion"
+                ]
+            }
+        ],
+        "mustNotFlagSpecs": [
+            {
+                "key": "maint-trap-category-loop",
+                "path": "src/reports/summary.ts",
+                "lineStart": 10,
+                "lineEnd": 19,
+                "lens": "maintainability",
+                "mechanism": [
+                    "loop could be a reduce",
+                    "byCategory could use Map",
+                    "summarize is too long",
+                    "split summarize"
+                ]
+            }
+        ]
+    }
+}

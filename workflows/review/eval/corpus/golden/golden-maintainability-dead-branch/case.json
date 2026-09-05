@@ -1,0 +1,114 @@
+{
+    "id": "golden-maintainability-dead-branch",
+    "tags": [
+        "golden",
+        "maintainability",
+        "live"
+    ],
+    "category": "golden",
+    "description": "The dead-code half of the policy. The real work is exponential backoff with caps and an attempt ceiling, and the guard that implements the ceiling also returns early for every kind in NO_RETRY, which holds `fatal`. The switch below it swaps its old `default` arm for an explicit `case \"fatal\"` arm in the same edit, so the diff adds a branch the guard above already makes unreachable. The guard goes through a Set rather than a literal comparison on purpose: `kind === \"fatal\"` would narrow the union and make the arm a TS2678 compile error, which is a defect tsc already blocks and not what this case measures. `Set.has` does not narrow, so the arm compiles and is dead at runtime only, and the reviewer has to read NO_RETRY's one member to see it. The caps and the comment on THROTTLE_CAP_MS are must-not-flag: the comment records where the number came from, and the two Math.min lines are the logic work.",
+    "changedFiles": [
+        {
+            "path": "src/queue/retry.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "conventions",
+            "maintainability"
+        ]
+    },
+    "findings": [
+        {
+            "source": "maintainability",
+            "finding": {
+                "schema_version": 2,
+                "id": "maint-dead-fatal-case",
+                "lens": "maintainability",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/queue/retry.ts",
+                    "line": 19,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/queue/retry.ts:11 returns null for every kind in NO_RETRY before the switch, and NO_RETRY (line 7) holds exactly `fatal`",
+                    "src/queue/retry.ts:19-20 adds `case \"fatal\": return null;` inside the switch, which no kind reaches",
+                    "FailureKind has exactly three members, so the switch's remaining two arms are exhaustive without it"
+                ],
+                "failure_scenario": "The next reader of the switch sees two places that decide what fatal means, changes the one that never runs, and ships a fix that does nothing.",
+                "producing_hunt": "maintainability:dead-code",
+                "model_authored_prose": "The `case \"fatal\"` arm at retry.ts:19 is unreachable: the guard at line 11 already returns null for every kind in NO_RETRY, and NO_RETRY is `fatal`. Two ways out, both leaving one place that decides fatal: compare the literal in the guard (`kind === \"fatal\"` narrows the union, so the arm can go and the switch stays exhaustive), or keep the Set and replace the arm with `default: return null;` (the switch loses its exhaustiveness check, which is the cost of the Set)."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "maint-dead-fatal-case"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/queue/retry.ts b/src/queue/retry.ts\n--- a/src/queue/retry.ts\n+++ b/src/queue/retry.ts\n@@ -1,13 +1,22 @@\n export type FailureKind = \"transient\" | \"throttled\" | \"fatal\";\n \n+const MAX_ATTEMPTS = 6;\n+// The throttled ceiling is the upstream's documented retry-after maximum.\n+const THROTTLE_CAP_MS = 60_000;\n+// Kinds that never retry, whatever the attempt count.\n+const NO_RETRY = new Set<FailureKind>([\"fatal\"]);\n+\n /** Milliseconds to wait before the next attempt, or null to stop retrying. */\n export const nextDelay = (attempt: number, kind: FailureKind): number | null => {\n+    if (NO_RETRY.has(kind) || attempt >= MAX_ATTEMPTS) {\n+        return null;\n+    }\n     switch (kind) {\n         case \"transient\":\n-            return 500 * attempt;\n+            return Math.min(500 * 2 ** attempt, 30_000);\n         case \"throttled\":\n-            return 5_000;\n-        default:\n+            return Math.min(5_000 * 2 ** attempt, THROTTLE_CAP_MS);\n+        case \"fatal\":\n             return null;\n     }\n };\n",
+    "live": {
+        "prContext": {
+            "title": "queue: exponential backoff with a six-attempt ceiling",
+            "description": "Retries were linear and unbounded. Transient failures now back off exponentially to a 30s cap, throttled ones to the upstream's 60s retry-after maximum, and every kind stops after six attempts.",
+            "author": "dev-queue",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "maint-dead-fatal-case",
+                "path": "src/queue/retry.ts",
+                "lineStart": 18,
+                "lineEnd": 20,
+                "lens": "maintainability",
+                "mechanism": [
+                    "case fatal is unreachable",
+                    "dead branch",
+                    "fatal handled twice",
+                    "guard already returns null for fatal",
+                    "NO_RETRY already",
+                    "unreachable case",
+                    "remove the fatal arm",
+                    "replace the fatal arm with default"
+                ]
+            }
+        ],
+        "mustNotFlagSpecs": [
+            {
+                "key": "maint-trap-throttle-comment",
+                "path": "src/queue/retry.ts",
+                "lineStart": 4,
+                "lineEnd": 7,
+                "lens": "maintainability",
+                "mechanism": [
+                    "THROTTLE_CAP_MS comment restates",
+                    "delete the throttle comment",
+                    "magic number 60000",
+                    "NO_RETRY set for one member",
+                    "Set for a single value",
+                    "NO_RETRY comment restates"
+                ]
+            },
+            {
+                "key": "maint-trap-backoff-caps",
+                "path": "src/queue/retry.ts",
+                "lineStart": 15,
+                "lineEnd": 18,
+                "lens": "maintainability",
+                "mechanism": [
+                    "Math.min duplicated",
+                    "extract a backoff helper",
+                    "30_000 should be a constant"
+                ]
+            }
+        ]
+    }
+}

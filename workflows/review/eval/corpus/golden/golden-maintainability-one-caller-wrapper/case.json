@@ -1,0 +1,105 @@
+{
+    "id": "golden-maintainability-one-caller-wrapper",
+    "tags": [
+        "golden",
+        "maintainability",
+        "live"
+    ],
+    "category": "golden",
+    "description": "The indirection half of the policy. The real work is grouping the digest by day. Alongside it the change introduces a NotificationSender interface, an EmailSender that wraps the existing sendEmail one-to-one, and a SenderRegistry keyed by string, then replaces the digest's direct sendEmail call with registry.get(\"email\").send(...). After the change there is one implementation, one registered kind, and one caller; a reader of digest.ts now opens sender.ts and email.ts to learn that an email gets sent, and the string key can fail at runtime where the import could not. The day grouping and its comment are must-not-flag.",
+    "changedFiles": [
+        {
+            "path": "src/notify/sender.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/notify/digest.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "conventions",
+            "maintainability"
+        ]
+    },
+    "findings": [
+        {
+            "source": "maintainability",
+            "finding": {
+                "schema_version": 2,
+                "id": "maint-one-caller-registry",
+                "lens": "maintainability",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/notify/sender.ts",
+                    "line": 13,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/notify/sender.ts:3 declares NotificationSender; EmailSender at :7-11 is its only implementation and delegates to sendEmail unchanged",
+                    "src/notify/sender.ts:13 declares SenderRegistry with exactly one registered kind",
+                    "src/notify/digest.ts:24 is the only caller of the registry in the checkout (grep for SenderRegistry)",
+                    "digest.ts previously imported sendEmail directly, so the change replaces a one-line import with three layers"
+                ],
+                "failure_scenario": "A reader of sendDigest has to open sender.ts and then email.ts to learn that an email is sent, and a typo in the \"email\" key becomes a runtime throw where the direct import failed at compile time.",
+                "producing_hunt": "maintainability:one-caller-indirection",
+                "model_authored_prose": "SenderRegistry (sender.ts:13), NotificationSender, and EmailSender add three layers between sendDigest and sendEmail with one implementation and one caller behind them. Keep the direct sendEmail import until a second sender exists."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "maint-one-caller-registry"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/notify/sender.ts b/src/notify/sender.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/notify/sender.ts\n@@ -0,0 +1,25 @@\n+import {sendEmail, type Email} from \"./email\";\n+\n+export interface NotificationSender {\n+    send(email: Email): Promise<void>;\n+}\n+\n+class EmailSender implements NotificationSender {\n+    async send(email: Email): Promise<void> {\n+        await sendEmail(email);\n+    }\n+}\n+\n+export class SenderRegistry {\n+    private readonly senders = new Map<string, NotificationSender>([\n+        [\"email\", new EmailSender()],\n+    ]);\n+\n+    get(kind: string): NotificationSender {\n+        const sender = this.senders.get(kind);\n+        if (sender === undefined) {\n+            throw new Error(`no sender registered for \"${kind}\"`);\n+        }\n+        return sender;\n+    }\n+}\ndiff --git a/src/notify/digest.ts b/src/notify/digest.ts\n--- a/src/notify/digest.ts\n+++ b/src/notify/digest.ts\n@@ -1,13 +1,29 @@\n-import {sendEmail} from \"./email\";\n+import {SenderRegistry} from \"./sender\";\n import type {Activity} from \"./types\";\n \n+const registry = new SenderRegistry();\n+\n+// Digests group by day so a busy week reads as seven lines, not seventy.\n+const groupByDay = (items: readonly Activity[]): Map<string, Activity[]> => {\n+    const days = new Map<string, Activity[]>();\n+    for (const item of items) {\n+        const day = item.at.slice(0, 10);\n+        days.set(day, [...(days.get(day) ?? []), item]);\n+    }\n+    return days;\n+};\n+\n export const sendDigest = async (to: string, items: readonly Activity[]): Promise<void> => {\n     if (items.length === 0) {\n         return;\n     }\n-    await sendEmail({\n+    const lines: string[] = [];\n+    for (const [day, dayItems] of groupByDay(items)) {\n+        lines.push(`${day}: ${dayItems.length} update${dayItems.length === 1 ? \"\" : \"s\"}`);\n+    }\n+    await registry.get(\"email\").send({\n         to,\n         subject: `${items.length} updates`,\n-        body: items.map((item) => `- ${item.text}`).join(\"\\n\"),\n+        body: lines.join(\"\\n\"),\n     });\n };\n",
+    "live": {
+        "prContext": {
+            "title": "notify: group the digest by day and route sends through a sender registry",
+            "description": "The daily digest listed every update as its own line, so a busy week ran to seventy lines. It now groups by day. Sending goes through a NotificationSender registry so a second channel can be added later.",
+            "author": "dev-notify",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "maint-one-caller-registry",
+                "path": "src/notify/sender.ts",
+                "lineStart": 3,
+                "lineEnd": 17,
+                "lens": "maintainability",
+                "mechanism": [
+                    "one implementation",
+                    "single caller",
+                    "registry with one entry",
+                    "indirection",
+                    "premature abstraction",
+                    "wrapper around sendEmail",
+                    "keep the direct import",
+                    "only one sender"
+                ]
+            }
+        ],
+        "mustNotFlagSpecs": [
+            {
+                "key": "maint-trap-group-by-day",
+                "path": "src/notify/digest.ts",
+                "lineStart": 6,
+                "lineEnd": 14,
+                "lens": "maintainability",
+                "mechanism": [
+                    "groupByDay duplicates",
+                    "groupByDay comment restates",
+                    "groupByDay could use reduce",
+                    "extract groupByDay to a util"
+                ]
+            }
+        ]
+    }
+}

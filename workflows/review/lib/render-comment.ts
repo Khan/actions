@@ -60,6 +60,14 @@ export const BLOCKING_LABELS = [
 export const DOCUMENTATION_LABEL = "suggestion (non-blocking, documentation)";
 
 /**
+ * The label the `maintainability` reviewer's findings carry. Same reasoning as
+ * {@link DOCUMENTATION_LABEL}: a selection key for a downstream consumer that
+ * reads labels off posted comments, so it is spelled once and imported.
+ */
+export const MAINTAINABILITY_LABEL =
+    "suggestion (non-blocking, maintainability)";
+
+/**
  * The nitpick label. Named for the same reason {@link DOCUMENTATION_LABEL}
  * is: it is a selection key, not only a description — the posting surface
  * (`submission.ts`) never posts nitpick-class findings inline, so the string
@@ -72,6 +80,7 @@ export const NON_BLOCKING_LABELS = [
     "suggestion (non-blocking)",
     "suggestion (non-blocking, best-practice)",
     DOCUMENTATION_LABEL,
+    MAINTAINABILITY_LABEL,
     NITPICK_LABEL,
     "question (non-blocking)",
     "thought (non-blocking)",
@@ -127,14 +136,27 @@ const DOCUMENTATION_LENSES: ReadonlySet<Lens> = new Set<Lens>([
 ]);
 
 /**
+ * Lenses whose findings render as *maintainability* labels. Same code-owned
+ * mapping and the same reason as {@link DOCUMENTATION_LENSES}: the label is
+ * the only channel by which a consumer reading posted threads can tell a
+ * maintainability finding (a near-duplicate of an existing helper, dead code
+ * left in a touched function, a misleading name) from any other nit, and
+ * those are exactly the findings a scoped autofix does well.
+ */
+const MAINTAINABILITY_LENSES: ReadonlySet<Lens> = new Set<Lens>([
+    "maintainability",
+]);
+
+/**
  * The Conventional-Comment label a finding renders with. Deterministic function
  * of the finding's `severity` and `lens` only:
  *
- *   - blocking  + best-practice lens  -> `issue (blocking, best-practice)`
- *   - blocking  + other lens          -> `issue (blocking)`
- *   - advisory  + best-practice lens  -> `suggestion (non-blocking, best-practice)`
- *   - advisory  + documentation lens  -> `suggestion (non-blocking, documentation)`
- *   - advisory  + other lens          -> `suggestion (non-blocking)`
+ *   - blocking  + best-practice lens    -> `issue (blocking, best-practice)`
+ *   - blocking  + other lens            -> `issue (blocking)`
+ *   - advisory  + best-practice lens    -> `suggestion (non-blocking, best-practice)`
+ *   - advisory  + documentation lens    -> `suggestion (non-blocking, documentation)`
+ *   - advisory  + maintainability lens  -> `suggestion (non-blocking, maintainability)`
+ *   - advisory  + other lens            -> `suggestion (non-blocking)`
  *
  * `medium` severity renders exactly as `advisory` does (the non-blocking
  * rows above). That is the tier's design invariant, not an omission:
@@ -152,6 +174,7 @@ const DOCUMENTATION_LENSES: ReadonlySet<Lens> = new Set<Lens>([
  * blocking renders as a plain `issue (blocking)`: it keeps its severity and
  * loses only its eligibility for the documentation autofix scope, which is the
  * safe direction (a blocking finding wants a human, not a scoped bulk fix).
+ * The same holds for `maintainability`, advisory-only by definition.
  *
  * The finer labels a human reviewer might pick (`todo`, `nitpick`, `question`,
  * `thought`, `note`) are not expressible in the three-value schema, so lenses fold
@@ -168,6 +191,9 @@ export const labelForFinding = (finding: Finding): ConventionalLabel => {
     }
     if (DOCUMENTATION_LENSES.has(finding.lens)) {
         return DOCUMENTATION_LABEL;
+    }
+    if (MAINTAINABILITY_LENSES.has(finding.lens)) {
+        return MAINTAINABILITY_LABEL;
     }
     return bestPractice
         ? "suggestion (non-blocking, best-practice)"

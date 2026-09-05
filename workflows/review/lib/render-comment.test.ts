@@ -91,6 +91,7 @@ describe("labelForFinding — deterministic from severity + lens", () => {
             "security-auth",
             "conventions",
             "documentation",
+            "maintainability",
         ] as const) {
             expect(
                 labelForFinding(makeFinding({severity: "medium", lens})),
@@ -127,6 +128,28 @@ describe("labelForFinding — deterministic from severity + lens", () => {
     it("mints no blocking documentation label", () => {
         expect(
             BLOCKING_LABELS.filter((label) => label.includes("documentation")),
+        ).toEqual([]);
+    });
+
+    // Same shape as the documentation variant, for the same reason: the label
+    // is the selection key a maintainability-scoped autofix would use, so it
+    // is reachable from the advisory row and only from it.
+    it("advisory + maintainability lens -> suggestion (non-blocking, maintainability)", () => {
+        expect(
+            labelForFinding(
+                makeFinding({severity: "advisory", lens: "maintainability"}),
+            ),
+        ).toBe("suggestion (non-blocking, maintainability)");
+    });
+
+    it("blocking + maintainability lens -> plain issue (blocking), no variant", () => {
+        expect(labelForFinding(makeFinding({lens: "maintainability"}))).toBe(
+            "issue (blocking)",
+        );
+        expect(
+            BLOCKING_LABELS.filter((label) =>
+                label.includes("maintainability"),
+            ),
         ).toEqual([]);
     });
 
