@@ -16,6 +16,8 @@ import {
     severityTableNote,
     SEVERITY_SPLIT_NOTE,
 } from "./aggregate-severity";
+import {pooledCostLines} from "./cost-rows";
+import type {RateCard} from "../lib/pricing";
 
 const pct = (value: number): string => `${(value * 100).toFixed(0)}%`;
 
@@ -50,7 +52,17 @@ const splitNote = (spec: SpecAggregate): string =>
  * Every row is **report-only**. Nothing here gates a run; the adversarial hard
  * gate in `gates.ts` is still the only thing that fails a job.
  */
-export const renderAggregateMarkdown = (report: AggregateReport): string => {
+export const renderAggregateMarkdown = (
+    report: AggregateReport,
+    options: {
+        /**
+         * Khan's rate card (pricing.ts). When given, the pooled table prices
+         * the sub-agent tokens at Khan's rate beside the list figure and adds
+         * the judge and arbiter spend.
+         */
+        khanRates?: RateCard;
+    } = {},
+): string => {
     const {baseline, candidate} = report.arms;
     // `noiseFloor` is only computed for identical-arm pools (wobble controls
     // and the weekly drift run), so its presence IS the identical-arms
@@ -260,9 +272,12 @@ export const renderAggregateMarkdown = (report: AggregateReport): string => {
                   )} |  | ${candidate.judgeMeanQuality.toFixed(2)} |  |`,
               ]
             : []),
-        `| Cost | $${baseline.pooled.usd.toFixed(
+        `| Cost (list price) | $${baseline.pooled.usd.toFixed(
             2,
         )} |  | $${candidate.pooled.usd.toFixed(2)} |  |`,
+        ...(options.khanRates === undefined
+            ? []
+            : pooledCostLines(report, options.khanRates)),
         "",
     );
 

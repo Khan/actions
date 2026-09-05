@@ -7,12 +7,23 @@
  */
 
 import {renderAggregateMarkdown, type AggregateReport} from "./aggregate";
+import {money, pricedRows, toolCallRows} from "./cost-rows";
+import {
+    khanCost,
+    type AgentCost,
+    type ModelTokens,
+    type RateCard,
+} from "../lib/pricing";
+
+export type {AgentCost};
+export {armToolCalls} from "./cost-rows";
 import type {
     CaseVerification,
     CorpusCase,
     RecordedFinding,
 } from "./corpus/loader";
 import type {MergeVia} from "../lib/dedup";
+import {CLUSTERER} from "../lib/dispatch-cluster";
 import type {LiveCaseRun, LiveMetricsReport} from "./live-match";
 import type {
     LiveDedupReport,
@@ -20,6 +31,8 @@ import type {
     PerAgentReport,
 } from "./live-producer";
 import type {RereviewCaseScore, RereviewMetricsReport} from "./rereview-match";
+
+export type {AgentCost};
 
 export type ArmId = "baseline" | "candidate";
 
@@ -138,6 +151,15 @@ export type ArmRunReport = {
          */
         toolCalls?: {agent: string; count: number}[];
         /**
+         * Each agent's recorded spend (list price, like `usd`), the model it
+         * was billed on (the pin, or the refusal fallback when the dispatch
+         * fell back), and the tokens per model behind the spend when the
+         * runner could see them. The tokens are what let the report price an
+         * arm at Khan's rate (pricing.ts) without changing what `usd` means.
+         * Absent on artifacts predating the field.
+         */
+        agentCosts?: AgentCost[];
+        /**
          * Reviewers the case enabled that this arm's `review.md` does not
          * define, so the arm never had the dimension. Expected on the baseline
          * arm of a new-reviewer A/B, and reported so a missing dimension is
@@ -152,6 +174,16 @@ export type ArmRunReport = {
     judge?: {meanQuality: number; verdictCounts: Record<string, number>};
     /** Fixed-format note when judge scoring failed; metrics still stand. */
     judgeError?: string;
+    /**
+     * Tokens the instrument itself spent on this arm: the judge's scoring
+     * calls and the match arbiter's fallback calls (both haiku, both direct
+     * Messages API calls that report `usage` but no dollars). Neither is in
+     * `usd`, which is sub-agent spend only, so the report prices these from
+     * tokens and adds them as their own row. Absent on artifacts predating
+     * the field. A run with the judge or arbiter disabled records empty
+     * lists, not an absent field.
+     */
+    overhead?: {judge: ModelTokens[]; arbiter: ModelTokens[]};
 };
 
 export type GateRetryAttempt = {
@@ -159,6 +191,8 @@ export type GateRetryAttempt = {
     /** Gate failures this attempt produced (empty when pass). */
     failures: string[];
     usd: number;
+    /** Per-agent cost behind `usd`, the same shape as `perCase[].agentCosts`. */
+    agentCosts?: AgentCost[];
 };
 
 export type GateRetry = {
@@ -260,7 +294,10 @@ const PARTIAL_LEAD =
     "PARTIAL REPORT: a checkpoint written mid-run (the run was cancelled, " +
     "timed out, or is still going), not a finished measurement.";
 
-export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
+export const renderMultiMarkdownReport = (
+    report: MultiAbReport,
+    options: {khanRates?: RateCard} = {},
+): string => {
     const first = report.repeats[0];
     const partial = report.partial === true ? " (partial)" : "";
     const inProgress = report.repeats.find((r) => r.partial === true);
@@ -310,7 +347,7 @@ export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
                   "",
               ]
             : []),
-        renderAggregateMarkdown(report.aggregate),
+        renderAggregateMarkdown(report.aggregate, options),
         "",
     ];
     const asymmetry = armAsymmetryLines(
@@ -430,11 +467,20 @@ const snappedTotal = (arm: ArmRunReport): number =>
  * folded into the zero: the arm paid for it and measured nothing, which is not
  * the same claim as "tier 2 found no duplicates here".
  */
-const mergedTotal = (arm: ArmRunReport): string => {
+const mergedTotal = (arm: ArmRunReport, khan?: RateCard): string => {
     const dedup = arm.perCase.flatMap((c) => (c.dedup ? [c.dedup] : []));
     if (dedup.length === 0) {
         return "n/a";
     }
+    // The clusterer's tokens, from its own per-agent entries, so its price
+    // reads in both currencies like every other dollar in the table.
+    const clustererCosts = arm.perCase.flatMap((c) =>
+        (c.agentCosts ?? []).filter((a) => a.agent === CLUSTERER),
+    );
+    const clustererKhan =
+        khan === undefined || clustererCosts.length === 0
+            ? ""
+            : ` list, ${money(khanCost(clustererCosts, khan).usd)} Khan rate`;
     const sum = (pick: (d: typeof dedup[number]) => number): number =>
         dedup.reduce((total, d) => total + pick(d), 0);
     const absent = dedup.every((d) => d.clustererAbsent);
@@ -446,9 +492,9 @@ const mergedTotal = (arm: ArmRunReport): string => {
             ? "tier 1 only"
             : `${sum(
                   (d) => d.clusterMerged,
-              )} by clusterer at $${clustererUsd.toFixed(2)} / ${Math.round(
-                  clustererWallMs / 1000,
-              )}s`,
+              )} by clusterer at $${clustererUsd.toFixed(
+                  2,
+              )}${clustererKhan} / ${Math.round(clustererWallMs / 1000)}s`,
         ...(sum((d) => d.rejected) > 0
             ? [`${sum((d) => d.rejected)} proposed member(s) rejected`]
             : []),
@@ -549,7 +595,17 @@ const NOISE_FLOOR_FOOTER =
         .join("") +
     "*";
 
-export const renderMarkdownReport = (report: AbReport): string => {
+export const renderMarkdownReport = (
+    report: AbReport,
+    options: {
+        /**
+         * Khan's rate card (pricing.ts, read off review.md's overlay). When
+         * given, the table carries a "Cost (Khan rate)" row beside the
+         * list-price row, prices the judge and arbiter, and totals the run.
+         */
+        khanRates?: RateCard;
+    } = {},
+): string => {
     const {baseline, candidate} = report.arms;
     // See renderMultiMarkdownReport: identical shas imply `--force-arms`.
     const identicalArms =
@@ -587,6 +643,14 @@ export const renderMarkdownReport = (report: AbReport): string => {
         );
 
     const partial = report.partial === true ? " (partial)" : "";
+
+    const priced =
+        options.khanRates === undefined
+            ? undefined
+            : pricedRows(baseline, candidate, options.khanRates, (l, b, c) =>
+                  row(l, b, c),
+              );
+
     const lines = [
         identicalArms
             ? `## Review wobble control (identical arms)${partial}`
@@ -675,10 +739,12 @@ export const renderMarkdownReport = (report: AbReport): string => {
               ]
             : []),
         row(
-            "Cost",
+            "Cost (list price)",
             `$${baseline.usd.toFixed(2)}`,
             `$${candidate.usd.toFixed(2)}`,
         ),
+        ...(priced?.rows ?? []),
+        ...toolCallRows(baseline, candidate, options.khanRates, row),
         row(
             "Wall clock",
             `${Math.round(baseline.wallMs / 1000)}s`,
@@ -723,10 +789,11 @@ export const renderMarkdownReport = (report: AbReport): string => {
         ),
         row(
             "Cross-source claims merged (of candidates)",
-            mergedTotal(baseline),
-            mergedTotal(candidate),
+            mergedTotal(baseline, options.khanRates),
+            mergedTotal(candidate, options.khanRates),
         ),
         "",
+        ...(priced === undefined ? [] : priced.notes.flatMap((n) => [n, ""])),
     ];
 
     // A regression that was PRODUCED and then died at a gate is a different
@@ -792,12 +859,17 @@ export const renderMarkdownReport = (report: AbReport): string => {
             ...report.gateRetries.map((retry) => {
                 const passes = retry.attempts.filter((a) => a.pass).length;
                 const usd = retry.attempts.reduce((sum, a) => sum + a.usd, 0);
+                const costs = retry.attempts.flatMap((a) => a.agentCosts ?? []);
+                const spend =
+                    options.khanRates === undefined || costs.length === 0
+                        ? `$${usd.toFixed(2)} retry spend at list`
+                        : `$${usd.toFixed(2)} retry spend at list, ${money(
+                              khanCost(costs, options.khanRates).usd,
+                          )} at Khan's rate`;
                 const outcome = retry.settledPass
                     ? "settled as a run-to-run flake; the gate does not fail on this case"
                     : "failure confirmed";
-                return `- ${retry.caseId}: original run failed, ${passes}/${
-                    retry.attempts.length
-                } retries passed; ${outcome} ($${usd.toFixed(2)} retry spend)`;
+                return `- ${retry.caseId}: original run failed, ${passes}/${retry.attempts.length} retries passed; ${outcome} (${spend})`;
             }),
             "",
         );

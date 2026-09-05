@@ -37,7 +37,13 @@
 /* eslint-disable no-console -- CLI entry point; console IS the interface. */
 
 import {execFileSync} from "node:child_process";
-import {mkdirSync, mkdtempSync, readFileSync, writeFileSync} from "node:fs";
+import {
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    writeFileSync,
+} from "node:fs";
 import {tmpdir} from "node:os";
 import {dirname} from "node:path";
 
@@ -49,6 +55,12 @@ import {
 } from "./aggregate-extract";
 import {renderAggregateMarkdown} from "./aggregate-render";
 import {caughtBlocking, SEVERITY_BAND_METRIC} from "./aggregate-severity";
+import {
+    mergeUsage,
+    readOverlayRates,
+    type AgentCost,
+    type ModelTokens,
+} from "../lib/pricing";
 import {rateStat, type RateStat} from "./wilson";
 
 // The markdown renderer lives in ./aggregate-render, re-exported so the CLI
@@ -124,7 +136,18 @@ export type ArmAggregate = {
         foundButDropped: Record<string, number>;
         /** Total anchor-snapped findings across the arm's case-runs. */
         snapped: number;
+        /** Sub-agent spend at list, summed over samples. */
         usd: number;
+        /**
+         * Per-agent costs over the samples that recorded them, and how many
+         * did: a pool that mixes token-bearing and older artifacts prices
+         * only the former, and says so.
+         */
+        agentCosts: AgentCost[];
+        costSamples: number;
+        /** Judge plus arbiter tokens over the samples that recorded them. */
+        overhead: ModelTokens[];
+        overheadSamples: number;
     };
     /** Mean of per-sample judge means, when any sample carried one. */
     judgeMeanQuality?: number;
@@ -198,10 +221,22 @@ const aggregateArm = (
     let posted = 0;
     let snapped = 0;
     let usd = 0;
+    const agentCosts: AgentCost[] = [];
+    let costSamples = 0;
+    const overhead: ModelTokens[] = [];
+    let overheadSamples = 0;
     const judgeMeans: number[] = [];
 
     for (const sample of samples) {
         usd += sample.usd;
+        if (sample.agentCosts !== undefined) {
+            agentCosts.push(...sample.agentCosts);
+            costSamples += 1;
+        }
+        if (sample.overhead !== undefined) {
+            overhead.push(...sample.overhead);
+            overheadSamples += 1;
+        }
         if (sample.judgeMeanQuality !== undefined) {
             judgeMeans.push(sample.judgeMeanQuality);
         }
@@ -323,6 +358,10 @@ const aggregateArm = (
             foundButDropped,
             snapped,
             usd,
+            agentCosts,
+            costSamples,
+            overhead: mergeUsage(overhead),
+            overheadSamples,
         },
         ...(judgeMeans.length > 0
             ? {
@@ -533,7 +572,15 @@ const main = (): void => {
         }
     }
     const report = aggregateSamples(samples, skipped);
-    const markdown = renderAggregateMarkdown(report);
+    // Khan's rates come from the working tree's review.md when the CLI runs
+    // inside the repo. A pool rendered elsewhere prints list only.
+    const reviewMdPath = "workflows/review/review.md";
+    const markdown = renderAggregateMarkdown(
+        report,
+        existsSync(reviewMdPath)
+            ? {khanRates: readOverlayRates(readFileSync(reviewMdPath, "utf8"))}
+            : {},
+    );
     mkdirSync(dirname(outPath), {recursive: true});
     writeFileSync(outPath, JSON.stringify(report, null, 2));
     writeFileSync(outPath.replace(/\.json$/, ".md"), `${markdown}\n`);

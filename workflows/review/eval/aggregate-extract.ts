@@ -6,6 +6,8 @@
  * the tolerance rules are unchanged.
  */
 
+import {mergeUsage, type AgentCost, type ModelTokens} from "../lib/pricing";
+
 /* -------------------------------------------------------------------------- */
 /* The report subset this module consumes (structural, version-tolerant)      */
 /* -------------------------------------------------------------------------- */
@@ -67,7 +69,15 @@ export type ArmSample = {
     runs: SampleRun[];
     /** Cases never dispatched (budget skips); asymmetric samples bias bands. */
     skippedCount: number;
+    /** Sub-agent spend at list (the runner's meter). */
     usd: number;
+    /**
+     * Per-agent cost with tokens, when the report recorded it
+     * (`perCase[].agentCosts`), so the pool can be priced at Khan's rate.
+     */
+    agentCosts?: AgentCost[];
+    /** The judge's and arbiter's tokens on this arm, when recorded. */
+    overhead?: ModelTokens[];
     judgeMeanQuality?: number;
 };
 
@@ -193,6 +203,21 @@ const parseArm = (
         };
     });
     const judge = raw["judge"];
+    const agentCosts = (Array.isArray(raw["perCase"]) ? raw["perCase"] : [])
+        .filter(isRecord)
+        .flatMap((c) =>
+            Array.isArray(c["agentCosts"])
+                ? c["agentCosts"].map(parseAgentCost)
+                : [],
+        )
+        .filter((a): a is AgentCost => a !== undefined);
+    const overheadRaw = raw["overhead"];
+    const overhead = isRecord(overheadRaw)
+        ? [overheadRaw["judge"], overheadRaw["arbiter"]]
+              .flatMap((list) => (Array.isArray(list) ? list : []))
+              .map(parseTokens)
+              .filter((t): t is ModelTokens => t !== undefined)
+        : undefined;
     return {
         arm,
         reviewMdSha,
@@ -201,6 +226,8 @@ const parseArm = (
             ? raw["skippedCases"].length
             : 0,
         usd: asNumber(raw["usd"]),
+        ...(agentCosts.length > 0 ? {agentCosts} : {}),
+        ...(overhead === undefined ? {} : {overhead: mergeUsage(overhead)}),
         ...(isRecord(judge) && typeof judge["meanQuality"] === "number"
             ? {judgeMeanQuality: judge["meanQuality"]}
             : {}),
@@ -254,4 +281,34 @@ export const extractSamples = (
             ),
         },
     ];
+};
+
+/** One `ModelTokens` entry off a raw artifact, or undefined on a bad shape. */
+const parseTokens = (raw: unknown): ModelTokens | undefined =>
+    isRecord(raw) && typeof raw["model"] === "string"
+        ? {
+              model: raw["model"],
+              input: asNumber(raw["input"]),
+              output: asNumber(raw["output"]),
+              cacheRead: asNumber(raw["cacheRead"]),
+              cacheWrite: asNumber(raw["cacheWrite"]),
+          }
+        : undefined;
+
+/** One `agentCosts[]` entry off a raw artifact, or undefined on a bad shape. */
+const parseAgentCost = (raw: unknown): AgentCost | undefined => {
+    if (!isRecord(raw) || typeof raw["agent"] !== "string") {
+        return undefined;
+    }
+    const usage = Array.isArray(raw["usage"])
+        ? raw["usage"]
+              .map(parseTokens)
+              .filter((t): t is ModelTokens => t !== undefined)
+        : undefined;
+    return {
+        agent: raw["agent"],
+        model: asString(raw["model"]),
+        usd: asNumber(raw["usd"]),
+        ...(usage === undefined ? {} : {usage}),
+    };
 };

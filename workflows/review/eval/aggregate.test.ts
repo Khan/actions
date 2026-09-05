@@ -4,137 +4,12 @@ import {
     aggregateSamples,
     computeNoiseFloor,
     extractSamples,
-    rateStat,
     renderAggregateMarkdown,
-    wilsonInterval,
     type ArmSample,
     type ReportSample,
     type SampleRun,
 } from "./aggregate";
-
-/* -------------------------------------------------------------------------- */
-/* Fixture builders: the report-JSON subset the extractor consumes            */
-/* -------------------------------------------------------------------------- */
-
-/** One raw `arms.<arm>.runs[]` entry as live-ab.ts serializes it. */
-const rawRun = (
-    caseId: string,
-    over: {
-        verdict?: string;
-        expected?: string;
-        caught?: string[];
-        /**
-         * Spec key -> the label the catch carried. A key absent from this map
-         * serializes a `caught` entry with no `blocking` field, i.e. an
-         * artifact predating the severity instrumentation.
-         */
-        blocking?: Record<string, boolean>;
-        missedDetail?: {specKey: string; droppedBy?: string}[];
-        unmatched?: string[];
-        /** Leftovers bucketed as a second copy of a caught spec. */
-        duplicates?: {findingId: string; specKey: string}[];
-        /** Leftovers bucketed as legitimate unspecced (may-flag matches). */
-        legitimate?: string[];
-        posted?: number;
-    } = {},
-) => ({
-    corpusCase: {
-        id: caseId,
-        expected: {verdict: over.expected ?? "REQUEST_CHANGES"},
-    },
-    result: {verdict: {event: over.verdict ?? "REQUEST_CHANGES"}},
-    match: {
-        caseId,
-        caught: (over.caught ?? []).map((specKey) => ({
-            specKey,
-            findingId: `${caseId}:f`,
-            via: "deterministic",
-            ...(over.blocking?.[specKey] !== undefined
-                ? {blocking: over.blocking[specKey]}
-                : {}),
-        })),
-        missed: (over.missedDetail ?? []).map((d) => d.specKey),
-        missedDetail: over.missedDetail ?? [],
-        falseFlags: [],
-        unmatchedFindingIds: over.unmatched ?? [],
-        // Absent (not empty) unless asked for, so the default run is the
-        // legacy artifact shape.
-        ...(over.duplicates !== undefined ? {duplicates: over.duplicates} : {}),
-        ...(over.legitimate !== undefined
-            ? {
-                  legitimateUnspecced: over.legitimate.map((findingId) => ({
-                      specKey: "may-1",
-                      findingId,
-                      via: "deterministic",
-                      blocking: false,
-                  })),
-              }
-            : {}),
-        postedCount: over.posted ?? (over.caught ?? []).length,
-    },
-});
-
-const rawReport = (over: {
-    baselineRuns?: unknown[];
-    candidateRuns?: unknown[];
-    baselineSha?: string;
-    candidateSha?: string;
-    baselineJudge?: number;
-    candidateJudge?: number;
-}) => ({
-    baseRef: "origin/main",
-    reviewMdSha: {
-        baseline: over.baselineSha ?? "a".repeat(64),
-        candidate: over.candidateSha ?? "b".repeat(64),
-    },
-    arms: {
-        baseline: {
-            arm: "baseline",
-            runs: over.baselineRuns ?? [],
-            usd: 1.5,
-            ...(over.baselineJudge !== undefined
-                ? {judge: {meanQuality: over.baselineJudge, verdictCounts: {}}}
-                : {}),
-        },
-        candidate: {
-            arm: "candidate",
-            runs: over.candidateRuns ?? [],
-            usd: 2.5,
-            ...(over.candidateJudge !== undefined
-                ? {judge: {meanQuality: over.candidateJudge, verdictCounts: {}}}
-                : {}),
-        },
-    },
-    regressions: {lost: [], gained: []},
-    adversarialFailures: [],
-    gateRetries: [],
-});
-
-describe("wilsonInterval", () => {
-    it("brackets the point estimate and stays inside [0,1]", () => {
-        const interval = wilsonInterval(5, 6);
-        expect(interval.lo).toBeGreaterThan(0.4);
-        expect(interval.lo).toBeLessThan(5 / 6);
-        expect(interval.hi).toBeGreaterThan(5 / 6);
-        expect(interval.hi).toBeLessThanOrEqual(1);
-    });
-
-    it("is exactly [0,1] at n=0 and never collapses at 0/n or n/n", () => {
-        expect(wilsonInterval(0, 0)).toEqual({lo: 0, hi: 1});
-        const zero = wilsonInterval(0, 10);
-        expect(zero.lo).toBe(0);
-        expect(zero.hi).toBeGreaterThan(0.2);
-        const full = wilsonInterval(10, 10);
-        expect(full.hi).toBe(1);
-        expect(full.lo).toBeLessThan(1);
-    });
-
-    it("narrows as repeats accumulate (the whole point of pooling)", () => {
-        const single = wilsonInterval(6, 8);
-        const pooled = wilsonInterval(60, 80);
-        expect(pooled.hi - pooled.lo).toBeLessThan((single.hi - single.lo) / 2);
-    });
-});
+import {rawReport, rawRun} from "./aggregate-fixtures";
 
 describe("extractSamples", () => {
     it("reduces a single-run report to one sample pair", () => {
@@ -949,15 +824,5 @@ describe("renderAggregateMarkdown", () => {
         expect(markdown.indexOf("### Noise floor")).toBeLessThan(
             markdown.indexOf("| Case / spec |"),
         );
-    });
-});
-
-describe("rateStat", () => {
-    it("carries numerator, denominator, rate, and interval together", () => {
-        const stat = rateStat(3, 4);
-        expect(stat.rate).toBe(0.75);
-        expect(stat.interval.lo).toBeGreaterThan(0);
-        expect(stat.interval.hi).toBeLessThanOrEqual(1);
-        expect(rateStat(0, 0).rate).toBe(0);
     });
 });

@@ -185,6 +185,78 @@ describe("the prose judge wiring (PRA-45)", () => {
         ).toBe(1);
     });
 
+    it("records each agent's tokens, tool calls, and the judge's tokens on its entry", async () => {
+        // The cost report's only real input. Every other test hand-builds
+        // perAgent entries, so this is the one place the dispatcher's write
+        // of usage, toolCalls, and judgeUsage is asserted.
+        const opus = {
+            model: "claude-opus-5",
+            input: 1000,
+            output: 100,
+            cacheRead: 5000,
+            cacheWrite: 200,
+        };
+        const haiku = {
+            model: "claude-haiku-4-5-20251001",
+            input: 400,
+            output: 10,
+            cacheRead: 0,
+            cacheWrite: 0,
+        };
+        const runner = (async (request) => {
+            const output = canned[request.name];
+            if (
+                request.name === "correctness-reviewer" &&
+                request.judgeProse !== undefined
+            ) {
+                await request.judgeProse(
+                    JSON.parse(output) as Record<string, unknown>,
+                );
+                return {
+                    output,
+                    usd: 0.5,
+                    turns: 3,
+                    wallMs: 100,
+                    usage: [opus],
+                    toolCalls: 17,
+                    structured: true,
+                };
+            }
+            // A runner that could not see tokens for this one: no fields.
+            return {output, usd: 0.5, turns: 3, wallMs: 100};
+        }) as AgentRunner;
+        const fs = makeFakeFs(staging());
+        const result = await runDispatch({
+            ...options(fs, runner),
+            proseRunner: (prompt, onUsage) => {
+                onUsage?.(haiku);
+                return Promise.resolve('{"pass": true, "problems": []}');
+            },
+        });
+        const correctness = result.perAgent.find(
+            (a) => a.name === "correctness-reviewer",
+        );
+        expect(correctness).toMatchObject({
+            usd: 0.5,
+            usage: [opus],
+            toolCalls: 17,
+            judgeUsage: [haiku],
+        });
+        const auditor = result.perAgent.find((a) => a.name === "skill-auditor");
+        expect(auditor?.usage).toBeUndefined();
+        expect(auditor?.toolCalls).toBeUndefined();
+        expect(auditor?.judgeUsage).toBeUndefined();
+        // And the staged artifact the post-step reads carries the same.
+        const staged = JSON.parse(
+            fs.files[`${REVIEW}/dispatch-result.json`],
+        ) as {
+            perAgent: {name: string; usage?: unknown; judgeUsage?: unknown}[];
+        };
+        expect(
+            staged.perAgent.find((a) => a.name === "correctness-reviewer"),
+        ).toMatchObject({usage: [opus], judgeUsage: [haiku]});
+    });
+
     it("judges nothing and stages nothing without a proseRunner", async () => {
         const fs = makeFakeFs(staging());
         const runner = (async (request) => ({

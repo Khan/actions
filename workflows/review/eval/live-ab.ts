@@ -63,14 +63,15 @@ import {dirname} from "node:path";
 
 import {extractAgents} from "./agent-extract";
 import {SMOKE_TAG, loadLiveCorpus, type CorpusCase} from "./corpus/loader";
-import {aggregate, buildCorpusRequests} from "./judge";
-import {liveJudgeModel} from "./judge-live-model";
+import {aggregate, buildCorpusRequests, type JudgeModel} from "./judge";
+import {liveJudge} from "./judge-live-model";
 import {assembleReport, createCheckpointer} from "./live-ab-checkpoint";
 import {
     adversarialGateFailures,
     diffRegressions,
     majorityGateFailures,
 } from "./live-ab-gates";
+import {readOverlayRates, type ModelTokens} from "../lib/pricing";
 import {
     renderMarkdownReport,
     renderMultiMarkdownReport,
@@ -369,6 +370,20 @@ export const runArm = async (
             toolCalls: produced.perAgent
                 .filter((a) => a.toolCalls !== undefined)
                 .map((a) => ({agent: a.name, count: a.toolCalls as number})),
+            // The billed model, not the pin: a refusal fallback spent its
+            // dollars on the model it fell back to. The tokens are what the
+            // report prices at Khan's rate (pricing.ts). Absent reviewers
+            // (a placeholder per dimension this arm's review.md lacks) never
+            // dispatched, so they are not a cost and must not read as a
+            // dispatch whose meter failed.
+            agentCosts: produced.perAgent
+                .filter((a) => a.absent !== true)
+                .map((a) => ({
+                    agent: a.name,
+                    model: a.fellBackTo ?? a.model,
+                    usd: a.usd,
+                    ...(a.usage === undefined ? {} : {usage: a.usage}),
+                })),
             absentAgents: produced.perAgent
                 .filter((a) => a.absent === true)
                 .map((a) => a.name),
@@ -430,6 +445,12 @@ export const retryGateFlips = async (
         for (let attempt = 1; attempt <= 2; attempt += 1) {
             const produced = await produceForAttempt(attempt)(corpusCase);
             const usd = produced.perAgent.reduce((sum, a) => sum + a.usd, 0);
+            const agentCosts = produced.perAgent.map((a) => ({
+                agent: a.name,
+                model: a.fellBackTo ?? a.model,
+                usd: a.usd,
+                ...(a.usage === undefined ? {} : {usage: a.usage}),
+            }));
             const result = runCase(corpusCase, {
                 produceFindings: () => produced.findings,
                 validation: produced.validation,
@@ -443,6 +464,7 @@ export const retryGateFlips = async (
                 pass: attemptFailures.length === 0,
                 failures: attemptFailures,
                 usd,
+                agentCosts,
             });
             if (attemptFailures.length > 0) {
                 break;
@@ -469,14 +491,17 @@ const argValue = (flag: string): string | undefined => {
 const sha256 = (text: string): string =>
     createHash("sha256").update(text).digest("hex");
 
-const judgeArm = async (report: ArmRunReport): Promise<void> => {
+const judgeArm = async (
+    report: ArmRunReport,
+    judgeModel: JudgeModel,
+): Promise<void> => {
     const requests = buildCorpusRequests(
         report.runs.map(({corpusCase, result}) => ({corpusCase, result})),
     );
     if (requests.length === 0) {
         return;
     }
-    const scores = await liveJudgeModel(requests);
+    const scores = await judgeModel(requests);
     const judged = aggregate(requests, scores);
     // Only the quality aggregates are meaningful here: judge-vs-ground-truth
     // disagreement keys on recorded ids, which a live arm does not use.
@@ -512,6 +537,9 @@ const main = async (): Promise<void> => {
         {encoding: "utf8", maxBuffer: 64 * 1024 * 1024},
     );
     const candidateMd = readFileSync(reviewMdPath, "utf8");
+    // The overlay is Khan's contract rate, not a prompt property, so the
+    // working tree's review.md prices both arms.
+    const khanRates = readOverlayRates(candidateMd);
     if (baselineMd === candidateMd && !process.argv.includes("--force-arms")) {
         // Pre-flight identity short-circuit (the tuning memo's first item):
         // byte-identical review.md means byte-identical extracted prompts and
@@ -572,6 +600,13 @@ const main = async (): Promise<void> => {
     // deterministic matcher left unmatched, and an arbiter failure degrades
     // to a non-match. Both arms share the one matcher, so it never biases
     // the A/B delta.
+    // The instrument's own token meter. Arms run one at a time, so a sink
+    // that is swapped per arm attributes each arbiter and judge call to the
+    // arm it scored. The report prices them beside the sub-agents' spend,
+    // which they are otherwise invisible to (direct Messages API calls, no
+    // dollars in the response).
+    let arbiterSink: ModelTokens[] = [];
+    let judgeSink: ModelTokens[] = [];
     const match: MatchOptions | undefined = process.argv.includes(
         "--no-match-arbiter",
     )
@@ -579,8 +614,16 @@ const main = async (): Promise<void> => {
         : {
               fallback: haikuMatchArbiter({
                   onError: (message) => console.error(message),
+                  onUsage: (usage) => arbiterSink.push(usage),
               }),
           };
+    const judgeModel = liveJudge({onUsage: (usage) => judgeSink.push(usage)});
+    /** Close out an arm's meter: what the arbiter spent scoring it. */
+    const meterArm = (arm: ArmRunReport): ArmRunReport => {
+        arm.overhead = {judge: [], arbiter: arbiterSink};
+        arbiterSink = [];
+        return arm;
+    };
 
     // Each arm's provenance gate emulates that arm's OWN review.md version:
     // the anchor-snap fallback is keyed on the marker the gate step carries
@@ -619,8 +662,9 @@ const main = async (): Promise<void> => {
         // report without quality scores, never kill a run whose arms have
         // already spent their budget (the plan's standing rule).
         for (const arm of [baseline, candidate]) {
+            judgeSink = [];
             try {
-                await judgeArm(arm);
+                await judgeArm(arm, judgeModel);
             } catch (error) {
                 arm.judgeError = String(
                     error instanceof Error ? error.message : error,
@@ -628,6 +672,12 @@ const main = async (): Promise<void> => {
                 console.error(
                     `judge scoring failed on the ${arm.arm} arm: ${arm.judgeError}`,
                 );
+            } finally {
+                // Committed whether or not scoring finished: a judge pass
+                // that died after some calls still paid for those calls.
+                if (arm.overhead !== undefined) {
+                    arm.overhead.judge = judgeSink;
+                }
             }
         }
     };
@@ -667,6 +717,7 @@ const main = async (): Promise<void> => {
     const ckpt = createCheckpointer({
         outPath,
         repeats,
+        khanRates,
         header: {
             baseRef,
             reviewMdSha: {
@@ -686,32 +737,40 @@ const main = async (): Promise<void> => {
         suffix: string,
         withRetry: boolean,
     ): Promise<AbReport> => {
-        const baseline = trackArm(
-            await runArm(
-                "baseline",
-                cases,
-                armProduce(`baseline${suffix}`, baselineMd, "full"),
-                {
-                    maxUsd: nextArmBudget(),
-                    anchorSnap: armSnap.baseline,
-                    ...(match !== undefined ? {match} : {}),
-                    label: `baseline${suffix}`,
-                    onCase: ckpt.baselineCase,
-                },
+        const baseline = meterArm(
+            trackArm(
+                await runArm(
+                    "baseline",
+                    cases,
+                    armProduce(`baseline${suffix}`, baselineMd, "full"),
+                    {
+                        maxUsd: nextArmBudget(),
+                        anchorSnap: armSnap.baseline,
+                        ...(match !== undefined ? {match} : {}),
+                        label: `baseline${suffix}`,
+                        onCase: ckpt.baselineCase,
+                    },
+                ),
             ),
         );
-        const candidate = trackArm(
-            await runArm(
-                "candidate",
-                cases,
-                armProduce(`candidate${suffix}`, candidateMd, candidateMode),
-                {
-                    maxUsd: nextArmBudget(),
-                    anchorSnap: armSnap.candidate,
-                    ...(match !== undefined ? {match} : {}),
-                    label: `candidate${suffix}`,
-                    onCase: ckpt.candidateCase(baseline),
-                },
+        const candidate = meterArm(
+            trackArm(
+                await runArm(
+                    "candidate",
+                    cases,
+                    armProduce(
+                        `candidate${suffix}`,
+                        candidateMd,
+                        candidateMode,
+                    ),
+                    {
+                        maxUsd: nextArmBudget(),
+                        anchorSnap: armSnap.candidate,
+                        ...(match !== undefined ? {match} : {}),
+                        label: `candidate${suffix}`,
+                        onCase: ckpt.candidateCase(baseline),
+                    },
+                ),
             ),
         );
 
@@ -737,6 +796,12 @@ const main = async (): Promise<void> => {
                   armSnap.candidate,
               )
             : [];
+        // The retries re-match through the same arbiter, and that spend was on
+        // the candidate's behalf.
+        if (candidate.overhead !== undefined) {
+            candidate.overhead.arbiter.push(...arbiterSink);
+        }
+        arbiterSink = [];
 
         await judgeBothArms(baseline, candidate);
 

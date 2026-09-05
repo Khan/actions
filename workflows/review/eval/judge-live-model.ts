@@ -15,6 +15,7 @@ import {
     type JudgeScore,
 } from "./judge";
 import {extractJsonObject} from "./extract-json";
+import {usageOfResponse, type ModelTokens} from "../lib/pricing";
 
 const API_URL = "https://api.anthropic.com/v1/messages";
 const CONCURRENCY = 4;
@@ -35,7 +36,10 @@ const isTransientStatus = (status: number): boolean =>
 const sleep = (ms: number): Promise<void> =>
     new Promise((resolve) => setTimeout(resolve, ms));
 
-const scoreOne = async (request: JudgeRequest): Promise<JudgeScore> => {
+const scoreOne = async (
+    request: JudgeRequest,
+    onUsage: (usage: ModelTokens) => void,
+): Promise<JudgeScore> => {
     const prompt = [
         "You are grading one code-review comment for quality.",
         'Return ONLY a JSON object: {"verdict": "good"|"borderline"|"bad", "quality": <0..1>, "rationale": "<one sentence>"}.',
@@ -92,7 +96,10 @@ const scoreOne = async (request: JudgeRequest): Promise<JudgeScore> => {
     }
     const data = (await response.json()) as {
         content: {type: string; text?: string}[];
+        model?: string;
+        usage?: Record<string, unknown>;
     };
+    onUsage(usageOfResponse(data, PINNED_JUDGE_MODEL));
     const text =
         data.content.find((block) => block.type === "text")?.text ?? "";
     let parsed: Omit<JudgeScore, "findingId">;
@@ -106,12 +113,28 @@ const scoreOne = async (request: JudgeRequest): Promise<JudgeScore> => {
     return {findingId: request.findingId, ...parsed};
 };
 
-/** Score requests with the live pinned judge, in bounded batches. */
-export const liveJudgeModel: JudgeModel = async (requests) => {
-    const scores: JudgeScore[] = [];
-    for (let i = 0; i < requests.length; i += CONCURRENCY) {
-        const batch = requests.slice(i, i + CONCURRENCY);
-        scores.push(...(await Promise.all(batch.map(scoreOne))));
-    }
-    return scores;
+/**
+ * Score requests with the live pinned judge, in bounded batches. `onUsage`
+ * receives each call's token counts (the response carries `usage` but no
+ * dollars), so the A/B can price the judge beside the arms it scored.
+ */
+export const liveJudge = (options?: {
+    onUsage?: (usage: ModelTokens) => void;
+}): JudgeModel => {
+    const onUsage = options?.onUsage ?? (() => {});
+    return async (requests) => {
+        const scores: JudgeScore[] = [];
+        for (let i = 0; i < requests.length; i += CONCURRENCY) {
+            const batch = requests.slice(i, i + CONCURRENCY);
+            scores.push(
+                ...(await Promise.all(
+                    batch.map((request) => scoreOne(request, onUsage)),
+                )),
+            );
+        }
+        return scores;
+    };
 };
+
+/** The unmetered judge, for callers that only want scores. */
+export const liveJudgeModel: JudgeModel = liveJudge();
