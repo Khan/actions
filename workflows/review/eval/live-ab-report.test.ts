@@ -3,10 +3,20 @@ import {join} from "node:path";
 
 import {describe, it, expect} from "vitest";
 
+import {aggregateSamples, extractSamples} from "./aggregate";
 import {parseCase, type CorpusCase} from "./corpus/loader";
-import {renderMarkdownReport, runArm, type ArmProduce} from "./live-ab";
+import {
+    diffRegressions,
+    runArm,
+    type AbReport,
+    type ArmProduce,
+} from "./live-ab";
 import {armCosts} from "./cost-rows";
-import {armToolCalls} from "./live-ab-report";
+import {
+    armToolCalls,
+    renderMarkdownReport,
+    renderMultiMarkdownReport,
+} from "./live-ab-report";
 import {
     readOverlayRates,
     type ModelTokens,
@@ -505,5 +515,171 @@ describe("renderMarkdownReport priced rows", () => {
             ),
         });
         expect(markdown).toContain("| Cost (Khan rate) | $3.00 | $3.00 |");
+    });
+});
+
+/** A producer that finds nothing and reads nothing it should not. */
+const produceMiss: ArmProduce = async () => ({
+    findings: [],
+    validation: [],
+    perAgent: [
+        {
+            name: "correctness-reviewer",
+            model: "m",
+            usd: 1,
+            turns: 1,
+            wallMs: 10,
+            retried: false,
+        },
+    ],
+});
+
+describe("renderMarkdownReport: read scope", () => {
+    it("renders denied reads as a row and names the reviewer that went looking", async () => {
+        const produceDenied: ArmProduce = async () => ({
+            findings: [],
+            validation: [],
+            perAgent: [
+                {
+                    name: "correctness-reviewer",
+                    model: "m",
+                    usd: 1,
+                    turns: 1,
+                    wallMs: 10,
+                    retried: false,
+                    toolCalls: 42,
+                    deniedReads: 3,
+                },
+                {
+                    name: "skill-auditor",
+                    model: "m",
+                    usd: 1,
+                    turns: 1,
+                    wallMs: 10,
+                    retried: false,
+                    toolCalls: 8,
+                    deniedReads: 0,
+                },
+            ],
+        });
+        const baseline = await runArm(
+            "baseline",
+            [liveCase("case-1")],
+            produceMiss,
+            {maxUsd: 10},
+        );
+        const candidate = await runArm(
+            "candidate",
+            [liveCase("case-1")],
+            produceDenied,
+            {maxUsd: 10},
+        );
+        // Only the agent with denials is recorded; a zero is the norm.
+        expect(candidate.perCase[0].deniedReads).toEqual([
+            {agent: "correctness-reviewer", count: 3},
+        ]);
+        const markdown = renderMarkdownReport({
+            baseRef: "origin/main",
+            reviewMdSha: {baseline: "a".repeat(12), candidate: "b".repeat(12)},
+            arms: {baseline, candidate},
+            regressions: {lost: [], gained: []},
+            adversarialFailures: [],
+            gateRetries: [],
+        });
+        expect(markdown).toContain(
+            "| Reads denied outside the staged case | 0 | 3 |",
+        );
+        expect(markdown).toContain(
+            "### Reviewers that read outside the staged case",
+        );
+        expect(markdown).toContain(
+            "- candidate / case-1 / correctness-reviewer: 3 read(s) denied",
+        );
+        // An arm with no denials renders the row and nothing else.
+        const clean = renderMarkdownReport({
+            baseRef: "origin/main",
+            reviewMdSha: {baseline: "a".repeat(12), candidate: "b".repeat(12)},
+            arms: {baseline, candidate: baseline},
+            regressions: {lost: [], gained: []},
+            adversarialFailures: [],
+            gateRetries: [],
+        });
+        expect(clean).toContain(
+            "| Reads denied outside the staged case | 0 | 0 |",
+        );
+        expect(clean).not.toContain("Reviewers that read outside");
+    });
+    it("shows denials on a repeats report too, summed per arm/case/agent, tools apart from reads", async () => {
+        const produceDenied: ArmProduce = async () => ({
+            findings: [],
+            validation: [],
+            perAgent: [
+                {
+                    name: "correctness-reviewer",
+                    model: "m",
+                    usd: 1,
+                    turns: 1,
+                    wallMs: 10,
+                    retried: false,
+                    deniedReads: 2,
+                },
+                {
+                    name: "skill-auditor",
+                    model: "m",
+                    usd: 1,
+                    turns: 1,
+                    wallMs: 10,
+                    retried: false,
+                    deniedTools: 1,
+                },
+            ],
+        });
+        const repeats: AbReport[] = [];
+        for (let i = 0; i < 3; i++) {
+            const baseline = await runArm(
+                "baseline",
+                [liveCase("case-1")],
+                produceMiss,
+                {maxUsd: 10},
+            );
+            const candidate = await runArm(
+                "candidate",
+                [liveCase("case-1")],
+                produceDenied,
+                {maxUsd: 10},
+            );
+            repeats.push({
+                baseRef: "origin/main",
+                reviewMdSha: {
+                    baseline: "a".repeat(12),
+                    candidate: "a".repeat(12),
+                },
+                arms: {baseline, candidate},
+                regressions: diffRegressions(baseline, candidate),
+                adversarialFailures: [],
+                gateRetries: [],
+            });
+        }
+        const markdown = renderMultiMarkdownReport({
+            repeatCount: 3,
+            repeats,
+            aggregate: aggregateSamples(
+                repeats.flatMap((r, i) => extractSamples(`repeat-${i + 1}`, r)),
+            ),
+            gate: [],
+            adversarialFailures: [],
+        });
+        expect(markdown).toContain(
+            "Reads denied outside the staged case: baseline 0, candidate 6 (pooled over 3 repeats).",
+        );
+        expect(markdown).toContain(
+            "- candidate / case-1 / correctness-reviewer: 6 read(s) denied; read its transcript",
+        );
+        // The tool-policy denial is its own section and never a "read".
+        expect(markdown).toContain("### Tool-policy denials");
+        expect(markdown).toContain(
+            "- candidate / case-1 / skill-auditor: 3 call(s) to a tool outside Read/Grep/Glob",
+        );
+        expect(markdown).not.toContain("skill-auditor: 3 read(s)");
     });
 });

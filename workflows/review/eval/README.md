@@ -37,6 +37,7 @@ pnpm dlx tsx workflows/review/eval/live-ab.ts \
   [--no-judge]              # skip prose-quality judging
   [--no-match-arbiter]      # deterministic spec matching only
   [--out <path>]            # default out/live-ab-report.json (+ sibling .md)
+  [--transcripts-dir <d>]   # per-agent transcripts (default <tmpdir>/review-transcripts)
 ```
 
 Byte-identical review.md in both arms short-circuits to a $0 "no reviewable
@@ -53,14 +54,66 @@ the actions log reads as a running tally.
 - **Per-PR** (`.github/workflows/review-eval-ab.yml`): triggers on PRs
   touching `workflows/review/**`; smoke subset by default, the `full-eval`
   label lifts to every live case, `skip-live-eval` opts out. Report goes to
-  a sticky PR comment, the job summary, and the `live-ab-report` artifact.
+  a sticky PR comment, the job summary, and the `live-ab-report` artifact;
+  every sub-agent's transcript goes to the `live-ab-transcripts` artifact.
 - **Dispatch** (same workflow): inputs `base_ref`, `max_usd`, `full`,
   `cases`, `repeats`, `force_arms`. This is how powered runs launch.
 - **Weekly drift** (`.github/workflows/review-eval-drift.yml`): cron; full
   corpus x3 repeats, both arms pinned to main's review.md, so it watches
   cumulative drift AND re-measures the noise floor every week. Report goes
   to the job summary, the `live-ab-report` artifact, and a visibility PR
-  adding the report under `.github/review-eval/drift/`.
+  adding the report under `.github/review-eval/drift/`, and transcripts to
+  `live-ab-transcripts`.
+
+### What a reviewer can reach
+
+The live A/B runs on a machine that also holds this repo, and this repo holds
+the corpus (every case's must-catch spec) and the scorer. A reviewer that
+reads across is scoring itself, and on the Pi harness branch (actions#406)
+one did: gemini's correctness-reviewer found the repo with `find /`, read its
+own case's `case.json`, another case's, and `live-match.ts`, 37 of its 42
+calls on one case. The tool-call count showed nothing unusual for two full
+runs, and the transcript showed it in one.
+
+The SDK runner (`live-runner.ts`) now closes both routes. The toolset is
+restricted to Read, Grep, and Glob (the SDK's `allowedTools` only
+pre-approves, so before this every default tool including Bash was reachable
+under `bypassPermissions`), and a PreToolUse hook denies two things: any tool
+outside those three (a second layer under the `tools` restriction), and any
+read that resolves outside the staged case directory (the checkout plus its
+`context/` sibling), symlinks followed. Denials are counted per agent, reads apart from
+tools, and rendered in every report shape: the single-run table row and the
+repeats report's pooled line both say "Reads denied outside the staged case",
+and a nonzero count adds a section naming the reviewer whose transcript
+should be read. A tool-policy denial (the hook catching a tool `tools`
+should have removed) gets its own section and is never counted as a read.
+The expected value of both is zero for a corpus hunt, but not every denial
+is one: in the first scoped run (33902871639) all 8 denials were reviewers
+that guessed `<case>/src/...` for a changed file, missed, and widened a Glob
+to the staging root, or climbed out of `context/` with a relative path.
+Before the scope those searches returned other cases' files (and the other
+arm's copy of the same case) without anyone noticing. The transcript shows
+which kind a denial was in one line, and the denial message now names the
+checkout and context directories so the recovery is one retry.
+Transcripts are written outside the staging root so no reviewer can read a
+sibling's mid-run.
+
+Every live workflow starts with `live-runner.ts --probe-read-scope`, one
+Haiku call that reads a staged file, then a planted file outside the case,
+Globs the planted directory, then tries to `cat` the planted file through
+Bash. It fails the job when the planted contents or the planted file name
+appear anywhere (final text and every tool result are both checked, so a leak
+through Bash fails it too), when an attempted out-of-scope read was not
+denied, or when the attempted in-scope read returned nothing. A run where the
+model skipped a step, or the probe's own dispatch failed, twice, is
+`unproven`: the job proceeds under a warning annotation rather than failing,
+since nothing was learned against the hook either, and the arms retry their
+own dispatches. The Bash leg is otherwise
+informational: the log line says whether the hook denied Bash (`tools`
+stopped restricting and the second layer held), the model reported it
+unavailable (`tools` restricting), or neither was reported. The unit tests
+cover the scope predicate and the verdict; the probe covers the SDK honoring
+the hook under `bypassPermissions` on the version the checkout installs.
 
 ### Recipes
 
@@ -270,18 +323,31 @@ claiming a band.
 - **Gates:** single runs retry a flipped adversarial case best-of-three;
   `--repeats` runs decide by strict majority across repeats instead. Only
   confirmed failures exit non-zero.
+- **Read at least one transcript per arm** before trusting a recall or noise
+  delta (the `live-ab-transcripts` artifact, one file per dispatch, tool-call
+  index at the top). The report's denial sections are the first pointer:
+  any agent listed there is the one to open. The per-arm read is for what
+  the report cannot see: whether the reviewer investigated the change or
+  something else (Read lines on `dispatch-contracts.ts` or
+  `finding-schema.ts` are a reviewer shaping its JSON from the tooling
+  source), whether it looped (the same Read path many times), and whether
+  its depth matches the other arm's. The index answers those in under a
+  minute. Start with the agent that had the most calls on the case that
+  moved.
 - **Stacked PRs:** a per-PR report's baseline is the PR's base branch tip
   (the parent PR in a stack), so it prices the marginal delta only.
   Absolute columns do not compare across reports.
 - **Ruler provenance:** every report stamps the matcher configuration
   (`deterministic-v2`, `+arbiter` when the fallback ran; v1 is the
-  unsuffixed stamp from before the lens tie-break and leftover buckets) and a
-  corpus content hash (`provenance` in the JSON, the "Ruler" line in the
-  markdown). Rates are only comparable when BOTH the review.md sha and the
-  ruler match; `aggregate.ts` warns loudly on mixed pools. Instrument
-  changes (arbiter on/off, corpus growth) move every rate without the
-  reviewer changing, and the stamps are what keep the drift series honest
-  across them.
+  unsuffixed stamp from before the lens tie-break and leftover buckets), a
+  corpus content hash, and the runner's tool policy (`provenance` in the
+  JSON, the "Ruler" line in the markdown). Rates are only comparable when
+  BOTH the review.md sha and the ruler match; `aggregate.ts` warns loudly on
+  mixed pools. Instrument changes (arbiter on/off, corpus growth, what the
+  reviewer can reach) move every rate without the reviewer changing, and the
+  stamps are what keep the drift series honest across them. Reports from
+  before the read scope carry no tool policy and pool as `unscoped`, so a
+  drift series crossing that boundary warns.
 
 ### Statistical honesty (limits to keep in mind)
 
@@ -303,6 +369,32 @@ claiming a band.
   structure is the evidence), but it IS a relaxation of "handle every
   adversarial case outright"; per-case fail counts print either way, read
   them.
+- **Runs before the read scope landed were not isolated from the corpus.**
+  Reports without a "Reads denied outside the staged case" row come from a
+  runner whose reviewers could read every case's spec and the scorer, and
+  that also had Bash. No transcript exists from those runs to say whether one
+  did. The evidence that they did not is indirect and comes from the Pi
+  harness branch, where transcripts were written: across 2 runs, each of the
+  5 Claude agents made one search for the `gh-aw-review-lib` tooling
+  directory, found nothing, and read only files under the staged checkout
+  from then on. The Gemini reviewer on the same machine, given the same
+  prompt, searched the filesystem and read the corpus. Treat pre-scope
+  numbers as probably clean and the denial counter on later runs as the
+  measurement that says so.
+- **The eval's reviewers have no shell, production's do.** `tools` restricts
+  the SDK arm to Read, Grep, and Glob, while `lib/dispatch-runner.ts` keeps
+  Bash for the investigation-cap CLI. The cap CLI was never staged in the
+  eval, so that part is unchanged, but review.md's "one targeted cheap
+  check per finding" shell step was runnable against the staged checkout
+  before the scope landed and is not now. Both arms lose it together, so a
+  delta between two prompts that differ elsewhere stays comparable, and eval
+  recall reads as a lower bound on production recall rather than an estimate
+  of it. The exception is a review.md change to the shell step itself: the
+  A/B cannot see it, and its delta prints as zero rather than as not
+  measured, so that kind of change is judged by the canary and production
+  rounds, not by this eval. Scoping Bash by path instead would reopen the
+  corpus (`find /` is how the leak was found), so this stays a documented
+  limit.
 - **The arbiter's refuse bias is a prompt, not a calibration.** Its rescues
   inflate recall, the load-bearing metric, and its false-positive rate has
   not been measured against known non-matches. Audit `via: "fallback"`

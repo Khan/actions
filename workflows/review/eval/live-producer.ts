@@ -51,6 +51,7 @@ import {validateFinding, type Finding, type Lens} from "../lib/finding-schema";
 import {CLUSTERER} from "../lib/dispatch-cluster";
 import {LABEL_SHAPE_REVIEWERS} from "./lens-sources";
 import {dedupeLiveFindings, type LiveDedupReport} from "./live-dedup";
+import {addAccounting, LiveAgentError} from "./live-agent-error";
 import {
     VERIFICATION_STATES,
     type CaseVerification,
@@ -87,6 +88,12 @@ export type LiveAgentRequest = {
     prompt: string;
     /** The staged checkout the agent investigates (its cwd). */
     cwd: string;
+    /**
+     * The staged case root (checkout plus its `context/` sibling). The runner
+     * denies any read outside it: the eval's corpus and scorer live on the
+     * same machine, and a reviewer that can read them is scoring itself.
+     */
+    readRoot: string;
     /** Hard turn cap. */
     maxTurns: number;
     /** Hard wall-clock cap, enforced by the runner. */
@@ -116,6 +123,19 @@ export type LiveAgentResult = {
      * count them reports nothing rather than a misleading zero.
      */
     toolCalls?: number;
+    /**
+     * Read/Grep/Glob calls the runner denied for resolving outside the staged
+     * case. Zero is the expected value; anything else is a reviewer that
+     * went looking, and the transcript says where.
+     */
+    deniedReads?: number;
+    /**
+     * Calls to tools outside Read/Grep/Glob the runner denied. `tools` keeps
+     * those out of the model's toolset, so this is the signal that the
+     * restriction stopped restricting; it is not a corpus read and is never
+     * reported as one.
+     */
+    deniedTools?: number;
     /** Provider stop reason for the last assistant message, when visible. */
     stopReason?: string;
     /** Why the call failed, when the runner can see it. */
@@ -150,6 +170,10 @@ export type PerAgentReport = {
     toolCalls?: number;
     /** Tokens per model across every attempt; see `LiveAgentResult.usage`. */
     usage?: ModelTokens[];
+    /** Denied reads across every attempt (see `LiveAgentResult.deniedReads`). */
+    deniedReads?: number;
+    /** Denied non-read tools across every attempt (`LiveAgentResult.deniedTools`). */
+    deniedTools?: number;
     /** Stop reason of the last attempt; set alongside `failed`. */
     stopReason?: string;
     /**
@@ -642,9 +666,7 @@ const dispatchWithRetry = async <R>(
             report.usd += result.usd;
             report.turns += result.turns;
             report.wallMs += result.wallMs;
-            if (result.toolCalls !== undefined) {
-                report.toolCalls = (report.toolCalls ?? 0) + result.toolCalls;
-            }
+            addAccounting(report, result);
             if (result.usage !== undefined) {
                 report.usage = mergeUsage([
                     ...(report.usage ?? []),
@@ -718,6 +740,10 @@ const dispatchWithRetry = async <R>(
             failure = `dispatch failed: ${String(
                 runError instanceof Error ? runError.message : runError,
             )}`;
+            // Keep what the failed attempt counted (see LiveAgentError).
+            if (runError instanceof LiveAgentError) {
+                addAccounting(report, runError.partial);
+            }
         }
         if (attempt === 0) {
             report.retried = true;
@@ -840,6 +866,7 @@ export const produceLive = async (
                     name: agent.name,
                     model: agent.model,
                     cwd: staged.checkoutDir,
+                    readRoot: staged.rootDir,
                     maxTurns,
                     timeoutMs,
                 },
@@ -873,6 +900,7 @@ export const produceLive = async (
                         name: agent.name,
                         model: agent.model,
                         cwd: staged.checkoutDir,
+                        readRoot: staged.rootDir,
                         maxTurns,
                         timeoutMs,
                     },
@@ -912,6 +940,7 @@ export const produceLive = async (
                 name: validator.name,
                 model: validator.model,
                 cwd: staged.checkoutDir,
+                readRoot: staged.rootDir,
                 maxTurns,
                 timeoutMs,
             },
@@ -939,6 +968,7 @@ export const produceLive = async (
                 name: reconciler.name,
                 model: reconciler.model,
                 cwd: staged.checkoutDir,
+                readRoot: staged.rootDir,
                 maxTurns,
                 timeoutMs,
             },

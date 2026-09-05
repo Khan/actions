@@ -93,6 +93,8 @@ export type ReportSample = {
      */
     matcher?: string;
     corpusSha?: string;
+    /** Runner tool policy; `unscoped` on stamped reports predating the scope. */
+    toolPolicy?: string;
     baseline: ArmSample;
     candidate: ArmSample;
 };
@@ -267,12 +269,16 @@ export const extractSamples = (
     const provenance = isRecord(raw["provenance"]) ? raw["provenance"] : {};
     const matcher = asString(provenance["matcher"]);
     const corpusSha = asString(provenance["corpusSha"]);
+    // A stamped report without a tool policy predates the read scope.
+    const toolPolicy =
+        matcher === "" ? "" : asString(provenance["toolPolicy"]) || "unscoped";
     return [
         {
             source,
             baseRef: asString(raw["baseRef"]),
             ...(matcher !== "" ? {matcher} : {}),
             ...(corpusSha !== "" ? {corpusSha} : {}),
+            ...(toolPolicy !== "" ? {toolPolicy} : {}),
             baseline: parseArm(arms["baseline"], "baseline", sha("baseline")),
             candidate: parseArm(
                 arms["candidate"],

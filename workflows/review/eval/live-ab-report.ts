@@ -9,6 +9,11 @@
 import {renderAggregateMarkdown, type AggregateReport} from "./aggregate";
 import {money, pricedRows, toolCallRows} from "./cost-rows";
 import {
+    deniedSection,
+    deniedTotal,
+    pooledDeniedLines,
+} from "./live-ab-report-denials";
+import {
     khanCost,
     type AgentCost,
     type ModelTokens,
@@ -160,6 +165,20 @@ export type ArmRunReport = {
          */
         agentCosts?: AgentCost[];
         /**
+         * Read-tool calls the runner denied for resolving outside the
+         * staged case, per agent that had any. The eval's corpus and scorer
+         * sit on the same machine; a nonzero count is a reviewer that went
+         * looking, and the denial is why its recall still counts.
+         */
+        deniedReads?: {agent: string; count: number}[];
+        /**
+         * Calls to tools outside Read/Grep/Glob the runner denied, per agent
+         * that had any. Nonzero means the SDK's `tools` restriction stopped
+         * restricting and the hook caught it; reported apart from reads so
+         * a tool-policy denial is never read as a corpus peek.
+         */
+        deniedTools?: {agent: string; count: number}[];
+        /**
          * Reviewers the case enabled that this arm's `review.md` does not
          * define, so the arm never had the dimension. Expected on the baseline
          * arm of a new-reviewer A/B, and reported so a missing dimension is
@@ -229,6 +248,13 @@ export type ReportProvenance = {
     /** Content hash of the loaded corpus cases this run was scored against. */
     corpusSha: string;
     caseCount: number;
+    /**
+     * What the runner let reviewers reach (`READ_TOOL_POLICY` in
+     * read-scope.ts). Absent on reports before the read scope, which the
+     * aggregate reads as `unscoped`: those reviewers had every default tool
+     * and could read the corpus, so their rates are a different instrument.
+     */
+    toolPolicy?: string;
 };
 
 export type AbReport = {
@@ -361,6 +387,7 @@ export const renderMultiMarkdownReport = (
             "",
         );
     }
+    lines.push(...pooledDeniedLines(report));
     if (report.gate.length === 0) {
         lines.push(
             report.partial === true
@@ -682,7 +709,8 @@ export const renderMarkdownReport = (
             ? [
                   `Ruler: matcher ${report.provenance.matcher}; corpus ` +
                       `${report.provenance.corpusSha.slice(0, 12)} ` +
-                      `(${report.provenance.caseCount} cases).`,
+                      `(${report.provenance.caseCount} cases); tools ` +
+                      `${report.provenance.toolPolicy ?? "unscoped"}.`,
                   "",
               ]
             : []),
@@ -791,6 +819,11 @@ export const renderMarkdownReport = (
             "Cross-source claims merged (of candidates)",
             mergedTotal(baseline, options.khanRates),
             mergedTotal(candidate, options.khanRates),
+        ),
+        row(
+            "Reads denied outside the staged case",
+            String(deniedTotal(baseline)),
+            String(deniedTotal(candidate)),
         ),
         "",
         ...(priced === undefined ? [] : priced.notes.flatMap((n) => [n, ""])),
@@ -941,6 +974,7 @@ export const renderMarkdownReport = (
             "",
         );
     }
+    lines.push(...deniedSection([{baseline, candidate}]));
     const asymmetry = armAsymmetryLines([{baseline, candidate}]);
     if (asymmetry.length > 0) {
         lines.push(
