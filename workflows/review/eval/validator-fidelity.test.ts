@@ -11,10 +11,12 @@ import {join, resolve} from "node:path";
 
 import {loadFidelityFixtures} from "./claim-fidelity";
 import {outOfScopeRead} from "./read-scope";
+import {hashFiles} from "./fidelity-provenance";
 import {
     inputClaim,
     runValidatorFidelity,
     scoreValidatorOutput,
+    VALIDATOR_IMPLEMENTATION_FILES,
     type SampleKind,
 } from "./validator-fidelity";
 import {
@@ -320,6 +322,99 @@ describe("validator fidelity replay", () => {
         expect(input).not.toContain("fileSha256");
     });
 
+    it("stages an added file against an empty base through preparation and cache verification", () => {
+        const {fixture, sourceRoot, root, head, base} = sample();
+        const path = "added.go";
+        const addedHead = Buffer.from("package sample\nvar Added = true\n");
+        const withAddition = {
+            ...fixture,
+            provenance: {
+                ...fixture.provenance,
+                evidence: [
+                    ...fixture.provenance.evidence,
+                    {
+                        ...fixture.provenance.evidence[0],
+                        path,
+                        fileSha256: sha256(addedHead),
+                    },
+                ],
+            },
+        };
+        const snapshot = prepareSnapshot(
+            withAddition,
+            sourceRoot,
+            (file, commit) => {
+                if (file === path) {
+                    return commit === fixture.provenance.reviewedCommit
+                        ? addedHead
+                        : null;
+                }
+                return commit === fixture.provenance.reviewedCommit
+                    ? head
+                    : base;
+            },
+        );
+        expect(snapshot.files.find((f) => f.path === path)).toEqual({
+            path,
+            headHash: sha256(addedHead),
+            baseHash: null,
+        });
+        expect(
+            readSnapshot(sourceRoot, snapshot).find((f) => f.path === path)
+                ?.base,
+        ).toEqual(Buffer.alloc(0));
+        const staged = stageValidatorCase(
+            sourceRoot,
+            snapshot,
+            inputClaim(withAddition, "original"),
+            join(root, "addition"),
+        );
+        expect(readFileSync(join(staged.checkoutDir, path))).toEqual(addedHead);
+        const diff = readFileSync(join(staged.contextDir, "pr.diff"), "utf8");
+        expect(diff).toContain(
+            `diff --git a/${path} b/${path}\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,2 @@\n+package sample\n+var Added = true`,
+        );
+        expect(diff).toContain("-var Answer = 1");
+        expect(diff).toContain("+var Answer = 2");
+    });
+
+    it("records an implementation manifest independently of the lexical scorer hash", async () => {
+        const {report, checkpoints} = await replay(async () => result());
+        expect(report.implementationFiles).toEqual(
+            VALIDATOR_IMPLEMENTATION_FILES,
+        );
+        expect(report.implementationFiles).toEqual(
+            expect.arrayContaining([
+                "workflows/review/eval/validator-fidelity.ts",
+                "workflows/review/eval/validator-fidelity-stage.ts",
+                "workflows/review/eval/validator-fidelity-live.ts",
+                "workflows/review/eval/live-runner.ts",
+                "workflows/review/eval/read-scope.ts",
+                "workflows/review/lib/dispatch-contracts.ts",
+                "workflows/review/lib/submission-render.ts",
+                "workflows/review/lib/render-comment.ts",
+                "pnpm-lock.yaml",
+            ]),
+        );
+        expect(report.implementationSha256).toBe(
+            hashFiles(report.implementationFiles),
+        );
+        expect(JSON.parse(checkpoints[0]).implementationSha256).toBe(
+            report.implementationSha256,
+        );
+        expect(report.scorerSha256).toBe(
+            sha256(readFileSync("workflows/review/eval/claim-fidelity.ts")),
+        );
+        for (const changed of report.implementationFiles) {
+            const modified = hashFiles(report.implementationFiles, (path) =>
+                path === changed
+                    ? Buffer.concat([readFileSync(path), Buffer.from("\n")])
+                    : readFileSync(path),
+            );
+            expect(modified, changed).not.toBe(report.implementationSha256);
+        }
+    });
+
     it("repeats identical inputs, alternates ordering, and checkpoints every sample", async () => {
         const requests: LiveAgentRequest[] = [];
         const {report, checkpoints} = await replay(async (r) => {
@@ -373,6 +468,32 @@ describe("validator fidelity replay", () => {
         ]);
         expect(report.spendComplete).toBe(false);
     });
+
+    it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+        "stops after an unusable cost without losing known spend: %s",
+        async (usd) => {
+            let calls = 0;
+            const {report, checkpoints} = await replay(async () => {
+                calls++;
+                return calls === 1 ? result() : {...result(), usd};
+            }, 2);
+            expect(calls).toBe(2);
+            expect(report.samples.map((s) => s.status)).toEqual([
+                "scored",
+                "error",
+                "skipped",
+                "skipped",
+            ]);
+            expect(report.samples[1].error).toContain(
+                "Runner returned no usable cost",
+            );
+            expect(report.samples[1].score).toBeUndefined();
+            expect(report.spentUsd).toBeCloseTo(0.1);
+            expect(report.spendComplete).toBe(false);
+            expect(JSON.parse(checkpoints[2]).spendComplete).toBe(false);
+            expect(JSON.parse(checkpoints.at(-1)!).spentUsd).toBeCloseTo(0.1);
+        },
+    );
 
     it("stops dispatching at the spend threshold without calling skips failures", async () => {
         const {report} = await replay(async () => result(), 1, 0.1);

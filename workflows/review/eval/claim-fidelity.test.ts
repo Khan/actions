@@ -13,7 +13,7 @@ import {
     scoreFidelity,
 } from "./claim-fidelity";
 import {computeMetrics} from "./metrics";
-import {runCase} from "./runner";
+import {runCase, toCandidate} from "./runner";
 
 const fixtures = loadFidelityFixtures();
 const allPass = Object.fromEntries(FIDELITY_FACETS.map((key) => [key, true]));
@@ -69,6 +69,11 @@ describe("historical finding fidelity", () => {
                 ).toEqual(fixture.originalPass);
                 const result = runCase(fixture.corpusCase);
                 expect(result.postedCandidates).toHaveLength(1);
+                expect(result.postedCandidates[0].body).toBe(
+                    renderClaimComment(
+                        buildClaims(fixture.corpusCase.findings)[0],
+                    ),
+                );
                 expect(
                     scoreFidelity(
                         result.postedCandidates[0].body,
@@ -158,6 +163,79 @@ describe("historical finding fidelity", () => {
                     "malformed-correction",
                 ),
             ).toThrow("corrected: must be an object");
+        },
+    );
+
+    it.each([
+        {
+            severity: "medium",
+            label: "issue (blocking)",
+            expected: "blocking",
+            event: "REQUEST_CHANGES",
+        },
+        {
+            severity: "blocking",
+            label: "suggestion (non-blocking)",
+            expected: "advisory",
+            event: "APPROVE",
+        },
+    ] as const)(
+        "applies an accepted label and line correction: $label",
+        ({severity, label, expected, event}) => {
+            const {corpusCase} = fixtures[0];
+            const original = corpusCase.findings[0];
+            const findings = [
+                {...original, finding: {...original.finding, severity}},
+            ];
+            const validation = [
+                {
+                    id: original.finding.id,
+                    verification: "confirmed",
+                    corrected: {label, line: 41},
+                },
+            ];
+            const result = runCase(
+                parseCase(
+                    {...corpusCase, findings, validation},
+                    "accepted-fields",
+                ),
+            );
+            const posted = result.postedCandidates[0];
+            const [claim] = applyVerifications(
+                buildClaims(findings),
+                parseValidatorOutput(JSON.stringify({claims: validation})),
+            );
+            expect(posted.label).toBe(label);
+            expect(posted.blocking).toBe(expected === "blocking");
+            expect(posted.finding.severity).toBe(expected);
+            expect(posted.line).toBe(41);
+            expect(posted.anchor).toEqual({
+                ...original.finding.anchor,
+                line: 41,
+            });
+            expect(posted.finding.anchor).toEqual(posted.anchor);
+            expect(posted.body).toBe(renderClaimComment(claim));
+            expect(result.verdict.event).toBe(event);
+            expect(result.plannedReview.event).toBe(event);
+        },
+    );
+
+    it.each(["\treturn nil", "// explanation\n".repeat(9)])(
+        "uses production's suggestion gate before validation: %s",
+        (suggestedPatch) => {
+            const original = fixtures[0].corpusCase.findings[0];
+            const recorded = {
+                ...original,
+                finding: {...original.finding, suggested_patch: suggestedPatch},
+            };
+            const body = toCandidate(recorded).body;
+            expect(body).toBe(renderClaimComment(buildClaims([recorded])[0]));
+            expect(body.includes("```suggestion")).toBe(
+                suggestedPatch === "\treturn nil",
+            );
+            expect(
+                body.includes("A sketch, not a committable replacement:"),
+            ).toBe(suggestedPatch !== "\treturn nil");
         },
     );
 

@@ -19,6 +19,7 @@ import {
 } from "./live-producer";
 import {rewriteAgentPrompt} from "./live-stage";
 import {READ_TOOL_POLICY} from "./read-scope";
+import {CLAIM_RENDERING_FILES, hashFiles} from "./fidelity-provenance";
 import {
     sha256,
     stageValidatorCase,
@@ -26,6 +27,29 @@ import {
 } from "./validator-fidelity-stage";
 
 export type SampleKind = "original" | "clean-control";
+
+/** Request preparation, execution, accounting, scoring, and posting dependencies. */
+export const VALIDATOR_IMPLEMENTATION_FILES = [
+    "workflows/review/eval/fidelity-provenance.ts",
+    "workflows/review/eval/validator-fidelity.ts",
+    "workflows/review/eval/validator-fidelity-stage.ts",
+    "workflows/review/eval/validator-fidelity-live.ts",
+    "workflows/review/eval/claim-fidelity.ts",
+    "workflows/review/eval/corpus/loader.ts",
+    "workflows/review/eval/agent-extract.ts",
+    "workflows/review/eval/extract-json.ts",
+    "workflows/review/eval/live-producer.ts",
+    "workflows/review/eval/live-stage.ts",
+    "workflows/review/eval/live-runner.ts",
+    "workflows/review/eval/live-agent-error.ts",
+    "workflows/review/eval/read-scope.ts",
+    "workflows/review/eval/transcripts.ts",
+    "workflows/review/lib/pricing.ts",
+    ...CLAIM_RENDERING_FILES,
+    "package.json",
+    "pnpm-lock.yaml",
+    "tsconfig.json",
+];
 
 export const inputClaim = (
     fixture: FidelityFixture,
@@ -96,6 +120,8 @@ export type ValidatorFidelityReport = {
     model: string;
     promptSha256: string;
     scorerSha256: string;
+    implementationFiles: string[];
+    implementationSha256: string;
     inputsSha256: string;
     toolPolicy: string;
     scope: string;
@@ -144,6 +170,8 @@ export const runValidatorFidelity = async (
         scorerSha256: sha256(
             readFileSync("workflows/review/eval/claim-fidelity.ts"),
         ),
+        implementationFiles: [...VALIDATOR_IMPLEMENTATION_FILES],
+        implementationSha256: hashFiles(VALIDATOR_IMPLEMENTATION_FILES),
         inputsSha256: sha256(
             JSON.stringify({
                 snapshots,
@@ -231,7 +259,9 @@ export const runValidatorFidelity = async (
                         timeoutMs: 180_000,
                     });
                     sample.result = result;
-                    if (!Number.isFinite(result.usd) || result.usd < 0) {
+                    // The SDK runner uses zero for missing pricing. It isn't
+                    // evidence of a free call, so stop rather than undercount.
+                    if (!Number.isFinite(result.usd) || result.usd <= 0) {
                         throw new Error("Runner returned no usable cost");
                     }
                     report.spentUsd += result.usd;

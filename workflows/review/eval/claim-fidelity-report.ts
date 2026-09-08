@@ -1,5 +1,3 @@
-import {createHash} from "node:crypto";
-import {readFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 
 import {
@@ -12,15 +10,16 @@ import {loadFidelityFixtures, scoreFidelity} from "./claim-fidelity";
 import {parseCase} from "./corpus/loader";
 import {computeMetrics} from "./metrics";
 import {runCase} from "./runner";
+import {CLAIM_RENDERING_FILES, hashFiles} from "./fidelity-provenance";
 
-const hashFiles = (paths: string[]): string => {
-    const hash = createHash("sha256");
-    for (const path of paths) {
-        hash.update(path);
-        hash.update(readFileSync(path));
-    }
-    return hash.digest("hex");
-};
+export const FIDELITY_IMPLEMENTATION_FILES = [
+    "workflows/review/eval/fidelity-provenance.ts",
+    "workflows/review/eval/claim-fidelity-report.ts",
+    "workflows/review/eval/corpus/loader.ts",
+    "workflows/review/eval/runner.ts",
+    "workflows/review/eval/live-producer.ts",
+    ...CLAIM_RENDERING_FILES,
+];
 
 /** Measures replay fidelity only. The controls are not model output. */
 export const measureFidelity = () => {
@@ -39,11 +38,8 @@ export const measureFidelity = () => {
                 join(dirname(corpusCase.sourcePath), "fidelity.json"),
             ]),
         ]),
-        implementationSha256: hashFiles([
-            "workflows/review/eval/corpus/loader.ts",
-            "workflows/review/eval/runner.ts",
-            "workflows/review/eval/live-producer.ts",
-        ]),
+        implementationFiles: FIDELITY_IMPLEMENTATION_FILES,
+        implementationSha256: hashFiles(FIDELITY_IMPLEMENTATION_FILES),
         reviewPromptSha256: hashFiles(["workflows/review/review.md"]),
         originalMetrics: {
             mustCatchRecall: metrics.mustCatchRecall.rate,
@@ -74,6 +70,9 @@ export const measureFidelity = () => {
                 ),
                 handAuthoredControl: scoreFidelity(correctedBody, checks),
                 productionControl: scoreFidelity(productionBody, checks),
+                originalMatchesProduction:
+                    runs[index].result.postedCandidates[0]?.body ===
+                    renderClaimComment(buildClaims(corpusCase.findings)[0]),
                 controlRetained: corrected.postedCandidates.length === 1,
                 controlMatchesProduction: correctedBody === productionBody,
             };
