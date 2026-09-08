@@ -163,6 +163,7 @@ describe("produceLive", () => {
                     wallMs: 1000,
                     toolCalls: 5,
                     deniedReads: 1,
+                    stopReason: "end_turn",
                 };
             }
             return {
@@ -181,6 +182,7 @@ describe("produceLive", () => {
             (a) => a.name === "correctness-reviewer",
         );
         expect(correctness?.retried).toBe(true);
+        expect(correctness?.stopReason).toBe("end_turn");
         expect(correctness?.failed).toBeUndefined();
         expect(correctness?.toolCalls).toBe(45);
         expect(correctness?.deniedReads).toBe(3);
