@@ -2,4 +2,4 @@
 "review": patch
 ---
 
-Preserve code-region XML tags when comparing review submissions with sanitized output, so URL placeholders do not falsely block publication. Keep rejecting changed hosts, prose, and punctuation.
+Use the consumer's pinned gh-aw sanitizer for staged review text instead of maintaining a second implementation of its transforms. Compare the already-sanitized queue without reparsing its code spans, fixing false publication failures when URL redaction changes backtick pairing. Missing or incompatible sanitizer code blocks publication, with no legacy comparison fallback. Keep the existing formatting and same-host URL tolerances, and test against byte-exact upstream fixtures offline.

@@ -9,8 +9,8 @@
  *
  *   - A review-event plan (APPROVE / REQUEST_CHANGES): the queued event,
  *     body, and inline comments must match the plan under a
- *     sanitizer-tolerant normalization (`normalizeBody`,
- *     sanitizer-normalize.ts, which documents every absorbed transform),
+ *     role-specific normalization (`createBodyNormalization`,
+ *     sanitizer-normalize.ts, which documents the remaining tolerances),
  *     with the fingerprint stamp folded out of both bodies first
  *     (`stripRereviewStamp`: its payload is opaque high-entropy text a
  *     transcription garble should not withhold a review over);
@@ -34,8 +34,8 @@
  *     dead core lenses, so the gate must make "hold plan but approval
  *     posted anyway" a red run.
  *
- * Determinism boundary: a pure function of the queued items and the staged
- * plan; no model call, no clock, no prose about the code under review.
+ * Determinism boundary: the queued items, staged plan, and pinned host
+ * sanitizer. No model call, clock, or network request.
  */
 
 import type {DispatchGateViolation, SafeOutputItem} from "./dispatch-gate";
@@ -46,7 +46,8 @@ import {
     stampHunksChain,
     stripRereviewStamp,
 } from "./rereview-mode";
-import {normalizeBody} from "./sanitizer-normalize";
+import {createBodyNormalization, normalizeBody} from "./sanitizer-normalize";
+import {SanitizerUnavailableError} from "./sanitizer-runtime";
 
 const COMMENT_TYPE = "create_pull_request_review_comment";
 const RESOLVE_TYPE = "resolve_pull_request_review_thread";
@@ -68,7 +69,7 @@ export type SubmissionPlanViolationsInput = {
 };
 
 /** Evaluate rule 7; returns [] when no plan is staged or nothing deviates. */
-export const submissionPlanViolations = (
+const evaluateSubmissionPlan = (
     input: SubmissionPlanViolationsInput,
 ): DispatchGateViolation[] => {
     const violations: DispatchGateViolation[] = [];
@@ -92,6 +93,11 @@ export const submissionPlanViolations = (
                   skipSubmission?: unknown;
               })
             : undefined;
+    if (planStaged === undefined) {
+        return violations;
+    }
+    const {planned: plannedBody, queued: queuedBody} =
+        createBodyNormalization();
     const planIsHold =
         planStaged !== undefined && planStaged.event === "HOLD_FOR_HUMAN";
     if (planStaged !== undefined && planIsHold) {
@@ -132,9 +138,8 @@ export const submissionPlanViolations = (
         const holdCommentQueued = items.some(
             (item) =>
                 item.type === ADD_COMMENT_TYPE &&
-                normalizeBody(
-                    typeof item.body === "string" ? item.body : "",
-                ) === normalizeBody(planBody),
+                queuedBody(typeof item.body === "string" ? item.body : "") ===
+                    plannedBody(planBody),
         );
         if (!holdCommentQueued) {
             violations.push({
@@ -220,8 +225,8 @@ export const submissionPlanViolations = (
             // comparison: a garbled or dropped payload degrades the next
             // run to "no fingerprint" (full depth) instead of withholding
             // this review (stripRereviewStamp documents the trade).
-            normalizeBody(stripRereviewStamp(body)) !==
-                normalizeBody(stripRereviewStamp(planStaged.body))
+            queuedBody(stripRereviewStamp(body)) !==
+                plannedBody(stripRereviewStamp(planStaged.body))
         ) {
             violations.push({
                 code: "submission-plan-mismatch",
@@ -293,7 +298,7 @@ export const submissionPlanViolations = (
                 )
                 .map(
                     (comment) =>
-                        `${comment.path}:${comment.line}:${normalizeBody(
+                        `${comment.path}:${comment.line}:${plannedBody(
                             comment.body,
                         )}`,
                 )
@@ -304,7 +309,7 @@ export const submissionPlanViolations = (
                     (item) =>
                         `${
                             typeof item["path"] === "string" ? item["path"] : ""
-                        }:${String(item["line"] ?? "")}:${normalizeBody(
+                        }:${String(item["line"] ?? "")}:${queuedBody(
                             typeof item.body === "string" ? item.body : "",
                         )}`,
                 )
@@ -320,4 +325,24 @@ export const submissionPlanViolations = (
     }
 
     return violations;
+};
+
+/** Missing or broken sanitizer code is an explicit violation, never fail-open. */
+export const submissionPlanViolations = (
+    input: SubmissionPlanViolationsInput,
+): DispatchGateViolation[] => {
+    try {
+        return evaluateSubmissionPlan(input);
+    } catch (error) {
+        if (!(error instanceof SanitizerUnavailableError)) {
+            throw error;
+        }
+        return [
+            {
+                code: "submission-plan-mismatch",
+                dimension: "sanitizer unavailable",
+                detail: error.message,
+            },
+        ];
+    }
 };
