@@ -1,6 +1,6 @@
 # Review eval — scheduled live judge.
 #
-# The DETERMINISTIC eval suite (loadCorpus -> runCorpus -> computeMetrics ->
+# The DETERMINISTIC eval suite (loadCorpus -> runCase -> computeMetrics ->
 # evaluateGates, plus the stub-judge composition checks) needs no secrets and
 # already runs on every PR via the normal test runner (`pnpm run test --run`
 # in node-ci.yml), so it has no job here.

@@ -674,6 +674,7 @@ const dispatchWithRetry = async <R>(
                 ]);
             }
             lastOutput = result.output;
+            // The report spans both attempts, so discard the previous stop reason.
             delete report.stopReason;
             if (result.stopReason !== undefined) {
                 report.stopReason = result.stopReason;

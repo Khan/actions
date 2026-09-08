@@ -3,7 +3,7 @@
  * (`.github/workflows/review-eval-full.yml`).
  *
  * Replays the full corpus through the deterministic review path (loadCorpus ->
- * runCorpus -> computeMetrics -> evaluateGates) and scores the rendered review
+ * runCase -> computeMetrics -> evaluateGates) and scores the rendered review
  * comments with the live pinned judge model through the pure `JudgeModel` seam
  * (`judge-live-model.ts` supplies the one production implementation). Nothing here checks out a
  * consumer repo or runs `review.md`: the corpus carries recorded findings, and
