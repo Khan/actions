@@ -16,7 +16,11 @@
     "routerConfig": {
         "enabledReviewers": [
             "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
             "conventions",
+            "documentation",
             "maintainability"
         ]
     },
@@ -75,7 +79,8 @@
                     "is-prefixed function writes lastChecked",
                     "name promises a pure check",
                     "side effect hidden in isSessionValid",
-                    "rename or move the write"
+                    "rename or move the write",
+                    "isSessionValid[^\\n]{0,100}(writes|mutates)[^\\n]{0,40}lastChecked"
                 ]
             }
         ],

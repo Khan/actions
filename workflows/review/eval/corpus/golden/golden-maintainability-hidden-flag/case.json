@@ -28,7 +28,11 @@
     "routerConfig": {
         "enabledReviewers": [
             "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
             "conventions",
+            "documentation",
             "maintainability"
         ]
     },
@@ -86,11 +90,11 @@
                     "boolean flag threaded",
                     "strict is passed through",
                     "bare boolean at the call site",
-                    "loadConfig(path, true)",
                     "what true means",
                     "options object instead of a boolean",
                     "flag read three calls away",
-                    "strict parameter"
+                    "strict parameter",
+                    "loadConfig\\(path,\\s*true\\)[^\\n]{0,120}(open three files|tells its reader nothing)"
                 ]
             }
         ],

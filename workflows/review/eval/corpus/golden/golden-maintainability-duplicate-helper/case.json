@@ -16,7 +16,11 @@
     "routerConfig": {
         "enabledReviewers": [
             "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
             "conventions",
+            "documentation",
             "maintainability"
         ]
     },
@@ -75,7 +79,8 @@
                     "same body as dollarsToCents",
                     "reuse dollarsToCents",
                     "src/money/cents.ts already",
-                    "second copy of the cents conversion"
+                    "second copy of the cents conversion",
+                    "toCents[^\\n]{0,80}dollarsToCents[^\\n]{0,100}(new name|same|second copy)"
                 ]
             }
         ],

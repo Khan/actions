@@ -16,7 +16,11 @@
     "routerConfig": {
         "enabledReviewers": [
             "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
             "conventions",
+            "documentation",
             "maintainability"
         ]
     },

@@ -16,7 +16,11 @@
     "routerConfig": {
         "enabledReviewers": [
             "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
             "conventions",
+            "documentation",
             "maintainability"
         ]
     },
@@ -77,7 +81,8 @@
                     "NO_RETRY already",
                     "unreachable case",
                     "remove the fatal arm",
-                    "replace the fatal arm with default"
+                    "replace the fatal arm with default",
+                    "case\\s+[`\\\"\\']?fatal[`\\\"\\']?[^\\n]{0,80}unreachable"
                 ]
             }
         ],

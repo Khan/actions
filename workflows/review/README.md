@@ -614,19 +614,17 @@ The eval corpus carries five golden cases, one per finding type
 `golden-maintainability-one-caller-wrapper`), each seeded inside a diff that also does
 real logic work, plus a clean case (`clean-maintainability-reuses-existing`) whose
 change reuses the existing helper and must draw no comment. Every case enables
-`holistic` and `conventions` beside `maintainability`, because those are the two
-reviewers whose lanes border this one (wrong-layer and idiom deviation): with them in
-the baseline arm, the delta measures what the new reviewer adds over the reviewers
-most likely to have caught the defect already, which is the question the gate asks.
-None carries the `smoke` tag, so the per-PR A/B skips them. Price this reviewer with a
-targeted `workflow_dispatch` of *Review Eval A/B* over those six cases with
-`repeats=3` (recipe in the eval README). The gate is the one `documentation` had: a
-positive recall delta on the seeded cases with the clean case silent, or the reviewer
-does not earn an `enable` line. Read the delta with the eval README's power note in
-mind: 5 cases at 3 repeats is 15 spec-samples per arm, enough only for a large effect.
-The baseline arm has no lane for these defects, so the expected shape is a large
-delta or none. A small one reads as "fold the checks into an existing reviewer", the
-same fork `documentation` had, not as a signal to add repeats.
+all six existing consumer opt-ins beside `maintainability`, not only its adjacent
+reviewers. None carries the `smoke` tag, so the per-PR A/B skips them.
+
+These six cases are screening, not sufficient evidence for an `enable` line.
+[The comparison protocol](eval/production-parity.md) separates old-cap recovery
+from same-cap reviewer value and requires field-shaped overlap, clean,
+lens-pressure, and reduced-credit controls. Measure unique useful catches gained
+and lost, duplicates, false positives, cost, and inline coverage displaced.
+Displacement is a trade to evaluate, not an automatic veto. Keep maintainability
+disabled until a powered comparison with an explicitly approved spend budget
+supports enabling it. Recorded-fixture calibration is not model recall.
 
 ### The `.github/NOTIFIED` file (optional)
 

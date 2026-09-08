@@ -1,3 +1,14 @@
+import {
+    volFs,
+    CASE,
+    caseVol,
+    agent,
+    AGENTS,
+    LABEL_FINDING,
+    SCHEMA_FINDING,
+    scriptedRunner,
+    validatorOutput,
+} from "./live-producer-fixtures";
 import {describe, it, expect} from "vitest";
 import {Volume} from "memfs";
 
@@ -6,141 +17,9 @@ import {LiveAgentError} from "./live-agent-error";
 import {
     produceLive,
     resolveRuntimeImports,
-    type LiveAgentRequest,
     type LiveAgentRunner,
 } from "./live-producer";
-import type {ExtractedAgent} from "./agent-extract";
-import type {StageFs} from "./live-stage";
 import type {ModelTokens} from "../lib/pricing";
-
-/** Adapt a memfs volume to the staging fs seam. */
-const volFs = (vol: InstanceType<typeof Volume>): StageFs => ({
-    existsSync: (p) => vol.existsSync(p),
-    mkdirSync: (p, opts) => {
-        vol.mkdirSync(p, opts);
-    },
-    readdirSync: (p, opts) =>
-        vol.readdirSync(p, opts) as unknown as ReturnType<
-            StageFs["readdirSync"]
-        >,
-    readFileSync: (p, enc) => vol.readFileSync(p, enc) as string,
-    writeFileSync: (p, data) => {
-        vol.writeFileSync(p, data);
-    },
-});
-
-const DIFF = [
-    "diff --git a/src/a.ts b/src/a.ts",
-    "--- a/src/a.ts",
-    "+++ b/src/a.ts",
-    "@@ -1,2 +1,2 @@",
-    "-const a = 1;",
-    "+const a = 2;",
-    " export {a};",
-    "",
-].join("\n");
-
-const CASE = parseCase(
-    {
-        id: "produce-case",
-        tags: ["live"],
-        category: "incident-repro",
-        description: "a producible case",
-        changedFiles: [{path: "src/a.ts", status: "modified"}],
-        expected: {verdict: "APPROVE"},
-        diff: DIFF,
-        routerConfig: {
-            lensRules: [{pattern: "src/**", lenses: ["money-payments"]}],
-        },
-        live: {
-            prContext: {
-                title: "t",
-                description: "",
-                author: "a",
-                baseBranch: "main",
-            },
-        },
-    },
-    "/corpus/incidents/produce-case/case.json",
-);
-
-const caseVol = () =>
-    Volume.fromJSON({
-        "/corpus/incidents/produce-case/tree/src/a.ts":
-            "const a = 2;\nexport {a};\n",
-    });
-
-const agent = (name: string, prompt = `${name} prompt`): ExtractedAgent => ({
-    name,
-    description: `${name} description`,
-    model: "claude-opus-4-8",
-    prompt,
-});
-
-const AGENTS = new Map(
-    [
-        "correctness-reviewer",
-        "skill-auditor",
-        "money-payments",
-        "claim-validator",
-    ].map((name) => [name, agent(name)]),
-);
-
-const LABEL_FINDING = {
-    path: "src/a.ts",
-    line: 1,
-    label: "issue (blocking)",
-    failure_scenario: "with input X the constant is wrong and Y crashes.",
-    subject: "Constant changed incorrectly",
-    discussion: "The new value breaks the Y invariant.",
-};
-
-const SCHEMA_FINDING = {
-    schema_version: 2,
-    id: "lens-money-1",
-    lens: "money-payments",
-    anchor: {type: "line", path: "src/a.ts", line: 1, side: "RIGHT"},
-    severity: "advisory",
-    confidence: 0.6,
-    evidence_trace: ["read src/a.ts line 1"],
-    failure_scenario: "amounts drift by a cent on large values.",
-    producing_hunt: "money:rounding",
-    model_authored_prose: "Money should stay in integer cents.",
-};
-
-/**
- * A scripted runner: outputs queued per agent name, requests recorded. With
- * `usage`, every call also reports that token usage (the SDK's modelUsage).
- */
-const scriptedRunner = (
-    scripts: Record<string, string[]>,
-    usage?: ModelTokens[],
-): {runner: LiveAgentRunner; requests: LiveAgentRequest[]} => {
-    const requests: LiveAgentRequest[] = [];
-    const cursors: Record<string, number> = {};
-    const runner: LiveAgentRunner = async (request) => {
-        requests.push(request);
-        const queue = scripts[request.name] ?? [];
-        const cursor = cursors[request.name] ?? 0;
-        cursors[request.name] = cursor + 1;
-        const output = queue[Math.min(cursor, queue.length - 1)] ?? "{}";
-        return {
-            output,
-            usd: 0.25,
-            turns: 3,
-            wallMs: 1000,
-            ...(usage === undefined ? {} : {usage}),
-        };
-    };
-    return {runner, requests};
-};
-
-const validatorOutput = (
-    entries: {id: string; verification: string; confidence?: number}[],
-): string =>
-    JSON.stringify({
-        claims: entries.map((entry) => ({...entry, reason: "checked"})),
-    });
 
 describe("produceLive", () => {
     it("keeps the counters a failed attempt measured before it threw", async () => {
@@ -280,145 +159,6 @@ describe("produceLive", () => {
         // Cost accounting: one entry per dispatched agent.
         expect(result.perAgent.length).toBe(4);
         expect(result.perAgent.every((a) => a.usd === 0.25)).toBe(true);
-    });
-
-    it("dispatches the opt-in reviewers a case enables, in production rank order", async () => {
-        const enabledCase = parseCase(
-            {
-                ...CASE,
-                id: "produce-enabled",
-                routerConfig: {
-                    lensRules: [
-                        {pattern: "src/**", lenses: ["money-payments"]},
-                    ],
-                    // Listed out of canonical order deliberately.
-                    enabledReviewers: [
-                        "maintainability",
-                        "documentation",
-                        "conventions",
-                    ],
-                },
-            },
-            "/corpus/incidents/produce-enabled/case.json",
-        );
-        const {runner, requests} = scriptedRunner({
-            "correctness-reviewer": [JSON.stringify({findings: []})],
-            "skill-auditor": [JSON.stringify({findings: []})],
-            "money-payments": [JSON.stringify({findings: [], hunts: []})],
-            conventions: [JSON.stringify({findings: []})],
-            maintainability: [
-                JSON.stringify({
-                    findings: [
-                        {
-                            path: "src/a.ts",
-                            line: 1,
-                            label: "suggestion (non-blocking, maintainability)",
-                            failure_scenario:
-                                "the next reader has two names for one value.",
-                            subject: "`a` duplicates `b`",
-                            discussion:
-                                "`const a = 2` at line 1 and `const b = 2` in src/b.ts.",
-                        },
-                    ],
-                }),
-            ],
-            documentation: [
-                JSON.stringify({
-                    findings: [
-                        {
-                            path: "src/a.ts",
-                            line: 1,
-                            label: "suggestion (non-blocking, documentation)",
-                            failure_scenario:
-                                "the next reader trusts a comment the change made false.",
-                            subject: "Comment describes the old value",
-                            discussion:
-                                '"// a is always 1" no longer holds: line 1 sets it to 2.',
-                        },
-                        // The PR-level shape: no path, no line. Production
-                        // maps this to a {type: "pr"} anchor; the producer
-                        // must too, or a real title/description finding
-                        // scores as a true miss (run 31738849545, 0/3).
-                        {
-                            label: "suggestion (non-blocking, documentation)",
-                            failure_scenario:
-                                "every reader translates the description's metaphors before they can act.",
-                            subject: "Description is built from metaphors",
-                            discussion:
-                                '"teaches the loop to breathe" names no operation; plainer: "bounds each drain pass".',
-                        },
-                    ],
-                }),
-            ],
-            "claim-validator": [
-                validatorOutput([
-                    {
-                        id: "produce-enabled:live-documentation-1",
-                        verification: "confirmed",
-                    },
-                    {
-                        id: "produce-enabled:live-documentation-2",
-                        verification: "confirmed",
-                    },
-                    {
-                        id: "produce-enabled:live-maintainability-1",
-                        verification: "confirmed",
-                    },
-                ]),
-            ],
-        });
-        const agents = new Map(AGENTS);
-        agents.set("conventions", agent("conventions"));
-        agents.set("documentation", agent("documentation"));
-        agents.set("maintainability", agent("maintainability"));
-
-        const result = await produceLive(enabledCase, agents, {
-            runner,
-            stageDir: "/stage",
-            fs: volFs(
-                Volume.fromJSON({
-                    "/corpus/incidents/produce-enabled/tree/src/a.ts":
-                        "const a = 2;\nexport {a};\n",
-                }),
-            ),
-        });
-
-        // Production ranks matched lenses before the enabled opt-ins.
-        const finders = requests
-            .map((r) => r.name)
-            .filter((name) => name !== "claim-validator");
-        expect(finders).toEqual([
-            "correctness-reviewer",
-            "skill-auditor",
-            "money-payments",
-            "conventions",
-            "maintainability",
-            "documentation",
-
-        ]);
-
-        // The opt-in reviewer's label-shape output is mapped, not thrown on.
-        const docs = result.findings.find((f) => f.source === "documentation");
-        expect(docs?.finding.lens).toBe("documentation");
-        expect(docs?.finding.severity).toBe("advisory");
-        // The path-less finding maps to a pr anchor, mirroring production.
-        const prLevel = result.findings.find(
-            (f) => f.finding.id === "produce-enabled:live-documentation-2",
-        );
-        expect(prLevel?.finding.anchor).toEqual({type: "pr"});
-        expect(
-            result.perAgent.find((a) => a.name === "documentation")?.failed,
-        ).toBeFalsy();
-        // The maintainability parse path: label shape, mapped to its lens,
-        // so the first time it runs is not the graduation A/B.
-        const maint = result.findings.find(
-            (f) => f.source === "maintainability",
-        );
-        expect(maint?.finding.lens).toBe("maintainability");
-        expect(maint?.finding.severity).toBe("advisory");
-        expect(
-            result.perAgent.find((a) => a.name === "maintainability")?.failed,
-        ).toBeFalsy();
     });
 
     it("records an enabled reviewer this arm does not define instead of throwing", async () => {
