@@ -39,6 +39,12 @@
  * note lines) is pure code. No prose about the code under review.
  */
 
+import {
+    DEFAULT_MAX_TURNS,
+    DEFAULT_TIMEOUT_MS,
+    DEFAULT_CONCURRENCY,
+} from "./dispatch-limits";
+
 import {dedupeClaims, type ClaimMerge} from "./dedup";
 import {type ThreadSuppression} from "./dedup-threads";
 import {
@@ -157,20 +163,6 @@ export {
 
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const OUT_DIR = `${REVIEW_DIR}/out`;
-
-// 100, not 30: #295 held twice on error_max_turns (a loop guard only).
-const DEFAULT_MAX_TURNS = 100;
-/**
- * Per-sub-agent wall-clock cap. 15 minutes, not 5: trial run 29901690493
- * killed both default finders (correctness-reviewer, skill-auditor) at
- * exactly the old 5-minute mark while every lighter reviewer finished in
- * 60-115s; the heavy investigators routinely need 5-10 minutes (the prior
- * pin's correctness pass ran ~8 minutes to completion). The cap is a hang
- * backstop, not a budget: credit spend is metered separately by the
- * sandbox's api-proxy.
- */
-const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
-const DEFAULT_CONCURRENCY = 4;
 
 const TRIAGE = "pattern-triage";
 const RECONCILER = "thread-reconciler";

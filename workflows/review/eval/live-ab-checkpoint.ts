@@ -5,6 +5,8 @@
  * it with `runArm` and a stub producer and read the files back.
  */
 
+import {compareUsefulCoverage} from "./live-value";
+
 import {mkdirSync, renameSync, writeFileSync} from "node:fs";
 import {basename, dirname, join} from "node:path";
 
@@ -41,6 +43,7 @@ export const assembleReport = (
     return {
         ...header,
         arms: {baseline, candidate},
+        value: compareUsefulCoverage(baseline, candidate),
         regressions: diffRegressions(baseline, candidate),
         adversarialFailures: adversarialGateFailures(candidate).filter(
             (failure) => !flakes.has(failure.slice(0, failure.indexOf(":"))),

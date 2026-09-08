@@ -51,7 +51,7 @@ import {
     STAMP_SCHEMA_VERSION,
     type ReReviewPlan,
 } from "../lib/rereview-mode";
-import {route, type RouterConfig} from "../lib/router";
+import {route, type RouterConfig, type RoutingResult} from "../lib/router";
 import type {ReReviewMode} from "../lib/routing-config";
 import type {CaseRereview, CorpusCase} from "./corpus/loader";
 
@@ -103,6 +103,8 @@ export type StagedCase = {
 
 /** Options for {@link stageCase}. */
 export type StageOptions = {
+    /** The arm-specific effective routing, shared with dispatch. */
+    routing?: RoutingResult & {enabledReviewers: string[]};
     /**
      * The repo's re-review mode for this run (the ROUTING `re-review` line in
      * production; an arm parameter here, so the A/B can price a mode).
@@ -300,7 +302,9 @@ export const stageCase = (
         generatedRules: [],
         ...(corpusCase.routerConfig as Partial<RouterConfig>),
     };
-    const routing = route({files: corpusCase.changedFiles}, routerConfig);
+    const routing =
+        options.routing ??
+        route({files: corpusCase.changedFiles}, routerConfig);
     fs.writeFileSync(
         `${contextDir}/routing.json`,
         JSON.stringify(routing, null, 2),

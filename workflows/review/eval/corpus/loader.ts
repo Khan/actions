@@ -18,6 +18,12 @@
  * path, a tag, or a validation error — never a sentence composed about a diff.
  */
 
+import {
+    BLOCKING_LABELS,
+    NON_BLOCKING_LABELS,
+    type ConventionalLabel,
+} from "../../lib/render-comment";
+
 import {existsSync, readdirSync, readFileSync} from "node:fs";
 
 import {
@@ -81,6 +87,8 @@ export type CaseCategory = typeof CASE_CATEGORIES[number];
  * finding body itself is a full {@link Finding} validated against the schema.
  */
 export type RecordedFinding = {
+    /** Validated label-shape output, preserved through posting allocation. */
+    labelOverride?: ConventionalLabel;
     /** Producing reviewer/lens name (provenance; e.g. `correctness`). */
     source: string;
     /** The structured finding the sub-agent emitted (schema-validated). */
@@ -370,8 +378,26 @@ const parseFindings = (raw: unknown, errors: string[]): RecordedFinding[] => {
             }
             return;
         }
+        const label = entry["labelOverride"];
+        if (
+            label !== undefined &&
+            ![...BLOCKING_LABELS, ...NON_BLOCKING_LABELS].includes(
+                label as ConventionalLabel,
+            )
+        ) {
+            errors.push(
+                `findings[${i}].labelOverride: unknown conventional label`,
+            );
+            return;
+        }
         if (isNonEmptyString(entry["source"])) {
-            findings.push({source: entry["source"], finding: result.finding});
+            findings.push({
+                source: entry["source"],
+                finding: result.finding,
+                ...(label === undefined
+                    ? {}
+                    : {labelOverride: label as ConventionalLabel}),
+            });
         }
     });
     return findings;

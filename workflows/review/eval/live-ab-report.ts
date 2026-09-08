@@ -6,6 +6,13 @@
  * consumer can share the shapes without importing the CLI.
  */
 
+import {valueSummary, type UsefulCoverageComparison} from "./live-value";
+import {coverageNote} from "./live-accounting";
+import type {LiveExecution} from "./live-roster";
+import type {LiveAccounting} from "./live-accounting";
+import type {ArmRuntime, ReportProvenance} from "./runtime-config";
+export type {ReportProvenance} from "./runtime-config";
+
 import {renderAggregateMarkdown, type AggregateReport} from "./aggregate";
 import {money, pricedRows, toolCallRows} from "./cost-rows";
 import {
@@ -37,12 +44,11 @@ import type {
 } from "./live-producer";
 import type {RereviewCaseScore, RereviewMetricsReport} from "./rereview-match";
 
-export type {AgentCost};
-
 export type ArmId = "baseline" | "candidate";
 
 /** What an arm's producer must return per case (the produceLive subset). */
 export type ArmProduceResult = {
+    execution?: LiveExecution;
     findings: RecordedFinding[];
     validation: CaseVerification[];
     perAgent: PerAgentReport[];
@@ -64,6 +70,7 @@ export type ArmRunReport = {
     wallMs: number;
     perCase: {
         caseId: string;
+        accounting?: LiveAccounting;
         usd: number;
         verdict: string;
         expected: string;
@@ -238,26 +245,9 @@ export type GateMajority = {
  * changing at all. aggregate.ts warns when a pool mixes rulers, which is
  * what keeps the weekly drift series honest across instrument upgrades.
  */
-export type ReportProvenance = {
-    /**
-     * Matcher configuration: `deterministic-v2` or
-     * `deterministic-v2+arbiter` (v1, unsuffixed, predates the lens
-     * tie-break and the leftover buckets).
-     */
-    matcher: string;
-    /** Content hash of the loaded corpus cases this run was scored against. */
-    corpusSha: string;
-    caseCount: number;
-    /**
-     * What the runner let reviewers reach (`READ_TOOL_POLICY` in
-     * read-scope.ts). Absent on reports before the read scope, which the
-     * aggregate reads as `unscoped`: those reviewers had every default tool
-     * and could read the corpus, so their rates are a different instrument.
-     */
-    toolPolicy?: string;
-};
-
 export type AbReport = {
+    value?: UsefulCoverageComparison;
+    runtime?: {baseline: ArmRuntime; candidate: ArmRuntime};
     baseRef: string;
     reviewMdSha: {baseline: string; candidate: string};
     /** Absent only on artifacts predating the ruler stamp. */
@@ -281,7 +271,7 @@ export type AbReport = {
 /** What every report of one run shares, fixed before any arm runs. */
 export type RunHeader = Pick<
     AbReport,
-    "baseRef" | "reviewMdSha" | "provenance"
+    "baseRef" | "reviewMdSha" | "provenance" | "runtime"
 >;
 
 /**
@@ -335,7 +325,9 @@ export const renderMultiMarkdownReport = (
     // result.
     const identicalArms =
         first !== undefined &&
-        first.reviewMdSha.baseline === first.reviewMdSha.candidate;
+        first.reviewMdSha.baseline === first.reviewMdSha.candidate &&
+        JSON.stringify(first.runtime?.baseline) ===
+            JSON.stringify(first.runtime?.candidate);
     const lines = [
         identicalArms
             ? `## Review wobble control: ${report.repeatCount} repeats (identical arms)${partial}`
@@ -636,7 +628,9 @@ export const renderMarkdownReport = (
     const {baseline, candidate} = report.arms;
     // See renderMultiMarkdownReport: identical shas imply `--force-arms`.
     const identicalArms =
-        report.reviewMdSha.baseline === report.reviewMdSha.candidate;
+        report.reviewMdSha.baseline === report.reviewMdSha.candidate &&
+        JSON.stringify(report.runtime?.baseline) ===
+            JSON.stringify(report.runtime?.candidate);
     const [armALabel, armBLabel] = identicalArms
         ? ["Arm A", "Arm B"]
         : ["Baseline", "Candidate"];
@@ -691,6 +685,11 @@ export const renderMarkdownReport = (
                   "",
               ]
             : []),
+        ...valueSummary(report.value),
+        coverageNote(baseline),
+        coverageNote(candidate),
+        "Coverage gaps are not clean passes. Inspect per-case usefulDefects and posting for source overlap and inline displacement.",
+        "",
         identicalArms
             ? `Both arms ran the same review.md (${report.reviewMdSha.baseline.slice(
                   0,

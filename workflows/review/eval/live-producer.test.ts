@@ -282,7 +282,7 @@ describe("produceLive", () => {
         expect(result.perAgent.every((a) => a.usd === 0.25)).toBe(true);
     });
 
-    it("dispatches the opt-in reviewers a case enables, in canonical order", async () => {
+    it("dispatches the opt-in reviewers a case enables, in production rank order", async () => {
         const enabledCase = parseCase(
             {
                 ...CASE,
@@ -358,16 +358,16 @@ describe("produceLive", () => {
             ),
         });
 
-        // Canonical ENABLEABLE_REVIEWERS order, not the case's listing order.
+        // Production ranks matched lenses before the enabled opt-ins.
         const finders = requests
             .map((r) => r.name)
             .filter((name) => name !== "claim-validator");
         expect(finders).toEqual([
             "correctness-reviewer",
             "skill-auditor",
+            "money-payments",
             "conventions",
             "documentation",
-            "money-payments",
         ]);
 
         // The opt-in reviewer's label-shape output is mapped, not thrown on.

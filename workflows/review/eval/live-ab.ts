@@ -56,6 +56,10 @@
  *                             Default 1 (single-run behavior, unchanged).
  */
 
+import {liveRouting} from "./live-roster";
+import {extractTierBudgets} from "./runtime-config";
+import {scoringOptions, accountLiveRun} from "./live-accounting";
+
 /* eslint-disable no-console -- CLI entry point; console IS the interface. */
 
 import {execFileSync} from "node:child_process";
@@ -257,6 +261,7 @@ export const runArm = async (
         usd += caseUsd;
 
         const result = runCase(corpusCase, {
+            ...scoringOptions(corpusCase, produced),
             produceFindings: () => produced.findings,
             validation: produced.validation,
             ...(options.anchorSnap !== undefined
@@ -287,6 +292,7 @@ export const runArm = async (
         );
         perCase.push({
             caseId: corpusCase.id,
+            accounting: accountLiveRun(produced, result, match),
             usd: caseUsd,
             verdict: result.verdict.event,
             expected: corpusCase.expected.verdict,
@@ -462,6 +468,7 @@ export const retryGateFlips = async (
                 ...(a.usage === undefined ? {} : {usage: a.usage}),
             }));
             const result = runCase(corpusCase, {
+                ...scoringOptions(corpusCase, produced),
                 produceFindings: () => produced.findings,
                 validation: produced.validation,
                 ...(anchorSnap !== undefined ? {anchorSnap} : {}),
@@ -548,10 +555,42 @@ const main = async (): Promise<void> => {
         {encoding: "utf8", maxBuffer: 64 * 1024 * 1024},
     );
     const candidateMd = readFileSync(reviewMdPath, "utf8");
+    const budgetPath = "workflows/review/lib/budgets.ts";
+    const disabled = (flag: string): string[] =>
+        [
+            ...new Set(
+                (argValue(flag) ?? "")
+                    .split(",")
+                    .map((n) => n.trim())
+                    .filter(Boolean),
+            ),
+        ].sort();
+    const runtime = {
+        baseline: {
+            tierBudgets: extractTierBudgets(
+                execFileSync("git", ["show", `${baseRef}:${budgetPath}`], {
+                    encoding: "utf8",
+                }),
+            ),
+            disabledReviewers: disabled("--baseline-disable-reviewers"),
+            reReviewMode: "full",
+        },
+        candidate: {
+            tierBudgets: extractTierBudgets(readFileSync(budgetPath, "utf8")),
+            disabledReviewers: disabled("--candidate-disable-reviewers"),
+            reReviewMode: argValue("--re-review-mode") ?? "full",
+        },
+    };
+
     // The overlay is Khan's contract rate, not a prompt property, so the
     // working tree's review.md prices both arms.
     const khanRates = readOverlayRates(candidateMd);
-    if (baselineMd === candidateMd && !process.argv.includes("--force-arms")) {
+    if (
+        baselineMd === candidateMd &&
+        JSON.stringify(runtime.baseline) ===
+            JSON.stringify(runtime.candidate) &&
+        !process.argv.includes("--force-arms")
+    ) {
         // Pre-flight identity short-circuit (the tuning memo's first item):
         // byte-identical review.md means byte-identical extracted prompts and
         // orchestrator body, so both arms would do the same thing and the run
@@ -600,6 +639,15 @@ const main = async (): Promise<void> => {
         throw new Error(`unknown --re-review-mode "${rawMode}"`);
     }
     const candidateMode = rawMode as ReReviewMode;
+    // Validate both arm configurations over every case before any dispatch.
+    for (const arm of ["baseline", "candidate"] as const) {
+        const names = new Set(
+            extractAgents(arm === "baseline" ? baselineMd : candidateMd).keys(),
+        );
+        for (const corpusCase of cases) {
+            liveRouting(corpusCase, names, runtime[arm]);
+        }
+    }
 
     const repeats = Number(argValue("--repeats") ?? "1");
     if (!Number.isInteger(repeats) || repeats < 1) {
@@ -664,6 +712,9 @@ const main = async (): Promise<void> => {
                     caseId: corpusCase.id,
                 }),
                 stageDir: `${stageRoot}/${stage}/${corpusCase.id}`,
+                ...runtime[
+                    stage.startsWith("baseline") ? "baseline" : "candidate"
+                ],
                 reReviewMode: mode,
             });
 
@@ -724,8 +775,8 @@ const main = async (): Promise<void> => {
     const provenance = {
         matcher:
             match !== undefined
-                ? "deterministic-v2+arbiter"
-                : "deterministic-v2",
+                ? "deterministic-v2+posting-v1+threads-v2+arbiter"
+                : "deterministic-v2+posting-v1+threads-v2",
         corpusSha: sha256(JSON.stringify(cases)),
         caseCount: cases.length,
         toolPolicy: READ_TOOL_POLICY,
@@ -736,6 +787,7 @@ const main = async (): Promise<void> => {
         repeats,
         khanRates,
         header: {
+            runtime,
             baseRef,
             reviewMdSha: {
                 baseline: sha256(baselineMd),
@@ -807,6 +859,8 @@ const main = async (): Promise<void> => {
                                   arm: `candidate${suffix}-retry${attempt}`,
                                   caseId: corpusCase.id,
                               }),
+                              ...runtime.candidate,
+                              reReviewMode: candidateMode,
                               stageDir: `${stageRoot}/candidate${suffix}-retry${attempt}/${corpusCase.id}`,
                           }),
                   match,

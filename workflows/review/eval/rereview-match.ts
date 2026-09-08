@@ -85,10 +85,22 @@ const duplicatesThread = (
     if (finding.anchor.type === "pr") {
         return false;
     }
-    if (finding.anchor.path !== thread.path) {
+    if (
+        finding.anchor.path !== thread.path &&
+        !(
+            thread.mechanism !== undefined &&
+            thread.relatedPaths?.includes(finding.anchor.path)
+        )
+    ) {
         return false;
     }
-    if (finding.anchor.type === "line" && thread.line !== null) {
+    // An audited mechanism identifies the defect across moved anchors.
+    // Proximity is only a fallback when the case has no mechanism label.
+    if (
+        thread.mechanism === undefined &&
+        finding.anchor.type === "line" &&
+        thread.line !== null
+    ) {
         const start = finding.anchor.start_line ?? finding.anchor.line;
         const near =
             thread.line >= start - DUP_LINE_WINDOW &&

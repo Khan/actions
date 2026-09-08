@@ -40,14 +40,23 @@ pnpm dlx tsx workflows/review/eval/live-ab.ts \
   [--transcripts-dir <d>]   # per-agent transcripts (default <tmpdir>/review-transcripts)
 ```
 
-Byte-identical review.md in both arms short-circuits to a $0 "no reviewable
-delta" report unless `--force-arms` is passed. Budgets are enforced between
-cases; a capped run reports skipped cases instead of dying. Every run
+Byte-identical review.md and runtime configuration in both arms short-circuit
+to a $0 "no reviewable delta" report unless `--force-arms` is passed. Runtime
+configuration includes each arm's budget table, disabled reviewers, and
+review mode. Budgets are enforced between cases. A capped run reports skipped
+cases instead of dying. Every run
 checkpoints the artifact (JSON and markdown) after every scored case, marked
 `partial: true` in the JSON and `(partial)` in the markdown header, so a
 cancelled or timed-out run leaves what it had scored for the `always()`
 upload. Progress goes to stderr, one line per dispatch and one per case, so
 the actions log reads as a running tally.
+
+The baseline budget table comes from `--base-ref`, and the candidate table
+comes from the working tree. Use `--baseline-disable-reviewers <name,name>`
+and `--candidate-disable-reviewers <name,name>` for same-snapshot off/on
+comparisons. See [Measuring an added reviewer](production-parity.md) for
+full-roster comparisons, skipped-reviewer accounting, inline displacement,
+and the remaining limits on production fidelity.
 
 ### CI entry points
 
