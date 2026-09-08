@@ -28,6 +28,8 @@
  * review. Prose stays with the lens sub-agents.
  */
 
+import {appendFileSync, existsSync, mkdirSync, readFileSync} from "node:fs";
+
 import type {RunBudget} from "./router";
 
 /* -------------------------------------------------------------------------- */
@@ -331,11 +333,20 @@ export const runCapCli = (argv: string[], fs: CapCliFs): CapDecision => {
     return decision;
 };
 
-// Run only when executed directly (the sub-agent prompts in review.md), never
-// on import (tests).
-if (typeof require !== "undefined" && require.main === module) {
-    const fs = require("node:fs") as CapCliFs;
-    const decision = runCapCli(process.argv.slice(2), fs);
+// Native type stripping reparses this file as ESM, where require is absent.
+// Keep value imports limited to node builtins so node can run the CLI without
+// tsx or package resolution. The argv guard matches the other native CLIs.
+if (process.argv[1]?.endsWith("investigation-cap.ts")) {
+    const decision = runCapCli(process.argv.slice(2), {
+        existsSync,
+        readFileSync: (p, enc) => readFileSync(p, enc),
+        appendFileSync: (p, data) => {
+            appendFileSync(p, data);
+        },
+        mkdirSync: (p, opts) => {
+            mkdirSync(p, opts);
+        },
+    });
     // eslint-disable-next-line no-console
     console.log(JSON.stringify(decision));
     process.exit(decision.allowed ? 0 : 1);
