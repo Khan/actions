@@ -57,12 +57,12 @@ The original comments still fail the same four checks. Editing fixtures did not 
 
 Run the focused tests from the repo root:
 
-`pnpm test --run workflows/review/eval/claim-fidelity.test.ts workflows/review/eval/live-producer.test.ts`
+`pnpm test --run workflows/review/eval/claim-fidelity.test.ts workflows/review/eval/live-producer.test.ts workflows/review/eval/live-producer-fidelity.test.ts`
 
 Print the deterministic report, without model calls:
 
 `node -r @swc-node/register workflows/review/eval/claim-fidelity-report.ts`
 
-The final full suite passes 2,244 tests in 107 files, and `pnpm lint` passes. `pnpm typecheck` passes but its tsconfig excludes `workflows/`. A separate strict check including the changed eval modules reports the existing `runner.ts` error where `submitEvent` may return `COMMENT` but `PlannedReview.event` excludes it. The same error reproduces in the detached baseline worktree. This change does not fix that unrelated type mismatch.
+The initial candidate passed 2,244 tests in 107 files. After rebasing onto `088b1a1`, the full suite passes 2,418 tests in 126 files and `pnpm lint` passes. The same scorer and fixtures produce identical component results after the rebase. The live-producer fidelity test moved to its own file with shared test fixtures to stay under the repo's 1,000-line limit. `pnpm typecheck` passes but its tsconfig excludes `workflows/`. A separate strict check including the changed eval modules reports the existing `runner.ts` error where `submitEvent` may return `COMMENT` but `PlannedReview.event` excludes it. The same error reproduces in the detached baseline worktree. This change does not fix that unrelated type mismatch.
 
 Before changing a model prompt, run the same reviewed code and candidate claims through both prompt versions with the same tools, model, budget, and component checks. Measure whether inaccurate details are corrected and whether the useful findings survive. These recorded controls are not a substitute for that experiment, and whole-review live A/B rates from the old harness should not be compared to new rates as if only a prompt changed.
