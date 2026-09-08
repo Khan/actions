@@ -132,13 +132,16 @@ export const rebaseModels = <T extends CatalogProvider>(
 
 /**
  * Which provider a review.md model pin resolves against. The pins are tier
- * aliases and the prefix names the family: `gemini-*` is Google's Gemini
- * API, everything else stays Anthropic (the default, so an unknown pin
- * fails inside {@link resolveModelId} with the Anthropic candidates listed
- * rather than silently routing to a provider that cannot serve it).
+ * aliases. `gemini-*` routes to google, `gpt-*` to openai, and everything
+ * else to anthropic. Unknown pins fail inside {@link resolveModelId} with
+ * that provider's candidates listed, rather than silently substituting.
  */
 export const providerForPin = (pin: string): string =>
-    pin.startsWith("gemini") ? GOOGLE_PROVIDER_ID : ANTHROPIC_PROVIDER_ID;
+    pin.startsWith("gemini")
+        ? GOOGLE_PROVIDER_ID
+        : pin.startsWith("gpt-")
+        ? "openai"
+        : ANTHROPIC_PROVIDER_ID;
 
 /**
  * Resolve a review.md model pin against Pi's catalog for the pin's provider

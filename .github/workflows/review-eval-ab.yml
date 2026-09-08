@@ -71,10 +71,10 @@ on:
         required: false
         default: false
       transcripts:
-        description: "Live A/B: write every agent's transcript under out/transcripts (uploaded as live-ab-transcripts)"
+        description: "Live A/B: capture sub-agent transcripts (always enabled for PR trials)"
         type: boolean
         required: false
-        default: false
+        default: true
       probes_only:
         description: "Sandbox smoke: run the free boundary probes only, skipping the live production-surface case"
         type: boolean
@@ -178,9 +178,9 @@ jobs:
       - name: Run the sandbox smoke
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # The reviewer pins on this branch are Google models (the gemini
-          # A/B); the judges and arbiter stay Anthropic, so both keys ride.
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Astra reviewers need openai auth. The judges and arbiter keep
+          # anthropic auth, so the live phase needs both keys.
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           # Drafts pay nothing: probes only. A ready PR or a dispatch runs the
           # live phase too, which is the only check of the tool DEFINITIONS.
           PROBES_ONLY: ${{ inputs.probes_only == true || (github.event_name == 'pull_request' && github.event.pull_request.draft == true) }}
@@ -197,8 +197,8 @@ jobs:
             echo "ANTHROPIC_API_KEY not available; running the boundary probes only." >&2
             EXTRA="--probes-only"
           fi
-          if [ -z "$GEMINI_API_KEY" ]; then
-            echo "GEMINI_API_KEY not available; the gemini-pinned live phase cannot run." >&2
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY not available. The astra-pinned live phase cannot run." >&2
             EXTRA="--probes-only"
           fi
           if [ -n "$SMOKE_CASE" ]; then
@@ -305,9 +305,9 @@ jobs:
       - name: Run the live A/B
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # The candidate arm's reviewer pins are gemini-3.8-flash on this
-          # branch; the baseline arm, the judges, and the arbiter stay on
-          # Anthropic pins, so the run needs both keys.
+          # The candidate uses astra. Judges stay on anthropic, and a
+          # baseline stacked on the gemini trial needs google auth too.
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # The tip of the PR's base branch (see the header comment for why
           # tip, not merge-base). workflow_dispatch may override it.
@@ -317,15 +317,22 @@ jobs:
           CASES: ${{ inputs.cases || '' }}
           REPEATS: ${{ inputs.repeats || '1' }}
           FORCE_ARMS: ${{ inputs.force_arms == true }}
-          REVIEW_EVAL_TRANSCRIPTS: ${{ inputs.transcripts == true && '1' || '' }}
+          REVIEW_EVAL_TRANSCRIPTS: ${{ (github.event_name == 'pull_request' || inputs.transcripts == true) && '1' || '' }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "ANTHROPIC_API_KEY secret not configured; skipping the live A/B." >&2
             exit 0
           fi
-          if [ -z "$GEMINI_API_KEY" ]; then
-            echo "GEMINI_API_KEY secret not configured; the candidate arm's gemini pins cannot run. Skipping." >&2
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY secret not configured. The candidate arm's astra pins cannot run. Skipping." >&2
             exit 0
+          fi
+          BASE_REVIEW="$(git show "${BASE_REF}:workflows/review/review.md")"
+          if printf '%s\n' "$BASE_REVIEW" | grep -q '^model: gemini-'; then
+            if [ -z "$GEMINI_API_KEY" ]; then
+              echo "GEMINI_API_KEY not configured. The baseline's gemini pins cannot run. Skipping." >&2
+              exit 0
+            fi
           fi
           SCOPE="--smoke-only"
           if [ "$FULL_EVAL" = "true" ]; then
@@ -352,8 +359,7 @@ jobs:
           path: out/live-ab-report.*
           if-no-files-found: ignore
       - name: Upload the transcripts
-        # Present only when REVIEW_EVAL_TRANSCRIPTS=1 was set on the run
-        # (a dispatch input); a 10-case run is ~400 files.
+        # Automatic PR trials always capture transcripts. Dispatches may opt out.
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

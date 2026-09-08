@@ -71,15 +71,19 @@ describe("makeSandboxedExec", () => {
                     argv: [
                         "bash",
                         "-c",
-                        'printf %s "${ANTHROPIC_API_KEY:-scrubbed}:${KEEP_ME:-lost}"',
+                        'printf %s "${ANTHROPIC_API_KEY:-scrubbed}:${OPENAI_API_KEY:-scrubbed}:${GEMINI_API_KEY:-scrubbed}:${KEEP_ME:-lost}"',
                     ],
                     env: {
                         ...process.env,
                         ANTHROPIC_API_KEY: "sk-secret",
+                        OPENAI_API_KEY: "sk-openai-test",
+                        GEMINI_API_KEY: "google-test",
                         KEEP_ME: "kept",
                     },
                 }),
         });
-        expect(await exec(["ignored"], ".")).toBe("scrubbed:kept");
+        expect(await exec(["ignored"], ".")).toBe(
+            "scrubbed:scrubbed:scrubbed:kept",
+        );
     });
 });

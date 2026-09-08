@@ -64,8 +64,9 @@ describe("resolveModelId", () => {
 });
 
 describe("providerForPin", () => {
-    it("routes gemini pins to Google and everything else to Anthropic", () => {
+    it("routes known model families and leaves unknown pins with anthropic", () => {
         expect(providerForPin("gemini-3.8-flash")).toBe("google");
+        expect(providerForPin("gpt-6-astra")).toBe("openai");
         expect(providerForPin("claude-opus-5")).toBe("anthropic");
         // The default is deliberate: an unknown family fails inside
         // resolveModelId with candidates listed, never a silent reroute.

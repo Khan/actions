@@ -264,6 +264,50 @@ claiming a band.
   matches when a recall claim is close, and prefer `--no-match-arbiter`
   when reproducing pre-arbiter numbers.
 
+## Astra trial
+
+This branch tests all 23 candidate sub-agents on `gpt-6-astra` through the
+openai Responses API. The baseline pins still come from the base ref. Both
+arms use the pi runner at high reasoning. The orchestrator engine, prose
+judge, eval judge, and match arbiter keep their claude pins.
+
+The available credential is a codex workspace token, which this direct API
+runner cannot use. Keep the PR in draft until codex CLI or app-server auth is
+implemented and astra access is verified, or a separate API-platform key is
+available. `skip-ai-review` alone does not disable the live eval.
+
+For the current API path, configure `OPENAI_API_KEY` with an API-platform key.
+Keep `ANTHROPIC_API_KEY` for the judges and any claude baseline. A PR stacked
+on the gemini trial also needs `GEMINI_API_KEY` for its baseline. The workflow
+checks that baseline's model pins and skips if the google key is missing.
+The A/B step skips without spending when either key is missing. The sandbox
+smoke runs only its free boundary probes in that case, so a green check
+without both keys is not evidence of a live trial. Local live runs need both
+keys too. Neither key is passed into reviewer tool subprocesses.
+
+The PR flow runs the smoke subset. `full-eval` lifts it to the full corpus,
+and dispatch inputs still control cases, repeats, and the USD budget. PR
+trials always upload sub-agent transcripts. Dispatches default to capturing
+transcripts and can opt out. Read the candidate transcripts before accepting
+a quality or cost delta.
+
+The pinned pi-ai 0.84.4 catalog does not include astra. `dispatch-astra.ts`
+adds the model with standard API pricing per million tokens: $10 input,
+$1 cached input, $12.50 cache writes, and $50 output. Above 272,000 total input
+tokens, the full request uses $20/$2/$25/$75 respectively. The existing pi
+Responses adapter reports cache-write usage and applies these pricing tiers.
+The entry uses `prompt_cache_options.ttl: "30m"` instead of the retired
+`prompt_cache_retention` field and requests standard processing, not fast
+mode. A future catalog entry takes precedence over the local definition.
+See the [model docs](https://developers.openai.com/api/docs/models/gpt-6-astra)
+and [migration guide](https://developers.openai.com/api/docs/guides/latest-model).
+
+This is an eval configuration, not a production rollout. The installed
+reviewer, canary, and compiled workflows are unchanged. The production
+firewall still meters anthropic traffic only, so do not release these astra
+pins or use the head-lib canary as an astra test. The reported costs and
+budget are list-price dollars, not Khan's discounted anthropic rate.
+
 ## Costs and models
 
 Measured ~$0.72-0.75 per case per arm. Smoke run ~$10/PR; full 14-case

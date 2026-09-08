@@ -44,6 +44,7 @@
  */
 
 import type {AgentRequest, AgentResult, AgentRunner} from "./dispatch";
+import {withAstra} from "./dispatch-astra";
 import {createToolExec, type SandboxOptions} from "./dispatch-exec";
 import {
     ANTHROPIC_BASE_URL_ENV,
@@ -292,6 +293,9 @@ export const createPiRunner = async (
             getModels: () => readonly {id: string}[];
         };
     };
+    const {openaiProvider} = await import(
+        "@earendil-works/pi-ai/providers/openai"
+    );
     const core = (await import("@earendil-works/pi-agent-core")) as unknown as {
         runAgentLoop: (
             prompts: unknown[],
@@ -324,6 +328,14 @@ export const createPiRunner = async (
     models.setProvider({
         ...google,
         getModels: () => withGemini38Flash(google.getModels()),
+    });
+
+    // Eval-only direct API access, with OPENAI_API_KEY resolved lazily.
+    // Production routing through the anthropic firewall is unchanged.
+    const openai = openaiProvider();
+    models.setProvider({
+        ...openai,
+        getModels: () => withAstra(openai.getModels()),
     });
 
     return async (request: AgentRequest): Promise<AgentResult> => {

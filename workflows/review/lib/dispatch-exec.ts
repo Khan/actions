@@ -166,6 +166,8 @@ type SandboxWrapper = {
  */
 export const SCRUBBED_ENV_KEYS = [
     "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
     "GITHUB_TOKEN",
     "GH_TOKEN",
     "GITHUB_MCP_SERVER_TOKEN",

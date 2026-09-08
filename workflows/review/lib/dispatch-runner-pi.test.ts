@@ -47,6 +47,7 @@ type RegisteredProvider = {
 let registeredProviders: RegisteredProvider[];
 let catalog: {id: string}[];
 let googleCatalog: {id: string}[];
+let openaiCatalog: {id: string}[];
 /** Every (provider, id) pair the runner loaded, for the routing assertions. */
 let getModelCalls: [string, string][];
 
@@ -107,6 +108,13 @@ vi.mock("@earendil-works/pi-ai/providers/google", () => ({
         id: "google",
         baseUrl: "https://generativelanguage.googleapis.com/v1beta",
         getModels: () => googleCatalog,
+    }),
+}));
+
+vi.mock("@earendil-works/pi-ai/providers/openai", () => ({
+    openaiProvider: () => ({
+        id: "openai",
+        getModels: () => openaiCatalog,
     }),
 }));
 
@@ -185,6 +193,7 @@ beforeEach(() => {
     getModelCalls = [];
     catalog = [{id: "claude-opus-4-8"}, {id: "claude-fable-5"}];
     googleCatalog = [{id: "gemini-3.6-flash"}];
+    openaiCatalog = [{id: "gpt-5.5"}];
     delete process.env["ANTHROPIC_BASE_URL"];
     delete process.env["REVIEW_SANDBOX"];
     loop = () => Promise.resolve([]);
@@ -850,6 +859,32 @@ describe("createPiRunner", () => {
         const runner = await createPiRunner();
         await runner(request({model: "gemini-3.8-flash"}));
         expect(getModelCalls).toEqual([["google", "gemini-3.8-flash"]]);
+    });
+
+    it("registers astra and routes it to openai with metered turns", async () => {
+        loop = async ({emit, streamFn}) => {
+            streamFn({id: "gpt-6-astra", api: "openai-responses"}, []);
+            emit(turnEnd("{}", 0.25));
+            emit(turnEnd("{}", 0.5));
+            return [];
+        };
+        const runner = await createPiRunner();
+        const result = await runner(request({model: "gpt-6-astra"}));
+        expect(
+            registered("openai")
+                .getModels()
+                .map((m) => m.id),
+        ).toEqual(["gpt-5.5", "gpt-6-astra"]);
+        expect(getModelCalls).toEqual([["openai", "gpt-6-astra"]]);
+        expect(streamSimpleOptions[0]?.["reasoning"]).toBe("high");
+        expect(result.usd).toBe(0.75);
+    });
+
+    it("rejects an unknown openai pin without falling back", async () => {
+        const runner = await createPiRunner();
+        await expect(runner(request({model: "gpt-9"}))).rejects.toThrow(
+            /not in Pi's openai catalog.*gpt-6-astra/s,
+        );
     });
 
     it("routes a claude pin to the Anthropic provider", async () => {
