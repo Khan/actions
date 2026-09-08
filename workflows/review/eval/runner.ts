@@ -97,7 +97,7 @@ export type RunCandidate = {
 /** The review the runner would submit — data only; nothing is posted. */
 export type PlannedReview = {
     /**
-     * The github review event, including COMMENT, or `null` for HOLD_FOR_HUMAN.
+     * The review event to submit, or `null` for HOLD_FOR_HUMAN.
      * A hold isn't a review event, so it calls for a human instead of submitting.
      */
     event: Exclude<VerdictEvent, "HOLD_FOR_HUMAN"> | null;
