@@ -1,0 +1,852 @@
+{
+    "scope": "Unchanged-validator live baseline with a partial checkout. Recorded outputs and lexical scores, not a candidate experiment or a complete factual audit. See validator-fidelity-baseline.md for the manual audit.",
+    "sourceReportSha256": "37328e20273533aaed709a0ef1a184c4265682135489ad99b549f087ea6b2dd4",
+    "harnessRefFromOperatorContext": "2cbab05d2171ed37534b32b7e104247418ddfb03",
+    "provenanceLimit": "The runner did not record its implementation hash. The harness ref comes from operator context, not run-captured provenance.",
+    "status": "complete",
+    "probe": {
+        "ok": true,
+        "notAttempted": false,
+        "dispatchFailed": false,
+        "detail": "in-scope read returned its contents, out-of-scope reads attempted (Read and Glob) and did not leak (checked in the final text and every tool result), bash absent from the toolset, deniedReads=2, deniedTools=0, toolCalls=3, $0.048"
+    },
+    "model": "claude-opus-5",
+    "promptSha256": "9f3abadfa798cf4138524fd2f5415f96297bfb19936b0abd75acfd352a2344ac",
+    "scorerSha256": "abbb57f2526bf7ec4e526e6aeb45f70a27764410d51855c4da1f5f3baa02f0ba",
+    "inputsSha256": "5ad4330e28b5fb0f4a3ca9c478080aa8962dd0ba3832a21ea053ed32a6e8bc40",
+    "toolPolicy": "read-scoped:v1:Read,Grep,Glob",
+    "maxUsd": 8,
+    "budgetPolicy": "Stop before the next dispatch at the spend threshold. An in-flight call may overrun it. Stop on an unpriced failure.",
+    "spentUsd": 7.791942000000001,
+    "spendComplete": true,
+    "samples": [
+        {
+            "sample": 1,
+            "caseId": "webapp-41896-coaching-batch-support",
+            "kind": "original",
+            "repeat": 1,
+            "status": "scored",
+            "inputSha256": "d9defecbca27955b3fe7028e2b68b5dfd07c9aece84636a52dff8aa66c48efaa",
+            "resolvedPromptSha256": "d28ba79ad5afa5f9db4d487dabb56f0249f2cdaddc4e771a4a45cd716719a3d4",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.85,\n      \"reason\": \"Verified the whole chain on new code: coaching_loader.go:38-45 copies one error into all len(kaids) slots; coaches.go:114-116 returns the still-empty map with the error; coachee.go:71-100 fans out per kaid and tracegroup.go:94-102 returns the first non-nil error while Go() cancels the rest; acls.go:120-131 logs and falls through to actorIsProgressViewingAdminForUser, which a plain teacher fails, so one bad lookup 403s every row. Precedent cite services/progress/resolvers/coaching_loader.go:38-45 checks out. Corrections: grep for TestFetchWCSessionsScopesErrorToItsConfig found it only in the claim text (the diff adds no test files), and the suggestion's parenthetical is wrong since acl.IsCoachedByActorErr does exist at coaches.go:36; also fixed the IsCoachedBy and acls.go line cites.\",\n      \"corrected\": {\n        \"importance\": \"medium\",\n        \"subject\": \"The coaching loader fans one failed lookup out to every kaid, so one student's transient error now denies the whole roster. Consider scoping it per-kaid the way the session loader does.\",\n        \"discussion\": \"The coaching loader fans one failed lookup out to every kaid, so a single student's transient error now denies the whole roster. Consider scoping it per-kaid the way the sibling loader in this same PR does: writing_coach_session_loader.go:70-73 states the principle outright (\\\"Batching must not widen the blast radius: without this, one assignment's failed query would error out a healthy assignment's roster too, whereas the unbatched per-row calls failed independently\\\"). The coaching loader is the half where that principle wasn't applied, and it's the half with the worse outcome, a 403 rather than a null field.\\n\\nThe comment on this line assumes a batch-wide error means the actor's coach data is globally unavailable. It doesn't. acl.ManyCoachedByActorErr issues one manyCoachedBy call, and coaches' relationships.ManyCoachedBy (coachee.go:71-100) fans out one getCoachCoacheePair per kaid in a tracegroup, where g.Wait() returns the first non-nil error and the first error cancels the remaining goroutines (tracegroup.go:94-102 and 173-179). ManyCoachedByActorErr then discards every successful result, returning the still-empty result map alongside the error (coaches.go:112-116). This loader copies that one error into all len(kaids) slots, and isActorCoachOrAdminBatched (acls.go:120-131) logs it, gets coached=false for every kaid, and falls through to actorIsProgressViewingAdminForUser, which a plain teacher fails. So the whole roster comes back Unauthorized.\\n\\nBefore this PR the same event denied exactly one row: acl.IsCoachedByActor ran per kaid against coaches' IsCoachedBy, a single-key query (coachee.go:103-110), with its own request-cache entry. Falling back per-kaid on error costs nothing on the happy path, since the fallback only runs once the batch has already failed.\\n\\nOne caveat on the precedent: services/progress/resolvers/coaching_loader.go:38-45 does the identical all-keys fan-out, so this shape is the existing repo pattern for a batched coach check, and a per-kaid fallback would diverge from it. Worth deciding deliberately rather than treating it as an oversight.\",\n        \"suggestion\": \"\\tcoached, err := acl.ManyCoachedByActorErr(ktx, kaids)\\n\\tif err != nil {\\n\\t\\t// coaches' manyCoachedBy fans out one lookup per kaid and returns the\\n\\t\\t// first error, so a batch-wide failure says nothing about any\\n\\t\\t// particular kaid. Fall back to the per-kaid check: one bad lookup\\n\\t\\t// should deny one student, not the whole roster.\\n\\t\\tktx.Log().Error(err)\\n\\t\\tout := make([]bool, len(kaids))\\n\\t\\tfor i, kaid := range kaids {\\n\\t\\t\\tout[i] = acl.IsCoachedByActor(ktx, kaid)\\n\\t\\t}\\n\\t\\treturn out, nil\\n\\t}\\n\\n// (acl.IsCoachedByActor, coaches.go:21, is the bool form that already logs and\\n// denies internally; use acl.IsCoachedByActorErr, coaches.go:36, if you'd\\n// rather surface the per-kaid error.)\"\n      }\n    }\n  ]\n}\n```",
+                "usd": 0.7724267499999999,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 760,
+                        "output": 7405,
+                        "cacheRead": 300516,
+                        "cacheWrite": 69319
+                    }
+                ],
+                "turns": 14,
+                "toolCalls": 13,
+                "deniedReads": 0,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 26,
+                    "total": 29
+                },
+                "refused": false,
+                "wallMs": 108607
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "body": "**suggestion (non-blocking):** The coaching loader fans one failed lookup out to every kaid, so one student's transient error now denies the whole roster. Consider scoping it per-kaid the way the session loader does.\n\n<details><summary><sub>context</sub></summary>\n\nThe coaching loader fans one failed lookup out to every kaid, so a single student's transient error now denies the whole roster. Consider scoping it per-kaid the way the sibling loader in this same PR does: writing_coach_session_loader.go:70-73 states the principle outright (\"Batching must not widen the blast radius: without this, one assignment's failed query would error out a healthy assignment's roster too, whereas the unbatched per-row calls failed independently\"). The coaching loader is the half where that principle wasn't applied, and it's the half with the worse outcome, a 403 rather than a null field.\n\nThe comment on this line assumes a batch-wide error means the actor's coach data is globally unavailable. It doesn't. acl.ManyCoachedByActorErr issues one manyCoachedBy call, and coaches' relationships.ManyCoachedBy (coachee.go:71-100) fans out one getCoachCoacheePair per kaid in a tracegroup, where g.Wait() returns the first non-nil error and the first error cancels the remaining goroutines (tracegroup.go:94-102 and 173-179). ManyCoachedByActorErr then discards every successful result, returning the still-empty result map alongside the error (coaches.go:112-116). This loader copies that one error into all len(kaids) slots, and isActorCoachOrAdminBatched (acls.go:120-131) logs it, gets coached=false for every kaid, and falls through to actorIsProgressViewingAdminForUser, which a plain teacher fails. So the whole roster comes back Unauthorized.\n\nBefore this PR the same event denied exactly one row: acl.IsCoachedByActor ran per kaid against coaches' IsCoachedBy, a single-key query (coachee.go:103-110), with its own request-cache entry. Falling back per-kaid on error costs nothing on the happy path, since the fallback only runs once the batch has already failed.\n\nOne caveat on the precedent: services/progress/resolvers/coaching_loader.go:38-45 does the identical all-keys fan-out, so this shape is the existing repo pattern for a batched coach check, and a per-kaid fallback would diverge from it. Worth deciding deliberately rather than treating it as an oversight.\n\nA sketch, not a committable replacement:\n\n````\n\tcoached, err := acl.ManyCoachedByActorErr(ktx, kaids)\n\tif err != nil {\n\t\t// coaches' manyCoachedBy fans out one lookup per kaid and returns the\n\t\t// first error, so a batch-wide failure says nothing about any\n\t\t// particular kaid. Fall back to the per-kaid check: one bad lookup\n\t\t// should deny one student, not the whole roster.\n\t\tktx.Log().Error(err)\n\t\tout := make([]bool, len(kaids))\n\t\tfor i, kaid := range kaids {\n\t\t\tout[i] = acl.IsCoachedByActor(ktx, kaid)\n\t\t}\n\t\treturn out, nil\n\t}\n\n// (acl.IsCoachedByActor, coaches.go:21, is the bool form that already logs and\n// denies internally; use acl.IsCoachedByActorErr, coaches.go:36, if you'd\n// rather surface the per-kaid error.)\n````\n\n</details>"
+            },
+            "transcriptSha256": "e99763399295f82552e977eb11dadfb16509eb9ef76d2be945c9eef7be508dde"
+        },
+        {
+            "sample": 2,
+            "caseId": "webapp-41896-coaching-batch-support",
+            "kind": "clean-control",
+            "repeat": 1,
+            "status": "scored",
+            "inputSha256": "9070f6738fffea44fd2a13b7a690164c7cd798a66ea21b020d9cdef42a93190d",
+            "resolvedPromptSha256": "a56cffb3233d08a50383de268b8785e6c58e6d4b5bf1257ba6806d8faea02c13",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.7,\n      \"reason\": \"Traced the chain: services/coaches/relationships/coachee.go:82-99 fans ManyCoachedBy out to one getCoachCoacheePair per coachee under a tracegroup whose g.Wait() returns the first error, acl.ManyCoachedByActorErr returns an empty map plus that error (pkg/khan/acl/coaches.go:114-116), and coaching_loader.go:39-46 copies it into every slot, so one pair's error denies every kaid for a non-admin caller via isActorCoachOrAdminBatched; corrected the prose since the per-student fan-out is server-side in the coaches service, not in ManyCoachedByActorErr's client call.\",\n      \"corrected\": {\n        \"discussion\": \"One student's failed coach lookup can deny the whole roster. ManyCoachedBy on the coaches side (services/coaches/relationships/coachee.go:82-99) runs one getCoachCoacheePair per coachee in a tracegroup and g.Wait() returns the first error, so a single pair's datastore error fails the entire response. acl.ManyCoachedByActorErr then hands back an empty map plus that error (pkg/khan/acl/coaches.go:114-116), and this loader copies it into every slot at lines 39-46, which is where the line 40 comment (\\\"The failure is not per-key\\\") stops holding. isActorCoachOrAdminBatched logs the error and falls through to the admin check, so a teacher without progress-viewing admin gets Unauthorized for every row instead of just the broken one, where the unbatched isActorCoachOrAdmin failed per student. The sibling WcSession loader in this same PR takes the opposite tack and scopes a failure to the config that failed. Keep the successful batch path, and on error fall back per kaid with acl.IsCoachedByActorErr (the cached variable at pkg/khan/acl/coaches.go:36-40), retaining each result and error in its own slot. That adds calls only on the failure path and won't repair a service-wide outage. Reasonable to leave as is if you'd rather match services/progress/resolvers/coaching_loader.go, which does the same fan-out today.\"\n      }\n    }\n  ]\n}\n```",
+                "usd": 0.51219525,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 547,
+                        "output": 6164,
+                        "cacheRead": 339833,
+                        "cacheWrite": 29671
+                    }
+                ],
+                "turns": 13,
+                "toolCalls": 12,
+                "deniedReads": 0,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 5
+                },
+                "refused": false,
+                "wallMs": 91099
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "body": "**suggestion (non-blocking):** The coaching batch can deny the whole roster after one student's lookup fails, so fall back per kaid on error.\n\n<details><summary><sub>context</sub></summary>\n\nOne student's failed coach lookup can deny the whole roster. ManyCoachedBy on the coaches side (services/coaches/relationships/coachee.go:82-99) runs one getCoachCoacheePair per coachee in a tracegroup and g.Wait() returns the first error, so a single pair's datastore error fails the entire response. acl.ManyCoachedByActorErr then hands back an empty map plus that error (pkg/khan/acl/coaches.go:114-116), and this loader copies it into every slot at lines 39-46, which is where the line 40 comment (\"The failure is not per-key\") stops holding. isActorCoachOrAdminBatched logs the error and falls through to the admin check, so a teacher without progress-viewing admin gets Unauthorized for every row instead of just the broken one, where the unbatched isActorCoachOrAdmin failed per student. The sibling WcSession loader in this same PR takes the opposite tack and scopes a failure to the config that failed. Keep the successful batch path, and on error fall back per kaid with acl.IsCoachedByActorErr (the cached variable at pkg/khan/acl/coaches.go:36-40), retaining each result and error in its own slot. That adds calls only on the failure path and won't repair a service-wide outage. Reasonable to leave as is if you'd rather match services/progress/resolvers/coaching_loader.go, which does the same fan-out today.\n\n</details>\n\n```suggestion\nif err != nil {\n    out := make([]bool, len(kaids))\n    errs := make([]error, len(kaids))\n    for i, kaid := range kaids {\n        out[i], errs[i] = acl.IsCoachedByActorErr(ktx, kaid)\n    }\n    return out, errs\n}\n```"
+            },
+            "transcriptSha256": "4c5c0efaa47a610c0538e723544e7e4620ec824587b1481f9d195e15f29d6be3"
+        },
+        {
+            "sample": 3,
+            "caseId": "webapp-41989-district-query-support",
+            "kind": "original",
+            "repeat": 1,
+            "status": "scored",
+            "inputSha256": "8b2a1c53dd8c3a9ea30f3ceba7f27fb34c49b0c349d8ca4612cd0b212274624b",
+            "resolvedPromptSha256": "c28e0ecbb795470edb17faffa2358493317f78fee24557570b4028b96e09fddc",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.45,\n      \"reason\": \"Anchor is right: line 1857 is the new unbounded `crud.GetAll[models.District]` and lines 1862-1874 filter eligibility in memory. But two load-bearing details are wrong, so corrected: `DontSendKADEmails` is `datastore:\\\"dont_send_kad_emails,noindex\\\"` (district.go:92) so the `EligibleForKADEmails()` half (district.go:451 = `SendKADEmails() && RosterSyncingEnabled`) cannot become a query filter without dropping noindex, and the pre-diff path (removed lines) was an unbounded global `is_admin = true` GetAll plus GetMulti over every district with an admin, so the district read is narrower than what it replaced, not a regression. Residual is a real but minor bound-the-scan suggestion on new code; the 61-property count checks out (61 `datastore:` tags).\",\n      \"corrected\": {\n        \"label\": \"suggestion (non-blocking)\",\n        \"importance\": \"minor\",\n        \"subject\": \"The new country-wide `crud.GetAll[models.District]` at line 1857 has no `.Limit()` and filters eligibility in memory; `is_test` and `roster_syncing_enabled` could move into the query, but `dont_send_kad_emails` is noindex.\",\n        \"discussion\": \"This new `crud.GetAll[models.District]` at line 1857 has no `.Limit()`, so it loads every district with `country_code == countryCode` (the full entity, 61 `datastore:` properties, not a projection) and then discards the ineligible ones in memory at lines 1862-1874. Two of those predicates can move into the query: `IsTest` is `datastore:\\\"is_test\\\"` (district.go:114) and `RosterSyncingEnabled` is `datastore:\\\"roster_syncing_enabled\\\"` (district.go:143), both indexed. The third can't: `DontSendKADEmails` is `datastore:\\\"dont_send_kad_emails,noindex\\\"` (district.go:92), and `EligibleForKADEmails()` (district.go:451) is `SendKADEmails() && RosterSyncingEnabled`, so the opt-out half needs the noindex dropped and a backfill before it could be filtered server-side. To be clear this isn't a regression from the old path: the code removed here ran an unbounded `is_admin = true` GetAll over every admin UDI in datastore with no country filter, then `GetMulti` over the districts of all of them, so the district-side read is narrower now, and the comment at lines 1800-1804 shows the up-front-load tradeoff was already weighed. The only thing left is bounding growth of the new scan, either the two indexable equality filters (plus the matching index.yaml entry) or a `.Limit()` with a cursor. Non-blocking either way; is the district count per country small enough that you'd rather leave it unbounded?\",\n        \"suggestion\": \"Add `.FilterField(\\\"is_test\\\", \\\"=\\\", testDistrictsOnly).FilterField(\\\"roster_syncing_enabled\\\", \\\"=\\\", true)` to the query (with the matching index.yaml entry) and keep only the `SendKADEmails()` check in the in-memory loop.\"\n      }\n    }\n  ]\n}\n```",
+                "usd": 0.47408375,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 545,
+                        "output": 6105,
+                        "cacheRead": 282755,
+                        "cacheWrite": 28377
+                    }
+                ],
+                "turns": 11,
+                "toolCalls": 10,
+                "deniedReads": 1,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 4
+                },
+                "refused": false,
+                "wallMs": 86669
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": false,
+                    "supportingAssertions": true,
+                    "visibleConsequence": false
+                },
+                "body": "**suggestion (non-blocking):** The new country-wide `crud.GetAll[models.District]` at line 1857 has no `.Limit()` and filters eligibility in memory; `is_test` and `roster_syncing_enabled` could move into the query, but `dont_send_kad_emails` is noindex.\n\n<details><summary><sub>context</sub></summary>\n\nThis new `crud.GetAll[models.District]` at line 1857 has no `.Limit()`, so it loads every district with `country_code == countryCode` (the full entity, 61 `datastore:` properties, not a projection) and then discards the ineligible ones in memory at lines 1862-1874. Two of those predicates can move into the query: `IsTest` is `datastore:\"is_test\"` (district.go:114) and `RosterSyncingEnabled` is `datastore:\"roster_syncing_enabled\"` (district.go:143), both indexed. The third can't: `DontSendKADEmails` is `datastore:\"dont_send_kad_emails,noindex\"` (district.go:92), and `EligibleForKADEmails()` (district.go:451) is `SendKADEmails() && RosterSyncingEnabled`, so the opt-out half needs the noindex dropped and a backfill before it could be filtered server-side. To be clear this isn't a regression from the old path: the code removed here ran an unbounded `is_admin = true` GetAll over every admin UDI in datastore with no country filter, then `GetMulti` over the districts of all of them, so the district-side read is narrower now, and the comment at lines 1800-1804 shows the up-front-load tradeoff was already weighed. The only thing left is bounding growth of the new scan, either the two indexable equality filters (plus the matching index.yaml entry) or a `.Limit()` with a cursor. Non-blocking either way; is the district count per country small enough that you'd rather leave it unbounded?\n\n</details>\n\n```suggestion\nAdd `.FilterField(\"is_test\", \"=\", testDistrictsOnly).FilterField(\"roster_syncing_enabled\", \"=\", true)` to the query (with the matching index.yaml entry) and keep only the `SendKADEmails()` check in the in-memory loop.\n```"
+            },
+            "transcriptSha256": "23e0cfbbc88089b06ac5a191b132d9ebf9fca9bfc4fbb585d510000d7a7e8290"
+        },
+        {
+            "sample": 4,
+            "caseId": "webapp-41989-district-query-support",
+            "kind": "clean-control",
+            "repeat": 1,
+            "status": "scored",
+            "inputSha256": "640cfe2a90e8299ad4f2ec6ebab200933d7f8599f6a26539b66132069f1f751d",
+            "resolvedPromptSha256": "025900dc25aa78d43ca61fc69f1150c003b4d334bef9f9528389020a555b24cd",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"plausible\",\n      \"confidence\": 0.4,\n      \"reason\": \"Line 1857 really is an unbounded crud.GetAll filtered only on country_code with IsTest/EligibleForKADEmails applied in memory (1863-1874), and dont_send_kad_emails is `datastore:\\\"dont_send_kad_emails,noindex\\\"` (district.go:92) as claimed, but the mechanism is pre-existing and not amplified: the removed code did crud.GetAll over every is_admin UDI with no country filter plus a GetMulti of their districts, and both callers (monthly_admin_email_batch.go:444, kad_email_subscriptions.go:529) still take one full UDI slice back, so the 'one page per invocation' remedy doesn't fit the caller contract and I can't size the actual district count to confirm a real limit is hit.\",\n      \"corrected\": {\n        \"subject\": \"The country district query loads every district before filtering in memory, unbounded, though smaller than the read it replaces.\",\n        \"discussion\": \"getEmailableDistrictsByCountry runs crud.GetAll on District filtered only by country_code (line 1857) and then applies IsTest and EligibleForKADEmails in memory, so every district in the country gets materialized regardless of eligibility. dont_send_kad_emails is stored noindex (models/district.go:92) so that check can't move into the query, but is_test and roster_syncing_enabled are indexed and could, which would shrink the result without bounding it. This isn't a regression: the code being replaced did crud.GetAll over every is_admin UDI with no country filter plus a GetMulti of their districts, so the new read materializes strictly less, and both callers (monthly_admin_email_batch.go:444, kad_email_subscriptions.go:529) still take the whole UDI slice back in one call, so paging only the district query wouldn't bound the function end to end. Do you know roughly how many districts the largest country has here, a few thousand or more like tens of thousands?\"\n      }\n    }\n  ]\n}\n```",
+                "usd": 0.4520055,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 543,
+                        "output": 5463,
+                        "cacheRead": 240256,
+                        "cacheWrite": 30814
+                    }
+                ],
+                "turns": 10,
+                "toolCalls": 9,
+                "deniedReads": 0,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 5
+                },
+                "refused": false,
+                "wallMs": 83294
+            },
+            "score": {
+                "verification": "plausible",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "body": "**suggestion (non-blocking):** The country query loads every district before filtering, so page the read without dropping eligible recipients.\n\n<details><summary><sub>context</sub></summary>\n\nThe new country-wide District read materializes ineligible entities before filtering, with no page bound. Page the country query with a limit and cursor, processing one page per invocation while retaining the eligibility checks. Do not silently truncate eligible recipients. DontSendKADEmails is stored with noindex, so adding index.yaml alone cannot enable that equality filter. Indexed is_test and roster_syncing_enabled filters can reduce the result set but do not bound its size.\n\n</details>"
+            },
+            "transcriptSha256": "1fcf8fa09970632f7d506378877dab8731d259dc24a15bf08c9b8d4c3c4dfd27"
+        },
+        {
+            "sample": 5,
+            "caseId": "webapp-42001-phantom-debug-summary",
+            "kind": "original",
+            "repeat": 1,
+            "status": "scored",
+            "inputSha256": "d62819e2c1eb9fdfaa5d112b1c21e890a2fa4fce256837ea64f7fc3fa496ba52",
+            "resolvedPromptSha256": "7d71dabddb22a8356c1a6024ebc8bc7d867c4d2f3f4dbc535f9c5331e163a246",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.85,\n      \"reason\": \"Traced the branch: line 167 returns whenever RequestUser's err is non-nil, so err is provably nil at line 175, and errorToDebugMessage's `if err == nil { return nil }` (lines 157-160) makes line 180 always yield a nil debugMessage while the errors.Unauthorized() built on line 176 is only logged; all lines are added by this diff.\"\n    }\n  ]\n}\n```",
+                "usd": 0.29648975,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 539,
+                        "output": 1209,
+                        "cacheRead": 180052,
+                        "cacheWrite": 27767
+                    }
+                ],
+                "turns": 8,
+                "toolCalls": 7,
+                "deniedReads": 0,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 4
+                },
+                "refused": false,
+                "wallMs": 23705
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": false
+                },
+                "body": "**suggestion (non-blocking):** `errorToDebugMessage(err)` is passed a guaranteed-nil `err` in the phantom-user branch.\n\n<details><summary><sub>context</sub></summary>\n\n`errorToDebugMessage(err)` on line 180 is always passed a nil `err`. Control flow reaches line 175 only when `ktx.RequestUser()` on line 166 returned a nil error (the non-nil case returns at line 169), and `errorToDebugMessage` (line 157) short-circuits with `if err == nil { return nil }`. So every phantom/not-logged-in rejection returns `UNAUTHORIZED` with `debugMessage: null`, discarding the reason — while the `errors.Unauthorized()` constructed on line 176 for the log line is thrown away instead of being reused for the client-facing debug message. Introduced by this change; the four new tests all authenticate, so none covers this branch.\n\nA sketch, not a committable replacement:\n\n````\n\tif !acl.IsLoggedIn(ktx, acl.PhantomProhibited) {\n\t\tunauthorizedErr := errors.Unauthorized()\n\t\tktx.Log().Warn(unauthorizedErr)\n\t\treturn _mapErrorToAllClassrooms(\n\t\t\tgraphql.WritingCoachConfigErrorCodeUnauthorized,\n\t\t\t&response,\n\t\t\terrorToDebugMessage(unauthorizedErr),\n\t\t), nil\n\t}\n````\n\n</details>"
+            },
+            "transcriptSha256": "4c086ba9cd4c189c46437867ae33ff831e3eb32a95a6090dc37a18dbadd1b069"
+        },
+        {
+            "sample": 6,
+            "caseId": "webapp-42001-phantom-debug-summary",
+            "kind": "clean-control",
+            "repeat": 1,
+            "status": "scored",
+            "inputSha256": "f298a6a80e8931272795c3ea9f08308619c15d4fb975b54ce8084bf2515ca596",
+            "resolvedPromptSha256": "ba7947ba63c9dfb7aa2b3160fbd6ddc7459f78247effd27fd3868151a213436b",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.9,\n      \"reason\": \"Read writing_coach_config.go:157-182: the closure returns nil for a nil err (157-160), line 167 returns on every non-nil RequestUser error, so `err` is provably nil at line 180 and the phantom rejection ships debugMessage: null while the errors.Unauthorized() built at 176 is only logged; all of this is added by this diff.\"\n    }\n  ]\n}\n```",
+                "usd": 0.24953375,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 535,
+                        "output": 1246,
+                        "cacheRead": 98080,
+                        "cacheWrite": 26667
+                    }
+                ],
+                "turns": 5,
+                "toolCalls": 4,
+                "deniedReads": 0,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 9
+                },
+                "refused": false,
+                "wallMs": 23623
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "body": "**suggestion (non-blocking):** Phantom-user rejections return UNAUTHORIZED without the debug reason, so reuse the unauthorized error for the message.\n\n<details><summary><sub>context</sub></summary>\n\n`errorToDebugMessage(err)` on line 180 is always passed a nil `err`. Control flow reaches line 175 only when `ktx.RequestUser()` on line 166 returned a nil error (the non-nil case returns at line 169), and `errorToDebugMessage` (line 157) short-circuits with `if err == nil { return nil }`. So every phantom/not-logged-in rejection returns `UNAUTHORIZED` with `debugMessage: null`, discarding the reason — while the `errors.Unauthorized()` constructed on line 176 for the log line is thrown away instead of being reused for the client-facing debug message. Introduced by this change; the four new tests all authenticate, so none covers this branch.\n\nA sketch, not a committable replacement:\n\n````\n\tif !acl.IsLoggedIn(ktx, acl.PhantomProhibited) {\n\t\tunauthorizedErr := errors.Unauthorized()\n\t\tktx.Log().Warn(unauthorizedErr)\n\t\treturn _mapErrorToAllClassrooms(\n\t\t\tgraphql.WritingCoachConfigErrorCodeUnauthorized,\n\t\t\t&response,\n\t\t\terrorToDebugMessage(unauthorizedErr),\n\t\t), nil\n\t}\n````\n\n</details>"
+            },
+            "transcriptSha256": "19000bd4c9e263bc17b07d12b2ba47929c9a387a6ac3782e177af7fae02db2f2"
+        },
+        {
+            "sample": 7,
+            "caseId": "webapp-41896-coaching-batch-support",
+            "kind": "clean-control",
+            "repeat": 2,
+            "status": "scored",
+            "inputSha256": "9070f6738fffea44fd2a13b7a690164c7cd798a66ea21b020d9cdef42a93190d",
+            "resolvedPromptSha256": "103e8622fc1800d783c873dbb2c3271b6762e1d72b9e8418d194da24d50960fb",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.75,\n      \"reason\": \"Traced the chain: services/coaches/relationships/coachee.go:82-99 loops getCoachCoacheePair per coachee in a tracegroup and g.Wait() returns an error if any single pair fails, pkg/khan/acl/coaches.go:114-116 then returns an empty map plus that error, and coaching_loader.go:39-46 fans it to every key while isActorCoachOrAdminBatched (resolvers/acls.go) only logs and falls through to the admin check, so the roster-wide denial is real; corrected the prose to say which part is pre-existing (upstream all-or-nothing, also fanned out today by services/progress/resolvers/coaching_loader.go:39-45) and which part this diff introduces.\",\n      \"corrected\": {\n        \"discussion\": \"Batching changes the failure blast radius on this permission check. services/coaches ManyCoachedBy (relationships/coachee.go:82-99) runs one getCoachCoacheePair per coachee in a tracegroup and g.Wait() returns an error if any single one fails, and acl.ManyCoachedByActorErr (pkg/khan/acl/coaches.go:114-116) then returns an empty map plus that error. This loader fans that error to every key, and isActorCoachOrAdminBatched logs it and falls through to actorIsProgressViewingAdminForUser, so one student's transient datastore error denies the whole roster for a teacher who isn't a progress-viewing admin. The upstream all-or-nothing behavior is pre-existing (services/progress/resolvers/coaching_loader.go:39-45 does the same fan-out today), but routing ai-guide's per-kaid check through the batch is new here, which is what turns a single-student failure into a roster-wide denial. Also, the comment on line 40 says the failure isn't per-key, and given that per-coachee loop upstream it often is. Worth noting the sibling loader in this same PR scopes errors per config for exactly this reason. So let's keep the successful batch path and, on batch failure, fall back per kaid with acl.IsCoachedByActorErr (the cached func var at pkg/khan/acl/coaches.go:36-40), retaining each result and error in its own slot. That adds calls only on the failure path and won't repair a service-wide outage (a RequestUser failure would just fail N times instead of once).\"\n      }\n    }\n  ]\n}\n```",
+                "usd": 0.5030959999999999,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 545,
+                        "output": 6248,
+                        "cacheRead": 294792,
+                        "cacheWrite": 31484
+                    }
+                ],
+                "turns": 12,
+                "toolCalls": 11,
+                "deniedReads": 0,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 5
+                },
+                "refused": false,
+                "wallMs": 86405
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "body": "**suggestion (non-blocking):** The coaching batch can deny the whole roster after one student's lookup fails, so fall back per kaid on error.\n\n<details><summary><sub>context</sub></summary>\n\nBatching changes the failure blast radius on this permission check. services/coaches ManyCoachedBy (relationships/coachee.go:82-99) runs one getCoachCoacheePair per coachee in a tracegroup and g.Wait() returns an error if any single one fails, and acl.ManyCoachedByActorErr (pkg/khan/acl/coaches.go:114-116) then returns an empty map plus that error. This loader fans that error to every key, and isActorCoachOrAdminBatched logs it and falls through to actorIsProgressViewingAdminForUser, so one student's transient datastore error denies the whole roster for a teacher who isn't a progress-viewing admin. The upstream all-or-nothing behavior is pre-existing (services/progress/resolvers/coaching_loader.go:39-45 does the same fan-out today), but routing ai-guide's per-kaid check through the batch is new here, which is what turns a single-student failure into a roster-wide denial. Also, the comment on line 40 says the failure isn't per-key, and given that per-coachee loop upstream it often is. Worth noting the sibling loader in this same PR scopes errors per config for exactly this reason. So let's keep the successful batch path and, on batch failure, fall back per kaid with acl.IsCoachedByActorErr (the cached func var at pkg/khan/acl/coaches.go:36-40), retaining each result and error in its own slot. That adds calls only on the failure path and won't repair a service-wide outage (a RequestUser failure would just fail N times instead of once).\n\n</details>\n\n```suggestion\nif err != nil {\n    out := make([]bool, len(kaids))\n    errs := make([]error, len(kaids))\n    for i, kaid := range kaids {\n        out[i], errs[i] = acl.IsCoachedByActorErr(ktx, kaid)\n    }\n    return out, errs\n}\n```"
+            },
+            "transcriptSha256": "137d2a43308b5377632042b1e101043f7b877d3241e42e515fb321a9df2d6d28"
+        },
+        {
+            "sample": 8,
+            "caseId": "webapp-41896-coaching-batch-support",
+            "kind": "original",
+            "repeat": 2,
+            "status": "scored",
+            "inputSha256": "d9defecbca27955b3fe7028e2b68b5dfd07c9aece84636a52dff8aa66c48efaa",
+            "resolvedPromptSha256": "de906dba479050ab8c593ae29c5b3978b6564aed8690e0da3b322cc7feee6f34",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.75,\n      \"reason\": \"Traced the whole chain in the checkout: coachee.go:78-99 fans out one getCoachCoacheePair per kaid and `err := g.Wait()` returns the first error, acl/coaches.go:114-116 returns an empty map plus that error, coaching_loader.go:39-45 copies it into every slot, and acls.go:120-131 logs and falls through to actorIsProgressViewingAdminForUser, so one kaid's failure denies the whole roster where the pre-change per-kaid acl.IsCoachedByActor (coachee.go:103-110) denied one row; corrected prose because the cited test TestFetchWCSessionsScopesErrorToItsConfig is not in the checkout (no _test.go files are staged, so I can't verify it) and the \\\"null field versus a 403\\\" contrast misstates the session loader's error path, which returns an error rather than null.\",\n      \"corrected\": {\n        \"line\": 40,\n        \"subject\": \"The coaching loader fans a single failed lookup out to every kaid, so one student's transient error now denies the whole roster. Scope it per-kaid the way the session loader does.\",\n        \"discussion\": \"The coaching loader copies one batch-wide error into every kaid's slot, so a failure that concerns a single student denies the whole roster. Consider scoping it per-kaid the way the sibling loader added in this PR does: writing_coach_session_loader.go:131-138 keeps a failed config's error off the healthy configs' keys, with the reasoning spelled out in the comment there (\\\"Batching must not widen the blast radius\\\").\\n\\nThe comment on this line assumes a batch-wide error means the actor's coach data is globally unavailable, and it isn't. services/coaches/relationships/coachee.go:71-100 shows ManyCoachedBy does not batch at the datastore layer, it fans out one getCoachCoacheePair per kaid in a tracegroup and `err := g.Wait()` returns the first error. acl.ManyCoachedByActorErr then returns an empty map alongside that error (pkg/khan/acl/coaches.go:114-116), this loader copies the one error into all len(kaids) slots, and isActorCoachOrAdminBatched (acls.go:120-131) logs it, gets coached=false for every kaid, and falls through to actorIsProgressViewingAdminForUser, which a plain teacher fails. So every row of the roster comes back Unauthorized.\\n\\nBefore this PR the same event denied exactly one row: acl.IsCoachedByActor ran per kaid against coaches' IsCoachedBy, a single key query (coachee.go:103-110) with its own request-cache entry. The happy-path batching win is unaffected by falling back per-kaid on error, since the fallback only runs when the batch already failed.\\n\\nOne caveat on the precedent: services/progress/resolvers/coaching_loader.go:38-45 does the identical all-keys fan-out, so this shape is the existing repo pattern for a batched coach check and a per-kaid fallback would diverge from it. Worth deciding deliberately rather than treating it as an oversight.\"\n      }\n    }\n  ]\n}\n```",
+                "usd": 0.676664,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 549,
+                        "output": 7970,
+                        "cacheRead": 430788,
+                        "cacheWrite": 41484
+                    }
+                ],
+                "turns": 18,
+                "toolCalls": 17,
+                "deniedReads": 2,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 5
+                },
+                "refused": false,
+                "wallMs": 113397
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": false,
+                    "visibleConsequence": true
+                },
+                "body": "**suggestion (non-blocking):** The coaching loader fans a single failed lookup out to every kaid, so one student's transient error now denies the whole roster. Scope it per-kaid the way the session loader does.\n\n<details><summary><sub>context</sub></summary>\n\nThe coaching loader copies one batch-wide error into every kaid's slot, so a failure that concerns a single student denies the whole roster. Consider scoping it per-kaid the way the sibling loader added in this PR does: writing_coach_session_loader.go:131-138 keeps a failed config's error off the healthy configs' keys, with the reasoning spelled out in the comment there (\"Batching must not widen the blast radius\").\n\nThe comment on this line assumes a batch-wide error means the actor's coach data is globally unavailable, and it isn't. services/coaches/relationships/coachee.go:71-100 shows ManyCoachedBy does not batch at the datastore layer, it fans out one getCoachCoacheePair per kaid in a tracegroup and `err := g.Wait()` returns the first error. acl.ManyCoachedByActorErr then returns an empty map alongside that error (pkg/khan/acl/coaches.go:114-116), this loader copies the one error into all len(kaids) slots, and isActorCoachOrAdminBatched (acls.go:120-131) logs it, gets coached=false for every kaid, and falls through to actorIsProgressViewingAdminForUser, which a plain teacher fails. So every row of the roster comes back Unauthorized.\n\nBefore this PR the same event denied exactly one row: acl.IsCoachedByActor ran per kaid against coaches' IsCoachedBy, a single key query (coachee.go:103-110) with its own request-cache entry. The happy-path batching win is unaffected by falling back per-kaid on error, since the fallback only runs when the batch already failed.\n\nOne caveat on the precedent: services/progress/resolvers/coaching_loader.go:38-45 does the identical all-keys fan-out, so this shape is the existing repo pattern for a batched coach check and a per-kaid fallback would diverge from it. Worth deciding deliberately rather than treating it as an oversight.\n\nA sketch, not a committable replacement:\n\n````\n\tcoached, err := acl.ManyCoachedByActorErr(ktx, kaids)\n\tif err != nil {\n\t\t// coaches' manyCoachedBy fans out one lookup per kaid and returns the\n\t\t// first error, so a batch-wide failure says nothing about any\n\t\t// particular kaid. Fall back to the per-kaid check: one bad lookup\n\t\t// should deny one student, not the whole roster.\n\t\tktx.Log().Error(err)\n\t\tout := make([]bool, len(kaids))\n\t\tfor i, kaid := range kaids {\n\t\t\tout[i] = acl.IsCoachedByActor(ktx, kaid)\n\t\t}\n\t\treturn out, nil\n\t}\n\n// (acl.IsCoachedByActorErr does not exist; IsCoachedByActor is the bool form\n// at pkg/khan/acl/coaches.go:21 and already logs-and-denies internally.)\n````\n\n</details>"
+            },
+            "transcriptSha256": "f436330ee14e8a52a44e858e72e669c0f18cb617f9f84c1630693b7ccfe7d278"
+        },
+        {
+            "sample": 9,
+            "caseId": "webapp-41989-district-query-support",
+            "kind": "clean-control",
+            "repeat": 2,
+            "status": "scored",
+            "inputSha256": "640cfe2a90e8299ad4f2ec6ebab200933d7f8599f6a26539b66132069f1f751d",
+            "resolvedPromptSha256": "4f3ee2ecd9a60a35024be352e2d36676ff013f61551dd0e2de9edba4fe052183",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"plausible\",\n      \"confidence\": 0.4,\n      \"reason\": \"Lines 1855-1857 do run an unlimited crud.GetAll over DistrictKind filtered only by country_code with the eligibility filtering done in Go, and the noindex claim checks out (services/districts/models/district.go:92 `dont_send_kad_emails,noindex`, with is_test:114 and roster_syncing_enabled:143 indexed); what I can't settle is whether this is a defect worth fixing, since the code it replaces was also unbounded (GetAll over every is_admin UDI globally plus a GetMulti of their districts) so total entities materialized goes down, not up, and both callers (monthly_admin_email_batch.go:444, kad_email_subscriptions.go:529) consume the full slice so per-invocation paging would change the function's contract.\",\n      \"corrected\": {\n        \"line\": 1857,\n        \"subject\": \"The new country district query has no limit, so it loads every district in the country before filtering.\",\n        \"discussion\": \"getEmailableDistrictsByCountry runs crud.GetAll on DistrictKind filtered only by country_code (line 1857) and then does the is_test and EligibleForKADEmails filtering in Go, so a large country materializes every district in memory. Two things temper this. The code it replaces was also unbounded (GetAll over every is_admin UDI globally, then GetMulti of their districts), so this isn't a regression, it's the same unbounded-read shape moved to a different kind, and probably fewer entities overall. And dont_send_kad_emails is stored noindex (services/districts/models/district.go:92), so the KAD-eligibility half of the filter genuinely can't move into the query, an index.yaml entry won't help there. is_test and roster_syncing_enabled are both indexed (district.go:114 and :143) though, so pushing those two down into the query would shrink the result set without touching any noindex field, even if it doesn't bound it. Full paging with a cursor is a bigger change than it looks, both callers (monthly_admin_email_batch.go:444 and kad_email_subscriptions.go:529) take the whole slice back, so a page-per-invocation version needs their loops reworked too, and dropping eligible recipients is the failure mode to avoid there. Roughly how many districts does the largest country you run this for have?\"\n      }\n    }\n  ]\n}\n```",
+                "usd": 0.4165565,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 543,
+                        "output": 4761,
+                        "cacheRead": 238358,
+                        "cacheWrite": 28102
+                    }
+                ],
+                "turns": 9,
+                "toolCalls": 8,
+                "deniedReads": 0,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 5
+                },
+                "refused": false,
+                "wallMs": 77353
+            },
+            "score": {
+                "verification": "plausible",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "body": "**suggestion (non-blocking):** The country query loads every district before filtering, so page the read without dropping eligible recipients.\n\n<details><summary><sub>context</sub></summary>\n\nThe new country-wide District read materializes ineligible entities before filtering, with no page bound. Page the country query with a limit and cursor, processing one page per invocation while retaining the eligibility checks. Do not silently truncate eligible recipients. DontSendKADEmails is stored with noindex, so adding index.yaml alone cannot enable that equality filter. Indexed is_test and roster_syncing_enabled filters can reduce the result set but do not bound its size.\n\n</details>"
+            },
+            "transcriptSha256": "b3f8d905f1c9eaa2221a385854a639ed042a06f4483e918f611b0d491ae5a255"
+        },
+        {
+            "sample": 10,
+            "caseId": "webapp-41989-district-query-support",
+            "kind": "original",
+            "repeat": 2,
+            "status": "scored",
+            "inputSha256": "8b2a1c53dd8c3a9ea30f3ceba7f27fb34c49b0c349d8ca4612cd0b212274624b",
+            "resolvedPromptSha256": "e2429b6c49d72cbf34c6ebbc7df1cf2f9dfe81f34ec7e1d489ddad08cc9ff30f",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.55,\n      \"reason\": \"Verified at send_monthly_admin_email.go:1855-1874: the new query filters only on country_code and crud.GetAll materializes full District entities, with eligibility applied in the Go loop after; both callers (monthly_admin_email_batch.go:444, kad_email_subscriptions.go:529) pass through unbounded. Corrected two details the claim gets wrong: DontSendKADEmails is `datastore:\\\"dont_send_kad_emails,noindex\\\"` (district.go:92) so half of EligibleForKADEmails cannot become a query filter, and the removed code did a global unbounded crud.GetAll over every is_admin UDI, so this is a new unbounded read rather than a regression from a bounded one.\",\n      \"corrected\": {\n        \"line\": 1857,\n        \"label\": \"suggestion (non-blocking)\",\n        \"importance\": \"minor\",\n        \"subject\": \"getEmailableDistrictsByCountry loads every district with this country_code, full entities, no .Limit()\",\n        \"discussion\": \"The new query at line 1855 filters only on country_code, and crud.GetAll at 1857 materializes whole District entities (61 datastore properties in services/districts/models/district.go), including the ineligible ones the loop at 1862-1874 then discards in memory. Nothing upstream bounds it: both callers (monthly_admin_email_batch.go:444, kad_email_subscriptions.go:529) pass a country code straight through, so the read scales with how many District entities exist in that country. Two caveats on the fix, so this is a suggestion rather than a must-do. Only part of the eligibility filter can move into the query: is_test and roster_syncing_enabled are indexed, but DontSendKADEmails is `datastore:\\\"dont_send_kad_emails,noindex\\\"` (district.go:92), so SendKADEmails() has to stay an in-memory check unless that property gets reindexed. And the code this replaced was itself an unbounded crud.GetAll over every is_admin UDI globally, so total reads probably go down here, it's just that the district kind now gets a country-wide scan. If you want it bounded, the cheap version is adding is_test and roster_syncing_enabled equality filters (plus the index.yaml entry) and keeping the SendKADEmails() check in the loop; the fuller version is .Limit() plus a cursor with one page per invocation.\"\n      }\n    }\n  ]\n}\n```",
+                "usd": 0.42213550000000005,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 543,
+                        "output": 4501,
+                        "cacheRead": 244116,
+                        "cacheWrite": 29574
+                    }
+                ],
+                "turns": 10,
+                "toolCalls": 9,
+                "deniedReads": 0,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 5
+                },
+                "refused": false,
+                "wallMs": 69739
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "body": "**suggestion (non-blocking):** getEmailableDistrictsByCountry loads every district with this country_code, full entities, no .Limit().\n\n<details><summary><sub>context</sub></summary>\n\nThe new query at line 1855 filters only on country_code, and crud.GetAll at 1857 materializes whole District entities (61 datastore properties in services/districts/models/district.go), including the ineligible ones the loop at 1862-1874 then discards in memory. Nothing upstream bounds it: both callers (monthly_admin_email_batch.go:444, kad_email_subscriptions.go:529) pass a country code straight through, so the read scales with how many District entities exist in that country. Two caveats on the fix, so this is a suggestion rather than a must-do. Only part of the eligibility filter can move into the query: is_test and roster_syncing_enabled are indexed, but DontSendKADEmails is `datastore:\"dont_send_kad_emails,noindex\"` (district.go:92), so SendKADEmails() has to stay an in-memory check unless that property gets reindexed. And the code this replaced was itself an unbounded crud.GetAll over every is_admin UDI globally, so total reads probably go down here, it's just that the district kind now gets a country-wide scan. If you want it bounded, the cheap version is adding is_test and roster_syncing_enabled equality filters (plus the index.yaml entry) and keeping the SendKADEmails() check in the loop; the fuller version is .Limit() plus a cursor with one page per invocation.\n\n</details>"
+            },
+            "transcriptSha256": "d7e266dcd80dd82b5ae5c88799f5dc1ad8aac6023b079c11a5279b619fd0d002"
+        },
+        {
+            "sample": 11,
+            "caseId": "webapp-42001-phantom-debug-summary",
+            "kind": "clean-control",
+            "repeat": 2,
+            "status": "scored",
+            "inputSha256": "f298a6a80e8931272795c3ea9f08308619c15d4fb975b54ce8084bf2515ca596",
+            "resolvedPromptSha256": "da4fda3c4674a437d81382f62e9e146975357f3d27c9d967b03804db03284123",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.9,\n      \"reason\": \"Read services/humanities/resolvers/writing_coach_config.go:157-182: the err!=nil branch returns at 167-174, so err is provably nil at line 175, and errorToDebugMessage (157-160) returns nil for a nil err, so line 180 always yields debugMessage: null while the errors.Unauthorized() built at line 176 is only logged; claim's scenario and lines both check out.\"\n    }\n  ]\n}\n```",
+                "usd": 0.27310075,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 537,
+                        "output": 1332,
+                        "cacheRead": 139019,
+                        "cacheWrite": 26817
+                    }
+                ],
+                "turns": 7,
+                "toolCalls": 6,
+                "deniedReads": 0,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 5
+                },
+                "refused": false,
+                "wallMs": 26789
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "body": "**suggestion (non-blocking):** Phantom-user rejections return UNAUTHORIZED without the debug reason, so reuse the unauthorized error for the message.\n\n<details><summary><sub>context</sub></summary>\n\n`errorToDebugMessage(err)` on line 180 is always passed a nil `err`. Control flow reaches line 175 only when `ktx.RequestUser()` on line 166 returned a nil error (the non-nil case returns at line 169), and `errorToDebugMessage` (line 157) short-circuits with `if err == nil { return nil }`. So every phantom/not-logged-in rejection returns `UNAUTHORIZED` with `debugMessage: null`, discarding the reason — while the `errors.Unauthorized()` constructed on line 176 for the log line is thrown away instead of being reused for the client-facing debug message. Introduced by this change; the four new tests all authenticate, so none covers this branch.\n\nA sketch, not a committable replacement:\n\n````\n\tif !acl.IsLoggedIn(ktx, acl.PhantomProhibited) {\n\t\tunauthorizedErr := errors.Unauthorized()\n\t\tktx.Log().Warn(unauthorizedErr)\n\t\treturn _mapErrorToAllClassrooms(\n\t\t\tgraphql.WritingCoachConfigErrorCodeUnauthorized,\n\t\t\t&response,\n\t\t\terrorToDebugMessage(unauthorizedErr),\n\t\t), nil\n\t}\n````\n\n</details>"
+            },
+            "transcriptSha256": "0c32239beb175386268a05dffb341760cb61d596c951a77a0926b17dcb7ff743"
+        },
+        {
+            "sample": 12,
+            "caseId": "webapp-42001-phantom-debug-summary",
+            "kind": "original",
+            "repeat": 2,
+            "status": "scored",
+            "inputSha256": "d62819e2c1eb9fdfaa5d112b1c21e890a2fa4fce256837ea64f7fc3fa496ba52",
+            "resolvedPromptSha256": "e24fc687278e5651613a04a41df15648a6a2efba42395ce60838a263e74e172e",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.85,\n      \"reason\": \"Read writing_coach_config.go:157-182: the non-nil branch at 167-174 returns, so err is provably nil at line 180, and errorToDebugMessage short-circuits `if err == nil { return nil }` at 158-160, so the phantom rejection sends debugMessage null while the errors.Unauthorized() built at line 176 is only logged.\",\n      \"corrected\": {\n        \"importance\": \"medium\"\n      }\n    }\n  ]\n}\n```",
+                "usd": 0.25833075,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 535,
+                        "output": 1602,
+                        "cacheRead": 98074,
+                        "cacheWrite": 26651
+                    }
+                ],
+                "turns": 5,
+                "toolCalls": 4,
+                "deniedReads": 0,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 5
+                },
+                "refused": false,
+                "wallMs": 29617
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": false
+                },
+                "body": "**suggestion (non-blocking):** `errorToDebugMessage(err)` is passed a guaranteed-nil `err` in the phantom-user branch.\n\n<details><summary><sub>context</sub></summary>\n\n`errorToDebugMessage(err)` on line 180 is always passed a nil `err`. Control flow reaches line 175 only when `ktx.RequestUser()` on line 166 returned a nil error (the non-nil case returns at line 169), and `errorToDebugMessage` (line 157) short-circuits with `if err == nil { return nil }`. So every phantom/not-logged-in rejection returns `UNAUTHORIZED` with `debugMessage: null`, discarding the reason — while the `errors.Unauthorized()` constructed on line 176 for the log line is thrown away instead of being reused for the client-facing debug message. Introduced by this change; the four new tests all authenticate, so none covers this branch.\n\nA sketch, not a committable replacement:\n\n````\n\tif !acl.IsLoggedIn(ktx, acl.PhantomProhibited) {\n\t\tunauthorizedErr := errors.Unauthorized()\n\t\tktx.Log().Warn(unauthorizedErr)\n\t\treturn _mapErrorToAllClassrooms(\n\t\t\tgraphql.WritingCoachConfigErrorCodeUnauthorized,\n\t\t\t&response,\n\t\t\terrorToDebugMessage(unauthorizedErr),\n\t\t), nil\n\t}\n````\n\n</details>"
+            },
+            "transcriptSha256": "00043d38d931e49ba2ac7828cc6ae9e315087fddaa2da82df23fa3a6f124fa4f"
+        },
+        {
+            "sample": 13,
+            "caseId": "webapp-41896-coaching-batch-support",
+            "kind": "original",
+            "repeat": 3,
+            "status": "scored",
+            "inputSha256": "d9defecbca27955b3fe7028e2b68b5dfd07c9aece84636a52dff8aa66c48efaa",
+            "resolvedPromptSha256": "1939c53bd24476e8b6cd40a49c8f236836e5a4167e345087e25202c4e371952d",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.78,\n      \"reason\": \"Traced the whole chain in the checkout: coaching_loader.go:38-46 copies one error into all len(kaids) slots; acl.ManyCoachedByActorErr returns an empty map plus err at coaches.go:114-116; relationships.ManyCoachedBy (coachee.go:71-99) fans out one getCoachCoacheePair per kaid and `err := g.Wait()` returns the first failure; acls.go:120-131 logs and falls through to actorIsProgressViewingAdminForUser, which a plain teacher fails, so the whole roster 403s. Corrected two miscited line refs and dropped the suggestion's false parenthetical: acl.IsCoachedByActorErr does exist (coaches.go:36-40). The progress-service precedent the claim cites is real and sits exactly at services/progress/resolvers/coaching_loader.go:38-45.\",\n      \"corrected\": {\n        \"importance\": \"medium\",\n        \"discussion\": \"The coaching loader fans a single failed lookup out to every kaid, so one student's transient error now denies the whole roster; consider scoping it per-kaid the way the session loader does. The sibling loader added in this PR states the principle explicitly (writing_coach_session_loader.go:70-73, \\\"Batching must not widen the blast radius: without this, one assignment's failed query would error out a healthy assignment's roster too, whereas the unbatched per-row calls failed independently\\\"). The coaching loader is the half where that principle wasn't applied, and it's the half with the worse outcome (a 403 for the whole roster rather than a null field).\\n\\nThe comment on this line assumes a batch-wide error means the actor's coach data is globally unavailable. It doesn't. services/coaches/relationships/coachee.go:71-99 shows `ManyCoachedBy` doesn't batch at the datastore layer, it fans out one `getCoachCoacheePair` per kaid in a tracegroup and `err := g.Wait()` returns the first error. `acl.ManyCoachedByActorErr` then discards every successful result (`return result, err` with `result` still the empty map, pkg/khan/acl/coaches.go:114-116); this loader copies that one error into all `len(kaids)` slots; and `isActorCoachOrAdminBatched` (acls.go:120-131) logs it, gets `coached=false` for all, and falls through to `actorIsProgressViewingAdminForUser`, which a plain teacher fails.\\n\\nBefore this PR the same event denied exactly one row: `acl.IsCoachedByActor` ran per kaid against coaches' `IsCoachedBy`, a single key query (coachee.go:103-110) with its own request-cache entry. The happy-path win is unaffected by falling back per-kaid on error, since the fallback only runs when the batch already failed.\\n\\nOne caveat on the precedent: services/progress/resolvers/coaching_loader.go:38-45 does the identical all-keys fan-out, so this shape is the existing repo pattern for a batched coach check and a per-kaid fallback would diverge from it, worth deciding deliberately rather than treating it as an oversight.\",\n        \"suggestion\": \"\\tcoached, err := acl.ManyCoachedByActorErr(ktx, kaids)\\n\\tif err != nil {\\n\\t\\t// coaches' manyCoachedBy fans out one lookup per kaid and returns the\\n\\t\\t// first error, so a batch-wide failure says nothing about any\\n\\t\\t// particular kaid. Fall back to the per-kaid check: one bad lookup\\n\\t\\t// should deny one student, not the whole roster.\\n\\t\\tktx.Log().Error(err)\\n\\t\\tout := make([]bool, len(kaids))\\n\\t\\tfor i, kaid := range kaids {\\n\\t\\t\\tout[i] = acl.IsCoachedByActor(ktx, kaid)\\n\\t\\t}\\n\\t\\treturn out, nil\\n\\t}\\n\\n// (acl.IsCoachedByActor is the log-and-deny bool form at pkg/khan/acl/coaches.go:21;\\n// acl.IsCoachedByActorErr at coaches.go:36 is the explicit-error form if you'd\\n// rather keep per-kaid errors in the []error slots.)\"\n      }\n    }\n  ]\n}\n```",
+                "usd": 0.59088725,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 545,
+                        "output": 6678,
+                        "cacheRead": 325237,
+                        "cacheWrite": 41375
+                    }
+                ],
+                "turns": 15,
+                "toolCalls": 14,
+                "deniedReads": 2,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 5
+                },
+                "refused": false,
+                "wallMs": 95285
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "body": "**suggestion (non-blocking):** The coaching loader fans a single failed lookup out to every kaid, so one student's transient error now denies the whole roster; scope it per-kaid the way the session loader does.\n\n<details><summary><sub>context</sub></summary>\n\nThe coaching loader fans a single failed lookup out to every kaid, so one student's transient error now denies the whole roster; consider scoping it per-kaid the way the session loader does. The sibling loader added in this PR states the principle explicitly (writing_coach_session_loader.go:70-73, \"Batching must not widen the blast radius: without this, one assignment's failed query would error out a healthy assignment's roster too, whereas the unbatched per-row calls failed independently\"). The coaching loader is the half where that principle wasn't applied, and it's the half with the worse outcome (a 403 for the whole roster rather than a null field).\n\nThe comment on this line assumes a batch-wide error means the actor's coach data is globally unavailable. It doesn't. services/coaches/relationships/coachee.go:71-99 shows `ManyCoachedBy` doesn't batch at the datastore layer, it fans out one `getCoachCoacheePair` per kaid in a tracegroup and `err := g.Wait()` returns the first error. `acl.ManyCoachedByActorErr` then discards every successful result (`return result, err` with `result` still the empty map, pkg/khan/acl/coaches.go:114-116); this loader copies that one error into all `len(kaids)` slots; and `isActorCoachOrAdminBatched` (acls.go:120-131) logs it, gets `coached=false` for all, and falls through to `actorIsProgressViewingAdminForUser`, which a plain teacher fails.\n\nBefore this PR the same event denied exactly one row: `acl.IsCoachedByActor` ran per kaid against coaches' `IsCoachedBy`, a single key query (coachee.go:103-110) with its own request-cache entry. The happy-path win is unaffected by falling back per-kaid on error, since the fallback only runs when the batch already failed.\n\nOne caveat on the precedent: services/progress/resolvers/coaching_loader.go:38-45 does the identical all-keys fan-out, so this shape is the existing repo pattern for a batched coach check and a per-kaid fallback would diverge from it, worth deciding deliberately rather than treating it as an oversight.\n\nA sketch, not a committable replacement:\n\n````\n\tcoached, err := acl.ManyCoachedByActorErr(ktx, kaids)\n\tif err != nil {\n\t\t// coaches' manyCoachedBy fans out one lookup per kaid and returns the\n\t\t// first error, so a batch-wide failure says nothing about any\n\t\t// particular kaid. Fall back to the per-kaid check: one bad lookup\n\t\t// should deny one student, not the whole roster.\n\t\tktx.Log().Error(err)\n\t\tout := make([]bool, len(kaids))\n\t\tfor i, kaid := range kaids {\n\t\t\tout[i] = acl.IsCoachedByActor(ktx, kaid)\n\t\t}\n\t\treturn out, nil\n\t}\n\n// (acl.IsCoachedByActor is the log-and-deny bool form at pkg/khan/acl/coaches.go:21;\n// acl.IsCoachedByActorErr at coaches.go:36 is the explicit-error form if you'd\n// rather keep per-kaid errors in the []error slots.)\n````\n\n</details>"
+            },
+            "transcriptSha256": "307c7101e223b4b4ee557834e9a42bbbf24e51a408c343a347f81424b669db99"
+        },
+        {
+            "sample": 14,
+            "caseId": "webapp-41896-coaching-batch-support",
+            "kind": "clean-control",
+            "repeat": 3,
+            "status": "scored",
+            "inputSha256": "9070f6738fffea44fd2a13b7a690164c7cd798a66ea21b020d9cdef42a93190d",
+            "resolvedPromptSha256": "deb78f3df8e3f198f0407350f9c8b296dbf574dc97a22e852026cf8e76f391d1",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.7,\n      \"reason\": \"Traced the chain: coaches ManyCoachedBy (services/coaches/relationships/coachee.go:82-99) runs one getCoachCoacheePair per coachee in a tracegroup and g.Wait() returns a single error if any one fails, acl.ManyCoachedByActorErr then returns an empty map plus err (pkg/khan/acl/coaches.go:112-116), and the new loader fans that err to every key (coaching_loader.go:43-50), so isActorCoachOrAdminBatched (resolvers/acls.go:121-131) logs and falls through to the admin check for the whole roster; IsCoachedByActorErr does exist at coaches.go:36-40 as claimed.\",\n      \"corrected\": {\n        \"discussion\": \"One student's failed lookup denies the whole roster here. acl.ManyCoachedByActorErr wraps the coaches service's ManyCoachedBy, which runs a separate getCoachCoacheePair per coachee inside a tracegroup and returns a single error from g.Wait() if any one of them fails (services/coaches/relationships/coachee.go:82-99). On that error ManyCoachedByActorErr returns an empty map plus the error (pkg/khan/acl/coaches.go:112-116), this loader copies it into every slot, and isActorCoachOrAdminBatched logs and falls back to the admin check, so a teacher without progress-viewing admin loses every row instead of the one that failed. That makes the \\\"the failure is not per-key\\\" comment on line 44 a bit off: a per-key datastore error does reach here as a batch-wide error. The unbatched isActorCoachOrAdmin failed per student. So on the error path let's just fall back to acl.IsCoachedByActorErr per kaid (it's request-cached, coaches.go:36-40) and keep each result and error in its own slot, leaving the successful batch path alone. It won't repair a service-wide outage or a RequestUser failure, since those fail the fallback calls too. Note services/progress/resolvers/coaching_loader.go:39-45 already has this same fan-out, so this is a pattern question as much as a bug in the new file.\"\n      }\n    }\n  ]\n}\n```",
+                "usd": 0.4858905,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 545,
+                        "output": 4750,
+                        "cacheRead": 295981,
+                        "cacheWrite": 34628
+                    }
+                ],
+                "turns": 12,
+                "toolCalls": 11,
+                "deniedReads": 1,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 11
+                },
+                "refused": false,
+                "wallMs": 76236
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "body": "**suggestion (non-blocking):** The coaching batch can deny the whole roster after one student's lookup fails, so fall back per kaid on error.\n\n<details><summary><sub>context</sub></summary>\n\nOne student's failed lookup denies the whole roster here. acl.ManyCoachedByActorErr wraps the coaches service's ManyCoachedBy, which runs a separate getCoachCoacheePair per coachee inside a tracegroup and returns a single error from g.Wait() if any one of them fails (services/coaches/relationships/coachee.go:82-99). On that error ManyCoachedByActorErr returns an empty map plus the error (pkg/khan/acl/coaches.go:112-116), this loader copies it into every slot, and isActorCoachOrAdminBatched logs and falls back to the admin check, so a teacher without progress-viewing admin loses every row instead of the one that failed. That makes the \"the failure is not per-key\" comment on line 44 a bit off: a per-key datastore error does reach here as a batch-wide error. The unbatched isActorCoachOrAdmin failed per student. So on the error path let's just fall back to acl.IsCoachedByActorErr per kaid (it's request-cached, coaches.go:36-40) and keep each result and error in its own slot, leaving the successful batch path alone. It won't repair a service-wide outage or a RequestUser failure, since those fail the fallback calls too. Note services/progress/resolvers/coaching_loader.go:39-45 already has this same fan-out, so this is a pattern question as much as a bug in the new file.\n\n</details>\n\n```suggestion\nif err != nil {\n    out := make([]bool, len(kaids))\n    errs := make([]error, len(kaids))\n    for i, kaid := range kaids {\n        out[i], errs[i] = acl.IsCoachedByActorErr(ktx, kaid)\n    }\n    return out, errs\n}\n```"
+            },
+            "transcriptSha256": "d479712a4d32ce84541a3c46d36f77c4e9a02e0fb04b72bc9f7ea623c5aa1e29"
+        },
+        {
+            "sample": 15,
+            "caseId": "webapp-41989-district-query-support",
+            "kind": "original",
+            "repeat": 3,
+            "status": "scored",
+            "inputSha256": "8b2a1c53dd8c3a9ea30f3ceba7f27fb34c49b0c349d8ca4612cd0b212274624b",
+            "resolvedPromptSha256": "b76d57db95ffd25945ffaaccd371fbb9df96d51ce97b3ec9610b46ada7191991",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.5,\n      \"reason\": \"Line 1857 does run crud.GetAll[models.District] with only a country_code filter and no .Limit(), with eligibility filtering in memory at 1862-1874 (61 datastore properties confirmed in district.go), but two details are wrong: DontSendKADEmails is `datastore:\\\"dont_send_kad_emails,noindex\\\"` at district.go:92 so half of EligibleForKADEmails cannot become a query filter, and the pre-diff path did an unbounded crud.GetAll over all is_admin UDIs across every country, so the framing as a bounded-to-unbounded regression overstates it.\",\n      \"corrected\": {\n        \"label\": \"suggestion (non-blocking)\",\n        \"importance\": \"minor\",\n        \"subject\": \"`crud.GetAll[models.District]` here has no `.Limit()`, so the whole country's districts load as full entities before the in-memory eligibility filter; `is_test` and `roster_syncing_enabled` could move into the query, but `dont_send_kad_emails` is `noindex` so `EligibleForKADEmails` only partly pushes down.\",\n        \"discussion\": \"`getEmailableDistrictsByCountry` runs `crud.GetAll[models.District]` at line 1857 with only a `country_code` equality filter and no `.Limit()`, so every district in the country is materialized as a full entity (61 `datastore:` properties in services/districts/models/district.go, no projection) and the eligibility filtering happens in memory at lines 1862-1874.\\n\\nThis isn't a straight regression though, and the prose in the original review overstated it: the pre-diff path did an unbounded `crud.GetAll[models.UserDistrictInfo]` over all `is_admin` UDIs in every country, so total read volume here probably went down, the unbounded read just moved to a wider entity kind and got scoped to one country.\\n\\nTwo of the three in-memory predicates are indexed and could move into the query: `is_test` (district.go:114) and `roster_syncing_enabled` (district.go:143), with a matching index.yaml entry. The third can't, `DontSendKADEmails` is `datastore:\\\"dont_send_kad_emails,noindex\\\"` (district.go:92), so `EligibleForKADEmails()` (district.go:451) can only be partly pushed down without a schema change and backfill. If the per-country district count is big enough to matter, paging with `.Limit()` plus a cursor is the option that actually bounds the read.\"\n      }\n    }\n  ]\n}\n```",
+                "usd": 0.41507724999999995,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 541,
+                        "output": 5389,
+                        "cacheRead": 208407,
+                        "cacheWrite": 27751
+                    }
+                ],
+                "turns": 10,
+                "toolCalls": 9,
+                "deniedReads": 0,
+                "deniedTools": 1,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 4
+                },
+                "refused": false,
+                "wallMs": 86441
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": false
+                },
+                "body": "**suggestion (non-blocking):** `crud.GetAll[models.District]` here has no `.Limit()`, so the whole country's districts load as full entities before the in-memory eligibility filter; `is_test` and `roster_syncing_enabled` could move into the query, but `dont_send_kad_emails` is `noindex` so `EligibleForKADEmails` only partly pushes down.\n\n<details><summary><sub>context</sub></summary>\n\n`getEmailableDistrictsByCountry` runs `crud.GetAll[models.District]` at line 1857 with only a `country_code` equality filter and no `.Limit()`, so every district in the country is materialized as a full entity (61 `datastore:` properties in services/districts/models/district.go, no projection) and the eligibility filtering happens in memory at lines 1862-1874.\n\nThis isn't a straight regression though, and the prose in the original review overstated it: the pre-diff path did an unbounded `crud.GetAll[models.UserDistrictInfo]` over all `is_admin` UDIs in every country, so total read volume here probably went down, the unbounded read just moved to a wider entity kind and got scoped to one country.\n\nTwo of the three in-memory predicates are indexed and could move into the query: `is_test` (district.go:114) and `roster_syncing_enabled` (district.go:143), with a matching index.yaml entry. The third can't, `DontSendKADEmails` is `datastore:\"dont_send_kad_emails,noindex\"` (district.go:92), so `EligibleForKADEmails()` (district.go:451) can only be partly pushed down without a schema change and backfill. If the per-country district count is big enough to matter, paging with `.Limit()` plus a cursor is the option that actually bounds the read.\n\n</details>"
+            },
+            "transcriptSha256": "5d340be538885783d071f0a43259158ab34342b2b2539d5dcfb64f819ffde698"
+        },
+        {
+            "sample": 16,
+            "caseId": "webapp-41989-district-query-support",
+            "kind": "clean-control",
+            "repeat": 3,
+            "status": "scored",
+            "inputSha256": "640cfe2a90e8299ad4f2ec6ebab200933d7f8599f6a26539b66132069f1f751d",
+            "resolvedPromptSha256": "aeb288d7791944dce169bedc9350872c4b8645f08e8ef296aa9efe9ebf538d58",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"plausible\",\n      \"confidence\": 0.4,\n      \"reason\": \"Line 1857 really is an unbounded crud.GetAll on District filtered only by country_code with IsTest/EligibleForKADEmails applied in memory, and the noindex detail checks out (district.go:92 `DontSendKADEmails bool `datastore:\\\"dont_send_kad_emails,noindex\\\"``, is_test and roster_syncing_enabled are indexed at :114 and :143); what I could not settle is whether it causes any real harm, since crud.GetAll is not in the staged checkout so I can't tell if it streams, and the diff replaces an even broader unbounded read (the removed crud.GetAll over all is_admin UDIs across every country plus a GetMulti of their districts), so this narrows the load rather than expanding it.\",\n      \"corrected\": {\n        \"line\": 1857,\n        \"subject\": \"The country district query is unbounded, though it's narrower than the global UDI query it replaces.\",\n        \"discussion\": \"getEmailableDistrictsByCountry runs crud.GetAll on District filtered only by country_code, then applies IsTest and EligibleForKADEmails in memory, so every district in the country materializes regardless of eligibility. Pushing eligibility into the query only goes so far: dont_send_kad_emails is stored noindex (services/districts/models/district.go:92), so DontSendKADEmails can't be an equality filter no matter what goes in index.yaml, and is_test plus roster_syncing_enabled would shrink the result set without bounding it. Two caveats on how much this matters. This is narrower than what it replaces, since the old path ran GetAll over all is_admin UDIs across every country and then GetMulti'd their districts, so it isn't a regression. And I couldn't check how many districts a big country actually has, or whether crud.GetAll streams under the hood, so I don't know that memory or the request deadline is genuinely at risk here. If it is, a limit plus cursor processing one page per invocation would cap it, with the eligibility checks kept so eligible recipients aren't silently dropped.\",\n        \"suggestion\": \"\"\n      }\n    }\n  ]\n}\n```",
+                "usd": 0.4163589999999999,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 543,
+                        "output": 4407,
+                        "cacheRead": 239738,
+                        "cacheWrite": 29376
+                    }
+                ],
+                "turns": 10,
+                "toolCalls": 9,
+                "deniedReads": 1,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 4
+                },
+                "refused": false,
+                "wallMs": 66041
+            },
+            "score": {
+                "verification": "plausible",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "body": "**suggestion (non-blocking):** The country query loads every district before filtering, so page the read without dropping eligible recipients.\n\n<details><summary><sub>context</sub></summary>\n\nThe new country-wide District read materializes ineligible entities before filtering, with no page bound. Page the country query with a limit and cursor, processing one page per invocation while retaining the eligibility checks. Do not silently truncate eligible recipients. DontSendKADEmails is stored with noindex, so adding index.yaml alone cannot enable that equality filter. Indexed is_test and roster_syncing_enabled filters can reduce the result set but do not bound its size.\n\n</details>"
+            },
+            "transcriptSha256": "a6a7002cb0eebaa83a471395d3a92adffa02be2e31c39eb8540119e56a780ef2"
+        },
+        {
+            "sample": 17,
+            "caseId": "webapp-42001-phantom-debug-summary",
+            "kind": "original",
+            "repeat": 3,
+            "status": "scored",
+            "inputSha256": "d62819e2c1eb9fdfaa5d112b1c21e890a2fa4fce256837ea64f7fc3fa496ba52",
+            "resolvedPromptSha256": "d4702a61a4cde3db62d8c7bba31851ff8b292d417c7c33ec3a0773c14f19013e",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.85,\n      \"reason\": \"Read writing_coach_config.go lines 157-182: the closure at 157 returns nil for a nil err, line 166 assigns err and the non-nil case returns at 167-173, so the `err` passed to errorToDebugMessage at line 180 is always nil while the errors.Unauthorized() built at line 176 is only logged; every cited line number matches the checkout.\",\n      \"corrected\": {\"importance\": \"medium\"}\n    }\n  ]\n}\n```",
+                "usd": 0.29881425,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 539,
+                        "output": 1401,
+                        "cacheRead": 179751,
+                        "cacheWrite": 27395
+                    }
+                ],
+                "turns": 7,
+                "toolCalls": 6,
+                "deniedReads": 0,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 9
+                },
+                "refused": false,
+                "wallMs": 27852
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": false
+                },
+                "body": "**suggestion (non-blocking):** `errorToDebugMessage(err)` is passed a guaranteed-nil `err` in the phantom-user branch.\n\n<details><summary><sub>context</sub></summary>\n\n`errorToDebugMessage(err)` on line 180 is always passed a nil `err`. Control flow reaches line 175 only when `ktx.RequestUser()` on line 166 returned a nil error (the non-nil case returns at line 169), and `errorToDebugMessage` (line 157) short-circuits with `if err == nil { return nil }`. So every phantom/not-logged-in rejection returns `UNAUTHORIZED` with `debugMessage: null`, discarding the reason — while the `errors.Unauthorized()` constructed on line 176 for the log line is thrown away instead of being reused for the client-facing debug message. Introduced by this change; the four new tests all authenticate, so none covers this branch.\n\nA sketch, not a committable replacement:\n\n````\n\tif !acl.IsLoggedIn(ktx, acl.PhantomProhibited) {\n\t\tunauthorizedErr := errors.Unauthorized()\n\t\tktx.Log().Warn(unauthorizedErr)\n\t\treturn _mapErrorToAllClassrooms(\n\t\t\tgraphql.WritingCoachConfigErrorCodeUnauthorized,\n\t\t\t&response,\n\t\t\terrorToDebugMessage(unauthorizedErr),\n\t\t), nil\n\t}\n````\n\n</details>"
+            },
+            "transcriptSha256": "0899a5d23f3d928a84e1c5de6fbb7f1f74f92a0e693997f78eef29c2069a4ffe"
+        },
+        {
+            "sample": 18,
+            "caseId": "webapp-42001-phantom-debug-summary",
+            "kind": "clean-control",
+            "repeat": 3,
+            "status": "scored",
+            "inputSha256": "f298a6a80e8931272795c3ea9f08308619c15d4fb975b54ce8084bf2515ca596",
+            "resolvedPromptSha256": "67b4d0fe77d4116410194ec32969f38a1d9d23ca332a13c131f0448f62d9453a",
+            "result": {
+                "output": "```json\n{\n  \"claims\": [\n    {\n      \"id\": \"candidate-1\",\n      \"verification\": \"confirmed\",\n      \"confidence\": 0.85,\n      \"reason\": \"Read writing_coach_config.go 157-182: `err` from `ktx.RequestUser()` (166) is provably nil at 180 because the non-nil case returns at 169-173, and the closure at 157-160 returns nil for a nil err, so the PhantomProhibited branch emits UNAUTHORIZED with debugMessage null while the `errors.Unauthorized()` built at 176 is only logged; all new code in this diff.\"\n    }\n  ]\n}\n```",
+                "usd": 0.27829550000000003,
+                "usage": [
+                    {
+                        "model": "claude-opus-5",
+                        "input": 537,
+                        "output": 1468,
+                        "cacheRead": 139021,
+                        "cacheWrite": 27104
+                    }
+                ],
+                "turns": 6,
+                "toolCalls": 5,
+                "deniedReads": 1,
+                "deniedTools": 0,
+                "stopReason": "success",
+                "tokensAtFailure": {
+                    "input": 2,
+                    "total": 5
+                },
+                "refused": false,
+                "wallMs": 29100
+            },
+            "score": {
+                "verification": "confirmed",
+                "retained": true,
+                "unexpectedBlocking": false,
+                "facets": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "body": "**suggestion (non-blocking):** Phantom-user rejections return UNAUTHORIZED without the debug reason, so reuse the unauthorized error for the message.\n\n<details><summary><sub>context</sub></summary>\n\n`errorToDebugMessage(err)` on line 180 is always passed a nil `err`. Control flow reaches line 175 only when `ktx.RequestUser()` on line 166 returned a nil error (the non-nil case returns at line 169), and `errorToDebugMessage` (line 157) short-circuits with `if err == nil { return nil }`. So every phantom/not-logged-in rejection returns `UNAUTHORIZED` with `debugMessage: null`, discarding the reason — while the `errors.Unauthorized()` constructed on line 176 for the log line is thrown away instead of being reused for the client-facing debug message. Introduced by this change; the four new tests all authenticate, so none covers this branch.\n\nA sketch, not a committable replacement:\n\n````\n\tif !acl.IsLoggedIn(ktx, acl.PhantomProhibited) {\n\t\tunauthorizedErr := errors.Unauthorized()\n\t\tktx.Log().Warn(unauthorizedErr)\n\t\treturn _mapErrorToAllClassrooms(\n\t\t\tgraphql.WritingCoachConfigErrorCodeUnauthorized,\n\t\t\t&response,\n\t\t\terrorToDebugMessage(unauthorizedErr),\n\t\t), nil\n\t}\n````\n\n</details>"
+            },
+            "transcriptSha256": "bfe9acb77eb431f96628bf3ecc216f749cf6ca2d6d7f6a3f5c4a7d2620953704"
+        }
+    ]
+}

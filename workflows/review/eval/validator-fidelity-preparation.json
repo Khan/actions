@@ -1,5 +1,5 @@
 {
-    "scope": "Preparation and deterministic verification only. No live model results.",
+    "scope": "Initial preparation and blocked attempt. Completed live results are recorded separately in validator-fidelity-baseline.json.",
     "preparation": {
         "status": "prepared",
         "modelCalls": 0,

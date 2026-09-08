@@ -15,6 +15,7 @@ import {
     inputClaim,
     runValidatorFidelity,
     scoreValidatorOutput,
+    type SampleKind,
 } from "./validator-fidelity";
 import {
     prepareSnapshot,
@@ -176,6 +177,38 @@ describe("validator fidelity replay", () => {
             ).toThrow();
         },
     );
+
+    it("replays all recorded live outputs without changing their lexical scores or rendered comments", () => {
+        const baseline = JSON.parse(
+            readFileSync(
+                "workflows/review/eval/validator-fidelity-baseline.json",
+                "utf8",
+            ),
+        ) as {
+            samples: {
+                caseId: string;
+                kind: SampleKind;
+                inputSha256: string;
+                result: {output: string};
+                score: ReturnType<typeof scoreValidatorOutput>;
+            }[];
+        };
+        expect(baseline.samples).toHaveLength(18);
+        for (const recorded of baseline.samples) {
+            const fixture = fixtures.find(
+                (f) => f.corpusCase.id === recorded.caseId,
+            );
+            expect(fixture).toBeDefined();
+            if (fixture === undefined) {
+                throw new Error(`Missing fixture: ${recorded.caseId}`);
+            }
+            const claim = inputClaim(fixture, recorded.kind);
+            expect(sha256(JSON.stringify(claim))).toBe(recorded.inputSha256);
+            expect(
+                scoreValidatorOutput(fixture, claim, recorded.result.output),
+            ).toEqual(recorded.score);
+        }
+    });
 
     it("uses production's tolerant JSON extraction", () => {
         expect(

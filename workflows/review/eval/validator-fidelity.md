@@ -40,7 +40,8 @@ A later candidate prompt can be selected with `--review-md <path>`. Before compa
 
 ## Verified so far
 
-- The new harness has 15 deterministic tests covering source hashes, staged diffs, read-scope boundaries, blinded inputs, corrected controls, malformed and duplicate outputs, retention, unexpected blocking, repeated inputs, checkpoints, budget skips, and unpriced failures.
-- The full suite passes 2,433 tests in 127 files. Lint and a targeted strict typecheck of the new modules pass.
+- The new harness has 16 deterministic tests covering source hashes, staged diffs, read-scope boundaries, blinded inputs, corrected controls, malformed and duplicate outputs, retention, unexpected blocking, repeated inputs, checkpoints, budget skips, unpriced failures, and exact replay of the 18 recorded live outputs.
+- The full suite passes 2,434 tests in 127 files. Lint and a targeted strict typecheck of the replay modules and tests pass.
 - Source preparation succeeded for all three pinned reviews, including the full-file hash checks.
-- The live attempt stopped before any model call because this session had no `ANTHROPIC_API_KEY`. There is no live baseline result or reviewer-quality improvement claim. `validator-fidelity-preparation.json` records the preparation and blocked-run status without embedding the source files.
+- The initial sandbox attempt stopped before any model call because it had no `ANTHROPIC_API_KEY`. `validator-fidelity-preparation.json` preserves that initial preparation and blocked attempt.
+- A subsequent terminal run completed all 18 samples with the unchanged validator at $7.791942 reported list cost, plus the separate scope probe. All findings survived without unexpected blocking, but the manual audit found supporting-claim and headline misses, new citation errors, and lexical scoring disagreements. See [the live baseline audit](./validator-fidelity-baseline.md) and [recorded outputs](./validator-fidelity-baseline.json). No candidate prompt has been run and no production-quality improvement is claimed.
