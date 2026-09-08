@@ -393,10 +393,27 @@ export const dedupeClaims = (
             number,
             string[]
         >;
-        const heads = [...namedByHead.keys()]
-            .filter((owner) => !reservedHeads.has(owner))
-            .sort((a, b) => a - b);
+        // An identity tier 1 already established isn't a rejected proposal.
+        if (namedByHead.size < 2) {
+            continue;
+        }
+        const heads: number[] = [];
+        for (const [owner, ids] of namedByHead) {
+            if (reservedHeads.has(owner)) {
+                for (const id of ids) {
+                    clusterRejections.push({id, reason: "head-reserved"});
+                }
+            } else {
+                heads.push(owner);
+            }
+        }
+        heads.sort((a, b) => a - b);
         if (heads.length < 2) {
+            for (const owner of heads) {
+                for (const id of namedByHead.get(owner) ?? []) {
+                    clusterRejections.push({id, reason: "cluster-collapsed"});
+                }
+            }
             continue;
         }
         const survivorIndex = heads.reduce((best, index) =>

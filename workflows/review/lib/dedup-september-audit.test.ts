@@ -4,6 +4,7 @@ import pairs from "../eval/same-run-september-2026/pairs.json";
 import reservation from "../eval/same-run-september-2026/proposal-reservation.json";
 import {pairDiagnostics} from "../eval/replay-same-run";
 import {dedupeClaims, describesSameDefect} from "./dedup";
+import {verifiableClusters} from "./dedup-cluster";
 import {mergeCrossFileDuplicates} from "./dedup-crossfile";
 import {
     applyVerifications,
@@ -14,6 +15,11 @@ import {attributionLine} from "./attribution";
 import {isBlockingLabel} from "./render-comment";
 import {computeVerdict} from "./verdict";
 
+/**
+ * Original inputs from the September 3–8 webapp audit. The full #42034 run
+ * reproduces proposal scheduling after tier 1, which a pair-only replay misses.
+ * Fixture provenance and evidence limits are in the adjacent eval report.
+ */
 const claims = (): Claim[] => structuredClone(reservation.claims) as Claim[];
 const blockingIds = (input: Claim[]): string[] =>
     input
@@ -187,6 +193,159 @@ describe("September 2026 same-run duplicate audit", () => {
             "x",
         ]);
         expect(result.claims[1]).toEqual(y);
+        expect(result.clusterRejections).toEqual([
+            {id: "b", reason: "head-reserved"},
+            {id: "y", reason: "cluster-collapsed"},
+        ]);
+    });
+
+    it("reserves a rejected head when its proposal merges another member", () => {
+        const base = claims().find((claim) => claim.id === target)!;
+        const survivor = {...base, id: "s", source: "s"};
+        const copy = (id: string, text: string, label: string): Claim => ({
+            ...base,
+            id,
+            source: id,
+            label,
+            subject: text,
+            discussion: text,
+            failure_scenario: text,
+        });
+        const blocker = copy(
+            "blocker",
+            "Missing authorization permits deleted accounts to retain privileged workspace membership during token renewal.",
+            "issue (blocking)",
+        );
+        // The proposals name different original ids, so both pass parsing.
+        // Tier 1 maps this advisory alias to the blocking head. Only then does
+        // the first proposal reject it while successfully merging x.
+        const alias = {
+            ...blocker,
+            id: "alias",
+            source: "alias",
+            label: "suggestion (non-blocking)",
+        };
+        const first = copy(
+            "x",
+            "An independent database constraint.",
+            "suggestion (non-blocking)",
+        );
+        const later = copy(
+            "y",
+            "A separate retry timeout.",
+            "suggestion (non-blocking)",
+        );
+        const proposals = [
+            {ids: ["s", "alias", "x"], evidence: "First exact-anchor proposal"},
+            {ids: ["blocker", "y"], evidence: "Second exact-anchor proposal"},
+        ];
+        const input = [survivor, blocker, alias, first, later];
+        const parsed = verifiableClusters(input, proposals);
+        expect(parsed.rejections).toEqual([]);
+        expect(parsed.clusterOf.size).toBe(5);
+        expect(
+            dedupeClaims([blocker, later], [proposals[1]]).claims,
+        ).toHaveLength(1);
+        const result = dedupeClaims(input, proposals);
+        expect(result.claims.map((claim) => claim.id)).toEqual([
+            "s",
+            "blocker",
+            "y",
+        ]);
+        expect(
+            result.merges.map((merge) => ({
+                survivor: merge.survivor,
+                ids: merge.merged.map((member) => member.id),
+            })),
+        ).toEqual([
+            {survivor: "s", ids: ["x"]},
+            {survivor: "blocker", ids: ["alias"]},
+        ]);
+        expect(result.claims[2]).toEqual(later);
+        expect(result.clusterRejections).toEqual([
+            {id: "alias", reason: "blocking-member"},
+            {id: "blocker", reason: "head-reserved"},
+            {id: "y", reason: "cluster-collapsed"},
+        ]);
+    });
+
+    it("records reserved members without stopping the later proposal's remaining pair", () => {
+        const base = claims().find((claim) => claim.id === target)!;
+        const a = {...base, id: "a", source: "a"};
+        const b = {...a, id: "b", source: "b"};
+        const copy = (id: string, text: string): Claim => ({
+            ...base,
+            id,
+            source: id,
+            label: "suggestion (non-blocking)",
+            subject: text,
+            discussion: text,
+            failure_scenario: text,
+        });
+        const x = copy("x", "An independent database constraint.");
+        const y = copy("y", "A separate retry timeout.");
+        const z = copy("z", "An unrelated memory allocation.");
+        const result = dedupeClaims(
+            [a, b, x, y, z],
+            [
+                {ids: ["a", "x"], evidence: "First exact-anchor proposal"},
+                {
+                    ids: ["b", "y", "z"],
+                    evidence: "Second exact-anchor proposal",
+                },
+            ],
+        );
+        expect(result.claims.map((claim) => claim.id)).toEqual(["a", "y"]);
+        expect(
+            result.merges.map((merge) => ({
+                survivor: merge.survivor,
+                ids: merge.merged.map((member) => member.id),
+            })),
+        ).toEqual([
+            {survivor: "a", ids: ["b", "x"]},
+            {survivor: "y", ids: ["z"]},
+        ]);
+        expect(result.clusterRejections).toEqual([
+            {id: "b", reason: "head-reserved"},
+        ]);
+    });
+
+    it("doesn't reject an identity tier 1 already established on a reserved head", () => {
+        const base = claims().find((claim) => claim.id === target)!;
+        const a = {...base, id: "a", source: "a"};
+        const b = {...base, id: "b", source: "b"};
+        const c = {
+            ...base,
+            id: "c",
+            source: "c",
+            label: "suggestion (non-blocking)",
+        };
+        const x = {
+            ...base,
+            id: "x",
+            source: "x",
+            label: "suggestion (non-blocking)",
+            subject: "An independent database constraint.",
+            discussion: "An independent database constraint.",
+            failure_scenario: "An independent database constraint.",
+        };
+        const result = dedupeClaims(
+            [a, b, c, x],
+            [
+                {ids: ["a", "x"], evidence: "First exact-anchor proposal"},
+                {
+                    ids: ["b", "c"],
+                    evidence: "Identity already reached by tier 1",
+                },
+            ],
+        );
+        expect(result.claims.map((claim) => claim.id)).toEqual(["a"]);
+        expect(result.merges[0].merged.map((member) => member.id)).toEqual([
+            "b",
+            "c",
+            "x",
+        ]);
+        expect(result.clusterRejections).toEqual([]);
     });
 
     it("keeps the later copy when it is blocking, on another path, or from the same source", () => {
