@@ -356,6 +356,81 @@ describe("parseCase: the live block", () => {
         expect(parseErrors(raw)).toMatch(/duplicate spec key "dup"/);
     });
 
+    it("rejects a spec lens that is not a known lens", () => {
+        // The matcher breaks ties on it, so a typo would silently revert
+        // to posted order instead of failing the corpus.
+        const raw = liveCase({
+            live: {
+                prContext: {
+                    title: "t",
+                    description: "d",
+                    author: "a",
+                    baseBranch: "main",
+                },
+                mustCatchSpecs: [
+                    {
+                        key: "k",
+                        path: "src/a.ts",
+                        mechanism: ["m"],
+                        lens: "concurency-async",
+                    },
+                ],
+            },
+        });
+        expect(parseErrors(raw)).toMatch(
+            /mustCatchSpecs\[0\]\.lens: must be one of security-auth, /,
+        );
+    });
+
+    it("parses mayFlagSpecs with the same validation as the other spec lists", () => {
+        const withMayFlag = (entry: Record<string, unknown>) =>
+            liveCase({
+                live: {
+                    prContext: {
+                        title: "t",
+                        description: "d",
+                        author: "a",
+                        baseBranch: "main",
+                    },
+                    mustCatchSpecs: [
+                        {key: "bug", path: "src/a.ts", mechanism: ["m"]},
+                    ],
+                    mayFlagSpecs: [entry],
+                },
+            });
+        const ok = parseCase(
+            withMayFlag({
+                key: "real-but-unspecced",
+                path: "src/a.ts",
+                lineStart: 1,
+                lineEnd: 2,
+                mechanism: ["empty string fallback"],
+            }),
+            "test://may-flag",
+        );
+        expect(ok.live?.mayFlagSpecs?.[0]?.key).toBe("real-but-unspecced");
+        expect(
+            parseErrors(
+                withMayFlag({
+                    key: "bug",
+                    path: "src/a.ts",
+                    mechanism: ["m"],
+                }),
+            ),
+        ).toMatch(/duplicate spec key "bug"/);
+        expect(
+            parseErrors(
+                withMayFlag({
+                    key: "elsewhere",
+                    path: "src/other.ts",
+                    mechanism: ["m"],
+                }),
+            ),
+        ).toMatch(
+            /mayFlagSpecs\[0\]\.path: "src\/other\.ts" is not in changedFiles/,
+        );
+    });
+
     it("rejects an escaping or absolute tree path", () => {
         const withTree = (tree: string) =>
             liveCase({

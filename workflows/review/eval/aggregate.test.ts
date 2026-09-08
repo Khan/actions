@@ -4,120 +4,12 @@ import {
     aggregateSamples,
     computeNoiseFloor,
     extractSamples,
-    rateStat,
     renderAggregateMarkdown,
-    wilsonInterval,
     type ArmSample,
     type ReportSample,
     type SampleRun,
 } from "./aggregate";
-
-/* -------------------------------------------------------------------------- */
-/* Fixture builders: the report-JSON subset the extractor consumes            */
-/* -------------------------------------------------------------------------- */
-
-/** One raw `arms.<arm>.runs[]` entry as live-ab.ts serializes it. */
-const rawRun = (
-    caseId: string,
-    over: {
-        verdict?: string;
-        expected?: string;
-        caught?: string[];
-        /**
-         * Spec key -> the label the catch carried. A key absent from this map
-         * serializes a `caught` entry with no `blocking` field, i.e. an
-         * artifact predating the severity instrumentation.
-         */
-        blocking?: Record<string, boolean>;
-        missedDetail?: {specKey: string; droppedBy?: string}[];
-        unmatched?: string[];
-        posted?: number;
-    } = {},
-) => ({
-    corpusCase: {
-        id: caseId,
-        expected: {verdict: over.expected ?? "REQUEST_CHANGES"},
-    },
-    result: {verdict: {event: over.verdict ?? "REQUEST_CHANGES"}},
-    match: {
-        caseId,
-        caught: (over.caught ?? []).map((specKey) => ({
-            specKey,
-            findingId: `${caseId}:f`,
-            via: "deterministic",
-            ...(over.blocking?.[specKey] !== undefined
-                ? {blocking: over.blocking[specKey]}
-                : {}),
-        })),
-        missed: (over.missedDetail ?? []).map((d) => d.specKey),
-        missedDetail: over.missedDetail ?? [],
-        falseFlags: [],
-        unmatchedFindingIds: over.unmatched ?? [],
-        postedCount: over.posted ?? (over.caught ?? []).length,
-    },
-});
-
-const rawReport = (over: {
-    baselineRuns?: unknown[];
-    candidateRuns?: unknown[];
-    baselineSha?: string;
-    candidateSha?: string;
-    baselineJudge?: number;
-    candidateJudge?: number;
-}) => ({
-    baseRef: "origin/main",
-    reviewMdSha: {
-        baseline: over.baselineSha ?? "a".repeat(64),
-        candidate: over.candidateSha ?? "b".repeat(64),
-    },
-    arms: {
-        baseline: {
-            arm: "baseline",
-            runs: over.baselineRuns ?? [],
-            usd: 1.5,
-            ...(over.baselineJudge !== undefined
-                ? {judge: {meanQuality: over.baselineJudge, verdictCounts: {}}}
-                : {}),
-        },
-        candidate: {
-            arm: "candidate",
-            runs: over.candidateRuns ?? [],
-            usd: 2.5,
-            ...(over.candidateJudge !== undefined
-                ? {judge: {meanQuality: over.candidateJudge, verdictCounts: {}}}
-                : {}),
-        },
-    },
-    regressions: {lost: [], gained: []},
-    adversarialFailures: [],
-    gateRetries: [],
-});
-
-describe("wilsonInterval", () => {
-    it("brackets the point estimate and stays inside [0,1]", () => {
-        const interval = wilsonInterval(5, 6);
-        expect(interval.lo).toBeGreaterThan(0.4);
-        expect(interval.lo).toBeLessThan(5 / 6);
-        expect(interval.hi).toBeGreaterThan(5 / 6);
-        expect(interval.hi).toBeLessThanOrEqual(1);
-    });
-
-    it("is exactly [0,1] at n=0 and never collapses at 0/n or n/n", () => {
-        expect(wilsonInterval(0, 0)).toEqual({lo: 0, hi: 1});
-        const zero = wilsonInterval(0, 10);
-        expect(zero.lo).toBe(0);
-        expect(zero.hi).toBeGreaterThan(0.2);
-        const full = wilsonInterval(10, 10);
-        expect(full.hi).toBe(1);
-        expect(full.lo).toBeLessThan(1);
-    });
-
-    it("narrows as repeats accumulate (the whole point of pooling)", () => {
-        const single = wilsonInterval(6, 8);
-        const pooled = wilsonInterval(60, 80);
-        expect(pooled.hi - pooled.lo).toBeLessThan((single.hi - single.lo) / 2);
-    });
-});
+import {rawReport, rawRun} from "./aggregate-fixtures";
 
 describe("extractSamples", () => {
     it("reduces a single-run report to one sample pair", () => {
@@ -143,6 +35,47 @@ describe("extractSamples", () => {
         expect(sample.candidate.runs[0]?.unmatchedPosted).toBe(1);
         expect(sample.candidate.runs[0]?.posted).toBe(2);
         expect(sample.baseline.usd).toBe(1.5);
+    });
+
+    it("sums unmatched plus duplicates for noise and reads the may-flag bucket as zero on legacy shapes", () => {
+        // A report predating the buckets recorded every leftover under
+        // unmatchedFindingIds. Summing unmatched plus duplicates reconciles
+        // the duplicate bucket with that shape, and only that bucket: a
+        // leftover the new shape records as legitimate unspecced used to
+        // count as noise, so the same three leftovers read 3 under the old
+        // shape and 2 under the new. The may-flag count is 0, not missing,
+        // for the legacy shape.
+        const legacy = rawRun("case-1", {
+            posted: 4,
+            unmatched: ["dup", "legit", "template"],
+        });
+        const bucketed = rawRun("case-1", {
+            posted: 4,
+            unmatched: ["template"],
+            duplicates: [{findingId: "dup", specKey: "s"}],
+            legitimate: ["legit"],
+        });
+        const raw = rawReport({
+            baselineRuns: [legacy],
+            candidateRuns: [bucketed],
+        });
+        const sample = extractSamples("r1", raw)[0]!;
+        expect(sample.baseline.runs[0]?.unmatchedPosted).toBe(3);
+        expect(sample.baseline.runs[0]?.legitimateUnspecced).toBe(0);
+        expect(sample.candidate.runs[0]?.unmatchedPosted).toBe(2);
+        expect(sample.candidate.runs[0]?.legitimateUnspecced).toBe(1);
+        expect(sample.candidate.runs[0]?.audited).toBe(false);
+
+        // The audited flag reads the case's own may-flag list.
+        const audited = rawRun("case-1", {posted: 1}) as unknown as {
+            corpusCase: Record<string, unknown>;
+        };
+        audited.corpusCase["live"] = {mayFlagSpecs: [{key: "m"}]};
+        const auditedSample = extractSamples(
+            "r2",
+            rawReport({baselineRuns: [audited], candidateRuns: [audited]}),
+        )[0]!;
+        expect(auditedSample.baseline.runs[0]?.audited).toBe(true);
     });
 
     it("carries recorded catch labels and omits unrecorded ones", () => {
@@ -281,6 +214,9 @@ describe("aggregateSamples", () => {
         caughtSpecBlocking: {},
         missedSpecs: [],
         unmatchedPosted: 0,
+        duplicates: 0,
+        legitimateUnspecced: 0,
+        audited: false,
         posted: 0,
         ...over,
     });
@@ -615,6 +551,79 @@ describe("renderAggregateMarkdown", () => {
         expect(markdown).not.toContain("Noise floor");
     });
 
+    it("pools the noise buckets: duplicates into noise, may-flag matches into their own row", () => {
+        const raw = rawReport({
+            baselineRuns: [
+                rawRun("case-1", {
+                    caught: ["spec-1"],
+                    posted: 4,
+                    unmatched: ["template"],
+                    duplicates: [{findingId: "copy", specKey: "spec-1"}],
+                    legitimate: ["legit"],
+                }),
+            ],
+            candidateRuns: [
+                rawRun("case-1", {
+                    caught: ["spec-1"],
+                    posted: 2,
+                    unmatched: ["template"],
+                }),
+            ],
+        });
+        const report = aggregateSamples([
+            ...extractSamples("r1", raw),
+            ...extractSamples("r2", raw),
+        ]);
+        expect(report.arms.baseline.pooled.noise).toMatchObject({
+            numerator: 4,
+            denominator: 8,
+        });
+        expect(report.arms.baseline.pooled.legitimateUnspecced).toMatchObject({
+            numerator: 2,
+            denominator: 8,
+        });
+        expect(report.arms.candidate.pooled.legitimateUnspecced).toMatchObject({
+            numerator: 0,
+            denominator: 4,
+        });
+        expect(report.arms.baseline.pooled.duplicates).toBe(2);
+        // Neither raw run carries a live block, so nothing counts as audited.
+        expect(report.arms.baseline.pooled.auditedRuns).toBe(0);
+        expect(report.arms.baseline.pooled.caseRuns).toBe(2);
+        const markdown = renderAggregateMarkdown(report);
+        expect(markdown).toContain(
+            "| Case-runs with may-flag entries (audited) | 0 / 2 |  | 0 / 2 |  |",
+        );
+
+        // A case that carries mayFlagSpecs counts on every run it appears in.
+        const auditedRun = rawRun("case-1", {
+            caught: ["spec-1"],
+            posted: 1,
+        }) as unknown as {corpusCase: Record<string, unknown>};
+        auditedRun.corpusCase["live"] = {mayFlagSpecs: [{key: "m"}]};
+        const auditedRaw = rawReport({
+            baselineRuns: [auditedRun],
+            candidateRuns: [rawRun("case-1", {caught: ["spec-1"], posted: 1})],
+        });
+        const audited = aggregateSamples([
+            ...extractSamples("r1", auditedRaw),
+            ...extractSamples("r2", auditedRaw),
+        ]);
+        expect(audited.arms.baseline.pooled.auditedRuns).toBe(2);
+        expect(audited.arms.candidate.pooled.auditedRuns).toBe(0);
+        expect(renderAggregateMarkdown(audited)).toContain(
+            "| Case-runs with may-flag entries (audited) | 2 / 2 |  | 0 / 2 |  |",
+        );
+        expect(markdown).toContain("| Noise (unmatched posted) | 4/8 (50%)");
+        expect(markdown).toContain(
+            "| of which duplicates of a claimed defect | 2 |  | 0 |  |",
+        );
+        expect(markdown).toContain(
+            "| Legitimate unspecced (may-flag, not noise) | 2/8 (25%)",
+        );
+        expect(markdown).toContain("| 0/4 (0%)");
+    });
+
     it("renders a (blocking) row per spec and marks a split on identical arms", () => {
         // Three identical-arm repeats: the spec is always caught, and the
         // label flips. Recall shows 6/6 and nothing else; the blocking row is
@@ -685,7 +694,7 @@ describe("renderAggregateMarkdown", () => {
         ]);
         const uniformMd = renderAggregateMarkdown(uniform);
         expect(uniformMd).toContain(
-            "Ruler: matcher deterministic; corpus cccccccccccc.",
+            "Ruler: matcher deterministic; corpus cccccccccccc; tools unscoped.",
         );
         expect(uniformMd).not.toContain("mix rulers");
 
@@ -699,6 +708,77 @@ describe("renderAggregateMarkdown", () => {
         expect(renderAggregateMarkdown(mixed)).toContain(
             "WARNING: pooled runs mix rulers",
         );
+
+        // A stamped report pooled with a legacy unstamped one is a mixed
+        // ruler too: "unstamped" is listed as the second value so the same
+        // warning fires. An all-unstamped pool stays silent as before.
+        const halfStamped = aggregateSamples([
+            ...extractSamples(
+                "r1",
+                withRuler("deterministic-v2", "c".repeat(64)),
+            ),
+            ...extractSamples(
+                "r2",
+                rawReport({
+                    baselineRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+                    candidateRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+                }),
+            ),
+        ]);
+        expect(halfStamped.matchers).toEqual(["deterministic-v2", "unstamped"]);
+        const halfMd = renderAggregateMarkdown(halfStamped);
+        expect(halfMd).toContain("matcher deterministic-v2, unstamped;");
+        expect(halfMd).toContain("WARNING: pooled runs mix rulers");
+        const legacyOnly = aggregateSamples([
+            ...extractSamples(
+                "r1",
+                rawReport({
+                    baselineRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+                    candidateRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+                }),
+            ),
+        ]);
+        expect(legacyOnly.matchers).toEqual([]);
+        expect(renderAggregateMarkdown(legacyOnly)).not.toContain("mix rulers");
+    });
+
+    it("treats a stamped report without a tool policy as unscoped, and warns across that boundary", () => {
+        const base = rawReport({
+            baselineRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+            candidateRuns: [rawRun("case-1", {caught: ["spec-1"]})],
+        });
+        const ruler = {matcher: "deterministic", corpusSha: "c".repeat(64)};
+        const preScope = {...base, provenance: {...ruler, caseCount: 1}};
+        const scoped = {
+            ...base,
+            provenance: {
+                ...ruler,
+                caseCount: 1,
+                toolPolicy: "read-scoped:v1:Read,Grep,Glob",
+            },
+        };
+        const uniform = aggregateSamples([
+            ...extractSamples("r1", scoped),
+            ...extractSamples("r2", scoped),
+        ]);
+        expect(renderAggregateMarkdown(uniform)).toContain(
+            "tools read-scoped:v1:Read,Grep,Glob.",
+        );
+        expect(renderAggregateMarkdown(uniform)).not.toContain("mix rulers");
+        const mixed = aggregateSamples([
+            ...extractSamples("r1", preScope),
+            ...extractSamples("r2", scoped),
+        ]);
+        expect(mixed.toolPolicies).toEqual([
+            "read-scoped:v1:Read,Grep,Glob",
+            "unscoped",
+        ]);
+        expect(renderAggregateMarkdown(mixed)).toContain(
+            "WARNING: pooled runs mix rulers",
+        );
+        // A report with no stamp at all stays unstamped, not "unscoped".
+        const unstamped = aggregateSamples([...extractSamples("r1", base)]);
+        expect(unstamped.toolPolicies).toEqual([]);
     });
 
     it("warns on asymmetric samples under the noise-floor bands", () => {
@@ -783,15 +863,5 @@ describe("renderAggregateMarkdown", () => {
         expect(markdown.indexOf("### Noise floor")).toBeLessThan(
             markdown.indexOf("| Case / spec |"),
         );
-    });
-});
-
-describe("rateStat", () => {
-    it("carries numerator, denominator, rate, and interval together", () => {
-        const stat = rateStat(3, 4);
-        expect(stat.rate).toBe(0.75);
-        expect(stat.interval.lo).toBeGreaterThan(0);
-        expect(stat.interval.hi).toBeLessThanOrEqual(1);
-        expect(rateStat(0, 0).rate).toBe(0);
     });
 });

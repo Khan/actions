@@ -1,4 +1,4 @@
-import {describe, it, expect} from "vitest";
+import {afterAll, beforeAll, describe, it, expect, vi} from "vitest";
 
 import {aggregateSamples, extractSamples} from "./aggregate";
 import {parseCase, type CorpusCase} from "./corpus/loader";
@@ -17,6 +17,15 @@ import {
     type ArmRunReport,
     type MultiAbReport,
 } from "./live-ab";
+
+// runArm prints a progress line per case to stderr (live-ab-progress.ts,
+// asserted in live-ab-progress.test.ts), so keep this suite's output clean.
+beforeAll(() => {
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+});
+afterAll(() => {
+    vi.restoreAllMocks();
+});
 
 const DIFF = [
     "diff --git a/src/a.ts b/src/a.ts",
@@ -525,12 +534,13 @@ describe("retryGateFlips", () => {
             },
         );
         expect(attemptsSeen).toEqual([1, 2]);
+        const cost = {agent: "correctness-reviewer", model: "m", usd: 0.5};
         expect(retries).toEqual([
             {
                 caseId: "adv-1",
                 attempts: [
-                    {pass: true, failures: [], usd: 0.5},
-                    {pass: true, failures: [], usd: 0.5},
+                    {pass: true, failures: [], usd: 0.5, agentCosts: [cost]},
+                    {pass: true, failures: [], usd: 0.5, agentCosts: [cost]},
                 ],
                 settledPass: true,
             },
@@ -808,9 +818,14 @@ describe("renderMarkdownReport", () => {
             "Measured noise floor (identical arms, run 29069228968",
         );
         expect(markdown).toContain("must-catch recall 54%-86% (sd 10%)");
-        expect(markdown.trimEnd().endsWith("resolve smaller effects.*")).toBe(
-            true,
-        );
+        // A band whose row was redefined after measurement says so in the
+        // same footer, so the two numbers cannot be read as one series.
+        expect(markdown).toContain("resolve smaller effects. The noise");
+        expect(
+            markdown
+                .trimEnd()
+                .endsWith("reads high against post-2026-09-03 numbers.*"),
+        ).toBe(true);
     });
 
     it("relabels the arm columns on an identical-arm single run", async () => {
@@ -843,7 +858,8 @@ describe("renderMarkdownReport", () => {
                 mustCatchRecall: {numerator: 0, denominator: 0, rate: 0},
                 verdictAgreement: {numerator: 0, denominator: 0, rate: 0},
                 cleanFalseFlag: {count: 0, details: []},
-                noise: {numerator: 0, denominator: 0, rate: 0},
+                noise: {numerator: 0, denominator: 0, rate: 0, duplicates: 0},
+                legitimateUnspecced: {numerator: 0, denominator: 0, rate: 0},
             },
             skippedCases: [],
             usd: 0,
@@ -876,7 +892,7 @@ describe("renderMarkdownReport", () => {
             "Gate flips retried (best of three, flipped cases only)",
         );
         expect(markdown).toContain(
-            "- adv-1: original run failed, 0/1 retries passed; failure confirmed ($0.57 retry spend)",
+            "- adv-1: original run failed, 0/1 retries passed; failure confirmed ($0.57 retry spend at list)",
         );
     });
 

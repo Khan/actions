@@ -74,6 +74,29 @@
                 "lineStart": 12,
                 "lineEnd": 22
             }
+        ],
+        "mayFlagSpecs": [
+            {
+                "key": "fast-path-leaves-session-unset",
+                "path": "src/auth/middleware.ts",
+                "lineStart": 12,
+                "lineEnd": 22,
+                "mechanism": [
+                    "req\\.session.{0,100}(unset|undefined|not (set|assigned|populated)|never (set|assigned)|without (setting|assigning))",
+                    "without (setting|assigning|populating) `?req\\.session",
+                    "(session|identity).{0,40}(undefined|unset|missing).{0,100}(handler|downstream)"
+                ]
+            },
+            {
+                "key": "middleware-doc-comment-stale",
+                "path": "src/auth/middleware.ts",
+                "lineStart": 12,
+                "lineEnd": 22,
+                "mechanism": [
+                    "doc ?comment.{0,100}(stale|no longer (true|holds|accurate)|out of date|contradict|still (says|claims|promises))",
+                    "(stale|outdated|contradict(s|ed)?).{0,60}(doc ?comment|docstring)"
+                ]
+            }
         ]
     },
     "routerConfig": {

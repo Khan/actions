@@ -10,6 +10,7 @@
  */
 
 import type {AgentRequest, AgentResult, AgentRunner} from "./dispatch";
+import {usageOfResultMessage, type ModelTokens} from "./pricing";
 
 /**
  * Anthropic SDK internal retries for a sub-agent subprocess (the SDK's own
@@ -236,11 +237,13 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
         // the totalUsd summed over them).
         let endedUsd = 0;
         let endedTurns = 0;
+        let endedUsage: ModelTokens[] | undefined;
         let ended = false;
         try {
             const run = sdk.query({prompt: request.prompt, options});
             let output = "";
             let usd = 0;
+            let usage: ModelTokens[] | undefined;
             let turns = 0;
             let stopReason: string | undefined;
             let toolCalls = 0;
@@ -280,6 +283,7 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                 if (message["subtype"] !== "success") {
                     endedUsd = Number(message["total_cost_usd"] ?? 0);
                     endedTurns = Number(message["num_turns"] ?? 0);
+                    endedUsage = usageOfResultMessage(message);
                     ended = true;
                     throw new Error(
                         `sub-agent ended without success: ${String(
@@ -290,12 +294,14 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                 output = String(message["result"] ?? "");
                 usd = Number(message["total_cost_usd"] ?? 0);
                 turns = Number(message["num_turns"] ?? 0);
+                usage = usageOfResultMessage(message);
             }
             const salvage = captured ?? provisional;
             if (salvage !== undefined) {
                 return {
                     output: JSON.stringify(salvage),
                     usd,
+                    ...(usage === undefined ? {} : {usage}),
                     turns,
                     toolCalls,
                     stopReason,
@@ -307,6 +313,7 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
             return {
                 output,
                 usd,
+                ...(usage === undefined ? {} : {usage}),
                 turns,
                 toolCalls,
                 stopReason,
@@ -325,6 +332,7 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                 return {
                     output: JSON.stringify(salvage),
                     usd: endedUsd,
+                    ...(endedUsage === undefined ? {} : {usage: endedUsage}),
                     turns: endedTurns,
                     wallMs: Date.now() - started,
                     structured: true,
@@ -354,6 +362,7 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
                 return {
                     output: lastText,
                     usd: endedUsd,
+                    ...(endedUsage === undefined ? {} : {usage: endedUsage}),
                     turns: endedTurns,
                     wallMs: Date.now() - started,
                 };

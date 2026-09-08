@@ -2,6 +2,7 @@ import {describe, it, expect} from "vitest";
 import {Volume} from "memfs";
 
 import {parseCase} from "./corpus/loader";
+import {LiveAgentError} from "./live-agent-error";
 import {
     produceLive,
     resolveRuntimeImports,
@@ -10,6 +11,7 @@ import {
 } from "./live-producer";
 import type {ExtractedAgent} from "./agent-extract";
 import type {StageFs} from "./live-stage";
+import type {ModelTokens} from "../lib/pricing";
 
 /** Adapt a memfs volume to the staging fs seam. */
 const volFs = (vol: InstanceType<typeof Volume>): StageFs => ({
@@ -106,9 +108,13 @@ const SCHEMA_FINDING = {
     model_authored_prose: "Money should stay in integer cents.",
 };
 
-/** A scripted runner: outputs queued per agent name, requests recorded. */
+/**
+ * A scripted runner: outputs queued per agent name, requests recorded. With
+ * `usage`, every call also reports that token usage (the SDK's modelUsage).
+ */
 const scriptedRunner = (
     scripts: Record<string, string[]>,
+    usage?: ModelTokens[],
 ): {runner: LiveAgentRunner; requests: LiveAgentRequest[]} => {
     const requests: LiveAgentRequest[] = [];
     const cursors: Record<string, number> = {};
@@ -118,7 +124,13 @@ const scriptedRunner = (
         const cursor = cursors[request.name] ?? 0;
         cursors[request.name] = cursor + 1;
         const output = queue[Math.min(cursor, queue.length - 1)] ?? "{}";
-        return {output, usd: 0.25, turns: 3, wallMs: 1000};
+        return {
+            output,
+            usd: 0.25,
+            turns: 3,
+            wallMs: 1000,
+            ...(usage === undefined ? {} : {usage}),
+        };
     };
     return {runner, requests};
 };
@@ -131,6 +143,49 @@ const validatorOutput = (
     });
 
 describe("produceLive", () => {
+    it("keeps the counters a failed attempt measured before it threw", async () => {
+        // A timed-out or non-success attempt is the one most likely to have
+        // gone looking outside the case; its denials must reach the report.
+        let correctnessAttempts = 0;
+        const runner: LiveAgentRunner = async (request) => {
+            if (request.name === "correctness-reviewer") {
+                correctnessAttempts += 1;
+                if (correctnessAttempts === 1) {
+                    throw new LiveAgentError("sub-agent timed out", {
+                        toolCalls: 40,
+                        deniedReads: 2,
+                    });
+                }
+                return {
+                    output: JSON.stringify({files: [], findings: []}),
+                    usd: 0.25,
+                    turns: 3,
+                    wallMs: 1000,
+                    toolCalls: 5,
+                    deniedReads: 1,
+                };
+            }
+            return {
+                output: JSON.stringify({findings: []}),
+                usd: 0.1,
+                turns: 1,
+                wallMs: 100,
+            };
+        };
+        const result = await produceLive(CASE, AGENTS, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        const correctness = result.perAgent.find(
+            (a) => a.name === "correctness-reviewer",
+        );
+        expect(correctness?.retried).toBe(true);
+        expect(correctness?.failed).toBeUndefined();
+        expect(correctness?.toolCalls).toBe(45);
+        expect(correctness?.deniedReads).toBe(3);
+    });
+
     it("runs the default finders plus routed lenses and the validator", async () => {
         const {runner, requests} = scriptedRunner({
             "correctness-reviewer": [
@@ -168,9 +223,13 @@ describe("produceLive", () => {
             "money-payments",
             "skill-auditor",
         ]);
-        // Every dispatch runs in the staged checkout.
+        // Every dispatch runs in the staged checkout, and its read scope is
+        // the staged case (checkout plus the context sibling), nothing wider.
         expect(new Set(requests.map((r) => r.cwd))).toEqual(
             new Set(["/stage/checkout"]),
+        );
+        expect(new Set(requests.map((r) => r.readRoot))).toEqual(
+            new Set(["/stage"]),
         );
 
         // The label-shape finding is mapped into the schema.
@@ -428,6 +487,8 @@ describe("produceLive", () => {
         expect(report?.retried).toBe(true);
         expect(report?.failed).toBeUndefined();
         expect(report?.usd).toBeCloseTo(0.5, 10); // both attempts billed
+        // No usage from this runner: the field stays absent, never `[]`.
+        expect(report?.usage).toBeUndefined();
         expect(result.findings.length).toBe(1);
         // The retry prompt carries the rejection reason.
         const retryPrompt = requests.filter(
@@ -493,6 +554,48 @@ describe("produceLive", () => {
         expect(models[1]).toBe("claude-opus-4-8");
         expect(report?.fellBackTo).toBe("claude-opus-4-8");
         expect(report?.failed).toBeUndefined();
+    });
+
+    it("carries the runner's token usage onto the report, merged across the retry", async () => {
+        const tokens: ModelTokens = {
+            model: "claude-opus-5",
+            input: 1000,
+            output: 100,
+            cacheRead: 5000,
+            cacheWrite: 200,
+        };
+        const {runner} = scriptedRunner(
+            {
+                "correctness-reviewer": [
+                    "sorry, here is prose instead of JSON",
+                    JSON.stringify({findings: [LABEL_FINDING]}),
+                ],
+                "skill-auditor": [JSON.stringify({findings: []})],
+                "money-payments": [JSON.stringify({findings: []})],
+                "claim-validator": [validatorOutput([])],
+            },
+            [tokens],
+        );
+        const result = await produceLive(CASE, AGENTS, {
+            runner,
+            stageDir: "/stage",
+            fs: volFs(caseVol()),
+        });
+        const retried = result.perAgent.find(
+            (a) => a.name === "correctness-reviewer",
+        );
+        // Two attempts, one model: summed into one entry.
+        expect(retried?.usage).toEqual([
+            {
+                model: "claude-opus-5",
+                input: 2000,
+                output: 200,
+                cacheRead: 10_000,
+                cacheWrite: 400,
+            },
+        ]);
+        const single = result.perAgent.find((a) => a.name === "skill-auditor");
+        expect(single?.usage).toEqual([tokens]);
     });
 
     it("names an empty final as empty output, not malformed", async () => {

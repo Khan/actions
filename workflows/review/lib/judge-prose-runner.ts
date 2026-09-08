@@ -15,6 +15,7 @@
  */
 
 import type {ProseRunner} from "./judge-prose";
+import {usageOfResultMessage, type ModelTokens} from "./pricing";
 
 /**
  * Per-call ceiling. A judge call is a bounded classification over one
@@ -63,7 +64,10 @@ export const createJudgeRunner = async (
         }) => AsyncIterable<Record<string, unknown>>;
     };
 
-    return async (prompt: string): Promise<string> => {
+    return async (
+        prompt: string,
+        onUsage?: (usage: ModelTokens) => void,
+    ): Promise<string> => {
         const abort = new AbortController();
         const timer = setTimeout(() => {
             abort.abort(
@@ -99,6 +103,13 @@ export const createJudgeRunner = async (
                             message["subtype"],
                         )}`,
                     );
+                }
+                // The judge's own tokens, so the cost report can attribute
+                // them to the agent this call gated (the judge is a separate
+                // SDK session, invisible to the agent's meter).
+                const usage = usageOfResultMessage(message);
+                if (usage !== undefined && onUsage !== undefined) {
+                    usage.forEach(onUsage);
                 }
                 return String(message["result"] ?? "");
             }

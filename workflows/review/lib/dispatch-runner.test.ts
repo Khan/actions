@@ -62,12 +62,33 @@ const request = (over: Partial<AgentRequest> = {}): AgentRequest => ({
     ...over,
 });
 
+/** The SDK's per-model usage on a result record, as the runner reads it. */
+const MODEL_USAGE = {
+    "claude-opus-5": {
+        inputTokens: 1000,
+        outputTokens: 100,
+        cacheReadInputTokens: 5000,
+        cacheCreationInputTokens: 200,
+        costUSD: 0.42,
+    },
+};
+const USAGE = [
+    {
+        model: "claude-opus-5",
+        input: 1000,
+        output: 100,
+        cacheRead: 5000,
+        cacheWrite: 200,
+    },
+];
+
 const success = (result: string): Record<string, unknown> => ({
     type: "result",
     subtype: "success",
     result,
     total_cost_usd: 0.42,
     num_turns: 7,
+    modelUsage: MODEL_USAGE,
 });
 
 describe("createSdkRunner submit_result (trial suggestion h)", () => {
@@ -75,6 +96,14 @@ describe("createSdkRunner submit_result (trial suggestion h)", () => {
         session = async function* () {
             yield success("free text");
         };
+    });
+
+    it("reports the result record's per-model tokens beside its dollars", async () => {
+        // The cost report prices from these; the SDK's dollar figure is
+        // list and cannot be re-priced.
+        const result = await (await createSdkRunner())(request());
+        expect(result.usd).toBe(0.42);
+        expect(result.usage).toEqual(USAGE);
     });
 
     it("an accepted payload IS the output, beating the free-text final", async () => {
@@ -126,8 +155,11 @@ describe("createSdkRunner submit_result (trial suggestion h)", () => {
         expect(result.structured).toBe(true);
         expect(JSON.parse(result.output)).toEqual({findings: []});
         // Cost fields are best-effort zero ONLY here: the stream died with
-        // no result record of any subtype, so there is nothing to report.
+        // no result record of any subtype, so there is nothing to report,
+        // and no tokens either (absent, so the report reads it as untracked
+        // rather than as free).
         expect(result.usd).toBe(0);
+        expect(result.usage).toBeUndefined();
     });
 
     it("salvages the last assistant text when the session dies without success", async () => {
@@ -148,6 +180,7 @@ describe("createSdkRunner submit_result (trial suggestion h)", () => {
                 subtype: "error_max_turns",
                 total_cost_usd: 1.5,
                 num_turns: 100,
+                modelUsage: MODEL_USAGE,
             };
         };
         const result = await (await createSdkRunner())(request());
@@ -155,6 +188,8 @@ describe("createSdkRunner submit_result (trial suggestion h)", () => {
         expect(result.output).toBe("the free-text findings");
         expect(result.usd).toBe(1.5);
         expect(result.turns).toBe(100);
+        // The tokens ride the non-success record the same way the dollars do.
+        expect(result.usage).toEqual(USAGE);
     });
 
     it("the LAST assistant text wins when several were emitted", async () => {
@@ -210,6 +245,7 @@ describe("createSdkRunner submit_result (trial suggestion h)", () => {
                 subtype: "error_max_turns",
                 total_cost_usd: 2.25,
                 num_turns: 42,
+                modelUsage: MODEL_USAGE,
             };
         };
         const result = await (
@@ -223,6 +259,7 @@ describe("createSdkRunner submit_result (trial suggestion h)", () => {
         expect(JSON.parse(result.output)).toEqual({findings: [{id: "styled"}]});
         expect(result.usd).toBe(2.25);
         expect(result.turns).toBe(42);
+        expect(result.usage).toEqual(USAGE);
     });
 
     it("reports a timeout instead of salvaging mid-investigation narration", async () => {

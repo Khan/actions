@@ -7,12 +7,28 @@
  */
 
 import {renderAggregateMarkdown, type AggregateReport} from "./aggregate";
+import {money, pricedRows, toolCallRows} from "./cost-rows";
+import {
+    deniedSection,
+    deniedTotal,
+    pooledDeniedLines,
+} from "./live-ab-report-denials";
+import {
+    khanCost,
+    type AgentCost,
+    type ModelTokens,
+    type RateCard,
+} from "../lib/pricing";
+
+export type {AgentCost};
+export {armToolCalls} from "./cost-rows";
 import type {
     CaseVerification,
     CorpusCase,
     RecordedFinding,
 } from "./corpus/loader";
 import type {MergeVia} from "../lib/dedup";
+import {CLUSTERER} from "../lib/dispatch-cluster";
 import type {LiveCaseRun, LiveMetricsReport} from "./live-match";
 import type {
     LiveDedupReport,
@@ -20,6 +36,8 @@ import type {
     PerAgentReport,
 } from "./live-producer";
 import type {RereviewCaseScore, RereviewMetricsReport} from "./rereview-match";
+
+export type {AgentCost};
 
 export type ArmId = "baseline" | "candidate";
 
@@ -51,6 +69,20 @@ export type ArmRunReport = {
         expected: string;
         caught: number;
         missed: string[];
+        /**
+         * The case's posted count and its noise buckets, so the per-case
+         * noise picture is readable from the report without opening each
+         * run's match record: `noise` is unmatched plus duplicates (the
+         * pooled numerator's contribution), `legitimateUnspecced` the
+         * may-flag matches that left it. Cases without `mayFlagSpecs`
+         * report the old definition, so compare these per case across arms
+         * rather than reading a pooled rate over audited and unaudited
+         * cases as one number.
+         */
+        posted: number;
+        noise: number;
+        duplicates: number;
+        legitimateUnspecced: number;
         /**
          * Findings the provenance gate anchor-snapped this run. The direct
          * observable for anchor fidelity: a prompt change that fixes
@@ -124,6 +156,29 @@ export type ArmRunReport = {
          */
         toolCalls?: {agent: string; count: number}[];
         /**
+         * Each agent's recorded spend (list price, like `usd`), the model it
+         * was billed on (the pin, or the refusal fallback when the dispatch
+         * fell back), and the tokens per model behind the spend when the
+         * runner could see them. The tokens are what let the report price an
+         * arm at Khan's rate (pricing.ts) without changing what `usd` means.
+         * Absent on artifacts predating the field.
+         */
+        agentCosts?: AgentCost[];
+        /**
+         * Read-tool calls the runner denied for resolving outside the
+         * staged case, per agent that had any. The eval's corpus and scorer
+         * sit on the same machine; a nonzero count is a reviewer that went
+         * looking, and the denial is why its recall still counts.
+         */
+        deniedReads?: {agent: string; count: number}[];
+        /**
+         * Calls to tools outside Read/Grep/Glob the runner denied, per agent
+         * that had any. Nonzero means the SDK's `tools` restriction stopped
+         * restricting and the hook caught it; reported apart from reads so
+         * a tool-policy denial is never read as a corpus peek.
+         */
+        deniedTools?: {agent: string; count: number}[];
+        /**
          * Reviewers the case enabled that this arm's `review.md` does not
          * define, so the arm never had the dimension. Expected on the baseline
          * arm of a new-reviewer A/B, and reported so a missing dimension is
@@ -138,6 +193,16 @@ export type ArmRunReport = {
     judge?: {meanQuality: number; verdictCounts: Record<string, number>};
     /** Fixed-format note when judge scoring failed; metrics still stand. */
     judgeError?: string;
+    /**
+     * Tokens the instrument itself spent on this arm: the judge's scoring
+     * calls and the match arbiter's fallback calls (both haiku, both direct
+     * Messages API calls that report `usage` but no dollars). Neither is in
+     * `usd`, which is sub-agent spend only, so the report prices these from
+     * tokens and adds them as their own row. Absent on artifacts predating
+     * the field. A run with the judge or arbiter disabled records empty
+     * lists, not an absent field.
+     */
+    overhead?: {judge: ModelTokens[]; arbiter: ModelTokens[]};
 };
 
 export type GateRetryAttempt = {
@@ -145,6 +210,8 @@ export type GateRetryAttempt = {
     /** Gate failures this attempt produced (empty when pass). */
     failures: string[];
     usd: number;
+    /** Per-agent cost behind `usd`, the same shape as `perCase[].agentCosts`. */
+    agentCosts?: AgentCost[];
 };
 
 export type GateRetry = {
@@ -172,11 +239,22 @@ export type GateMajority = {
  * what keeps the weekly drift series honest across instrument upgrades.
  */
 export type ReportProvenance = {
-    /** Matcher configuration: `deterministic` or `deterministic+arbiter`. */
+    /**
+     * Matcher configuration: `deterministic-v2` or
+     * `deterministic-v2+arbiter` (v1, unsuffixed, predates the lens
+     * tie-break and the leftover buckets).
+     */
     matcher: string;
     /** Content hash of the loaded corpus cases this run was scored against. */
     corpusSha: string;
     caseCount: number;
+    /**
+     * What the runner let reviewers reach (`READ_TOOL_POLICY` in
+     * read-scope.ts). Absent on reports before the read scope, which the
+     * aggregate reads as `unscoped`: those reviewers had every default tool
+     * and could read the corpus, so their rates are a different instrument.
+     */
+    toolPolicy?: string;
 };
 
 export type AbReport = {
@@ -190,7 +268,21 @@ export type AbReport = {
     adversarialFailures: string[];
     /** Best-of-three re-runs of the cases that flipped the hard gate. */
     gateRetries: GateRetry[];
+    /**
+     * Set on a checkpoint written mid-run (after every scored case), absent
+     * on a finished report. The arms cover only the cases scored so far,
+     * the gate has not been retried, and the judge has not run. The reader
+     * gets what a cancelled or timed-out run had, marked so nobody reads it
+     * as finished. `aggregate.ts` pools nothing from a partial report.
+     */
+    partial?: true;
 };
+
+/** What every report of one run shares, fixed before any arm runs. */
+export type RunHeader = Pick<
+    AbReport,
+    "baseRef" | "reviewMdSha" | "provenance"
+>;
 
 /**
  * The `--repeats n` report: every repeat's full single-run report (so any
@@ -205,10 +297,37 @@ export type MultiAbReport = {
     gate: GateMajority[];
     /** Cases failing the candidate gate in a strict majority of repeats. */
     adversarialFailures: string[];
+    /**
+     * Set on a mid-run checkpoint: the last entry of `repeats` is itself
+     * partial (its own `partial` flag set), and `aggregate` and `gate` cover
+     * the finished repeats only. See {@link AbReport.partial}.
+     */
+    partial?: true;
 };
 
-export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
+/** How far each arm of a report got, for the partial-report caveat. */
+const armProgress = (report: AbReport): string => {
+    const total = report.provenance?.caseCount;
+    const of = (done: number): string =>
+        total === undefined ? `${done}` : `${done} of ${total}`;
+    return (
+        `baseline scored ${of(report.arms.baseline.runs.length)} cases, ` +
+        `candidate ${of(report.arms.candidate.runs.length)}`
+    );
+};
+
+const PARTIAL_LEAD =
+    "PARTIAL REPORT: a checkpoint written mid-run (the run was cancelled, " +
+    "timed out, or is still going), not a finished measurement.";
+
+export const renderMultiMarkdownReport = (
+    report: MultiAbReport,
+    options: {khanRates?: RateCard} = {},
+): string => {
     const first = report.repeats[0];
+    const partial = report.partial === true ? " (partial)" : "";
+    const inProgress = report.repeats.find((r) => r.partial === true);
+    const finished = report.repeats.filter((r) => r.partial !== true).length;
     // Identical review.md in both arms only happens under `--force-arms`
     // (the runner short-circuits otherwise): a wobble control or the weekly
     // drift run, not an A/B. Say so up front; a report headed
@@ -219,9 +338,21 @@ export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
         first.reviewMdSha.baseline === first.reviewMdSha.candidate;
     const lines = [
         identicalArms
-            ? `## Review wobble control: ${report.repeatCount} repeats (identical arms)`
-            : `## Review live A/B: ${report.repeatCount} repeats`,
+            ? `## Review wobble control: ${report.repeatCount} repeats (identical arms)${partial}`
+            : `## Review live A/B: ${report.repeatCount} repeats${partial}`,
         "",
+        ...(report.partial === true
+            ? [
+                  `${PARTIAL_LEAD} ${finished} of ${report.repeatCount} ` +
+                      `repeats finished` +
+                      (inProgress === undefined
+                          ? "."
+                          : `, repeat ${finished + 1} in progress ` +
+                            `(${armProgress(inProgress)}).`) +
+                      " The aggregate and the gate below cover the finished repeats only.",
+                  "",
+              ]
+            : []),
         ...(first !== undefined
             ? [
                   identicalArms
@@ -242,7 +373,7 @@ export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
                   "",
               ]
             : []),
-        renderAggregateMarkdown(report.aggregate),
+        renderAggregateMarkdown(report.aggregate, options),
         "",
     ];
     const asymmetry = armAsymmetryLines(
@@ -256,9 +387,30 @@ export const renderMultiMarkdownReport = (report: MultiAbReport): string => {
             "",
         );
     }
+    lines.push(...pooledDeniedLines(report));
     if (report.gate.length === 0) {
         lines.push(
-            "Adversarial hard gate: PASSED on the candidate arm in every repeat.",
+            report.partial === true
+                ? `Adversarial hard gate: no flip so far (${finished} finished ` +
+                      `repeat${
+                          finished === 1 ? "" : "s"
+                      }), decided when the run finishes.`
+                : "Adversarial hard gate: PASSED on the candidate arm in every repeat.",
+            "",
+        );
+    } else if (report.partial === true) {
+        // A strict majority over one or two finished repeats is not a
+        // majority anyone should act on: a single flip at n=1 would render
+        // as confirmed. List the flips, decide nothing.
+        lines.push(
+            `### Adversarial hard gate (provisional, ${finished} finished repeat${
+                finished === 1 ? "" : "s"
+            })`,
+            "",
+            ...report.gate.map(
+                (g) =>
+                    `- ${g.caseId}: failed ${g.failedRepeats}/${g.repeats} finished repeats so far, decided when the run finishes`,
+            ),
             "",
         );
     } else {
@@ -313,6 +465,12 @@ const armAsymmetryLines = (
 const ASYMMETRY_HEADING =
     "### Arm asymmetry (expected when the PR adds a reviewer)";
 
+/** Cases in the arm whose corpus entry carries `mayFlagSpecs`. */
+const auditedCases = (arm: ArmRunReport): number =>
+    arm.runs.filter(
+        (run) => (run.corpusCase.live?.mayFlagSpecs?.length ?? 0) > 0,
+    ).length;
+
 /** Total anchor-snaps across an arm's case runs (see `perCase.snapped`). */
 const snappedTotal = (arm: ArmRunReport): number =>
     arm.perCase.reduce((sum, c) => sum + c.snapped, 0);
@@ -336,11 +494,20 @@ const snappedTotal = (arm: ArmRunReport): number =>
  * folded into the zero: the arm paid for it and measured nothing, which is not
  * the same claim as "tier 2 found no duplicates here".
  */
-const mergedTotal = (arm: ArmRunReport): string => {
+const mergedTotal = (arm: ArmRunReport, khan?: RateCard): string => {
     const dedup = arm.perCase.flatMap((c) => (c.dedup ? [c.dedup] : []));
     if (dedup.length === 0) {
         return "n/a";
     }
+    // The clusterer's tokens, from its own per-agent entries, so its price
+    // reads in both currencies like every other dollar in the table.
+    const clustererCosts = arm.perCase.flatMap((c) =>
+        (c.agentCosts ?? []).filter((a) => a.agent === CLUSTERER),
+    );
+    const clustererKhan =
+        khan === undefined || clustererCosts.length === 0
+            ? ""
+            : ` list, ${money(khanCost(clustererCosts, khan).usd)} Khan rate`;
     const sum = (pick: (d: typeof dedup[number]) => number): number =>
         dedup.reduce((total, d) => total + pick(d), 0);
     const absent = dedup.every((d) => d.clustererAbsent);
@@ -352,9 +519,9 @@ const mergedTotal = (arm: ArmRunReport): string => {
             ? "tier 1 only"
             : `${sum(
                   (d) => d.clusterMerged,
-              )} by clusterer at $${clustererUsd.toFixed(2)} / ${Math.round(
-                  clustererWallMs / 1000,
-              )}s`,
+              )} by clusterer at $${clustererUsd.toFixed(
+                  2,
+              )}${clustererKhan} / ${Math.round(clustererWallMs / 1000)}s`,
         ...(sum((d) => d.rejected) > 0
             ? [`${sum((d) => d.rejected)} proposed member(s) rejected`]
             : []),
@@ -423,6 +590,21 @@ export const MEASURED_NOISE_FLOOR = {
         {metric: "noise (unmatched posted)", min: 0.5, max: 0.6, sd: 0.03},
         {metric: "judge mean quality", min: 0.82, max: 0.86, sd: 0.02},
     ],
+    /**
+     * Rows whose definition changed after the band was measured, with the
+     * break. The noise numerator was redefined on 2026-09-03: may-flag
+     * matches left it and duplicates of a caught spec joined it, and on
+     * run 33671015442 that moved the claude arm from 71% to 35%. Until a
+     * drift run re-measures under the new definition the band is an
+     * upper bound for a smoke case that carries `mayFlagSpecs` and the old
+     * definition everywhere else.
+     */
+    redefined: [
+        {
+            metric: "noise (unmatched posted)",
+            note: "measured before the may-flag and duplicate buckets, so it reads high against post-2026-09-03 numbers",
+        },
+    ],
 } as const;
 
 const NOISE_FLOOR_FOOTER =
@@ -434,9 +616,23 @@ const NOISE_FLOOR_FOOTER =
         .join(", ") +
     ". A single-run delta whose arms both sit inside a band is " +
     "indistinguishable from run-to-run wobble; use `--repeats` to resolve " +
-    "smaller effects.*";
+    "smaller effects." +
+    MEASURED_NOISE_FLOOR.redefined
+        .map((r) => ` The ${r.metric} band was ${r.note}.`)
+        .join("") +
+    "*";
 
-export const renderMarkdownReport = (report: AbReport): string => {
+export const renderMarkdownReport = (
+    report: AbReport,
+    options: {
+        /**
+         * Khan's rate card (pricing.ts, read off review.md's overlay). When
+         * given, the table carries a "Cost (Khan rate)" row beside the
+         * list-price row, prices the judge and arbiter, and totals the run.
+         */
+        khanRates?: RateCard;
+    } = {},
+): string => {
     const {baseline, candidate} = report.arms;
     // See renderMultiMarkdownReport: identical shas imply `--force-arms`.
     const identicalArms =
@@ -444,12 +640,22 @@ export const renderMarkdownReport = (report: AbReport): string => {
     const [armALabel, armBLabel] = identicalArms
         ? ["Arm A", "Arm B"]
         : ["Baseline", "Candidate"];
+    // A checkpoint taken before an arm has scored anything must not render
+    // that arm as 0% (or $0.00) and the delta as a total regression: the
+    // sticky comment replaces the last finished result, so for the whole
+    // baseline half of a run the table would read as the candidate having
+    // lost everything. Every row goes through here.
+    const notRun = (arm: ArmRunReport): boolean =>
+        report.partial === true && arm.runs.length === 0;
     const row = (
         label: string,
         base: string,
         cand: string,
         delta = "",
-    ): string => `| ${label} | ${base} | ${cand} | ${delta} |`;
+    ): string =>
+        `| ${label} | ${notRun(baseline) ? "not run yet" : base} | ${
+            notRun(candidate) ? "not run yet" : cand
+        } | ${notRun(baseline) || notRun(candidate) ? "" : delta} |`;
     const metric = (
         label: string,
         pick: (arm: ArmRunReport) => number,
@@ -463,11 +669,28 @@ export const renderMarkdownReport = (report: AbReport): string => {
                 format(pick(candidate) - pick(baseline)),
         );
 
+    const partial = report.partial === true ? " (partial)" : "";
+
+    const priced =
+        options.khanRates === undefined
+            ? undefined
+            : pricedRows(baseline, candidate, options.khanRates, (l, b, c) =>
+                  row(l, b, c),
+              );
+
     const lines = [
         identicalArms
-            ? "## Review wobble control (identical arms)"
-            : "## Review live A/B",
+            ? `## Review wobble control (identical arms)${partial}`
+            : `## Review live A/B${partial}`,
         "",
+        ...(report.partial === true
+            ? [
+                  `${PARTIAL_LEAD} So far ${armProgress(report)}. Every ` +
+                      "number below covers only those cases, the gate was not " +
+                      "retried, and the judge did not run.",
+                  "",
+              ]
+            : []),
         identicalArms
             ? `Both arms ran the same review.md (${report.reviewMdSha.baseline.slice(
                   0,
@@ -486,7 +709,8 @@ export const renderMarkdownReport = (report: AbReport): string => {
             ? [
                   `Ruler: matcher ${report.provenance.matcher}; corpus ` +
                       `${report.provenance.corpusSha.slice(0, 12)} ` +
-                      `(${report.provenance.caseCount} cases).`,
+                      `(${report.provenance.caseCount} cases); tools ` +
+                      `${report.provenance.toolPolicy ?? "unscoped"}.`,
                   "",
               ]
             : []),
@@ -495,6 +719,30 @@ export const renderMarkdownReport = (report: AbReport): string => {
         metric("Must-catch recall", (a) => a.metrics.mustCatchRecall.rate),
         metric("Verdict agreement", (a) => a.metrics.verdictAgreement.rate),
         metric("Noise (unmatched posted)", (a) => a.metrics.noise.rate),
+        // The noise numerator, decomposed: a duplicate is a second posted
+        // copy of a defect another comment already claimed, a caught spec or
+        // an accepted may-flag entry (a merge-stage miss), and a
+        // legitimate unspecced finding matched a `mayFlagSpecs` entry and is
+        // NOT in the numerator (a real defect the fixture carries that the
+        // case is not about). What remains is template comments,
+        // speculation, and unspecced findings nobody has audited yet.
+        row(
+            "of which duplicates of a claimed defect",
+            String(baseline.metrics.noise.duplicates),
+            String(candidate.metrics.noise.duplicates),
+        ),
+        metric(
+            "Legitimate unspecced (may-flag, not noise)",
+            (a) => a.metrics.legitimateUnspecced.rate,
+        ),
+        // Only cases carrying mayFlagSpecs can move a finding into the row
+        // above, and on the rest the noise row is still the pre-audit
+        // definition, so the count is per arm beside the rates it qualifies.
+        row(
+            "Cases with may-flag entries (audited)",
+            `${auditedCases(baseline)} / ${baseline.runs.length}`,
+            `${auditedCases(candidate)} / ${candidate.runs.length}`,
+        ),
         row(
             "Clean false flags",
             String(baseline.metrics.cleanFalseFlag.count),
@@ -519,10 +767,12 @@ export const renderMarkdownReport = (report: AbReport): string => {
               ]
             : []),
         row(
-            "Cost",
+            "Cost (list price)",
             `$${baseline.usd.toFixed(2)}`,
             `$${candidate.usd.toFixed(2)}`,
         ),
+        ...(priced?.rows ?? []),
+        ...toolCallRows(baseline, candidate, options.khanRates, row),
         row(
             "Wall clock",
             `${Math.round(baseline.wallMs / 1000)}s`,
@@ -567,10 +817,16 @@ export const renderMarkdownReport = (report: AbReport): string => {
         ),
         row(
             "Cross-source claims merged (of candidates)",
-            mergedTotal(baseline),
-            mergedTotal(candidate),
+            mergedTotal(baseline, options.khanRates),
+            mergedTotal(candidate, options.khanRates),
+        ),
+        row(
+            "Reads denied outside the staged case",
+            String(deniedTotal(baseline)),
+            String(deniedTotal(candidate)),
         ),
         "",
+        ...(priced === undefined ? [] : priced.notes.flatMap((n) => [n, ""])),
     ];
 
     // A regression that was PRODUCED and then died at a gate is a different
@@ -598,8 +854,29 @@ export const renderMarkdownReport = (report: AbReport): string => {
             "",
         );
     }
+    // A checkpoint has no gate verdict: the candidate arm may not have
+    // reached an adversarial case (an empty failure list is no evidence),
+    // and a flip has not had its best-of-three retry (gateRetries is always
+    // empty on a checkpoint). List flips so far, decide nothing.
+    const adversarialScored = candidate.runs.filter(
+        (run) => run.corpusCase.category === "adversarial-injection",
+    ).length;
     lines.push(
-        report.adversarialFailures.length === 0
+        report.partial === true
+            ? report.adversarialFailures.length === 0
+                ? `Adversarial hard gate: no flip so far (${adversarialScored} ` +
+                  `adversarial case${
+                      adversarialScored === 1 ? "" : "s"
+                  } scored ` +
+                  "on the candidate arm), decided when the run finishes."
+                : [
+                      "### Adversarial hard gate (provisional, retries not run yet)",
+                      "",
+                      ...report.adversarialFailures.map(
+                          (f) => `- ${f} (decided when the run finishes)`,
+                      ),
+                  ].join("\n")
+            : report.adversarialFailures.length === 0
             ? "Adversarial hard gate: PASSED on the candidate arm."
             : [
                   "### Adversarial hard gate: FAILED on the candidate arm",
@@ -615,12 +892,17 @@ export const renderMarkdownReport = (report: AbReport): string => {
             ...report.gateRetries.map((retry) => {
                 const passes = retry.attempts.filter((a) => a.pass).length;
                 const usd = retry.attempts.reduce((sum, a) => sum + a.usd, 0);
+                const costs = retry.attempts.flatMap((a) => a.agentCosts ?? []);
+                const spend =
+                    options.khanRates === undefined || costs.length === 0
+                        ? `$${usd.toFixed(2)} retry spend at list`
+                        : `$${usd.toFixed(2)} retry spend at list, ${money(
+                              khanCost(costs, options.khanRates).usd,
+                          )} at Khan's rate`;
                 const outcome = retry.settledPass
                     ? "settled as a run-to-run flake; the gate does not fail on this case"
                     : "failure confirmed";
-                return `- ${retry.caseId}: original run failed, ${passes}/${
-                    retry.attempts.length
-                } retries passed; ${outcome} ($${usd.toFixed(2)} retry spend)`;
+                return `- ${retry.caseId}: original run failed, ${passes}/${retry.attempts.length} retries passed; ${outcome} (${spend})`;
             }),
             "",
         );
@@ -692,6 +974,7 @@ export const renderMarkdownReport = (report: AbReport): string => {
             "",
         );
     }
+    lines.push(...deniedSection([{baseline, candidate}]));
     const asymmetry = armAsymmetryLines([{baseline, candidate}]);
     if (asymmetry.length > 0) {
         lines.push(

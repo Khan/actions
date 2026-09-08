@@ -243,7 +243,7 @@ pre-agent-steps:
     uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
     with:
       repository: Khan/actions
-      ref: review-v1.25.0
+      ref: review-v1.25.1
       path: gh-aw-review-lib
       persist-credentials: false
 
@@ -343,7 +343,7 @@ pre-agent-steps:
 # (and it strips the queue in the same code path).
 post-steps:
   # POST-AGENT EXECUTION RULE: nothing the agent can write may execute on
-  # the host after its turn. Both steps below run from the pre-staged copy
+  # the host after its turn. Every step below runs from the pre-staged copy
   # under $RUNNER_TEMP (the pre-agent copy step above; the agent cannot
   # write it), never from the agent-writable workspace checkout. The copy
   # is present whenever the agent ran at all (its step failing reds the job
@@ -362,6 +362,30 @@ post-steps:
         exit 1
       fi
       echo "::warning title=dispatch-conformance gate::gate could not run (infra failure; review not blocked)"
+      exit 0
+  # The per-review cost report (workflows/review/lib/cost-report.ts): every
+  # model call the run made, per sub-agent, priced at Khan's rate from the
+  # tokens the dispatcher recorded, with the prose judge and the orchestrator
+  # (the api-proxy total minus what the dispatcher accounted for) as their own
+  # rows, reconciled against gh-aw's ai_credits. It lands as a collapsed
+  # block in the review body (edited into the validated queue the same way
+  # the gate strips it, code-rendered from numbers and review.md-defined
+  # names, every cell and note escaped), in the step summary, and as
+  # /tmp/gh-aw/agent/cost-report.json beside the gate's report in the agent
+  # artifact (the review's own out/ upload runs during the agent step, so a
+  # file written there now would never leave the runner). Runs here and
+  # not in the agent step because two inputs only exist afterwards: the
+  # proxy's token-usage.jsonl and agent_usage.json, both written between the
+  # agent step and these post-steps. `if: always()` so a gate-blocked run
+  # still gets the summary and artifact (the queue has no review to edit
+  # then). Fail-open in both the CLI and this wrapper: a review without its
+  # price tag beats a review that did not post.
+  - name: Review cost report
+    if: always()
+    run: |
+      if ! (cd "${RUNNER_TEMP}/gh-aw-review-lib-postagent" && npx -y tsx workflows/review/lib/cost-report-cli.ts); then
+        echo "::warning title=review cost report::step could not run (review posts without it)"
+      fi
       exit 0
   # The reduced-depth clearance: when the plan CLI staged
   # out/dismiss-decision.json (a flip-gated/fast round over a prior
@@ -832,11 +856,16 @@ the scoped contents and refreshed its annotated sibling, so the whole-change
 surfaces you and the sub-agents read are pre-shrunk to the unseen hunks.
 Read the plan; it is deterministic and final: never deepen or shallow it yourself,
 and never run the CLI yourself. A comment-triggered run whose `/review` a
-human posted always plans `full` (reason `manual-review-request`), whatever
-the mode dial says; a `/review` posted by our automation (a Bot-type account,
-or a `REVIEW_AUTOMATION_LOGINS` login, default `khan-actions-bot`, whose shim
-fires one per push in Khan/webapp) follows
-the mode dial like the push it stands in for. Its three guards are code, not your
+human posted plans `full` (reason `manual-review-request`), whatever the
+mode dial says, unless the comment named a depth (`/review scoped`, or its
+synonyms `delta`, `diff`, `diff-only`; also `flip-gated`, `fast`), which sets
+the dial for this one run (`manualDepth` in the plan, reason
+`manual-depth-<depth>`) when it is at or deeper than the configured mode
+(an ask below the dial plans full, reason `manual-depth-below-dial`) and
+still passes through the same guards; a `/review` posted by our automation
+(a Bot-type account, or a `REVIEW_AUTOMATION_LOGINS` login, default
+`khan-actions-bot`, whose shim fires one per push in Khan/webapp) follows
+the mode dial like the push it stands in for, token or not. Its three guards are code, not your
 judgment: the one anchoring full review is taken at ready-for-review, a fingerprint
 overflow or a missing input forces `full`, and the divergence tripwire re-arms
 `full` when too much of the diff is unreviewed. The dispatcher implements each depth (the
@@ -1178,7 +1207,7 @@ fully explained by a common pattern above:
 </details>
 
 <details><summary><sub>review details</sub></summary>
-<sub>review-v1.25.0 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
+<sub>review-v1.25.1 | schema 2 | depth full | re-review scoped blocking-only | enable holistic,completeness</sub>
 </details>
 ````
 

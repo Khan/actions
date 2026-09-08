@@ -10,6 +10,7 @@
  * validation error.
  */
 
+import {KNOWN_LENSES, type Lens} from "../../lib/finding-schema";
 import {computeDiffProvenance, countFileLines} from "../../lib/provenance";
 import type {ChangedFile} from "../../lib/router";
 
@@ -73,8 +74,13 @@ export type LiveDefectSpec = {
      * a human reads in a miss report, so keep entries descriptive.
      */
     mechanism: string[];
-    /** Producing lens, when the defect is lens-specific (advisory only). */
-    lens?: string;
+    /**
+     * Producing lens, when the defect is lens-specific. Must be a
+     * KNOWN_LENSES entry. Consulted by the matcher as a tie-break: when
+     * several posted findings satisfy the spec, the one produced by this
+     * lens wins over posted order.
+     */
+    lens?: Lens;
     /**
      * Alternate anchor locations the spec ALSO accepts. A defect that spans
      * files has more than one correct anchor site (a migration missing an
@@ -190,6 +196,24 @@ export type CaseLive = {
     mustCatchSpecs?: LiveDefectSpec[];
     /** Labeled traps a live run must NOT flag (clean-case ground truth). */
     mustNotFlagSpecs?: LiveDefectSpec[];
+    /**
+     * Labeled real defects the fixture carries that are NOT the case's
+     * ground truth: a reviewer that posts one is right about the code, and
+     * the case is not about that defect. Neither must-catch (no recall
+     * credit) nor noise (a posted candidate matching one leaves the noise
+     * numerator and is reported as a legitimate unspecced finding).
+     *
+     * Exists because "unmatched posted" only means the spec did not list
+     * it. Reading run 33671015442's postings, 10 of the claude arm's 22
+     * unmatched findings were code-grounded defects the fixtures really
+     * have (an empty-string account id fallback, an unvalidated discount
+     * rate, a NOT NULL DEFAULT table rewrite, a test fake ordering rows
+     * opposite to the store's contract), and the noise column could not
+     * tell them from "no test covers X" template comments. Author an entry
+     * here when a fixture audit finds a defect that does not change the
+     * expected verdict. When it would, fix the fixture or spec it instead.
+     */
+    mayFlagSpecs?: LiveDefectSpec[];
     /** Present iff the case is a re-review (open-PR) snapshot. */
     rereview?: CaseRereview;
 };
@@ -202,7 +226,7 @@ const isNonEmptyString = (value: unknown): value is string =>
 
 const parseDefectSpecs = (
     raw: unknown,
-    key: "mustCatchSpecs" | "mustNotFlagSpecs",
+    key: "mustCatchSpecs" | "mustNotFlagSpecs" | "mayFlagSpecs",
     changedPaths: Set<string>,
     diffPaths: Set<string> | undefined,
     seenKeys: Set<string>,
@@ -299,6 +323,17 @@ const parseDefectSpecs = (
             errors.push(`${at}.lens: must be a non-empty string when present`);
             return;
         }
+        if (
+            isNonEmptyString(lens) &&
+            !(KNOWN_LENSES as readonly string[]).includes(lens)
+        ) {
+            // The matcher resolves this to a producer; a typo or a renamed
+            // agent would otherwise silently fall back to posted order.
+            errors.push(
+                `${at}.lens: must be one of ${KNOWN_LENSES.join(", ")}`,
+            );
+            return;
+        }
         const blockingOnly = entry["blockingOnly"];
         if (blockingOnly !== undefined && typeof blockingOnly !== "boolean") {
             errors.push(`${at}.blockingOnly: must be a boolean when present`);
@@ -386,7 +421,7 @@ const parseDefectSpecs = (
             spec.lineEnd = lineEnd as number;
         }
         if (isNonEmptyString(lens)) {
-            spec.lens = lens;
+            spec.lens = lens as Lens; // validated against KNOWN_LENSES above
         }
         if (altLocations !== undefined) {
             spec.altLocations = altLocations;
@@ -656,6 +691,14 @@ export const parseLive = (
         seenKeys,
         errors,
     );
+    const mayFlagSpecs = parseDefectSpecs(
+        raw["mayFlagSpecs"],
+        "mayFlagSpecs",
+        changedPaths,
+        diffPaths,
+        seenKeys,
+        errors,
+    );
 
     const rawTicket = raw["ticket"];
     let ticket: Record<string, unknown> | undefined;
@@ -686,6 +729,9 @@ export const parseLive = (
     }
     if (mustNotFlagSpecs !== undefined) {
         live.mustNotFlagSpecs = mustNotFlagSpecs;
+    }
+    if (mayFlagSpecs !== undefined) {
+        live.mayFlagSpecs = mayFlagSpecs;
     }
     if (rereview !== undefined) {
         live.rereview = rereview;

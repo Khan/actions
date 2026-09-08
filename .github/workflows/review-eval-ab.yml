@@ -20,7 +20,8 @@
 # a `full-eval` label lifts that to every live case. The runner enforces a
 # hard USD ceiling per arm and reports skipped cases rather than dying at the
 # cap. A new push cancels a superseded run (concurrency below). A
-# `skip-live-eval` label skips the job entirely.
+# `skip-live-eval` label skips the job entirely (added mid-run, it cancels
+# the in-flight run too, see the concurrency key).
 #
 # NOTE: this workflow's name must stay distinct from any gh-aw workflow a
 # consumer runs (same-named workflows share a gh-aw concurrency group per PR
@@ -67,8 +68,16 @@ permissions:
   contents: read
   pull-requests: write
 
+# A `labeled` event for any label other than `full-eval` runs nothing (every
+# job's `if` skips it), but until this key sent it to its own group it still
+# cancelled the PR's in-flight A/B: run 33802457289 lost 45 minutes and its
+# spend to a `skip-ai-review` label added mid-run. A no-op event must never
+# share a group with a live one. `skip-live-eval` is the one exception: it is
+# the opt-out, and adding it mid-run is how a run that is burning budget gets
+# stopped from inside the repo, so it stays in the live group and cancels
+# (the run's per-case checkpoint keeps what it had scored).
 concurrency:
-  group: review-eval-ab-${{ github.event.pull_request.number || github.run_id }}
+  group: review-eval-ab-${{ github.event.pull_request.number || github.run_id }}-${{ (github.event.action == 'labeled' && github.event.label.name != 'full-eval' && github.event.label.name != 'skip-live-eval') && 'noop' || 'live' }}
   cancel-in-progress: true
 
 jobs:
@@ -92,6 +101,21 @@ jobs:
           # `git show`, so the full history is needed.
           fetch-depth: 0
       - uses: ./actions/shared-node-cache
+      - name: Prove the read scope bites
+        # One Haiku call: an in-scope Read must succeed and an out-of-scope
+        # Read must be denied, on the SDK version this checkout installs. A
+        # runner that lets a reviewer read the corpus produces recall numbers
+        # that are not recall numbers, so this fails the job before any arm
+        # spends.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY secret not configured; skipping the probe." >&2
+            exit 0
+          fi
+          pnpm dlx tsx workflows/review/eval/live-runner.ts --probe-read-scope \
+            --transcripts-dir "$RUNNER_TEMP/review-transcripts"
       - name: Run the live A/B
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -123,7 +147,8 @@ jobs:
             EXTRA="$EXTRA --force-arms"
           fi
           pnpm dlx tsx workflows/review/eval/live-ab.ts \
-            --base-ref "$BASE_REF" --max-usd "$MAX_USD" $SCOPE $EXTRA
+            --base-ref "$BASE_REF" --max-usd "$MAX_USD" $SCOPE $EXTRA \
+            --transcripts-dir "$RUNNER_TEMP/review-transcripts"
       - name: Upload the report artifact
         # always(): a partial or gate-failing run still uploads what it wrote.
         if: always()
@@ -131,6 +156,15 @@ jobs:
         with:
           name: live-ab-report
           path: out/live-ab-report.*
+          if-no-files-found: ignore
+      - name: Upload the sub-agent transcripts
+        # One file per dispatch. Read at least one per arm before trusting a
+        # recall or noise delta (eval/README.md, "Reading a report").
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: live-ab-transcripts
+          path: ${{ runner.temp }}/review-transcripts
           if-no-files-found: ignore
       - name: Post the sticky PR comment
         if: always() && github.event_name == 'pull_request'

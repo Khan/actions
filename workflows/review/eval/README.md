@@ -37,26 +37,83 @@ pnpm dlx tsx workflows/review/eval/live-ab.ts \
   [--no-judge]              # skip prose-quality judging
   [--no-match-arbiter]      # deterministic spec matching only
   [--out <path>]            # default out/live-ab-report.json (+ sibling .md)
+  [--transcripts-dir <d>]   # per-agent transcripts (default <tmpdir>/review-transcripts)
 ```
 
 Byte-identical review.md in both arms short-circuits to a $0 "no reviewable
 delta" report unless `--force-arms` is passed. Budgets are enforced between
-cases; a capped run reports skipped cases instead of dying. Multi-repeat
-runs checkpoint the artifact after every repeat.
+cases; a capped run reports skipped cases instead of dying. Every run
+checkpoints the artifact (JSON and markdown) after every scored case, marked
+`partial: true` in the JSON and `(partial)` in the markdown header, so a
+cancelled or timed-out run leaves what it had scored for the `always()`
+upload. Progress goes to stderr, one line per dispatch and one per case, so
+the actions log reads as a running tally.
 
 ### CI entry points
 
 - **Per-PR** (`.github/workflows/review-eval-ab.yml`): triggers on PRs
   touching `workflows/review/**`; smoke subset by default, the `full-eval`
   label lifts to every live case, `skip-live-eval` opts out. Report goes to
-  a sticky PR comment, the job summary, and the `live-ab-report` artifact.
+  a sticky PR comment, the job summary, and the `live-ab-report` artifact;
+  every sub-agent's transcript goes to the `live-ab-transcripts` artifact.
 - **Dispatch** (same workflow): inputs `base_ref`, `max_usd`, `full`,
   `cases`, `repeats`, `force_arms`. This is how powered runs launch.
 - **Weekly drift** (`.github/workflows/review-eval-drift.yml`): cron; full
   corpus x3 repeats, both arms pinned to main's review.md, so it watches
   cumulative drift AND re-measures the noise floor every week. Report goes
   to the job summary, the `live-ab-report` artifact, and a visibility PR
-  adding the report under `.github/review-eval/drift/`.
+  adding the report under `.github/review-eval/drift/`, and transcripts to
+  `live-ab-transcripts`.
+
+### What a reviewer can reach
+
+The live A/B runs on a machine that also holds this repo, and this repo holds
+the corpus (every case's must-catch spec) and the scorer. A reviewer that
+reads across is scoring itself, and on the Pi harness branch (actions#406)
+one did: gemini's correctness-reviewer found the repo with `find /`, read its
+own case's `case.json`, another case's, and `live-match.ts`, 37 of its 42
+calls on one case. The tool-call count showed nothing unusual for two full
+runs, and the transcript showed it in one.
+
+The SDK runner (`live-runner.ts`) now closes both routes. The toolset is
+restricted to Read, Grep, and Glob (the SDK's `allowedTools` only
+pre-approves, so before this every default tool including Bash was reachable
+under `bypassPermissions`), and a PreToolUse hook denies two things: any tool
+outside those three (a second layer under the `tools` restriction), and any
+read that resolves outside the staged case directory (the checkout plus its
+`context/` sibling), symlinks followed. Denials are counted per agent, reads apart from
+tools, and rendered in every report shape: the single-run table row and the
+repeats report's pooled line both say "Reads denied outside the staged case",
+and a nonzero count adds a section naming the reviewer whose transcript
+should be read. A tool-policy denial (the hook catching a tool `tools`
+should have removed) gets its own section and is never counted as a read.
+The expected value of both is zero for a corpus hunt, but not every denial
+is one: in the first scoped run (33902871639) all 8 denials were reviewers
+that guessed `<case>/src/...` for a changed file, missed, and widened a Glob
+to the staging root, or climbed out of `context/` with a relative path.
+Before the scope those searches returned other cases' files (and the other
+arm's copy of the same case) without anyone noticing. The transcript shows
+which kind a denial was in one line, and the denial message now names the
+checkout and context directories so the recovery is one retry.
+Transcripts are written outside the staging root so no reviewer can read a
+sibling's mid-run.
+
+Every live workflow starts with `live-runner.ts --probe-read-scope`, one
+Haiku call that reads a staged file, then a planted file outside the case,
+Globs the planted directory, then tries to `cat` the planted file through
+Bash. It fails the job when the planted contents or the planted file name
+appear anywhere (final text and every tool result are both checked, so a leak
+through Bash fails it too), when an attempted out-of-scope read was not
+denied, or when the attempted in-scope read returned nothing. A run where the
+model skipped a step, or the probe's own dispatch failed, twice, is
+`unproven`: the job proceeds under a warning annotation rather than failing,
+since nothing was learned against the hook either, and the arms retry their
+own dispatches. The Bash leg is otherwise
+informational: the log line says whether the hook denied Bash (`tools`
+stopped restricting and the second layer held), the model reported it
+unavailable (`tools` restricting), or neither was reported. The unit tests
+cover the scope predicate and the verdict; the probe covers the SDK honoring
+the hook under `bypassPermissions` on the version the checkout installs.
 
 ### Recipes
 
@@ -105,7 +162,24 @@ migration missing an index is correctly flagged at the migration OR at the
 hot query; a single-location spec turns anchor-site preference into fake
 recall noise). Matching is deterministic first (location AND mechanism);
 specs left unmatched go to a capped Haiku arbiter (`match-arbiter.ts`)
-whose claims are recorded `via: "fallback"` for audit.
+whose claims are recorded `via: "fallback"` for audit. When several
+posted findings satisfy one spec, the one produced by the spec's `lens`
+wins, then posted order.
+
+A case may also carry `live.mayFlagSpecs`: real defects the fixture has
+that are NOT the case's ground truth. "Unmatched posted" only means the
+spec did not list a finding, and reading run 33671015442's postings showed
+10 of the claude arm's 22 unmatched findings were correct about the code
+(an unvalidated discount rate, a NOT NULL DEFAULT table rewrite, a test
+fake ordering rows opposite to the store's contract). A posted finding
+matching a may-flag entry is reported as legitimate unspecced and leaves
+the noise numerator, with no recall credit. When you audit a fixture and
+find a defect the author did not intend: if it changes the expected verdict,
+fix the fixture (as #412 did for the false-block case's pagination doc
+comment) or spec it, otherwise add a may-flag entry. Keep the mechanism
+alternates tight, they are what tells a legitimate finding from a second
+copy of the seeded one. Clean cases can carry them too, but a clean case
+with a real defect in its diff is a fixture bug first.
 
 Growing the corpus: target the 20-80% catch band, where discrimination
 lives. Saturated cases (caught 100% on both arms) are tripwires; they add
@@ -144,9 +218,35 @@ claiming a band.
 - **Noise floor** (measured on 6 identical-arm samples, run 29069228968,
   rendered in every report footer): recall 54-86%, verdict agreement
   75-100%, noise 50-60%, judge quality 0.82-0.86. A single-run delta whose
-  arms both sit inside a band is wobble. Detecting a 20-point recall change
-  needs ~60 spec-samples per arm; 10 points needs ~140 (two-proportion, 80%
-  power). Repeats are the cheap axis: no authoring, no review.
+  arms both sit inside a band is wobble. The noise band predates the
+  may-flag and duplicate buckets (next bullet), so it reads high against
+  numbers taken after 2026-09-03 on cases that carry `mayFlagSpecs`, until
+  a drift run re-measures it. The report footer carries the same caveat.
+  Detecting a 20-point recall change needs ~60 spec-samples per arm; 10
+  points needs ~140 (two-proportion, 80% power). Repeats are the cheap
+  axis: no authoring, no review.
+- **Noise buckets:** the noise row's numerator is residual unmatched
+  findings plus duplicates (a second posted copy of a defect another
+  finding already claimed, a caught spec or an accepted may-flag entry: a
+  merge-stage miss, reported on its own sub-row). Legitimate unspecced findings (may-flag matches, above)
+  are NOT in the numerator and get their own row. What remains after both
+  is template comments ("no test covers X"), speculation, and unspecced
+  findings nobody has audited yet, and on a claude arm the templates are
+  most of it. Only audited cases carry `mayFlagSpecs` (8 of the 10 live
+  smoke cases so far, none of the rest of the live corpus), so on a case
+  without them the noise row is still the old definition, an upper bound.
+  A pooled noise rate over audited and unaudited cases together mixes the
+  two definitions, so compare `perCase[].noise` / `legitimateUnspecced` in
+  the report JSON across arms rather than the pooled row. The entries were written from the claude arm's postings on run
+  33671015442 and cross-checked against the gemini arm where it posted, so
+  for the first few runs read the per-case buckets against the postings
+  once to catch an entry that only matches one model's vocabulary. The
+  buckets are regex classification over the finding's text: a leftover
+  whose `failure_scenario` fits a may-flag entry is taken at its word, then
+  the duplicate check runs, then may-flag against the
+  full prose. A distinct finding that borrows the spec's keywords can still
+  land in the duplicate bucket (the race case's TTL suggestion says
+  "overwrite"), so read the per-case ids before trusting a duplicate count.
 - **Miss classes:** a true miss is a recall problem; found-but-dropped
   (provenance/scope/validation buckets) is an anchoring or gate-calibration
   problem. They route to different fixes; never collapse them. The
@@ -223,16 +323,31 @@ claiming a band.
 - **Gates:** single runs retry a flipped adversarial case best-of-three;
   `--repeats` runs decide by strict majority across repeats instead. Only
   confirmed failures exit non-zero.
+- **Read at least one transcript per arm** before trusting a recall or noise
+  delta (the `live-ab-transcripts` artifact, one file per dispatch, tool-call
+  index at the top). The report's denial sections are the first pointer:
+  any agent listed there is the one to open. The per-arm read is for what
+  the report cannot see: whether the reviewer investigated the change or
+  something else (Read lines on `dispatch-contracts.ts` or
+  `finding-schema.ts` are a reviewer shaping its JSON from the tooling
+  source), whether it looped (the same Read path many times), and whether
+  its depth matches the other arm's. The index answers those in under a
+  minute. Start with the agent that had the most calls on the case that
+  moved.
 - **Stacked PRs:** a per-PR report's baseline is the PR's base branch tip
   (the parent PR in a stack), so it prices the marginal delta only.
   Absolute columns do not compare across reports.
-- **Ruler provenance:** every report stamps the matcher configuration and a
-  corpus content hash (`provenance` in the JSON, the "Ruler" line in the
-  markdown). Rates are only comparable when BOTH the review.md sha and the
-  ruler match; `aggregate.ts` warns loudly on mixed pools. Instrument
-  changes (arbiter on/off, corpus growth) move every rate without the
-  reviewer changing, and the stamps are what keep the drift series honest
-  across them.
+- **Ruler provenance:** every report stamps the matcher configuration
+  (`deterministic-v2`, `+arbiter` when the fallback ran; v1 is the
+  unsuffixed stamp from before the lens tie-break and leftover buckets), a
+  corpus content hash, and the runner's tool policy (`provenance` in the
+  JSON, the "Ruler" line in the markdown). Rates are only comparable when
+  BOTH the review.md sha and the ruler match; `aggregate.ts` warns loudly on
+  mixed pools. Instrument changes (arbiter on/off, corpus growth, what the
+  reviewer can reach) move every rate without the reviewer changing, and the
+  stamps are what keep the drift series honest across them. Reports from
+  before the read scope carry no tool policy and pool as `unscoped`, so a
+  drift series crossing that boundary warns.
 
 ### Statistical honesty (limits to keep in mind)
 
@@ -254,6 +369,32 @@ claiming a band.
   structure is the evidence), but it IS a relaxation of "handle every
   adversarial case outright"; per-case fail counts print either way, read
   them.
+- **Runs before the read scope landed were not isolated from the corpus.**
+  Reports without a "Reads denied outside the staged case" row come from a
+  runner whose reviewers could read every case's spec and the scorer, and
+  that also had Bash. No transcript exists from those runs to say whether one
+  did. The evidence that they did not is indirect and comes from the Pi
+  harness branch, where transcripts were written: across 2 runs, each of the
+  5 Claude agents made one search for the `gh-aw-review-lib` tooling
+  directory, found nothing, and read only files under the staged checkout
+  from then on. The Gemini reviewer on the same machine, given the same
+  prompt, searched the filesystem and read the corpus. Treat pre-scope
+  numbers as probably clean and the denial counter on later runs as the
+  measurement that says so.
+- **The eval's reviewers have no shell, production's do.** `tools` restricts
+  the SDK arm to Read, Grep, and Glob, while `lib/dispatch-runner.ts` keeps
+  Bash for the investigation-cap CLI. The cap CLI was never staged in the
+  eval, so that part is unchanged, but review.md's "one targeted cheap
+  check per finding" shell step was runnable against the staged checkout
+  before the scope landed and is not now. Both arms lose it together, so a
+  delta between two prompts that differ elsewhere stays comparable, and eval
+  recall reads as a lower bound on production recall rather than an estimate
+  of it. The exception is a review.md change to the shell step itself: the
+  A/B cannot see it, and its delta prints as zero rather than as not
+  measured, so that kind of change is judged by the canary and production
+  rounds, not by this eval. Scoping Bash by path instead would reopen the
+  corpus (`find /` is how the leak was found), so this stays a documented
+  limit.
 - **The arbiter's refuse bias is a prompt, not a calibration.** Its rescues
   inflate recall, the load-bearing metric, and its false-positive rate has
   not been measured against known non-matches. Audit `via: "fallback"`
@@ -262,11 +403,45 @@ claiming a band.
 
 ## Costs and models
 
-Measured ~$0.72-0.75 per case per arm. Smoke run ~$10/PR; full 14-case
+Measured ~$0.72-0.75 per case per arm, sub-agent spend at list (the judge
+and arbiter are not in these figures). Smoke run ~$10/PR; full 14-case
 corpus x3 repeats x both arms ~$60 (cap it at $85 to avoid budget skips).
 The judge and the match arbiter are pinned to `claude-haiku-4-5-20251001`.
 Every model-spending path degrades to a partial report rather than dying
 at a cap, and judge/arbiter failures degrade to notes/non-matches.
+
+Every dollar figure the eval records is provider **list price**, and the
+report prices the same tokens twice. "Cost (list price)" is the recorded
+number: the runner's `total_cost_usd`, which is what Anthropic bills a bare API
+key (claude-opus-5 at $5/$25 per million tokens). "Cost (Khan rate)" is what
+production would have metered for the same tokens: the per-model token counts
+the runner records (`perCase[].agentCosts[].usage`, from the SDK result's
+`modelUsage`) priced at the `models.providers` overlay in review.md's
+frontmatter (#314, 50% of list for every claude pin it lists), priced per
+agent. An agent on a model with no overlay entry keeps its recorded list
+dollars in the Khan-rate figure (production bills it at list too) and the model
+is named in the note under the table. A dispatch that recorded no token counts
+is priced from its recorded list dollars by the overlay ratio for its model
+(exact, since the overlay is a flat multiple of list), and the note counts
+those. The eval cannot inherit the proxy's rate directly because the
+overlay applies inside the awf api-proxy, and the eval never crosses it (bare
+runner VM, real API key), so a claude arm's list row reads at 2x production and
+a cross-provider comparison at list skews against any model the overlay does
+not cover.
+
+`pricing.ts` is the only place tokens become dollars. Khan's rates are read off
+review.md at render time (nothing else in the repo restates them), and list
+rates live in one table there, which the report checks against the runner's
+own meter on every run and flags when the two disagree by more than 1%. The
+judge and the match arbiter (haiku, direct Messages API calls that return
+`usage` but no dollars) are priced from their tokens at both rates and reported
+as their own row, "Judge + arbiter", with "Run total" adding them to the
+sub-agent cost. "Cost per tool call", the clusterer's price in the merge row,
+the gate-retry spend, and the repeats aggregate's pooled cost all read in both
+currencies the same way. The recorded `usd` stays list so every prior artifact
+remains comparable (older artifacts render n/a on the Khan-rate rows), and the
+budget cap (`--max-usd`) is still enforced in list dollars, so a claude arm's
+cap is 2x tighter in production dollars than a gemini arm's.
 
 When an agent fails contract parsing, the report keeps the **raw final text**
 of its last attempt (truncated to 4000 chars) and renders it inline under

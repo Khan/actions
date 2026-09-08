@@ -26,6 +26,8 @@
  *     [--cases <id,...>]    subset of rereview cases (default: all of them)
  *     [--max-usd <n>]       total hard budget across the sweep (default 30)
  *     [--stage-root <dir>]  staging root (default: a fresh temp dir)
+ *     [--transcripts-dir <d>] per-agent transcripts (default
+ *                           <tmpdir>/review-transcripts; see transcripts.ts)
  *     [--out <path>]        JSON report path (default out/rereview-sweep.json)
  */
 
@@ -175,6 +177,7 @@ const main = async (): Promise<void> => {
     const outPath = argValue("--out") ?? "out/rereview-sweep.json";
     const stageRoot =
         argValue("--stage-root") ?? mkdtempSync(`${tmpdir()}/review-sweep-`);
+    const transcriptsDir = argValue("--transcripts-dir");
     const caseFilter = argValue("--cases")?.split(",");
 
     const allCases = loadLiveCorpus().filter(
@@ -191,7 +194,9 @@ const main = async (): Promise<void> => {
     const agents = extractAgents(
         readFileSync("workflows/review/review.md", "utf8"),
     );
-    const runner = sdkRunner();
+    const runner = sdkRunner({
+        ...(transcriptsDir !== undefined ? {transcriptsDir} : {}),
+    });
 
     const rows: SweepRow[] = [];
     let usd = 0;

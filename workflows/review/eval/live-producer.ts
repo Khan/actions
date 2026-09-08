@@ -49,7 +49,9 @@ import {isBlockingLabel, labelForFinding} from "../lib/render-comment";
 import {route, type RouterConfig} from "../lib/router";
 import {validateFinding, type Finding, type Lens} from "../lib/finding-schema";
 import {CLUSTERER} from "../lib/dispatch-cluster";
+import {LABEL_SHAPE_REVIEWERS} from "./lens-sources";
 import {dedupeLiveFindings, type LiveDedupReport} from "./live-dedup";
+import {addAccounting, LiveAgentError} from "./live-agent-error";
 import {
     VERIFICATION_STATES,
     type CaseVerification,
@@ -64,6 +66,7 @@ import {
     type ReReviewMode,
 } from "../lib/routing-config";
 import {extractJsonObject} from "./extract-json";
+import {mergeUsage, type ModelTokens} from "../lib/pricing";
 import {
     rewriteAgentPrompt,
     stageCase,
@@ -85,6 +88,12 @@ export type LiveAgentRequest = {
     prompt: string;
     /** The staged checkout the agent investigates (its cwd). */
     cwd: string;
+    /**
+     * The staged case root (checkout plus its `context/` sibling). The runner
+     * denies any read outside it: the eval's corpus and scorer live on the
+     * same machine, and a reviewer that can read them is scoring itself.
+     */
+    readRoot: string;
     /** Hard turn cap. */
     maxTurns: number;
     /** Hard wall-clock cap, enforced by the runner. */
@@ -95,8 +104,14 @@ export type LiveAgentRequest = {
 export type LiveAgentResult = {
     /** The agent's final text (expected to be the JSON contract). */
     output: string;
-    /** Billed cost in USD (0 when the runner cannot price it). */
+    /** Billed cost in USD at list (0 when the runner cannot price it). */
     usd: number;
+    /**
+     * Tokens per model, the measurement `usd` was derived from. What lets the
+     * report price the dispatch at any rate (pricing.ts). Optional because a
+     * runner that cannot see token counts reports nothing rather than zeros.
+     */
+    usage?: ModelTokens[];
     /** Turns consumed. */
     turns: number;
     /** Wall-clock milliseconds. */
@@ -108,6 +123,19 @@ export type LiveAgentResult = {
      * count them reports nothing rather than a misleading zero.
      */
     toolCalls?: number;
+    /**
+     * Read/Grep/Glob calls the runner denied for resolving outside the staged
+     * case. Zero is the expected value; anything else is a reviewer that
+     * went looking, and the transcript says where.
+     */
+    deniedReads?: number;
+    /**
+     * Calls to tools outside Read/Grep/Glob the runner denied. `tools` keeps
+     * those out of the model's toolset, so this is the signal that the
+     * restriction stopped restricting; it is not a corpus read and is never
+     * reported as one.
+     */
+    deniedTools?: number;
     /** Provider stop reason for the last assistant message, when visible. */
     stopReason?: string;
     /** Why the call failed, when the runner can see it. */
@@ -140,6 +168,12 @@ export type PerAgentReport = {
     retried: boolean;
     /** Tool calls across every attempt; see `LiveAgentResult.toolCalls`. */
     toolCalls?: number;
+    /** Tokens per model across every attempt; see `LiveAgentResult.usage`. */
+    usage?: ModelTokens[];
+    /** Denied reads across every attempt (see `LiveAgentResult.deniedReads`). */
+    deniedReads?: number;
+    /** Denied non-read tools across every attempt (`LiveAgentResult.deniedTools`). */
+    deniedTools?: number;
     /** Stop reason of the last attempt; set alongside `failed`. */
     stopReason?: string;
     /**
@@ -440,25 +474,7 @@ const parseAgentFindings = (
         throw new Error("output JSON has no findings array");
     }
 
-    // Every reviewer that emits the label-bearing shape rather than the
-    // structured finding schema: the two defaults, plus the opt-in
-    // whole-change reviewers (reachable since a case may `enable` them). A
-    // name missing here falls through to the specialist-lens branch and
-    // throws on the first finding, so keep this in step with
-    // ENABLEABLE_REVIEWERS.
-    const labelLens: Record<string, {lens: Lens; source: string}> = {
-        "correctness-reviewer": {lens: "correctness", source: "correctness"},
-        "skill-auditor": {lens: "conventions", source: "skill"},
-        holistic: {lens: "holistic", source: "holistic"},
-        completeness: {lens: "completeness", source: "completeness"},
-        "test-adequacy": {lens: "test-adequacy", source: "test-adequacy"},
-        "first-principles": {
-            lens: "first-principles",
-            source: "first-principles",
-        },
-        conventions: {lens: "conventions", source: "conventions"},
-        documentation: {lens: "documentation", source: "documentation"},
-    };
+    const labelLens = LABEL_SHAPE_REVIEWERS;
 
     const findings = rawFindings.map((raw, index): LiveFinding => {
         const label = labelLens[agent.name];
@@ -650,8 +666,12 @@ const dispatchWithRetry = async <R>(
             report.usd += result.usd;
             report.turns += result.turns;
             report.wallMs += result.wallMs;
-            if (result.toolCalls !== undefined) {
-                report.toolCalls = (report.toolCalls ?? 0) + result.toolCalls;
+            addAccounting(report, result);
+            if (result.usage !== undefined) {
+                report.usage = mergeUsage([
+                    ...(report.usage ?? []),
+                    ...result.usage,
+                ]);
             }
             lastOutput = result.output;
             report.stopReason = result.stopReason;
@@ -720,6 +740,10 @@ const dispatchWithRetry = async <R>(
             failure = `dispatch failed: ${String(
                 runError instanceof Error ? runError.message : runError,
             )}`;
+            // Keep what the failed attempt counted (see LiveAgentError).
+            if (runError instanceof LiveAgentError) {
+                addAccounting(report, runError.partial);
+            }
         }
         if (attempt === 0) {
             report.retried = true;
@@ -842,6 +866,7 @@ export const produceLive = async (
                     name: agent.name,
                     model: agent.model,
                     cwd: staged.checkoutDir,
+                    readRoot: staged.rootDir,
                     maxTurns,
                     timeoutMs,
                 },
@@ -875,6 +900,7 @@ export const produceLive = async (
                         name: agent.name,
                         model: agent.model,
                         cwd: staged.checkoutDir,
+                        readRoot: staged.rootDir,
                         maxTurns,
                         timeoutMs,
                     },
@@ -914,6 +940,7 @@ export const produceLive = async (
                 name: validator.name,
                 model: validator.model,
                 cwd: staged.checkoutDir,
+                readRoot: staged.rootDir,
                 maxTurns,
                 timeoutMs,
             },
@@ -941,6 +968,7 @@ export const produceLive = async (
                 name: reconciler.name,
                 model: reconciler.model,
                 cwd: staged.checkoutDir,
+                readRoot: staged.rootDir,
                 maxTurns,
                 timeoutMs,
             },

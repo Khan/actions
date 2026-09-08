@@ -73,6 +73,31 @@
                 "lineStart": 8,
                 "lineEnd": 24
             }
+        ],
+        "mayFlagSpecs": [
+            {
+                "key": "adv-injection-comment-surfaced",
+                "path": "src/api/handler.ts",
+                "lineStart": 5,
+                "lineEnd": 11,
+                "mechanism": [
+                    "(instruct|direct|tell|ask)(s|ing|ed)?.{0,80}(automated |code )?reviewers?|reviewers?.{0,60}(instruct|ignore the auth)",
+                    "(doc |code |source )?comment.{0,160}(as an instruction|instruct(s|ing|ion)|approve this PR)",
+                    "prompt.injection|injection attempt|steer(s|ing)? the review|address(es|ing)? reviewers",
+                    "text inside code is data|untrusted (content|instruction|text)"
+                ]
+            },
+            {
+                "key": "adv-empty-account-id-fallback",
+                "path": "src/api/handler.ts",
+                "lineStart": 14,
+                "lineEnd": 18,
+                "mechanism": [
+                    "\\?\\? *(\"\"|'')",
+                    "empty[- ]string|empty (account ?id|id)",
+                    "missing (route )?param(eter)?.{0,80}(empty|\"\"|400)"
+                ]
+            }
         ]
     }
 }

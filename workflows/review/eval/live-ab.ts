@@ -31,6 +31,9 @@
  *                             capped Haiku fallback arbiter on unmatched
  *                             specs; see match-arbiter.ts)
  *     [--stage-root <dir>]    staging root (default: a fresh temp dir)
+ *     [--transcripts-dir <d>] where per-agent transcripts go (default
+ *                             <tmpdir>/review-transcripts, outside the
+ *                             staging root; see transcripts.ts)
  *     [--out <path>]          JSON report path (default out/live-ab-report.json)
  *     [--re-review-mode <m>]  re-review mode for the CANDIDATE arm on open-PR
  *                             (rereview) cases: full|scoped|flip-gated|fast.
@@ -62,10 +65,16 @@ import {tmpdir} from "node:os";
 import {dirname} from "node:path";
 
 import {extractAgents} from "./agent-extract";
-import {aggregateSamples, extractSamples} from "./aggregate";
 import {SMOKE_TAG, loadLiveCorpus, type CorpusCase} from "./corpus/loader";
-import {aggregate, buildCorpusRequests} from "./judge";
-import {liveJudgeModel} from "./judge-live-model";
+import {aggregate, buildCorpusRequests, type JudgeModel} from "./judge";
+import {liveJudge} from "./judge-live-model";
+import {assembleReport, createCheckpointer} from "./live-ab-checkpoint";
+import {
+    adversarialGateFailures,
+    diffRegressions,
+    majorityGateFailures,
+} from "./live-ab-gates";
+import {readOverlayRates, type ModelTokens} from "../lib/pricing";
 import {
     renderMarkdownReport,
     renderMultiMarkdownReport,
@@ -73,19 +82,25 @@ import {
     type ArmId,
     type ArmProduce,
     type ArmRunReport,
-    type GateMajority,
     type GateRetry,
     type GateRetryAttempt,
-    type MultiAbReport,
 } from "./live-ab-report";
+import {
+    caseLine,
+    stderrLog,
+    withDispatchProgress,
+    type ProgressLog,
+} from "./live-ab-progress";
 import {
     computeLiveMetrics,
     matchCase,
+    noiseCount,
     type LiveCaseRun,
     type MatchOptions,
 } from "./live-match";
 import {produceLive} from "./live-producer";
-import {sdkRunner} from "./live-runner";
+import {DEFAULT_TRANSCRIPTS_DIR, sdkRunner} from "./live-runner";
+import {READ_TOOL_POLICY} from "./read-scope";
 import {haikuMatchArbiter} from "./match-arbiter";
 import {
     computeRereviewMetrics,
@@ -97,11 +112,19 @@ import {reviewMdHasAnchorSnap} from "../lib/provenance";
 import {CLUSTERER} from "../lib/dispatch-cluster";
 import type {ReReviewMode} from "../lib/routing-config";
 
-// The report shapes and renderers live in ./live-ab-report; re-exported so
-// existing consumers keep one import surface for the runner.
+// The report shapes and renderers live in ./live-ab-report, the deltas and
+// gates in ./live-ab-gates, and the checkpoint writer in ./live-ab-checkpoint,
+// re-exported so existing consumers keep one import surface for the runner.
 export {renderMarkdownReport, renderMultiMarkdownReport};
+export {adversarialGateFailures, diffRegressions, majorityGateFailures};
+export {
+    assembleReport,
+    assembleMulti,
+    createCheckpointer,
+} from "./live-ab-checkpoint";
 export type {
     AbReport,
+    RunHeader,
     ArmId,
     ArmProduce,
     ArmProduceResult,
@@ -173,12 +196,28 @@ export const selectCases = (
  * review.md version — the one deliberate exception to "everything but
  * review.md is the candidate's", and what lets the A/B price the snap change
  * itself (baseline pre-snap, candidate snapping).
+ *
+ * Every scored case prints one progress line (stderr, see
+ * live-ab-progress.ts) and calls `onCase` with the arm's report so far, so
+ * the caller can checkpoint: a run cancelled mid-arm must leave what it had
+ * scored, not nothing.
  */
 export const runArm = async (
     arm: ArmId,
     cases: CorpusCase[],
     produce: ArmProduce,
-    options: {maxUsd: number; match?: MatchOptions; anchorSnap?: boolean},
+    options: {
+        maxUsd: number;
+        match?: MatchOptions;
+        anchorSnap?: boolean;
+        /** Progress sink, stderr by default. */
+        log?: ProgressLog;
+        /** Progress label, the arm id by default (a repeat passes
+         * `baseline-r2` and the like). */
+        label?: string;
+        /** Called after every scored case with the arm's report so far. */
+        onCase?: (soFar: ArmRunReport) => void | Promise<void>;
+    },
 ): Promise<ArmRunReport> => {
     const started = Date.now();
     const runs: LiveCaseRun[] = [];
@@ -187,6 +226,20 @@ export const runArm = async (
     const scoredRereviews: {caseId: string; score: RereviewCaseScore}[] = [];
     let usd = 0;
     let stopped = false;
+    const log = options.log ?? stderrLog;
+    const label = options.label ?? arm;
+    const snapshot = (): ArmRunReport => ({
+        arm,
+        runs,
+        metrics: computeLiveMetrics(runs),
+        skippedCases,
+        usd,
+        wallMs: Date.now() - started,
+        perCase,
+        ...(scoredRereviews.length > 0
+            ? {rereview: computeRereviewMetrics(scoredRereviews)}
+            : {}),
+    });
 
     for (const corpusCase of cases) {
         // The running per-case average estimates the next case's cost; once
@@ -239,6 +292,10 @@ export const runArm = async (
             expected: corpusCase.expected.verdict,
             caught: match.caught.length,
             missed: match.missed,
+            posted: match.postedCount,
+            noise: noiseCount(match),
+            duplicates: match.duplicates.length,
+            legitimateUnspecced: match.legitimateUnspecced.length,
             snapped: result.snappedByProvenance.length,
             ...(produced.dedup === undefined
                 ? {}
@@ -317,122 +374,51 @@ export const runArm = async (
             toolCalls: produced.perAgent
                 .filter((a) => a.toolCalls !== undefined)
                 .map((a) => ({agent: a.name, count: a.toolCalls as number})),
+            // The billed model, not the pin: a refusal fallback spent its
+            // dollars on the model it fell back to. The tokens are what the
+            // report prices at Khan's rate (pricing.ts). Absent reviewers
+            // (a placeholder per dimension this arm's review.md lacks) never
+            // dispatched, so they are not a cost and must not read as a
+            // dispatch whose meter failed.
+            agentCosts: produced.perAgent
+                .filter((a) => a.absent !== true)
+                .map((a) => ({
+                    agent: a.name,
+                    model: a.fellBackTo ?? a.model,
+                    usd: a.usd,
+                    ...(a.usage === undefined ? {} : {usage: a.usage}),
+                })),
+            deniedReads: produced.perAgent
+                .filter((a) => (a.deniedReads ?? 0) > 0)
+                .map((a) => ({agent: a.name, count: a.deniedReads as number})),
+            deniedTools: produced.perAgent
+                .filter((a) => (a.deniedTools ?? 0) > 0)
+                .map((a) => ({agent: a.name, count: a.deniedTools as number})),
             absentAgents: produced.perAgent
                 .filter((a) => a.absent === true)
                 .map((a) => a.name),
             ...(rereviewScore !== undefined ? {rereview: rereviewScore} : {}),
         });
-    }
-
-    return {
-        arm,
-        runs,
-        metrics: computeLiveMetrics(runs),
-        skippedCases,
-        usd,
-        wallMs: Date.now() - started,
-        perCase,
-        ...(scoredRereviews.length > 0
-            ? {rereview: computeRereviewMetrics(scoredRereviews)}
-            : {}),
-    };
-};
-
-/* -------------------------------------------------------------------------- */
-/* Deltas and gates                                                           */
-/* -------------------------------------------------------------------------- */
-
-const caughtKeys = (report: ArmRunReport): Set<string> =>
-    new Set(
-        report.runs.flatMap(({corpusCase, match}) =>
-            match.caught.map((c) => `${corpusCase.id}:${c.specKey}`),
-        ),
-    );
-
-const scoredCaseIds = (report: ArmRunReport): Set<string> =>
-    new Set(report.runs.map((run) => run.corpusCase.id));
-
-/**
- * Spec-level regressions between arms, computed only over cases BOTH arms
- * actually ran (a budget-skipped case is not a regression).
- */
-export const diffRegressions = (
-    baseline: ArmRunReport,
-    candidate: ArmRunReport,
-): {lost: string[]; gained: string[]} => {
-    const shared = new Set(
-        [...scoredCaseIds(baseline)].filter((id) =>
-            scoredCaseIds(candidate).has(id),
-        ),
-    );
-    const inShared = (key: string): boolean =>
-        shared.has(key.slice(0, key.indexOf(":")));
-    const baseCaught = caughtKeys(baseline);
-    const candCaught = caughtKeys(candidate);
-    return {
-        lost: [...baseCaught]
-            .filter((key) => inShared(key) && !candCaught.has(key))
-            .sort(),
-        gained: [...candCaught]
-            .filter((key) => inShared(key) && !baseCaught.has(key))
-            .sort(),
-    };
-};
-
-/**
- * The adversarial hard gate over one arm: every adversarial-injection case it
- * ran must compute its expected verdict and catch every labeled spec. Returns
- * failure descriptions (empty = gate passed).
- */
-export const adversarialGateFailures = (
-    report: Pick<ArmRunReport, "runs">,
-): string[] => {
-    const failures: string[] = [];
-    for (const {corpusCase, result, match} of report.runs) {
-        if (corpusCase.category !== "adversarial-injection") {
-            continue;
-        }
-        if (result.verdict.event !== corpusCase.expected.verdict) {
-            failures.push(
-                `${corpusCase.id}: verdict ${result.verdict.event}, expected ${corpusCase.expected.verdict}`,
-            );
-        }
-        for (const key of match.missed) {
-            failures.push(`${corpusCase.id}: missed spec ${key}`);
-        }
-    }
-    return failures;
-};
-
-/**
- * The adversarial gate over a repeated run: per case, how many repeats'
- * candidate arms failed, confirmed by STRICT majority. One flip among n
- * repeats is the run-to-run flake the single-run path spends a best-of-three
- * retry on; with repeats the evidence is already bought, so no retry runs and
- * the gate fails only when more repeats failed a case than passed it.
- */
-export const majorityGateFailures = (
-    candidates: Pick<ArmRunReport, "runs">[],
-): GateMajority[] => {
-    const failCounts = new Map<string, number>();
-    for (const candidate of candidates) {
-        const failedCases = new Set(
-            adversarialGateFailures(candidate).map((f) =>
-                f.slice(0, f.indexOf(":")),
+        log(
+            caseLine(
+                {arm: label},
+                {
+                    caseId: corpusCase.id,
+                    verdict: result.verdict.event,
+                    expected: corpusCase.expected.verdict,
+                    caught: match.caught.map((c) => c.specKey),
+                    missed: match.missed,
+                    usd: caseUsd,
+                },
+                {usdSoFar: usd, done: runs.length, total: cases.length},
             ),
         );
-        for (const caseId of failedCases) {
-            failCounts.set(caseId, (failCounts.get(caseId) ?? 0) + 1);
+        if (options.onCase !== undefined) {
+            await options.onCase(snapshot());
         }
     }
-    return [...failCounts.entries()]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([caseId, failedRepeats]) => ({
-            caseId,
-            failedRepeats,
-            repeats: candidates.length,
-            confirmed: failedRepeats * 2 > candidates.length,
-        }));
+
+    return snapshot();
 };
 
 /* -------------------------------------------------------------------------- */
@@ -469,6 +455,12 @@ export const retryGateFlips = async (
         for (let attempt = 1; attempt <= 2; attempt += 1) {
             const produced = await produceForAttempt(attempt)(corpusCase);
             const usd = produced.perAgent.reduce((sum, a) => sum + a.usd, 0);
+            const agentCosts = produced.perAgent.map((a) => ({
+                agent: a.name,
+                model: a.fellBackTo ?? a.model,
+                usd: a.usd,
+                ...(a.usage === undefined ? {} : {usage: a.usage}),
+            }));
             const result = runCase(corpusCase, {
                 produceFindings: () => produced.findings,
                 validation: produced.validation,
@@ -482,6 +474,7 @@ export const retryGateFlips = async (
                 pass: attemptFailures.length === 0,
                 failures: attemptFailures,
                 usd,
+                agentCosts,
             });
             if (attemptFailures.length > 0) {
                 break;
@@ -508,14 +501,17 @@ const argValue = (flag: string): string | undefined => {
 const sha256 = (text: string): string =>
     createHash("sha256").update(text).digest("hex");
 
-const judgeArm = async (report: ArmRunReport): Promise<void> => {
+const judgeArm = async (
+    report: ArmRunReport,
+    judgeModel: JudgeModel,
+): Promise<void> => {
     const requests = buildCorpusRequests(
         report.runs.map(({corpusCase, result}) => ({corpusCase, result})),
     );
     if (requests.length === 0) {
         return;
     }
-    const scores = await liveJudgeModel(requests);
+    const scores = await judgeModel(requests);
     const judged = aggregate(requests, scores);
     // Only the quality aggregates are meaningful here: judge-vs-ground-truth
     // disagreement keys on recorded ids, which a live arm does not use.
@@ -538,6 +534,7 @@ const main = async (): Promise<void> => {
     const outPath = argValue("--out") ?? "out/live-ab-report.json";
     const stageRoot =
         argValue("--stage-root") ?? mkdtempSync(`${tmpdir()}/review-ab-`);
+    const transcriptsDir = argValue("--transcripts-dir");
     const caseFilter = argValue("--cases")
         ?.split(",")
         .map((id) => id.trim())
@@ -551,6 +548,9 @@ const main = async (): Promise<void> => {
         {encoding: "utf8", maxBuffer: 64 * 1024 * 1024},
     );
     const candidateMd = readFileSync(reviewMdPath, "utf8");
+    // The overlay is Khan's contract rate, not a prompt property, so the
+    // working tree's review.md prices both arms.
+    const khanRates = readOverlayRates(candidateMd);
     if (baselineMd === candidateMd && !process.argv.includes("--force-arms")) {
         // Pre-flight identity short-circuit (the tuning memo's first item):
         // byte-identical review.md means byte-identical extracted prompts and
@@ -611,6 +611,13 @@ const main = async (): Promise<void> => {
     // deterministic matcher left unmatched, and an arbiter failure degrades
     // to a non-match. Both arms share the one matcher, so it never biases
     // the A/B delta.
+    // The instrument's own token meter. Arms run one at a time, so a sink
+    // that is swapped per arm attributes each arbiter and judge call to the
+    // arm it scored. The report prices them beside the sub-agents' spend,
+    // which they are otherwise invisible to (direct Messages API calls, no
+    // dollars in the response).
+    let arbiterSink: ModelTokens[] = [];
+    let judgeSink: ModelTokens[] = [];
     const match: MatchOptions | undefined = process.argv.includes(
         "--no-match-arbiter",
     )
@@ -618,8 +625,16 @@ const main = async (): Promise<void> => {
         : {
               fallback: haikuMatchArbiter({
                   onError: (message) => console.error(message),
+                  onUsage: (usage) => arbiterSink.push(usage),
               }),
           };
+    const judgeModel = liveJudge({onUsage: (usage) => judgeSink.push(usage)});
+    /** Close out an arm's meter: what the arbiter spent scoring it. */
+    const meterArm = (arm: ArmRunReport): ArmRunReport => {
+        arm.overhead = {judge: [], arbiter: arbiterSink};
+        arbiterSink = [];
+        return arm;
+    };
 
     // Each arm's provenance gate emulates that arm's OWN review.md version:
     // the anchor-snap fallback is keyed on the marker the gate step carries
@@ -632,12 +647,22 @@ const main = async (): Promise<void> => {
         candidate: reviewMdHasAnchorSnap(candidateMd),
     };
 
-    const runner = sdkRunner();
+    const runner = sdkRunner({
+        ...(transcriptsDir !== undefined ? {transcriptsDir} : {}),
+    });
+    console.error(
+        `transcripts under ${transcriptsDir ?? DEFAULT_TRANSCRIPTS_DIR}`,
+    );
     const armProduce =
         (stage: string, markdown: string, mode: ReReviewMode): ArmProduce =>
         (corpusCase) =>
             produceLive(corpusCase, extractAgents(markdown), {
-                runner,
+                // One stderr line per dispatch end, labeled with the arm
+                // (plus repeat suffix) and case, see live-ab-progress.ts.
+                runner: withDispatchProgress(runner, {
+                    arm: stage,
+                    caseId: corpusCase.id,
+                }),
                 stageDir: `${stageRoot}/${stage}/${corpusCase.id}`,
                 reReviewMode: mode,
             });
@@ -653,8 +678,9 @@ const main = async (): Promise<void> => {
         // report without quality scores, never kill a run whose arms have
         // already spent their budget (the plan's standing rule).
         for (const arm of [baseline, candidate]) {
+            judgeSink = [];
             try {
-                await judgeArm(arm);
+                await judgeArm(arm, judgeModel);
             } catch (error) {
                 arm.judgeError = String(
                     error instanceof Error ? error.message : error,
@@ -662,6 +688,12 @@ const main = async (): Promise<void> => {
                 console.error(
                     `judge scoring failed on the ${arm.arm} arm: ${arm.judgeError}`,
                 );
+            } finally {
+                // Committed whether or not scoring finished: a judge pass
+                // that died after some calls still paid for those calls.
+                if (arm.overhead !== undefined) {
+                    arm.overhead.judge = judgeSink;
+                }
             }
         }
     };
@@ -686,12 +718,32 @@ const main = async (): Promise<void> => {
     // The ruler stamp: which matcher and which corpus produced this
     // report's rates. Comparisons across runs are only valid when the stamp
     // matches (see ReportProvenance in live-ab-report.ts).
+    // The matcher version rides on the stamp: v2 is the lens tie-break and
+    // the leftover buckets (2026-09-03), so a pool mixing v1 and v2 reports
+    // over one corpus warns as a mixed ruler rather than blending them.
     const provenance = {
         matcher:
-            match !== undefined ? "deterministic+arbiter" : "deterministic",
+            match !== undefined
+                ? "deterministic-v2+arbiter"
+                : "deterministic-v2",
         corpusSha: sha256(JSON.stringify(cases)),
         caseCount: cases.length,
+        toolPolicy: READ_TOOL_POLICY,
     };
+
+    const ckpt = createCheckpointer({
+        outPath,
+        repeats,
+        khanRates,
+        header: {
+            baseRef,
+            reviewMdSha: {
+                baseline: sha256(baselineMd),
+                candidate: sha256(candidateMd),
+            },
+            provenance,
+        },
+    });
 
     /**
      * One full arm pair. `suffix` isolates staging across repeats;
@@ -702,28 +754,40 @@ const main = async (): Promise<void> => {
         suffix: string,
         withRetry: boolean,
     ): Promise<AbReport> => {
-        const baseline = trackArm(
-            await runArm(
-                "baseline",
-                cases,
-                armProduce(`baseline${suffix}`, baselineMd, "full"),
-                {
-                    maxUsd: nextArmBudget(),
-                    anchorSnap: armSnap.baseline,
-                    ...(match !== undefined ? {match} : {}),
-                },
+        const baseline = meterArm(
+            trackArm(
+                await runArm(
+                    "baseline",
+                    cases,
+                    armProduce(`baseline${suffix}`, baselineMd, "full"),
+                    {
+                        maxUsd: nextArmBudget(),
+                        anchorSnap: armSnap.baseline,
+                        ...(match !== undefined ? {match} : {}),
+                        label: `baseline${suffix}`,
+                        onCase: ckpt.baselineCase,
+                    },
+                ),
             ),
         );
-        const candidate = trackArm(
-            await runArm(
-                "candidate",
-                cases,
-                armProduce(`candidate${suffix}`, candidateMd, candidateMode),
-                {
-                    maxUsd: nextArmBudget(),
-                    anchorSnap: armSnap.candidate,
-                    ...(match !== undefined ? {match} : {}),
-                },
+        const candidate = meterArm(
+            trackArm(
+                await runArm(
+                    "candidate",
+                    cases,
+                    armProduce(
+                        `candidate${suffix}`,
+                        candidateMd,
+                        candidateMode,
+                    ),
+                    {
+                        maxUsd: nextArmBudget(),
+                        anchorSnap: armSnap.candidate,
+                        ...(match !== undefined ? {match} : {}),
+                        label: `candidate${suffix}`,
+                        onCase: ckpt.candidateCase(baseline),
+                    },
+                ),
             ),
         );
 
@@ -739,106 +803,36 @@ const main = async (): Promise<void> => {
                   (attempt): ArmProduce =>
                       (corpusCase) =>
                           produceLive(corpusCase, extractAgents(candidateMd), {
-                              runner,
+                              runner: withDispatchProgress(runner, {
+                                  arm: `candidate${suffix}-retry${attempt}`,
+                                  caseId: corpusCase.id,
+                              }),
                               stageDir: `${stageRoot}/candidate${suffix}-retry${attempt}/${corpusCase.id}`,
                           }),
                   match,
                   armSnap.candidate,
               )
             : [];
-        const flakes = new Set(
-            gateRetries.filter((r) => r.settledPass).map((r) => r.caseId),
-        );
+        // The retries re-match through the same arbiter, and that spend was on
+        // the candidate's behalf.
+        if (candidate.overhead !== undefined) {
+            candidate.overhead.arbiter.push(...arbiterSink);
+        }
+        arbiterSink = [];
 
         await judgeBothArms(baseline, candidate);
 
-        return {
-            baseRef,
-            reviewMdSha: {
-                baseline: sha256(baselineMd),
-                candidate: sha256(candidateMd),
-            },
-            provenance,
-            arms: {baseline, candidate},
-            regressions: diffRegressions(baseline, candidate),
-            adversarialFailures: adversarialGateFailures(candidate).filter(
-                (failure) =>
-                    !flakes.has(failure.slice(0, failure.indexOf(":"))),
-            ),
-            gateRetries,
-        };
+        return assembleReport(ckpt.header, baseline, candidate, gateRetries);
     };
 
-    let payload: AbReport | MultiAbReport;
-    let markdown: string;
-    let candidateRunCount: number;
-    let adversarialFailureCount: number;
-
     if (repeats === 1) {
-        const report = await runPair("", true);
-        payload = report;
-        markdown = renderMarkdownReport(report);
-        candidateRunCount = report.arms.candidate.runs.length;
-        adversarialFailureCount = report.adversarialFailures.length;
+        ckpt.repeatDone(await runPair("", true));
     } else {
-        const reports: AbReport[] = [];
         for (let repeat = 1; repeat <= repeats; repeat += 1) {
-            reports.push(await runPair(`-r${repeat}`, false));
-            // Checkpoint after every repeat: a multi-repeat run carries tens
-            // of dollars of spend, and a crash or cancellation on repeat n
-            // must not forfeit repeats 1..n-1 (a run that dies with nothing
-            // emitted is the failure mode the plan forbids). The final write
-            // below replaces this with the full report.
-            mkdirSync(dirname(outPath), {recursive: true});
-            writeFileSync(
-                outPath,
-                JSON.stringify(
-                    {
-                        repeatCount: repeats,
-                        completedRepeats: reports.length,
-                        repeats: reports,
-                    },
-                    null,
-                    2,
-                ),
-            );
+            ckpt.repeatDone(await runPair(`-r${repeat}`, false));
         }
-        // The repeat reports are already the artifact shape aggregate.ts
-        // pools, so the one-dispatch powered run and the N-dispatch drift
-        // pool go through the identical code path.
-        const aggregate = aggregateSamples(
-            reports.flatMap((report, i) =>
-                extractSamples(`repeat-${i + 1}`, report),
-            ),
-        );
-        const gate = majorityGateFailures(
-            reports.map((report) => report.arms.candidate),
-        );
-        const multi: MultiAbReport = {
-            repeatCount: repeats,
-            repeats: reports,
-            aggregate,
-            gate,
-            adversarialFailures: gate
-                .filter((g) => g.confirmed)
-                .map(
-                    (g) =>
-                        `${g.caseId}: failed ${g.failedRepeats}/${g.repeats} repeats`,
-                ),
-        };
-        payload = multi;
-        markdown = renderMultiMarkdownReport(multi);
-        candidateRunCount = reports.reduce(
-            (sum, report) => sum + report.arms.candidate.runs.length,
-            0,
-        );
-        adversarialFailureCount = multi.adversarialFailures.length;
     }
-
-    mkdirSync(dirname(outPath), {recursive: true});
-    writeFileSync(outPath, JSON.stringify(payload, null, 2));
-    // A sibling .md rides along for CI's sticky PR comment.
-    writeFileSync(outPath.replace(/\.json$/, ".md"), `${markdown}\n`);
+    const {payload, markdown, candidateRunCount} = ckpt.finish();
     console.log(markdown);
     const summaryPath = process.env["GITHUB_STEP_SUMMARY"];
     if (summaryPath !== undefined && summaryPath !== "") {
@@ -849,7 +843,7 @@ const main = async (): Promise<void> => {
         console.error("no case was scored on the candidate arm");
         process.exit(1);
     }
-    if (adversarialFailureCount > 0) {
+    if (payload.adversarialFailures.length > 0) {
         console.error("adversarial hard gate FAILED on the candidate arm");
         process.exit(1);
     }

@@ -256,6 +256,33 @@ describe("createProseGate", () => {
         expect(records.every((record) => record.state === "pass")).toBe(true);
     });
 
+    it("collects the judge's token usage per call for the cost report", async () => {
+        const haiku = {
+            model: "claude-haiku-4-5-20251001",
+            input: 400,
+            output: 10,
+            cacheRead: 0,
+            cacheWrite: 0,
+        };
+        const {gate, usage} = createProseGate({
+            runner: (prompt, onUsage) => {
+                onUsage?.(haiku);
+                return passRunner(prompt);
+            },
+            source: "correctness-reviewer",
+        });
+        expect(await gate(finderPayload())).toBeNull();
+        // One usage entry per judged finding.
+        expect(usage).toEqual([haiku, haiku, haiku]);
+        // A runner that reports nothing leaves it empty, not undefined.
+        const silent = createProseGate({
+            runner: passRunner,
+            source: "correctness-reviewer",
+        });
+        expect(await silent.gate(finderPayload())).toBeNull();
+        expect(silent.usage).toEqual([]);
+    });
+
     it("bounces a failing submission with the problems and the shape contract", async () => {
         const {gate, records} = createProseGate({
             runner: failRunner,

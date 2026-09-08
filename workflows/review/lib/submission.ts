@@ -66,6 +66,7 @@ import {neutralizeThenEscape, renderAttributionFooter} from "./attribution";
 import {computeRisksPatternsKey, RISKS_PATTERNS_KEY_PATH} from "./cache-record";
 import type {Claim} from "./dispatch-contracts";
 import {applyMediumVeto} from "./dispatch-contracts";
+import {renderDepthNotes, type DepthNotePlan} from "./depth-note";
 import {computeChangedLines} from "./diff";
 import {DEFAULT_FINDERS, TRIAGE_DIMENSION} from "./dispatch-roster";
 import {runCli as runNotifiedCli} from "./notified";
@@ -596,33 +597,15 @@ export const runSubmissionCli = (
         mediumCount,
     });
 
-    // The depth note (Step 3), when the run reduced.
+    // The depth notes (Step 3): the reduced depth and its dial, a manual ask
+    // a guard answered with full, a re-armed tripwire (depth-note.ts).
     const plan = readJson(fs, `${REVIEW_DIR}/rereview-plan.json`) as
-        | {mode?: unknown; tripwireRearmed?: unknown; divergence?: unknown}
+        | DepthNotePlan
         | undefined;
-    const depthNotes: string[] = [];
-    if (plan !== undefined && depth !== "full") {
-        const mode = typeof plan.mode === "string" ? plan.mode : "full";
-        depthNotes.push(
-            `Note: re-review ran at ${depth} depth (re-review mode ${mode}${
-                blockingOnly
-                    ? ", blocking-only"
-                    : blockingMedium
-                    ? ", blocking-medium"
-                    : ""
-            }).`,
-        );
-    }
-    if (plan?.tripwireRearmed === true) {
-        const share = (
-            plan.divergence as {unreviewedShare?: unknown} | undefined
-        )?.unreviewedShare;
-        depthNotes.push(
-            `Note: divergence tripwire re-armed a full review (unreviewed share ${
-                typeof share === "number" ? share.toFixed(2) : "unknown"
-            }).`,
-        );
-    }
+    const depthNotes = renderDepthNotes(plan, depth, {
+        blockingOnly,
+        blockingMedium,
+    });
 
     // The hold path (computeVerdict's core-dimension gate): a run whose
     // correctness or skill/severity pass produced no output must not resolve

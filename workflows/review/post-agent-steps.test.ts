@@ -70,6 +70,7 @@ describe("the post-agent execution rule", () => {
             ...postSteps.matchAll(/cd ("[^"]+"|\S+) && npx -y tsx ([^\s);]+)/g),
         ];
         expect(invocations.map((m) => m[2]).sort()).toEqual([
+            "workflows/review/lib/cost-report-cli.ts",
             "workflows/review/lib/dismiss-review.ts",
             "workflows/review/lib/dispatch-gate.ts",
         ]);
@@ -89,7 +90,11 @@ describe("the post-agent execution rule", () => {
         // warning wrappers. Walk the closure statically instead.
         const libDir = new URL("./lib/", import.meta.url);
         const seen = new Set<string>();
-        const queue = ["dispatch-gate.ts", "dismiss-review.ts"];
+        const queue = [
+            "dispatch-gate.ts",
+            "dismiss-review.ts",
+            "cost-report-cli.ts",
+        ];
         while (queue.length > 0) {
             const name = queue.pop() as string;
             if (seen.has(name)) {

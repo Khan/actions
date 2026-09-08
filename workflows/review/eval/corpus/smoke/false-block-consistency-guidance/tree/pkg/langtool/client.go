@@ -15,7 +15,7 @@ func (c *Client) ListTraces(projectID string) ([]Trace, error) {
 	if err != nil {
 		return nil, err
 	}
-	return traces, nil
+	return decodeTraces(c.http.Do(req))
 }
 
 // ListObservations returns the observations the API has recorded for a
