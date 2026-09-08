@@ -372,35 +372,30 @@ export const dedupeClaims = (
 
     // ---- Tier 2: the verified clusters, over tier 1's heads.
     //
-    // Each named member is read at its head, and a head takes the LOWEST
-    // ordinal that reaches it, so a head is a candidate in exactly one cluster
-    // however tier 1 has reshaped things and nothing can be absorbed twice.
-    // Rejections stay keyed to the ids the clusterer actually named.
-    const clusterHead = new Map<number, number>();
-    const namedByHead = new Map<number, string[]>();
+    // Tier 1 can map members of different proposals to the same head.
+    // Reserve that head only when a proposal makes a merge. In webapp#42034
+    // (run 33921953823), an earlier proposal reserved a head, then the
+    // blocking-member guard vetoed its only merge. That empty reservation
+    // prevented a later, grounded advisory merge. Productive proposals keep
+    // exclusive ownership, so this does not permit transitive model merges.
+    // Rejections name only the ids in the proposal being checked.
+    const namedByOrdinal = new Map<number, Map<number, string[]>>();
     for (const [index, ordinal] of clusterOf) {
         const owner = head[index];
-        const seen = clusterHead.get(owner);
-        clusterHead.set(
-            owner,
-            seen === undefined ? ordinal : Math.min(seen, ordinal),
-        );
-        namedByHead.set(owner, [
-            ...(namedByHead.get(owner) ?? []),
-            claims[index].id,
-        ]);
+        const named =
+            namedByOrdinal.get(ordinal) ?? new Map<number, string[]>();
+        named.set(owner, [...(named.get(owner) ?? []), claims[index].id]);
+        namedByOrdinal.set(ordinal, named);
     }
-    const headsByOrdinal = new Map<number, number[]>();
-    for (const [owner, ordinal] of clusterHead) {
-        headsByOrdinal.set(ordinal, [
-            ...(headsByOrdinal.get(ordinal) ?? []),
-            owner,
-        ]);
-    }
-    for (const ordinal of [...headsByOrdinal.keys()].sort((a, b) => a - b)) {
-        const heads = (headsByOrdinal.get(ordinal) as number[]).sort(
-            (a, b) => a - b,
-        );
+    const reservedHeads = new Set<number>();
+    for (const ordinal of [...namedByOrdinal.keys()].sort((a, b) => a - b)) {
+        const namedByHead = namedByOrdinal.get(ordinal) as Map<
+            number,
+            string[]
+        >;
+        const heads = [...namedByHead.keys()]
+            .filter((owner) => !reservedHeads.has(owner))
+            .sort((a, b) => a - b);
         if (heads.length < 2) {
             continue;
         }
@@ -417,6 +412,7 @@ export const dedupeClaims = (
         const groupEvidence = evidence[ordinal];
         const evidenceTokens = salientTokens(groupEvidence);
         const into = absorbed.get(survivorIndex) ?? [];
+        const previousCount = into.length;
         for (const index of heads) {
             if (index === survivorIndex) {
                 continue;
@@ -456,8 +452,11 @@ export const dedupeClaims = (
             absorbed.delete(index);
             groundedIn.set(survivorIndex, groupEvidence);
         }
-        if (into.length > 0) {
+        if (into.length > previousCount) {
             absorbed.set(survivorIndex, into);
+            for (const index of heads) {
+                reservedHeads.add(index);
+            }
         }
     }
 
