@@ -21,7 +21,7 @@
 import {appendFileSync} from "fs";
 
 import {loadCorpus} from "./corpus/loader.ts";
-import {runCorpus} from "./runner.ts";
+import {runCase} from "./runner.ts";
 import {computeMetrics} from "./metrics.ts";
 import {evaluateGates} from "./gates.ts";
 import {judgeCorpus} from "./judge.ts";
@@ -34,10 +34,9 @@ const main = async (): Promise<void> => {
     }
 
     const cases = loadCorpus();
-    const results = runCorpus(cases);
-    const runs: EvalRun[] = cases.map((corpusCase, index) => ({
+    const runs: EvalRun[] = cases.map((corpusCase) => ({
         corpusCase,
-        result: results[index],
+        result: runCase(corpusCase),
     }));
 
     const metrics = computeMetrics(runs);

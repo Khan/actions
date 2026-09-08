@@ -1,4 +1,4 @@
-import {describe, it, expect} from "vitest";
+import {assert, describe, it, expect} from "vitest";
 import {Volume} from "memfs";
 
 import {parseCase} from "./corpus/loader";
@@ -476,8 +476,15 @@ describe("produceLive", () => {
                 ]),
             ],
         });
+        let attempt = 0;
         const result = await produceLive(CASE, AGENTS, {
-            runner,
+            runner: async (request) => {
+                const result = await runner(request);
+                return request.name === "correctness-reviewer" &&
+                    attempt++ === 0
+                    ? {...result, stopReason: "max_tokens"}
+                    : result;
+            },
             stageDir: "/stage",
             fs: volFs(caseVol()),
         });
@@ -485,6 +492,7 @@ describe("produceLive", () => {
             (a) => a.name === "correctness-reviewer",
         );
         expect(report?.retried).toBe(true);
+        expect(report).not.toHaveProperty("stopReason");
         expect(report?.failed).toBeUndefined();
         expect(report?.usd).toBeCloseTo(0.5, 10); // both attempts billed
         // No usage from this runner: the field stays absent, never `[]`.
@@ -875,6 +883,7 @@ describe("produceLive cross-source dedup", () => {
         // production's posting surface), and the validator is dispatched
         // over the merged set only.
         expect(result.findings).toHaveLength(1);
+        assert.isDefined(result.findings[0]);
         expect(result.findings[0].finding.model_authored_prose).not.toContain(
             "Also flagged by",
         );
@@ -892,6 +901,7 @@ describe("produceLive cross-source dedup", () => {
             rejected: [],
             clustererAbsent: false,
         });
+        assert.isDefined(result.dedup.merges[0]);
         expect(result.dedup.merges[0].via).toBe("clusterer");
     });
 
@@ -960,6 +970,7 @@ describe("produceLive cross-source dedup", () => {
             fs: volFs(caseVol()),
         });
         expect(result.findings).toHaveLength(1);
+        assert.isDefined(result.findings[0]);
         expect(result.findings[0].finding.id).toContain(
             "live-correctness-reviewer-1",
         );

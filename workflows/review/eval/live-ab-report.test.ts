@@ -1,7 +1,7 @@
 import {readFileSync} from "node:fs";
 import {join} from "node:path";
 
-import {describe, it, expect} from "vitest";
+import {assert, describe, it, expect} from "vitest";
 
 import {aggregateSamples, extractSamples} from "./aggregate";
 import {parseCase, type CorpusCase} from "./corpus/loader";
@@ -487,9 +487,11 @@ describe("renderMarkdownReport priced rows", () => {
                 ],
                 dedup: {
                     candidates: 4,
+                    proposed: 0,
                     merges: [],
                     rejected: [],
                     clustererAbsent: false,
+                    clustererFailed: false,
                 },
             }),
             {maxUsd: 20},
@@ -575,6 +577,7 @@ describe("renderMarkdownReport: read scope", () => {
             {maxUsd: 10},
         );
         // Only the agent with denials is recorded; a zero is the norm.
+        assert.isDefined(candidate.perCase[0]);
         expect(candidate.perCase[0].deniedReads).toEqual([
             {agent: "correctness-reviewer", count: 3},
         ]);

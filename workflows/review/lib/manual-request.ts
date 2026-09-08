@@ -110,11 +110,10 @@ export const requestedDepthFromComment = (
         return null;
     }
     const firstLine = body.split(/\r?\n/, 1)[0] ?? "";
-    const match = /^\s*\/review[ \t]+(\S+)/.exec(firstLine);
-    if (match === null) {
+    const token = /^\s*\/review[ \t]+(\S+)/.exec(firstLine)?.[1]?.toLowerCase();
+    if (token === undefined) {
         return null;
     }
-    const token = match[1].toLowerCase();
     const resolved = DEPTH_SYNONYMS[token] ?? token;
     return (RE_REVIEW_MODES as readonly string[]).includes(resolved)
         ? (resolved as ReReviewMode)

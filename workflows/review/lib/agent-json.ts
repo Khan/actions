@@ -30,7 +30,7 @@ const fencedBlocks = (text: string): string[] => {
     const blocks: string[] = [];
     const fence = /```[^\n]*\n([\s\S]*?)```/g;
     for (let m = fence.exec(text); m !== null; m = fence.exec(text)) {
-        blocks.push(m[1]);
+        blocks.push(m[1] ?? "");
     }
     return blocks;
 };
@@ -112,9 +112,8 @@ export const extractJsonValue = (text: string): unknown => {
     if (whole !== undefined && typeof whole === "object" && whole !== null) {
         return whole;
     }
-    const fences = fencedBlocks(text);
-    for (let i = fences.length - 1; i >= 0; i--) {
-        const parsed = tryParse(fences[i].trim());
+    for (const fence of fencedBlocks(text).reverse()) {
+        const parsed = tryParse(fence.trim());
         if (
             parsed !== undefined &&
             typeof parsed === "object" &&

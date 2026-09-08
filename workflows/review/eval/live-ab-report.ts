@@ -20,7 +20,6 @@ import {
     type RateCard,
 } from "../lib/pricing";
 
-export type {AgentCost};
 export {armToolCalls} from "./cost-rows";
 import type {
     CaseVerification,

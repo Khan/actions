@@ -575,14 +575,19 @@ export const createProseGate = (options: {
             units.map(
                 async (
                     unit,
-                ): Promise<{verdict: JudgeVerdict | null; error?: string}> => {
+                ): Promise<{
+                    unit: ProseUnit;
+                    verdict: JudgeVerdict | null;
+                    error?: string;
+                }> => {
                     if (passedUnits.has(unitMemoKey(unit))) {
                         // Unchanged since a prior pass: accept without a
                         // judge call.
-                        return {verdict: {pass: true, problems: []}};
+                        return {unit, verdict: {pass: true, problems: []}};
                     }
                     try {
                         return {
+                            unit,
                             verdict: parseJudgeVerdict(
                                 await runner(
                                     buildJudgePrompt(
@@ -600,6 +605,7 @@ export const createProseGate = (options: {
                         };
                     } catch (error) {
                         return {
+                            unit,
                             verdict: null,
                             error:
                                 error instanceof Error
@@ -611,8 +617,7 @@ export const createProseGate = (options: {
             ),
         );
         const failures: {key: string; problems: string[]}[] = [];
-        units.forEach((unit, index) => {
-            const {verdict, error} = outcomes[index];
+        outcomes.forEach(({unit, verdict, error}) => {
             const base = {
                 source,
                 key: unit.key,

@@ -102,7 +102,8 @@ export const producerOver =
         const request = {
             model: "m",
             prompt: "p",
-            cwd: "/",
+            cwd: "/stage/repo",
+            readRoot: "/stage",
             maxTurns: 1,
             timeoutMs: 1000,
         };
@@ -122,7 +123,9 @@ export const producerOver =
                     turns: 1,
                     wallMs: 10,
                     retried: false,
-                    toolCalls: first.toolCalls,
+                    ...(first.toolCalls === undefined
+                        ? {}
+                        : {toolCalls: first.toolCalls}),
                 },
                 {
                     name: "claim-validator",

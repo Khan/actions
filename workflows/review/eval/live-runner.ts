@@ -295,9 +295,9 @@ const runOnce = async (
             toolCalls,
             deniedReads,
             deniedTools,
-            stopReason,
-            errorMessage,
-            tokensAtFailure,
+            ...(stopReason === undefined ? {} : {stopReason}),
+            ...(errorMessage === undefined ? {} : {errorMessage}),
+            ...(tokensAtFailure === undefined ? {} : {tokensAtFailure}),
             // Anthropic reports a usage-policy block as stop_reason "refusal".
             refused: stopReason === "refusal",
             wallMs: Date.now() - started,

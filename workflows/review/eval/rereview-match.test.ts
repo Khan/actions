@@ -1,4 +1,4 @@
-import {describe, it, expect} from "vitest";
+import {assert, describe, it, expect} from "vitest";
 
 import {computeVerdict} from "../lib/verdict";
 import {loadCorpus} from "./corpus/loader";
@@ -275,11 +275,13 @@ describe("stageCase: rereview staging", () => {
             "t-test-asserts-nothing",
         ]);
         // The author's reply rides the thread so the reconciler can weigh it.
+        assert.isDefined(threads[1]);
         expect(threads[1].comments[1]?.body).toContain("Fixed the offset");
 
         const priorReviews = JSON.parse(
             fs.files.get("/stage/context/prior-reviews.json") ?? "[]",
         ) as {body: string}[];
+        assert.isDefined(priorReviews[0]);
         expect(priorReviews[0].body).toContain("pr-reviewer:rereview");
 
         expect(staged.rereviewPlan?.depth).toBe("full");

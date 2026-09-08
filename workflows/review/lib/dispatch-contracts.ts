@@ -628,7 +628,7 @@ export const anchorPathLine = (
         ? {}
         : {
               path: anchor.path,
-              line: "line" in anchor ? anchor.line : undefined,
+              ...(anchor.type === "line" ? {line: anchor.line} : {}),
           };
 
 /**

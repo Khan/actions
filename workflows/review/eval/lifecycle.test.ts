@@ -22,7 +22,7 @@
 import {readdirSync, readFileSync} from "node:fs";
 import {join} from "node:path";
 
-import {describe, it, expect} from "vitest";
+import {assert, describe, it, expect} from "vitest";
 
 import {
     computeHunkSignature,
@@ -135,6 +135,7 @@ describe.each(CASES)("$id", (lifecycleCase) => {
                 plan: plans[index],
             })),
         )("push $push.name meets its expected depth", ({push, plan}) => {
+            assert.isDefined(plan);
             const expectedDepth =
                 push.expected.depth === "same-as-mode"
                     ? mode
@@ -146,6 +147,7 @@ describe.each(CASES)("$id", (lifecycleCase) => {
         if (lifecycleCase.scoring === "payload-full-review") {
             it("scores: the tripwire re-armed and the payload got a full review", () => {
                 const payload = plans[plans.length - 1];
+                assert.isDefined(payload);
                 expect(payload.tripwireRearmed).toBe(true);
                 expect(payload.depth).toBe("full");
                 expect(payload.dispatch).toBe("all");
@@ -154,6 +156,7 @@ describe.each(CASES)("$id", (lifecycleCase) => {
         } else {
             it("scores: the reduced path actually ran on the follow-up push", () => {
                 const followUp = plans[plans.length - 1];
+                assert.isDefined(followUp);
                 expect(followUp.depth).toBe(mode);
                 expect(followUp.tripwireRearmed).toBe(false);
             });

@@ -128,7 +128,8 @@ export const createCheckpointer = (options: {
     };
 } => {
     const {outPath, repeats, header} = options;
-    const render = {khanRates: options.khanRates};
+    const render =
+        options.khanRates === undefined ? {} : {khanRates: options.khanRates};
     const finished: AbReport[] = [];
     // Stage and rename: a cancel that lands mid-write must not truncate the
     // very file the checkpoint exists to preserve (rename is atomic on the
