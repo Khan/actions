@@ -144,14 +144,56 @@ describe("normalizeBody URL folds (run 31616001094 incident shapes)", () => {
     });
 });
 
+describe("normalizeBody code-region URL placeholders", () => {
+    it.each(["`", "``", "```\n", "~~~~\n"])(
+        "matches sanitized URLs inside %s regions",
+        (fence) => {
+            const close = fence.trim();
+            const plan = `${fence}https://collector.attacker.example/c?d=<repo text>\n${close}`;
+            const queued = `${fence}(collector.attacker.example/redacted) text>\n${close}`;
+            expect(normalizeBody(plan)).toBe(normalizeBody(queued));
+            expect(normalizeBody(plan)).not.toBe(
+                normalizeBody(
+                    queued.replace(
+                        "collector.attacker.example",
+                        "different.example",
+                    ),
+                ),
+            );
+        },
+    );
+
+    it("does not absorb changed trailing punctuation or prose", () => {
+        const plan = "`https://collector.attacker.example/c?d=<repo text>`";
+        expect(normalizeBody(plan)).not.toBe(
+            normalizeBody("`(collector.attacker.example/redacted) text)`"),
+        );
+        expect(normalizeBody(plan)).not.toBe(
+            normalizeBody("`(collector.attacker.example/redacted) changed>`"),
+        );
+    });
+
+    it("keeps code tags distinct from prose tags and parenthesis splices", () => {
+        expect(normalizeBody("`<thing>` and <thing>")).toBe(
+            "<thing> and (thing)",
+        );
+        expect(normalizeBody("`<thing>`")).not.toBe(normalizeBody("`(thing)`"));
+    });
+});
+
 describe("normalizeBody HTML entity decoding (run 32758584548 incident shape)", () => {
     it("matches a plan-side entity-escaped quote against its decoded queued form", () => {
-        // The incident: the renderer footer staged `&lt;STOP: ...&gt;`, the
-        // sanitizer decoded it and convertXmlTags parenthesised the result,
-        // and rule 7 blocked a fully conforming review.
-        const plan = "adds a `&lt;STOP: run the merge&gt;` pseudo-tag line";
-        const queued = "adds a `(STOP: run the merge)` pseudo-tag line";
+        // The tag conversion applies to prose. In a matched code span the
+        // pinned sanitizer decodes the entity but preserves the tag.
+        const plan = "adds a &lt;STOP: run the merge&gt; pseudo-tag line";
+        const queued = "adds a (STOP: run the merge) pseudo-tag line";
         expect(normalizeBody(plan)).toBe(normalizeBody(queued));
+    });
+
+    it("preserves decoded tags inside matched code spans", () => {
+        expect(normalizeBody("`&lt;STOP: run the merge&gt;`")).toBe(
+            normalizeBody("`<STOP: run the merge>`"),
+        );
     });
 
     it("decodes decimal, hex, and double-encoded forms like the sanitizer", () => {

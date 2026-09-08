@@ -34,6 +34,8 @@
  * commas. All three are absorbed below.
  */
 
+import {outsideCodeRegions} from "./sanitizer-code-regions";
+
 /**
  * The HTML tags gh-aw's convertXmlTags preserves (sanitize_content_core.cjs,
  * v0.83.4): GFM-safe tags plus its inline additions. Every other `<tag>` is
@@ -94,35 +96,43 @@ const SANITIZER_ALLOWED_TAGS = new Set([
  * list, paren rewrite), applied to plan and queued text alike, so a
  * cross-form splice is still caught: a queued `(p)` where the plan staged the
  * preserved `<p>` stays a mismatch. Differences from the original are the
- * absorbed tolerances: no code-region awareness (backticks are still present
- * when this fold runs; the real sanitizer skips code spans, so the symmetric
- * fold knowingly absorbs a tag-vs-paren splice inside a code region that the
- * sanitizer would never produce) and no dangerous-attribute stripping inside
- * preserved tags (still a documented residual). The queued side is
+ * absorbed tolerances: no dangerous-attribute stripping inside preserved
+ * tags (still a documented residual). Code regions stay untouched, matching
+ * the sanitizer. Folding a URL's placeholder tag before URL redaction can
+ * otherwise leave different trailing punctuation on the two sides.
+ * The queued side is
  * idempotent under the fold: parenthesised text contains no angle brackets
  * to match.
  */
 const foldXmlTags = (text: string): string =>
-    text.replace(/<(\/?[A-Za-z!][^>]*?)>/g, (match, tagContent: string) => {
-        // The sanitizer preserves https angle-bracket autolinks
-        // (isHttpsAngleBracketAutolink) so its URL filter can inspect them;
-        // preserve them here so the URL folds below see the same shape on
-        // both sides.
-        if (
-            /^https:\/\/[\w.-]+(?::\d+)?(\/[^\s<>|]*)?(?:\|[^<>]*)?$/.test(
-                tagContent,
-            )
-        ) {
-            return match;
-        }
-        const tagName = /^\/?\s*([A-Za-z][A-Za-z0-9]*)/
-            .exec(tagContent)?.[1]
-            ?.toLowerCase();
-        if (tagName !== undefined && SANITIZER_ALLOWED_TAGS.has(tagName)) {
-            return match;
-        }
-        return `(${tagContent})`;
-    });
+    outsideCodeRegions(text, (prose) =>
+        prose.replace(
+            /<(\/?[A-Za-z!][^>]*?)>/g,
+            (match, tagContent: string) => {
+                // The sanitizer preserves https angle-bracket autolinks
+                // (isHttpsAngleBracketAutolink) so its URL filter can inspect them;
+                // preserve them here so the URL folds below see the same shape on
+                // both sides.
+                if (
+                    /^https:\/\/[\w.-]+(?::\d+)?(\/[^\s<>|]*)?(?:\|[^<>]*)?$/.test(
+                        tagContent,
+                    )
+                ) {
+                    return match;
+                }
+                const tagName = /^\/?\s*([A-Za-z][A-Za-z0-9]*)/
+                    .exec(tagContent)?.[1]
+                    ?.toLowerCase();
+                if (
+                    tagName !== undefined &&
+                    SANITIZER_ALLOWED_TAGS.has(tagName)
+                ) {
+                    return match;
+                }
+                return `(${tagContent})`;
+            },
+        ),
+    );
 
 /**
  * Mirror sanitizeDomainName: each dot-separated part keeps only its
