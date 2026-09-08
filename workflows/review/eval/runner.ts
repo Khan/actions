@@ -36,6 +36,8 @@
  */
 
 import type {Anchor, Finding, Lens} from "../lib/finding-schema";
+import {applyVerifications, buildClaims} from "../lib/dispatch-contracts";
+import {renderClaimComment} from "../lib/submission-render";
 import {
     isBlockingLabel,
     labelForFinding,
@@ -258,9 +260,10 @@ export const applyScopeFilter = (
  * survivors, applying the Phase 3 rules mechanically: `refuted` drops the
  * candidate; `plausible` downgrades it to non-blocking (severity → `advisory`,
  * label/body recomputed in code, confidence lowered) so it can never drive
- * REQUEST_CHANGES — only a `confirmed` claim keeps a blocking label; `confirmed`
- * (or no recorded verification) keeps the candidate unchanged. A case without a
- * `validation` block is a no-op, exactly the pre-existing behavior.
+ * REQUEST_CHANGES. Confirmed corrections use production applyVerifications and
+ * renderClaimComment, so the scored body and summary are the corrected posting
+ * surface rather than the producer's obsolete text. A case without a
+ * validation block is a no-op.
  */
 export const applyValidation = (
     candidates: RunCandidate[],
@@ -274,11 +277,43 @@ export const applyValidation = (
     const dropped: RunCandidate[] = [];
     for (const candidate of candidates) {
         const verification = byId.get(candidate.id);
-        if (
-            verification === undefined ||
-            verification.verification === "confirmed"
-        ) {
+        if (verification === undefined) {
             validated.push(candidate);
+            continue;
+        }
+        if (verification.verification === "confirmed") {
+            if (verification.corrected === undefined) {
+                validated.push(candidate);
+                continue;
+            }
+            // Keep field validation in production code. Invalid corrections
+            // retain the original field, and correcting detail never drops a
+            // supported finding. Matchers read the updated finding too.
+            const [claim] = applyVerifications(buildClaims([candidate]), {
+                [candidate.id]: verification,
+            });
+            const finding: Finding = {
+                ...candidate.finding,
+                summary: claim.subject,
+                model_authored_prose: claim.discussion,
+                confidence: claim.confidence,
+                severity: isBlockingLabel(claim.label)
+                    ? "blocking"
+                    : claim.importance === "medium"
+                    ? "medium"
+                    : "advisory",
+                ...(candidate.anchor.type === "line" && claim.line !== undefined
+                    ? {anchor: {...candidate.anchor, line: claim.line}}
+                    : {}),
+                ...(claim.suggestion !== undefined
+                    ? {suggested_patch: claim.suggestion}
+                    : {}),
+            };
+            validated.push({
+                ...toCandidate({source: candidate.source, finding}),
+                label: claim.label as ConventionalLabel,
+                body: renderClaimComment(claim),
+            });
             continue;
         }
         if (verification.verification === "refuted") {

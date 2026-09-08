@@ -1,0 +1,48 @@
+{
+    "id": "webapp-41896-coaching-batch-support",
+    "tags": [
+        "golden",
+        "claim-fidelity"
+    ],
+    "category": "golden",
+    "description": "The coaching loader fans a single failed lookup out to every kaid, so one student's transient error can deny the whole roster for a teacher without admin permission. ManyCoachedBy runs one lookup per student, then ManyCoachedByActorErr returns an empty map on an error and the loader marks every key failed.",
+    "changedFiles": [
+        {
+            "path": "services/ai-guide/essay_feedback/loaders/coaching_loader.go",
+            "status": "modified"
+        }
+    ],
+    "findings": [
+        {
+            "source": "holistic",
+            "finding": {
+                "schema_version": 2,
+                "id": "comment-3925652967",
+                "lens": "holistic",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/ai-guide/essay_feedback/loaders/coaching_loader.go",
+                    "line": 40,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.7,
+                "evidence_trace": [
+                    "https://github.com/Khan/webapp/blob/dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82/services/ai-guide/essay_feedback/loaders/coaching_loader.go#L40"
+                ],
+                "failure_scenario": "The coaching loader fans a single failed lookup out to every kaid, so one student's transient error can deny the whole roster for a teacher without admin permission. ManyCoachedBy runs one lookup per student, then ManyCoachedByActorErr returns an empty map on an error and the loader marks every key failed.",
+                "producing_hunt": "historical-comment-replay",
+                "model_authored_prose": "The coaching loader fans a single failed lookup out to every kaid, so one student's transient error now denies the whole roster; consider scoping it per-kaid the way the session loader does. The sibling loader added in this PR states the principle explicitly (writing_coach_session_loader.go:70-73, \"Batching must not widen the blast radius: without this, one assignment's failed query would error out a healthy assignment's roster too, whereas the unbatched per-row calls failed independently\") and has a dedicated test for it (TestFetchWCSessionsScopesErrorToItsConfig). The coaching loader is the half where that principle was not applied, and it is the half with the worse outcome: a null field versus a 403.\n\nThe comment on this line assumes the batch-wide error means the actor's coach data is globally unavailable. It does not. services/coaches/relationships/coachee.go:70-98 shows `ManyCoachedBy` does not batch at the datastore layer \u2014 it fans out one `getCoachCoacheePair` per kaid in a tracegroup, and `err := g.Wait()` returns the first error (tracegroup is an errgroup fork with no concurrency limit). `acl.ManyCoachedByActorErr` then discards every successful result (`return result, err` with `result` still empty, pkg/khan/acl/coaches.go:112-118); this loader copies that one error into all `len(kaids)` slots; and `isActorCoachOrAdminBatched` (acls.go:120-124) logs it, gets `coached=false` for all, and falls through to `actorIsProgressViewingAdminForUser`, which a plain teacher fails.\n\nBefore this PR the same event denied exactly one row: `acl.IsCoachedByActor` ran per kaid against coaches' `IsCoachedBy`, a single key query (coachee.go:101-108) with its own request-cache entry. The happy-path win is unaffected by falling back per-kaid on error, since the fallback only runs when the batch already failed.\n\nOne caveat on the precedent: services/progress/resolvers/coaching_loader.go:38-45 does the identical all-keys fan-out, so this shape is the existing repo pattern for a batched coach check and a per-kaid fallback would diverge from it \u2014 worth deciding deliberately rather than treating it as an oversight.",
+                "summary": "The coaching loader fans a single failed lookup out to every kaid, so one student's transient error now denies the whole roster; scope it per-kaid the way the session loader does.",
+                "suggested_patch": "\tcoached, err := acl.ManyCoachedByActorErr(ktx, kaids)\n\tif err != nil {\n\t\t// coaches' manyCoachedBy fans out one lookup per kaid and returns the\n\t\t// first error, so a batch-wide failure says nothing about any\n\t\t// particular kaid. Fall back to the per-kaid check: one bad lookup\n\t\t// should deny one student, not the whole roster.\n\t\tktx.Log().Error(err)\n\t\tout := make([]bool, len(kaids))\n\t\tfor i, kaid := range kaids {\n\t\t\tout[i] = acl.IsCoachedByActor(ktx, kaid)\n\t\t}\n\t\treturn out, nil\n\t}\n\n// (acl.IsCoachedByActorErr does not exist; IsCoachedByActor is the bool form\n// at pkg/khan/acl/coaches.go:21 and already logs-and-denies internally.)"
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "comment-3925652967"
+        ],
+        "postedCommentCount": 1
+    }
+}

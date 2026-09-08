@@ -45,7 +45,12 @@ import {
     writeFileSync,
 } from "node:fs";
 
-import {isBlockingLabel, labelForFinding} from "../lib/render-comment";
+import {isBlockingLabel} from "../lib/render-comment";
+import {
+    buildClaims,
+    joinProse,
+    subjectRestatesDiscussion,
+} from "../lib/dispatch-contracts";
 import {route, type RouterConfig} from "../lib/router";
 import {validateFinding, type Finding, type Lens} from "../lib/finding-schema";
 import {CLUSTERER} from "../lib/dispatch-cluster";
@@ -436,8 +441,12 @@ const fromLabelShape = (
         ],
         failure_scenario: raw["failure_scenario"],
         producing_hunt: `live:${agentName}`,
-        model_authored_prose:
-            discussion === "" ? subject : `${subject} ${discussion}`.trim(),
+        model_authored_prose: joinProse(subject, discussion),
+        ...(subject !== "" &&
+        !subject.includes("\n") &&
+        !subjectRestatesDiscussion(subject, discussion)
+            ? {summary: subject}
+            : {}),
         ...(typeof raw["suggestion"] === "string" && raw["suggestion"] !== ""
             ? {suggested_patch: raw["suggestion"]}
             : {}),
@@ -515,31 +524,6 @@ const parseAgentFindings = (
 /* The claims path                                                            */
 /* -------------------------------------------------------------------------- */
 
-/** Build the claims.json entries the validator's contract names. */
-const buildClaims = (findings: LiveFinding[]): Record<string, unknown>[] =>
-    findings.map((live) => {
-        const {finding} = live;
-        return {
-            id: finding.id,
-            source: live.source,
-            ...(finding.anchor.type !== "pr"
-                ? {path: finding.anchor.path}
-                : {}),
-            ...(finding.anchor.type === "line"
-                ? {line: finding.anchor.line}
-                : {}),
-            label: labelForFinding(finding),
-            subject: finding.model_authored_prose,
-            discussion: finding.evidence_trace.join(" | "),
-            failure_scenario: finding.failure_scenario,
-            confidence: finding.confidence,
-            ...(finding.suggested_patch !== undefined
-                ? {suggestion: finding.suggested_patch}
-                : {}),
-            ...(live.skill !== undefined ? {skill: live.skill} : {}),
-        };
-    });
-
 /** Parse the validator's `{"claims": [...]}` output into verifications. */
 const parseVerifications = (
     output: string,
@@ -571,6 +555,9 @@ const parseVerifications = (
         const out: CaseVerification = {
             id,
             verification: verification as VerificationState,
+            ...(isRecord(raw["corrected"])
+                ? {corrected: {...raw["corrected"]}}
+                : {}),
         };
         const confidence = raw["confidence"];
         if (

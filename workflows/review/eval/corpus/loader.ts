@@ -141,6 +141,8 @@ export type CaseVerification = {
     verification: VerificationState;
     /** Post-verification confidence in [0,1], when the validator changed it. */
     confidence?: number;
+    /** Production correction fields, checked by applyVerifications at replay. */
+    corrected?: Record<string, unknown>;
 };
 
 /**
@@ -431,6 +433,13 @@ const parseValidation = (
             id,
             verification: verification as VerificationState,
         };
+        if (entry["corrected"] !== undefined) {
+            if (!isRecord(entry["corrected"])) {
+                errors.push(`validation[${i}].corrected: must be an object`);
+                return;
+            }
+            out.corrected = {...entry["corrected"]};
+        }
         const confidence = entry["confidence"];
         if (confidence !== undefined) {
             if (

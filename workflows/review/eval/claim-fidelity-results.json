@@ -1,0 +1,197 @@
+{
+    "baselineRef": "a5b6eb08efd60b690f443b569f552404e731497a",
+    "measurement": "Deterministic eval parity only. No model calls or reviewer-quality improvement claim.",
+    "tests": {
+        "untouchedBaseline": {
+            "files": 106,
+            "passed": 2220
+        },
+        "sameRulerFocusedBaseline": {
+            "passed": 35,
+            "failed": 7
+        },
+        "sameRulerFocusedCandidate": {
+            "passed": 42,
+            "failed": 0
+        },
+        "fullCandidate": {
+            "files": 107,
+            "passed": 2244
+        },
+        "lint": "pass",
+        "repoTypecheck": "pass, excludes workflows",
+        "targetedTypecheck": "Existing submitEvent COMMENT type mismatch reproduces in baseline and candidate."
+    },
+    "baseline": {
+        "kind": "deterministic replay, hand-authored controls, no model calls",
+        "rulerSha256": "852e78e3109b27fc50691f3bc9e1f5a6dfe557277cf255dc5deac4bb12170b72",
+        "implementationSha256": "40f904dfca291d1ea57c9a3726ac880b9743f9f11213c05453b0cbcbe70bc0d7",
+        "reviewPromptSha256": "1428bb79f7404fb1d850c4dc7485ed605ca0d3cb88a4bf2785a5447e209ce32f",
+        "originalMetrics": {
+            "mustCatchRecall": 1,
+            "goldenPrecision": 1,
+            "noise": 0,
+            "findings": 3
+        },
+        "rows": [
+            {
+                "caseId": "webapp-41896-coaching-batch-support",
+                "reviewedCommit": "dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82",
+                "original": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": false,
+                    "visibleConsequence": true
+                },
+                "handAuthoredControl": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": false,
+                    "visibleConsequence": true
+                },
+                "productionControl": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "controlRetained": true,
+                "controlMatchesProduction": false
+            },
+            {
+                "caseId": "webapp-41989-district-query-support",
+                "reviewedCommit": "ec472f1619848fa78e8383b64ebb0d73a67a3756",
+                "original": {
+                    "mainDefect": true,
+                    "proposedFix": false,
+                    "supportingAssertions": false,
+                    "visibleConsequence": true
+                },
+                "handAuthoredControl": {
+                    "mainDefect": true,
+                    "proposedFix": false,
+                    "supportingAssertions": false,
+                    "visibleConsequence": true
+                },
+                "productionControl": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "controlRetained": true,
+                "controlMatchesProduction": false
+            },
+            {
+                "caseId": "webapp-42001-phantom-debug-summary",
+                "reviewedCommit": "5b4a84fbb520c3102467ed549078c72aff3cdd93",
+                "original": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": false
+                },
+                "handAuthoredControl": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": false
+                },
+                "productionControl": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "controlRetained": true,
+                "controlMatchesProduction": false
+            }
+        ]
+    },
+    "candidate": {
+        "kind": "deterministic replay, hand-authored controls, no model calls",
+        "rulerSha256": "852e78e3109b27fc50691f3bc9e1f5a6dfe557277cf255dc5deac4bb12170b72",
+        "implementationSha256": "7348c95f4f355798c3c18ed453dd2ab273a265edff68e79728df186d500795e3",
+        "reviewPromptSha256": "1428bb79f7404fb1d850c4dc7485ed605ca0d3cb88a4bf2785a5447e209ce32f",
+        "originalMetrics": {
+            "mustCatchRecall": 1,
+            "goldenPrecision": 1,
+            "noise": 0,
+            "findings": 3
+        },
+        "rows": [
+            {
+                "caseId": "webapp-41896-coaching-batch-support",
+                "reviewedCommit": "dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82",
+                "original": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": false,
+                    "visibleConsequence": true
+                },
+                "handAuthoredControl": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "productionControl": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "controlRetained": true,
+                "controlMatchesProduction": true
+            },
+            {
+                "caseId": "webapp-41989-district-query-support",
+                "reviewedCommit": "ec472f1619848fa78e8383b64ebb0d73a67a3756",
+                "original": {
+                    "mainDefect": true,
+                    "proposedFix": false,
+                    "supportingAssertions": false,
+                    "visibleConsequence": true
+                },
+                "handAuthoredControl": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "productionControl": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "controlRetained": true,
+                "controlMatchesProduction": true
+            },
+            {
+                "caseId": "webapp-42001-phantom-debug-summary",
+                "reviewedCommit": "5b4a84fbb520c3102467ed549078c72aff3cdd93",
+                "original": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": false
+                },
+                "handAuthoredControl": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "productionControl": {
+                    "mainDefect": true,
+                    "proposedFix": true,
+                    "supportingAssertions": true,
+                    "visibleConsequence": true
+                },
+                "controlRetained": true,
+                "controlMatchesProduction": true
+            }
+        ]
+    }
+}
