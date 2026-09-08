@@ -42,11 +42,11 @@
                 "evidence_trace": [
                     "src/auth/session.ts:12 keeps the name `isSessionValid` and the boolean return",
                     "src/auth/session.ts:14 adds `session.lastChecked = now;`, a write to the argument",
-                    "the name and signature predict a pure predicate; no caller can see the write from its call site"
+                    "src/auth/metrics.ts:4 filters sessions with isSessionValid while computing countValidSessions, and the adjacent grace-window comment does not expose mutation"
                 ],
-                "failure_scenario": "A caller on a read path (a metrics sweep, a test asserting lastChecked) calls isSessionValid expecting no side effect, and the session's lastChecked moves under it.",
+                "failure_scenario": "A dev adding session-validity checks to a read-only metrics sweep can expect isSessionValid to leave sessions unchanged, but the boolean predicate also updates lastChecked.",
                 "producing_hunt": "maintainability:misleading-name",
-                "model_authored_prose": "`isSessionValid` (session.ts:12) reads as a pure predicate and now writes `session.lastChecked` (line 14). Either move the write to the caller that wants it (a `touchSession`) or rename so the mutation is in the name."
+                "model_authored_prose": "`isSessionValid = (session: Session, now = Date.now()): boolean` (session.ts:12) now writes `session.lastChecked = now` (line 14). countValidSessions filters with this predicate (metrics.ts:4), and the adjacent grace-window comment explains expiry tolerance, not mutation. Rename it to checkAndRecordSession so a dev adding a read-only validity check can see that this operation is not a pure predicate. Renaming preserves the grace window and timestamp recording without splitting their behavior."
             }
         }
     ],

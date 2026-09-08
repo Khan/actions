@@ -42,11 +42,12 @@
                 "evidence_trace": [
                     "src/reports/summary.ts:7-8 adds `const toCents = (dollars: number): number => Math.sign(dollars) * Math.round(Math.abs(dollars) * 100);`",
                     "src/money/cents.ts:4-5 exports `dollarsToCents` with the identical body",
-                    "grep for dollarsToCents finds no import in src/reports/summary.ts"
+                    "grep for dollarsToCents finds no import in src/reports/summary.ts",
+                    "src/reports/invoice.ts:4 calls dollarsToCents for each invoice amount, so invoice and summary totals must follow the same money conversion policy"
                 ],
-                "failure_scenario": "The next reader of a cents bug has two names for one conversion and fixes the one they found first, and the two drift the first time either changes its rounding rule.",
+                "failure_scenario": "A dev changing dollar-to-cent rounding consistently across invoices and summaries has to update both toCents and dollarsToCents, making it easy to leave one report path unchanged.",
                 "producing_hunt": "maintainability:duplicate",
-                "model_authored_prose": "`toCents` (summary.ts:7) is `dollarsToCents` from src/money/cents.ts with a new name: same sign handling, same rounding, same return type. Import the existing one instead of carrying a second copy."
+                "model_authored_prose": "`const toCents = (dollars: number): number => Math.sign(dollars) * Math.round(Math.abs(dollars) * 100);` (summary.ts:7-8) duplicates `export const dollarsToCents = (dollars: number): number => Math.sign(dollars) * Math.round(Math.abs(dollars) * 100);` (src/money/cents.ts:4-5). Both round half away from zero with identical types, sign handling, and no side effects. invoiceTotalCents already calls dollarsToCents (invoice.ts:4). Reuse dollarsToCents in the summary so changing rounding consistently across the two report paths has one implementation to update. The report already normalizes amounts to the shared integer-cents contract, so reuse adds no independent policy dependency."
             }
         }
     ],

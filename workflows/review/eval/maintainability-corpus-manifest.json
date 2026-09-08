@@ -16,7 +16,7 @@
     },
     "version": 1,
     "status": "frozen-before-model-runs",
-    "promptSectionSha256": "e0af6ac06b15303b4acbc1e3ff71ee4aedcd1523beb9ba12725daa488d846707",
+    "promptSectionSha256": "8b8201fc73124ab693355777fba368fd941505dc0715fbe8e91c71613cad9b55",
     "paidRunsAtFreeze": 0,
     "holdoutRule": "Family-level reserved holdout. No model outputs from these cases may tune the prompt or matcher. Authored prospectively, not an independent external benchmark.",
     "entries": [
@@ -475,5 +475,6 @@
                 "notHistorical": true
             }
         }
-    ]
+    ],
+    "constructionPromptSectionSha256": "e0af6ac06b15303b4acbc1e3ff71ee4aedcd1523beb9ba12725daa488d846707"
 }

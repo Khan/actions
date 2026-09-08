@@ -1,0 +1,64 @@
+{
+    "id": "clean-maintainability-documented-retry",
+    "tags": [
+        "clean",
+        "maintainability",
+        "reader-cost",
+        "live"
+    ],
+    "category": "clean",
+    "description": "The parse callback can redispatch, but its signature, adjacent contract, and call site explicitly expose the paid retry and replacement staged output. Renaming it solely because parsing may do I/O is not a reader-cost finding. This is a synthetic clean control based on the manual audit.",
+    "changedFiles": [
+        {
+            "path": "src/review.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/main.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 0,
+        "mustNotPost": []
+    },
+    "diff": "diff --git a/src/review.ts b/src/review.ts\n--- /dev/null\n+++ b/src/review.ts\n@@ -0,0 +1,14 @@\n+import type {ReviewResult} from \"./types\";\n+\n+export type ReviewIo = {\n+    dispatch: () => Promise<string>;\n+    // Parsing may dispatch once more on malformed output and replace the staged reply.\n+    // The returned promise includes that paid retry, not just local decoding.\n+    parse: (output: string) => Promise<ReviewResult>;\n+};\n+\n+export const runReview = async (io: ReviewIo): Promise<ReviewResult> => {\n+    const output = await io.dispatch();\n+    // Allow one corrective model call if this reply does not satisfy the contract.\n+    return io.parse(output);\n+};\ndiff --git a/src/main.ts b/src/main.ts\n--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1,6 +1,7 @@\n import {parseWithRetry} from \"./parse\";\n+import {runReview} from \"./review\";\n \n-export const review = async (\n+export const review = (\n     callModel: (instruction: string) => Promise<string>,\n     stage: (output: string) => void,\n ) => {\n@@ -9,7 +10,9 @@\n         stage(output);\n         return output;\n     };\n-    const output = await dispatch(\"Return a JSON object with a findings string array.\");\n-    return parseWithRetry(output, () =>\n-        dispatch(\"The reply was malformed. Return a JSON object with a findings string array.\"));\n+    return runReview({\n+        dispatch: () => dispatch(\"Return a JSON object with a findings string array.\"),\n+        parse: (output) => parseWithRetry(output, () =>\n+            dispatch(\"The reply was malformed. Return a JSON object with a findings string array.\")),\n+    });\n };\n",
+    "live": {
+        "prContext": {
+            "title": "review: accept one corrective reply after malformed output",
+            "description": "The coordinator accepts a dispatch callback and a retry-capable parser. A malformed reply permits one corrective model call. Both attempts stage their output, and a second malformed reply fails rather than continuing.",
+            "author": "dev-tools",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "maint-trap-documented-retry",
+                "path": "src/review.ts",
+                "lineStart": 3,
+                "lineEnd": 14,
+                "lens": "maintainability",
+                "mechanism": [
+                    "rename the parse callback",
+                    "parseOrRedispatch",
+                    "(parse|callback)[^\n]{0,100}(mislead|hidden|hides|surpris)",
+                    "(mislead|hidden|hides)[^\n]{0,100}(parse|retry|dispatch)",
+                    "parsing should be pure"
+                ]
+            }
+        ]
+    }
+}

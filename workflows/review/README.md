@@ -573,10 +573,20 @@ of something that exists (both definitions quoted, equivalence stated in one sen
 a name that misleads (the prediction a reader makes from the name, and the line that
 breaks it), a behavior change hidden from the call site (a flag threaded two or more
 calls before it is read), dead or unreachable code inside a function the diff touched,
-and indirection with one caller. Every finding names a concrete reader who is misled
-or made to do more work. Length, terseness, and elegance as such are not findings,
+and indirection with one caller. Every finding names a concrete maintenance task,
+the dev doing it, and the mistaken prediction or extra work the change causes.
+The proposed fix must reduce that work without changing behavior or removing a
+useful boundary. Comparing two short definitions alone is not enough. Naming
+findings must survive reading the signature, nearby contract, and caller. One caller
+is a search clue, not evidence against a transaction boundary, dependency isolation,
+or domain meaning. Length, terseness, and elegance as such are not findings,
 duplication that predates the diff is not a finding, and the reviewer never audits
 beyond the touched code.
+
+Divergent copies warrant investigation only when a quoted shared contract or parity
+requirement says they must agree. Different behavior alone does not justify
+consolidation. The reviewer must preserve intentional differences, and behavioral
+violations remain correctness findings rather than a sixth maintainability type.
 
 The duplication check is a search before it is a judgment, and every reviewer runs
 under the bounded-investigation cap, so the search is meant to be done for it: when
@@ -612,17 +622,22 @@ The eval corpus carries five golden cases, one per finding type
 (`golden-maintainability-duplicate-helper`, `golden-maintainability-misleading-name`,
 `golden-maintainability-hidden-flag`, `golden-maintainability-dead-branch`,
 `golden-maintainability-one-caller-wrapper`), each seeded inside a diff that also does
-real logic work, plus a clean case (`clean-maintainability-reuses-existing`) whose
-change reuses the existing helper and must draw no comment. Every case enables
+real logic work, plus a clean reuse case (`clean-maintainability-reuses-existing`) whose
+change reuses the existing helper and must draw no comment. Three additional clean
+controls cover a harmless duplicate filesystem adapter, a documented retry callback,
+and a one-caller transaction wrapper. Their local tests establish the code's
+properties, not the model's judgment. Every case enables
 all six existing consumer opt-ins beside `maintainability`, not only its adjacent
 reviewers. None carries the `smoke` tag, so the per-PR A/B skips them.
 
 An [expanded synthetic corpus](eval/maintainability-corpus.md) adds 20 cases
 across nine families, including contract-sensitive counterexamples, mixed-reviewer
-pressure, and four prospectively reserved holdout cases. All 26 cases request the
+pressure, and four prospectively reserved holdout cases. All 29 cases request the
 full consumer roster. The reserved cases require explicit selection permission.
 None of these cases establishes real-world usefulness or supports an `enable` line
-without model evaluation.
+without model evaluation. The [reader-cost screening notes](eval/maintainability-screening.md)
+distinguish synthetic controls from historical candidates and describe the remaining
+source selection and blinding work.
 [The comparison protocol](eval/production-parity.md) separates old-cap recovery
 from same-cap reviewer value and requires field-shaped overlap, clean,
 lens-pressure, and reduced-credit controls. Measure unique useful catches gained

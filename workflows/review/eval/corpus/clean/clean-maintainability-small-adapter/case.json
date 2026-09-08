@@ -1,0 +1,60 @@
+{
+    "id": "clean-maintainability-small-adapter",
+    "tags": [
+        "clean",
+        "maintainability",
+        "reader-cost",
+        "live"
+    ],
+    "category": "clean",
+    "description": "An identical short node filesystem adapter appears in two report commands. The adapter contains no policy and callers retain filesystem injection. Comparing the two definitions is not by itself a maintenance task worth a finding. This is a synthetic clean control based on the manual audit, not a historical production snapshot.",
+    "changedFiles": [
+        {
+            "path": "src/commands/export.ts",
+            "status": "added"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 0,
+        "mustNotPost": []
+    },
+    "diff": "diff --git a/src/commands/export.ts b/src/commands/export.ts\n--- /dev/null\n+++ b/src/commands/export.ts\n@@ -0,0 +1,19 @@\n+import {existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync} from \"node:fs\";\n+import type {ReportFs} from \"../files\";\n+\n+const EXPORT_FS: ReportFs = {\n+    existsSync,\n+    mkdirSync: (path, options) => {\n+        mkdirSync(path, options);\n+    },\n+    readdirSync: (path, options) => readdirSync(path, options),\n+    readFileSync: (path, encoding) => readFileSync(path, encoding),\n+    writeFileSync: (path, data) => {\n+        writeFileSync(path, data);\n+    },\n+};\n+\n+export const exportReport = (input: string, output: string, fs: ReportFs = EXPORT_FS): void => {\n+    const report: unknown = JSON.parse(fs.readFileSync(input, \"utf8\"));\n+    fs.writeFileSync(output, `${JSON.stringify(report, null, 2)}\\n`);\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "reports: add formatted JSON export",
+            "description": "Add an export command that pretty-prints an existing JSON report to a caller-selected destination. Like preview, the command accepts a filesystem implementation for tests.",
+            "author": "dev-tools",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "maint-trap-small-adapter",
+                "path": "src/commands/export.ts",
+                "lineStart": 4,
+                "lineEnd": 14,
+                "lens": "maintainability",
+                "mechanism": [
+                    "share the filesystem adapter",
+                    "reuse PREVIEW_FS",
+                    "(EXPORT_FS|filesystem adapter)[^\n]{0,100}(duplicat|second copy|identical)",
+                    "(extract|centraliz|consolidat)[^\n]{0,60}(adapter|filesystem)",
+                    "(duplicat|identical)[^\n]{0,100}(EXPORT_FS|PREVIEW_FS|adapter)"
+                ]
+            }
+        ]
+    }
+}

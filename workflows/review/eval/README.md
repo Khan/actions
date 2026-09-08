@@ -152,8 +152,8 @@ gh workflow run review-eval-ab.yml --ref <branch> \
   -f cases=golden-documentation-stale-and-narrated,golden-documentation-restated-docstring,golden-documentation-missing-why,golden-documentation-commented-out-code,clean-documentation-earned-comments \
   -f repeats=5 -f max_usd=50
 
-# Calibrate the maintainability fixtures without model calls.
-pnpm exec vitest run workflows/review/eval/maintainability-calibration.test.ts
+# Calibrate the maintainability fixtures and reader-cost controls without model calls.
+pnpm exec vitest run workflows/review/eval/maintainability-calibration.test.ts workflows/review/eval/maintainability-reader-cost.test.ts
 
 # Pool reports across dispatches (run ids or local paths)
 pnpm dlx tsx workflows/review/eval/aggregate.ts <run-id> <run-id> ... [--out <path>]
@@ -161,15 +161,27 @@ pnpm dlx tsx workflows/review/eval/aggregate.ts <run-id> <run-id> ... [--out <pa
 
 ### Maintainability screening
 
-The original five positive cases and one clean case remain screening, not an
-enablement gate. The [expanded coverage matrix](maintainability-corpus.md) adds
-20 independently authored cases across nine families, including matched
-counterexamples, mixed-reviewer pressure, and four reserved holdout cases.
-All 26 cases request the full consumer roster and are synthetic, not historical
-PR replays. The additions carry opaque IDs and pinned source hashes. Routine
-live selections exclude `reserved-holdout`, even with `--cases`, unless
-`--include-reserved-holdout` is explicitly supplied. Unlocking selection does
-not authorize spending.
+The five seeded positive cases and four clean cases are screening, not an
+enablement gate. The three reader-cost controls cover a harmless duplicate adapter,
+a documented retry callback, and a useful one-caller transaction wrapper. Their
+tests establish those properties without model calls.
+
+The [expanded coverage matrix](maintainability-corpus.md) adds 20 independently
+authored cases across nine families, including matched counterexamples,
+mixed-reviewer pressure, and four reserved holdout cases. All 29 cases request the
+full consumer roster and are synthetic, not historical PR replays. Recorded positives
+must match their live specs, false-flag controls must remain distinguishable, and
+all fixture trees must typecheck before a paid run. The 20 additions carry opaque
+IDs and pinned source hashes. Routine live selections exclude `reserved-holdout`,
+even with `--cases`, unless `--include-reserved-holdout` is explicitly supplied.
+Unlocking selection does not authorize spending.
+
+The [reader-cost screening notes](maintainability-screening.md) track historical
+candidate sources separately. None has been promoted to a maintainability positive
+merely because a later fix shared code. Historical positives still need a reviewed
+maintenance-cost claim and a pre-fix snapshot with the later fix hidden from the
+reviewer.
+
 Use the [full comparison protocol](production-parity.md) to separate cap
 recovery from added-reviewer value. At the same new-cap snapshot, compare
 maintainability off (`--baseline-disable-reviewers maintainability`) with it

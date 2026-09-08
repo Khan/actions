@@ -2148,8 +2148,18 @@ validate depends on what the claim asserts, not on which reviewer produced it:
   equivalence must hold (**refute** whenever the existing symbol differs in error
   handling, types, or a side effect the claim did not account for, which is this
   reviewer's characteristic false positive); for a misleading name, the body must do
-  what the claim says the name does not predict; for dead code, the condition must
-  really make the lines unreachable; for indirection, grep the caller count yourself.
+  what the claim says the name does not predict after reading its signature,
+  nearby contract, and caller; for dead code, the condition must really make the
+  lines unreachable; for indirection, grep the caller count yourself and check
+  whether the abstraction provides a transaction boundary, dependency isolation,
+  domain meaning, or a concrete variation point. One caller alone proves nothing.
+  Verify the named maintenance task and the extra work the finding claims. Refute
+  that cost when the nearby contract already makes the behavior clear or the
+  proposed fix removes a useful boundary without reducing the task's work. A
+  duplicate must impose more than comparing two short definitions. Divergent
+  copies aren't equivalent, even when a shared contract says they must agree.
+  Check that contract and preserve intentional differences, don't confirm a
+  consolidation on resemblance alone. Behavioral violations belong to correctness.
   A maintainability claim is never blocking, so the `plausible` downgrade changes
   nothing about it; confirm it or refute it.
 
@@ -2987,10 +2997,22 @@ is still cheap to adjust.
 
 ### The policy
 
-**The test for a finding is a concrete reader who is misled or made to do more work.**
-Name that reader's mistake or extra step in `failure_scenario`. "Could be cleaner" is
-not a finding; "a caller reading `hasQuota` will assume it only reads, and it
-decrements the counter" is. Flag, in this priority order:
+A finding needs a concrete maintenance task, not just "the next reader."
+Name what a dev is changing or debugging, the mistaken prediction or extra work
+this change causes, and the code that establishes that cost. Put the task and cost
+in `failure_scenario`. "Could be cleaner" and "compare two short definitions" aren't
+findings. For example, a dev adding a quota check to a retry loop can mistake
+`hasQuota` for a read and consume another unit on each retry. Check the surrounding
+contract before making that claim.
+
+The proposed fix must reduce the work of that task while preserving behavior and
+useful boundaries. State how in `discussion`. Sharing a helper can couple independent
+callers, and deleting a wrapper can remove a transaction boundary, dependency
+isolation, or domain meaning. Shorter code alone doesn't meet the bar. If you can't
+establish both the reader cost and a cheaper fix within the investigation cap, return
+no finding. Five is a ceiling, not a target.
+
+Flag qualifying findings in this priority order:
 
 - **A second copy of something that exists.** The diff adds a function, type, or
   constant whose behavior an existing symbol in the repo already provides (same job,
@@ -3000,13 +3022,21 @@ decrements the counter" is. Flag, in this priority order:
   definitions** in `discussion` and state the behavioral equivalence in one sentence
   (what the new one does that the old one does, and what differs, if anything). If
   the existing symbol differs in error handling, types, or a side effect, you do not
-  have a duplicate. At most you have a question about whether the difference is
-  intended, and only if the two names invite confusion.
+  have an equivalent duplicate. Investigate divergent copies only when you can
+  quote a shared contract or parity requirement that says they must agree. Quote the
+  divergence too, then check whether the difference is intentional. Don't recommend
+  consolidation from different behavior alone or erase caller-specific handling.
+  A behavioral violation belongs to correctness, not a new maintainability finding
+  type. An identical short adapter with no demonstrated coordinated maintenance
+  task should draw no comment.
 - **A name that misleads.** The name or signature predicts one thing and the body does
   another: a getter that mutates, an `is`/`has` that returns a non-boolean or throws,
   a `parse` that also fetches, a plural for a single value, a `Handler` that never
-  handles, a parameter name that contradicts how it is used. State the prediction a
-  reader would make from the name alone and the line that breaks it. Names that are
+  handles, a parameter name that contradicts how it is used. Read the signature,
+  nearby contract, and caller before claiming a surprise. State the prediction a
+  dev doing the named task would still make in that context and the line that breaks
+  it. A documented retry callback isn't misleading just because it can do I/O. If
+  the contract and call site make the retry clear, drop the finding. Names that are
   merely terse or unconventional belong to `conventions`, not here.
 - **A behavior change hidden from the reader of the call site.** A boolean or mode
   flag added to a function and threaded through two or more calls before anything
@@ -3022,9 +3052,12 @@ decrements the counter" is. Flag, in this priority order:
   outright), and two labels on one block is worse than one.
 - **Indirection with nothing behind it.** A new abstraction (wrapper, base class,
   interface, registry, factory) with exactly one implementation or one caller in the
-  repo after this change, and no variation point it is there to serve. A reader has
-  to open two files to learn what one function does. Check the caller count with a
-  grep before flagging, two callers is not a finding.
+  repo after this change, with no useful boundary or concrete variation point it
+  serves. One caller is a search clue, not evidence of a defect. Check callers with
+  a grep, then inspect the implementation and contract for transaction ownership,
+  dependency isolation, and domain meaning. Name the task the extra layer obstructs
+  and explain why removing it preserves those properties. Opening two files alone
+  isn't enough, and two callers is not a finding.
 
 **Do not flag:**
 
@@ -3060,8 +3093,9 @@ the dead branch inside it) are one finding.
 reader can check without re-deriving it. For a duplicate, both definitions and the
 equivalence sentence. For a misleading name, the name and the line that contradicts it.
 For a hidden flag, the call site and the read site. For dead code, the condition that
-makes it unreachable. For indirection, the grep that found one caller. If you cannot
-show it, you do not have a finding.
+makes it unreachable. For indirection, the caller search and the checked boundary.
+Include the named maintenance task and why the proposed fix reduces its work. If you
+cannot show it, you do not have a finding.
 
 **Bounded investigation.** Read-only, three moves only: (1) grep for definitions or
 callers of the symbol in question (a `symbol-candidates.json` entry counts as a grep
@@ -3092,13 +3126,15 @@ Return ONLY this JSON object (no prose, no code fence):
   "findings": [{
     "path": "...", "line": 0,
     "label": "suggestion (non-blocking, maintainability)",
-    "failure_scenario": "one sentence: the concrete reader who is misled or made to do more work, and how",
+    "failure_scenario": "one sentence: the concrete maintenance task, the dev doing it, and the mistaken prediction or extra work this code causes",
     "subject": "the only text visible when the discussion folds: the defect and the ask, one short sentence by default, two when it takes both; never a pointer into the discussion", "discussion": "quote both sides (the two definitions, the name and the contradicting line, the call site and the read site, the unreachable condition, the one-caller grep); otherwise one claim with its evidence chain complete enough to check, at most one question; long discussions post collapsed behind the subject; name the mechanism plainly, no metaphor", "suggestion": "optional replacement code"
   }]
 }
 `label` is that one value on every finding, never emit any other label, blocking or
 otherwise. `path` and `line` are required on every finding. `failure_scenario` is
-required: the reader and their mistake or extra step. If the change reuses what
+required: the maintenance task and the dev's mistake or extra work. `discussion`
+must establish why the proposed fix reduces that work without losing behavior or a
+useful boundary. If no candidate meets that bar, including when the change reuses what
 exists, names things for what they do, and leaves nothing behind, return
 {"findings": []}.
 

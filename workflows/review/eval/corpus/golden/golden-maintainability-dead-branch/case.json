@@ -44,9 +44,9 @@
                     "src/queue/retry.ts:19-20 adds `case \"fatal\": return null;` inside the switch, which no kind reaches",
                     "FailureKind has exactly three members, so the switch's remaining two arms are exhaustive without it"
                 ],
-                "failure_scenario": "The next reader of the switch sees two places that decide what fatal means, changes the one that never runs, and ships a fix that does nothing.",
+                "failure_scenario": "A dev changing fatal-error retry handling can edit the switch arm that names fatal, but that arm never runs because the earlier NO_RETRY guard already returned.",
                 "producing_hunt": "maintainability:dead-code",
-                "model_authored_prose": "The `case \"fatal\"` arm at retry.ts:19 is unreachable: the guard at line 11 already returns null for every kind in NO_RETRY, and NO_RETRY is `fatal`. Two ways out, both leaving one place that decides fatal: compare the literal in the guard (`kind === \"fatal\"` narrows the union, so the arm can go and the switch stays exhaustive), or keep the Set and replace the arm with `default: return null;` (the switch loses its exhaustiveness check, which is the cost of the Set)."
+                "model_authored_prose": "The `case \"fatal\"` arm at retry.ts:19 is unreachable: `if (NO_RETRY.has(kind) || attempt >= MAX_ATTEMPTS) { return null; }` at :11 handles fatal first, and :7 defines `NO_RETRY = new Set<FailureKind>([\"fatal\"])`. Use `kind === \"fatal\"` in that guard and delete the dead arm and the unused NO_RETRY declaration. The literal comparison narrows the union, so the remaining switch stays exhaustive and a dev changing fatal retry handling has only the reachable decision to edit. The attempt ceiling and both backoff caps stay unchanged."
             }
         }
     ],

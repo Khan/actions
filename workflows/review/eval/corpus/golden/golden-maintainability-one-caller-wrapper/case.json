@@ -49,9 +49,9 @@
                     "src/notify/digest.ts:24 is the only caller of the registry in the checkout (grep for SenderRegistry)",
                     "digest.ts previously imported sendEmail directly, so the change replaces a one-line import with three layers"
                 ],
-                "failure_scenario": "A reader of sendDigest has to open sender.ts and then email.ts to learn that an email is sent, and a typo in the \"email\" key becomes a runtime throw where the direct import failed at compile time.",
+                "failure_scenario": "A dev changing how digest email is sent must trace registry.get(\"email\").send through SenderRegistry and EmailSender to sendEmail, although the registry adds no routing choice or delivery boundary.",
                 "producing_hunt": "maintainability:one-caller-indirection",
-                "model_authored_prose": "SenderRegistry (sender.ts:13), NotificationSender, and EmailSender add three layers between sendDigest and sendEmail with one implementation and one caller behind them. Keep the direct sendEmail import until a second sender exists."
+                "model_authored_prose": "`SenderRegistry` (sender.ts:13) registers only `[\"email\", new EmailSender()]`, and `EmailSender.send` does only `await sendEmail(email)` (sender.ts:7-11). The caller search finds only `registry.get(\"email\").send(...)` in digest.ts:24. There is one implementation and one caller, and the interface and wrapper add no transaction, dependency injection, or current channel variation. Keep the direct sendEmail import so a dev changing digest delivery sees the operation at its call site. This preserves day grouping and email behavior without the string lookup or the two pass-through types."
             }
         }
     ],

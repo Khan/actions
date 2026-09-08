@@ -1,8 +1,8 @@
 # Maintainability corpus coverage
 
-The corpus now has 26 maintainability cases: the original six screening cases and 20 independently authored additions. All are synthetic. None contains private repository source, none is a historical PR replay, and none is tagged `smoke`. Maintainability remains disabled outside these eval configurations. No paid model runs were used to construct or calibrate the additions.
+The corpus now has 29 maintainability cases: the original six screening cases, three reader-cost clean controls, and 20 independently authored additions. All are synthetic. None contains private repository source, none is a historical PR replay, and none is tagged `smoke`. Maintainability remains disabled outside these eval configurations. No paid model runs were used to construct or calibrate the additions.
 
-The additions cover nine families, not 20 independent PR samples. Nine cases have positive expectations and 11 are clean controls. The two mixed-export cases deliberately reuse the same source under different credit caps. Their five expectations each count twice in case-level recall but represent the same five defects. Across the additions there are 17 positive spec occurrences, 12 distinct defect keys, and 12 explicit false-flag traps. The original six remain a separate calibration set.
+The additions cover nine families, not 20 independent PR samples. Nine cases have positive expectations and 11 are clean controls. The two mixed-export cases deliberately reuse the same source under different credit caps. Their five expectations each count twice in case-level recall but represent the same five defects. Across the additions there are 17 positive spec occurrences, 12 distinct defect keys, and 12 explicit false-flag traps. The original six and the three reader-cost controls remain a separate calibration set.
 
 ## Coverage matrix
 
@@ -28,7 +28,7 @@ The mixed-export pair requests `security-auth` and low risk. With ample credits,
 
 ## Isolation and reproducibility
 
-`maintainability-corpus-manifest.json` pins each case JSON, each tree file, the changed files' before-images, and the unchanged maintainability prompt section. A tree digest is also included in each case's tags so the existing corpus hash changes when search context changes. `paidRunsAtFreeze` records the construction state, not an ongoing run counter.
+`maintainability-corpus-manifest.json` pins each case JSON, each tree file, the changed files' before-images, and the current maintainability prompt section. The construction prompt hash is retained as `constructionPromptSectionSha256`, separate from the reader-cost policy update integrated before any model-output tuning. Case and tree pins did not change during that integration. A tree digest is also included in each case's tags so the existing corpus hash changes when search context changes. `paidRunsAtFreeze` records the construction state, not an ongoing run counter.
 
 Before-images live at `before/<source-path>.txt`. Integrity tests apply each unified diff to those images and compare the result with the staged tree. Only `tree/` is copied into an agent checkout. Case JSON, the manifest, negative witnesses, and before-images are not staged. All 20 added trees typecheck as strict TypeScript. Executable tests verify the counterexamples' type, error, mutation, side-effect, branch, and fixture-isolation distinctions.
 

@@ -27,9 +27,10 @@ const sample = cases.flatMap((c) => c.findings)[0]!;
 // These controls calibrate fixture scoring. They don't measure model recall.
 describe("original maintainability screening fixture calibration", () => {
     it("uses all six existing opt-ins, plus the candidate, in every case", () => {
-        expect(cases).toHaveLength(6);
+        expect(cases).toHaveLength(9);
         for (const c of cases) {
             expect(c.routerConfig?.enabledReviewers).toEqual(fullRoster);
+            expect(c.tags).not.toContain("smoke");
         }
     });
     for (const c of cases) {

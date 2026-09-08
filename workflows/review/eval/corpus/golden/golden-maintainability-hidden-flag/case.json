@@ -57,9 +57,9 @@
                     "src/config/validate.ts:11 is the first and only line that reads `strict`",
                     "src/main.ts:4 calls `loadConfig(..., true)`; the reader there cannot tell what true changes"
                 ],
-                "failure_scenario": "A reader at main.ts sees `loadConfig(path, true)`, has to open three files to learn that true means unknown keys throw, and a second caller copies the pattern with false without knowing they opted out of validation.",
+                "failure_scenario": "A dev adding a config-loading caller sees loadConfig(path, true) in main.ts and must trace loadConfig and parseConfig to validate.ts to learn that true makes unknown keys throw.",
                 "producing_hunt": "maintainability:hidden-flag",
-                "model_authored_prose": "`strict` enters at loadConfig (load.ts:5) and is threaded through parseConfig before validate.ts:11 reads it, so `loadConfig(path, true)` at main.ts:4 tells its reader nothing. An options object (`{unknownKeys: \"throw\"}`) or a separately named `loadConfigStrict` puts the meaning at the call site."
+                "model_authored_prose": "The strict parameter in `export const loadConfig = (path: string, strict = false): Config =>` (load.ts:5) is passed through `parseConfig(readFileSync(path, \"utf8\"), strict)` and then `validateKeys(raw, strict)` before validate.ts:11 reads `if (strict)`. At main.ts:4, the bare boolean in `serve(loadConfig(process.env.CONFIG_PATH ?? \"config.json\", true))` does not name the unknown-key policy. Use an options field such as `{unknownKeys: \"throw\"}` at the public loader, retaining the existing default for callers that omit it. This makes the policy visible when adding a caller without changing parsing or validation behavior."
             }
         }
     ],

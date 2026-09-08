@@ -1,0 +1,63 @@
+{
+    "id": "clean-maintainability-transaction-wrapper",
+    "tags": [
+        "clean",
+        "maintainability",
+        "reader-cost",
+        "live"
+    ],
+    "category": "clean",
+    "description": "storeOrder has one production caller, but owns the transaction that keeps order creation and stock reservation atomic. Inlining database operations at that caller removes a meaningful domain boundary. One caller is not a defect. This is a synthetic clean control.",
+    "changedFiles": [
+        {
+            "path": "src/store.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/handler.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "postedCommentCount": 0,
+        "mustNotPost": []
+    },
+    "diff": "diff --git a/src/store.ts b/src/store.ts\n--- /dev/null\n+++ b/src/store.ts\n@@ -0,0 +1,9 @@\n+import type {Database, Order} from \"./database\";\n+\n+// Order creation and its stock reservation commit or roll back together.\n+// Keep the transaction here so a caller cannot save only half of an order.\n+export const storeOrder = (db: Database, order: Order): Promise<void> =>\n+    db.transaction(async (tx) => {\n+        await tx.insertOrder(order);\n+        await tx.reserveStock(order.sku, order.quantity);\n+    });\ndiff --git a/src/handler.ts b/src/handler.ts\n--- a/src/handler.ts\n+++ b/src/handler.ts\n@@ -1,9 +1,7 @@\n import type {Database, Order} from \"./database\";\n+import {storeOrder} from \"./store\";\n \n export const placeOrder = async (db: Database, order: Order): Promise<{id: string}> => {\n-    await db.transaction(async (tx) => {\n-        await tx.insertOrder(order);\n-        await tx.reserveStock(order.sku, order.quantity);\n-    });\n+    await storeOrder(db, order);\n     return {id: order.id};\n };\n",
+    "live": {
+        "prContext": {
+            "title": "orders: save the order and reserve stock atomically",
+            "description": "The order handler now delegates persistence to storeOrder. The database transaction covers both the order row and its stock reservation, so a failure rolls both operations back.",
+            "author": "dev-tools",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "maint-trap-transaction-wrapper",
+                "path": "src/store.ts",
+                "lineStart": 3,
+                "lineEnd": 9,
+                "lens": "maintainability",
+                "mechanism": [
+                    "inline storeOrder",
+                    "(storeOrder|wrapper)[^\n]{0,100}(one caller|single caller|indirection|unnecessary)",
+                    "(remove|delete)[^\n]{0,60}(storeOrder|wrapper)",
+                    "(inline|move)[^\n]{0,80}(transaction|handler)"
+                ]
+            }
+        ]
+    }
+}
