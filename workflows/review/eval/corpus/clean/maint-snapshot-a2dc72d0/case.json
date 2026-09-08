@@ -1,0 +1,80 @@
+{
+    "id": "maint-snapshot-a2dc72d0",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "holdout",
+        "reserved-holdout",
+        "snapshot-fdc096c321d2e14f8a39d2439bbcf6945be28d8fe1916db26159751099b407c8"
+    ],
+    "category": "clean",
+    "description": "Compact exports should collapse whitespace. Standard attachments should preserve whitespace.",
+    "changedFiles": [
+        {
+            "path": "src/attachments/send.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/export.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/attachments/options.ts",
+            "status": "added"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [],
+        "postedCommentCount": 0
+    },
+    "diff": "diff --git a/src/attachments/send.ts b/src/attachments/send.ts\n--- a/src/attachments/send.ts\n+++ b/src/attachments/send.ts\n@@ -1,2 +1,3 @@\n import {encodeAttachment} from \"./encode\";\n-export const sendAttachment = (text: string): string => encodeAttachment(text);\n+import type {AttachmentOptions} from \"./options\";\n+export const sendAttachment = (text: string, options: AttachmentOptions): string => encodeAttachment(options.whitespace === \"collapse\" ? text.replace(/\\s+/g, \" \") : text);\ndiff --git a/src/export.ts b/src/export.ts\n--- a/src/export.ts\n+++ b/src/export.ts\n@@ -1,2 +1,2 @@\n import {sendAttachment} from \"./attachments/send\";\n-export const exportAttachment = (text: string) => sendAttachment(text);\n+export const exportAttachment = (text: string) => sendAttachment(text, {whitespace: \"collapse\"});\ndiff --git a/src/attachments/options.ts b/src/attachments/options.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/attachments/options.ts\n@@ -0,0 +1 @@\n+export type AttachmentOptions = {whitespace: \"preserve\" | \"collapse\"};\n",
+    "live": {
+        "prContext": {
+            "title": "Add compact attachment exports",
+            "description": "Compact exports should collapse whitespace. Standard attachments should preserve whitespace.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "attachment-explicit-mode",
+                "path": "src/attachments/send.ts",
+                "lineStart": 3,
+                "lineEnd": 3,
+                "lens": "maintainability",
+                "mechanism": [
+                    "(sendAttachment|whitespace)[^\\n]{0,120}(hidden flag|bare boolean|threaded|meaning unclear)"
+                ]
+            }
+        ]
+    }
+}

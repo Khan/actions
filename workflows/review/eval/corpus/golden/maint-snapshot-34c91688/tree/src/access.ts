@@ -1,0 +1,1 @@
+export const mayExport = (actorTenant: string, documentTenant: string): boolean => actorTenant !== documentTenant;

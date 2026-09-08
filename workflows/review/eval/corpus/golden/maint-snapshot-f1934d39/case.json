@@ -1,0 +1,97 @@
+{
+    "id": "maint-snapshot-f1934d39",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "development",
+        "snapshot-b3e3d66e5178faae0f00563343f64523a12495bc456801e6b071c5757abc8fe7"
+    ],
+    "category": "golden",
+    "description": "Line amounts arrive as numeric dollars. Return the sum in minor units, preserving credit-note signs.",
+    "changedFiles": [
+        {
+            "path": "src/invoice.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [
+        {
+            "source": "maintainability",
+            "finding": {
+                "schema_version": 2,
+                "id": "invoice-copy",
+                "lens": "maintainability",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/invoice.ts",
+                    "line": 1,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/invoice.ts:1 and src/money/decimal.ts:1 have identical bodies."
+                ],
+                "failure_scenario": "ledgerCents duplicates signedMinorUnits from src/money/decimal.ts: the same sign-preserving rounding with compatible numeric inputs. A rounding fix now has two definitions to find and update.",
+                "producing_hunt": "corpus:maintainability",
+                "model_authored_prose": "ledgerCents duplicates signedMinorUnits from src/money/decimal.ts: the same sign-preserving rounding with compatible numeric inputs. A rounding fix now has two definitions to find and update."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "invoice-copy"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/invoice.ts b/src/invoice.ts\n--- a/src/invoice.ts\n+++ b/src/invoice.ts\n@@ -1 +1,3 @@\n-export const invoiceTotal = (amounts: readonly number[]): number => amounts.reduce((sum, amount) => sum + amount, 0);\n+const ledgerCents = (amount: number): number => Math.sign(amount) * Math.round(Math.abs(amount) * 100);\n+\n+export const invoiceTotal = (amounts: readonly number[]): number => amounts.reduce((sum, amount) => sum + ledgerCents(amount), 0);\n",
+    "live": {
+        "prContext": {
+            "title": "Invoice totals use integer minor units",
+            "description": "Line amounts arrive as numeric dollars. Return the sum in minor units, preserving credit-note signs.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "invoice-copy",
+                "path": "src/invoice.ts",
+                "lineStart": 1,
+                "lineEnd": 1,
+                "lens": "maintainability",
+                "mechanism": [
+                    "ledgerCents[^\\n]{0,180}(signedMinorUnits|decimal.ts)[^\\n]{0,100}(same|duplicat|reuse|equivalent)",
+                    "(duplicat|second copy)[^\\n]{0,100}(conversion|rounding)"
+                ]
+            }
+        ]
+    }
+}

@@ -617,7 +617,12 @@ change reuses the existing helper and must draw no comment. Every case enables
 all six existing consumer opt-ins beside `maintainability`, not only its adjacent
 reviewers. None carries the `smoke` tag, so the per-PR A/B skips them.
 
-These six cases are screening, not sufficient evidence for an `enable` line.
+An [expanded synthetic corpus](eval/maintainability-corpus.md) adds 20 cases
+across nine families, including contract-sensitive counterexamples, mixed-reviewer
+pressure, and four prospectively reserved holdout cases. All 26 cases request the
+full consumer roster. The reserved cases require explicit selection permission.
+None of these cases establishes real-world usefulness or supports an `enable` line
+without model evaluation.
 [The comparison protocol](eval/production-parity.md) separates old-cap recovery
 from same-cap reviewer value and requires field-shaped overlap, clean,
 lens-pressure, and reduced-credit controls. Measure unique useful catches gained

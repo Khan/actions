@@ -1,0 +1,114 @@
+{
+    "id": "maint-snapshot-3b548055",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "development",
+        "snapshot-082170d40b464e0f08aa37db336632c144ac8d49cd2c460e9797c3e1f673ee17"
+    ],
+    "category": "golden",
+    "description": "Display available units for stocked items, Out of stock for empty items, and Unknown item for missing items. Keep the numeric stock API unchanged.",
+    "changedFiles": [
+        {
+            "path": "src/stock/caption.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/dashboard.ts",
+            "status": "added"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [
+        {
+            "source": "holistic",
+            "finding": {
+                "schema_version": 2,
+                "id": "stock-copy",
+                "lens": "maintainability",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/stock/caption.ts",
+                    "line": 2,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/stock/caption.ts and src/stock/units.ts repeat the key normalization, fetch and finite-number check."
+                ],
+                "failure_scenario": "stockCaption repeats the lookup and validation from getAvailableUnits. A change to stock validation now needs two edits. Share the common lookup while preserving the distinct missing-item defaults.",
+                "producing_hunt": "corpus:maintainability",
+                "model_authored_prose": "stockCaption repeats the lookup and validation from getAvailableUnits. A change to stock validation now needs two edits. Share the common lookup while preserving the distinct missing-item defaults."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "stock-copy"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/stock/caption.ts b/src/stock/caption.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/stock/caption.ts\n@@ -0,0 +1,12 @@\n+import type {Catalog} from \"./catalog\";\n+export const stockCaption = (catalog: Catalog, sku: string): string => {\n+    const key = sku.trim();\n+    if (key === \"\") return \"Unknown item\";\n+    const stock = catalog.fetch(key);\n+    if (!stock) return \"Unknown item\";\n+    if (!Number.isFinite(stock.onHand) || !Number.isFinite(stock.reserved)) {\n+        throw new Error(\"invalid stock count\");\n+    }\n+    const available = Math.max(0, stock.onHand - stock.reserved);\n+    return available > 0 ? `${available} available` : \"Out of stock\";\n+};\ndiff --git a/src/dashboard.ts b/src/dashboard.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/dashboard.ts\n@@ -0,0 +1,3 @@\n+import {stockCaption} from \"./stock/caption\";\n+import type {Catalog} from \"./stock/catalog\";\n+export const dashboard = (catalog: Catalog, sku: string) => ({caption: stockCaption(catalog, sku)});\n",
+    "live": {
+        "prContext": {
+            "title": "Show stock availability on the dashboard",
+            "description": "Display available units for stocked items, Out of stock for empty items, and Unknown item for missing items. Keep the numeric stock API unchanged.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "stock-copy",
+                "path": "src/stock/caption.ts",
+                "lineStart": 2,
+                "lineEnd": 12,
+                "lens": "maintainability",
+                "mechanism": [
+                    "(stockCaption|getAvailableUnits)[^\\n]{0,160}(duplicat|repeat|shared|lookup.and.validation)",
+                    "(lookup|validation)[^\\n]{0,100}(duplicat|repeated)"
+                ]
+            }
+        ],
+        "mustNotFlagSpecs": [
+            {
+                "key": "stock-defaults-differ",
+                "path": "src/stock/caption.ts",
+                "lineStart": 2,
+                "lineEnd": 12,
+                "lens": "maintainability",
+                "mechanism": [
+                    "stockCaption[^\\n]{0,120}(replace|call)[^\\n]{0,80}getAvailableUnits[^\\n]{0,80}(directly|same|unchanged)",
+                    "(missing|unknown)[^\\n]{0,100}same[^\\n]{0,60}(empty|zero)"
+                ]
+            }
+        ]
+    }
+}

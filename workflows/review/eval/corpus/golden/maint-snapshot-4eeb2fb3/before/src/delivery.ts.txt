@@ -1,0 +1,2 @@
+import {sendMail} from "./mail";
+export const deliver = (body: string): string => sendMail(body);

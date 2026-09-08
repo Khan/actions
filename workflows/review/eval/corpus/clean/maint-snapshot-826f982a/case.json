@@ -1,0 +1,72 @@
+{
+    "id": "maint-snapshot-826f982a",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "development",
+        "snapshot-bed45f414e54c339b9471288cba671fbcf4cd5f0b270d140d902b95f3a4e7063"
+    ],
+    "category": "clean",
+    "description": "Line amounts arrive as numeric dollars. Return the sum in minor units, preserving credit-note signs.",
+    "changedFiles": [
+        {
+            "path": "src/invoice.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [],
+        "postedCommentCount": 0
+    },
+    "diff": "diff --git a/src/invoice.ts b/src/invoice.ts\n--- a/src/invoice.ts\n+++ b/src/invoice.ts\n@@ -1 +1,3 @@\n-export const invoiceTotal = (amounts: readonly number[]): number => amounts.reduce((sum, amount) => sum + amount, 0);\n+import {signedMinorUnits} from \"./money/decimal\";\n+\n+export const invoiceTotal = (amounts: readonly number[]): number => amounts.reduce((sum, amount) => sum + signedMinorUnits(amount), 0);\n",
+    "live": {
+        "prContext": {
+            "title": "Invoice totals use integer minor units",
+            "description": "Line amounts arrive as numeric dollars. Return the sum in minor units, preserving credit-note signs.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "invoice-reuses-helper",
+                "path": "src/invoice.ts",
+                "lineStart": 3,
+                "lineEnd": 3,
+                "lens": "maintainability",
+                "mechanism": [
+                    "invoiceTotal[^\\n]{0,100}(duplicat|conversion helper)",
+                    "(add|extract|introduce)[^\\n]{0,80}(converter|conversion helper)"
+                ]
+            }
+        ]
+    }
+}

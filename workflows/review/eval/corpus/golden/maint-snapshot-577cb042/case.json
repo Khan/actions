@@ -1,0 +1,97 @@
+{
+    "id": "maint-snapshot-577cb042",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "development",
+        "snapshot-96805884869f86a75007d420af4fe641ee236fb45e6227dbc24def044ef0412d"
+    ],
+    "category": "golden",
+    "description": "Submitting should reserve one available slot. Preview should continue to report availability without reserving a slot.",
+    "changedFiles": [
+        {
+            "path": "src/quota.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [
+        {
+            "source": "maintainability",
+            "finding": {
+                "schema_version": 2,
+                "id": "quota-predicate-write",
+                "lens": "maintainability",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/quota.ts",
+                    "line": 2,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/quota.ts:4 writes remaining. src/preview.ts calls hasCapacity while rendering."
+                ],
+                "failure_scenario": "hasCapacity now decrements remaining. The preview caller reads as a check but consumes quota each time a button is rendered. Name the reservation explicitly and keep the preview predicate read-only.",
+                "producing_hunt": "corpus:maintainability",
+                "model_authored_prose": "hasCapacity now decrements remaining. The preview caller reads as a check but consumes quota each time a button is rendered. Name the reservation explicitly and keep the preview predicate read-only."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "quota-predicate-write"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/quota.ts b/src/quota.ts\n--- a/src/quota.ts\n+++ b/src/quota.ts\n@@ -1,2 +1,6 @@\n export type Quota = {remaining: number};\n-export const hasCapacity = (quota: Quota): boolean => quota.remaining > 0;\n+export const hasCapacity = (quota: Quota): boolean => {\n+    if (quota.remaining <= 0) return false;\n+    quota.remaining -= 1;\n+    return true;\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "Reserve quota before submission",
+            "description": "Submitting should reserve one available slot. Preview should continue to report availability without reserving a slot.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "quota-predicate-write",
+                "path": "src/quota.ts",
+                "lineStart": 2,
+                "lineEnd": 2,
+                "lens": "maintainability",
+                "mechanism": [
+                    "hasCapacity[^\\n]{0,160}(mutat|decrement|consum|remaining)",
+                    "predicate[^\\n]{0,90}(mutat|side effect)"
+                ]
+            }
+        ]
+    }
+}

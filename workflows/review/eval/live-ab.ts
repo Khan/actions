@@ -152,11 +152,16 @@ export type {
  * the 2026-07-10 anchor-snap powered run named two cases, the smoke scope
  * silently dropped the non-smoke one, and the paid report covered half the
  * measurement without saying so. Requested order is preserved; duplicate
- * ids run once.
+ * ids run once. Reserved holdouts additionally require an explicit unlock,
+ * including when selected by id, so routine full runs cannot consume them.
  */
 export const selectCases = (
     allLive: CorpusCase[],
-    options: {smokeOnly: boolean; caseFilter?: string[]},
+    options: {
+        smokeOnly: boolean;
+        caseFilter?: string[];
+        includeReservedHoldout?: boolean;
+    },
 ): CorpusCase[] => {
     const {caseFilter} = options;
     if (caseFilter !== undefined) {
@@ -166,6 +171,16 @@ export const selectCases = (
             throw new Error(
                 `--cases: not in the live corpus: ${unknown.join(", ")} ` +
                     `(live case ids: ${allLive.map((c) => c.id).join(", ")})`,
+            );
+        }
+        const reserved = caseFilter.filter((id) =>
+            byId.get(id)?.tags.includes("reserved-holdout"),
+        );
+        if (reserved.length > 0 && options.includeReservedHoldout !== true) {
+            throw new Error(
+                `reserved holdout requires --include-reserved-holdout: ${reserved.join(
+                    ", ",
+                )}`,
             );
         }
         const seen = new Set<string>();
@@ -178,9 +193,14 @@ export const selectCases = (
             return found === undefined ? [] : [found];
         });
     }
+    const eligible = allLive.filter(
+        (c) =>
+            options.includeReservedHoldout === true ||
+            !c.tags.includes("reserved-holdout"),
+    );
     return options.smokeOnly
-        ? allLive.filter((c) => c.tags.includes(SMOKE_TAG))
-        : [...allLive];
+        ? eligible.filter((c) => c.tags.includes(SMOKE_TAG))
+        : eligible;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -626,6 +646,9 @@ const main = async (): Promise<void> => {
 
     const cases = selectCases(loadLiveCorpus(), {
         smokeOnly: process.argv.includes("--smoke-only"),
+        includeReservedHoldout: process.argv.includes(
+            "--include-reserved-holdout",
+        ),
         ...(caseFilter !== undefined ? {caseFilter} : {}),
     });
     if (cases.length === 0) {

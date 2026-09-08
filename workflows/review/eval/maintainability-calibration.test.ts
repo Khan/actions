@@ -8,7 +8,11 @@ import {loadCorpus, type RecordedFinding} from "./corpus/loader";
 import {matchCase, matchesSpec} from "./live-match";
 import {runCase, toCandidate} from "./runner";
 
-const cases = loadCorpus().filter((c) => c.tags.includes("maintainability"));
+const cases = loadCorpus().filter(
+    (c) =>
+        c.tags.includes("maintainability") &&
+        !c.tags.includes("maintainability-expanded"),
+);
 const fullRoster = [
     "holistic",
     "completeness",
@@ -21,7 +25,7 @@ const fullRoster = [
 const sample = cases.flatMap((c) => c.findings)[0]!;
 
 // These controls calibrate fixture scoring. They don't measure model recall.
-describe("maintainability fixture calibration", () => {
+describe("original maintainability screening fixture calibration", () => {
     it("uses all six existing opt-ins, plus the candidate, in every case", () => {
         expect(cases).toHaveLength(6);
         for (const c of cases) {

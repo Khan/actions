@@ -1,0 +1,1 @@
+export const invoiceTotal = (amounts: readonly number[]): number => amounts.reduce((sum, amount) => sum + amount, 0);

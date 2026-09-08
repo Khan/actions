@@ -1,0 +1,98 @@
+{
+    "id": "maint-snapshot-557f90ba",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "holdout",
+        "reserved-holdout",
+        "snapshot-f21dbd0873c39ba9f2927e9da06673d82c4d96bdc93f388eb8e112336f6f7060"
+    ],
+    "category": "golden",
+    "description": "Non-retryable failures must stop immediately. Keep the existing delays for retryable failures.",
+    "changedFiles": [
+        {
+            "path": "src/retry.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [
+        {
+            "source": "maintainability",
+            "finding": {
+                "schema_version": 2,
+                "id": "retry-redundant-guard",
+                "lens": "maintainability",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/retry.ts",
+                    "line": 6,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/retry.ts first guard returns null, the later identical condition cannot be true."
+                ],
+                "failure_scenario": "The second retryable guard is unreachable because the first guard already returns for every non-retryable failure. A reader changing the later return value would change no behavior.",
+                "producing_hunt": "corpus:maintainability",
+                "model_authored_prose": "The second retryable guard is unreachable because the first guard already returns for every non-retryable failure. A reader changing the later return value would change no behavior."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "retry-redundant-guard"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/retry.ts b/src/retry.ts\n--- a/src/retry.ts\n+++ b/src/retry.ts\n@@ -1,6 +1,8 @@\n export type Failure = {kind: \"network\" | \"quota\" | \"permanent\"; retryable: boolean};\n export const retryDelay = (failure: Failure): number | null => {\n+    if (!failure.retryable) return null;\n     if (failure.kind === \"permanent\") return null;\n     if (failure.kind === \"quota\") return 60;\n+    if (!failure.retryable) return 0;\n     return 5;\n };\n",
+    "live": {
+        "prContext": {
+            "title": "Honor non-retryable failures",
+            "description": "Non-retryable failures must stop immediately. Keep the existing delays for retryable failures.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "retry-redundant-guard",
+                "path": "src/retry.ts",
+                "lineStart": 6,
+                "lineEnd": 6,
+                "lens": "maintainability",
+                "mechanism": [
+                    "(retryable|retryDelay)[^\\n]{0,150}(unreachable|dead|already return|second guard)",
+                    "(second guard|later guard)[^\\n]{0,120}(unreachable|never)"
+                ]
+            }
+        ]
+    }
+}

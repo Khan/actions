@@ -1,0 +1,479 @@
+{
+    "recordedFindings": "Authored scripted references, not captured model output. Assigned reviewer sources exercise accounting, not observed catches.",
+    "negativeWitnesses": {
+        "invoice-not-equivalent-errors": "ledgerCents duplicates checkedMinorUnits, so replace it with that helper.",
+        "invoice-not-equivalent-types": "ledgerCents duplicates textMinorUnits, so replace it with that helper.",
+        "invoice-not-equivalent-effects": "ledgerCents duplicates postedMinorUnits, so replace it with that helper.",
+        "invoice-reuses-helper": "invoiceTotal duplicates the conversion helper.",
+        "quota-explicit-reservation": "reserveCapacity is misleading because it is a pure predicate.",
+        "attachment-explicit-mode": "sendAttachment has a hidden flag and its meaning is unclear.",
+        "retry-guard-reachable": "The later guard is unreachable.",
+        "delivery-real-boundary": "Transport has one implementation and no variation point.",
+        "legacy-debt-out-of-scope": "oldNormalize duplicates otherNormalize and must be consolidated.",
+        "stock-defaults-differ": "stockCaption should call getAvailableUnits directly because missing and zero stock are the same.",
+        "stock-shared-lookup": "stockCaption still duplicates the validation.",
+        "encoding-shared-fixture": "verifyEnvelopeRows still duplicates the rows fixture."
+    },
+    "version": 1,
+    "status": "frozen-before-model-runs",
+    "promptSectionSha256": "e0af6ac06b15303b4acbc1e3ff71ee4aedcd1523beb9ba12725daa488d846707",
+    "paidRunsAtFreeze": 0,
+    "holdoutRule": "Family-level reserved holdout. No model outputs from these cases may tune the prompt or matcher. Authored prospectively, not an independent external benchmark.",
+    "entries": [
+        {
+            "id": "maint-snapshot-f1934d39",
+            "name": "maint-search-equivalent",
+            "family": "money-search",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/golden/maint-snapshot-f1934d39",
+            "caseSha256": "e4d315fa8746efcec6a5964d558172c29fcb88abbb8c67f982042d3bb30cf6eb",
+            "tree": {
+                "src/app.ts": "421e0a67e6503d935efdcf5b17842b5d44c6f53047412e666dd8678d42dea2ba",
+                "src/invoice.ts": "d9a1440d131290a7ea9f8e80e4ffdd538330fb39482eb7b7cb7f2e99ea92025a",
+                "src/money/decimal.ts": "b263c7efe194a39e73a3eadf04f2609010718775795ece66c01c3d2a4ec238c1",
+                "src/money/ledger.ts": "0988be7c57ca26fb1152ec2062e681b0449bb65e7f3674d57001f0b295a9bbf5",
+                "src/money/strict.ts": "3d4f3af308d2732e2103cb5095f138653770345618be00253abfb2329d852f11",
+                "src/money/text.ts": "b57a1c9002b5231c6179f47455cb0a283844da74a59eb89453d71d3a568a6265"
+            },
+            "before": {
+                "src/invoice.ts": "a82ff3fb5969888e820be4c014ec9979b270c48be5e6f7eba6978498bab5d4b1"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-89113098",
+            "name": "maint-search-different-errors",
+            "family": "money-search",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/clean/maint-snapshot-89113098",
+            "caseSha256": "2d3146e8828b24d3b11325e6b20f5d3db70d9ff88d2ec71eb15eb5ceb1693f2b",
+            "tree": {
+                "src/app.ts": "421e0a67e6503d935efdcf5b17842b5d44c6f53047412e666dd8678d42dea2ba",
+                "src/invoice.ts": "d9a1440d131290a7ea9f8e80e4ffdd538330fb39482eb7b7cb7f2e99ea92025a",
+                "src/money/strict.ts": "3d4f3af308d2732e2103cb5095f138653770345618be00253abfb2329d852f11"
+            },
+            "before": {
+                "src/invoice.ts": "a82ff3fb5969888e820be4c014ec9979b270c48be5e6f7eba6978498bab5d4b1"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-edf4d3d4",
+            "name": "maint-search-different-types",
+            "family": "money-search",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/clean/maint-snapshot-edf4d3d4",
+            "caseSha256": "89035e4ccefe209b42bb1edcae2883cbea569346bf87603d233405fac4bb98dd",
+            "tree": {
+                "src/app.ts": "421e0a67e6503d935efdcf5b17842b5d44c6f53047412e666dd8678d42dea2ba",
+                "src/invoice.ts": "d9a1440d131290a7ea9f8e80e4ffdd538330fb39482eb7b7cb7f2e99ea92025a",
+                "src/money/text.ts": "b57a1c9002b5231c6179f47455cb0a283844da74a59eb89453d71d3a568a6265"
+            },
+            "before": {
+                "src/invoice.ts": "a82ff3fb5969888e820be4c014ec9979b270c48be5e6f7eba6978498bab5d4b1"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-1b2c6398",
+            "name": "maint-search-different-effects",
+            "family": "money-search",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/clean/maint-snapshot-1b2c6398",
+            "caseSha256": "fad23148a40a8f002ec76bfd82ab71d9f0c2558c22e3662bc5c329a3b3748205",
+            "tree": {
+                "src/app.ts": "421e0a67e6503d935efdcf5b17842b5d44c6f53047412e666dd8678d42dea2ba",
+                "src/invoice.ts": "d9a1440d131290a7ea9f8e80e4ffdd538330fb39482eb7b7cb7f2e99ea92025a",
+                "src/money/ledger.ts": "0988be7c57ca26fb1152ec2062e681b0449bb65e7f3674d57001f0b295a9bbf5"
+            },
+            "before": {
+                "src/invoice.ts": "a82ff3fb5969888e820be4c014ec9979b270c48be5e6f7eba6978498bab5d4b1"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-826f982a",
+            "name": "maint-search-repaired",
+            "family": "money-search",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/clean/maint-snapshot-826f982a",
+            "caseSha256": "fd12f20ce12b6748bfa0e53f4a2babd696e89b35ab435de8f73b6635594d8a04",
+            "tree": {
+                "src/app.ts": "421e0a67e6503d935efdcf5b17842b5d44c6f53047412e666dd8678d42dea2ba",
+                "src/invoice.ts": "137ac338b6519bf8b28519aa153440210b8a28b64dfecc508e3c1d52e86f713e",
+                "src/money/decimal.ts": "b263c7efe194a39e73a3eadf04f2609010718775795ece66c01c3d2a4ec238c1",
+                "src/money/ledger.ts": "0988be7c57ca26fb1152ec2062e681b0449bb65e7f3674d57001f0b295a9bbf5",
+                "src/money/strict.ts": "3d4f3af308d2732e2103cb5095f138653770345618be00253abfb2329d852f11",
+                "src/money/text.ts": "b57a1c9002b5231c6179f47455cb0a283844da74a59eb89453d71d3a568a6265"
+            },
+            "before": {
+                "src/invoice.ts": "a82ff3fb5969888e820be4c014ec9979b270c48be5e6f7eba6978498bab5d4b1"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-577cb042",
+            "name": "maint-name-consuming-predicate",
+            "family": "quota-name",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/golden/maint-snapshot-577cb042",
+            "caseSha256": "5a125e456526e94e79fa20935816110fc5a9327954270c5d8e55bf811c2df64c",
+            "tree": {
+                "src/preview.ts": "2f7085570849a2498a595529e16adc44060490f99a923e56198122aa0b37d1b0",
+                "src/quota.ts": "948560e6e73c51914dd90442bf2fa0d61611d69628b0a3cd2d84eb5a1ece9414",
+                "src/submit.ts": "f7cc8be28a670d2c598fa9df8a31bd56e848c62772ab1c3121ec01549323202e"
+            },
+            "before": {
+                "src/quota.ts": "0c3a13f67ca802ec6321977c07b91f4b6719358451d7b7fbb6b7710ac07ec622"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-6e6baac2",
+            "name": "maint-name-explicit-reservation",
+            "family": "quota-name",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/clean/maint-snapshot-6e6baac2",
+            "caseSha256": "bc6f0134c2029ad42335fbc197cf1fb55d27d32e0a53f928a53f0e2ac9b37030",
+            "tree": {
+                "src/preview.ts": "2f7085570849a2498a595529e16adc44060490f99a923e56198122aa0b37d1b0",
+                "src/quota.ts": "bb24c3e708f445dc91fd0709b94cc31bbffb995f5b96b8358a57bb6a74abb79c",
+                "src/submit.ts": "cd5dd8194659612daa95f70dab924759bcf71e0160233c449af333a1756adbce"
+            },
+            "before": {
+                "src/quota.ts": "0c3a13f67ca802ec6321977c07b91f4b6719358451d7b7fbb6b7710ac07ec622",
+                "src/submit.ts": "f7cc8be28a670d2c598fa9df8a31bd56e848c62772ab1c3121ec01549323202e"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-f5fba079",
+            "name": "maint-holdout-attachment-flag",
+            "family": "attachment-mode",
+            "kind": "authored",
+            "partition": "holdout",
+            "casePath": "workflows/review/eval/corpus/golden/maint-snapshot-f5fba079",
+            "caseSha256": "379c772949495095b3c68e345aff872fae75a7fa974dabceab567f5523ffc5a5",
+            "tree": {
+                "src/attachments/encode.ts": "16c75be6244a9ad567f1c46833e0be682739e6866a13352004286b439bbf668e",
+                "src/attachments/render.ts": "7535e2d3bf8281fe61e354411ad1e95a1b1f5678197af251aa75eec692908f53",
+                "src/attachments/send.ts": "48e66670753433d69a4393cc11bb7698ed1a7fb43d3ad9a6b2e60c98ab2d8ba3",
+                "src/export.ts": "d6027c2c25f03383b5948ed9aa3602f114a6375a5dd066502265ebfc995038f3"
+            },
+            "before": {
+                "src/attachments/send.ts": "65283307e39780ebfbe0be019a5b100b35334188c33076dab773ace3e57b41e9",
+                "src/attachments/encode.ts": "ba982c015e21b334ea7ab8bcee14be7130cdebf50b04e858f48287ad6ac1f682",
+                "src/attachments/render.ts": "e4d12bc0cbd9986dc92e2d476c6ee227a81ba872d5d7c23fc1e60f3fb39ca246",
+                "src/export.ts": "423bba45682299ad430b0df34aff58d35d4e8c70a9494387bb992dff8c68692b"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-a2dc72d0",
+            "name": "maint-holdout-attachment-explicit",
+            "family": "attachment-mode",
+            "kind": "authored",
+            "partition": "holdout",
+            "casePath": "workflows/review/eval/corpus/clean/maint-snapshot-a2dc72d0",
+            "caseSha256": "cc9cf8cd900eb49a15936a387411c94a5fe7355847bc25f526db37ea13dc2e65",
+            "tree": {
+                "src/attachments/encode.ts": "ba982c015e21b334ea7ab8bcee14be7130cdebf50b04e858f48287ad6ac1f682",
+                "src/attachments/options.ts": "4172852db87fde622224313e6ac05c1cae34499bf2d64d393498b01c839492e1",
+                "src/attachments/render.ts": "e4d12bc0cbd9986dc92e2d476c6ee227a81ba872d5d7c23fc1e60f3fb39ca246",
+                "src/attachments/send.ts": "830373a0ba45fbd0d45549ff00a931034fcb33ba2efa0d1112075458c1baf35c",
+                "src/export.ts": "3de11e14aed45c8755a98c5cd550c10a86973751c0abadd9246163f2fc70f1c5"
+            },
+            "before": {
+                "src/attachments/send.ts": "65283307e39780ebfbe0be019a5b100b35334188c33076dab773ace3e57b41e9",
+                "src/export.ts": "423bba45682299ad430b0df34aff58d35d4e8c70a9494387bb992dff8c68692b",
+                "src/attachments/options.ts": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-557f90ba",
+            "name": "maint-holdout-retry-dead",
+            "family": "retry-guard",
+            "kind": "authored",
+            "partition": "holdout",
+            "casePath": "workflows/review/eval/corpus/golden/maint-snapshot-557f90ba",
+            "caseSha256": "e723a50f6ec108ccf1abc58c3ac432eb66f69b3ee2c8355022d3eca06a0876de",
+            "tree": {
+                "src/retry.ts": "81f7138158471111c8f6623f94c0a6c09bca1c986e63b1ff603a0a68732a1eb8",
+                "src/scheduler.ts": "25e05a19d207283e720676696f045c272a51eea57b70c40c6aa6139238d36fb2"
+            },
+            "before": {
+                "src/retry.ts": "2f3afad15f6e81af3cd9769743d441777285846e83f28070a8c6a13296bab549"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-c6345f81",
+            "name": "maint-holdout-retry-reachable",
+            "family": "retry-guard",
+            "kind": "authored",
+            "partition": "holdout",
+            "casePath": "workflows/review/eval/corpus/clean/maint-snapshot-c6345f81",
+            "caseSha256": "94adadffb3568e77cf647e752c3d575e6432a8b535440d9f725155f9afa4a9d5",
+            "tree": {
+                "src/retry.ts": "15ab1020743374c20486b0c57c17cb3cc5dc2777ff70875e2b28fb8560ba0eff",
+                "src/scheduler.ts": "25e05a19d207283e720676696f045c272a51eea57b70c40c6aa6139238d36fb2"
+            },
+            "before": {
+                "src/retry.ts": "2f3afad15f6e81af3cd9769743d441777285846e83f28070a8c6a13296bab549"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-4eeb2fb3",
+            "name": "maint-wrapper-single-use",
+            "family": "delivery-boundary",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/golden/maint-snapshot-4eeb2fb3",
+            "caseSha256": "2f0b1ce151f9d1d86cca79f52ece6949b7ce1b2b5901c76412f3ba76df724e47",
+            "tree": {
+                "src/delivery.ts": "3d5e44cda13e44f113901e346d580ab3f57709ab0ce015a6ba1ff4f8b9bb573c",
+                "src/mail.ts": "8462c1c1aec094d987fed4cf249657ef6f734395e671791fd260dbf1609975c2",
+                "src/transport.ts": "795fb84813c89ac6e2ce5d98e83f4335bf335ae9522fd6b9b1078720ac1ff2dd"
+            },
+            "before": {
+                "src/delivery.ts": "ddc1fec3659adc064123dfae9830ee0eddebd44bd92838118f3c0eef68c3859f",
+                "src/transport.ts": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-ac9ccd96",
+            "name": "maint-wrapper-injected",
+            "family": "delivery-boundary",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/clean/maint-snapshot-ac9ccd96",
+            "caseSha256": "50118e6e8a7265cb74d2814783be3c8356e761935bf05fd4b8c9a498624af5e4",
+            "tree": {
+                "src/delivery.ts": "46714cbd39cda6e588bfcd66cab96dff91e986d55d34a4c21ba52bf123d210f4",
+                "src/mail.ts": "8462c1c1aec094d987fed4cf249657ef6f734395e671791fd260dbf1609975c2",
+                "src/online.ts": "c910bc57745768ca1651a22264c1517cce956c0f25daa61915b6ece3187735f0",
+                "src/preview.ts": "b5d96f55e3f96be0216c3a36420f8da9a45065e7aa30e01ab2c4e61f742ff969"
+            },
+            "before": {
+                "src/delivery.ts": "ddc1fec3659adc064123dfae9830ee0eddebd44bd92838118f3c0eef68c3859f",
+                "src/online.ts": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "src/preview.ts": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-7c30362c",
+            "name": "maint-untouched-debt",
+            "family": "scope-debt",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/clean/maint-snapshot-7c30362c",
+            "caseSha256": "28703256022ac8450850a1394c132208697f317b60c3d6e95b6c2337923a729a",
+            "tree": {
+                "src/legacy.ts": "6e1d20957fe6c35faac391ceb2ea05002e8af120a559ea6dfcdf351ad762222a"
+            },
+            "before": {
+                "src/legacy.ts": "27ea99c9e056cf2fbe25f21188b63d3e8959bc9210ecc99c47620a287e1ab44e"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-6fb2c92a",
+            "name": "maint-mixed-export",
+            "family": "mixed-export",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/golden/maint-snapshot-6fb2c92a",
+            "caseSha256": "3a0ecadd23433e14526df49a5b447f4832a33d8919c4562e373b24578e86d04d",
+            "tree": {
+                "src/access.ts": "410549aee85aaae3463fc2b029e718e49316fcec2ffb9a526bdac009053f065d",
+                "src/cache.ts": "ac7b627e551208ad8456731c0bd62edf9156a3bbed42f051d5760211917db010",
+                "src/format.ts": "d82d6ff110d9de6df216f60d9badf33b5ac508b325f2dc5c8f2597ea4f86d048",
+                "src/money/decimal.ts": "b263c7efe194a39e73a3eadf04f2609010718775795ece66c01c3d2a4ec238c1",
+                "src/report.ts": "c86c83d7f914c95945d2f88b1255f1c4bca6cc54e2ca836e27776c00d9a9539c",
+                "src/status.ts": "972558f61e8d91803258b51b84ffc8c105acb624c6b9ce5ebe4926696361d0a5"
+            },
+            "before": {
+                "src/report.ts": "a7a8fa1a1c911743de6df37386b35e4ba700756e9c39f016cfab9c04a7012c4e",
+                "src/access.ts": "8a7d77c28523822e6123b34ec1239cc0c1a22504139b1a67dbf896ee39b7eb6c",
+                "src/cache.ts": "93fcefac3d011b961278353452f754d5e803b676ec5c6ef538eccda57eda8ff8",
+                "src/format.ts": "d01605a3e8198e9cd74c27bdf48fa7de1c4fb82ec1bb399f2a81a12362bccaf0",
+                "src/status.ts": "302d6df4f8b742f8badea9a239e5c81127f567f9615b84c340102e1c02c0f21b"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-34c91688",
+            "name": "maint-mixed-export-tight-credit",
+            "family": "mixed-export",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/golden/maint-snapshot-34c91688",
+            "caseSha256": "830a9922471c9a2b154f3c6a68ed9da96ed97b04ddab5cb4d73bbb88b6f989a6",
+            "tree": {
+                "src/access.ts": "410549aee85aaae3463fc2b029e718e49316fcec2ffb9a526bdac009053f065d",
+                "src/cache.ts": "ac7b627e551208ad8456731c0bd62edf9156a3bbed42f051d5760211917db010",
+                "src/format.ts": "d82d6ff110d9de6df216f60d9badf33b5ac508b325f2dc5c8f2597ea4f86d048",
+                "src/money/decimal.ts": "b263c7efe194a39e73a3eadf04f2609010718775795ece66c01c3d2a4ec238c1",
+                "src/report.ts": "c86c83d7f914c95945d2f88b1255f1c4bca6cc54e2ca836e27776c00d9a9539c",
+                "src/status.ts": "972558f61e8d91803258b51b84ffc8c105acb624c6b9ce5ebe4926696361d0a5"
+            },
+            "before": {
+                "src/report.ts": "a7a8fa1a1c911743de6df37386b35e4ba700756e9c39f016cfab9c04a7012c4e",
+                "src/access.ts": "8a7d77c28523822e6123b34ec1239cc0c1a22504139b1a67dbf896ee39b7eb6c",
+                "src/cache.ts": "93fcefac3d011b961278353452f754d5e803b676ec5c6ef538eccda57eda8ff8",
+                "src/format.ts": "d01605a3e8198e9cd74c27bdf48fa7de1c4fb82ec1bb399f2a81a12362bccaf0",
+                "src/status.ts": "302d6df4f8b742f8badea9a239e5c81127f567f9615b84c340102e1c02c0f21b"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-3b548055",
+            "name": "maint-stock-lookup-copy",
+            "family": "stock-lookup",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/golden/maint-snapshot-3b548055",
+            "caseSha256": "f3bccf9b035f46ff0dbae3b9eb0a3e942331d11eae707889965ead57a14c6ab4",
+            "tree": {
+                "src/dashboard.ts": "5bfe7aae90bc4cc485a4cda7b3ea08997b4c19ff7e5445e5bec17df8d8c2b3c9",
+                "src/stock/caption.ts": "ac7f36a5ecd551f9e347c0e36fe96690ad0d71301849e4daf69172ed633ae524",
+                "src/stock/catalog.ts": "4c586df96a6c895a8ffe6c0c011102ed16f203e961009028b88730147f12d95f",
+                "src/stock/units.ts": "1e7428432d3e14ad6cd2f4efe8493637b5e49440fa063657a65e9d610d09ac1e"
+            },
+            "before": {
+                "src/stock/caption.ts": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "src/dashboard.ts": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-1e521fb7",
+            "name": "maint-stock-lookup-shared",
+            "family": "stock-lookup",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/clean/maint-snapshot-1e521fb7",
+            "caseSha256": "f195a7ef8648b36a22af96a4db1f92237b1417aad50ad91b0419479503cdc52e",
+            "tree": {
+                "src/dashboard.ts": "5bfe7aae90bc4cc485a4cda7b3ea08997b4c19ff7e5445e5bec17df8d8c2b3c9",
+                "src/stock/caption.ts": "c8587bd7be4a150a36f673a28240dc621bff696a8229830599be86af7e34f6ea",
+                "src/stock/catalog.ts": "4c586df96a6c895a8ffe6c0c011102ed16f203e961009028b88730147f12d95f",
+                "src/stock/read.ts": "fc4b5517412a94a8b4a854a0c8063e0b005f43db2fd1425afc3d3e64503b5bd1",
+                "src/stock/units.ts": "09a02a4d7a71a5bc3e6a9abc9331b55ecb754ad5f3a6ce4c7ffb2a7c8be941bf"
+            },
+            "before": {
+                "src/stock/caption.ts": "ac7f36a5ecd551f9e347c0e36fe96690ad0d71301849e4daf69172ed633ae524",
+                "src/stock/units.ts": "1e7428432d3e14ad6cd2f4efe8493637b5e49440fa063657a65e9d610d09ac1e",
+                "src/stock/read.ts": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-11a8cf57",
+            "name": "maint-encoding-fixture-copy",
+            "family": "encoding-fixtures",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/golden/maint-snapshot-11a8cf57",
+            "caseSha256": "e70d6c93c6c8501b6741ad230e71abeafbffc12e1eb83e7d82a189dbda9e5d48",
+            "tree": {
+                "src/encoding/checks.ts": "fa6aa70a46ec1e3d05475a9ee28fcc7c9643fc2d78132a14c4d82cb006a44a25",
+                "src/encoding/encode.ts": "4a642e70d0d2cfa6418566f57285264738a4d15bc2479013eb766520dc77f23e"
+            },
+            "before": {
+                "src/encoding/checks.ts": "308d58f49594b5abf6240f9ed0750e8eb1a3ee5b8751a1526bbcdbcd72a01210"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        },
+        {
+            "id": "maint-snapshot-4e0b89b1",
+            "name": "maint-encoding-fixture-shared",
+            "family": "encoding-fixtures",
+            "kind": "authored",
+            "partition": "development",
+            "casePath": "workflows/review/eval/corpus/clean/maint-snapshot-4e0b89b1",
+            "caseSha256": "119092cefce8b90bda38ffe2b902d49c8cba9e3d308cc1f224ab25d0efdf26a6",
+            "tree": {
+                "src/encoding/checks.ts": "6f5e99e5769e9cc5bf5b7a3bab617813f85883cbc00c1539bc025e07a31eacec",
+                "src/encoding/encode.ts": "4a642e70d0d2cfa6418566f57285264738a4d15bc2479013eb766520dc77f23e",
+                "src/encoding/fixtures.ts": "95b77bf4a2695e9fb40555930668bb22681ab9401c0e64e3f86083ffd1cdcd66"
+            },
+            "before": {
+                "src/encoding/checks.ts": "fa6aa70a46ec1e3d05475a9ee28fcc7c9643fc2d78132a14c4d82cb006a44a25",
+                "src/encoding/fixtures.ts": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "provenance": {
+                "origin": "authored",
+                "notHistorical": true
+            }
+        }
+    ]
+}

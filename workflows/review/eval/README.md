@@ -161,12 +161,15 @@ pnpm dlx tsx workflows/review/eval/aggregate.ts <run-id> <run-id> ... [--out <pa
 
 ### Maintainability screening
 
-The five seeded maintainability cases and one clean case are screening, not
-an enablement gate. Every case now includes all six existing consumer opt-ins
-alongside maintainability. The recorded positives must match their live specs,
-the false-flag controls must remain distinguishable, and all six fixture trees
-must typecheck before a paid run.
-
+The original five positive cases and one clean case remain screening, not an
+enablement gate. The [expanded coverage matrix](maintainability-corpus.md) adds
+20 independently authored cases across nine families, including matched
+counterexamples, mixed-reviewer pressure, and four reserved holdout cases.
+All 26 cases request the full consumer roster and are synthetic, not historical
+PR replays. The additions carry opaque IDs and pinned source hashes. Routine
+live selections exclude `reserved-holdout`, even with `--cases`, unless
+`--include-reserved-holdout` is explicitly supplied. Unlocking selection does
+not authorize spending.
 Use the [full comparison protocol](production-parity.md) to separate cap
 recovery from added-reviewer value. At the same new-cap snapshot, compare
 maintainability off (`--baseline-disable-reviewers maintainability`) with it

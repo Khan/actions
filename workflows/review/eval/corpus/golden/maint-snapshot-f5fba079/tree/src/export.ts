@@ -1,0 +1,2 @@
+import {sendAttachment} from "./attachments/send";
+export const exportAttachment = (text: string) => sendAttachment(text, true);

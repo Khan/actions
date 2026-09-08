@@ -1,0 +1,71 @@
+{
+    "id": "maint-snapshot-7c30362c",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "development",
+        "snapshot-2bfa641712b7a58a7cc9657d088d9bd198632eccd6e1e31278d2b8b43e68ae68"
+    ],
+    "category": "clean",
+    "description": "Remove outer whitespace from the heading. Existing normalization helpers are unchanged.",
+    "changedFiles": [
+        {
+            "path": "src/legacy.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [],
+        "postedCommentCount": 0
+    },
+    "diff": "diff --git a/src/legacy.ts b/src/legacy.ts\n--- a/src/legacy.ts\n+++ b/src/legacy.ts\n@@ -1,4 +1,4 @@\n export const oldNormalize = (s: string): string => s.trim().toLowerCase();\n export const otherNormalize = (s: string): string => s.trim().toLowerCase();\n \n-export const heading = (s: string): string => s;\n+export const heading = (s: string): string => s.trim();\n",
+    "live": {
+        "prContext": {
+            "title": "Trim report headings",
+            "description": "Remove outer whitespace from the heading. Existing normalization helpers are unchanged.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "legacy-debt-out-of-scope",
+                "path": "src/legacy.ts",
+                "lineStart": 4,
+                "lineEnd": 4,
+                "lens": "maintainability",
+                "mechanism": [
+                    "(oldNormalize|otherNormalize)[^\\n]{0,100}(duplicat|consolidat|remove|reuse)"
+                ]
+            }
+        ]
+    }
+}
