@@ -17,7 +17,7 @@
  *       Phase 3: refuted drops, plausible downgrades to non-blocking, only a
  *       confirmed claim keeps a blocking label)
  *   4. `computeVerdict`        — the mechanical verdict (#194 labels + hold gate)
- *   5. `renderComment` / `renderReviewBody` — templated, prose-free rendering
+ *   5. `renderClaimComment` / `renderReviewBody`: templated, prose-free rendering
  *
  * The parts that are *not* deterministic in production — the model sub-agents
  * that author findings and the claim-validator's per-claim verifications — are
@@ -41,7 +41,6 @@ import {renderClaimComment} from "../lib/submission-render";
 import {
     isBlockingLabel,
     labelForFinding,
-    renderComment,
     renderReviewBody,
     type ConventionalLabel,
     type SkippedDimension,
@@ -210,7 +209,7 @@ export const toCandidate = (recorded: RecordedFinding): RunCandidate => {
         ...(anchorLine(finding.anchor) !== undefined
             ? {line: anchorLine(finding.anchor)}
             : {}),
-        body: renderComment(finding),
+        body: renderClaimComment(buildClaims([recorded])[0]),
         finding,
     };
 };

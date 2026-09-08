@@ -32,7 +32,7 @@ The `control` objects are explicitly hand-authored validator outputs. They estab
 
 Baseline code: `a5b6eb08efd60b690f443b569f552404e731497a`. The untouched suite passed 2,220 tests in 106 files before any eval implementation changes. The initial regression run then failed the three correction replays and the live producer's subject/body parity test. After adding malformed-correction guards and formatting, the final identical tests and fixtures were also run in a detached baseline worktree. That run had 35 passes and 7 failures out of 42 focused tests. The candidate passed all 42.
 
-`claim-fidelity-results.json` records both implementations against the same final scorer and fixture hash. The original comments and hand-authored corrections are identical in both arms.
+`claim-fidelity-results.json` records both implementations against the same final scorer and fixture hash. The original comments and hand-authored corrections are identical in both arms. Its `reviewFollowup` section repeats the measurement after unifying the renderer and records the expanded implementation file list, including production verification, rendering, and their supporting modules. Earlier implementation hashes covered only three eval modules and aren't directly comparable to the expanded hashes.
 
 | Observable | Baseline | Candidate |
 | --- | --- | --- |
@@ -45,6 +45,7 @@ Baseline code: `a5b6eb08efd60b690f443b569f552404e731497a`. The untouched suite p
 | Original visible-consequence checks | 2/3 | 2/3 |
 | Hand-authored correction component checks | 8/12 | 12/12 |
 | Hand-authored corrections retained | 3/3 | 3/3 |
+| Original comments byte-equal to production rendering | 1/3 | 3/3 |
 | Corrected comments byte-equal to production rendering | 0/3 | 3/3 |
 
 The original comments still fail the same four checks. Editing fixtures did not make them better. The measured change is that the eval now represents corrections which production already applies. The production prompt, validator, and prose judge are unchanged. There were no model calls, so this provides no measured improvement in reviewer quality, recall, or model correction rate.
@@ -53,7 +54,7 @@ The original comments still fail the same four checks. Editing fixtures did not 
 
 - `live-producer.ts` uses production's subject/body composition and claim builder, then carries `corrected` through validator parsing.
 - `corpus/loader.ts` preserves correction objects. Invalid field values still go through production's field guards at application time.
-- `runner.ts` applies confirmed corrections with production `applyVerifications` and renders them with `renderClaimComment`. The normalized finding also receives the corrected prose, summary, suggestion, and anchor, so downstream matchers and judges receive the corrected posted text. Producer evidence and failure scenarios stay unchanged as provenance. Plausible corrections remain unapplied, matching production's current behavior.
+- `runner.ts` renders every candidate with production `renderClaimComment`, including uncorrected and plausibly downgraded findings. This keeps suggestion/sketch handling consistent across the compared outputs. It applies confirmed corrections with production `applyVerifications`. The normalized finding also receives the corrected prose, summary, suggestion, and anchor, so downstream matchers and judges receive the corrected posted text. Producer evidence and failure scenarios stay unchanged as provenance. Plausible corrections remain unapplied, matching production's current behavior.
 
 Run the focused tests from the repo root:
 
@@ -64,5 +65,7 @@ Print the deterministic report, without model calls:
 `node -r @swc-node/register workflows/review/eval/claim-fidelity-report.ts`
 
 The initial candidate passed 2,244 tests in 107 files. After rebasing onto `088b1a1`, the full suite passes 2,418 tests in 126 files and `pnpm lint` passes. The same scorer and fixtures produce identical component results after the rebase. The live-producer fidelity test moved to its own file with shared test fixtures to stay under the repo's 1,000-line limit. `pnpm typecheck` passes but its tsconfig excludes `workflows/`. A separate strict check including the changed eval modules reports the existing `runner.ts` error where `submitEvent` may return `COMMENT` but `PlannedReview.event` excludes it. The same error reproduces in the detached baseline worktree. This change does not fix that unrelated type mismatch.
+
+The review follow-up passes 2,424 tests in 127 files, lint, and the repo typecheck. Six added tests cover accepted label/line corrections in both severity directions, drop-in versus sketch rendering before validation, and implementation hash coverage. The strict eval check still reports only the existing `COMMENT` mismatch. The repeated deterministic measurement keeps the same component scores, with all 3 original and all 3 corrected comments now byte-equal to production rendering.
 
 Before changing a model prompt, run the same reviewed code and candidate claims through both prompt versions with the same tools, model, budget, and component checks. Measure whether inaccurate details are corrected and whether the useful findings survive. These recorded controls are not a substitute for that experiment, and whole-review live A/B rates from the old harness should not be compared to new rates as if only a prompt changed.
