@@ -15,6 +15,9 @@ const evidence = JSON.parse(
     readFileSync(`${__dirname}/field-parity-evidence.json`, "utf8"),
 ) as {
     existingEnabledReviewers: string[];
+    replayBudget: typeof DEFAULT_TIER_BUDGETS.low & {
+        effectiveCreditCap: number;
+    };
     rounds: {
         runId: number;
         lenses: string[];
@@ -35,6 +38,10 @@ const makeCase = (lenses: string[] = ["security-auth"]) =>
             diff: DIFF,
             routerConfig: {
                 enabledReviewers: evidence.existingEnabledReviewers,
+                tierBudgets: {
+                    ...DEFAULT_TIER_BUDGETS,
+                    low: evidence.replayBudget,
+                },
                 lensRules: [{pattern: "src/**", lenses}],
                 riskRules: [{pattern: "src/**", tier: "low"}],
                 maxAiCredits: 2500,
@@ -270,7 +277,7 @@ describe("arm budget extraction", () => {
         expect(() =>
             extractTierBudgets(
                 source.replace(
-                    "maxReviewerInvocations: 8",
+                    `maxReviewerInvocations: ${DEFAULT_TIER_BUDGETS.low.maxReviewerInvocations}`,
                     "maxReviewerInvocations: 8.5",
                 ),
             ),
