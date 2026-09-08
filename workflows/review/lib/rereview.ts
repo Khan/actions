@@ -180,9 +180,9 @@ const BOLD_LABEL_RE = /^\*\*([^*\n]+?):\*\*\s*/;
  * recap or let a reduced-depth run flip the verdict past it).
  */
 export const parseLeadingLabel = (body: string): string | null => {
-    const bold = BOLD_LABEL_RE.exec(body);
-    if (bold) {
-        return bold[1].trim();
+    const bold = BOLD_LABEL_RE.exec(body)?.[1];
+    if (bold !== undefined) {
+        return bold.trim();
     }
     const plain = PLAIN_LABEL_RE.exec(body);
     return plain ? `${plain[1]}${plain[2]}` : null;
@@ -207,7 +207,7 @@ export const excerptOpeningComment = (body: string): string => {
     const withoutLabel =
         withoutBold !== body ? withoutBold : body.replace(PLAIN_LABEL_RE, "");
     const firstLine = neutralizeStructuralTags(
-        withoutLabel.split("\n", 1)[0].trim(),
+        (withoutLabel.split("\n", 1)[0] ?? "").trim(),
     );
     if (firstLine.length <= EXCERPT_MAX) {
         return firstLine;
@@ -578,7 +578,7 @@ const parseThreads = (raw: unknown): StagedThread[] => {
                 Number.isInteger(entry["line"])
                     ? entry["line"]
                     : null,
-            url: typeof entry["url"] === "string" ? entry["url"] : undefined,
+            ...(typeof entry["url"] === "string" ? {url: entry["url"]} : {}),
             comments,
         });
     }
@@ -652,9 +652,9 @@ export const runRereviewCli = (fs: RereviewCliFs): RereviewSection => {
         result = renderRereviewSection({
             threads,
             reconciler,
-            headSha,
+            ...(headSha === undefined ? {} : {headSha}),
             priorReviewBodies,
-            prAuthor,
+            ...(prAuthor === undefined ? {} : {prAuthor}),
         });
     }
 

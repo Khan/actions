@@ -525,7 +525,7 @@ describe("case-directory layout and tree validation", () => {
     });
 
     it("rejects a live case whose tree directory is missing", () => {
-        const files = corpus();
+        const files: Record<string, string> = corpus();
         delete files["/corpus/smoke/live-case/tree/src/a.ts"];
         expect(() => loadCorpus("/corpus", volFs(files))).toThrow(/live\.tree/);
     });

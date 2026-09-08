@@ -2,7 +2,7 @@ import {existsSync, mkdtempSync, readFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 
-import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
+import {assert, afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 
 import {extractSamples} from "./aggregate";
 import {
@@ -217,6 +217,7 @@ describe("live A/B checkpoints", () => {
     it("marks a repeated run partial until the last repeat finishes", async () => {
         const {runner} = scriptedRunner();
         const cases = [liveCase("case-1")];
+        assert.isDefined(header.provenance);
         const oneCase: RunHeader = {
             ...header,
             provenance: {...header.provenance, caseCount: 1},

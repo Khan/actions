@@ -151,8 +151,10 @@ export const MAX_STAMP_HUNKS_B64_CHARS = 20000;
  */
 const encodeSignature = (signature: HunkSignature): string => {
     const sorted: HunkSignature = {};
-    for (const path of Object.keys(signature).sort()) {
-        sorted[path] = signature[path];
+    for (const [path, hashes] of Object.entries(signature).sort(([a], [b]) =>
+        a < b ? -1 : a > b ? 1 : 0,
+    )) {
+        sorted[path] = hashes;
     }
     return Buffer.from(JSON.stringify(sorted), "utf8").toString("base64url");
 };
@@ -250,7 +252,12 @@ export const parseRereviewStamp = (body: string): ReReviewStamp | null => {
         return null;
     }
     const [, version, depth, verdict, anchorDraft, hunksField] = match;
-    if (Number(version) !== STAMP_SCHEMA_VERSION) {
+    if (
+        Number(version) !== STAMP_SCHEMA_VERSION ||
+        depth === undefined ||
+        verdict === undefined ||
+        hunksField === undefined
+    ) {
         return null;
     }
     if (!(RE_REVIEW_MODES as readonly string[]).includes(depth)) {
@@ -371,8 +378,8 @@ export const findLatestStamp = (
         }
         return a.submittedAt < b.submittedAt ? -1 : 1;
     });
-    for (let i = ordered.length - 1; i >= 0; i--) {
-        const stamp = parseRereviewStamp(ordered[i].body);
+    for (const review of ordered.reverse()) {
+        const stamp = parseRereviewStamp(review.body);
         if (stamp !== null) {
             return stamp;
         }

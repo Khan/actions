@@ -194,6 +194,8 @@ const anchorLine = (anchor: Anchor): number | undefined =>
 export const toCandidate = (recorded: RecordedFinding): RunCandidate => {
     const {finding, source} = recorded;
     const label = labelForFinding(finding);
+    const path = anchorPath(finding.anchor);
+    const line = anchorLine(finding.anchor);
     return {
         id: finding.id,
         source,
@@ -201,12 +203,8 @@ export const toCandidate = (recorded: RecordedFinding): RunCandidate => {
         label,
         blocking: isBlockingLabel(label),
         anchor: finding.anchor,
-        ...(anchorPath(finding.anchor) !== undefined
-            ? {path: anchorPath(finding.anchor)}
-            : {}),
-        ...(anchorLine(finding.anchor) !== undefined
-            ? {line: anchorLine(finding.anchor)}
-            : {}),
+        ...(path !== undefined ? {path} : {}),
+        ...(line !== undefined ? {line} : {}),
         body: renderComment(finding),
         finding,
     };

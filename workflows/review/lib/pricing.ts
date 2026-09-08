@@ -194,10 +194,13 @@ export const readOverlayRates = (reviewMd: string): RateCard => {
             // model. None of those appear inside the overlay.
             continue;
         }
-        const indent = match[1].length;
-        const key = match[2];
-        const value = match[3]?.trim();
-        while (path.length > 0 && path[path.length - 1].indent >= indent) {
+        const [, whitespace = "", key, scalar] = match;
+        if (key === undefined) {
+            continue;
+        }
+        const indent = whitespace.length;
+        const value = scalar?.trim();
+        while ((path.at(-1)?.indent ?? -1) >= indent) {
             path.pop();
         }
         path.push({indent, key});
@@ -206,20 +209,26 @@ export const readOverlayRates = (reviewMd: string): RateCard => {
         }
         // models / providers / <provider> / models / <pin> / cost / <leaf>
         const keys = path.map((p) => p.key);
+        const providerName = keys[2];
+        const modelName = keys[4];
+        const costField = keys[6];
         if (
             keys.length === 7 &&
+            providerName !== undefined &&
+            modelName !== undefined &&
+            costField !== undefined &&
             keys[0] === "models" &&
             keys[1] === "providers" &&
             keys[3] === "models" &&
             keys[5] === "cost"
         ) {
-            const provider = (providers[keys[2]] ??= {models: {}});
+            const provider = (providers[providerName] ??= {models: {}});
             const models = provider["models"] as Record<
                 string,
                 {cost: Record<string, string>}
             >;
-            const model = (models[keys[4]] ??= {cost: {}});
-            model.cost[keys[6]] = value;
+            const model = (models[modelName] ??= {cost: {}});
+            model.cost[costField] = value;
         }
     }
     return rateCardFromProviders(providers);

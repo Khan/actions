@@ -94,6 +94,8 @@
  * can cost is bounded by code even where its judgment cannot be checked.
  */
 
+import assert from "node:assert/strict";
+
 import {type AlsoFlagged} from "./attribution";
 import {
     bigrams,
@@ -105,6 +107,7 @@ import {
 import {type Claim, type ProposedCluster} from "./dispatch-contracts";
 import {isBlockingLabel} from "./render-comment";
 import {
+    claimAt,
     clusterMemberRejection,
     salientTokens,
     verifiableClusters,
@@ -233,8 +236,8 @@ const survivorFirst = (
     indexB: number,
     claims: Claim[],
 ): number => {
-    const a = claims[indexA];
-    const b = claims[indexB];
+    const a = claimAt(claims, indexA);
+    const b = claimAt(claims, indexB);
     const blockingA = isBlockingLabel(a.label) ? 1 : 0;
     const blockingB = isBlockingLabel(b.label) ? 1 : 0;
     if (blockingA !== blockingB) {
@@ -319,15 +322,22 @@ export const dedupeClaims = (
     // ---- Tier 1: union-find over pairwise-mergeable claims.
     const parent = claims.map((_, index) => index);
     const find = (index: number): number => {
-        while (parent[index] !== index) {
-            parent[index] = parent[parent[index]];
-            index = parent[index];
+        // Parents start as input indices and unions only assign other roots.
+        for (;;) {
+            const next = parent[index];
+            assert(next !== undefined, `Invalid dedup parent index: ${index}`);
+            if (next === index) {
+                return index;
+            }
+            const root = parent[next];
+            assert(root !== undefined, `Invalid dedup parent index: ${next}`);
+            parent[index] = root;
+            index = root;
         }
-        return index;
     };
     for (let i = 0; i < claims.length; i += 1) {
         for (let j = i + 1; j < claims.length; j += 1) {
-            if (mergeable(claims[i], claims[j])) {
+            if (mergeable(claimAt(claims, i), claimAt(claims, j))) {
                 parent[find(j)] = find(i);
             }
         }
@@ -356,7 +366,10 @@ export const dedupeClaims = (
         const merged = group.filter(
             (index) =>
                 index !== survivorIndex &&
-                mergeable(claims[survivorIndex], claims[index]),
+                mergeable(
+                    claimAt(claims, survivorIndex),
+                    claimAt(claims, index),
+                ),
         );
         if (merged.length === 0) {
             continue;
@@ -380,6 +393,7 @@ export const dedupeClaims = (
     const namedByHead = new Map<number, string[]>();
     for (const [index, ordinal] of clusterOf) {
         const owner = head[index];
+        assert(owner !== undefined, `Invalid dedup head index: ${index}`);
         const seen = clusterHead.get(owner);
         clusterHead.set(
             owner,
@@ -387,7 +401,7 @@ export const dedupeClaims = (
         );
         namedByHead.set(owner, [
             ...(namedByHead.get(owner) ?? []),
-            claims[index].id,
+            claimAt(claims, index).id,
         ]);
     }
     const headsByOrdinal = new Map<number, number[]>();
@@ -407,7 +421,7 @@ export const dedupeClaims = (
         const survivorIndex = heads.reduce((best, index) =>
             survivorFirst(best, index, claims),
         );
-        const survivor = claims[survivorIndex];
+        const survivor = claimAt(claims, survivorIndex);
         // The grounding rules (both ends of the vocabulary check, and the
         // shared-anchor path that needs no vocabulary) live in
         // clusterMemberRejection, per member: the survivor-end test cannot sit
@@ -415,6 +429,11 @@ export const dedupeClaims = (
         // path grounds (run 32390393344's pair, where the survivor shares no
         // token with the evidence and the member sits on its exact line).
         const groupEvidence = evidence[ordinal];
+        // verifiableClusters appends evidence before assigning its ordinal.
+        assert(
+            groupEvidence !== undefined,
+            `Invalid cluster ordinal: ${ordinal}`,
+        );
         const evidenceTokens = salientTokens(groupEvidence);
         const into = absorbed.get(survivorIndex) ?? [];
         for (const index of heads) {
@@ -427,7 +446,7 @@ export const dedupeClaims = (
             // named.
             const reason = clusterMemberRejection(
                 survivor,
-                claims[index],
+                claimAt(claims, index),
                 evidenceTokens,
             );
             if (reason !== undefined) {
@@ -447,8 +466,8 @@ export const dedupeClaims = (
                 index,
                 via: "clusterer",
                 groundedBy:
-                    claims[index].line !== undefined &&
-                    claims[index].line === survivor.line
+                    claimAt(claims, index).line !== undefined &&
+                    claimAt(claims, index).line === survivor.line
                         ? "anchor"
                         : "evidence",
             });
@@ -474,12 +493,12 @@ export const dedupeClaims = (
             Math.min(b, ...listB.map((copy) => copy.index)),
     );
     for (const [survivorIndex, list] of entries) {
-        const survivor = claims[survivorIndex];
+        const survivor = claimAt(claims, survivorIndex);
         const others = [...list].sort((a, b) => a.index - b.index);
         for (const {index} of others) {
             drop.add(index);
         }
-        const otherClaims = others.map(({index}) => claims[index]);
+        const otherClaims = others.map(({index}) => claimAt(claims, index));
         // One entry per other source, first copy wins, naming that copy's
         // anchor when it is not the survivor's. With tier 2 merging across
         // anchors, "also flagged by test-adequacy" alone would hide that the
@@ -508,7 +527,7 @@ export const dedupeClaims = (
         // collapsed attribution footer.
         const sources: AlsoFlagged[] = [];
         for (const {index, via} of others) {
-            const claim = claims[index];
+            const claim = claimAt(claims, index);
             if (
                 claim.source === survivor.source ||
                 sources.some((seen) => seen.source === claim.source)
@@ -559,7 +578,7 @@ export const dedupeClaims = (
         merges.push({
             survivor: survivor.id,
             merged: others.map(({index, via: copyVia, groundedBy}) => {
-                const claim = claims[index];
+                const claim = claimAt(claims, index);
                 return {
                     id: claim.id,
                     source: claim.source,

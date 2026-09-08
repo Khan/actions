@@ -56,30 +56,28 @@ describe("buildArbiterPrompt", () => {
     });
 
     it("renders windowless specs and PR-level anchors without artifacts", () => {
-        const prompt = buildArbiterPrompt(
-            {
-                ...candidate,
-                anchor: {type: "pr"},
-                path: undefined,
-                line: undefined,
-            },
-            {key: "k", path: "src/a.ts", mechanism: ["m"]},
-        );
+        const prCandidate: RunCandidate = {...candidate, anchor: {type: "pr"}};
+        delete prCandidate.path;
+        delete prCandidate.line;
+        const prompt = buildArbiterPrompt(prCandidate, {
+            key: "k",
+            path: "src/a.ts",
+            mechanism: ["m"],
+        });
         expect(prompt).toContain("in file src/a.ts.");
         expect(prompt).not.toContain("lines");
         expect(prompt).toContain("anchored at the PR");
     });
 
     it("names the PR title/description for a prLevel spec (no file, no window)", () => {
-        const prompt = buildArbiterPrompt(
-            {
-                ...candidate,
-                anchor: {type: "pr"},
-                path: undefined,
-                line: undefined,
-            },
-            {key: "k", prLevel: true, mechanism: ["metaphor"]},
-        );
+        const prCandidate: RunCandidate = {...candidate, anchor: {type: "pr"}};
+        delete prCandidate.path;
+        delete prCandidate.line;
+        const prompt = buildArbiterPrompt(prCandidate, {
+            key: "k",
+            prLevel: true,
+            mechanism: ["metaphor"],
+        });
         expect(prompt).toContain("in the PR title/description");
         expect(prompt).not.toContain("in file");
         expect(prompt).not.toContain("lines");

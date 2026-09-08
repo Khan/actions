@@ -1,4 +1,4 @@
-import {describe, it, expect} from "vitest";
+import {assert, describe, it, expect} from "vitest";
 
 import {loadCorpus} from "./corpus/loader";
 import {stageCase, type StageFs} from "./live-stage";
@@ -50,6 +50,8 @@ describe("buildSweepReport", () => {
         ]);
         expect(report.modes.map((m) => m.mode)).toEqual(["full", "fast"]);
         const [full, fast] = report.modes;
+        assert.isDefined(full);
+        assert.isDefined(fast);
         expect(full.recall).toBe(1);
         expect(full.usd).toBe(8);
         // fast's zero fresh-defect recall is the mode's cost, priced here.
@@ -66,6 +68,7 @@ describe("buildSweepReport", () => {
                 tripwireRearmed: true,
             }),
         ]);
+        assert.isDefined(report.modes[0]);
         expect(report.modes[0].trippedCases).toEqual(["case"]);
     });
 
@@ -73,6 +76,7 @@ describe("buildSweepReport", () => {
         const report = buildSweepReport([
             rowOf({mode: "fast", caught: 0, specs: 0}),
         ]);
+        assert.isDefined(report.modes[0]);
         expect(report.modes[0].recall).toBeNull();
     });
 });

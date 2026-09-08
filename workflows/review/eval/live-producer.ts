@@ -674,7 +674,11 @@ const dispatchWithRetry = async <R>(
                 ]);
             }
             lastOutput = result.output;
-            report.stopReason = result.stopReason;
+            // The report spans both attempts, so discard the previous stop reason.
+            delete report.stopReason;
+            if (result.stopReason !== undefined) {
+                report.stopReason = result.stopReason;
+            }
             failureDetail = [
                 result.rawStopReason === undefined
                     ? undefined
@@ -980,9 +984,7 @@ export const produceLive = async (
     }
 
     return {
-        findings: findings.map(
-            ({source, finding}): RecordedFinding => ({source, finding}),
-        ),
+        findings: findings.map(({source, finding}) => ({source, finding})),
         validation,
         perAgent,
         staged,

@@ -23,6 +23,10 @@ Single-run percentage deltas below the measured noise floor mean nothing
 pnpm test --run workflows/review/eval/
 ```
 
+### Strict typecheck
+
+Run `pnpm typecheck:review-eval` to check the eval modules, their tests, and imported production modules with the root config's strict flags, including `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`. Corpus `tree/` files are excluded because they contain intentional defects. The normal `pnpm typecheck` command includes this check, so the existing CI typecheck step gates it too.
+
 ### Live A/B locally (requires `ANTHROPIC_API_KEY`)
 
 ```sh

@@ -1,4 +1,4 @@
-import {afterAll, beforeAll, describe, it, expect, vi} from "vitest";
+import {assert, afterAll, beforeAll, describe, it, expect, vi} from "vitest";
 
 import {aggregateSamples, extractSamples} from "./aggregate";
 import {parseCase, type CorpusCase} from "./corpus/loader";
@@ -280,6 +280,7 @@ describe("runArm dedup accounting", () => {
         // for, not every copy in a group it touched: the `both` group below
         // carries one of each, and crediting tier 2 with the pair would
         // overstate the delta that decides graduation.
+        assert.isDefined(report.perCase[0]);
         expect(report.perCase[0].dedup).toEqual({
             candidates: 4,
             merged: 3,
@@ -358,6 +359,7 @@ describe("runArm dedup accounting", () => {
             }),
             {maxUsd: 10},
         );
+        assert.isDefined(report.perCase[0]);
         expect(report.perCase[0].dedup?.clustererFailed).toBe(true);
         const markdown = renderMarkdownReport({
             baseRef: "origin/main",
@@ -380,6 +382,7 @@ describe("runArm dedup accounting", () => {
             produceHit(1),
             {maxUsd: 10},
         );
+        assert.isDefined(report.perCase[0]);
         expect(report.perCase[0].dedup).toBeUndefined();
     });
 });

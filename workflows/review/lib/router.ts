@@ -438,8 +438,7 @@ export const isGenerated = (
     path: string,
     generatedRules: readonly GeneratedRule[],
 ): boolean => {
-    for (let i = generatedRules.length - 1; i >= 0; i--) {
-        const rule = generatedRules[i];
+    for (const rule of [...generatedRules].reverse()) {
         if (matchesGlob(path, rule.pattern)) {
             return rule.generated;
         }
@@ -514,11 +513,11 @@ const tierForFile = (
     const matches = riskRules.filter((rule) =>
         matchesGlob(file.path, rule.pattern),
     );
-    if (matches.length === 0) {
+    const winner = matches.at(-1);
+    if (winner === undefined) {
         return {tier: defaultTier, pending: false, candidates: [defaultTier]};
     }
 
-    const winner = matches[matches.length - 1];
     const candidateSet = new Set<RiskTier>(matches.map((rule) => rule.tier));
     const candidates = RISK_TIERS.filter((t) => candidateSet.has(t));
     return {

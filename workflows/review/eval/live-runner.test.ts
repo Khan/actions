@@ -89,6 +89,38 @@ describe("sdkRunner", () => {
         rmSync(dir, {recursive: true, force: true});
     });
 
+    it("omits diagnostics the SDK didn't report", async () => {
+        script = {messages: []};
+        const result = await sdkRunner({transcriptsDir: false})(request());
+        expect(result).not.toHaveProperty("stopReason");
+        expect(result).not.toHaveProperty("errorMessage");
+        expect(result).not.toHaveProperty("tokensAtFailure");
+    });
+
+    it("preserves reported diagnostics and refusal status", async () => {
+        script = {
+            messages: [
+                {
+                    type: "assistant",
+                    message: {
+                        role: "assistant",
+                        content: [],
+                        stop_reason: "refusal",
+                        usage: {input_tokens: 10, output_tokens: 2},
+                    },
+                },
+                {...success(""), error: "policy refusal"},
+            ],
+        };
+        const result = await sdkRunner({transcriptsDir: false})(request());
+        expect(result).toMatchObject({
+            stopReason: "refusal",
+            errorMessage: '"policy refusal"',
+            tokensAtFailure: {input: 10, total: 12},
+            refused: true,
+        });
+    });
+
     it("restricts the toolset and installs the scope hook", async () => {
         script = {messages: [success()]};
         await sdkRunner({transcriptsDir: false})(request());

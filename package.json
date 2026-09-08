@@ -7,7 +7,8 @@
         "fix": "pnpm run lint --fix",
         "sync-canary": "node -r @swc-node/register utils/generate-canary.ts",
         "test": "vitest",
-        "typecheck": "tsc --noEmit",
+        "typecheck": "tsc --noEmit && pnpm typecheck:review-eval",
+        "typecheck:review-eval": "tsc -p workflows/review/eval/tsconfig.json",
         "build": "tsc -p actions/tsconfig.json"
     },
     "devDependencies": {

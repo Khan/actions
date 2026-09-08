@@ -231,13 +231,13 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
     const warnings: string[] = [];
 
     const lines = content.split(/\r?\n/);
-    for (let index = 0; index < lines.length; index++) {
-        const line = lines[index].trim();
+    for (const [index, rawLine] of lines.entries()) {
+        const line = rawLine.trim();
         if (line === "" || line.startsWith("#")) {
             continue;
         }
         const lineNo = index + 1;
-        const [pattern, ...fields] = line.split(/\s+/);
+        const [pattern = "", ...fields] = line.split(/\s+/);
 
         if (pattern === "enable") {
             const names = fields.flatMap((field) => field.split(","));
@@ -265,14 +265,14 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
         }
 
         if (pattern === "re-review") {
-            if (fields.length < 1 || fields.length > 2) {
+            const [mode, modifier] = fields;
+            if (mode === undefined || fields.length > 2) {
                 warnings.push(
                     `ROUTING line ${lineNo}: re-review takes one mode and ` +
                         `optionally blocking-only (line skipped)`,
                 );
                 continue;
             }
-            const mode = fields[0];
             if (!(RE_REVIEW_MODES as readonly string[]).includes(mode)) {
                 warnings.push(
                     `ROUTING line ${lineNo}: unknown re-review mode ` +
@@ -282,19 +282,19 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
             }
             let blockingOnly = false;
             let blockingMedium = false;
-            if (fields.length === 2) {
+            if (modifier !== undefined) {
                 if (
                     (RE_REVIEW_MODIFIERS as readonly string[]).includes(
-                        fields[1],
+                        modifier,
                     )
                 ) {
-                    blockingOnly = fields[1] === "blocking-only";
-                    blockingMedium = fields[1] === "blocking-medium";
+                    blockingOnly = modifier === "blocking-only";
+                    blockingMedium = modifier === "blocking-medium";
                     if (mode === "full") {
                         // full never executes at a reduced depth, so the
                         // modifier never applies; the mode still does.
                         warnings.push(
-                            `ROUTING line ${lineNo}: ${fields[1]} never ` +
+                            `ROUTING line ${lineNo}: ${modifier} never ` +
                                 `applies at full re-review depth (repeat ` +
                                 `reviews post everything)`,
                         );
@@ -302,7 +302,7 @@ export const parseRoutingConfig = (content: string): RoutingFileConfig => {
                 } else {
                     warnings.push(
                         `ROUTING line ${lineNo}: unknown re-review ` +
-                            `modifier "${fields[1]}" (ignored)`,
+                            `modifier "${modifier}" (ignored)`,
                     );
                 }
             }

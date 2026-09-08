@@ -34,6 +34,8 @@
  * reasoning is written down there.
  */
 
+import assert from "node:assert/strict";
+
 import {type Claim, type ProposedCluster} from "./dispatch-contracts";
 import {isBlockingLabel} from "./render-comment";
 
@@ -218,6 +220,13 @@ export const clusterMemberRejection = (
         : "ungrounded";
 };
 
+/** Indices come from this claim array and stay valid throughout both merge tiers. */
+export const claimAt = (claims: readonly Claim[], index: number): Claim => {
+    const claim = claims[index];
+    assert(claim !== undefined, `Invalid dedup claim index: ${index}`);
+    return claim;
+};
+
 /**
  * Hold one proposal's members to the structural rules at parse time.
  *
@@ -253,21 +262,26 @@ const structurallyVerified = (
     claims: Claim[],
     rejections: ClusterRejection[],
 ): number[] => {
-    if (members.length === 0) {
+    const first = members[0];
+    if (first === undefined) {
         return [];
     }
     const anchor =
-        members.find((index) => isBlockingLabel(claims[index].label)) ??
-        members[0];
+        members.find((index) =>
+            isBlockingLabel(claimAt(claims, index).label),
+        ) ?? first;
     const kept: number[] = [];
     for (const index of members) {
         if (index === anchor) {
             kept.push(index);
             continue;
         }
-        const reason = structuralRejection(claims[anchor], claims[index]);
+        const reason = structuralRejection(
+            claimAt(claims, anchor),
+            claimAt(claims, index),
+        );
         if (reason !== undefined) {
-            rejections.push({id: claims[index].id, reason});
+            rejections.push({id: claimAt(claims, index).id, reason});
             continue;
         }
         kept.push(index);
@@ -317,7 +331,7 @@ export const verifiableClusters = (
                 rejections.push({id, reason: "already-clustered"});
                 continue;
             }
-            const claim = claims[index];
+            const claim = claimAt(claims, index);
             if (claim.path === undefined || claim.line === undefined) {
                 rejections.push({id, reason: "no-anchor"});
                 continue;
@@ -328,7 +342,7 @@ export const verifiableClusters = (
         if (members.length < 2) {
             for (const index of members) {
                 rejections.push({
-                    id: claims[index].id,
+                    id: claimAt(claims, index).id,
                     reason: "cluster-collapsed",
                 });
             }
