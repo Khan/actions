@@ -95,8 +95,10 @@ export type ArmRunReport = {
          * count, `merged` the claims it absorbed, and `clusterMerged` how many
          * of those copies tier 2 (the `claim-clusterer`) is what absorbed,
          * counted per copy since a `both` group absorbed some of its members on
-         * the text floor. `rejected` counts proposed MEMBERS the merge rules
-         * turned down, so one bad proposal naming three ids counts three.
+         * the text floor. `rejected` counts proposal-local member refusals,
+         * not unique claims left unmerged. A head-reserved member may have
+         * merged under tier 1 or an earlier proposal. One proposal naming three
+         * ids that all fail counts three.
          *
          * Read the duplicate rate from these, never from the posted set: merges
          * happen upstream of every drop the pipeline applies afterwards, and in
@@ -477,8 +479,9 @@ const snappedTotal = (arm: ArmRunReport): number =>
 
 /**
  * The arm's cross-source merge rate: claims absorbed over claims produced,
- * with tier 2's share and any rejected cluster MEMBER in parentheses (one
- * proposal naming three ids that all fail is three). `tier 1 only`
+ * with tier 2's share and proposal-local member refusals in parentheses (one
+ * proposal naming three ids that all fail is three, even if those claims merged
+ * elsewhere). This is not a count of separately posted findings. `tier 1 only`
  * marks an arm whose review.md defines no `claim-clusterer` — the expected
  * shape of the baseline in the A/B that graduates it, and the reason a zero in
  * the clusterer column there is asymmetry, not a negative result.

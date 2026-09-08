@@ -6,7 +6,7 @@ The investigation found one deterministic advisory merge bug. In webapp#42034, a
 
 ## Reproduce
 
-From the repo root, run `pnpm exec vitest run workflows/review/lib/dedup-september-audit.test.ts`. This checks the 12 groups with available original claims, the complete 31-candidate reservation case, independent-claim retention, structural and grounding negatives, attribution, recorded validation, and the request-changes verdict.
+From the repo root, run `pnpm exec vitest run workflows/review/eval/replay-same-run.test.ts`. This checks the 12 groups with available original claims, the complete 31-candidate reservation case, independent-claim retention, structural and grounding negatives, attribution, recorded validation, and the request-changes verdict. It also runs under the documented eval-only command, `pnpm test --run workflows/review/eval/`.
 
 Run `node -r @swc-node/register workflows/review/eval/replay-same-run.ts` for machine-readable scores, failed floors, path/source/blocker barriers, recorded proposals, and the full reservation replay. The numeric diagnostics mirror the private text-selection function and are checked against the production predicate in the test.
 
@@ -14,7 +14,7 @@ The baseline is `review-v1.25.0`, commit `8c13cc7bf9dc4a444971300a10e4dbf13d0f6f
 
 ## Verification
 
-After rebasing onto `088b1a1`, the full suite passes: 2,415 tests in 125 files, including 21 dedicated audit tests. `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check` also pass. The root typecheck excludes workflows. Lint ran before build after moving the previous build's ignored `actions/fix-workflows/cli.js` out of the checkout, since eslint excludes generated `index.js` but not that CLI output. The first full-suite run exposed that the eval corpus loader treats every nested JSON file as a formal corpus case, so these replay fixtures live beside that corpus rather than inside it. The loader wasn't changed.
+After rebasing onto `088b1a1`, the full suite passes: 2,415 tests in 125 files, including 21 dedicated audit tests. `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check` also pass. The documented eval-only command also passes: 556 tests in 28 files, including all 21 audit tests. The root typecheck excludes workflows. Lint ran before build after moving the previous build's ignored `actions/fix-workflows/cli.js` out of the checkout, since eslint excludes generated `index.js` but not that CLI output. The first full-suite run exposed that the eval corpus loader treats every nested JSON file as a formal corpus case, so these replay fixtures live beside that corpus rather than inside it. The loader wasn't changed.
 
 An additional strict typecheck of the changed dedup and replay code plus its audit test reaches four existing `opener`-possibly-undefined errors in dedup-adjudicated.ts and dedup-threads.ts. Running strict typechecking directly on those unchanged files reproduces the same four errors. No new error was reported in the changed files.
 

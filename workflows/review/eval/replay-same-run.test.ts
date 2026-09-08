@@ -1,19 +1,19 @@
 import {describe, expect, it} from "vitest";
 
-import pairs from "../eval/same-run-september-2026/pairs.json";
-import reservation from "../eval/same-run-september-2026/proposal-reservation.json";
-import {pairDiagnostics} from "../eval/replay-same-run";
-import {dedupeClaims, describesSameDefect} from "./dedup";
-import {verifiableClusters} from "./dedup-cluster";
-import {mergeCrossFileDuplicates} from "./dedup-crossfile";
+import pairs from "./same-run-september-2026/pairs.json";
+import reservation from "./same-run-september-2026/proposal-reservation.json";
+import {pairDiagnostics} from "./replay-same-run";
+import {dedupeClaims, describesSameDefect} from "../lib/dedup";
+import {verifiableClusters} from "../lib/dedup-cluster";
+import {mergeCrossFileDuplicates} from "../lib/dedup-crossfile";
 import {
     applyVerifications,
     parseValidatorOutput,
     type Claim,
-} from "./dispatch-contracts";
-import {attributionLine} from "./attribution";
-import {isBlockingLabel} from "./render-comment";
-import {computeVerdict} from "./verdict";
+} from "../lib/dispatch-contracts";
+import {attributionLine} from "../lib/attribution";
+import {isBlockingLabel} from "../lib/render-comment";
+import {computeVerdict} from "../lib/verdict";
 
 /**
  * Original inputs from the September 3–8 webapp audit. The full #42034 run
@@ -48,9 +48,22 @@ describe("September 2026 same-run duplicate audit", () => {
             }
             const baseline = dedupeClaims(input);
             const proposed = dedupeClaims(input, fixture.proposals);
-            expect(proposed.claims.length).toBeLessThanOrEqual(
-                baseline.claims.length,
+            // In the bounded #42034 triple, tier 1 already absorbs the
+            // advisory into holistic. Only the full-run fixture below
+            // reproduces the reservation bug. All other groups stay separate.
+            const expectedIds = input
+                .filter(
+                    (claim) =>
+                        fixture.pr !== 42034 || claim.id !== "completeness-2",
+                )
+                .map((claim) => claim.id);
+            expect(baseline.claims.map((claim) => claim.id)).toEqual(
+                expectedIds,
             );
+            expect(proposed.claims.map((claim) => claim.id)).toEqual(
+                expectedIds,
+            );
+            expect(proposed.claims).toEqual(baseline.claims);
             expect(blockingIds(proposed.claims)).toEqual(
                 blockingIds(baseline.claims),
             );

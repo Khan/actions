@@ -284,9 +284,10 @@ const survivorFirst = (
  * into one head therefore merges nothing and rejects nothing: it asserted an
  * identity the text floors had reached first.
  *
- * `clusterRejections` is the tier-2 audit trail (see {@link ClusterRejection});
- * it is empty both when the clusterer proposed nothing and when everything it
- * proposed merged, so read it beside the proposal count, never alone.
+ * `clusterRejections` records proposal-local refusals (see
+ * {@link ClusterRejection}), not unique claims left unmerged. A reserved member
+ * may have merged under tier 1 or an earlier proposal. Read these records beside
+ * the proposals and merges, never as a count of separately posted findings.
  */
 export const dedupeClaims = (
     claims: Claim[],
