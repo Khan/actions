@@ -1,0 +1,46 @@
+# Validator-only fidelity baseline
+
+This replay measures whether the unchanged claim-validator corrects inaccurate details without dropping a useful finding or damaging an already-correct comment. It runs the three historical comments from [claim-fidelity.md](./claim-fidelity.md) and their three hand-authored clean controls through the same validator prompt. It does not run the finding producers or change production validation.
+
+## Inputs and isolation
+
+The host fetches full files from `Khan/webapp` at each review's original commit and the parent of the PR's first commit. Existing evidence hashes must match. Additional cited callers and definitions are fetched at the same commits and receive hashes in the snapshot manifest. Missing base files are treated as additions only after a 404 response. Other fetch failures stop preparation.
+
+Preparation currently covers 15 reviewed files and 13 existing base files across the three cases. The two remaining files were added by the coaching PR. Source files are not synthesized from the evidence excerpts.
+
+Each sample receives its own partial checkout, the diff between those base and reviewed files, minimal PR metadata, and one candidate with the neutral id `candidate-1`. Both original and clean-control samples use the same code and diff. Source manifests, expected outcomes, controls, other samples, and transcripts are outside that sample's readable root. The cached bytes are checked again before staging.
+
+The validator uses the existing SDK runner with Read, Grep, and Glob. The runner's path guard scopes those tools to the sample. A live read-scope probe must pass before any validator sample runs. An unproven or failed probe stops this experiment rather than switching runners or changing permissions. The labels identifying original and clean-control inputs appear only in the host-side report.
+
+This is a bounded-context experiment, not a complete reproduction of the original review. It includes the named files and nearby callers, not the full repo. Original PR metadata, skills, and the investigation-cap CLI are not staged. Required runtime imports resolve through the existing eval's missing-import fallback. Record requests for missing context in the transcript audit rather than reading a failed investigation as proof that the concern is wrong.
+
+## Measurement
+
+The default is 3 repeats of each of 6 inputs, or 18 validator calls, plus one read-scope probe. Original and clean-control ordering alternates across repeats. The model comes from the selected `review.md`, without a model override. Each validator call has a 12-turn limit and a 180,000 ms timeout.
+
+The report carries the model, prompt hash, scorer hash, input and source hashes, tool-policy version, full validator output, SDK accounting, rendered comment, verification state, retention, unexpected blocking, and the four component checks. A missing or invalid verification is an error, not a retained finding. A valid refutation is a scored dropped finding. Errors and budget skips remain separate from scored samples. Checkpoints are written after each sample, including skips and failures.
+
+The `--max-usd` value is a stop-before-next-dispatch threshold at reported list cost, not a hard total ceiling. An in-flight call may overrun it, and the read-scope probe is separate. An unpriced dispatch failure stops further calls and marks the spend incomplete. The default threshold is $8. No price or success is inferred from a failed call.
+
+The component checks are lexical regression checks. Read at least one transcript for every case and input kind, then audit every changed or flagged comment against the pinned source. A paraphrase can fail a regex despite being correct, and passing regexes do not prove arbitrary supporting claims true. Report audited outcomes separately from lexical scores. Do not treat the 18 correlated samples as a population-level improvement estimate.
+
+## Run
+
+From this branch's repo root, prepare and verify source without calling a model:
+
+`node -r @swc-node/register workflows/review/eval/validator-fidelity-live.ts --prepare-only`
+
+Run the unchanged validator in a terminal where `ANTHROPIC_API_KEY` is already configured:
+
+`node -r @swc-node/register workflows/review/eval/validator-fidelity-live.ts --repeats 3 --max-usd 8`
+
+The CLI prints its output directory. It refuses to overwrite an existing report, including a partial or blocked report. Use a fresh directory with `--output-dir` when choosing one explicitly. Transcripts and staged source remain alongside the report for audit.
+
+A later candidate prompt can be selected with `--review-md <path>`. Before comparing its report with the baseline, check that model, scorer, input/source hashes, tools, repeat count, and budgets agree. No candidate prompt is included here. Only consider adding a component-by-component validation rule after the baseline demonstrates missed inaccuracies, and reject any candidate that loses useful findings or damages clean controls.
+
+## Verified so far
+
+- The new harness has 15 deterministic tests covering source hashes, staged diffs, read-scope boundaries, blinded inputs, corrected controls, malformed and duplicate outputs, retention, unexpected blocking, repeated inputs, checkpoints, budget skips, and unpriced failures.
+- The full suite passes 2,433 tests in 127 files. Lint and a targeted strict typecheck of the new modules pass.
+- Source preparation succeeded for all three pinned reviews, including the full-file hash checks.
+- The live attempt stopped before any model call because this session had no `ANTHROPIC_API_KEY`. There is no live baseline result or reviewer-quality improvement claim. `validator-fidelity-preparation.json` records the preparation and blocked-run status without embedding the source files.
