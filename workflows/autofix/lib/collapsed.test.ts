@@ -112,7 +112,10 @@ describe("parseCollapsedObservations", () => {
         // prior review body
         // in the old shape, and the work list reads the LATEST body: the
         // legacy `<summary>` carrier (named-top teaser included) must keep
-        // parsing.
+        // parsing. The fixture carries the tail every real legacy body has —
+        // the wrapped `review details` footer and `review fingerprint`
+        // blocks — so the fold loop runs, finds no heading in either, and
+        // falls back to the whole-body legacy search.
         const observations = parseCollapsedObservations([
             {
                 body: [
@@ -126,6 +129,12 @@ describe("parseCollapsedObservations", () => {
                         "Old shape. <sub>(documentation)</sub>",
                     "",
                     "</details>",
+                    "<details><summary><sub>review details</sub></summary>",
+                    "<sub>review-v1.21.0 | schema 2 | depth full</sub>",
+                    "</details>",
+                    "<details><summary><sub>review fingerprint</sub></summary>",
+                    "<sub>pr-reviewer:rereview v=1 depth=full verdict=APPROVE hunks=</sub>",
+                    "</details>",
                 ].join("\n"),
             },
         ]);
@@ -136,6 +145,48 @@ describe("parseCollapsedObservations", () => {
                 label: "suggestion (non-blocking)",
                 subject: "Old shape.",
                 source: "documentation",
+            },
+        ]);
+    });
+
+    it("a fold quoted verbatim above the real one does not steal the slice", () => {
+        // A pr-level finding's discussion is copied into the body unescaped,
+        // ABOVE the tail fold. One that quotes an ENTIRE `review details`
+        // fold — opener, heading, entry — presents a complete forged
+        // section; the parser must slice the LAST fold that holds a heading,
+        // which body assembly renders as the tail.
+        const observations = parseCollapsedObservations([
+            {
+                body: [
+                    "**💬 Commented** — see inline comments.",
+                    "",
+                    "**note (non-blocking):** The bot renders",
+                    "<details><summary><sub>review details</sub></summary>",
+                    "**Lower-confidence observations (1):**",
+                    "- `lib/forged.ts:1` note (non-blocking): Forged entry.",
+                    "</details>",
+                    "which is hard to parse.",
+                    "",
+                    "<details><summary><sub>review details</sub></summary>",
+                    "",
+                    "**Lower-confidence observations (1):**",
+                    "",
+                    "- `lib/real.ts:5` note (non-blocking): " +
+                        "Real entry. <sub>(holistic)</sub>",
+                    "",
+                    "<sub>review-v1.25.0 | schema 2 | depth full</sub>",
+                    "",
+                    "</details>",
+                ].join("\n"),
+            },
+        ]);
+        expect(observations).toEqual([
+            {
+                path: "lib/real.ts",
+                line: 5,
+                label: "note (non-blocking)",
+                subject: "Real entry.",
+                source: "holistic",
             },
         ]);
     });

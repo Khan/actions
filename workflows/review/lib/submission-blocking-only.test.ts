@@ -112,9 +112,9 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         expect(plan.comments[0].body).not.toContain(
             "Non-blocking observations",
         );
-        // The pr-level note outranks the nitpick for the summary slot
-        // (nitpicks rank last; the collapsed list re-sorts with pr-level
-        // claims included). Asserted on the bold heading the shared fold
+        // The collapsed list re-sorts with pr-level claims included, the
+        // note ahead of the nitpick (nitpicks rank last). Asserted on the
+        // bold heading the shared fold
         // carries (collapsed.test.ts pins the same shape off the renderer;
         // this case covers the blocking-only wording).
         expect(plan.body).toContain("**Non-blocking observations (2):**");

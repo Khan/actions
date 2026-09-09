@@ -7,7 +7,8 @@ import {
 } from "./submission";
 import {
     COLLAPSED_ENTRY_RE,
-    COLLAPSED_SUMMARY_RE,
+    COLLAPSED_HEADING_RE,
+    LEGACY_COLLAPSED_SUMMARY_RE,
     MAX_VERBATIM_FOLD_CHARS,
     renderCollapsedHeading,
     renderCollapsedLine,
@@ -403,7 +404,7 @@ describe("the collapsed heading's render/match pair", () => {
             expect(heading).toContain(
                 nonBlockingOnly ? "Non-blocking" : "Lower-confidence",
             );
-            expect(`prose\n${heading}\nmore`).toMatch(COLLAPSED_SUMMARY_RE);
+            expect(`prose\n${heading}\nmore`).toMatch(COLLAPSED_HEADING_RE);
         }
     });
 
@@ -413,15 +414,15 @@ describe("the collapsed heading's render/match pair", () => {
         // anchor; the line anchors are what make that structural.
         expect(
             "the run emits **Non-blocking observations (2):** at the top",
-        ).not.toMatch(COLLAPSED_SUMMARY_RE);
+        ).not.toMatch(COLLAPSED_HEADING_RE);
         expect("**Non-blocking observations (N):**").not.toMatch(
-            COLLAPSED_SUMMARY_RE,
+            COLLAPSED_HEADING_RE,
         );
     });
 
     it("still matches the legacy per-section summary line", () => {
         expect(
             "<summary>Lower-confidence observations (2; top: x)</summary>",
-        ).toMatch(COLLAPSED_SUMMARY_RE);
+        ).toMatch(LEGACY_COLLAPSED_SUMMARY_RE);
     });
 });

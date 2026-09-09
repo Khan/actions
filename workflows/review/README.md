@@ -841,7 +841,7 @@ own eval-suite arm.
 ### What a review costs (the per-review cost report)
 
 Every review carries its own price tag: a collapsed `review cost` block at the
-end of the review body (before the fingerprint stamp), with one row per
+end of the review body (after the `review details` tail fold), with one row per
 sub-agent (model, tool calls, turns, wall clock, tokens by class), a row for
 the prose judge, a row for the orchestrator, and a total, in two currencies.
 The same table lands in the run's step summary and as `cost-report.json` in
@@ -1047,10 +1047,12 @@ change ships.
 Semver is the behavior contract: a release that changes the reviewer's behavior bumps
 the major version, so a consumer pinned to `review-v<major>` can assume the fundamental
 behavior holds within a major. For attribution and rollback, every submitted review
-body and the risks/patterns guidance comment (Step 7) end with a footer collapsed
-inside a `<details>` block (summary chip `review details`), rendered in code by
+body and the risks/patterns guidance comment (Step 7) carry a version footer,
+rendered in code by
 `lib/version-footer.ts` from the pinned checkout's `package.json` and the staged
-run files (never composed by the model):
+run files (never composed by the model). In the review body it is a bare `<sub>`
+line inside the body's one `review details` tail fold (below); the guidance
+comment, which has no tail fold to ride, ends with the standalone wrapped block:
 
 ```
 <details><summary><sub>review details</sub></summary>
@@ -1094,8 +1096,9 @@ when the post-step could not run.
 Before KORE-2632 those were three separate stacked folds — observations,
 footer, stamp — two of them machine bookkeeping no reader opens (and the
 cost block inserted itself before the stamp block). Bodies posted in that
-shape are still parsed: `COLLAPSED_SUMMARY_RE` matches the legacy
-`<summary>` heading as well as the current bold one, and the stamp readers
+shape are still parsed: autofix's section slice matches the legacy
+`<summary>` heading (`LEGACY_COLLAPSED_SUMMARY_RE`) as well as the current
+bold one (`COLLAPSED_HEADING_RE`), and the stamp readers
 accept both carriers, so an in-flight PR's next re-review and autofix run
 behave exactly as before.
 

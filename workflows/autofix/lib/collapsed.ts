@@ -24,20 +24,22 @@
  * it, which is the same self-healing bet the reviewer's own corpus memory
  * makes.
  *
- * Section slicing runs from the heading match ({@link COLLAPSED_SUMMARY_RE},
- * which accepts both the current bold header and the legacy `<summary>`
- * line) to the next `</details>`. Since the one-fold consolidation that closing tag belongs
+ * Section slicing runs from the heading match — the current bold header
+ * ({@link COLLAPSED_HEADING_RE}) or the legacy `<summary>` line
+ * ({@link LEGACY_COLLAPSED_SUMMARY_RE}) — to the next `</details>`. Since
+ * the one-fold consolidation that closing tag belongs
  * to the enclosing `review details` fold rather than a per-section block,
  * so the slice additionally covers the config and fingerprint `<sub>` lines
  * that follow the entries — neither matches the entry grammar, so they are
  * skipped like any other unparseable line.
  *
  * For the CURRENT shape the heading is hunted only after a `review details`
- * fold opener ({@link REVIEW_DETAILS_OPEN}), never across the whole body.
- * A pr-level finding's discussion is copied verbatim into the body ABOVE
- * that fold, so a finding that quotes the heading (and an entry-shaped
- * bullet under it) would otherwise hand the parser a forged section and
- * silently replace the real work list. Legacy `<summary>` bodies keep the
+ * fold opener ({@link REVIEW_DETAILS_OPEN}), never across the whole body,
+ * and the LAST fold holding a heading wins. A pr-level finding's discussion
+ * is copied verbatim into the body ABOVE the real tail fold, so a finding
+ * that quotes the heading — or an entire fold, opener and all — would
+ * otherwise hand the parser a forged section and silently replace the real
+ * work list. Legacy `<summary>` bodies keep the
  * whole-body search: their section carries its own fold, which no prose
  * above it opens.
  *
@@ -78,12 +80,17 @@ export type CollapsedObservation = {
  *
  * Current shape first, and structurally: only a `review details` fold's own
  * interior is searched for the bold heading, so prose above the fold cannot
- * forge one. Every opener is tried because the same chip wraps the
- * standalone version footer; a body carrying both yields the fold that
- * actually holds a heading. Only if no fold does is the legacy `<summary>`
- * carrier looked for, whole-body, since that shape predates the tail fold.
+ * forge one — and of the folds that hold a heading, the LAST wins. Body
+ * assembly renders the real fold as the body's tail, while a pr-level
+ * finding's discussion (copied verbatim and unescaped ABOVE it) can quote
+ * an entire fold, heading and all; taking the first match would hand that
+ * quote the section slice. Every opener is still tried because the same
+ * chip wraps the standalone version footer. Only if no fold holds a heading
+ * is the legacy `<summary>` carrier looked for, whole-body, since that
+ * shape predates the tail fold.
  */
 const locateSection = (body: string): string | null => {
+    let section: string | null = null;
     for (
         let open = body.indexOf(REVIEW_DETAILS_OPEN);
         open !== -1;
@@ -94,8 +101,11 @@ const locateSection = (body: string): string | null => {
         const fold = body.slice(from, close === -1 ? body.length : close);
         const heading = fold.search(COLLAPSED_HEADING_RE);
         if (heading !== -1) {
-            return fold.slice(heading);
+            section = fold.slice(heading);
         }
+    }
+    if (section !== null) {
+        return section;
     }
     const legacy = body.search(LEGACY_COLLAPSED_SUMMARY_RE);
     if (legacy === -1) {

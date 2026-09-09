@@ -314,7 +314,7 @@ export const COLLAPSED_ENTRY_RE =
  * "Non-blocking" heading would then mislabel it, so that wording applies
  * only on a reduced surface whose every collapsed claim is non-blocking.
  *
- * Lives beside {@link COLLAPSED_SUMMARY_RE} for the same no-drift reason
+ * Lives beside {@link COLLAPSED_HEADING_RE} for the same no-drift reason
  * {@link renderCollapsedLine} lives beside {@link COLLAPSED_ENTRY_RE}: the
  * heading is the anchor autofix slices the section from, so renderer and
  * matcher must move together.
@@ -328,34 +328,30 @@ export const renderCollapsedHeading = (
         : `**Lower-confidence observations (${count}):**`;
 
 /**
- * The parse of the collapsed section's heading. Two carriers, deliberately:
+ * The parse of the collapsed section's heading, current shape: a WHOLE line
+ * of exactly {@link renderCollapsedHeading}'s output, the bold markdown
+ * header the section renders since the one-fold consolidation, now that it
+ * lives inside the body's single `review details` fold rather than a fold
+ * of its own. Autofix's section slice pairs it with
+ * {@link LEGACY_COLLAPSED_SUMMARY_RE} to keep reading bodies posted before
+ * the change.
  *
- *   - a WHOLE line of exactly {@link renderCollapsedHeading}'s output, the
- *     bold markdown header the section renders since the one-fold
- *     consolidation, now that it lives inside the body's single
- *     `review details` fold rather than a fold of its own;
- *   - `<summary>Lower-confidence observations (N…)</summary>`, the legacy
- *     per-section `<summary>` line, matched by prefix because its teaser
- *     text varies. Still matched because the autofix reads the LATEST
- *     posted review body, and every body posted before the change carries
- *     that shape.
- *
- * The bold arm is line-anchored rather than a loose prefix because a
- * pr-level claim's discussion is copied verbatim into the body ABOVE the
- * tail fold, so a finding that merely QUOTES the heading mid-sentence would
- * otherwise steal the section slice from the real fold. Line-anchoring is
- * half the defense; the other half is autofix searching only after the fold
- * opener (collapsed.ts).
+ * Line-anchored rather than a loose prefix because a pr-level claim's
+ * discussion is copied verbatim into the body ABOVE the tail fold, so a
+ * finding that merely QUOTES the heading mid-sentence would otherwise steal
+ * the section slice from the real fold. Line-anchoring is half the defense;
+ * the other half is autofix searching only fold interiors, last match wins
+ * (collapsed.ts).
  */
 export const COLLAPSED_HEADING_RE =
     /^\*\*(?:Non-blocking|Lower-confidence) observations \(\d+\):\*\*$/m;
 
-/** The legacy per-section `<summary>` arm, matched by prefix (see above). */
+/**
+ * The legacy per-section `<summary>` heading,
+ * `<summary>Lower-confidence observations (N…)</summary>`, matched by
+ * prefix because its teaser text varies. Still matched because autofix
+ * reads the LATEST posted review body, and every body posted before the
+ * one-fold consolidation carries this shape.
+ */
 export const LEGACY_COLLAPSED_SUMMARY_RE =
     /<summary>(?:Non-blocking|Lower-confidence) observations \(/;
-
-/** The two arms as one matcher, for callers that accept either carrier. */
-export const COLLAPSED_SUMMARY_RE = new RegExp(
-    `${COLLAPSED_HEADING_RE.source}|${LEGACY_COLLAPSED_SUMMARY_RE.source}`,
-    "m",
-);
