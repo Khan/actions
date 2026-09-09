@@ -17,9 +17,11 @@
 # case, which fails this job.
 #
 # Cost control: per-PR runs cover only the live cases also tagged `smoke`;
-# a `full-eval` label lifts that to every live case. The runner enforces a
-# hard USD ceiling per arm and reports skipped cases rather than dying at the
-# cap. A new push cancels a superseded run (concurrency below). A
+# a `full-eval` label lifts that to every live development case (reserved
+# holdouts stay excluded). Smoke gets $40 total across both arms, full gets
+# $200. The runner checks each arm's budget between cases, so a dispatch can
+# overshoot its slice. Judge, arbiter, and gate retries add spend outside that
+# budget. A new push cancels a superseded run (concurrency below). A
 # `skip-live-eval` label skips the job entirely (added mid-run, it cancels
 # the in-flight run too, see the concurrency key).
 #
@@ -37,17 +39,18 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - "workflows/review/**"
+      - ".github/workflows/review-eval-ab.yml"
   workflow_dispatch:
     inputs:
       base_ref:
         description: "Baseline ref for review.md (default: the runner's merge-base fallback; PR runs pass the base-branch tip)"
         required: false
       max_usd:
-        description: "Total hard budget across both arms"
+        description: "Dispatch budget across both arms and all repeats, checked between cases (blank: smoke 40, full 200)"
         required: false
-        default: "40"
+        default: ""
       full:
-        description: "Run every live case (not just the smoke subset)"
+        description: "Run every live development case (not just smoke, reserved holdouts stay excluded)"
         type: boolean
         required: false
         default: false
@@ -122,7 +125,7 @@ jobs:
           # The tip of the PR's base branch (see the header comment for why
           # tip, not merge-base). workflow_dispatch may override it.
           BASE_REF: ${{ inputs.base_ref || format('origin/{0}', github.base_ref || 'main') }}
-          MAX_USD: ${{ inputs.max_usd || '40' }}
+          MAX_USD: ${{ inputs.max_usd || '' }}
           FULL_EVAL: ${{ inputs.full == true || contains(github.event.pull_request.labels.*.name, 'full-eval') }}
           CASES: ${{ inputs.cases || '' }}
           REPEATS: ${{ inputs.repeats || '1' }}
@@ -132,22 +135,29 @@ jobs:
             echo "ANTHROPIC_API_KEY secret not configured; skipping the live A/B." >&2
             exit 0
           fi
-          SCOPE="--smoke-only"
+          SCOPE=(--smoke-only)
+          DEFAULT_MAX_USD=40
           if [ "$FULL_EVAL" = "true" ]; then
-            SCOPE=""
+            SCOPE=()
+            # Run 34381736297 spent $40.38 on 43 case-arm runs. At that
+            # rate, 66 cases across both arms need $124. The $200 budget
+            # leaves room for the unmeasured tail without raising smoke.
+            DEFAULT_MAX_USD=200
           fi
-          EXTRA=""
+          MAX_USD="${MAX_USD:-$DEFAULT_MAX_USD}"
+          echo "Live A/B: full=$FULL_EVAL, dispatch budget=$MAX_USD USD across both arms and all repeats"
+          EXTRA=()
           if [ -n "$CASES" ]; then
-            EXTRA="$EXTRA --cases $CASES"
+            EXTRA+=(--cases "$CASES")
           fi
           if [ "$REPEATS" != "1" ]; then
-            EXTRA="$EXTRA --repeats $REPEATS"
+            EXTRA+=(--repeats "$REPEATS")
           fi
           if [ "$FORCE_ARMS" = "true" ]; then
-            EXTRA="$EXTRA --force-arms"
+            EXTRA+=(--force-arms)
           fi
           pnpm dlx tsx workflows/review/eval/live-ab.ts \
-            --base-ref "$BASE_REF" --max-usd "$MAX_USD" $SCOPE $EXTRA \
+            --base-ref "$BASE_REF" --max-usd "$MAX_USD" "${SCOPE[@]}" "${EXTRA[@]}" \
             --transcripts-dir "$RUNNER_TEMP/review-transcripts"
       - name: Upload the report artifact
         # always(): a partial or gate-failing run still uploads what it wrote.

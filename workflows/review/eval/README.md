@@ -60,13 +60,21 @@ and the remaining limits on production fidelity.
 
 ### CI entry points
 
-- **Per-PR** (`.github/workflows/review-eval-ab.yml`): triggers on PRs
-  touching `workflows/review/**`; smoke subset by default, the `full-eval`
-  label lifts to every live case, `skip-live-eval` opts out. Report goes to
-  a sticky PR comment, the job summary, and the `live-ab-report` artifact;
-  every sub-agent's transcript goes to the `live-ab-transcripts` artifact.
-- **Dispatch** (same workflow): inputs `base_ref`, `max_usd`, `full`,
-  `cases`, `repeats`, `force_arms`. This is how powered runs launch.
+- Per-PR (`.github/workflows/review-eval-ab.yml`): triggers on PRs touching
+  `workflows/review/**` or the A/B workflow itself. Smoke is the default,
+  with a $40 dispatch budget across both arms. The `full-eval` label selects
+  every live development case and raises that budget to $200. Reserved holdouts
+  remain excluded. `skip-live-eval` opts out. The report goes to a sticky PR
+  comment, the job summary, and the `live-ab-report` artifact. Every sub-agent's
+  transcript goes to the `live-ab-transcripts` artifact.
+- Dispatch (same workflow): inputs `base_ref`, `max_usd`, `full`, `cases`,
+  `repeats`, `force_arms`. Leaving `max_usd` blank uses $40 for smoke or $200
+  when `full=true`. An explicit `max_usd` overrides either default. The budget
+  covers both arms and all repeats, it is not multiplied by `repeats`. Budget
+  checks happen between cases, not during dispatch. Judge, arbiter, the scope
+  probe, and gate retries add spend outside that budget. The local CLI default
+  remains $40. The hosted job's 6-hour limit is separate, so inspect the report
+  for partial results and skipped cases even with the larger budget.
 - **Weekly drift** (`.github/workflows/review-eval-drift.yml`): cron; full
   corpus x3 repeats, both arms pinned to main's review.md, so it watches
   cumulative drift AND re-measures the noise floor every week. Report goes
