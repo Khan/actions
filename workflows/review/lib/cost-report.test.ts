@@ -340,6 +340,20 @@ describe("withCostDetails", () => {
         expect(out.match(/review cost/g)).toHaveLength(2);
     });
 
+    it("appends after a one-fold body's tail fold (in-fold stamp has no block)", () => {
+        // The current shape carries the stamp as a <sub> line inside the
+        // 'review details' tail fold, not as its own chip'd block, so the
+        // cost block lands after the fold and the fold stays intact.
+        const fold =
+            "<details><summary><sub>review details</sub></summary>\n\n" +
+            "<sub>review-v1.25.0 | schema 2 | depth full</sub>\n\n" +
+            "<sub>pr-reviewer:rereview v=1 depth=full verdict=APPROVE hunks=</sub>\n\n" +
+            "</details>";
+        const body = `Review body.\n\n${fold}\n`;
+        const out = withCostDetails(body, details);
+        expect(out).toBe(`Review body.\n\n${fold}\n\n${details}\n`);
+    });
+
     it("appends when there is no stamp, and replaces an existing block rather than stacking", () => {
         const once = withCostDetails("Review body.\n", details);
         expect(once).toBe(`Review body.\n\n${details}\n`);

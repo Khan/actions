@@ -356,3 +356,14 @@ export const COLLAPSED_HEADING_RE =
  */
 export const LEGACY_COLLAPSED_SUMMARY_RE =
     /<summary>(?:Non-blocking|Lower-confidence) observations \(/;
+
+/**
+ * Every-occurrence variant of {@link LEGACY_COLLAPSED_SUMMARY_RE}, for
+ * callers that need the LAST match (autofix's legacy section slice).
+ * Declared here beside its single-match form so a flag or source change
+ * lands on both.
+ */
+export const LEGACY_COLLAPSED_SUMMARY_ALL_RE = new RegExp(
+    LEGACY_COLLAPSED_SUMMARY_RE.source,
+    "g",
+);

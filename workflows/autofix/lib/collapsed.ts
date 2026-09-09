@@ -26,8 +26,9 @@
  *
  * Section slicing runs from the heading match — the current bold header
  * ({@link COLLAPSED_HEADING_RE}) or the legacy `<summary>` line
- * ({@link LEGACY_COLLAPSED_SUMMARY_RE}) — to the next `</details>`. On a
- * current body that closing tag belongs
+ * ({@link LEGACY_COLLAPSED_SUMMARY_ALL_RE}) — to the fold's own closing
+ * `</details>` (line-anchored: an entry can carry the literal in a code
+ * span). On a current body that closing tag belongs
  * to the enclosing `review details` fold rather than a per-section block,
  * so the slice additionally covers the config and fingerprint `<sub>` lines
  * that follow the entries — neither matches the entry grammar, so they are
@@ -49,7 +50,7 @@
 import {
     COLLAPSED_ENTRY_RE,
     COLLAPSED_HEADING_RE,
-    LEGACY_COLLAPSED_SUMMARY_RE,
+    LEGACY_COLLAPSED_SUMMARY_ALL_RE,
 } from "../../review/lib/submission-render.ts";
 import {REVIEW_DETAILS_OPEN_RE} from "../../review/lib/attribution.ts";
 import {STAMP_MARKER} from "../../review/lib/rereview-mode.ts";
@@ -99,11 +100,7 @@ const locateSection = (body: string): string | null => {
         lastOpenEnd = open.index + open[0].length;
     }
     if (lastOpenEnd !== -1) {
-        const close = body.indexOf("</details>", lastOpenEnd);
-        const fold = body.slice(
-            lastOpenEnd,
-            close === -1 ? body.length : close,
-        );
+        const fold = sliceToFoldClose(body, lastOpenEnd);
         const heading = fold.search(COLLAPSED_HEADING_RE);
         if (heading !== -1) {
             return fold.slice(heading);
@@ -113,16 +110,26 @@ const locateSection = (body: string): string | null => {
         }
     }
     let legacy = -1;
-    for (const open of body.matchAll(
-        new RegExp(LEGACY_COLLAPSED_SUMMARY_RE.source, "g"),
-    )) {
+    for (const open of body.matchAll(LEGACY_COLLAPSED_SUMMARY_ALL_RE)) {
         legacy = open.index;
     }
     if (legacy === -1) {
         return null;
     }
-    const close = body.indexOf("</details>", legacy);
-    return body.slice(legacy, close === -1 ? body.length : close);
+    return sliceToFoldClose(body, legacy);
+};
+
+/**
+ * The fold's real `</details>` closer starts a line (submission renders it
+ * that way), while an entry's one-line subject can carry the literal inside
+ * a code span — cutting there would silently drop every entry below it.
+ */
+const FOLD_CLOSE_RE = /^[ \t]*<\/details>/m;
+
+const sliceToFoldClose = (body: string, from: number): string => {
+    const rest = body.slice(from);
+    const close = rest.search(FOLD_CLOSE_RE);
+    return close === -1 ? rest : rest.slice(0, close);
 };
 
 /**

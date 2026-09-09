@@ -311,6 +311,34 @@ describe("parseCollapsedObservations", () => {
         ]);
     });
 
+    it("an entry carrying `</details>` in a code span does not cut the slice", () => {
+        // The fold's real closer starts a line; the literal inside an
+        // entry's subject must not end the slice and drop the entries below.
+        const observations = parseCollapsedObservations([
+            {
+                body: [
+                    "**💬 Commented** — see inline comments.",
+                    "",
+                    "<details><summary><sub>review details</sub></summary>",
+                    "",
+                    "**Lower-confidence observations (2):**",
+                    "",
+                    "- `lib/a.ts:1` note (non-blocking): The strip tears " +
+                        "open `</details>` and leaves unbalanced HTML.",
+                    "- `lib/b.ts:2` note (non-blocking): Second entry.",
+                    "",
+                    "<sub>review-v1.25.0 | schema 2 | depth full</sub>",
+                    "",
+                    "</details>",
+                ].join("\n"),
+            },
+        ]);
+        expect(observations.map((entry) => entry.path)).toEqual([
+            "lib/a.ts",
+            "lib/b.ts",
+        ]);
+    });
+
     it("parses a fold truncated at the end of the body", () => {
         // A body cut off before the closing </details> (the 65536-char cap
         // can land mid-fold) still yields the entries above the cut.
