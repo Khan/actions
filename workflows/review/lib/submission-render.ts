@@ -290,14 +290,27 @@ export const renderClaimComment = (
  * list out of the collapse (Khan/actions#401's re-review), and escaping
  * cannot help because the ingest sanitizer decodes entities
  * ({@link neutralizeStructuralTags}).
+ *
+ * The subject is also flattened to ONE line. A multi-line subject is
+ * reachable (the first-sentence fallback for a lens that omits `summary`
+ * can span lines) and would break both directions of the contract: its
+ * continuation lines never parse back as entries, and a line-start fold
+ * opener inside a multi-line code span — which neutralization deliberately
+ * leaves alive — would out-position the real tail fold's opener in
+ * autofix's last-opener scan.
  */
+const flattenSubject = (subject: string): string =>
+    subject.replace(/\s+/g, " ").trim();
+
 export const renderCollapsedLine = (claim: Claim): string =>
     claim.path !== undefined && claim.line !== undefined
         ? `- \`${claim.path}:${claim.line}\` ${
               claim.label
-          }: ${neutralizeStructuralTags(claim.subject)} ${sourceTag(claim)}`
+          }: ${neutralizeStructuralTags(
+              flattenSubject(claim.subject),
+          )} ${sourceTag(claim)}`
         : `- ${claim.label}: ${neutralizeStructuralTags(
-              claim.subject,
+              flattenSubject(claim.subject),
           )} ${sourceTag(claim)}`;
 
 /**

@@ -219,7 +219,7 @@ export const renderRereviewStampLine = (stamp: ReReviewStamp): string => {
 
 /**
  * The LEGACY standalone `<details>` carrier, no longer emitted in
- * production; kept so the eval's live staging and the parser tests can
+ * production; kept so the parser tests can
  * build the pre-consolidation shape every in-flight PR's prior review carries.
  */
 export const renderRereviewStamp = (stamp: ReReviewStamp): string =>

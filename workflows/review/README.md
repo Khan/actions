@@ -1086,8 +1086,7 @@ collapsed observations section, the version/config line, and the re-review
 fingerprint stamp line (rendered by `lib/rereview-mode.ts`), the
 hunk-signature record the next run's re-review planner and autofix's
 currency check read back. The stamp rides the same sanitizer-surviving
-`sub` mechanism as the footer rather than becoming an HTML comment, because
-the ingest sanitizer deletes every HTML comment. The one exception to the
+`sub` mechanism as the footer (the paragraph above has the rationale). The one exception to the
 single fold: the cost report (summary chip `review cost`, spliced in by the
 `lib/cost-report-cli.ts` post-step after submission, see "What a review
 costs") appends as its own collapsed block after the fold, and is absent

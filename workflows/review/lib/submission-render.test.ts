@@ -373,6 +373,26 @@ describe("renderPrLevelFold block-close refusal", () => {
 });
 
 describe("renderCollapsedLine", () => {
+    it("flattens a multi-line subject to one line", () => {
+        // The first-sentence fallback can hand a subject that spans lines;
+        // rendered raw, its continuation lines never parse back as entries,
+        // and a line-start fold opener inside a multi-line code span would
+        // out-position the real tail fold in autofix's last-opener scan.
+        const line = renderCollapsedLine(
+            claim({
+                label: "note (non-blocking)",
+                subject:
+                    "The body renders\n<details><summary><sub>review details</sub></summary>\nacross lines.",
+            }) as never,
+        );
+        expect(line).not.toContain("\n");
+        expect(line).toBe(
+            "- `a.ts:2` note (non-blocking): The body renders " +
+                "(details)(summary)<sub>review details</sub>(/summary) " +
+                "across lines. <sub>(correctness-reviewer)</sub>",
+        );
+    });
+
     it("neutralizes structural tags in the model-authored subject", () => {
         const line = renderCollapsedLine(
             claim({
