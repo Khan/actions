@@ -130,7 +130,13 @@ export type ReReviewStamp = {
 
 export const STAMP_SCHEMA_VERSION = 1;
 
-const STAMP_MARKER = "pr-reviewer:rereview";
+/**
+ * The stamp's leading token. Exported because autofix's collapsed-section
+ * parser uses its presence inside a body's tail fold to tell a current-shape
+ * body (stamp rides the fold) from a legacy body's wrapped footer fold
+ * (stamp rode a separate `review fingerprint` block).
+ */
+export const STAMP_MARKER = "pr-reviewer:rereview";
 
 /**
  * Cap on the base64 fingerprint payload. A review body holds 65536 chars and

@@ -222,6 +222,114 @@ describe("parseCollapsedObservations", () => {
         ).toEqual([]);
     });
 
+    it("a quoted LEGACY heading cannot forge the list on a current body", () => {
+        // The legacy whole-body fallback must not run for a current-shape
+        // body: the stamp inside the (headingless) tail fold marks the body
+        // as current, so a legacy <summary> heading quoted in pr-level
+        // prose above the fold is never searched for.
+        expect(
+            parseCollapsedObservations([
+                {
+                    body: [
+                        "**✅ Approved** — no blocking issues found.",
+                        "",
+                        "**note (non-blocking):** Old bodies rendered",
+                        "<details>",
+                        "<summary>Lower-confidence observations (1; top: x)</summary>",
+                        "",
+                        "- `lib/forged.ts:1` note (non-blocking): Forged entry.",
+                        "",
+                        "</details>",
+                        "which this PR replaces.",
+                        "",
+                        "<details><summary><sub>review details</sub></summary>",
+                        "",
+                        "<sub>review-v1.25.0 | schema 2 | depth full</sub>",
+                        "",
+                        "<sub>pr-reviewer:rereview v=1 depth=full verdict=APPROVE hunks=</sub>",
+                        "",
+                        "</details>",
+                    ].join("\n"),
+                },
+            ]),
+        ).toEqual([]);
+    });
+
+    it("a legacy heading quoted above a legacy body's real section loses", () => {
+        // Legacy bodies put pr-level prose above their observations fold
+        // too, so the legacy arm takes the LAST match.
+        const observations = parseCollapsedObservations([
+            {
+                body: [
+                    "Approved.",
+                    "",
+                    "The old shape looked like",
+                    "<summary>Lower-confidence observations (1; top: q)</summary>",
+                    "- `lib/forged.ts:1` note (non-blocking): Forged entry.",
+                    "</details>",
+                    "",
+                    "<details>",
+                    "<summary>Lower-confidence observations (1; top: r)</summary>",
+                    "",
+                    "- `lib/real-legacy.ts:4` note (non-blocking): Real entry.",
+                    "",
+                    "</details>",
+                ].join("\n"),
+            },
+        ]);
+        expect(observations.map((entry) => entry.path)).toEqual([
+            "lib/real-legacy.ts",
+        ]);
+    });
+
+    it("an opener quoted inside a collapsed entry does not truncate the slice", () => {
+        // The opener match is line-anchored: an entry whose subject quotes
+        // the opener mid-line must not be read as a later fold start, which
+        // would cut the real entries out of the slice.
+        const observations = parseCollapsedObservations([
+            {
+                body: [
+                    "**💬 Commented** — see inline comments.",
+                    "",
+                    "<details><summary><sub>review details</sub></summary>",
+                    "",
+                    "**Lower-confidence observations (2):**",
+                    "",
+                    "- `lib/a.ts:1` note (non-blocking): The body opens with " +
+                        "<details><summary><sub>review details</sub></summary> here.",
+                    "- `lib/b.ts:2` note (non-blocking): Second entry.",
+                    "",
+                    "<sub>review-v1.25.0 | schema 2 | depth full</sub>",
+                    "",
+                    "</details>",
+                ].join("\n"),
+            },
+        ]);
+        expect(observations.map((entry) => entry.path)).toEqual([
+            "lib/a.ts",
+            "lib/b.ts",
+        ]);
+    });
+
+    it("parses a fold truncated at the end of the body", () => {
+        // A body cut off before the closing </details> (the 65536-char cap
+        // can land mid-fold) still yields the entries above the cut.
+        const observations = parseCollapsedObservations([
+            {
+                body: [
+                    "**💬 Commented** — see inline comments.",
+                    "",
+                    "<details><summary><sub>review details</sub></summary>",
+                    "",
+                    "**Lower-confidence observations (1):**",
+                    "",
+                    "- `lib/cut.ts:7` note (non-blocking): Survives the cut.",
+                ].join("\n"),
+            },
+        ]);
+        expect(observations.map((entry) => entry.path)).toEqual(["lib/cut.ts"]);
+    });
+
     it("tolerates whitespace reflow in the fold opener", () => {
         // autofix pins its own release and reads bodies a newer review
         // release rendered, so the opener match must survive a whitespace

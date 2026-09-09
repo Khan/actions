@@ -330,9 +330,9 @@ export const renderCollapsedHeading = (
 /**
  * The parse of the collapsed section's heading, current shape: a WHOLE line
  * of exactly {@link renderCollapsedHeading}'s output, the bold markdown
- * header the section renders since the one-fold consolidation, now that it
- * lives inside the body's single `review details` fold rather than a fold
- * of its own. Autofix's section slice pairs it with
+ * header the section renders inside the body's single `review details` fold
+ * (it has no fold
+ * of its own). Autofix's section slice pairs it with
  * {@link LEGACY_COLLAPSED_SUMMARY_RE} to keep reading bodies posted before
  * the change.
  *
@@ -350,8 +350,9 @@ export const COLLAPSED_HEADING_RE =
  * The legacy per-section `<summary>` heading,
  * `<summary>Lower-confidence observations (N…)</summary>`, matched by
  * prefix because its teaser text varies. Still matched because autofix
- * reads the LATEST posted review body, and every body posted before the
- * one-fold consolidation carries this shape.
+ * reads the LATEST posted review body, and bodies posted by older reviewer
+ * releases (their observations section carried its own fold) are what an
+ * in-flight PR still holds.
  */
 export const LEGACY_COLLAPSED_SUMMARY_RE =
     /<summary>(?:Non-blocking|Lower-confidence) observations \(/;

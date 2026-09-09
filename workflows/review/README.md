@@ -1100,7 +1100,10 @@ shape are still parsed: autofix's section slice matches the legacy
 `<summary>` heading (`LEGACY_COLLAPSED_SUMMARY_RE`) as well as the current
 bold one (`COLLAPSED_HEADING_RE`), and the stamp readers
 accept both carriers, so an in-flight PR's next re-review and autofix run
-behave exactly as before.
+behave exactly as before. That compatibility is one-directional: a consumer
+must take autofix's paired patch release before (or with) the reviewer
+release that posts new-format bodies — an older autofix reading a
+new-format body finds no legacy heading and its work list reads empty.
 
 Every inline review comment (and each pr-level finding folded into the review
 body) additionally carries per-comment attribution, naming the reviewer that

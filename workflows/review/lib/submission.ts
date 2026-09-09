@@ -529,11 +529,14 @@ export const runSubmissionCli = (
             // A pr-level finding names its reviewer as a bare `<sub>` line,
             // not the collapsed footer an inline comment gets: this renders
             // in the review BODY, and that footer's chip is the same
-            // `review details` chip the body's one tail fold uses
-            //, so stacking it put a second identically labelled
+            // `review details` chip the body's one tail fold uses, so
+            // stacking it put a second identically labelled
             // expando above the fold. Same choice the context fold makes
             // for a folded inline comment; stripFooters' whole-line `<sub>`
-            // strip removes this form too, so dedup is unaffected.
+            // strip removes this form too, so dedup is unaffected. The
+            // HOLD_FOR_HUMAN comment reuses these lines and gets the bare
+            // form as well — deliberately, one shape per claim kind
+            // wherever it posts.
             prLevelLines.push(
                 `${renderPrLevelFold(claim)}\n<sub>${attributionLine(
                     claim.source,

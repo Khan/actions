@@ -26,22 +26,14 @@
  *
  * Section slicing runs from the heading match — the current bold header
  * ({@link COLLAPSED_HEADING_RE}) or the legacy `<summary>` line
- * ({@link LEGACY_COLLAPSED_SUMMARY_RE}) — to the next `</details>`. Since
- * the one-fold consolidation that closing tag belongs
+ * ({@link LEGACY_COLLAPSED_SUMMARY_RE}) — to the next `</details>`. On a
+ * current body that closing tag belongs
  * to the enclosing `review details` fold rather than a per-section block,
  * so the slice additionally covers the config and fingerprint `<sub>` lines
  * that follow the entries — neither matches the entry grammar, so they are
- * skipped like any other unparseable line.
- *
- * For the CURRENT shape the heading is hunted only inside the LAST
- * `review details` fold ({@link REVIEW_DETAILS_OPEN_RE}), never across the
- * whole body. A pr-level finding's discussion
- * is copied verbatim into the body ABOVE the real tail fold, so a finding
- * that quotes the heading — or an entire fold, opener and all — would
- * otherwise hand the parser a forged section and silently replace the real
- * work list; anchoring on the last opener keeps a quoted fold from winning
- * even when the real fold collapsed nothing. Legacy `<summary>` bodies keep
- * the whole-body search they always had.
+ * skipped like any other unparseable line. How the section is located, and
+ * why prose quoting the markup cannot forge the work list, is
+ * {@link locateSection}'s docstring.
  *
  * The line grammar parsed here is `submission.ts`'s render, one entry per
  * line:
@@ -60,6 +52,7 @@ import {
     LEGACY_COLLAPSED_SUMMARY_RE,
 } from "../../review/lib/submission-render.ts";
 import {REVIEW_DETAILS_OPEN_RE} from "../../review/lib/attribution.ts";
+import {STAMP_MARKER} from "../../review/lib/rereview-mode.ts";
 import type {PriorReview} from "../../review/lib/rereview-mode.ts";
 
 /** One collapsed observation, parsed off the latest review body. */
@@ -78,20 +71,27 @@ export type CollapsedObservation = {
  * The observations section's text, from its heading to the close of the
  * block that carries it, or null when the body has none.
  *
- * Current shape first, and structurally: the LAST `review details` opener
- * names the real tail fold — body assembly renders it after everything
- * else, while a pr-level finding's discussion (copied verbatim and
- * unescaped ABOVE it) can quote an entire fold, heading and all. Only that
- * last fold's own interior is searched for the bold heading; a heading in
- * any earlier fold is quoted prose by construction, so it must not win
- * even when the real fold collapsed nothing and carries no heading of its
- * own. Openers are matched whitespace-tolerantly
- * ({@link REVIEW_DETAILS_OPEN_RE}): autofix pins its own release, so the
- * body it reads may have been rendered — and ingest-rewritten — by a newer
- * review release. Only when the body has no fold at all is the legacy
- * `<summary>` carrier looked for, whole-body, since that shape predates
- * the tail fold; a legacy body's own wrapped footer fold never carries a
- * heading, so it falls through to that search too.
+ * The threat model: a pr-level finding's discussion is copied into the body
+ * verbatim and unescaped, ABOVE the tail fold, so any markup this function
+ * keys on can also appear there as a quote. The defenses, in the order the
+ * code applies them:
+ *
+ *   1. The LAST `review details` opener ({@link REVIEW_DETAILS_OPEN_RE},
+ *      whitespace-tolerant and line-anchored — autofix pins its own release,
+ *      so the body may have been rendered and ingest-rewritten by a newer
+ *      review release) names the real tail fold: body assembly renders it
+ *      after everything else, so quoted openers always sit above it. Only
+ *      that fold's interior is searched for the bold heading.
+ *   2. A last fold with no heading but carrying the fingerprint stamp
+ *      ({@link STAMP_MARKER}) is a current-shape body that collapsed
+ *      nothing: stop, so a quoted LEGACY heading above the fold cannot win
+ *      either. (A current body missing its stamp — a staging failure the
+ *      author cannot cause — falls through and keeps that legacy exposure.)
+ *   3. Otherwise the body is legacy-shaped (its own wrapped footer fold
+ *      never carries a heading or a stamp) or pre-fold: the legacy
+ *      `<summary>` carrier is searched whole-body, LAST match winning,
+ *      since legacy bodies put pr-level prose above their observations
+ *      fold too.
  */
 const locateSection = (body: string): string | null => {
     let lastOpenEnd = -1;
@@ -108,8 +108,16 @@ const locateSection = (body: string): string | null => {
         if (heading !== -1) {
             return fold.slice(heading);
         }
+        if (fold.includes(STAMP_MARKER)) {
+            return null;
+        }
     }
-    const legacy = body.search(LEGACY_COLLAPSED_SUMMARY_RE);
+    let legacy = -1;
+    for (const open of body.matchAll(
+        new RegExp(LEGACY_COLLAPSED_SUMMARY_RE.source, "g"),
+    )) {
+        legacy = open.index;
+    }
     if (legacy === -1) {
         return null;
     }
@@ -121,11 +129,9 @@ const locateSection = (body: string): string | null => {
  * Parse the collapsed observations from the NEWEST review's body (ordered
  * by submittedAt where present, staging order otherwise). A newest body
  * with no collapsed section yields no observations; older bodies are never
- * consulted (the module header carries the staleness reasoning). Only the
- * text inside a `review details` fold, from that fold's own heading to its
- * close, is parsed, so an entry-shaped line elsewhere in the body — a
- * pr-level discussion quoting the heading included — cannot mint a work
- * item.
+ * consulted (the module header carries the staleness reasoning). Only
+ * {@link locateSection}'s slice is parsed, so an entry-shaped line
+ * elsewhere in the body cannot mint a work item.
  */
 export const parseCollapsedObservations = (
     priorReviews: readonly PriorReview[],
