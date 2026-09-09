@@ -271,8 +271,10 @@ it does nothing, clears any label that armed it, and says why.
 - **No reviewer feedback at all.** Nothing to fix. This is the *only* currency
   state that refuses.
 - **The review does not match this head.** Currency is checked against the
-  reviewer's own fingerprint stamp, a collapsed `<details>` block in the
-  review body (`review.md` Step 6), which survives
+  reviewer's own fingerprint stamp, a `<sub>` line inside the review body's
+  `review details` tail fold (a collapsed `<details>` block of its own on
+  bodies from older reviewer releases; both parse — `review.md` Step 6),
+  which survives
   force-pushes and rebases because it hashes added-line content rather than
   SHAs. The check is **per file**: if the author pushed one unrelated fix after
   the review, findings in the files that did not change are still fixed, and
@@ -298,8 +300,10 @@ Unstamped reviews are common, not exceptional. The stamp was an HTML comment
 for its whole pre-2026-08 history, and gh-aw's safe-output ingest strips every
 XML/HTML comment before a review posts (`removeXmlComments` in
 `sanitize_content_core.cjs`), so no review posted in that window carries one;
-Khan/actions#287 documents it end to end. The stamp now posts as a collapsed
-`<details>` block (webapp#41742), so reviews from that reviewer release on
+Khan/actions#287 documents it end to end. The stamp then posted as a collapsed
+`<details>` block (webapp#41742) and now rides a `<sub>` line inside the
+body's single `review details` fold (readers accept both carriers), so
+reviews from that reviewer release on
 stamp normally and the file-level check runs against them, while every
 pre-fix body and any body from a consumer's pinned older reviewer still has
 no stamp. The reviewer's second carrier, its cache-memory record, is not

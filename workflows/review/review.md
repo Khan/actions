@@ -638,7 +638,9 @@ budget on content you never act on.
 - `prior-reviews.json` — every prior `github-actions[bot]` review body,
   whatever its state (a dismissed or comment-only review still carries its
   fingerprint stamp, which is why states are not filtered). The stamp is a
-  collapsed `<details>` block, not an HTML comment: the sanitizer deletes
+  `<sub>` line inside the body's `review details` tail fold (a collapsed
+  `<details>` block of its own on bodies from older releases; both parse),
+  never an HTML comment: the sanitizer deletes
   comments, which is why the original comment-form stamp never posted and
   every run planned full depth (webapp#41742). Bodies from before that fix carry
   no stamp; the plan CLI then falls back to the Step 9 cache-memory record

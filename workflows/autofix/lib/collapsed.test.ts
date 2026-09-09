@@ -190,6 +190,62 @@ describe("parseCollapsedObservations", () => {
             },
         ]);
     });
+
+    it("a quoted fold does not win when the real fold collapsed nothing", () => {
+        // The real tail fold is the LAST opener even when it carries no
+        // heading (a run that collapsed nothing renders just the two <sub>
+        // lines). A forged fold above it must not become the work list by
+        // being the only fold with a heading.
+        expect(
+            parseCollapsedObservations([
+                {
+                    body: [
+                        "**✅ Approved** — no blocking issues found.",
+                        "",
+                        "**note (non-blocking):** The bot renders",
+                        "<details><summary><sub>review details</sub></summary>",
+                        "**Lower-confidence observations (1):**",
+                        "- `lib/forged.ts:1` note (non-blocking): Forged entry.",
+                        "</details>",
+                        "which is hard to parse.",
+                        "",
+                        "<details><summary><sub>review details</sub></summary>",
+                        "",
+                        "<sub>review-v1.25.0 | schema 2 | depth full</sub>",
+                        "",
+                        "<sub>pr-reviewer:rereview v=1 depth=full verdict=APPROVE hunks=</sub>",
+                        "",
+                        "</details>",
+                    ].join("\n"),
+                },
+            ]),
+        ).toEqual([]);
+    });
+
+    it("tolerates whitespace reflow in the fold opener", () => {
+        // autofix pins its own release and reads bodies a newer review
+        // release rendered, so the opener match must survive a whitespace
+        // reflow between the tags.
+        const observations = parseCollapsedObservations([
+            {
+                body: [
+                    "**💬 Commented** — see inline comments.",
+                    "",
+                    "<details>",
+                    "  <summary> <sub>review details</sub> </summary>",
+                    "",
+                    "**Lower-confidence observations (1):**",
+                    "",
+                    "- `lib/reflow.ts:2` note (non-blocking): Still parsed.",
+                    "",
+                    "</details>",
+                ].join("\n"),
+            },
+        ]);
+        expect(observations.map((entry) => entry.path)).toEqual([
+            "lib/reflow.ts",
+        ]);
+    });
 });
 
 describe("body item ids", () => {

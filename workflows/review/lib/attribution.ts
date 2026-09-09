@@ -2,7 +2,10 @@
  * The collapsed footer surfaces: one shared `<details>` wrapper for the
  * run-level version/config footer (version-footer.ts) and the per-comment
  * reviewer attribution, plus the strip that keeps footer boilerplate out of
- * text-similarity comparisons.
+ * text-similarity comparisons. Since the one-fold consolidation this module
+ * also owns the review body's tail fold itself (renderReviewDetailsFold):
+ * the same chip, wrapping the collapsed observations and both `<sub>`
+ * bookkeeping lines.
  *
  * Why collapsed: both footers are metadata, not review content. Rendered
  * open they add a visible line to every posted surface; wrapped in
@@ -51,6 +54,20 @@ export const FOOTER_SUMMARY = "review details";
  * two (collapsed.ts).
  */
 export const REVIEW_DETAILS_OPEN = `<details><summary><sub>${FOOTER_SUMMARY}</sub></summary>`;
+
+/**
+ * Whitespace-tolerant matcher for {@link REVIEW_DETAILS_OPEN}, for READERS
+ * of already-posted bodies. autofix pins its own release and parses bodies
+ * the review workflow's release rendered, so the two sides can skew: a
+ * byte-exact substring match would read the work list as empty the day a
+ * render tweak (or an ingest rewrite) reflows whitespace between the tags.
+ * Lives beside the renderer for the usual no-drift reason. Global flag so
+ * callers can iterate every opener with matchAll.
+ */
+export const REVIEW_DETAILS_OPEN_RE = new RegExp(
+    `<details>\\s*<summary>\\s*<sub>${FOOTER_SUMMARY}</sub>\\s*</summary>`,
+    "g",
+);
 
 /**
  * Wrap one `<sub>` content line in the shared collapsed `<details>` block.

@@ -33,15 +33,15 @@
  * that follow the entries — neither matches the entry grammar, so they are
  * skipped like any other unparseable line.
  *
- * For the CURRENT shape the heading is hunted only after a `review details`
- * fold opener ({@link REVIEW_DETAILS_OPEN}), never across the whole body,
- * and the LAST fold holding a heading wins. A pr-level finding's discussion
+ * For the CURRENT shape the heading is hunted only inside the LAST
+ * `review details` fold ({@link REVIEW_DETAILS_OPEN_RE}), never across the
+ * whole body. A pr-level finding's discussion
  * is copied verbatim into the body ABOVE the real tail fold, so a finding
  * that quotes the heading — or an entire fold, opener and all — would
  * otherwise hand the parser a forged section and silently replace the real
- * work list. Legacy `<summary>` bodies keep the
- * whole-body search: their section carries its own fold, which no prose
- * above it opens.
+ * work list; anchoring on the last opener keeps a quoted fold from winning
+ * even when the real fold collapsed nothing. Legacy `<summary>` bodies keep
+ * the whole-body search they always had.
  *
  * The line grammar parsed here is `submission.ts`'s render, one entry per
  * line:
@@ -59,7 +59,7 @@ import {
     COLLAPSED_HEADING_RE,
     LEGACY_COLLAPSED_SUMMARY_RE,
 } from "../../review/lib/submission-render.ts";
-import {REVIEW_DETAILS_OPEN} from "../../review/lib/attribution.ts";
+import {REVIEW_DETAILS_OPEN_RE} from "../../review/lib/attribution.ts";
 import type {PriorReview} from "../../review/lib/rereview-mode.ts";
 
 /** One collapsed observation, parsed off the latest review body. */
@@ -78,34 +78,36 @@ export type CollapsedObservation = {
  * The observations section's text, from its heading to the close of the
  * block that carries it, or null when the body has none.
  *
- * Current shape first, and structurally: only a `review details` fold's own
- * interior is searched for the bold heading, so prose above the fold cannot
- * forge one — and of the folds that hold a heading, the LAST wins. Body
- * assembly renders the real fold as the body's tail, while a pr-level
- * finding's discussion (copied verbatim and unescaped ABOVE it) can quote
- * an entire fold, heading and all; taking the first match would hand that
- * quote the section slice. Every opener is still tried because the same
- * chip wraps the standalone version footer. Only if no fold holds a heading
- * is the legacy `<summary>` carrier looked for, whole-body, since that
- * shape predates the tail fold.
+ * Current shape first, and structurally: the LAST `review details` opener
+ * names the real tail fold — body assembly renders it after everything
+ * else, while a pr-level finding's discussion (copied verbatim and
+ * unescaped ABOVE it) can quote an entire fold, heading and all. Only that
+ * last fold's own interior is searched for the bold heading; a heading in
+ * any earlier fold is quoted prose by construction, so it must not win
+ * even when the real fold collapsed nothing and carries no heading of its
+ * own. Openers are matched whitespace-tolerantly
+ * ({@link REVIEW_DETAILS_OPEN_RE}): autofix pins its own release, so the
+ * body it reads may have been rendered — and ingest-rewritten — by a newer
+ * review release. Only when the body has no fold at all is the legacy
+ * `<summary>` carrier looked for, whole-body, since that shape predates
+ * the tail fold; a legacy body's own wrapped footer fold never carries a
+ * heading, so it falls through to that search too.
  */
 const locateSection = (body: string): string | null => {
-    let section: string | null = null;
-    for (
-        let open = body.indexOf(REVIEW_DETAILS_OPEN);
-        open !== -1;
-        open = body.indexOf(REVIEW_DETAILS_OPEN, open + 1)
-    ) {
-        const from = open + REVIEW_DETAILS_OPEN.length;
-        const close = body.indexOf("</details>", from);
-        const fold = body.slice(from, close === -1 ? body.length : close);
+    let lastOpenEnd = -1;
+    for (const open of body.matchAll(REVIEW_DETAILS_OPEN_RE)) {
+        lastOpenEnd = open.index + open[0].length;
+    }
+    if (lastOpenEnd !== -1) {
+        const close = body.indexOf("</details>", lastOpenEnd);
+        const fold = body.slice(
+            lastOpenEnd,
+            close === -1 ? body.length : close,
+        );
         const heading = fold.search(COLLAPSED_HEADING_RE);
         if (heading !== -1) {
-            section = fold.slice(heading);
+            return fold.slice(heading);
         }
-    }
-    if (section !== null) {
-        return section;
     }
     const legacy = body.search(LEGACY_COLLAPSED_SUMMARY_RE);
     if (legacy === -1) {

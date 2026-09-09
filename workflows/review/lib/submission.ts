@@ -813,9 +813,9 @@ export const runSubmissionCli = (
             collapsed.length,
             reducedSurface && collapsedNonBlockingOnly,
         );
-        // The blank line is load-bearing: GFM will not parse a `-` list
-        // whose first item sits flush against the raw-HTML `<summary>` the
-        // fold opens with.
+        // The blank line is load-bearing: flush against the bold heading
+        // paragraph, GFM reads the `-` bullets as that paragraph's lazy
+        // continuation instead of starting a list.
         const section = [
             header,
             "",
