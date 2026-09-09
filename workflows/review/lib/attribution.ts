@@ -43,15 +43,21 @@ export type AlsoFlagged = {
 export const FOOTER_SUMMARY = "review details";
 
 /**
+ * The verbatim opener line of every `review details` fold — the standalone
+ * footer block's and the review body's tail fold's alike. Exported because
+ * autofix anchors its collapsed-section slice to it: a heading quoted in
+ * model prose above the fold must not be mistaken for the fold's own
+ * heading, and this line is the only structural landmark that separates the
+ * two (collapsed.ts).
+ */
+export const REVIEW_DETAILS_OPEN = `<details><summary><sub>${FOOTER_SUMMARY}</sub></summary>`;
+
+/**
  * Wrap one `<sub>` content line in the shared collapsed `<details>` block.
  * The shape is fixed so {@link stripFooters} can remove it mechanically.
  */
 export const renderCollapsedFooter = (content: string): string =>
-    [
-        `<details><summary><sub>${FOOTER_SUMMARY}</sub></summary>`,
-        `<sub>${content}</sub>`,
-        "</details>",
-    ].join("\n");
+    [REVIEW_DETAILS_OPEN, `<sub>${content}</sub>`, "</details>"].join("\n");
 
 /**
  * The review body's ONE tail fold: the collapsed-observations list, the
@@ -60,7 +66,7 @@ export const renderCollapsedFooter = (content: string): string =>
  * when every section is empty, so a body with nothing to disclose grows no
  * empty expando.
  *
- * Why one fold (KORE-2632): the body used to end in three stacked
+ * Why one fold: the body used to end in three stacked
  * `<details>` blocks — observations, config footer, fingerprint stamp — two
  * of which are machine bookkeeping no human opens. Three chips in a row read
  * as clutter and pushed the actual review content (verdict, PR-wide
@@ -80,13 +86,9 @@ export const renderReviewDetailsFold = (
     if (kept.length === 0) {
         return "";
     }
-    return [
-        `<details><summary><sub>${FOOTER_SUMMARY}</sub></summary>`,
-        "",
-        kept.join("\n\n"),
-        "",
-        "</details>",
-    ].join("\n");
+    return [REVIEW_DETAILS_OPEN, "", kept.join("\n\n"), "", "</details>"].join(
+        "\n",
+    );
 };
 
 /**
@@ -261,12 +263,20 @@ export const attributionLine = (
 };
 
 /**
- * The collapsed-footer block, tolerant of the whitespace GitHub round-trips
- * may introduce; non-greedy so it stops at the block's own `</details>` (a
- * footer never nests another details block).
+ * The STANDALONE collapsed-footer block ({@link renderCollapsedFooter}'s
+ * exact shape): the opener, one `<sub>` line, the close, tolerant of the
+ * whitespace GitHub round-trips may introduce.
+ *
+ * Deliberately not `[\s\S]*?` between the opener and the close: a review
+ * body's tail fold now opens with the very same chip and carries the
+ * collapsed observations list, which is review content the similarity
+ * comparison needs. A wildcard interior would delete the whole tail. Only
+ * the one-`<sub>` shape is boilerplate, so only it is matched; a fold
+ * carrying anything else keeps its wrapper, and the whole-line `<sub>`
+ * strip below still removes the boilerplate lines inside it.
  */
 const FOOTER_BLOCK_RE = new RegExp(
-    `<details>\\s*<summary>\\s*<sub>${FOOTER_SUMMARY}</sub>\\s*</summary>[\\s\\S]*?</details>`,
+    `<details>\\s*<summary>\\s*<sub>${FOOTER_SUMMARY}</sub>\\s*</summary>\\s*<sub>[^<]*</sub>\\s*</details>`,
     "gi",
 );
 
@@ -299,7 +309,9 @@ const CONTEXT_FOLD_RE = new RegExp(
  * one-liners). Deliberately NOT a blanket `<sub>…</sub>` strip: a posted
  * comment whose own discussion quotes a `<sub>` span mid-prose (even in
  * backticks) is review content, and deleting it would distort the
- * similarity text.
+ * similarity text. A review body's tail fold shares the footer's chip but
+ * carries the observations list, so it survives as a wrapper plus its
+ * entries; only its `<sub>` bookkeeping lines go.
  */
 export const stripFooters = (body: string): string =>
     body
@@ -308,9 +320,8 @@ export const stripFooters = (body: string): string =>
         // CONTEXT_FOLD_OPEN through its own closing tag, non-greedy): the
         // prose inside the fold is review content and must stay
         // comparable, which is exactly why the fold does not reuse the
-        // `review details` chip this function removes wholesale. Other
-        // details blocks (the review body's collapsed-observations
-        // section) keep their wrappers: only the context chip matches.
+        // `review details` chip. Other details blocks keep their wrappers:
+        // only the context chip matches here.
         .replace(CONTEXT_FOLD_RE, "$1")
         .replace(/^[ \t]*<sub>[^<]*<\/sub>[ \t]*$/gm, "")
         .replace(/<sub>\([^<]*\)<\/sub>[ \t]*$/gm, "");

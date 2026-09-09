@@ -10,7 +10,7 @@ import {
 import type {ReReviewStamp} from "./rereview-mode";
 
 /**
- * The stamp's two accepted carriers. Since KORE-2632 the review body carries
+ * The stamp's two accepted carriers. Since the one-fold consolidation the review body carries
  * the fingerprint as a bare `<sub>` line inside the single collapsed
  * `review details` fold; every body posted before that carries the legacy
  * standalone `<details>` block. The planner reads the LATEST prior review of

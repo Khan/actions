@@ -56,7 +56,7 @@
  * PR-level claims folded into the body (the inline-comment safe output needs
  * a path and line), and ONE collapsed `review details` fold as the final
  * block, carrying the observations, the version/config line, and the
- * fingerprint stamp line (KORE-2632, sanitizer-surviving).
+ * fingerprint stamp line (sanitizer-surviving).
  *
  * Determinism boundary: pure composition of staged files through the same
  * lib functions the eval runner uses; no model call, no prose about the code
@@ -88,6 +88,7 @@ import {
 import {
     labelToken,
     renderClaimComment,
+    renderCollapsedHeading,
     renderCollapsedLine,
     renderPrLevelFold,
 } from "./submission-render";
@@ -514,7 +515,7 @@ export const runSubmissionCli = (
     // here by construction).
     const anchored: Claim[] = [];
     const prLevelLines: string[] = [];
-    /** The body's single `review details` fold, in render order (KORE-2632). */
+    /** The body's single `review details` fold, in render order. */
     const detailsSections: string[] = [];
     /** Whether that fold carries an observations list (review content). */
     let hasCollapsedSection = false;
@@ -529,7 +530,7 @@ export const runSubmissionCli = (
             // not the collapsed footer an inline comment gets: this renders
             // in the review BODY, and that footer's chip is the same
             // `review details` chip the body's one tail fold uses
-            // (KORE-2632), so stacking it put a second identically labelled
+            //, so stacking it put a second identically labelled
             // expando above the fold. Same choice the context fold makes
             // for a folded inline comment; stripFooters' whole-line `<sub>`
             // strip removes this form too, so dedup is unaffected.
@@ -801,17 +802,17 @@ export const runSubmissionCli = (
         );
         // A bold markdown header plus one bullet per entry, inside the
         // body's single `review details` fold rather than a `<details>`
-        // block of its own (KORE-2632). Gone with that block: the summary
-        // quoting the top entry's whole subject (Khan/actions#367, where a
-        // bare count hid a real finding) and the `<details open>`
-        // single-entry case (Khan/actions#387, a closed one-entry fold
-        // showing the observation twice). Both made a bare count worth
-        // opening; the fold is generic now, and the teaser had come to read
-        // as a duplicate of the first bullet under it.
-        const header =
-            reducedSurface && collapsedNonBlockingOnly
-                ? `**Non-blocking observations (${collapsed.length}):**`
-                : `**Lower-confidence observations (${collapsed.length}):**`;
+        // block of its own. Gone with that block: the summary quoting the
+        // top entry's whole subject (Khan/actions#367, where a bare count
+        // hid a real finding) and the `<details open>` single-entry case
+        // (Khan/actions#387, showing the observation twice). Both made a
+        // bare count worth opening; the fold is generic now. The heading is
+        // rendered in submission-render.ts, beside the regex autofix slices
+        // the section with.
+        const header = renderCollapsedHeading(
+            collapsed.length,
+            reducedSurface && collapsedNonBlockingOnly,
+        );
         // The blank line is load-bearing: GFM will not parse a `-` list
         // whose first item sits flush against the raw-HTML `<summary>` the
         // fold opens with.
@@ -895,7 +896,7 @@ export const runSubmissionCli = (
     if (stamp !== null) {
         detailsSections.push(stamp);
     }
-    // One fold for the whole tail (KORE-2632): observations, config, then
+    // One fold for the whole tail: observations, config, then
     // fingerprint, where the body used to end in three stacked expandos.
     const body = [coreBody, renderReviewDetailsFold(detailsSections)]
         .filter((line) => line !== "")
@@ -916,10 +917,9 @@ export const runSubmissionCli = (
         priorRcStands,
         inlineCount: inline.length,
         resolveCount: resolveIds.length,
-        // The observations list left `coreBody` for the tail fold
-        // (KORE-2632), so a body carrying nothing BUT that list would
-        // compare equal to the bare approve line and skip submission with
-        // real review content in hand.
+        // The observations list left `coreBody` for the tail fold, so a
+        // body carrying nothing BUT that list would compare equal to the
+        // bare approve line and skip submission with review content in hand.
         bareApproveBody:
             !hasCollapsedSection &&
             normalizeBody(coreBody) ===

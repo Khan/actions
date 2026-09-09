@@ -1,10 +1,10 @@
 import {describe, it, expect} from "vitest";
 
-import {stripFooters} from "./attribution";
+import {renderCollapsedFooter, stripFooters} from "./attribution";
 import {runSubmissionCli, type SubmissionFs} from "./submission";
 
 /**
- * The review body's single tail fold (KORE-2632). Split from
+ * The review body's single tail fold. Split from
  * submission.test.ts by its max-lines budget; the fixtures are small local
  * copies of that file's helpers.
  */
@@ -60,9 +60,75 @@ const staged = (
     }),
 });
 
+/**
+ * A prior APPROVE via the cache-memory carrier (posted bodies never keep
+ * their stamp), which is what makes a redundant-approval skip legitimate.
+ */
+const priorApprove = (): Record<string, string> => ({
+    [`${REVIEW}/pr-context.json`]: JSON.stringify({number: 41007}),
+    "/tmp/gh-aw/cache-memory/pr-41007.json": JSON.stringify({
+        verdict: "APPROVE",
+        stampHunks: {"a.ts": ["deadbeef00000000"]},
+        wasDraft: false,
+    }),
+});
+
+/** A claim weak enough that the confidence floor collapses it into the fold. */
+const weak = (overrides: Record<string, unknown> = {}) =>
+    claim({
+        id: "weak",
+        label: "thought (non-blocking)",
+        subject: "a hunch",
+        confidence: 0.3,
+        ...overrides,
+    });
+
+describe("the fold's content blocks the submission skips", () => {
+    // Both skips compare the CORE body, which the observations list left
+    // when the tail moved into the fold. Without the two
+    // `!hasCollapsedSection` guards a body whose only content is the list
+    // reads as empty, and the run withholds the observations on this push
+    // and every later one.
+
+    it("refuses the redundant-approval skip when only the fold carries content", () => {
+        // Pins `bareApproveBody`: no inline comments, no notes, so the core
+        // body IS the bare approve line and the guard is the only thing
+        // standing between a real observation and a silent skip.
+        const plan = runSubmissionCli(
+            makeFakeFs({
+                ...staged({depth: "full", claims: [weak()]}),
+                ...priorApprove(),
+            }),
+        );
+        expect(plan.event).toBe("APPROVE");
+        expect(plan.comments).toEqual([]);
+        expect(plan.body).toContain("**Lower-confidence observations (1):**");
+        expect(plan.body).toContain("`a.ts:2` thought (non-blocking): a hunch");
+        expect(plan.skipSubmission).toBe(false);
+    });
+
+    it("refuses the demoted-COMMENT skip when the fold carries observations", () => {
+        // Pins `bodyCarriesOnlyDepthNote`: a fast round demotes its
+        // would-be APPROVE, so the core body is head plus depth note and
+        // can never equal the bare approve line — the emptiness signal is
+        // this field alone, and the collapsed list is content it must see.
+        const plan = runSubmissionCli(
+            makeFakeFs({
+                ...staged({depth: "fast", claims: [weak()]}),
+                ...priorApprove(),
+            }),
+        );
+        expect(plan.event).toBe("COMMENT");
+        expect(plan.comments).toEqual([]);
+        expect(plan.body).toContain("Note: ");
+        expect(plan.body).toContain("**Lower-confidence observations (1):**");
+        expect(plan.skipSubmission).toBe(false);
+    });
+});
+
 describe("the review body's review-details fold", () => {
     it("carries exactly one top-level fold when observations, config, and fingerprint all render", () => {
-        // The KORE-2632 shape: the body used to end in three stacked
+        // The one-fold shape: the body used to end in three stacked
         // <details> blocks (observations, config footer, fingerprint), two
         // of them machine bookkeeping. Anything above the fold is review
         // content a human reads without clicking.
@@ -112,7 +178,7 @@ describe("the review body's review-details fold", () => {
         // The pr-level fold's attribution used to be a `renderCollapsedFooter`
         // block, whose chip is the same `review details` chip the tail fold
         // carries: two identically-labelled expandos in one body. It is a
-        // bare `<sub>` line now (KORE-2632), the shape the context fold
+        // bare `<sub>` line now, the shape the context fold
         // already uses for a folded inline comment.
         const fs = makeFakeFs(
             staged({
@@ -139,5 +205,30 @@ describe("the review body's review-details fold", () => {
         // And the bare line still drops out of the text-similarity input,
         // exactly as the collapsed footer block did.
         expect(stripFooters(body)).not.toContain("found by skill-auditor");
+    });
+
+    it("stripFooters keeps the fold's observations and drops only boilerplate", () => {
+        // The footer strip used to delete any `review details` block
+        // wholesale. The tail fold wears that same chip now, so a wildcard
+        // interior would delete the observations with it — review content
+        // the similarity comparison is built on.
+        const fs = makeFakeFs(staged({depth: "full", claims: [weak()]}));
+        const body = runSubmissionCli(fs).body;
+        const stripped = stripFooters(body);
+        expect(stripped).toContain("`a.ts:2` thought (non-blocking): a hunch");
+        expect(stripped).toContain("Lower-confidence observations");
+        // The bookkeeping `<sub>` lines inside the fold still go...
+        expect(stripped).not.toContain("pr-reviewer:rereview");
+        expect(stripped).not.toMatch(/<sub>review-v/);
+        // ...and the STANDALONE wrapped footer (review.md Step 7's guidance
+        // comment stages exactly this shape) is still removed entire.
+        expect(
+            stripFooters(
+                [
+                    "Body.",
+                    renderCollapsedFooter("review-v1.24.0 | schema 2"),
+                ].join("\n"),
+            ).trim(),
+        ).toBe("Body.");
     });
 });

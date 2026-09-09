@@ -315,7 +315,7 @@ describe("runVersionFooterCli", () => {
     });
 });
 
-describe("the bare line form (the review body's carrier since KORE-2632)", () => {
+describe("the bare line form (the review body's carrier since the one-fold consolidation)", () => {
     it("renders the same segments without the collapsed wrapper", () => {
         const inputs = {
             version: "1.24.0",

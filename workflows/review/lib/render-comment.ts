@@ -506,7 +506,7 @@ export const HOLD_UNSTUCK_LINES = [
  * forming the entire body when the head is empty), and for HOLD_FOR_HUMAN,
  * which must always explain itself and how to proceed.
  *
- * The verdict phrase is bold with a verdict emoji (KORE-2632): the head used
+ * The verdict phrase is bold with a verdict emoji: the head used
  * to be a bare sentence of the same visual weight as the PR-wide feedback
  * paragraphs below it, so nothing separated the verdict from the findings.
  * Nothing parses the head text (the machine-readable verdict is the review

@@ -43,7 +43,7 @@
  *      `no-prior-fingerprint` (measured 2026-07-21 on Khan/webapp#40996,
  *      and again on webapp#41742). `details`/`summary`/`sub` are on the
  *      sanitizer's allowed-tags list, so the `<sub>` line posts intact.
- *      (Pre-KORE-2632 bodies carry a `<details>` block; readers take both.)
+ *      (Older bodies carry a `<details>` block; readers take both.)
  *   2. The cache-memory record (`/tmp/gh-aw/cache-memory/pr-<n>.json`),
  *      whose Step 9 fields (`verdict`, `stampHunks` — falling back to
  *      `reviewedHunks` where a consumer's Step 9 wrote the code-computed
@@ -214,7 +214,7 @@ export const renderRereviewStampLine = (stamp: ReReviewStamp): string => {
 /**
  * The LEGACY standalone `<details>` carrier, no longer emitted in
  * production; kept so the eval's live staging and the parser tests can
- * build the pre-KORE-2632 shape every in-flight PR's prior review carries.
+ * build the pre-consolidation shape every in-flight PR's prior review carries.
  */
 export const renderRereviewStamp = (stamp: ReReviewStamp): string =>
     [
@@ -287,7 +287,7 @@ export const parseRereviewStamp = (body: string): ReReviewStamp | null => {
 /**
  * The stamp's carrier, in BOTH accepted forms: the current bare
  * `<sub>payload</sub>` line inside the body's single `review details` fold
- * (KORE-2632), and the legacy standalone block every earlier body carries.
+ *, and the legacy standalone block every earlier body carries.
  * The line alternative deliberately stops at its own `</sub>`: the next
  * `</details>` closes the enclosing fold, and swallowing it would leave
  * unbalanced HTML for rule 7 to read as a body splice. The legacy wrapper

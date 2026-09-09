@@ -331,7 +331,7 @@ describe("runSubmissionCli", () => {
         // The attribution is a bare <sub> line, not the collapsed footer:
         // that footer's chip is the same `review details` chip the body's
         // one tail fold uses, so stacking it here would put a second
-        // identically-labelled expando in the body (KORE-2632).
+        // identically-labelled expando in the body.
         expect(plan.body).toContain(
             "<sub>found by correctness-reviewer | also flagged by " +
                 "completeness (at line 7)</sub>",
@@ -573,7 +573,7 @@ describe("the gate's plan-match rule (slice 4)", () => {
         );
         const plan = runSubmissionCli(fs);
         const lines = plan.body.split("\n");
-        // ONE tail fold (KORE-2632): config line, then fingerprint line.
+        // ONE tail fold: config line, then fingerprint line.
         expect(lines.at(-1)).toBe("</details>");
         expect(lines.at(-2)).toBe("");
         expect(lines.at(-3)).toMatch(/^<sub>pr-reviewer:rereview .*<\/sub>$/);

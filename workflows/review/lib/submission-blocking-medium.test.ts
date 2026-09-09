@@ -107,8 +107,9 @@ describe("runSubmissionCli: re-review blocking-medium", () => {
         );
         expect(plan.comments).toHaveLength(1);
         expect(plan.comments[0].line).toBe(2);
-        // A one-entry section renders open with a count-only summary (the
-        // top tag would duplicate the whole payload).
+        // The section is a bold heading plus one bullet per entry, inside
+        // the body's shared `review details` fold; the reduced surface
+        // picks the "Non-blocking" wording.
         expect(plan.body).toContain("**Non-blocking observations (1):**");
         expect(plan.body).toContain(
             "- `a.ts:9` suggestion (non-blocking): Rename the helper.",

@@ -651,7 +651,8 @@ Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministi
   reduced depths never approve, so the cleared block waits for a
   full-roster round to become one.
 - **Divergence tripwire.** Every full-depth review stamps a content-hashed
-  hunk signature into its review body as a collapsed `<details>` block (an
+  hunk signature into its review body as a `<sub>` line inside the body's
+  single collapsed `review details` fold (an
   HTML comment would be deleted by the ingest sanitizer; it survives cache
   eviction and branch protection's dismiss-stale-approvals, and it (not the
   review state) is what marks a full review as having happened, so a
@@ -1109,8 +1110,10 @@ block, and a long one posts as a visible summary line plus one collapsed
 context block (`lib/render-comment.ts`) with the attribution riding inside
 that block as its final `<sub>` line rather than stacking a second expando.
 A pr-level finding in the review body keeps its own fold
-(`renderPrLevelFold`: the `Full finding` chip at 400 chars) with the classic
-footer stacked after it. Collapsed one-liners (the low-confidence `<details>` section and a
+(`renderPrLevelFold`: the `Full finding` chip at 400 chars) and names its
+reviewer on a bare `<sub>` line after it — the same shape a context-folded
+inline comment uses — rather than stacking a second `review details` expando
+above the body's own. Collapsed one-liners (the observations section and a
 hold comment's claim list) carry the short form, a trailing
 `<sub>(<source>)</sub>` tag. Text-similarity comparisons against
 previously-posted bodies (open-thread suppression, the adjudicated corpus)

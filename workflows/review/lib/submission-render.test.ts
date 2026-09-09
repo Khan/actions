@@ -7,7 +7,9 @@ import {
 } from "./submission";
 import {
     COLLAPSED_ENTRY_RE,
+    COLLAPSED_SUMMARY_RE,
     MAX_VERBATIM_FOLD_CHARS,
+    renderCollapsedHeading,
     renderCollapsedLine,
     renderPrLevelFold,
 } from "./submission-render";
@@ -391,5 +393,35 @@ describe("renderCollapsedLine", () => {
         expect(match?.[4]).toBe(
             "No test pins the blank line between (/details) and the fence.",
         );
+    });
+});
+
+describe("the collapsed heading's render/match pair", () => {
+    it("matches its own rendered line on both wordings", () => {
+        for (const nonBlockingOnly of [true, false]) {
+            const heading = renderCollapsedHeading(3, nonBlockingOnly);
+            expect(heading).toContain(
+                nonBlockingOnly ? "Non-blocking" : "Lower-confidence",
+            );
+            expect(`prose\n${heading}\nmore`).toMatch(COLLAPSED_SUMMARY_RE);
+        }
+    });
+
+    it("does not match the heading quoted inside a sentence", () => {
+        // A pr-level discussion is copied verbatim into the body, so a
+        // finding ABOUT the review format must not read as a section
+        // anchor; the line anchors are what make that structural.
+        expect(
+            "the run emits **Non-blocking observations (2):** at the top",
+        ).not.toMatch(COLLAPSED_SUMMARY_RE);
+        expect("**Non-blocking observations (N):**").not.toMatch(
+            COLLAPSED_SUMMARY_RE,
+        );
+    });
+
+    it("still matches the legacy per-section summary line", () => {
+        expect(
+            "<summary>Lower-confidence observations (2; top: x)</summary>",
+        ).toMatch(COLLAPSED_SUMMARY_RE);
     });
 });

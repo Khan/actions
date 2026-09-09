@@ -114,9 +114,9 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         );
         // The pr-level note outranks the nitpick for the summary slot
         // (nitpicks rank last; the collapsed list re-sorts with pr-level
-        // claims included). Asserted with the wrapper: N>=2 is the closed
-        // `<details>` arm (also pinned off the renderer by collapsed.test.ts's
-        // N=2 round-trip case; this one covers the blocking-only wording).
+        // claims included). Asserted on the bold heading the shared fold
+        // carries (collapsed.test.ts pins the same shape off the renderer;
+        // this case covers the blocking-only wording).
         expect(plan.body).toContain("**Non-blocking observations (2):**");
         expect(plan.body).toContain(
             "- `a.ts:9` nitpick (non-blocking): Rename the helper. " +
@@ -251,8 +251,8 @@ describe("runSubmissionCli: re-review blocking-only", () => {
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("APPROVE");
         expect(plan.comments).toEqual([]);
-        // One entry: open section, count-only summary, the entry itself
-        // visible in the body.
+        // One entry: the bold heading and its bullet, inside the body's
+        // shared `review details` fold.
         expect(plan.body).toContain("**Non-blocking observations (1):**");
         expect(plan.body).toContain(
             "- `a.ts:2` nitpick (non-blocking): Rename the helper.",

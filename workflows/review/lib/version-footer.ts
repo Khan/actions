@@ -112,10 +112,10 @@ const footerSegments = (inputs: VersionFooterInputs): string => {
  * so a degraded staging yields a shorter footer, never a wrong one. Contains
  * no HTML comment by construction (the sanitizer would delete one).
  *
- * This is the form the review body carries since KORE-2632: the body's tail
- * has ONE fold (attribution.ts's renderReviewDetailsFold) holding the
- * collapsed observations, this line, and the fingerprint line, rather than
- * three stacked expandos.
+ * This is the form the review body carries since its tail collapsed to ONE
+ * fold (attribution.ts's renderReviewDetailsFold) holding the collapsed
+ * observations, this line, and the fingerprint line, rather than three
+ * stacked expandos.
  */
 export const renderVersionFooterLine = (inputs: VersionFooterInputs): string =>
     `<sub>${footerSegments(inputs)}</sub>`;
@@ -195,7 +195,7 @@ export const runVersionFooterCli = (
  * {@link runVersionFooterCli} because the two callers want different things
  * and neither wants a branch: review.md Step 7 reads the staged file and
  * needs the self-contained block, while submission.ts folds the line into
- * the review body's single `review details` fold (KORE-2632) and must not
+ * the review body's single `review details` fold and must not
  * nest a second `<details>` inside it. Both stage the WRAPPED form at
  * {@link FOOTER_OUT}, so Step 7 is unaffected by which one the run called.
  */
