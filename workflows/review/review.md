@@ -1962,9 +1962,19 @@ or `keep`.
 already open; the pipeline will not post a bot comment there. Do not
 resolve or otherwise touch human threads — they are input only.
 
-Return ONLY this JSON object (no prose, no code fence; `acknowledged` may be empty or
-omitted, and every entry in it must also be in `keep`):
-{"resolve": ["thread_id", "..."], "keep": ["thread_id", "..."], "acknowledged": ["thread_id", "..."], "skipLines": [{"path": "...", "line": 0}]}
+An answered non-blocking scope or follow-up question also belongs in `resolve`.
+Additionally list it in `answered` when the PR author's reply supplies the answer
+(e.g. the requested follow-up is already ticketed). This records an answer, not a
+code fix, so a full re-review won't ask the same question again. Read the whole
+reply chain. A reply's presence alone isn't an answer. Don't include unresolved
+questions, promises to fix a defect, or defect questions resolved because code was
+fixed or removed. When unsure, omit `answered`. Blocking threads never belong in
+`answered`, and this field doesn't change their resolution rules.
+
+Return ONLY this JSON object (no prose or code fence). `acknowledged` may be empty
+or omitted, and every entry must also be in `keep`. `answered` may be empty or
+omitted, and every entry must also be in `resolve`:
+{"resolve": ["thread_id", "..."], "keep": ["thread_id", "..."], "acknowledged": ["thread_id", "..."], "answered": ["thread_id", "..."], "skipLines": [{"path": "...", "line": 0}]}
 
 ## agent: `claim-clusterer`
 ---

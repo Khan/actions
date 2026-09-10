@@ -22,11 +22,13 @@
  * same judgment through the other feedback channel the bot advertises;
  * until this module that signal dead-ended in the retired thumbs sweep's
  * counters). The resolver identity is the resolution
- * membership rule, not resolution alone; a thread the BOT resolved is the
- * reconciler marking a defect FIXED, and a fixed defect that reappears is a
- * fresh finding that must post.
+ * membership rule, not resolution alone. Bot resolutions have no such
+ * authority unless an explicit answered scope-question record survives the
+ * checks in answered-questions.ts. A code-fixed defect that reappears stays
+ * eligible to post.
  */
 
+import {hasAnsweredQuestionEvidence} from "./answered-questions";
 import {
     bestOpenThreadMatch,
     openThreadsFromStaged,
@@ -49,12 +51,13 @@ import {isReviewBotAuthor} from "./threads";
  * The guards mirror `openThreadsFromStaged`'s, with the resolution checks
  * INVERTED and strengthened: membership requires an explicit `resolved: true`
  * AND a non-empty human `resolvedBy`, OR an explicit positive
- * `openerDownvotes` count, because this corpus grants the strongest
+ * `openerDownvotes` count, OR a verified `answeredBy` scope-question record
+ * from answered-questions.ts. This corpus grants the strongest
  * suppression in the pipeline (a defect a human marked settled stays settled
  * across rephrasings) and must never be manufacturable from a malformed
  * staging. Each guard fails closed toward NOT suppressing: a thread without
- * a bot opener, without either signal, or whose resolver is absent,
- * unattributable (""), or the bot itself contributes nothing, and the worst
+ * a bot opener or without any of these signals contributes nothing. An
+ * absent or bot resolver alone provides no adjudication, and the worst
  * case is a duplicate comment.
  */
 export const adjudicatedThreadsFromStaged = (threads: unknown): OpenThread[] =>
@@ -75,9 +78,15 @@ export const adjudicatedThreadsFromStaged = (threads: unknown): OpenThread[] =>
                 !isReviewBotAuthor(resolvedBy);
             const downvotes = thread["openerDownvotes"];
             const downvoted = typeof downvotes === "number" && downvotes > 0;
+            // Set only by the verified reconciler answer or its cache replay.
+            // Bot resolution alone still means a fixed defect, not an answer.
+            const answered = hasAnsweredQuestionEvidence(
+                thread,
+                thread["answeredBy"],
+            );
             if (
                 typeof thread["thread_id"] !== "string" ||
-                (!humanResolved && !downvoted) ||
+                (!humanResolved && !downvoted && !answered) ||
                 typeof author !== "string" ||
                 !isReviewBotAuthor(author)
             ) {

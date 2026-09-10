@@ -53,6 +53,8 @@
 /* Paths and seams                                                            */
 /* -------------------------------------------------------------------------- */
 
+import {verifiedAnsweredQuestions} from "./answered-questions";
+
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const CACHE_MEMORY_DIR = "/tmp/gh-aw/cache-memory";
 const AGENT_OUTPUT_PATH = "/tmp/gh-aw/agent_output.json";
@@ -430,7 +432,12 @@ export const runCacheRecordCli = (
     }
 
     const prContext = readJson(fs, `${REVIEW_DIR}/pr-context.json`) as
-        | {number?: unknown; headSha?: unknown; isDraft?: unknown}
+        | {
+              number?: unknown;
+              headSha?: unknown;
+              isDraft?: unknown;
+              author?: unknown;
+          }
         | undefined;
     if (typeof prContext?.number !== "number") {
         return refuse("pr-context.json is not staged: no record path to write");
@@ -451,7 +458,7 @@ export const runCacheRecordCli = (
         | {stampHunks?: unknown}
         | undefined;
     const dispatch = readJson(fs, `${REVIEW_DIR}/dispatch-result.json`) as
-        | {claims?: unknown; riskFiles?: unknown}
+        | {claims?: unknown; riskFiles?: unknown; reconciliation?: unknown}
         | undefined;
     const issuesFlagged = (
         Array.isArray(dispatch?.claims) ? dispatch.claims : []
@@ -507,8 +514,38 @@ export const runCacheRecordCli = (
         }
     }
 
+    // Preserve only explicit answers whose resolutions were actually queued.
+    // Use dispatch's parsed reconciliation: raw agent output can contain fences
+    // or prose that the strict staged-file reader rejects.
+    // A code fix has no answer record, so a later regression remains eligible.
+    const answeredQuestions = new Map(
+        (Array.isArray(carried["answeredQuestions"])
+            ? carried["answeredQuestions"].filter(isRecord)
+            : []
+        ).map((entry) => [entry["thread_id"], entry]),
+    );
+    const queuedResolutions = new Set(
+        items
+            .filter(
+                (item) => item["type"] === "resolve_pull_request_review_thread",
+            )
+            .map((item) => item["thread_id"]),
+    );
+    for (const answer of verifiedAnsweredQuestions(
+        readJson(fs, `${REVIEW_DIR}/threads.json`),
+        dispatch?.reconciliation,
+        prContext.author,
+    )) {
+        if (queuedResolutions.has(answer.thread_id)) {
+            answeredQuestions.set(answer.thread_id, answer);
+        }
+    }
+
     const record: Record<string, unknown> = {
         timestamp: nowIso,
+        ...(answeredQuestions.size > 0
+            ? {answeredQuestions: [...answeredQuestions.values()]}
+            : {}),
         ...(typeof prContext.headSha === "string"
             ? {commitSha: prContext.headSha}
             : {}),
