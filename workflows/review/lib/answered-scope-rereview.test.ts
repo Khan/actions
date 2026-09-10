@@ -167,6 +167,7 @@ const dispatch = async (
     firstRound: boolean,
     defectLabel: string,
     answered = true,
+    reconcilerFormat = "json",
 ) => {
     const outputs: Record<string, unknown> = {
         "pattern-triage": {patterns: [], reviewFiles: [PATH, "defect.ts"]},
@@ -202,8 +203,15 @@ const dispatch = async (
     const calls: string[] = [];
     const runner: AgentRunner = async (request) => {
         calls.push(request.name);
+        const json = JSON.stringify(outputs[request.name]);
+        const output =
+            request.name !== "thread-reconciler" || reconcilerFormat === "json"
+                ? json
+                : reconcilerFormat === "fenced"
+                ? `Reconciliation result:\n\`\`\`json\n${json}\n\`\`\`\nDone.`
+                : `Reconciliation result:\n${json}\nDone.`;
         return {
-            output: JSON.stringify(outputs[request.name]),
+            output,
             usd: 0,
             turns: 1,
             wallMs: 1,
@@ -264,18 +272,33 @@ describe("answered scope question across full re-reviews", () => {
     });
 
     it.each([
-        "suggestion (non-blocking)",
-        "question (non-blocking)",
-        "issue (blocking)",
+        ["suggestion (non-blocking)", "json"],
+        ["question (non-blocking)", "json"],
+        ["issue (blocking)", "json"],
+        ["suggestion (non-blocking)", "fenced"],
+        ["suggestion (non-blocking)", "prose"],
     ])(
-        "retains an explicit answer, while a fixed-then-regressed %s still posts",
-        async (label) => {
+        "retains an explicit answer, while a fixed-then-regressed %s still posts (%s output)",
+        async (label, reconcilerFormat) => {
             const fs = fakeFs();
             await stage(fs, false, label);
             expect(
                 JSON.parse(fs.files[`${REVIEW}/threads.json`])[0].comments,
             ).toEqual(QUESTION.comments);
-            const first = await dispatch(fs, true, label);
+            const first = await dispatch(
+                fs,
+                true,
+                label,
+                true,
+                reconcilerFormat,
+            );
+            if (reconcilerFormat !== "json") {
+                expect(() =>
+                    JSON.parse(
+                        fs.files[`${REVIEW}/out/thread-reconciler.json`],
+                    ),
+                ).toThrow();
+            }
             expect(first.result.claims.map((c) => c.id)).toEqual([
                 "correctness-reviewer-1",
             ]);

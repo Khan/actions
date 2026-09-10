@@ -153,6 +153,21 @@ describe("answered scope question evidence", () => {
         const adjudicated = includeAnsweredQuestions(null, [thread], decision, {
             author,
         });
+        expect(adjudicated).toEqual([{...thread, answeredBy: author}]);
+        const nonblocking = suppressTrackedDuplicates(
+            [fixture.candidate],
+            [thread],
+            adjudicated,
+            new Set(decision.resolve),
+        );
+        expect(nonblocking.kept).toEqual([]);
+        expect(nonblocking.suppressed).toEqual([
+            expect.objectContaining({
+                id: fixture.candidate.id,
+                thread_id: thread.thread_id,
+                adjudicated: true,
+            }),
+        ]);
         const candidate = {...fixture.candidate, label: "issue (blocking)"};
         const result = suppressTrackedDuplicates(
             [candidate],

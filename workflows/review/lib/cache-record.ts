@@ -458,7 +458,7 @@ export const runCacheRecordCli = (
         | {stampHunks?: unknown}
         | undefined;
     const dispatch = readJson(fs, `${REVIEW_DIR}/dispatch-result.json`) as
-        | {claims?: unknown; riskFiles?: unknown}
+        | {claims?: unknown; riskFiles?: unknown; reconciliation?: unknown}
         | undefined;
     const issuesFlagged = (
         Array.isArray(dispatch?.claims) ? dispatch.claims : []
@@ -515,6 +515,8 @@ export const runCacheRecordCli = (
     }
 
     // Preserve only explicit answers whose resolutions were actually queued.
+    // Use dispatch's parsed reconciliation: raw agent output can contain fences
+    // or prose that the strict staged-file reader rejects.
     // A code fix has no answer record, so a later regression remains eligible.
     const answeredQuestions = new Map(
         (Array.isArray(carried["answeredQuestions"])
@@ -531,7 +533,7 @@ export const runCacheRecordCli = (
     );
     for (const answer of verifiedAnsweredQuestions(
         readJson(fs, `${REVIEW_DIR}/threads.json`),
-        readJson(fs, `${REVIEW_DIR}/out/thread-reconciler.json`),
+        dispatch?.reconciliation,
         prContext.author,
     )) {
         if (queuedResolutions.has(answer.thread_id)) {
