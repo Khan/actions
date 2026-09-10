@@ -42,7 +42,6 @@ import {
     isBlockingLabel,
     labelForFinding,
     renderReviewBody,
-    type ConventionalLabel,
     type SkippedDimension,
     type VerdictEvent,
 } from "../lib/render-comment";
@@ -69,8 +68,8 @@ import {
 /**
  * One normalised candidate comment — a recorded finding after the code-owned
  * label + anchor extraction (review.md Step 3 "normalize each lens finding into
- * a candidate comment"). Carries the rendered body so a caller can diff the
- * exact text that would be posted.
+ * a candidate comment"). The body is the bare claim renderer's output, without
+ * publication attribution or submission placement.
  */
 export type RunCandidate = {
     /** The finding's stable id (dedup + must-catch correlation). */
@@ -79,8 +78,10 @@ export type RunCandidate = {
     source: string;
     /** The lens recorded on the finding. */
     lens: Lens;
-    /** Code-computed Conventional-Comment label (never model-authored). */
-    label: ConventionalLabel;
+    /** Original label-shape label, or the code-computed structured lens label. */
+    label: string;
+    /** Preserves the effective label when rebuilding a production claim. */
+    labelOverride: string;
     /** Whether {@link label} is a blocking label (#194's mechanical signal). */
     blocking: boolean;
     /** Where the comment anchors (line / file / PR-level). */
@@ -188,19 +189,20 @@ const anchorLine = (anchor: Anchor): number | undefined =>
     anchor.type === "line" ? anchor.line : undefined;
 
 /**
- * Normalise one recorded finding to a candidate: compute the label in code
- * (never from the model), extract the anchor path/line, and render the body.
+ * Normalise one recorded finding to a candidate: preserve an original label or
+ * compute the structured lens label, extract the anchor, and render the body.
  * This is the same normalisation review.md Step 3 performs before a finding
  * flows through the scope filter / verdict / comment path.
  */
 export const toCandidate = (recorded: RecordedFinding): RunCandidate => {
     const {finding, source} = recorded;
-    const label = labelForFinding(finding);
+    const label = recorded.labelOverride ?? labelForFinding(finding);
     return {
         id: finding.id,
         source,
         lens: finding.lens,
         label,
+        labelOverride: label,
         blocking: isBlockingLabel(label),
         anchor: finding.anchor,
         ...(anchorPath(finding.anchor) !== undefined
@@ -280,58 +282,36 @@ export const applyValidation = (
             validated.push(candidate);
             continue;
         }
-        if (verification.verification === "confirmed") {
-            if (verification.corrected === undefined) {
-                validated.push(candidate);
-                continue;
-            }
-            // Keep field validation in production code. Invalid corrections
-            // retain the original field, and correcting detail never drops a
-            // supported finding. Matchers read the updated finding too.
-            const [claim] = applyVerifications(buildClaims([candidate]), {
-                [candidate.id]: verification,
-            });
-            const finding: Finding = {
-                ...candidate.finding,
-                summary: claim.subject,
-                model_authored_prose: claim.discussion,
-                confidence: claim.confidence,
-                severity: isBlockingLabel(claim.label)
-                    ? "blocking"
-                    : claim.importance === "medium"
-                    ? "medium"
-                    : "advisory",
-                ...(candidate.anchor.type === "line" && claim.line !== undefined
-                    ? {anchor: {...candidate.anchor, line: claim.line}}
-                    : {}),
-                ...(claim.suggestion !== undefined
-                    ? {suggested_patch: claim.suggestion}
-                    : {}),
-            };
-            validated.push({
-                ...toCandidate({source: candidate.source, finding}),
-                label: claim.label as ConventionalLabel,
-                body: renderClaimComment(claim),
-            });
-            continue;
-        }
-        if (verification.verification === "refuted") {
+        const [claim] = applyVerifications(buildClaims([candidate]), {
+            [candidate.id]: verification,
+        });
+        if (claim === undefined) {
             dropped.push(candidate);
             continue;
         }
-        // plausible: never blocks. Downgrade the finding and re-run the same
-        // code-owned normalisation so the label mapping cannot drift from
-        // labelForFinding (blocking → the non-blocking equivalent).
-        const downgraded: Finding = {
+        // Production owns accepted corrections and plausible label downgrades.
+        // Matchers receive the corrected fields without losing the label override.
+        const finding: Finding = {
             ...candidate.finding,
-            severity: "advisory",
-            confidence:
-                verification.confidence ??
-                Math.min(candidate.finding.confidence, 0.4),
+            summary: claim.subject,
+            model_authored_prose: claim.discussion,
+            confidence: claim.confidence,
+            severity: isBlockingLabel(claim.label)
+                ? "blocking"
+                : claim.importance === "medium"
+                ? "medium"
+                : "advisory",
+            ...(candidate.anchor.type === "line" && claim.line !== undefined
+                ? {anchor: {...candidate.anchor, line: claim.line}}
+                : {}),
+            ...(claim.suggestion !== undefined
+                ? {suggested_patch: claim.suggestion}
+                : {}),
         };
-        validated.push(
-            toCandidate({source: candidate.source, finding: downgraded}),
-        );
+        validated.push({
+            ...toCandidate({...candidate, finding, labelOverride: claim.label}),
+            body: renderClaimComment(claim),
+        });
     }
     return {validated, dropped};
 };
@@ -426,7 +406,7 @@ export const runCase = (
                 const snap = snappedById.get(c.id);
                 return snap === undefined
                     ? c
-                    : toCandidate({source: c.source, finding: snap.finding});
+                    : toCandidate({...c, finding: snap.finding});
             });
         snappedByProvenance = changeAnchored.flatMap((candidate) => {
             const snap = snappedById.get(candidate.id);
@@ -444,7 +424,13 @@ export const runCase = (
                 );
                 return demoted === undefined
                     ? c
-                    : toCandidate({source: c.source, finding: demoted});
+                    : toCandidate({
+                          ...c,
+                          finding: demoted,
+                          labelOverride: applyVerifications(buildClaims([c]), {
+                              [c.id]: {verification: "plausible"},
+                          })[0].label,
+                      });
             });
     }
 

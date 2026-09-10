@@ -25,9 +25,26 @@ describe("fidelity implementation provenance", () => {
         expect(report.implementationFiles).toEqual(
             expect.arrayContaining(productionFiles),
         );
+        expect(report.implementationFiles).toContain(
+            "workflows/review/eval/metrics.ts",
+        );
+        expect(report.implementationFiles).not.toContain(
+            "workflows/review/eval/live-producer.ts",
+        );
         expect(report.implementationSha256).toBe(
             hashFiles(report.implementationFiles),
         );
+    });
+
+    it("names bare-renderer equality rather than publication bytes", () => {
+        const report = measureFidelity();
+        expect(report.renderingSurface).toContain("without attribution");
+        for (const row of report.rows) {
+            expect(row.originalMatchesBareRenderer).toBe(true);
+            expect(row.controlMatchesBareRenderer).toBe(true);
+            expect(row).not.toHaveProperty("originalMatchesProduction");
+            expect(row).not.toHaveProperty("controlMatchesProduction");
+        }
     });
 
     it("changes when any recorded dependency's bytes change", () => {

@@ -96,7 +96,7 @@ describe("historical finding fidelity", () => {
                 ).toEqual(allPass);
             });
 
-            it("replays the same correction and posting surface in the eval", () => {
+            it("replays the correction with bare-renderer equality, excluding attribution", () => {
                 const corpusCase = parseCase(
                     {...fixture.corpusCase, validation: fixture.control.claims},
                     fixture.corpusCase.sourcePath,
@@ -112,6 +112,11 @@ describe("historical finding fidelity", () => {
                     parseValidatorOutput(JSON.stringify(fixture.control)),
                 );
                 expect(posted.body).toBe(renderClaimComment(production[0]));
+                expect(posted.body).not.toBe(
+                    renderClaimComment(production[0], {
+                        source: production[0].source,
+                    }),
+                );
                 expect(posted.finding.summary).toBe(production[0].subject);
                 expect(posted.finding.model_authored_prose).toBe(
                     production[0].discussion,
@@ -143,6 +148,71 @@ describe("historical finding fidelity", () => {
             });
         });
     }
+
+    it.each(["unknown", "", null, 42])(
+        "rejects an invalid recorded label override: %j",
+        (labelOverride) => {
+            const {corpusCase} = fixtures[0];
+            expect(() =>
+                parseCase(
+                    {
+                        ...corpusCase,
+                        findings: [{...corpusCase.findings[0], labelOverride}],
+                    },
+                    "invalid-label",
+                ),
+            ).toThrow("labelOverride: unknown label");
+        },
+    );
+
+    it.each(["question (non-blocking)", "todo (blocking)"])(
+        "keeps %s through anchor snaps and demotes only blocking provenance drops",
+        (labelOverride) => {
+            const {corpusCase} = fixtures[0];
+            const finding = corpusCase.findings[0].finding;
+            const diff =
+                "diff --git a/test.ts b/test.ts\n--- a/test.ts\n+++ b/test.ts\n@@ -10 +10 @@\n-old\n+new\n";
+            const makeCase = (line: number) =>
+                parseCase(
+                    {
+                        ...corpusCase,
+                        diff,
+                        findings: [
+                            {
+                                source: "correctness",
+                                labelOverride,
+                                finding: {
+                                    ...finding,
+                                    severity:
+                                        labelOverride === "todo (blocking)"
+                                            ? "blocking"
+                                            : "advisory",
+                                    anchor: {
+                                        type: "line",
+                                        path: "test.ts",
+                                        line,
+                                        side: "RIGHT",
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                    "label-provenance",
+                );
+            const snapped = runCase(makeCase(12));
+            expect(snapped.snappedByProvenance).toHaveLength(1);
+            expect(snapped.postedLabels).toEqual([labelOverride]);
+            const dropped = runCase(makeCase(40), {anchorSnap: false});
+            expect(dropped.droppedByProvenance).toHaveLength(1);
+            expect(dropped.droppedByProvenance[0].label).toBe(
+                labelOverride === "todo (blocking)"
+                    ? "suggestion (non-blocking)"
+                    : labelOverride,
+            );
+            expect(dropped.droppedByProvenance[0].blocking).toBe(false);
+            expect(dropped.postedLabels).toEqual([]);
+        },
+    );
 
     it.each([null, [], "correction"])(
         "rejects a malformed correction: %j",

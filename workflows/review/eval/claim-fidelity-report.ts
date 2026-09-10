@@ -17,7 +17,7 @@ export const FIDELITY_IMPLEMENTATION_FILES = [
     "workflows/review/eval/claim-fidelity-report.ts",
     "workflows/review/eval/corpus/loader.ts",
     "workflows/review/eval/runner.ts",
-    "workflows/review/eval/live-producer.ts",
+    "workflows/review/eval/metrics.ts",
     ...CLAIM_RENDERING_FILES,
 ];
 
@@ -31,6 +31,8 @@ export const measureFidelity = () => {
     const metrics = computeMetrics(runs);
     return {
         kind: "deterministic replay, hand-authored controls, no model calls",
+        renderingSurface:
+            "bare renderClaimComment without attribution or submission placement, not exact publication bytes",
         rulerSha256: hashFiles([
             "workflows/review/eval/claim-fidelity.ts",
             ...fixtures.flatMap(({corpusCase}) => [
@@ -69,12 +71,12 @@ export const measureFidelity = () => {
                     checks,
                 ),
                 handAuthoredControl: scoreFidelity(correctedBody, checks),
-                productionControl: scoreFidelity(productionBody, checks),
-                originalMatchesProduction:
+                bareRendererControl: scoreFidelity(productionBody, checks),
+                originalMatchesBareRenderer:
                     runs[index].result.postedCandidates[0]?.body ===
                     renderClaimComment(buildClaims(corpusCase.findings)[0]),
                 controlRetained: corrected.postedCandidates.length === 1,
-                controlMatchesProduction: correctedBody === productionBody,
+                controlMatchesBareRenderer: correctedBody === productionBody,
             };
         }),
     };
