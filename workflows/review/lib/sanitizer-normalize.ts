@@ -49,12 +49,12 @@ export const createBodyNormalization = (
         try {
             const result = fn();
             if (typeof result !== "string") {
-                throw new SanitizerUnavailableError();
+                throw new SanitizerUnavailableError("invocation");
             }
             runtime.clearRedactedDomains();
             return result;
         } catch {
-            throw new SanitizerUnavailableError();
+            throw new SanitizerUnavailableError("invocation");
         }
     };
     const queued = (text: string): string =>
@@ -71,4 +71,16 @@ export const createBodyNormalization = (
             queued(invoke(() => runtime.sanitizeContentCore(text))),
         queued,
     };
+};
+
+/** Host preflight uses fixed text, never PR content or an agent-written plan. */
+export const verifyRunnerSanitizer = (): void => {
+    const normalization = createBodyNormalization();
+    const probe = "Sanitizer preflight";
+    if (
+        normalization.planned(probe) !== "sanitizer preflight" ||
+        normalization.queued(probe) !== "sanitizer preflight"
+    ) {
+        throw new SanitizerUnavailableError("invocation");
+    }
 };

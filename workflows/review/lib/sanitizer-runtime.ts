@@ -12,12 +12,19 @@ export type SanitizerRuntime = {
     clearRedactedDomains: () => void;
 };
 
+/** Safe diagnostics only: never attach raw exceptions, paths, or input text. */
+export type SanitizerFailureCategory =
+    | "config"
+    | "missing"
+    | "module-load"
+    | "exports"
+    | "invocation";
+
 /** A comparison failure, not a bootstrap exception that may fail open. */
 export class SanitizerUnavailableError extends Error {
-    constructor() {
-        super(
-            "The pinned gh-aw sanitizer could not complete the submission comparison.",
-        );
+    constructor(readonly category: SanitizerFailureCategory) {
+        super(`The pinned gh-aw sanitizer is unavailable (${category}).`);
+        this.name = "SanitizerUnavailableError";
     }
 }
 
@@ -25,21 +32,28 @@ export class SanitizerUnavailableError extends Error {
 export const loadRunnerSanitizer = (
     runnerTemp = process.env.RUNNER_TEMP,
 ): SanitizerRuntime => {
+    if (!runnerTemp || !isAbsolute(runnerTemp)) {
+        throw new SanitizerUnavailableError("config");
+    }
+    const path = join(runnerTemp, "gh-aw/actions/sanitize_content_core.cjs");
+    let source: string;
     try {
-        if (!runnerTemp || !isAbsolute(runnerTemp)) {
-            throw new SanitizerUnavailableError();
-        }
-        const path = join(
-            runnerTemp,
-            "gh-aw/actions/sanitize_content_core.cjs",
+        source = readFileSync(path, "utf8");
+    } catch (error) {
+        throw new SanitizerUnavailableError(
+            error instanceof Error && "code" in error && error.code === "ENOENT"
+                ? "missing"
+                : "module-load",
         );
-        const module = {exports: {}};
+    }
+    const module = {exports: {}};
+    try {
         // The upstream module expects github-script globals. Give its trusted
         // code a private logger and environment, without changing process globals
         // or printing review bodies/URLs into workflow-command-bearing stdout.
         // This context is dependency plumbing, not an untrusted-code sandbox.
         runInNewContext(
-            readFileSync(path, "utf8"),
+            source,
             {
                 module,
                 exports: module.exports,
@@ -50,6 +64,10 @@ export const loadRunnerSanitizer = (
             },
             {filename: path, timeout: 1000},
         );
+    } catch {
+        throw new SanitizerUnavailableError("module-load");
+    }
+    try {
         const runtime = module.exports as SanitizerRuntime;
         for (const name of [
             "sanitizeContentCore",
@@ -58,11 +76,11 @@ export const loadRunnerSanitizer = (
             "clearRedactedDomains",
         ] as const) {
             if (typeof runtime[name] !== "function") {
-                throw new SanitizerUnavailableError();
+                throw new SanitizerUnavailableError("exports");
             }
         }
         return runtime;
     } catch {
-        throw new SanitizerUnavailableError();
+        throw new SanitizerUnavailableError("exports");
     }
 };

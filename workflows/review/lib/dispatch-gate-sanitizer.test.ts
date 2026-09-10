@@ -1,4 +1,4 @@
-import {describe, expect, it} from "vitest";
+import {describe, expect, it, vi} from "vitest";
 import {submissionPlanViolations} from "./dispatch-gate-plan";
 import type {SubmissionPlanViolationsInput} from "./dispatch-gate-plan";
 import {loadRunnerSanitizer} from "./sanitizer-runtime";
@@ -55,6 +55,19 @@ const inputFor = (
 };
 
 describe("rule 7 with the actual pinned sanitizer", () => {
+    it.each([undefined, null])(
+        "does not load the sanitizer without a staged plan (%s)",
+        (submissionPlan) => {
+            vi.stubEnv("RUNNER_TEMP", undefined);
+            expect(
+                submissionPlanViolations({
+                    ...inputFor("review", "Commented.", "Commented."),
+                    submissionPlan,
+                }),
+            ).toEqual([]);
+        },
+    );
+
     it.each(["review", "inline", "hold"])(
         "compares %s text in the correct roles",
         (kind) => {

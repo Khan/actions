@@ -11,7 +11,10 @@ import {join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {runDispatchGateCli, BLOCKED_SENTINEL_PATH} from "./dispatch-gate";
-import {createBodyNormalization} from "./sanitizer-normalize";
+import {
+    createBodyNormalization,
+    verifyRunnerSanitizer,
+} from "./sanitizer-normalize";
 import {
     loadRunnerSanitizer,
     SanitizerUnavailableError,
@@ -83,26 +86,69 @@ describe("the pinned sanitizer runtime", () => {
     it("does not fall back to the checkout or test fixtures when RUNNER_TEMP is absent", () => {
         vi.stubEnv("RUNNER_TEMP", undefined);
         expect(() => loadRunnerSanitizer()).toThrow(SanitizerUnavailableError);
+        expect(() => loadRunnerSanitizer()).toThrow(
+            "The pinned gh-aw sanitizer is unavailable (config).",
+        );
         expect(() => loadRunnerSanitizer(".")).toThrow(
-            SanitizerUnavailableError,
+            "The pinned gh-aw sanitizer is unavailable (config).",
+        );
+        expect(() => loadRunnerSanitizer(join(fixture, "missing"))).toThrow(
+            "The pinned gh-aw sanitizer is unavailable (missing).",
         );
     });
 
     it.each([
-        "throw new Error('private module failure')",
-        "module.exports = {}",
+        ["module-load", "throw new Error('private module failure')"],
+        ["module-load", "require('./missing-private-dependency.cjs')"],
+        ["exports", "module.exports = {}"],
+        ["exports", "module.exports = null"],
+        [
+            "exports",
+            "module.exports = { get sanitizeContentCore() { throw new Error('private export failure'); } }",
+        ],
     ])(
-        "rejects a broken module without exposing source/provider details",
-        (source) => {
+        "reports only the bounded %s category for broken modules",
+        (category, source) => {
             expect(() => loadRunnerSanitizer(brokenRuntime(source))).toThrow(
-                "The pinned gh-aw sanitizer could not complete the submission comparison.",
+                `The pinned gh-aw sanitizer is unavailable (${category}).`,
             );
         },
     );
 
+    it("checks the production loader and invocation path without emitting text", () => {
+        const stdout = vi.spyOn(process.stdout, "write");
+        const stderr = vi.spyOn(process.stderr, "write");
+        try {
+            expect(() => verifyRunnerSanitizer()).not.toThrow();
+            expect(stdout).not.toHaveBeenCalled();
+            expect(stderr).not.toHaveBeenCalled();
+        } finally {
+            stdout.mockRestore();
+            stderr.mockRestore();
+        }
+    });
+
+    it.each([
+        "sanitizeContentCore",
+        "sanitizeUrlProtocols",
+        "sanitizeUrlDomains",
+        "clearRedactedDomains",
+    ])("preflight exercises %s and suppresses invocation details", (method) => {
+        vi.stubEnv(
+            "RUNNER_TEMP",
+            brokenRuntime(
+                `module.exports = { sanitizeContentCore(s) { return s; }, sanitizeUrlProtocols(s) { return s; }, sanitizeUrlDomains(s) { return s; }, clearRedactedDomains() {} }; module.exports.${method} = () => { throw new Error('private invocation details'); };`,
+            ),
+        );
+        expect(() => verifyRunnerSanitizer()).toThrow(
+            "The pinned gh-aw sanitizer is unavailable (invocation).",
+        );
+    });
+
     it.each(["load", "call"])(
-        "strips posting outputs when the sanitizer fails during %s",
+        "strips posting outputs on %s failure even after a successful preflight",
         (failure) => {
+            verifyRunnerSanitizer();
             const runtimeDir = brokenRuntime(
                 failure === "load"
                     ? "module.exports = {}"
@@ -147,6 +193,13 @@ describe("the pinned sanitizer runtime", () => {
                 JSON.parse(files["/tmp/gh-aw/agent_output.json"]).items,
             ).toEqual([items[2]]);
             expect(JSON.stringify(report)).not.toContain("private");
+            expect(report.violations).toContainEqual(
+                expect.objectContaining({
+                    detail: `The pinned gh-aw sanitizer is unavailable (${
+                        failure === "load" ? "exports" : "invocation"
+                    }).`,
+                }),
+            );
         },
     );
 });
