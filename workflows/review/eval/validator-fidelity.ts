@@ -4,13 +4,13 @@ import {join} from "node:path";
 import {
     applyVerifications,
     buildClaims,
+    parseJsonObject,
     parseValidatorOutput,
     type Claim,
 } from "../lib/dispatch-contracts";
 import {isBlockingLabel} from "../lib/render-comment";
 import {renderClaimComment} from "../lib/submission-render";
 import {extractAgents} from "./agent-extract";
-import {extractJsonObject} from "./extract-json";
 import {scoreFidelity, type FidelityFixture} from "./claim-fidelity";
 import {
     resolveRuntimeImports,
@@ -75,10 +75,12 @@ export const scoreValidatorOutput = (
     claim: Claim,
     output: string,
 ) => {
-    const verdicts = parseValidatorOutput(output);
+    // Extract once with production's rule so the duplicate guard and verdict
+    // parser cannot select different objects from the same output.
+    const raw = parseJsonObject(output) as {claims?: {id?: string}[]};
+    const verdicts = parseValidatorOutput(JSON.stringify(raw));
     // Unlike production's fail-open path, an omitted/invalid result is an eval
-    // error, not a successful retention. Reject duplicate ids before the map.
-    const raw = extractJsonObject(output) as {claims?: {id?: string}[]};
+    // error, not a successful retention. Reject duplicate ids before scoring.
     if (
         raw.claims?.length !== 1 ||
         raw.claims[0].id !== claim.id ||

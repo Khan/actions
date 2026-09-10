@@ -222,6 +222,55 @@ describe("validator fidelity replay", () => {
         ).toBe(true);
     });
 
+    it.each([
+        JSON.stringify({note: "Unrelated trailing object"}),
+        JSON.stringify({
+            claims: [
+                {id: "candidate-1", verification: "refuted"},
+                {id: "candidate-1", verification: "plausible"},
+            ],
+        }),
+    ])(
+        "scores the production-selected fence despite a competing object: %s",
+        (trailing) => {
+            const fixture = fixtures[0];
+            const claim = inputClaim(fixture, "original");
+            expect(
+                scoreValidatorOutput(
+                    fixture,
+                    claim,
+                    `\`\`\`json\n${result().output}\n\`\`\`\n${trailing}`,
+                ),
+            ).toEqual(scoreValidatorOutput(fixture, claim, result().output));
+        },
+    );
+
+    it("rejects duplicate ids in the selected fence even when a later object has one valid id", async () => {
+        const duplicate = JSON.stringify({
+            claims: [
+                {id: "candidate-1", verification: "confirmed"},
+                {id: "candidate-1", verification: "refuted"},
+            ],
+        });
+        const output = `\`\`\`json\n${duplicate}\n\`\`\`\n${result().output}`;
+        const fixture = fixtures[0];
+        expect(() =>
+            scoreValidatorOutput(
+                fixture,
+                inputClaim(fixture, "original"),
+                output,
+            ),
+        ).toThrow("Expected exactly one valid verification");
+        const {report} = await replay(async () => result(output));
+        expect(report.samples).toHaveLength(2);
+        for (const sample of report.samples) {
+            expect(sample.status).toBe("error");
+            expect(sample.result?.output).toBe(output);
+            expect(sample.score).toBeUndefined();
+        }
+        expect(report.spentUsd).toBeCloseTo(0.2);
+    });
+
     it("records dropped useful findings and unexpected severity increases", () => {
         const fixture = fixtures[0];
         const claim = inputClaim(fixture, "original");
