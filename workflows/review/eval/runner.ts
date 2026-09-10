@@ -17,7 +17,7 @@
  *       Phase 3: refuted drops, plausible downgrades to non-blocking, only a
  *       confirmed claim keeps a blocking label)
  *   4. `computeVerdict`        — the mechanical verdict (#194 labels + hold gate)
- *   5. `renderComment` / `renderReviewBody` — templated, prose-free rendering
+ *   5. `renderClaimComment` / `renderReviewBody`: templated, prose-free rendering
  *
  * The parts that are *not* deterministic in production — the model sub-agents
  * that author findings and the claim-validator's per-claim verifications — are
@@ -36,12 +36,12 @@
  */
 
 import type {Anchor, Finding, Lens} from "../lib/finding-schema";
+import {applyVerifications, buildClaims} from "../lib/dispatch-contracts";
+import {renderClaimComment} from "../lib/submission-render";
 import {
     isBlockingLabel,
     labelForFinding,
-    renderComment,
     renderReviewBody,
-    type ConventionalLabel,
     type SkippedDimension,
     type VerdictEvent,
 } from "../lib/render-comment";
@@ -68,8 +68,8 @@ import {
 /**
  * One normalised candidate comment — a recorded finding after the code-owned
  * label + anchor extraction (review.md Step 3 "normalize each lens finding into
- * a candidate comment"). Carries the rendered body so a caller can diff the
- * exact text that would be posted.
+ * a candidate comment"). The body is the bare claim renderer's output, without
+ * publication attribution or submission placement.
  */
 export type RunCandidate = {
     /** The finding's stable id (dedup + must-catch correlation). */
@@ -78,8 +78,10 @@ export type RunCandidate = {
     source: string;
     /** The lens recorded on the finding. */
     lens: Lens;
-    /** Code-computed Conventional-Comment label (never model-authored). */
-    label: ConventionalLabel;
+    /** Original label-shape label, or the code-computed structured lens label. */
+    label: string;
+    /** Preserves the effective label when rebuilding a production claim. */
+    labelOverride: string;
     /** Whether {@link label} is a blocking label (#194's mechanical signal). */
     blocking: boolean;
     /** Where the comment anchors (line / file / PR-level). */
@@ -187,19 +189,20 @@ const anchorLine = (anchor: Anchor): number | undefined =>
     anchor.type === "line" ? anchor.line : undefined;
 
 /**
- * Normalise one recorded finding to a candidate: compute the label in code
- * (never from the model), extract the anchor path/line, and render the body.
+ * Normalise one recorded finding to a candidate: preserve an original label or
+ * compute the structured lens label, extract the anchor, and render the body.
  * This is the same normalisation review.md Step 3 performs before a finding
  * flows through the scope filter / verdict / comment path.
  */
 export const toCandidate = (recorded: RecordedFinding): RunCandidate => {
     const {finding, source} = recorded;
-    const label = labelForFinding(finding);
+    const label = recorded.labelOverride ?? labelForFinding(finding);
     return {
         id: finding.id,
         source,
         lens: finding.lens,
         label,
+        labelOverride: label,
         blocking: isBlockingLabel(label),
         anchor: finding.anchor,
         ...(anchorPath(finding.anchor) !== undefined
@@ -208,7 +211,7 @@ export const toCandidate = (recorded: RecordedFinding): RunCandidate => {
         ...(anchorLine(finding.anchor) !== undefined
             ? {line: anchorLine(finding.anchor)}
             : {}),
-        body: renderComment(finding),
+        body: renderClaimComment(buildClaims([recorded])[0]),
         finding,
     };
 };
@@ -258,9 +261,10 @@ export const applyScopeFilter = (
  * survivors, applying the Phase 3 rules mechanically: `refuted` drops the
  * candidate; `plausible` downgrades it to non-blocking (severity → `advisory`,
  * label/body recomputed in code, confidence lowered) so it can never drive
- * REQUEST_CHANGES — only a `confirmed` claim keeps a blocking label; `confirmed`
- * (or no recorded verification) keeps the candidate unchanged. A case without a
- * `validation` block is a no-op, exactly the pre-existing behavior.
+ * REQUEST_CHANGES. Confirmed corrections use production applyVerifications and
+ * renderClaimComment, so the scored body and summary are the corrected posting
+ * surface rather than the producer's obsolete text. A case without a
+ * validation block is a no-op.
  */
 export const applyValidation = (
     candidates: RunCandidate[],
@@ -274,30 +278,40 @@ export const applyValidation = (
     const dropped: RunCandidate[] = [];
     for (const candidate of candidates) {
         const verification = byId.get(candidate.id);
-        if (
-            verification === undefined ||
-            verification.verification === "confirmed"
-        ) {
+        if (verification === undefined) {
             validated.push(candidate);
             continue;
         }
-        if (verification.verification === "refuted") {
+        const [claim] = applyVerifications(buildClaims([candidate]), {
+            [candidate.id]: verification,
+        });
+        if (claim === undefined) {
             dropped.push(candidate);
             continue;
         }
-        // plausible: never blocks. Downgrade the finding and re-run the same
-        // code-owned normalisation so the label mapping cannot drift from
-        // labelForFinding (blocking → the non-blocking equivalent).
-        const downgraded: Finding = {
+        // Production owns accepted corrections and plausible label downgrades.
+        // Matchers receive the corrected fields without losing the label override.
+        const finding: Finding = {
             ...candidate.finding,
-            severity: "advisory",
-            confidence:
-                verification.confidence ??
-                Math.min(candidate.finding.confidence, 0.4),
+            summary: claim.subject,
+            model_authored_prose: claim.discussion,
+            confidence: claim.confidence,
+            severity: isBlockingLabel(claim.label)
+                ? "blocking"
+                : claim.importance === "medium"
+                ? "medium"
+                : "advisory",
+            ...(candidate.anchor.type === "line" && claim.line !== undefined
+                ? {anchor: {...candidate.anchor, line: claim.line}}
+                : {}),
+            ...(claim.suggestion !== undefined
+                ? {suggested_patch: claim.suggestion}
+                : {}),
         };
-        validated.push(
-            toCandidate({source: candidate.source, finding: downgraded}),
-        );
+        validated.push({
+            ...toCandidate({...candidate, finding, labelOverride: claim.label}),
+            body: renderClaimComment(claim),
+        });
     }
     return {validated, dropped};
 };
@@ -392,7 +406,7 @@ export const runCase = (
                 const snap = snappedById.get(c.id);
                 return snap === undefined
                     ? c
-                    : toCandidate({source: c.source, finding: snap.finding});
+                    : toCandidate({...c, finding: snap.finding});
             });
         snappedByProvenance = changeAnchored.flatMap((candidate) => {
             const snap = snappedById.get(candidate.id);
@@ -410,7 +424,13 @@ export const runCase = (
                 );
                 return demoted === undefined
                     ? c
-                    : toCandidate({source: c.source, finding: demoted});
+                    : toCandidate({
+                          ...c,
+                          finding: demoted,
+                          labelOverride: applyVerifications(buildClaims([c]), {
+                              [c.id]: {verification: "plausible"},
+                          })[0].label,
+                      });
             });
     }
 
