@@ -1,0 +1,117 @@
+{
+    "scope": "Initial preparation and blocked attempt. Completed live results are recorded separately in validator-fidelity-baseline.json.",
+    "preparation": {
+        "status": "prepared",
+        "modelCalls": 0,
+        "snapshots": [
+            {
+                "caseId": "webapp-41896-coaching-batch-support",
+                "reviewedCommit": "dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82",
+                "baseCommit": "a0cf511316541da2c91f36a64d7938913c894ffa",
+                "files": [
+                    {
+                        "path": "pkg/external/opentelemetry/tracegroup/tracegroup.go",
+                        "headHash": "3ee75e83c64f1538da78e92ad0ceae666de025ae197554b4fdb668ea8694f917",
+                        "baseHash": "3ee75e83c64f1538da78e92ad0ceae666de025ae197554b4fdb668ea8694f917"
+                    },
+                    {
+                        "path": "pkg/khan/acl/coaches.go",
+                        "headHash": "b347483d3d21be70e06036c6ec146f739417f55e88c3a539356e1f1b57e55c37",
+                        "baseHash": "b347483d3d21be70e06036c6ec146f739417f55e88c3a539356e1f1b57e55c37"
+                    },
+                    {
+                        "path": "services/ai-guide/essay_feedback/loaders/coaching_loader.go",
+                        "headHash": "87631ed0593db1afcfe25ebd99a5e014678a0c43f77220d8cc40865a242f5263",
+                        "baseHash": null
+                    },
+                    {
+                        "path": "services/ai-guide/essay_feedback/loaders/writing_coach_session_loader.go",
+                        "headHash": "40d4ea6973d4922ac9006c8351f6ac96e260a6a6efd25cdabcb19e0db9855ee5",
+                        "baseHash": null
+                    },
+                    {
+                        "path": "services/ai-guide/resolvers/acls.go",
+                        "headHash": "9bd2e063dda533c992f317b21ff730f1d5f16e0f3c89f81cf1364b54042e56ca",
+                        "baseHash": "c3c8a14b28bd756264b31e3ec9ef3a55448195517c4ec193398805c3fafab242"
+                    },
+                    {
+                        "path": "services/ai-guide/resolvers/writing_coach_platform_assignment.go",
+                        "headHash": "092b00f540c9a32ef9ad48806b7dcf27f0a6c4fc81ea7d6a132ef01303bea9c5",
+                        "baseHash": "351039af3257d8520b12cbae4f42aae7992f08631a2a3139fb71fe1e350e04e1"
+                    },
+                    {
+                        "path": "services/coaches/relationships/coachee.go",
+                        "headHash": "a22a0caed1bb58a177ccddd4693c7ce093301a6b41826022d1e6b2aeeb7d8b07",
+                        "baseHash": "a22a0caed1bb58a177ccddd4693c7ce093301a6b41826022d1e6b2aeeb7d8b07"
+                    },
+                    {
+                        "path": "services/progress/resolvers/coaching_loader.go",
+                        "headHash": "2232cc66d6b9c9fb48de5704af58ef5fbaecee68b3f4f4c4d60e469eae561b8b",
+                        "baseHash": "2232cc66d6b9c9fb48de5704af58ef5fbaecee68b3f4f4c4d60e469eae561b8b"
+                    }
+                ]
+            },
+            {
+                "caseId": "webapp-41989-district-query-support",
+                "reviewedCommit": "ec472f1619848fa78e8383b64ebb0d73a67a3756",
+                "baseCommit": "a39ee0cc4a71ea97b81d0a10a95d9601994410ed",
+                "files": [
+                    {
+                        "path": "services/districts/emails/kad_email_subscriptions.go",
+                        "headHash": "55f86442f6153298047cb461b88084318adeeb04f590b7abca196e27807ce2ee",
+                        "baseHash": "55f86442f6153298047cb461b88084318adeeb04f590b7abca196e27807ce2ee"
+                    },
+                    {
+                        "path": "services/districts/emails/monthly_admin_email_batch.go",
+                        "headHash": "5cdaea9fc3879ea1b2d7665ef65d345628256489578998ddee56f927265a398e",
+                        "baseHash": "5cdaea9fc3879ea1b2d7665ef65d345628256489578998ddee56f927265a398e"
+                    },
+                    {
+                        "path": "services/districts/emails/send_monthly_admin_email.go",
+                        "headHash": "44aaef0e034e7fc64e0023fcb3ada341356069417f8d1e8badc2fab341fa531b",
+                        "baseHash": "bf5d8184cc7ac15d087491fd20e779bd575944f68497e9362319d4231d4e9514"
+                    },
+                    {
+                        "path": "services/districts/models/district.go",
+                        "headHash": "71585cb4fcf61eb73fbc295f1f2f33ac2fc898a14d2e14bed010ce1d6c639f9b",
+                        "baseHash": "71585cb4fcf61eb73fbc295f1f2f33ac2fc898a14d2e14bed010ce1d6c639f9b"
+                    }
+                ]
+            },
+            {
+                "caseId": "webapp-42001-phantom-debug-summary",
+                "reviewedCommit": "5b4a84fbb520c3102467ed549078c72aff3cdd93",
+                "baseCommit": "9715852a8971aff2354c4146f867aa6d0a3d8c90",
+                "files": [
+                    {
+                        "path": "pkg/lib/errors/graphql_presenter.go",
+                        "headHash": "3d1607b67958e53e6f792fe9a1509b6f2e2416634b0dc465b4bfd3161a31eaab",
+                        "baseHash": "3d1607b67958e53e6f792fe9a1509b6f2e2416634b0dc465b4bfd3161a31eaab"
+                    },
+                    {
+                        "path": "services/humanities/resolvers/writing_coach_config.go",
+                        "headHash": "68d5d6a0af668123d057b8ccd6f640c3a692182650e0b4cc83dec7c038b4a60b",
+                        "baseHash": "a2a040290216db2b323ed441b98894f7e7dde8e6f58ff551bca2f586195cd063"
+                    },
+                    {
+                        "path": "services/humanities/resolvers/writing_coach_config_test.go",
+                        "headHash": "330be6026f5463b331b93d01903e62c7164076b245c80dca0fc19267aeb41198",
+                        "baseHash": "1b4d25620512f29539d0226ad36f39eb25945969e2a0b141c882bb6c90a930e5"
+                    }
+                ]
+            }
+        ]
+    },
+    "liveAttempt": {
+        "status": "blocked",
+        "error": "Error: ANTHROPIC_API_KEY is required for live validator replays. No model calls were made."
+    },
+    "modelCalls": 0,
+    "validation": {
+        "tests": 2433,
+        "files": 127,
+        "newTests": 15,
+        "lint": "pass",
+        "targetedStrictTypecheck": "pass"
+    }
+}
