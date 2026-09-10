@@ -1,5 +1,179 @@
 # review
 
+## 1.26.0
+
+### Minor Changes
+
+-   c4092b4: A human `/review <depth>` comment sets the re-review dial for that one run. Under `re-review fast` (Khan/webapp's setting) the only way to get anything reviewed on a re-push was a bare `/review`, which always plans full: the planner read the comment's author but never its body, so there was nothing between "reconcile only" and "the whole roster over the whole diff". `/review scoped` now plans a scoped round (the whole roster over the hunks no full review has seen), with `delta`, `diff`, and `diff-only` accepted as synonyms, and `/review flip-gated`, `/review fast`, and `/review full` name the other positions. The token may match or deepen the configured dial, never shallow it: `flip-gated` and `fast` license the reduced-depth dismissal of a standing block (submission-clearance.ts) with no pass over the new code, and any collaborator who can comment (the PR author included) would otherwise be able to reach that route on a repo that never configured it, so an ask below the dial plans the bare-`/review` full round (reason `manual-depth-below-dial`). At or above the dial, `decideReReviewDepth` runs the same guard chain it runs for the configured mode (no anchor fingerprint, ready-for-review anchor, fingerprint overflow, divergence tripwire all fall back to full), and the plan CLI drops the token when a staging input is missing, the same degradation the configured mode gets. A scoped manual round advances the fingerprint like a dial-scoped one. The plan records the ask as `manualDepth` whenever a valid reduced-depth token was parsed (`/review full` is the bare `/review` and records nothing), with reason `manual-depth-<depth>` on success and the guard's or the below-dial rule's own reason after `manual-review-request` otherwise. A token that names no mode is ignored and the ask plans full as before, so a typo never buys a cheaper round. Bare `/review` is unchanged, and automation-posted `/review` comments (Bot-type authors and `REVIEW_AUTOMATION_LOGINS`) follow the configured mode whatever token they carry.
+
+    Render path: the depth notes move from `lib/submission.ts` into `lib/depth-note.ts`, and every plan field they interpolate is validated against the mode list first (the plan file lives in an agent-writable directory, the same boundary the stamp CLI guards). A reduced round's note gains a `requested by /review <depth>, ` segment when a human set the dial, and a full round that an ask tried to reduce gains one new line, `Note: /review <depth> was requested, this round ran at full depth (<reason>).`, so the human can tell a guard from the below-dial rule (a typo is never recorded and gets no note). Expected output-shape effect: the review body grows by about 30 characters on a reduced round a `/review <depth>` set, and by one line of about 90 characters on a full round a `/review <depth>` asked to reduce, and is byte-identical on every other run. Inline comments are unchanged.
+
+    `manual-request.ts` gains `commentFromEvent` (author and body) and `requestedDepthFromComment`, and `commentAuthorFromEvent` is removed (its only caller now reads the whole comment). Hunk signatures, divergence, and `buildScopedDiff` move from `rereview-mode.ts` to `hunk-signature.ts` and are re-exported, so imports do not change. Both moves are for the max-lines budget.
+
+-   f80de43: review: a per-review cost report, collapsed in the review body
+
+    Every review now carries its own price tag: a collapsed `review cost` block
+    at the end of the review body with one row per sub-agent (model, tool calls,
+    turns, wall clock, tokens by class), a row for the prose judge, a row for the
+    orchestrator, and a total, at Khan's rate with the SDK's list figure beside
+    it. The same table lands in the run's step summary and as
+    `cost-report.json` in the run's `agent` artifact. Body size: every review
+    body grows by one collapsed block, roughly 1,000 to 2,000 characters for a
+    default-roster run (one table row per sub-agent), which the reader sees as a
+    one-line `review cost: $x.xx at Khan's rate` chip. The block is left out,
+    with a note in the summary and artifact, when the body would otherwise cross
+    gh-aw's 65000-character ingest cap.
+
+    Before this, a run's cost lived in three places that never met:
+    `dispatch-result.json`'s per-agent `usd` was the Claude Agent SDK's own meter
+    at Anthropic list price, gh-aw's `agent_usage.json` was the whole run at
+    Khan's rate with no per-agent split, and the prose judge (its own SDK
+    sessions) was in neither. The dispatcher now records per-model tokens off the
+    SDK result's `modelUsage` for every sub-agent and for the judge's calls on
+    each agent, and `lib/pricing.ts` is the one place tokens become dollars. The
+    orchestrator's row is the api-proxy's whole-run usage minus what the
+    dispatcher accounted for, and the total is reconciled against gh-aw's
+    `ai_credits`, with a note when they disagree by more than 1%. The report is a
+    fail-open post-step after the dispatch-conformance gate, since two of its
+    inputs only exist after the agent step.
+
+-   4eaf1f1: The review body's tail collapses to ONE fold (KORE-2632). A submitted body used to end in three stacked `<details>` blocks — the collapsed observations section, the version/config footer (chip `review details`), and the re-review fingerprint stamp (chip `review fingerprint`) — and the top-level comment had become hard to parse as a result: the verdict head ran straight into the PR-wide feedback with no separation, and below it sat three expandos, two of which are machine bookkeeping no human ever opens. The observations section made it worse: its summary line quoted the whole top-ranked finding (subject and all, added so an approving review could not hide its best finding behind a bare count), and that same finding then repeated verbatim as the first bullet one line below. Now the body is verdict head, PR-wide feedback and `Note:` lines, then a single collapsed `review details` fold carrying, in order, the observations list under a bold `**Lower-confidence observations (N):**` heading (ranked, so the tail's best finding is still the first thing an expanding reader sees), the version/config `<sub>` line, and the fingerprint `<sub>` line. The `<details open>` single-entry special case (1.21.0) and the named-top summary teaser both go away with the per-section fold that motivated them.
+
+    A pr-level finding folded into the body loses its stacked collapsed attribution footer too: it now names its reviewer as a bare `<sub>` line (`attributionLine`, the shape a context-folded inline comment already uses). That footer's chip is the very same `review details` chip the new tail fold carries, so leaving it would have put two identically-labelled expandos in one body. Inline-comment attribution is unchanged, and `stripFooters`' existing whole-line `<sub>` strip removes the new form, so dedup's text-similarity input across posted bodies is unaffected. The standalone HOLD_FOR_HUMAN comment reuses the pr-level renderer, so its attribution takes the same bare-line form — deliberately, one shape per claim kind wherever it posts.
+
+    The post-submission cost report moves with the tail: it used to splice in before the standalone `review fingerprint` block, and with that block gone it appends after the fold, so a full production body ends `review details` then `review cost`.
+
+    The verdict head is now bold with a verdict emoji (`**⛔ Changes requested** — see inline comments.`, `**✅ Approved** …`, `**💬 Commented** …`), so the verdict no longer reads as one more bare paragraph of the same visual weight as the PR-wide feedback below it. Nothing parses the head text — the machine-readable verdict is the review event and the stamp — so the styling change is free; the hold comment's head is unchanged (it is a standalone comment with its own explanation, not a review body head).
+
+    The fingerprint stayed a `<sub>` line rather than becoming an HTML comment. gh-aw's safe-output ingest sanitizer deletes ALL XML/HTML comments (`removeXmlComments` in `sanitize_content_core.cjs`), which is exactly why 1.21.0 moved the stamp out of a comment in the first place; `sub`, `details`, and `summary` are the allowed tags that survive ingest, so the stamp rides one of them or it does not post at all.
+
+    `autofix` takes a patch bump of its own because it pins its own release and parses review bodies with `COLLAPSED_HEADING_RE` and `LEGACY_COLLAPSED_SUMMARY_RE`, so it must ship the new bold-heading matcher before the first new-format body posts, or its body-sourced work list reads empty.
+
+    Every parser stays backward compatible with already-posted bodies, which matters because both readers consult the LATEST prior review of an in-flight PR. autofix's body-sourced work list now matches the bold heading (`COLLAPSED_HEADING_RE`) and the legacy `<summary>` line (`LEGACY_COLLAPSED_SUMMARY_RE`), and the section slice still runs from the heading to the next `</details>` — now the outer fold's close, so the config and fingerprint lines fall inside the slice and are skipped like any other non-entry line. The slice anchors to the LAST `review details` opener (line-anchored and whitespace-tolerant): a pr-level discussion is copied into the body unescaped ABOVE the tail fold, so a quoted fold — or, when the run collapsed nothing, a quoted legacy heading — cannot steal the work list; the stamp inside a headingless tail fold marks the body current-shape and stops the legacy fallback. The stamp readers (`parseRereviewStamp`, `stripRereviewStamp`, `countRereviewStampBlocks`, `stampHunksChain`) accept both the bare `<sub>` line and the legacy `<details>` block; the block's own `</details>` is still consumed, while the line form's match stops at its `</sub>` so the strip cannot tear open the enclosing fold and leave unbalanced HTML for the dispatch gate's rule 7 to read as a body splice. The stamp's interior field skeleton is byte-for-byte as strict as before — that strictness is the anti-splice property rule 7 depends on. review.md Step 7's guidance comment keeps the standalone wrapped footer (it has no review body to fold into), and `FOOTER_OUT` still stages the wrapped form.
+
+    Expected output-shape effect: every submitted body loses two `<details>`/`<summary>`/`</details>` wrapper triples (roughly 100 characters), one more such triple per pr-level finding it folds in, and, on reviews with a collapsed tail of two or more entries, the summary's top-entry teaser (up to ~140 characters more), so bodies shrink; nothing grows. A body now carries exactly one `review details` fold whatever it contains. Reviews whose tail held exactly one entry no longer render it expanded by default — it sits inside the shared fold with the rest. The count of posted comments, the verdict, the inline surface, and the autofix's reachable scope are all unchanged. Minor, not patch, per the versioning precedent for posting-surface changes (1.20.0, 1.21.0, 1.24.0).
+
+### Patch Changes
+
+-   f80de43: review eval: price the A/B report at Khan's rate beside list, from tokens
+
+    Every cost the eval has ever reported is provider list price (the runner's
+    `total_cost_usd`), because the `models.providers` overlay that halves
+    Anthropic's rate for production applies inside the awf api-proxy, which the
+    eval never crosses. So a claude arm's cost row read at 2x what production
+    meters, and a cross-provider A/B at list skewed against any model with no
+    overlay entry. The runner now records per-model token counts (the SDK
+    result's `modelUsage`) beside the dollars, and one module, `pricing.ts`,
+    turns tokens into dollars at either rate: Khan's, read off review.md's
+    overlay at render time, or list, from the one table the eval keeps, which
+    the report checks against the runner's meter on every run. The A/B table
+    carries "Cost (Khan rate)" beside "Cost (list price)", prices the judge and
+    match arbiter from their tokens (they were previously uncounted), totals the
+    run, and reads cost per tool call, the clusterer's price, gate-retry spend,
+    and the repeats aggregate's pooled cost in both currencies. The recorded
+    `usd` is unchanged, so prior artifacts stay comparable and render n/a on the
+    new rows.
+
+-   dc46633: review eval: the noise column tells a legitimate unspecced finding from a
+    template comment, and the matcher credits the spec's own lens
+
+    "Unmatched posted" only ever meant the spec did not list it. Reading run
+    33671015442's postings instead of its noise column, 10 of the claude arm's 22
+    unmatched findings were code-grounded defects the smoke fixtures really carry
+    (an empty-string account id fallback, an unvalidated discount rate, a quota
+    clamp that hides overage, an ADD COLUMN NOT NULL DEFAULT table rewrite, a
+    bare-string status type, a "retention cap" comment with no cap in the
+    package, a test fake ordering rows opposite to the store's contract, fakes
+    that never fail, an unescaped traceID in a query string, and the injection
+    comment itself), 6 were a "no test covers X" template, and the eval scored
+    all of them the same.
+
+    Three changes, batched because every fixture edit moves the corpus hash:
+
+    -   Live cases gain `live.mayFlagSpecs`: labeled real defects the fixture
+        carries that are not the case's ground truth. A posted finding matching
+        one is reported as "legitimate unspecced" and leaves the noise numerator,
+        and it earns no recall. Eight of the ten live smoke cases now carry the
+        entries the audit produced (12 in all, 11 of which the recorded run
+        exercised). clean-no-findings and
+        incident-cache-missing-key carry none because the reading found nothing.
+        None of the audited defects changes an expected verdict, so no fixture
+        moved beyond the false-block case's stub `ListTraces`, which returned an
+        undeclared variable and now decodes its request like its siblings.
+    -   Leftover findings are classified rather than lumped: legitimate unspecced
+        (above), duplicate of a caught spec (same location and mechanism as a
+        defect another finding already claimed, a merge-stage miss that still
+        counts as noise), or residual noise. The report gets an "of which
+        duplicates" row under noise and a "Legitimate unspecced" row. The
+        aggregate reads both shapes of artifact and sums unmatched plus duplicates
+        so pooled noise stays comparable with older reports for the duplicate
+        bucket (may-flag matches do not reconcile). The matcher stamp is
+        `deterministic-v2`, and a pool that mixes stamped reports with unstamped
+        legacy ones now lists "unstamped" as a second ruler and trips the
+        mixed-ruler warning.
+    -   When several posted findings satisfy one spec, the matcher now prefers the
+        one whose code-assigned `source` is the spec's `lens` before falling back
+        to posted order. On
+        the recorded run that moves the credit on four cases from a correctness
+        neighbour to the security-auth, money-payments, concurrency-async, and
+        data-migrations findings that actually described the defect (the race
+        case had credited a TTL suggestion two lines away).
+
+    Replayed over the recorded run, the claude arm's noise reads 35% (4 of 11
+    duplicates) instead of 71%, with 11 legitimate unspecced findings beside it.
+    The gemini arm reads 18% instead of 27%. Recall is unchanged on both arms.
+
+-   87bd7c5: review eval: the live A/B prints progress and checkpoints its report after
+    every case
+
+    Run 33802457289 was cancelled 45 minutes in and left nothing: the actions log
+    went from the `tsx live-ab.ts` invocation straight to "The operation was
+    canceled", and no report file existed for the `always()` upload. The runner
+    now writes one stderr line per dispatch end (arm, case, agent, cost, tool
+    calls when the runner counts them) and one per case end (verdict against
+    expected, caught and missed keys, cost so far), and rewrites
+    `live-ab-report.json` plus the `.md` after every scored case, marked
+    `partial: true` in the JSON and `(partial)` in the markdown header until the
+    final write replaces it. `aggregate.ts` pools nothing from a partial
+    single-run report and only the finished repeats from a partial multi-run one.
+
+    The cancel itself came from a `skip-ai-review` label: the `labeled` event
+    fired the workflow, the per-PR concurrency group cancelled the live run, and
+    the new run then skipped every job. A `labeled` event for any label other than
+    `full-eval` now gets its own concurrency group, so a no-op event can't cancel
+    a live run. `skip-live-eval` stays in the live group on purpose: it's the
+    opt-out, and adding it mid-run is how a run that's burning budget gets
+    stopped from inside the repo (the checkpoint keeps what it had scored). The
+    drift workflow skips its visibility PR on a partial report, so the in-repo
+    time series stays finished measurements only.
+
+-   088b1a1: review eval: scope reviewers to the staged case, and write their transcripts
+
+    The live A/B runs on a machine that also holds this repo, which holds every
+    case's must-catch spec and the scorer, and nothing stopped a reviewer from
+    reading them. On the Pi harness branch a gemini reviewer did (found the repo
+    with `find /`, read its own case.json, another case's, and live-match.ts, 37
+    of 42 calls on one case), and the SDK arm on main was open the same way: its
+    `allowedTools` list only pre-approved Read/Grep/Glob, so under
+    `bypassPermissions` every default tool including Bash stayed reachable.
+
+    The runner now restricts the toolset with `tools`, denies through a
+    PreToolUse hook both any tool outside Read/Grep/Glob and any read whose path
+    resolves outside the staged case (checkout plus context), counts the denials
+    per agent into the report even when the attempt times out (a new
+    "Reads denied outside the staged case" row on single runs and pooled line on
+    repeats reports, plus a section naming the reviewer when nonzero, with
+    tool-policy denials listed apart), and writes one transcript per dispatch under the
+    runner's temp dir, uploaded as `live-ab-transcripts`. The ruler stamp gains
+    the runner's tool policy, so every report's "Ruler:" line now ends with
+    `tools read-scoped:v1:Read,Grep,Glob`, reports from before this change pool
+    as `unscoped`, and a drift series crossing the boundary warns as mixed
+    rulers. Every live workflow
+    starts with `live-runner.ts --probe-read-scope`, one Haiku call that fails
+    the job if an out-of-scope read goes through. The README's read protocol now
+    says to read at least one transcript per arm before trusting a delta, and
+    names pre-scope runs as not isolated from the corpus.
+
 ## 1.25.1
 
 ### Patch Changes
