@@ -47,10 +47,11 @@ import {
     buildScopedDiff,
     computeHunkSignature,
     decideReReviewDepth,
-    renderRereviewStamp,
+    renderRereviewStampLine,
     STAMP_SCHEMA_VERSION,
     type ReReviewPlan,
 } from "../lib/rereview-mode";
+import {renderReviewDetailsFold} from "../lib/attribution";
 import {route, type RouterConfig} from "../lib/router";
 import type {ReReviewMode} from "../lib/routing-config";
 import type {CaseRereview, CorpusCase} from "./corpus/loader";
@@ -184,7 +185,9 @@ const stageRereview = (
         JSON.stringify(
             [
                 {
-                    body: renderRereviewStamp(priorStamp),
+                    body: renderReviewDetailsFold([
+                        renderRereviewStampLine(priorStamp),
+                    ]),
                     submittedAt: "2026-01-01T00:00:00Z",
                 },
             ],

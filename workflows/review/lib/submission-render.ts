@@ -290,14 +290,27 @@ export const renderClaimComment = (
  * list out of the collapse (Khan/actions#401's re-review), and escaping
  * cannot help because the ingest sanitizer decodes entities
  * ({@link neutralizeStructuralTags}).
+ *
+ * The subject is also flattened to ONE line. A multi-line subject is
+ * reachable (the first-sentence fallback for a lens that omits `summary`
+ * can span lines) and would break both directions of the contract: its
+ * continuation lines never parse back as entries, and a line-start fold
+ * opener inside a multi-line code span — which neutralization deliberately
+ * leaves alive — would out-position the real tail fold's opener in
+ * autofix's last-opener scan.
  */
+const flattenSubject = (subject: string): string =>
+    subject.replace(/\s+/g, " ").trim();
+
 export const renderCollapsedLine = (claim: Claim): string =>
     claim.path !== undefined && claim.line !== undefined
         ? `- \`${claim.path}:${claim.line}\` ${
               claim.label
-          }: ${neutralizeStructuralTags(claim.subject)} ${sourceTag(claim)}`
+          }: ${neutralizeStructuralTags(
+              flattenSubject(claim.subject),
+          )} ${sourceTag(claim)}`
         : `- ${claim.label}: ${neutralizeStructuralTags(
-              claim.subject,
+              flattenSubject(claim.subject),
           )} ${sourceTag(claim)}`;
 
 /**
@@ -309,11 +322,61 @@ export const COLLAPSED_ENTRY_RE =
     /^- `([^`\s:]+):(\d+)` ([a-z]+ \([^)]*\)): (.*?)(?: <sub>\(([^)]+)\)<\/sub>)?$/;
 
 /**
- * The parse of the collapsed section's `<summary>` line (matched loosely,
- * prefix only: the count and the named-top tag vary per run, and a
- * one-entry section renders `<details open>` with a count-only summary;
- * keying on the `<summary>` text matches both forms). Lives beside the
- * renderer for the same no-drift reason as {@link COLLAPSED_ENTRY_RE}.
+ * Render the collapsed section's HEADING. `nonBlockingOnly` picks the
+ * wording: the inline cap can push a blocking claim into the collapse, and a
+ * "Non-blocking" heading would then mislabel it, so that wording applies
+ * only on a reduced surface whose every collapsed claim is non-blocking.
+ *
+ * Lives beside {@link COLLAPSED_HEADING_RE} for the same no-drift reason
+ * {@link renderCollapsedLine} lives beside {@link COLLAPSED_ENTRY_RE}: the
+ * heading is the anchor autofix slices the section from, so renderer and
+ * matcher must move together.
  */
-export const COLLAPSED_SUMMARY_RE =
+export const renderCollapsedHeading = (
+    count: number,
+    nonBlockingOnly: boolean,
+): string =>
+    nonBlockingOnly
+        ? `**Non-blocking observations (${count}):**`
+        : `**Lower-confidence observations (${count}):**`;
+
+/**
+ * The parse of the collapsed section's heading, current shape: a WHOLE line
+ * of exactly {@link renderCollapsedHeading}'s output, the bold markdown
+ * header the section renders inside the body's single `review details` fold
+ * (it has no fold
+ * of its own). Autofix's section slice pairs it with
+ * {@link LEGACY_COLLAPSED_SUMMARY_RE} to keep reading bodies posted before
+ * the change.
+ *
+ * Line-anchored rather than a loose prefix because a pr-level claim's
+ * discussion is copied verbatim into the body ABOVE the tail fold, so a
+ * finding that merely QUOTES the heading mid-sentence would otherwise steal
+ * the section slice from the real fold. Line-anchoring is half the defense;
+ * the other half is autofix searching only fold interiors, last match wins
+ * (collapsed.ts).
+ */
+export const COLLAPSED_HEADING_RE =
+    /^\*\*(?:Non-blocking|Lower-confidence) observations \(\d+\):\*\*$/m;
+
+/**
+ * The legacy per-section `<summary>` heading,
+ * `<summary>Lower-confidence observations (N…)</summary>`, matched by
+ * prefix because its teaser text varies. Still matched because autofix
+ * reads the LATEST posted review body, and bodies posted by older reviewer
+ * releases (their observations section carried its own fold) are what an
+ * in-flight PR still holds.
+ */
+export const LEGACY_COLLAPSED_SUMMARY_RE =
     /<summary>(?:Non-blocking|Lower-confidence) observations \(/;
+
+/**
+ * Every-occurrence variant of {@link LEGACY_COLLAPSED_SUMMARY_RE}, for
+ * callers that need the LAST match (autofix's legacy section slice).
+ * Declared here beside its single-match form so a flag or source change
+ * lands on both.
+ */
+export const LEGACY_COLLAPSED_SUMMARY_ALL_RE = new RegExp(
+    LEGACY_COLLAPSED_SUMMARY_RE.source,
+    "g",
+);

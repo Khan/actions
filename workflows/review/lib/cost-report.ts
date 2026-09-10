@@ -511,11 +511,13 @@ const blockStart = (body: string, chip: string): number => {
 };
 
 /**
- * Insert the cost block into a review body, before the fingerprint stamp
- * when the body carries one (the stamp is documented as the final block and
- * its reader is last-wins), else appended. Idempotent: a body that already
- * carries a cost block gets it replaced, so a re-run of the step cannot
- * stack two.
+ * Insert the cost block into a review body, before the LEGACY
+ * `review fingerprint` block when the body carries one (that block is
+ * documented as the final one and its reader is last-wins). On a one-fold
+ * body the stamp is a `<sub>` line inside the tail fold with no block of
+ * its own, so the cost block appends after the fold. Idempotent: a body
+ * that already carries a cost block gets it replaced, so a re-run of the
+ * step cannot stack two.
  */
 export const withCostDetails = (body: string, details: string): string => {
     // Anchored to a line start, so a body that merely quotes the chip's

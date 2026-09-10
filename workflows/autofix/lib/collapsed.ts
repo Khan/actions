@@ -2,8 +2,9 @@
  * Parsing the reviewer's collapsed observations out of review bodies.
  *
  * The reviewer's posting surface collapses over-budget and reduced-depth
- * non-blocking findings into a `<details>` block in the review body, one
- * terse line each (`submission.ts`). Before this module, those findings were
+ * non-blocking findings into the review body's single collapsed
+ * `review details` fold, under a bold heading, one terse line each
+ * (`submission.ts`). Before this module, those findings were
  * invisible to autofix: the work list reads posted threads, a collapsed
  * finding never becomes a thread, and so the reviewer's budget quietly
  * shrank autofix's scope (the documentation autofix's whole selection key is
@@ -23,8 +24,20 @@
  * it, which is the same self-healing bet the reviewer's own corpus memory
  * makes.
  *
+ * Section slicing runs from the heading match — the current bold header
+ * ({@link COLLAPSED_HEADING_RE}) or the legacy `<summary>` line
+ * ({@link LEGACY_COLLAPSED_SUMMARY_ALL_RE}) — to the fold's own closing
+ * `</details>` (line-anchored: an entry can carry the literal in a code
+ * span). On a current body that closing tag belongs
+ * to the enclosing `review details` fold rather than a per-section block,
+ * so the slice additionally covers the config and fingerprint `<sub>` lines
+ * that follow the entries — neither matches the entry grammar, so they are
+ * skipped like any other unparseable line. How the section is located, and
+ * why prose quoting the markup cannot forge the work list, is
+ * {@link locateSection}'s docstring.
+ *
  * The line grammar parsed here is `submission.ts`'s render, one entry per
- * line inside the `<details>` block:
+ * line:
  *
  *     - `path:line` label: subject <sub>(source)</sub>
  *
@@ -36,8 +49,11 @@
 
 import {
     COLLAPSED_ENTRY_RE,
-    COLLAPSED_SUMMARY_RE,
+    COLLAPSED_HEADING_RE,
+    LEGACY_COLLAPSED_SUMMARY_ALL_RE,
 } from "../../review/lib/submission-render.ts";
+import {REVIEW_DETAILS_OPEN_RE} from "../../review/lib/attribution.ts";
+import {STAMP_MARKER} from "../../review/lib/rereview-mode.ts";
 import type {PriorReview} from "../../review/lib/rereview-mode.ts";
 
 /** One collapsed observation, parsed off the latest review body. */
@@ -53,12 +69,76 @@ export type CollapsedObservation = {
 };
 
 /**
+ * The observations section's text, from its heading to the close of the
+ * block that carries it, or null when the body has none.
+ *
+ * The threat model: a pr-level finding's discussion is copied into the body
+ * verbatim and unescaped, ABOVE the tail fold, so any markup this function
+ * keys on can also appear there as a quote. The defenses, in the order the
+ * code applies them:
+ *
+ *   1. The LAST `review details` opener ({@link REVIEW_DETAILS_OPEN_RE},
+ *      whitespace-tolerant and line-anchored — autofix pins its own release,
+ *      so the body may have been rendered and ingest-rewritten by a newer
+ *      review release) names the real tail fold: body assembly renders it
+ *      after everything else, so quoted openers always sit above it. Only
+ *      that fold's interior is searched for the bold heading.
+ *   2. A last fold with no heading but carrying the fingerprint stamp
+ *      ({@link STAMP_MARKER}) is a current-shape body that collapsed
+ *      nothing: stop, so a quoted LEGACY heading above the fold cannot win
+ *      either. (A current body missing its stamp — a staging failure the
+ *      author cannot cause — falls through and keeps that legacy exposure.)
+ *   3. Otherwise the body is legacy-shaped (its own wrapped footer fold
+ *      never carries a heading or a stamp) or pre-fold: the legacy
+ *      `<summary>` carrier is searched whole-body, LAST match winning,
+ *      since legacy bodies put pr-level prose above their observations
+ *      fold too.
+ */
+const locateSection = (body: string): string | null => {
+    let lastOpenEnd = -1;
+    for (const open of body.matchAll(REVIEW_DETAILS_OPEN_RE)) {
+        lastOpenEnd = open.index + open[0].length;
+    }
+    if (lastOpenEnd !== -1) {
+        const fold = sliceToFoldClose(body, lastOpenEnd);
+        const heading = fold.search(COLLAPSED_HEADING_RE);
+        if (heading !== -1) {
+            return fold.slice(heading);
+        }
+        if (fold.includes(STAMP_MARKER)) {
+            return null;
+        }
+    }
+    let legacy = -1;
+    for (const open of body.matchAll(LEGACY_COLLAPSED_SUMMARY_ALL_RE)) {
+        legacy = open.index;
+    }
+    if (legacy === -1) {
+        return null;
+    }
+    return sliceToFoldClose(body, legacy);
+};
+
+/**
+ * The fold's real `</details>` closer starts a line (submission renders it
+ * that way), while an entry's one-line subject can carry the literal inside
+ * a code span — cutting there would silently drop every entry below it.
+ */
+const FOLD_CLOSE_RE = /^[ \t]*<\/details>/m;
+
+const sliceToFoldClose = (body: string, from: number): string => {
+    const rest = body.slice(from);
+    const close = rest.search(FOLD_CLOSE_RE);
+    return close === -1 ? rest : rest.slice(0, close);
+};
+
+/**
  * Parse the collapsed observations from the NEWEST review's body (ordered
  * by submittedAt where present, staging order otherwise). A newest body
  * with no collapsed section yields no observations; older bodies are never
- * consulted (the module header carries the staleness reasoning). Only the
- * text inside the section's own <details> block is parsed, so an
- * entry-shaped line elsewhere in the body cannot mint a work item.
+ * consulted (the module header carries the staleness reasoning). Only
+ * {@link locateSection}'s slice is parsed, so an entry-shaped line
+ * elsewhere in the body cannot mint a work item.
  */
 export const parseCollapsedObservations = (
     priorReviews: readonly PriorReview[],
@@ -74,13 +154,10 @@ export const parseCollapsedObservations = (
         const right = b.submittedAt ?? "";
         return left < right ? -1 : left > right ? 1 : 0;
     });
-    const body = ordered[ordered.length - 1]?.body ?? "";
-    const start = body.search(COLLAPSED_SUMMARY_RE);
-    if (start === -1) {
+    const section = locateSection(ordered[ordered.length - 1]?.body ?? "");
+    if (section === null) {
         return [];
     }
-    const end = body.indexOf("</details>", start);
-    const section = body.slice(start, end === -1 ? body.length : end);
     const observations: CollapsedObservation[] = [];
     for (const raw of section.split("\n")) {
         const match = COLLAPSED_ENTRY_RE.exec(raw.trim());

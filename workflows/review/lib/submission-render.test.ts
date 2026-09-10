@@ -7,7 +7,10 @@ import {
 } from "./submission";
 import {
     COLLAPSED_ENTRY_RE,
+    COLLAPSED_HEADING_RE,
+    LEGACY_COLLAPSED_SUMMARY_RE,
     MAX_VERBATIM_FOLD_CHARS,
+    renderCollapsedHeading,
     renderCollapsedLine,
     renderPrLevelFold,
 } from "./submission-render";
@@ -370,6 +373,26 @@ describe("renderPrLevelFold block-close refusal", () => {
 });
 
 describe("renderCollapsedLine", () => {
+    it("flattens a multi-line subject to one line", () => {
+        // The first-sentence fallback can hand a subject that spans lines;
+        // rendered raw, its continuation lines never parse back as entries,
+        // and a line-start fold opener inside a multi-line code span would
+        // out-position the real tail fold in autofix's last-opener scan.
+        const line = renderCollapsedLine(
+            claim({
+                label: "note (non-blocking)",
+                subject:
+                    "The body renders\n<details><summary><sub>review details</sub></summary>\nacross lines.",
+            }) as never,
+        );
+        expect(line).not.toContain("\n");
+        expect(line).toBe(
+            "- `a.ts:2` note (non-blocking): The body renders " +
+                "(details)(summary)<sub>review details</sub>(/summary) " +
+                "across lines. <sub>(correctness-reviewer)</sub>",
+        );
+    });
+
     it("neutralizes structural tags in the model-authored subject", () => {
         const line = renderCollapsedLine(
             claim({
@@ -391,5 +414,35 @@ describe("renderCollapsedLine", () => {
         expect(match?.[4]).toBe(
             "No test pins the blank line between (/details) and the fence.",
         );
+    });
+});
+
+describe("the collapsed heading's render/match pair", () => {
+    it("matches its own rendered line on both wordings", () => {
+        for (const nonBlockingOnly of [true, false]) {
+            const heading = renderCollapsedHeading(3, nonBlockingOnly);
+            expect(heading).toContain(
+                nonBlockingOnly ? "Non-blocking" : "Lower-confidence",
+            );
+            expect(`prose\n${heading}\nmore`).toMatch(COLLAPSED_HEADING_RE);
+        }
+    });
+
+    it("does not match the heading quoted inside a sentence", () => {
+        // A pr-level discussion is copied verbatim into the body, so a
+        // finding ABOUT the review format must not read as a section
+        // anchor; the line anchors are what make that structural.
+        expect(
+            "the run emits **Non-blocking observations (2):** at the top",
+        ).not.toMatch(COLLAPSED_HEADING_RE);
+        expect("**Non-blocking observations (N):**").not.toMatch(
+            COLLAPSED_HEADING_RE,
+        );
+    });
+
+    it("still matches the legacy per-section summary line", () => {
+        expect(
+            "<summary>Lower-confidence observations (2; top: x)</summary>",
+        ).toMatch(LEGACY_COLLAPSED_SUMMARY_RE);
     });
 });

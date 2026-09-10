@@ -410,13 +410,11 @@ re-review scoped
 - `non-blocking-budget` sets how many non-blocking findings may post as inline
   comments per review (default 3). Blocking findings never count against it;
   `nitpick (non-blocking)` findings never post inline at all. Findings over
-  budget collapse into a `<details>` block in the review body whose summary
-  names the top-ranked entry when it holds two or more; a one-entry
-  observation section renders `<details open>` with a count-only summary,
-  since the entry is its own preview (metadata chips such as the version
-  footer stay closed at any count; always the body, never riding an inline
-  comment: the body is the surface the autofix's body-sourced work list
-  reads back); nothing is dropped, the verdict counts every validated
+  budget collapse into the review body's single collapsed `review details`
+  fold, under a bold `**Lower-confidence observations (N):**` heading,
+  ranked so the tail's best finding is the first bullet (always the body,
+  never riding an inline comment: the body is the surface the autofix's
+  body-sourced work list reads back); nothing is dropped, the verdict counts every validated
   finding, and the autofix still reaches collapsed findings through that
   work list, so the budget shrinks the notification surface, never the
   autofix scope. A malformed value warns and keeps the previous value (the
@@ -653,7 +651,8 @@ Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministi
   reduced depths never approve, so the cleared block waits for a
   full-roster round to become one.
 - **Divergence tripwire.** Every full-depth review stamps a content-hashed
-  hunk signature into its review body as a collapsed `<details>` block (an
+  hunk signature into its review body as a `<sub>` line inside the body's
+  single collapsed `review details` fold (an
   HTML comment would be deleted by the ingest sanitizer; it survives cache
   eviction and branch protection's dismiss-stale-approvals, and it (not the
   review state) is what marks a full review as having happened, so a
@@ -842,7 +841,7 @@ own eval-suite arm.
 ### What a review costs (the per-review cost report)
 
 Every review carries its own price tag: a collapsed `review cost` block at the
-end of the review body (before the fingerprint stamp), with one row per
+end of the review body (after the `review details` tail fold), with one row per
 sub-agent (model, tool calls, turns, wall clock, tokens by class), a row for
 the prose judge, a row for the orchestrator, and a total, in two currencies.
 The same table lands in the run's step summary and as `cost-report.json` in
@@ -1048,10 +1047,12 @@ change ships.
 Semver is the behavior contract: a release that changes the reviewer's behavior bumps
 the major version, so a consumer pinned to `review-v<major>` can assume the fundamental
 behavior holds within a major. For attribution and rollback, every submitted review
-body and the risks/patterns guidance comment (Step 7) end with a footer collapsed
-inside a `<details>` block (summary chip `review details`), rendered in code by
+body and the risks/patterns guidance comment (Step 7) carry a version footer,
+rendered in code by
 `lib/version-footer.ts` from the pinned checkout's `package.json` and the staged
-run files (never composed by the model):
+run files (never composed by the model). In the review body it is a bare `<sub>`
+line inside the body's one `review details` tail fold (below); the guidance
+comment, which has no tail fold to ride, ends with the standalone wrapped block:
 
 ```
 <details><summary><sub>review details</sub></summary>
@@ -1079,15 +1080,29 @@ in `lib/rereview-mode.ts`), so the marker never reached a posted comment; `sub`,
 ingest. There is no separate config-hash or drift-stamp mechanism; the release
 tag plus the footer's config segments are the version surface.
 
-After the footer, a submitted review body ends with two more collapsed blocks:
-the cost report (summary chip `review cost`, spliced in by the
-`lib/cost-report-cli.ts` post-step, see "What a review costs"), then the
-re-review fingerprint stamp (summary chip `review fingerprint`, rendered by
-`lib/rereview-mode.ts`), the hunk-signature record the next run's re-review
-planner and autofix's currency check read back. All three ride the same
-sanitizer-surviving `details`/`summary`/`sub` mechanism, and the stamp is
-always the final block (the cost block is inserted before it, and is absent
-when the post-step could not run).
+A submitted review body ends with ONE collapsed `review details` fold, and
+the footer is a `<sub>` line inside it. The fold carries, in order: the
+collapsed observations section, the version/config line, and the re-review
+fingerprint stamp line (rendered by `lib/rereview-mode.ts`), the
+hunk-signature record the next run's re-review planner and autofix's
+currency check read back. The stamp rides the same sanitizer-surviving
+`sub` mechanism as the footer (the paragraph above has the rationale). The one exception to the
+single fold: the cost report (summary chip `review cost`, spliced in by the
+`lib/cost-report-cli.ts` post-step after submission, see "What a review
+costs") appends as its own collapsed block after the fold, and is absent
+when the post-step could not run.
+
+Before KORE-2632 those were three separate stacked folds — observations,
+footer, stamp — two of them machine bookkeeping no reader opens (and the
+cost block inserted itself before the stamp block). Bodies posted in that
+shape are still parsed: autofix's section slice matches the legacy
+`<summary>` heading (`LEGACY_COLLAPSED_SUMMARY_RE`) as well as the current
+bold one (`COLLAPSED_HEADING_RE`), and the stamp readers
+accept both carriers, so an in-flight PR's next re-review and autofix run
+behave exactly as before. That compatibility is one-directional: a consumer
+must take autofix's paired patch release before (or with) the reviewer
+release that posts new-format bodies — an older autofix reading a
+new-format body finds no legacy heading and its work list reads empty.
 
 Every inline review comment (and each pr-level finding folded into the review
 body) additionally carries per-comment attribution, naming the reviewer that
@@ -1100,8 +1115,10 @@ block, and a long one posts as a visible summary line plus one collapsed
 context block (`lib/render-comment.ts`) with the attribution riding inside
 that block as its final `<sub>` line rather than stacking a second expando.
 A pr-level finding in the review body keeps its own fold
-(`renderPrLevelFold`: the `Full finding` chip at 400 chars) with the classic
-footer stacked after it. Collapsed one-liners (the low-confidence `<details>` section and a
+(`renderPrLevelFold`: the `Full finding` chip at 400 chars) and names its
+reviewer on a bare `<sub>` line after it — the same shape a context-folded
+inline comment uses — rather than stacking a second `review details` expando
+above the body's own. Collapsed one-liners (the observations section and a
 hold comment's claim list) carry the short form, a trailing
 `<sub>(<source>)</sub>` tag. Text-similarity comparisons against
 previously-posted bodies (open-thread suppression, the adjudicated corpus)
