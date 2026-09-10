@@ -33,7 +33,11 @@ import {
     type CaseLive,
 } from "./live";
 import type {ChangedFile, FileStatus, RiskTier} from "../../lib/router";
-import type {VerdictEvent} from "../../lib/render-comment";
+import {
+    BLOCKING_LABELS,
+    NON_BLOCKING_LABELS,
+    type VerdictEvent,
+} from "../../lib/render-comment";
 import type {DimensionStatus} from "../../lib/verdict";
 
 /* -------------------------------------------------------------------------- */
@@ -83,6 +87,8 @@ export type CaseCategory = typeof CASE_CATEGORIES[number];
 export type RecordedFinding = {
     /** Producing reviewer/lens name (provenance; e.g. `correctness`). */
     source: string;
+    /** Original label-shape output, absent for structured lens findings. */
+    labelOverride?: string;
     /** The structured finding the sub-agent emitted (schema-validated). */
     finding: Finding;
 };
@@ -365,6 +371,17 @@ const parseFindings = (raw: unknown, errors: string[]): RecordedFinding[] => {
         if (!isNonEmptyString(entry["source"])) {
             errors.push(`findings[${i}].source: required non-empty string`);
         }
+        const labelOverride = entry["labelOverride"];
+        if (
+            labelOverride !== undefined &&
+            (typeof labelOverride !== "string" ||
+                ![...BLOCKING_LABELS, ...NON_BLOCKING_LABELS].some(
+                    (label) => label === labelOverride,
+                ))
+        ) {
+            errors.push(`findings[${i}].labelOverride: unknown label`);
+            return;
+        }
         const result = validateFinding(entry["finding"]);
         if (!result.ok) {
             for (const e of result.errors) {
@@ -373,7 +390,11 @@ const parseFindings = (raw: unknown, errors: string[]): RecordedFinding[] => {
             return;
         }
         if (isNonEmptyString(entry["source"])) {
-            findings.push({source: entry["source"], finding: result.finding});
+            findings.push({
+                source: entry["source"],
+                finding: result.finding,
+                ...(labelOverride !== undefined ? {labelOverride} : {}),
+            });
         }
     });
     return findings;

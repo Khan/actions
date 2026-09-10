@@ -45,16 +45,18 @@ Baseline code: `a5b6eb08efd60b690f443b569f552404e731497a`. The untouched suite p
 | Original visible-consequence checks | 2/3 | 2/3 |
 | Hand-authored correction component checks | 8/12 | 12/12 |
 | Hand-authored corrections retained | 3/3 | 3/3 |
-| Original comments byte-equal to production rendering | 1/3 | 3/3 |
-| Corrected comments byte-equal to production rendering | 0/3 | 3/3 |
+| Original replay bodies byte-equal to the bare claim renderer | 1/3 | 3/3 |
+| Corrected replay bodies byte-equal to the bare claim renderer | 0/3 | 3/3 |
+
+Equality here excludes attribution and submission placement. Production supplies attribution to `renderClaimComment`, while this replay calls it without that argument. The reconstructed finding envelopes do not recover every original publication input, so these are not exact publication-byte checks. Historical report fields named `originalMatchesProduction`, `controlMatchesProduction`, and `productionControl` refer only to that bare renderer. New reports name this limit in `renderingSurface` and use `originalMatchesBareRenderer`, `controlMatchesBareRenderer`, and `bareRendererControl` instead.
 
 The original comments still fail the same four checks. Editing fixtures did not make them better. The measured change is that the eval now represents corrections which production already applies. The production prompt, validator, and prose judge are unchanged. There were no model calls, so this provides no measured improvement in reviewer quality, recall, or model correction rate.
 
 ## Implementation and verification
 
-- `live-producer.ts` uses production's subject/body composition and claim builder, then carries `corrected` through validator parsing.
-- `corpus/loader.ts` preserves correction objects. Invalid field values still go through production's field guards at application time.
-- `runner.ts` renders every candidate with production `renderClaimComment`, including uncorrected and plausibly downgraded findings. This keeps suggestion/sketch handling consistent across the compared outputs. It applies confirmed corrections with production `applyVerifications`. The normalized finding also receives the corrected prose, summary, suggestion, and anchor, so downstream matchers and judges receive the corrected posted text. Producer evidence and failure scenarios stay unchanged as provenance. Plausible corrections remain unapplied, matching production's current behavior.
+- `live-producer.ts` uses production's subject/body composition and claim builder, preserves the original label as `labelOverride`, then carries `corrected` through validator parsing. Recorded cases retain that override so question, thought, note, nitpick, and todo labels reach the same sketch and verdict gates. Structured lens findings without an override still use the code-owned label mapping.
+- `corpus/loader.ts` preserves label overrides and correction objects. Invalid field values still go through production's field guards at application time.
+- `runner.ts` renders every candidate with production `renderClaimComment`, including uncorrected and plausibly downgraded findings. This keeps suggestion/sketch handling consistent across the compared outputs. It applies confirmed corrections and plausible downgrades with production `applyVerifications`. The normalized finding also receives the corrected prose, summary, suggestion, and anchor, so downstream matchers and judges receive the corrected posted text. Producer evidence and failure scenarios stay unchanged as provenance. Plausible corrections remain unapplied, matching production's current behavior.
 
 Run the focused tests from the repo root:
 
@@ -66,6 +68,8 @@ Print the deterministic report, without model calls:
 
 The initial candidate passed 2,244 tests in 107 files. After rebasing onto `088b1a1`, the full suite passes 2,418 tests in 126 files and `pnpm lint` passes. The same scorer and fixtures produce identical component results after the rebase. The live-producer fidelity test moved to its own file with shared test fixtures to stay under the repo's 1,000-line limit. `pnpm typecheck` passes but its tsconfig excludes `workflows/`. A separate strict check including the changed eval modules reports the existing `runner.ts` error where `submitEvent` may return `COMMENT` but `PlannedReview.event` excludes it. The same error reproduces in the detached baseline worktree. This change does not fix that unrelated type mismatch.
 
-The review follow-up passes 2,424 tests in 127 files, lint, and the repo typecheck. Six added tests cover accepted label/line corrections in both severity directions, drop-in versus sketch rendering before validation, and implementation hash coverage. The strict eval check still reports only the existing `COMMENT` mismatch. The repeated deterministic measurement keeps the same component scores, with all 3 original and all 3 corrected comments now byte-equal to production rendering.
+The review follow-up passes 2,424 tests in 127 files, lint, and the repo typecheck. Six added tests cover accepted label/line corrections in both severity directions, drop-in versus sketch rendering before validation, and implementation hash coverage. The strict eval check still reports only the existing `COMMENT` mismatch. The repeated deterministic measurement keeps the same component scores, with all 3 original and all 3 corrected replay bodies now byte-equal to the bare claim renderer (without attribution).
+
+The label follow-up's deterministic report is appended under `labelFollowup`, without overwriting earlier measurements. Its implementation manifest includes `metrics.ts`, which computes the reported recall, precision, and noise, and removes `live-producer.ts`, which this recorded replay never calls. Tests still cover the live producer separately. Source-byte sensitivity tests include every path in the measured manifest. These hashes are not directly comparable with the older manifest.
 
 Before changing a model prompt, run the same reviewed code and candidate claims through both prompt versions with the same tools, model, budget, and component checks. Measure whether inaccurate details are corrected and whether the useful findings survive. These recorded controls are not a substitute for that experiment, and whole-review live A/B rates from the old harness should not be compared to new rates as if only a prompt changed.

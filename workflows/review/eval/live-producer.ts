@@ -45,7 +45,11 @@ import {
     writeFileSync,
 } from "node:fs";
 
-import {isBlockingLabel} from "../lib/render-comment";
+import {
+    BLOCKING_LABELS,
+    NON_BLOCKING_LABELS,
+    isBlockingLabel,
+} from "../lib/render-comment";
 import {
     buildClaims,
     joinProse,
@@ -412,6 +416,15 @@ const fromLabelShape = (
         throw new Error(`findings[${index}] is not an object`);
     }
     const label = typeof raw["label"] === "string" ? raw["label"] : "";
+    if (
+        ![...BLOCKING_LABELS, ...NON_BLOCKING_LABELS].some(
+            (known) => known === label,
+        )
+    ) {
+        throw new Error(
+            `findings[${index}]: unknown label ${JSON.stringify(label)}`,
+        );
+    }
     const subject = typeof raw["subject"] === "string" ? raw["subject"] : "";
     const discussion =
         typeof raw["discussion"] === "string" ? raw["discussion"] : "";
@@ -458,6 +471,7 @@ const fromLabelShape = (
     return {
         source,
         finding: result.finding,
+        labelOverride: label,
         ...(typeof raw["skill"] === "string" && raw["skill"] !== ""
             ? {skill: raw["skill"]}
             : {}),
@@ -968,7 +982,7 @@ export const produceLive = async (
 
     return {
         findings: findings.map(
-            ({source, finding}): RecordedFinding => ({source, finding}),
+            ({skill: _skill, ...recorded}): RecordedFinding => recorded,
         ),
         validation,
         perAgent,
