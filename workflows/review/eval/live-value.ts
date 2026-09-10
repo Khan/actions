@@ -1,4 +1,5 @@
-import type {ArmRunReport} from "./live-ab-report";
+import type {ArmRunReport, MultiAbReport} from "./live-ab-report";
+import {coverageNote} from "./live-accounting";
 
 /** Pair cases, not raw comment counts. Unmatched output isn't a proven FP. */
 export const compareUsefulCoverage = (
@@ -65,19 +66,32 @@ export const compareUsefulCoverage = (
 
 export type UsefulCoverageComparison = ReturnType<typeof compareUsefulCoverage>;
 
+const valueTotalsSummary = (
+    value: Pick<
+        UsefulCoverageComparison,
+        "gained" | "lost" | "net" | "usdDelta" | "usdPerNetUsefulCatch"
+    >,
+): string[] => [
+    `Paired useful defects: ${value.gained} gained, ${value.lost} lost, ${
+        value.net
+    } net. Paired dispatch cost delta (list price): $${value.usdDelta.toFixed(
+        2,
+    )}.`,
+    `Dispatch cost per net useful catch (list price): ${
+        value.usdPerNetUsefulCatch === null
+            ? "n/a (net gain is not positive)"
+            : `$${value.usdPerNetUsefulCatch.toFixed(2)}`
+    }.`,
+];
+
 export const valueSummary = (
     value: UsefulCoverageComparison | undefined,
 ): string[] =>
     value === undefined
-        ? []
+        ? ["Useful-catch value unavailable (no value accounting)."]
         : [
-              `Paired useful defects: ${value.gained} gained, ${
-                  value.lost
-              } lost, ${
-                  value.net
-              } net. Paired dispatch cost delta: $${value.usdDelta.toFixed(
-                  2,
-              )}.`,
+              `Useful-catch pairing: ${value.paired.length} paired cases, ${value.unpaired.length} unpaired cases.`,
+              ...valueTotalsSummary(value),
               `Inline coverage displaced: ${value.paired.reduce(
                   (n, c) => n + c.inlineDisplaced.length,
                   0,
@@ -85,3 +99,57 @@ export const valueSummary = (
                   value.unpaired.join(", ") || "none"
               }. See the JSON value block for the per-case trade.`,
           ];
+
+/** Pool finished repeat observations, never partial checkpoints or missing values. */
+export const repeatedValueSummary = (report: MultiAbReport): string[] => {
+    const finished = report.repeats.filter((r) => r.partial !== true);
+    const values = finished.flatMap((r) =>
+        r.value === undefined ? [] : [r.value],
+    );
+    const gained = values.reduce((n, v) => n + v.gained, 0);
+    const lost = values.reduce((n, v) => n + v.lost, 0);
+    const net = gained - lost;
+    const usdDelta = values.reduce((n, v) => n + v.usdDelta, 0);
+    const paired = values.flatMap((v) => v.paired);
+    return [
+        `Useful-catch value pooled over ${values.length}/${
+            finished.length
+        } finished repeats with value accounting (${
+            report.repeatCount
+        } planned repeats): ${paired.length} paired case-runs, ${values.reduce(
+            (n, v) => n + v.unpaired.length,
+            0,
+        )} unpaired case-runs.`,
+        "Counts sum repeat observations, not distinct defects across repeats.",
+        ...(values.length === 0
+            ? [
+                  "Useful-catch value unavailable (no finished repeat has value accounting).",
+              ]
+            : [
+                  ...valueTotalsSummary({
+                      gained,
+                      lost,
+                      net,
+                      usdDelta,
+                      usdPerNetUsefulCatch: net > 0 ? usdDelta / net : null,
+                  }),
+                  `Inline coverage displaced in the pool: ${paired.reduce(
+                      (n, c) => n + c.inlineDisplaced.length,
+                      0,
+                  )} defect observations.`,
+              ]),
+        ...report.repeats.flatMap((repeat, i) => [
+            "",
+            `Repeat ${i + 1} (${
+                repeat.partial === true
+                    ? "in progress, excluded from pool"
+                    : "finished"
+            }):`,
+            ...valueSummary(repeat.value),
+            coverageNote(repeat.arms.baseline),
+            coverageNote(repeat.arms.candidate),
+        ]),
+        "Coverage gaps are not clean passes. Budget shedding leaves a missing coverage dimension. Inspect each repeat's JSON value and per-case accounting for the tradeoff.",
+        "",
+    ];
+};

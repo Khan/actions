@@ -10,7 +10,7 @@ import {matchCase} from "./live-match";
 import {runCase} from "./runner";
 import {accountLiveRun} from "./live-accounting";
 import {scoreRereview} from "./rereview-match";
-import {compareUsefulCoverage} from "./live-value";
+import {compareUsefulCoverage, valueSummary} from "./live-value";
 import {runArm} from "./live-ab";
 
 const evidence = JSON.parse(
@@ -313,5 +313,103 @@ describe("posting and matcher boundaries", () => {
         const match = await matchCase(c, result);
         expect(result.plannedReview.comments).toEqual([]);
         expect(match.falseFlags).toHaveLength(1);
+    });
+});
+
+describe("useful-catch value controls", () => {
+    const keys = ["lost", "shared", "gained-a", "gained-b"];
+    const cases = keys.map((key) =>
+        corpus(key, [{path: "src/a.ts", line: 1}], []),
+    );
+    const arm = (
+        name: "baseline" | "candidate",
+        caught: string[],
+        usd: number,
+        maxUsd = 10,
+    ) =>
+        runArm(
+            name,
+            cases,
+            async (c) => ({
+                findings: caught.includes(c.id)
+                    ? [finding(c.id, "src/a.ts", 1, c.id)]
+                    : [],
+                validation: [],
+                perAgent: [
+                    {
+                        name: "scripted",
+                        model: "scripted",
+                        usd,
+                        turns: 1,
+                        wallMs: 1,
+                        retried: false,
+                    },
+                ],
+            }),
+            {maxUsd, log: () => {}},
+        );
+
+    it.each([
+        {
+            caught: ["shared", "gained-a", "gained-b"],
+            gained: 2,
+            net: 1,
+            price: 2,
+        },
+        {caught: ["shared", "gained-a"], gained: 1, net: 0, price: null},
+        {caught: ["shared"], gained: 0, net: -1, price: null},
+    ])(
+        "prices $net net catches with a $price denominator result",
+        async ({caught, gained, net, price}) => {
+            const baseline = await arm("baseline", ["lost", "shared"], 0.25);
+            const candidate = await arm("candidate", caught, 0.75);
+            const value = compareUsefulCoverage(baseline, candidate);
+            expect(value).toMatchObject({
+                gained,
+                lost: 1,
+                net,
+                usdDelta: 2,
+                usdPerNetUsefulCatch: price,
+                unpaired: [],
+            });
+            expect(value.paired).toHaveLength(4);
+            expect(value.paired.find((c) => c.caseId === "lost")?.lost).toEqual(
+                ["lost"],
+            );
+            expect(
+                value.paired.find((c) => c.caseId === "shared")?.shared,
+            ).toEqual(["shared"]);
+            expect(value.paired.flatMap((c) => c.gained)).toEqual(
+                caught.filter((key) => key !== "shared"),
+            );
+            expect(valueSummary(value).join("\n")).toContain(
+                `Dispatch cost per net useful catch (list price): ${
+                    price === null ? "n/a (net gain is not positive)" : "$2.00"
+                }.`,
+            );
+        },
+    );
+
+    it("doesn't price skipped or unrecorded cases as lost catches", async () => {
+        const baseline = await arm("baseline", keys, 0.25);
+        const candidate = await arm("candidate", keys, 0.75, 0.75);
+        const value = compareUsefulCoverage(baseline, candidate);
+        expect(candidate.skippedCases).toEqual(keys.slice(1));
+        expect(value).toMatchObject({
+            gained: 0,
+            lost: 0,
+            net: 0,
+            usdDelta: 0.5,
+            usdPerNetUsefulCatch: null,
+            unpaired: keys.slice(1),
+        });
+        expect(value.paired).toHaveLength(1);
+        delete candidate.perCase[0]!.accounting;
+        expect(compareUsefulCoverage(baseline, candidate)).toMatchObject({
+            paired: [],
+            unpaired: keys,
+            usdDelta: 0,
+            usdPerNetUsefulCatch: null,
+        });
     });
 });

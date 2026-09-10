@@ -11,13 +11,15 @@ A reviewer earns its place by catching useful defects the existing roster misses
 - Live scoring uses production's inline selection function: blocking first, medium before minor, confidence floor, no inline nitpicks, the shared non-blocking budget, and the absolute 20-comment cap. Label-shape labels and medium importance survive normalization. Collapsed findings remain visible findings for recall, duplicates, and false flags.
 - Failed core reviewers affect the hold gate. A hold emits no planned inline comments. Recorded-only smoke replay retains its historical posting semantics unless `posting` is requested.
 
-`perCase.accounting.coverage` records planned, dispatched, shed, absent, and failed reviewers. `complete` covers the modeled stages only. `omittedStages` explicitly records pattern triage, which this harness still doesn't run. The native investigation-cap and validator-correction work are separate changes. This is not a claim of complete workflow parity, and these remaining boundaries must be checked before using a paid result to enable a reviewer.
+`perCase.accounting.coverage.planned` and `dispatched` count the same finder population: planned includes budget-shed finders, and dispatched excludes shed and absent entries but includes attempted finders that failed. Neither count includes validators, reconcilers, or clusterers. Without execution accounting, both populations are unrecorded (empty), not proof that no finders ran. The `shed`, `absent`, and `failed` lists still record statuses across all modeled stages, and `complete` still requires execution accounting with no shed, absent, or failed entry at any modeled stage. Budget shedding leaves a missing coverage dimension, not a clean pass. `omittedStages` explicitly records pattern triage, which this harness still doesn't run. The native investigation-cap and validator-correction work are separate changes. This is not a claim of complete workflow parity, and these remaining boundaries must be checked before using a paid result to enable a reviewer.
 
 ## Reading value rather than volume
 
 `perCase.accounting.usefulDefects` groups must-catch and audited may-flag matches by defect key. It preserves sources and both inline and collapsed surfaces. `mergedProposalSources` records dedup attribution, not independently validated credit for each absorbed proposal.
 
-The top-level `value` block pairs cases and reports gained, lost, and shared useful defect keys, inline displacement, changed budget sheds, cost delta, and unpaired cases. A finding that moves below the inline bar is displaced inline coverage, not a lost catch. Cost per net useful catch is null when the net gain is zero or negative. Unmatched findings still need human audit before they're called false positives. Must-not-flag matches and clean-case flags remain separate existing metrics.
+The top-level `value` block pairs cases and reports gained, lost, and shared useful defect keys, inline displacement, changed budget sheds, cost delta, and unpaired cases. A finding that moves below the inline bar is displaced inline coverage, not a lost catch. Cost per net useful catch is null when the net gain is zero or negative (rendered as n/a). The numerator is candidate minus baseline dispatch cost at list price for paired cases only, excluding judge and arbiter costs and unpaired cases. Unmatched findings still need human audit before they're called false positives. Must-not-flag matches and clean-case flags remain separate existing metrics.
+
+Repeated-run markdown shows each repeat's value and modeled-reviewer coverage, including in-progress repeats labeled as excluded from the value pool. Pooled useful-catch counts and dispatch cost deltas sum only finished repeats with value accounting. The report names that denominator, paired and unpaired case-run counts, and the planned repeat count. Each repeated catch is another observation, not another distinct defect across repeats. Pooled cost per net useful catch divides the summed cost delta by the summed net gain, not by an average of per-repeat prices. It reports no confidence interval or precision estimate for these value counts. Missing value accounting is unavailable, not zero. Coverage notes count scored cases separately from cases skipped by the between-case budget cap, and retain shed, absent, and failed reviewer names per repeat.
 
 The report's instrument version includes `posting-v1+threads-v2`, so historical results from the old posting instrument don't pool silently with these results. Identical-prompt comparisons measure only run-to-run variation when the budget tables, disabled reviewers, and review modes also match.
 
@@ -37,7 +39,7 @@ Displacement isn't an automatic veto. Report the useful catches gained, useful c
 
 ## Zero-cost controls and evidence
 
-`live-parity.test.ts` and `field-parity.test.ts` use scripted output. They make no model calls and don't estimate a reviewer's real recall.
+`live-parity.test.ts`, `field-parity.test.ts`, `live-accounting.test.ts`, and `live-value.test.ts` use scripted output. They make no model calls and don't estimate a reviewer's real recall.
 
 `field-parity-evidence.json` records the September 3-8, 2026 webapp audit: 155 PRs, 146 footer-bearing rounds, and 317 top-level bot inline comments. It includes:
 
@@ -46,6 +48,8 @@ Displacement isn't an automatic veto. Report the useful catches gained, useful c
 - The cross-round missing-seed-target control. An explicitly labeled mechanism recognizes the same defect after its anchor moves. Audited `relatedPaths` extend a kept thread to its other occurrences. Different mechanisms and unaudited files remain negative controls.
 - Two source-checked useful catches already owned by holistic and skill-auditor. The off/on controls don't count a new source's copy as an incremental catch.
 
-Run these checks with `pnpm exec vitest run workflows/review/eval/live-parity.test.ts workflows/review/eval/field-parity.test.ts`.
+Additional scripted controls cover gained and lost defects, positive/zero/negative net gains at nonzero dispatch costs, and skipped or unrecorded case exclusion. These synthetic accounting controls are separate from the audited field evidence. Report tests cover finished, partial, and older repeats without value accounting, and finder population tests preserve downstream-stage failures without counting those stages as finder dispatches.
+
+Run these checks with `pnpm exec vitest run workflows/review/eval/live-parity.test.ts workflows/review/eval/field-parity.test.ts workflows/review/eval/live-accounting.test.ts workflows/review/eval/live-value.test.ts`.
 
 Before paying for a new corpus, replay its recorded positive findings through `matchCase`, exercise nearby negative mechanisms, and typecheck each fixture tree. Fix the fixture or its specific mechanism alternatives, not the matcher globally, when only that case is wrong. Keep matcher search out of `evidence_trace`: quoting a symbol isn't a finding about it.

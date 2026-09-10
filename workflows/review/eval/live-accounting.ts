@@ -32,6 +32,15 @@ export const accountLiveRun = (
     const byId = new Map(result.postedCandidates.map((c) => [c.id, c]));
     const inline = new Set(result.posting?.inlineIds ?? []);
     const useful = [...match.caught, ...match.legitimateUnspecced];
+    // Both populations count finders only. Statuses below still cover every
+    // modeled stage, so a validator/reconciler/clusterer failure stays incomplete.
+    const planned =
+        produced.execution === undefined
+            ? []
+            : [
+                  ...produced.execution.roster.finders,
+                  ...produced.execution.roster.shed.map((a) => a.name),
+              ];
     return {
         coverage: {
             // This stamp covers modeled stages, not full workflow fidelity.
@@ -39,15 +48,9 @@ export const accountLiveRun = (
                 ? ["pattern-triage"]
                 : [],
             ...produced.execution,
-            planned:
-                produced.execution === undefined
-                    ? []
-                    : [
-                          ...produced.execution.roster.finders,
-                          ...produced.execution.roster.shed.map((a) => a.name),
-                      ],
+            planned,
             dispatched: produced.perAgent
-                .filter((a) => !a.absent && !a.shed)
+                .filter((a) => planned.includes(a.name) && !a.absent && !a.shed)
                 .map((a) => a.name),
             shed: produced.perAgent.filter((a) => a.shed).map((a) => a.name),
             absent: produced.perAgent
@@ -98,7 +101,7 @@ export const coverageNote = (arm: ArmRunReport): string => {
         (c) => c.accounting?.coverage.complete !== true,
     );
     return (
-        `${arm.arm}: ${incomplete.length}/${arm.perCase.length} cases have incomplete or unrecorded modeled-reviewer coverage` +
+        `${arm.arm}: ${incomplete.length}/${arm.perCase.length} scored cases have incomplete or unrecorded modeled-reviewer coverage` +
         incomplete
             .map(
                 (c) =>
@@ -112,6 +115,9 @@ export const coverageNote = (arm: ArmRunReport): string => {
                         "none"
                     }]`,
             )
-            .join("")
+            .join("") +
+        `. Skipped cases (not scored): ${arm.skippedCases.length} (${
+            arm.skippedCases.join(", ") || "none"
+        }).`
     );
 };

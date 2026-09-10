@@ -6,7 +6,11 @@
  * consumer can share the shapes without importing the CLI.
  */
 
-import {valueSummary, type UsefulCoverageComparison} from "./live-value";
+import {
+    repeatedValueSummary,
+    valueSummary,
+    type UsefulCoverageComparison,
+} from "./live-value";
 import {coverageNote} from "./live-accounting";
 import type {LiveExecution} from "./live-roster";
 import type {LiveAccounting} from "./live-accounting";
@@ -365,6 +369,7 @@ export const renderMultiMarkdownReport = (
                   "",
               ]
             : []),
+        ...repeatedValueSummary(report),
         renderAggregateMarkdown(report.aggregate, options),
         "",
     ];
