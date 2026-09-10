@@ -31,6 +31,7 @@ export const compareUsefulCoverage = (
                     .filter(
                         (d) =>
                             d.inline &&
+                            afterKeys.has(d.key) &&
                             !after.some((a) => a.key === d.key && a.inline),
                     )
                     .map((d) => d.key),

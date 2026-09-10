@@ -99,6 +99,9 @@ describe("repeated useful-catch value summaries", () => {
         ).join("\n");
         expect(summary).toContain("1 gained, 1 lost, 0 net");
         expect(summary).toContain(
+            "Inline coverage displaced in the pool: 0 defect observations.",
+        );
+        expect(summary).toContain(
             "Dispatch cost per net useful catch (list price): n/a (net gain is not positive).",
         );
     });

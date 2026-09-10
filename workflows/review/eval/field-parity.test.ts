@@ -373,8 +373,14 @@ describe("useful-catch value controls", () => {
                 unpaired: [],
             });
             expect(value.paired).toHaveLength(4);
-            expect(value.paired.find((c) => c.caseId === "lost")?.lost).toEqual(
-                ["lost"],
+            expect(value.paired.find((c) => c.caseId === "lost")).toMatchObject(
+                {
+                    lost: ["lost"],
+                    inlineDisplaced: [],
+                },
+            );
+            expect(valueSummary(value).join("\n")).toContain(
+                "Inline coverage displaced: 0 defect(s)",
             );
             expect(
                 value.paired.find((c) => c.caseId === "shared")?.shared,
