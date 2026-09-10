@@ -63,24 +63,82 @@ and the remaining limits on production fidelity.
 - Per-PR (`.github/workflows/review-eval-ab.yml`): triggers on PRs touching
   `workflows/review/**` or the A/B workflow itself. Smoke is the default,
   with a $40 dispatch budget across both arms. The `full-eval` label selects
-  every live development case and raises that budget to $200. Reserved holdouts
+  every live development case and raises that budget to $200, split across four
+  paired case shards running in parallel. Reserved holdouts
   remain excluded. `skip-live-eval` opts out. The report goes to a sticky PR
   comment, the job summary, and the `live-ab-report` artifact. Every sub-agent's
   transcript goes to the `live-ab-transcripts` artifact.
 - Dispatch (same workflow): inputs `base_ref`, `max_usd`, `full`, `cases`,
-  `repeats`, `force_arms`. Leaving `max_usd` blank uses $40 for smoke or $200
+  `repeats`, `force_arms`, `shards`. Leaving `max_usd` blank uses $40 for smoke or $200
   when `full=true`. An explicit `max_usd` overrides either default. The budget
   covers both arms and all repeats, it is not multiplied by `repeats`. Budget
   checks happen between cases, not during dispatch. Judge, arbiter, the scope
   probe, and gate retries add spend outside that budget. The local CLI default
-  remains $40. The hosted job's 6-hour limit is separate, so inspect the report
-  for partial results and skipped cases even with the larger budget.
+  remains $40. `shards` defaults to four for full evals and one for smoke.
+  An explicit integer from 1 to 16 overrides it, with at most four jobs active
+  at once. Budget is divided across shards, never multiplied by job count.
+  The merge job fails if any shard, repeat, or case is missing or duplicated,
+  including budget-skipped cases. Partial artifacts remain available.
 - **Weekly drift** (`.github/workflows/review-eval-drift.yml`): cron; full
   corpus x3 repeats, both arms pinned to main's review.md, so it watches
   cumulative drift AND re-measures the noise floor every week. Report goes
   to the job summary, the `live-ab-report` artifact, and a visibility PR
   adding the report under `.github/review-eval/drift/`, and transcripts to
   `live-ab-transcripts`.
+
+### Parallel case shards
+
+`live-ab-shard-cli.ts` provides reusable `plan`, `run`, and `merge` commands.
+It uses the ordinary case selector, not a feature-specific case list. Planning
+resolves the baseline ref once, pins the candidate commit, and records prompt,
+runtime, corpus, and per-shard hashes. Eligible cases are assigned round-robin in
+selection order. Both arms and every repeat use the same shard assignment.
+Reserved holdouts cannot be selected through this entry point.
+
+Full CI evals run four paired shards, each with one quarter of the dispatch
+budget. Within a shard, cases and arms remain sequential, retaining independent
+budget accounting, staging, checkpoints, judge usage, and gate retries. Up to
+four reviewer dispatches run within each case, so four active shards can make
+16 concurrent reviewer dispatches. API rate limits and uneven case duration can
+reduce the speedup. Smoke defaults to one shard. More shards divide the work
+into smaller jobs, but CI keeps at most four jobs active at once.
+
+The final job merges observations within each repeat before computing metrics,
+value, and the adversarial gate. Shards are not counted as additional repeats.
+Judge quality is weighted by the number of judged findings, and all recorded
+scoring overhead and gate retries are retained. The report labels summed arm
+work separately from elapsed time, which is available in the workflow jobs.
+Missing artifacts, incomplete checkpoints, skipped cases, mismatched source
+hashes, and duplicate coverage fail the merge rather than producing a green
+partial comparison. Shard failures do not cancel peers. Raw shard reports and
+transcripts remain available even when merging fails.
+
+The same commands work outside CI. Planning is free, `run` requires model
+credentials. Run one worker per planned shard, all from the pinned candidate
+checkout, and wait for every worker before merging. Workers write separate
+`out/shards/live-ab-shard-<id>/` directories. On separate machines, collect those
+directories under the merge worker's `out/shards/` first.
+
+```sh
+pnpm dlx tsx workflows/review/eval/live-ab-shard-cli.ts plan --base-ref origin/main --shards 4 --max-usd 200
+```
+
+```sh
+pnpm dlx tsx workflows/review/eval/live-ab-shard-cli.ts run --shard 0
+```
+
+```sh
+pnpm dlx tsx workflows/review/eval/live-ab-shard-cli.ts merge
+```
+
+The `run` line illustrates one worker, repeat it with each ID in
+`out/live-ab-plan.json`. `plan` also accepts `--smoke-only`, `--cases`, `--repeats`,
+and `--force-arms`. All commands accept `--plan` for a non-default plan path.
+The run command accepts `--shard-dir` and `--transcripts-dir`.
+The merge command accepts `--reports-dir` and `--out` to relocate its inputs and
+report. Neither larger shard counts nor additional repeats increase the total
+configured budget. Each shard checks its share between cases, so budget checks
+still do not interrupt an in-flight dispatch or cap scoring overhead.
 
 ### What a reviewer can reach
 

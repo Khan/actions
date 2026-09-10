@@ -4,8 +4,8 @@ import {describe, expect, it} from "vitest";
 
 const workflow = readFileSync(".github/workflows/review-eval-ab.yml", "utf8");
 const step = workflow
-    .split("      - name: Run the live A/B\n")[1]
-    ?.split("      - name: Upload the report artifact\n")[0];
+    .split("      - name: Plan the live A/B\n")[1]
+    ?.split("      - name: Prove the read scope bites\n")[0];
 const script = step?.split("        run: |\n")[1]?.replace(/^ {10}/gm, "");
 
 // Execute the workflow's shell, but replace pnpm before it can launch a model.
@@ -28,6 +28,8 @@ const workflowArgs = (overrides: Record<string, string> = {}): string[] => {
                 REPEATS: "1",
                 FORCE_ARMS: "false",
                 RUNNER_TEMP: "/unused-test-transcripts",
+                GITHUB_OUTPUT: "/dev/null",
+                SHARDS: "",
                 ...overrides,
             },
         },
