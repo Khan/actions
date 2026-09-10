@@ -306,6 +306,10 @@ describe("runArm dedup accounting", () => {
                 },
             ],
         });
+        expect(
+            report.perCase[0].accounting?.usefulDefects[0]
+                ?.mergedProposalSources,
+        ).toEqual(["documentation"]);
     });
 
     it("renders the merge row, marking an arm that never had the clusterer", async () => {

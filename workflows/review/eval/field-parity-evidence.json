@@ -1,0 +1,337 @@
+{
+    "schemaVersion": 1,
+    "productionVersion": "review-v1.25.0",
+    "window": {
+        "start": "2026-09-03T00:00:00Z",
+        "endExclusive": "2026-09-09T00:00:00Z",
+        "collectedPrs": 155,
+        "footerBearingReviews": 146,
+        "topLevelBotInline": 317
+    },
+    "existingEnabledReviewers": [
+        "holistic",
+        "completeness",
+        "test-adequacy",
+        "first-principles",
+        "conventions",
+        "documentation"
+    ],
+    "replayBudget": {
+        "tier": "low",
+        "floored": false,
+        "maxReviewerInvocations": 8,
+        "maxToolCallsPerFinding": 3,
+        "maxTotalToolCalls": 20,
+        "maxWallClockMinutes": 10,
+        "maxUsd": 1.5,
+        "effectiveCreditCap": 2500
+    },
+    "budgetProvenance": "Low-tier table from review-v1.25.0, final tier from posted shed notes and eight executed finders in all nine artifacts. Direct final routing budget visible in agent logs for runs 33797733274, 33822561178, 33824844078, 33915817561, 34259995713. Other rows are reconstructed, not recovered routing.json snapshots.",
+    "rounds": [
+        {
+            "reviewId": 5117014914,
+            "reviewUrl": "https://github.com/Khan/webapp/pull/40211#pullrequestreview-5117014914",
+            "commit": "00900c5fe2efb1febb0a3ce5126c91f649fd5739",
+            "submittedAt": "2026-09-04T19:19:47Z",
+            "runId": 33908299008,
+            "artifactId": 9951179826,
+            "source": "out/dispatch-result.json",
+            "artifactSha256": "b22e9588eb11706af60541895858fce9043216aaffeb04cc7bbb220d2924eff7",
+            "depth": "full",
+            "lenses": [
+                "security-auth"
+            ],
+            "observedShed": [
+                "documentation"
+            ],
+            "observedFinderCount": 8,
+            "dispatchUsd": 9.7948023
+        },
+        {
+            "reviewId": 5117596102,
+            "reviewUrl": "https://github.com/Khan/webapp/pull/41441#pullrequestreview-5117596102",
+            "commit": "2229720b917df6b817a97bf50d3ac67920039dd2",
+            "submittedAt": "2026-09-04T20:38:00Z",
+            "runId": 33915817561,
+            "artifactId": 9953583005,
+            "source": "out/dispatch-result.json",
+            "artifactSha256": "dfdc146ac413167ebc83f6de0cf58c51b66837b52ac8722236a939ee025cad2e",
+            "depth": "full",
+            "lenses": [
+                "security-auth"
+            ],
+            "observedShed": [
+                "documentation"
+            ],
+            "observedFinderCount": 8,
+            "dispatchUsd": 6.078982300000002
+        },
+        {
+            "reviewId": 5145427994,
+            "reviewUrl": "https://github.com/Khan/webapp/pull/41441#pullrequestreview-5145427994",
+            "commit": "eb64bf836a0a9af60239786114daa7144a761357",
+            "submittedAt": "2026-09-08T18:19:55Z",
+            "runId": 34259995713,
+            "artifactId": 10070396481,
+            "source": "out/dispatch-result.json",
+            "artifactSha256": "b7ee8f395590c01abcc02297a885d0a48d55fd4d67081b500182e33ee517377e",
+            "depth": "full",
+            "lenses": [
+                "security-auth"
+            ],
+            "observedShed": [
+                "documentation"
+            ],
+            "observedFinderCount": 8,
+            "dispatchUsd": 10.3743433
+        },
+        {
+            "reviewId": 5106315802,
+            "reviewUrl": "https://github.com/Khan/webapp/pull/41921#pullrequestreview-5106315802",
+            "commit": "f364e9f15c9235f6d75dda855bd3149442c585b0",
+            "submittedAt": "2026-09-03T20:07:17Z",
+            "runId": 33797733274,
+            "artifactId": 9910805439,
+            "source": "out/dispatch-result.json",
+            "artifactSha256": "de0723eb06b9fa49950cc68b3f31bc4df1d443354b444655352a7a4c0fc62300",
+            "depth": "full",
+            "lenses": [
+                "security-auth",
+                "api-federation-compat"
+            ],
+            "observedShed": [
+                "conventions",
+                "documentation"
+            ],
+            "observedFinderCount": 8,
+            "dispatchUsd": 17.697871350000003
+        },
+        {
+            "reviewId": 5108228689,
+            "reviewUrl": "https://github.com/Khan/webapp/pull/41974#pullrequestreview-5108228689",
+            "commit": "2356f3faea82b9afb83150821313bf0af8ac3102",
+            "submittedAt": "2026-09-04T01:05:20Z",
+            "runId": 33822561178,
+            "artifactId": 9919392982,
+            "source": "out/dispatch-result.json",
+            "artifactSha256": "c5af8e36f1310579f54832d749218e84efb891775589e167b4c6368b5cdb7fec",
+            "depth": "full",
+            "lenses": [
+                "security-auth"
+            ],
+            "observedShed": [
+                "documentation"
+            ],
+            "observedFinderCount": 8,
+            "dispatchUsd": 11.1922766
+        },
+        {
+            "reviewId": 5115990781,
+            "reviewUrl": "https://github.com/Khan/webapp/pull/41974#pullrequestreview-5115990781",
+            "commit": "b0ed0dd069b8008475348301c206fd9ad30743df",
+            "submittedAt": "2026-09-04T17:20:55Z",
+            "runId": 33897621459,
+            "artifactId": 9947206997,
+            "source": "agent/agent-stdio.log (dispatch summary, out artifact absent)",
+            "artifactSha256": "bb6197580ef3c5ed83b15c39c5dc62cad6b0321d49f3c46dd4518bdd2f96ad55",
+            "depth": "full",
+            "lenses": [
+                "security-auth"
+            ],
+            "observedShed": [
+                "documentation"
+            ],
+            "observedFinderCount": 8,
+            "dispatchUsd": 13.369201700000001
+        },
+        {
+            "reviewId": 5107618646,
+            "reviewUrl": "https://github.com/Khan/webapp/pull/42008#pullrequestreview-5107618646",
+            "commit": "7867d8c75ce67892fb6a0ce2c0c0fa248698a8c3",
+            "submittedAt": "2026-09-03T23:03:42Z",
+            "runId": 33814137979,
+            "artifactId": 9916506519,
+            "source": "out/dispatch-result.json",
+            "artifactSha256": "78baf40edd3c69ffd958a00a942f0400b1b7c84317e2a6286ab95a404c0de7de",
+            "depth": "full",
+            "lenses": [
+                "security-auth"
+            ],
+            "observedShed": [
+                "documentation"
+            ],
+            "observedFinderCount": 8,
+            "dispatchUsd": 10.35783865
+        },
+        {
+            "reviewId": 5108312060,
+            "reviewUrl": "https://github.com/Khan/webapp/pull/42012#pullrequestreview-5108312060",
+            "commit": "a06bc666a56d417935ff0a8c9598a47bc4c25099",
+            "submittedAt": "2026-09-04T01:23:13Z",
+            "runId": 33824844078,
+            "artifactId": 9919800559,
+            "source": "out/dispatch-result.json",
+            "artifactSha256": "68689410e6ee2124c4b48bdc92792a44c526497e8a2967118350d576e0a67401",
+            "depth": "full",
+            "lenses": [
+                "api-federation-compat"
+            ],
+            "observedShed": [
+                "documentation"
+            ],
+            "observedFinderCount": 8,
+            "dispatchUsd": 2.8167408
+        },
+        {
+            "reviewId": 5116289293,
+            "reviewUrl": "https://github.com/Khan/webapp/pull/42029#pullrequestreview-5116289293",
+            "commit": "c4b70fce33119ff94413c6f1d82b8550999e9a85",
+            "submittedAt": "2026-09-04T17:56:03Z",
+            "runId": 33901116697,
+            "artifactId": 9948414533,
+            "source": "out/dispatch-result.json",
+            "artifactSha256": "1474a38969c2c6a4523fd0982b142a3403bc36d4d1b5b16352c5b469fab37da5",
+            "depth": "full",
+            "lenses": [
+                "security-auth"
+            ],
+            "observedShed": [
+                "documentation"
+            ],
+            "observedFinderCount": 8,
+            "dispatchUsd": 11.2508596
+        }
+    ],
+    "sameRunDuplicateControls": [
+        {
+            "key": "unknown-score-early-return",
+            "reviewId": 5105174035,
+            "comments": [
+                {
+                    "id": 3927265804,
+                    "url": "https://github.com/Khan/webapp/pull/41921#discussion_r3927265804",
+                    "path": "services/ai-guide/models/ai_guide_thread.go",
+                    "line": 485
+                },
+                {
+                    "id": 3927265812,
+                    "url": "https://github.com/Khan/webapp/pull/41921#discussion_r3927265812",
+                    "path": "services/ai-guide/models/ai_guide_thread.go",
+                    "line": 485
+                }
+            ],
+            "uniqueDefects": 1,
+            "extraCopies": 1
+        },
+        {
+            "key": "duplicate-input-test",
+            "reviewId": 5103153938,
+            "comments": [
+                {
+                    "id": 3925538512,
+                    "url": "https://github.com/Khan/webapp/pull/41975#discussion_r3925538512",
+                    "path": "services/content/getters/course_test.go",
+                    "line": 245
+                },
+                {
+                    "id": 3925538531,
+                    "url": "https://github.com/Khan/webapp/pull/41975#discussion_r3925538531",
+                    "path": "services/content/getters/course.go",
+                    "line": 203
+                }
+            ],
+            "uniqueDefects": 1,
+            "extraCopies": 1
+        },
+        {
+            "key": "html-render-test",
+            "reviewId": 5105661314,
+            "comments": [
+                {
+                    "id": 3927700618,
+                    "url": "https://github.com/Khan/webapp/pull/42000#discussion_r3927700618",
+                    "path": "services/districts/templates/emails/hipr_teacher_activation_email.gohtml",
+                    "line": 22
+                },
+                {
+                    "id": 3927700630,
+                    "url": "https://github.com/Khan/webapp/pull/42000#discussion_r3927700630",
+                    "path": "services/districts/templates/emails/hipr_teacher_activation_email.gohtml",
+                    "line": 39
+                }
+            ],
+            "uniqueDefects": 1,
+            "extraCopies": 1
+        },
+        {
+            "key": "empty-classrooms-error",
+            "reviewId": 5106169416,
+            "comments": [
+                {
+                    "id": 3928148800,
+                    "url": "https://github.com/Khan/webapp/pull/42001#discussion_r3928148800",
+                    "path": "services/humanities/resolvers/writing_coach_config.go",
+                    "line": 476
+                },
+                {
+                    "id": 3928148813,
+                    "url": "https://github.com/Khan/webapp/pull/42001#discussion_r3928148813",
+                    "path": "services/humanities/resolvers/writing_coach_config.go",
+                    "line": 476
+                }
+            ],
+            "uniqueDefects": 1,
+            "extraCopies": 1
+        },
+        {
+            "key": "nil-config-stub",
+            "reviewId": 5116267603,
+            "comments": [
+                {
+                    "id": 3936609913,
+                    "url": "https://github.com/Khan/webapp/pull/42024#discussion_r3936609913",
+                    "path": "services/humanities/resolvers/writing_coach_platform_assignment.go",
+                    "line": 20
+                },
+                {
+                    "id": 3936609917,
+                    "url": "https://github.com/Khan/webapp/pull/42024#discussion_r3936609917",
+                    "path": "services/humanities/resolvers/writing_coach_platform_assignment.go",
+                    "line": 20
+                }
+            ],
+            "uniqueDefects": 1,
+            "extraCopies": 1
+        }
+    ],
+    "crossRunDuplicateControl": {
+        "key": "missing-seed-integration-target",
+        "comments": [
+            "https://github.com/Khan/webapp/pull/41974#discussion_r3930013370",
+            "https://github.com/Khan/webapp/pull/41974#discussion_r3936384005"
+        ],
+        "reason": "Same absent make target on different anchors in successive rounds, despite open-thread suppression."
+    },
+    "overlapControls": [
+        {
+            "key": "copied-resolver-preamble",
+            "runId": 33793761720,
+            "claimId": "holistic-3",
+            "source": "holistic",
+            "commentUrl": "https://github.com/Khan/webapp/pull/41986#discussion_r3927941011",
+            "sourceCommit": "20adcbb8b5b2755c5d3949dced867076fd1f63de",
+            "path": "services/districts/resolvers/district.go",
+            "assessment": "Useful shared load-and-walk extraction, independently checked against both resolver bodies. Return types and empty-ID defaults differ, so do not replace the whole resolver."
+        },
+        {
+            "key": "copied-test-fixture",
+            "runId": 33790147916,
+            "claimId": "skill-auditor-1",
+            "source": "skill-auditor",
+            "commentUrl": "https://github.com/Khan/webapp/pull/41999#discussion_r3927613174",
+            "sourceCommit": "a33acd75f4b7751bd9774a2a1c6c0c3cd0e76442",
+            "path": "services/progress/cross_service/learnable_content_test.go",
+            "assessment": "Useful shared fixture or table, independently checked against both tests. Preserve true and false cases and the operation-count assertions."
+        }
+    ]
+}

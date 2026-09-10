@@ -35,6 +35,11 @@
  * findings safely.
  */
 
+import {renderClaimComment} from "../lib/submission-render";
+import {computeChangedLines} from "../lib/diff";
+import {livePosting, type PostingOptions} from "./live-posting";
+import {applyMediumVeto, buildClaims} from "../lib/dispatch-contracts";
+
 import type {Anchor, Finding, Lens} from "../lib/finding-schema";
 import {
     isBlockingLabel,
@@ -72,6 +77,7 @@ import {
  * exact text that would be posted.
  */
 export type RunCandidate = {
+    labelOverride?: ConventionalLabel;
     /** The finding's stable id (dedup + must-catch correlation). */
     id: string;
     /** Producing reviewer/lens name (provenance). */
@@ -109,6 +115,7 @@ export type PlannedReview = {
 };
 
 export type RunResult = {
+    posting?: {inlineIds: string[]; collapsedIds: string[]};
     caseId: string;
     /** Deterministic routing decision (lenses, teams, tiers, run budget). */
     routing: RoutingResult;
@@ -147,6 +154,9 @@ export type RunResult = {
 };
 
 export type RunOptions = {
+    routing?: RoutingResult;
+    posting?: PostingOptions;
+    unavailableReviewers?: string[];
     /**
      * Optional live finding producer, for a full-eval arm that runs the real
      * model sub-agents. Given the case, it returns the recorded-finding list the
@@ -194,9 +204,12 @@ const anchorLine = (anchor: Anchor): number | undefined =>
  */
 export const toCandidate = (recorded: RecordedFinding): RunCandidate => {
     const {finding, source} = recorded;
-    const label = labelForFinding(finding);
+    const label = recorded.labelOverride ?? labelForFinding(finding);
     return {
         id: finding.id,
+        ...(recorded.labelOverride === undefined
+            ? {}
+            : {labelOverride: recorded.labelOverride}),
         source,
         lens: finding.lens,
         label,
@@ -208,7 +221,10 @@ export const toCandidate = (recorded: RecordedFinding): RunCandidate => {
         ...(anchorLine(finding.anchor) !== undefined
             ? {line: anchorLine(finding.anchor)}
             : {}),
-        body: renderComment(finding),
+        body:
+            recorded.labelOverride === undefined
+                ? renderComment(finding)
+                : renderClaimComment(buildClaims([recorded])[0]!),
         finding,
     };
 };
@@ -296,7 +312,13 @@ export const applyValidation = (
                 Math.min(candidate.finding.confidence, 0.4),
         };
         validated.push(
-            toCandidate({source: candidate.source, finding: downgraded}),
+            toCandidate({
+                source: candidate.source,
+                finding: downgraded,
+                ...(candidate.labelOverride !== undefined && !candidate.blocking
+                    ? {labelOverride: candidate.labelOverride}
+                    : {}),
+            }),
         );
     }
     return {validated, dropped};
@@ -353,7 +375,9 @@ export const runCase = (
         generatedRules: [],
         ...(corpusCase.routerConfig as Partial<RouterConfig>),
     };
-    const routing = route({files: corpusCase.changedFiles}, routerConfig);
+    const routing =
+        options.routing ??
+        route({files: corpusCase.changedFiles}, routerConfig);
 
     // 2. Produce findings (recorded by default) and normalise to candidates.
     const recorded = (options.produceFindings ?? (() => corpusCase.findings))(
@@ -392,7 +416,7 @@ export const runCase = (
                 const snap = snappedById.get(c.id);
                 return snap === undefined
                     ? c
-                    : toCandidate({source: c.source, finding: snap.finding});
+                    : toCandidate({...c, finding: snap.finding});
             });
         snappedByProvenance = changeAnchored.flatMap((candidate) => {
             const snap = snappedById.get(candidate.id);
@@ -421,11 +445,29 @@ export const runCase = (
     // 3b. Replay the claim-validator verifications (three-state gate: refuted
     // drops, plausible downgrades to non-blocking, confirmed keeps) — the
     // recorded block by default, or a live arm's real validator output.
-    const {validated: postedCandidates, dropped: droppedByValidation} =
-        applyValidation(
-            inScopeCandidates,
-            options.validation ?? corpusCase.validation,
+    const {validated, dropped: droppedByValidation} = applyValidation(
+        inScopeCandidates,
+        options.validation ?? corpusCase.validation,
+    );
+
+    let postedCandidates = validated;
+    if (options.posting !== undefined && corpusCase.diff !== undefined) {
+        const claims = applyMediumVeto(
+            buildClaims(validated),
+            computeChangedLines(corpusCase.diff),
         );
+        const mediumIds = new Set(
+            claims.filter((c) => c.importance === "medium").map((c) => c.id),
+        );
+        postedCandidates = validated.map((c) =>
+            c.finding.severity === "medium" && !mediumIds.has(c.id)
+                ? toCandidate({
+                      ...c,
+                      finding: {...c.finding, severity: "advisory"},
+                  })
+                : c,
+        );
+    }
 
     // 3c. Re-review (open-PR) cases: the deterministic replay assumes a
     // correct reconciler and takes each prior thread's `expect` as its
@@ -460,16 +502,22 @@ export const runCase = (
 
     // 4. Mechanical verdict from the posted labels + dimension gate + conflicts.
     const postedLabels = postedCandidates.map((c) => c.label);
+    const dimensions = {...corpusCase.dimensions};
+    for (const name of options.unavailableReviewers ?? []) {
+        if (name === "correctness-reviewer") {
+            dimensions.correctness = "unavailable";
+        }
+        if (name === "skill-auditor") {
+            dimensions.skillSeverity = "unavailable";
+        }
+    }
     const verdict = computeVerdict({
         postedLabels,
-        dimensions: toDimensionReport(corpusCase.dimensions),
+        dimensions: toDimensionReport(dimensions),
         policyConflicts: corpusCase.policyConflicts,
         keptBlockingCount,
-        // The PRA-7 middle-verdict signal, mirrored from submission.ts so
-        // the offline replica plans the same event the shipped path would
-        // submit. The harness has no changed-lines veto (fixtures are
-        // hand-anchored), so this is the pre-veto count; a fixture that
-        // wants a vetoed medium models it as advisory.
+        // Live scoring applies the production changed-lines veto above.
+        // Recorded-only replay keeps its historical fixture semantics.
         mediumCount: postedCandidates.filter(
             (candidate) => candidate.finding.severity === "medium",
         ).length,
@@ -478,26 +526,48 @@ export const runCase = (
             : {}),
     });
 
+    const surface =
+        options.posting === undefined
+            ? undefined
+            : livePosting(
+                  postedCandidates,
+                  options.posting,
+                  verdict.event === "HOLD_FOR_HUMAN",
+              );
+
     // 5. Render the review body + the comments that would be posted.
     const reviewBody = renderReviewBody({
         event: verdict.event,
-        hasInlineComments: postedCandidates.length > 0,
+        hasInlineComments:
+            surface === undefined
+                ? postedCandidates.length > 0
+                : surface.comments.length > 0,
         ...(rereviewSection !== undefined ? {rereviewSection} : {}),
-        skippedDimensions: skippedDimensions(corpusCase.dimensions),
+        skippedDimensions: skippedDimensions(dimensions),
     });
 
     const plannedReview: PlannedReview = {
         event: submitEvent(verdict.event),
-        body: reviewBody,
-        comments: postedCandidates.map((c) => ({
-            ...(c.path !== undefined ? {path: c.path} : {}),
-            ...(c.line !== undefined ? {line: c.line} : {}),
-            body: c.body,
-        })),
+        body: reviewBody + (surface?.body ? `\n\n${surface.body}` : ""),
+        comments:
+            surface?.comments ??
+            postedCandidates.map((c) => ({
+                ...(c.path !== undefined ? {path: c.path} : {}),
+                ...(c.line !== undefined ? {line: c.line} : {}),
+                body: c.body,
+            })),
     };
 
     return {
         caseId: corpusCase.id,
+        ...(surface === undefined
+            ? {}
+            : {
+                  posting: {
+                      inlineIds: surface.inlineIds,
+                      collapsedIds: surface.collapsedIds,
+                  },
+              }),
         routing,
         allCandidates,
         postedCandidates,

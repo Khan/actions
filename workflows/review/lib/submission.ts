@@ -74,10 +74,10 @@ import {
     HOLD_HEAD,
     HOLD_UNSTUCK_LINES,
     isBlockingLabel,
-    NITPICK_LABEL,
     renderReviewBody,
 } from "./render-comment";
-import {DEFAULT_NON_BLOCKING_INLINE_BUDGET} from "./routing-config";
+import {selectPostingClaims, MAX_INLINE_COMMENTS} from "./posting-selection";
+export {MAX_INLINE_COMMENTS} from "./posting-selection";
 import {runRereviewCli, type RereviewCliFs} from "./rereview";
 import {
     decideEventAndClearance,
@@ -85,7 +85,6 @@ import {
     stageDismissalDecision,
 } from "./submission-clearance";
 import {
-    labelToken,
     renderClaimComment,
     renderCollapsedLine,
     renderPrLevelFold,
@@ -275,18 +274,6 @@ export {
     renderClaimComment,
     renderPrLevelFold,
 } from "./submission-render";
-
-/**
- * At most this many inline comments post; the rest collapse (the Step 5 cap,
- * as code). MUST match the frontmatter's
- * `create-pull-request-review-comment: max:` in review.md: the engine
- * rejects safe outputs past that number, and a plan the engine cannot fully
- * emit is a conformance-gate red after full spend.
- */
-export const MAX_INLINE_COMMENTS = 20;
-
-/** The medium-confidence inline floor (the Step 5 posting bar). */
-const MIN_INLINE_CONFIDENCE = 0.5;
 
 /** The collapsed summary's named-top subject cap: one line, not a wall. */
 const TOP_SUBJECT_MAX_CHARS = 120;
@@ -681,79 +668,12 @@ export const runSubmissionCli = (
     // body-sourced work list reads the section back off posted reviews),
     // so it is surfaced without scattering noise. The verdict is computed from ALL claims, so a
     // collapsed blocking claim (a 21st blocking finding) still blocks.
-    const budgetRaw = routing?.nonBlockingInlineBudget;
-    const nonBlockingBudget =
-        typeof budgetRaw === "number" &&
-        Number.isInteger(budgetRaw) &&
-        budgetRaw >= 0
-            ? budgetRaw
-            : DEFAULT_NON_BLOCKING_INLINE_BUDGET;
-    const isNitpick = (claim: Claim): boolean =>
-        labelToken(claim.label) === labelToken(NITPICK_LABEL);
-    // Named so the collapsed list below can re-sort with the same rank
-    // once the pr-level claims join it: the disclosure names the tail's
-    // first entry, so the ordering IS the disclosure's selection rule.
-    const rankClaims = (a: Claim, b: Claim): number => {
-        const blocking =
-            Number(isBlockingLabel(b.label)) - Number(isBlockingLabel(a.label));
-        if (blocking !== 0) {
-            return blocking;
-        }
-        // Medium outranks minor within the non-blocking population (the
-        // PRA-7 tier), so the budget spends on the findings a reviewer
-        // judged worth fixing before merge ahead of the rest.
-        const medium =
-            Number(b.importance === "medium") -
-            Number(a.importance === "medium");
-        if (medium !== 0) {
-            return medium;
-        }
-        // Nitpicks rank last among non-blocking claims, whatever their
-        // confidence: without the demotion the class this surface
-        // deliberately never posts would routinely win the summary slot
-        // built for the tail's best finding.
-        const nitpick = Number(isNitpick(a)) - Number(isNitpick(b));
-        return nitpick !== 0 ? nitpick : b.confidence - a.confidence;
-    };
-    const ranked = [...anchored].sort(rankClaims);
-    let budgetLeft = nonBlockingBudget;
-    let budgetShed = 0;
-    let nitpickShed = 0;
-    const inlineWorthy = ranked.filter((claim) => {
-        if (isBlockingLabel(claim.label)) {
-            return true;
-        }
-        if (blockingOnly || claim.confidence < MIN_INLINE_CONFIDENCE) {
-            return false;
-        }
-        // Under blocking-medium only medium claims may punch through the
-        // reduced surface; everything below still applies to them (the
-        // nitpick ban wins over the tier: a medium nitpick is a labeling
-        // contradiction, and the ban is the stricter rule; medium spends
-        // the budget like any other non-blocking claim).
-        if (blockingMedium && claim.importance !== "medium") {
-            return false;
-        }
-        if (isNitpick(claim)) {
-            nitpickShed++;
-            return false;
-        }
-        if (budgetLeft > 0) {
-            budgetLeft--;
-            return true;
-        }
-        budgetShed++;
-        return false;
-    });
-    const inlineClaims = new Set(inlineWorthy.slice(0, MAX_INLINE_COMMENTS));
-    // Re-sorted rather than appended: a pr-level claim joins the tail at
-    // its rank, so the disclosure's named top entry is the tail's best
-    // claim, not merely its best ANCHORED claim.
-    const collapsed = [
-        ...ranked.filter((claim) => !inlineClaims.has(claim)),
-        ...prLevelCollapsed,
-    ].sort(rankClaims);
-    const inlineList = [...inlineClaims];
+    const {inlineList, collapsed, nonBlockingBudget, budgetShed, nitpickShed} =
+        selectPostingClaims(anchored, prLevelCollapsed, {
+            nonBlockingInlineBudget: routing?.nonBlockingInlineBudget,
+            blockingOnly,
+            blockingMedium,
+        });
     // Attribution composes at render time (attribution.ts's line, inside
     // the context fold when the claim folds, the classic collapsed footer
     // when it does not): which reviewer produced the finding, plus dedup's

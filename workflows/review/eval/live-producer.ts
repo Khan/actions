@@ -13,9 +13,8 @@
  * implementation (Agent SDK) lives in `live-runner.ts`.
  *
  * Deliberate deviations from production, documented here once:
- *  - No `pattern-triage` pass and no `thread-reconciler` (no threads exist in
- *    eval); the roster is the two default whole-change reviewers plus the
- *    router's `lensesToSpawn`.
+ *  - No pattern-triage pass. Finding producers use production's roster
+ *    calculation, and re-review cases run the thread reconciler.
  *  - `{{#runtime-import <path>}}` directives are compile-time inlines of
  *    consumer-repo files. Here they resolve against the case's checkout tree
  *    when the file exists there, so a case can opt into a skills index or a
@@ -36,6 +35,12 @@
  * clusterer agent.
  */
 
+import {
+    BLOCKING_LABELS,
+    NON_BLOCKING_LABELS,
+    type ConventionalLabel,
+} from "../lib/render-comment";
+
 import {refusalFallbackFor} from "../lib/refusal-fallback";
 import {
     existsSync,
@@ -46,7 +51,13 @@ import {
 } from "node:fs";
 
 import {isBlockingLabel, labelForFinding} from "../lib/render-comment";
-import {route, type RouterConfig} from "../lib/router";
+import {
+    DEFAULT_MAX_TURNS,
+    DEFAULT_TIMEOUT_MS,
+    DEFAULT_CONCURRENCY,
+} from "../lib/dispatch-limits";
+import {liveRouting, liveExecution, type LiveExecution} from "./live-roster";
+import type {TierBudgets} from "./runtime-config";
 import {validateFinding, type Finding, type Lens} from "../lib/finding-schema";
 import {CLUSTERER} from "../lib/dispatch-cluster";
 import {LABEL_SHAPE_REVIEWERS} from "./lens-sources";
@@ -60,11 +71,7 @@ import {
     type VerificationState,
 } from "./corpus/loader";
 import type {ExtractedAgent} from "./agent-extract";
-import {
-    ENABLEABLE_REVIEWERS,
-    type EnableableReviewer,
-    type ReReviewMode,
-} from "../lib/routing-config";
+import type {ReReviewMode} from "../lib/routing-config";
 import {extractJsonObject} from "./extract-json";
 import {mergeUsage, type ModelTokens} from "../lib/pricing";
 import {
@@ -200,6 +207,8 @@ export type PerAgentReport = {
      * distinct from `failed` so the report can say which it was.
      */
     absent?: boolean;
+    /** Planned but not dispatched because the invocation budget was full. */
+    shed?: true;
 };
 
 /** The thread-reconciler's parsed decision over the staged prior threads. */
@@ -211,6 +220,7 @@ export type LiveReconciliation = {
 };
 
 export type ProduceLiveResult = {
+    execution: LiveExecution;
     /** Schema-valid findings, in the corpus `RecordedFinding` shape. */
     findings: RecordedFinding[];
     /** Claim-validator verifications, in the corpus `validation` shape. */
@@ -236,6 +246,8 @@ export type ProduceLiveResult = {
 };
 
 export type ProduceLiveOptions = {
+    tierBudgets?: TierBudgets;
+    disabledReviewers?: string[];
     runner: LiveAgentRunner;
     /** Directory to stage the case under (one case per directory). */
     stageDir: string;
@@ -255,11 +267,6 @@ export type ProduceLiveOptions = {
     reReviewMode?: ReReviewMode;
 };
 
-/** Keep in sync with lib/dispatch.ts so trials reproduce prod behavior. */
-const DEFAULT_MAX_TURNS = 100;
-const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
-const DEFAULT_CONCURRENCY = 4;
-
 /** The real filesystem, in the staging seam's shape (mirrors live-stage). */
 const NODE_FS: StageFs = {
     existsSync,
@@ -276,49 +283,6 @@ const NODE_FS: StageFs = {
 
 /** Production's confidence default for label-shape reviewers (review.md). */
 const LABEL_SHAPE_CONFIDENCE = 0.7;
-
-/** The always-on finders (pattern-triage and thread-reconciler excluded). */
-const DEFAULT_FINDERS = ["correctness-reviewer", "skill-auditor"] as const;
-
-/**
- * The opt-in whole-change reviewers a case turns on, read from its
- * `routerConfig.enabledReviewers` (the case-level stand-in for the consumer
- * `ROUTING` file's `enable` lines, which the router threads in separately from
- * {@link RouterConfig}).
- *
- * Production dispatches these alongside the defaults; the live producer did
- * not, so an opt-in reviewer had no live arm at all and could not earn its
- * `enable` line the way the repo's policy says it must. Cases that name none
- * (every case before this existed) are unaffected: the roster is the defaults
- * plus routed lenses, exactly as before.
- *
- * An unrecognised name throws rather than being skipped. A typo here would
- * otherwise produce a full, green, expensive run that silently measured
- * nothing about the reviewer the case exists to measure.
- */
-const enabledReviewersOf = (corpusCase: CorpusCase): EnableableReviewer[] => {
-    const raw = corpusCase.routerConfig?.["enabledReviewers"];
-    if (raw === undefined) {
-        return [];
-    }
-    if (!Array.isArray(raw) || !raw.every((n) => typeof n === "string")) {
-        throw new Error(
-            `case "${corpusCase.id}": routerConfig.enabledReviewers must be an array of strings`,
-        );
-    }
-    const known: ReadonlySet<string> = new Set(ENABLEABLE_REVIEWERS);
-    const unknown = raw.filter((name) => !known.has(name));
-    if (unknown.length > 0) {
-        throw new Error(
-            `case "${corpusCase.id}": unknown enabledReviewers ${unknown.join(
-                ", ",
-            )}; known: ${ENABLEABLE_REVIEWERS.join(", ")}`,
-        );
-    }
-    // Canonical order, deduplicated: the roster (and so the report) must not
-    // depend on the order a case happened to list them in.
-    return ENABLEABLE_REVIEWERS.filter((name) => raw.includes(name));
-};
 
 const VALIDATOR = "claim-validator";
 
@@ -407,6 +371,13 @@ const fromLabelShape = (
         throw new Error(`findings[${index}] is not an object`);
     }
     const label = typeof raw["label"] === "string" ? raw["label"] : "";
+    if (
+        ![...BLOCKING_LABELS, ...NON_BLOCKING_LABELS].includes(
+            label as ConventionalLabel,
+        )
+    ) {
+        throw new Error(`findings[${index}]: unknown conventional label`);
+    }
     const subject = typeof raw["subject"] === "string" ? raw["subject"] : "";
     const discussion =
         typeof raw["discussion"] === "string" ? raw["discussion"] : "";
@@ -428,7 +399,12 @@ const fromLabelShape = (
                       line: raw["line"],
                       side: "RIGHT",
                   },
-        severity: isBlockingLabel(label) ? "blocking" : "advisory",
+        severity: isBlockingLabel(label)
+            ? "blocking"
+            : raw["importance"] === "medium"
+            ? "medium"
+            : "advisory",
+        ...(subject === "" ? {} : {summary: subject}),
         confidence: LABEL_SHAPE_CONFIDENCE,
         evidence_trace: [
             `${agentName} label: ${label}`,
@@ -449,6 +425,7 @@ const fromLabelShape = (
     return {
         source,
         finding: result.finding,
+        labelOverride: label as ConventionalLabel,
         ...(typeof raw["skill"] === "string" && raw["skill"] !== ""
             ? {skill: raw["skill"]}
             : {}),
@@ -528,7 +505,7 @@ const buildClaims = (findings: LiveFinding[]): Record<string, unknown>[] =>
             ...(finding.anchor.type === "line"
                 ? {line: finding.anchor.line}
                 : {}),
-            label: labelForFinding(finding),
+            label: live.labelOverride ?? labelForFinding(finding),
             subject: finding.model_authored_prose,
             discussion: finding.evidence_trace.join(" | "),
             failure_scenario: finding.failure_scenario,
@@ -781,57 +758,25 @@ export const produceLive = async (
     const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
 
     const fs = options.fs ?? NODE_FS;
+    const planned = liveRouting(corpusCase, new Set(agents.keys()), options);
     const staged = stageCase(corpusCase, options.stageDir, fs, {
         reReviewMode: options.reReviewMode ?? "full",
+        routing: {...planned.routing, enabledReviewers: planned.enabled},
     });
-
-    // Roster: default finders + the case's enabled opt-in reviewers + routed
-    // specialist lenses — sized by the re-review depth plan when the case is
-    // an open-PR snapshot. `scoped` keeps the full roster (over the scoped
-    // diff the staging already wrote); `flip-gated` keeps only the correctness
-    // pass; `fast` keeps none.
-    const routerConfig: RouterConfig = {
-        generatedRules: [],
-        ...(corpusCase.routerConfig as Partial<RouterConfig>),
-    };
-    const routing = route({files: corpusCase.changedFiles}, routerConfig);
-    const dispatch = staged.rereviewPlan?.dispatch ?? "all";
-    const enabled = enabledReviewersOf(corpusCase);
-    const rosterNames =
-        dispatch === "all"
-            ? [...DEFAULT_FINDERS, ...enabled, ...routing.lensesToSpawn]
-            : dispatch === "reconcile+correctness"
-            ? ["correctness-reviewer"]
-            : [];
-
-    /**
-     * An enabled opt-in reviewer this arm's `review.md` does not define is an
-     * **asymmetric arm**, not a broken one, and it is the normal shape of the
-     * A/B that graduates a new reviewer: the baseline arm is built from the
-     * base tip, which by construction predates the reviewer the candidate arm
-     * adds. Throwing here killed the whole A/B run before any report, since
-     * `runArm` does not wrap its `produce` call.
-     *
-     * Tolerating absence cannot mask a typo, which is the failure mode the
-     * `enabledReviewers` validation exists to prevent: the name is already
-     * checked against `ENABLEABLE_REVIEWERS`, so absence can only mean this
-     * arm predates the reviewer. Every other roster member stays a hard
-     * error: the default finders are always-on, and a routed lens name is not
-     * validated anywhere, so its absence really may be a mistake.
-     */
-    const absent: string[] = [];
-    const roster = rosterNames.flatMap((name) => {
+    const execution = liveExecution(
+        staged.rereviewPlan?.depth ?? "full",
+        planned,
+        (corpusCase.live?.rereview?.priorThreads.length ?? 0) > 0,
+    );
+    const absent = execution.absent;
+    const roster = execution.roster.finders.map((name) => {
         const agent = agents.get(name);
         if (agent === undefined) {
-            if ((enabled as readonly string[]).includes(name)) {
-                absent.push(name);
-                return [];
-            }
             throw new Error(
                 `sub-agent "${name}" is not defined in the extracted review.md`,
             );
         }
-        return [agent];
+        return agent;
     });
 
     const resolvePrompt = (agent: ExtractedAgent): string =>
@@ -854,6 +799,17 @@ export const produceLive = async (
         retried: false,
         absent: true,
     }));
+    perAgent.push(
+        ...execution.roster.shed.map(({name}) => ({
+            name,
+            model: agents.get(name)?.model ?? "",
+            usd: 0,
+            turns: 0,
+            wallMs: 0,
+            retried: false,
+            shed: true as const,
+        })),
+    );
 
     const finderResults = await mapWithConcurrency(
         roster,
@@ -980,8 +936,13 @@ export const produceLive = async (
     }
 
     return {
+        execution,
         findings: findings.map(
-            ({source, finding}): RecordedFinding => ({source, finding}),
+            ({source, finding, labelOverride}): RecordedFinding => ({
+                source,
+                finding,
+                ...(labelOverride === undefined ? {} : {labelOverride}),
+            }),
         ),
         validation,
         perAgent,

@@ -140,6 +140,8 @@ export type RereviewPriorThread = {
      * without it dup detection falls back to path + line proximity.
      */
     mechanism?: string[];
+    /** Additional audited occurrence paths for the same mechanism. Requires mechanism. */
+    relatedPaths?: string[];
 };
 
 /**
@@ -550,6 +552,19 @@ const parseRereview = (
                 );
                 return;
             }
+            const relatedPaths = entry["relatedPaths"];
+            if (
+                relatedPaths !== undefined &&
+                (mechanism === undefined ||
+                    !Array.isArray(relatedPaths) ||
+                    relatedPaths.length === 0 ||
+                    !relatedPaths.every(isNonEmptyString))
+            ) {
+                errors.push(
+                    `${at}.relatedPaths: requires a mechanism and a non-empty array of paths`,
+                );
+                return;
+            }
             const thread: RereviewPriorThread = {
                 key,
                 path,
@@ -562,6 +577,9 @@ const parseRereview = (
             }
             if (mechanism !== undefined) {
                 thread.mechanism = mechanism as string[];
+            }
+            if (relatedPaths !== undefined) {
+                thread.relatedPaths = relatedPaths as string[];
             }
             threads.push(thread);
         });
