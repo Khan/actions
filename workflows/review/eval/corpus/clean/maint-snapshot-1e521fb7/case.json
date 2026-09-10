@@ -1,0 +1,80 @@
+{
+    "id": "maint-snapshot-1e521fb7",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "development",
+        "snapshot-cb27a6a51d998f367a6dddf127b635ebb927105ae49633d624c9bbd5552ceac6"
+    ],
+    "category": "clean",
+    "description": "Keep the numeric and caption APIs, including their different missing-item values, while defining stock validation once.",
+    "changedFiles": [
+        {
+            "path": "src/stock/caption.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/stock/units.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/stock/read.ts",
+            "status": "added"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [],
+        "postedCommentCount": 0
+    },
+    "diff": "diff --git a/src/stock/caption.ts b/src/stock/caption.ts\n--- a/src/stock/caption.ts\n+++ b/src/stock/caption.ts\n@@ -1,12 +1,7 @@\n import type {Catalog} from \"./catalog\";\n+import {readAvailable} from \"./read\";\n export const stockCaption = (catalog: Catalog, sku: string): string => {\n-    const key = sku.trim();\n-    if (key === \"\") return \"Unknown item\";\n-    const stock = catalog.fetch(key);\n-    if (!stock) return \"Unknown item\";\n-    if (!Number.isFinite(stock.onHand) || !Number.isFinite(stock.reserved)) {\n-        throw new Error(\"invalid stock count\");\n-    }\n-    const available = Math.max(0, stock.onHand - stock.reserved);\n+    const available = readAvailable(catalog, sku);\n+    if (available === null) return \"Unknown item\";\n     return available > 0 ? `${available} available` : \"Out of stock\";\n };\ndiff --git a/src/stock/units.ts b/src/stock/units.ts\n--- a/src/stock/units.ts\n+++ b/src/stock/units.ts\n@@ -1,11 +1,3 @@\n import type {Catalog} from \"./catalog\";\n-export const getAvailableUnits = (catalog: Catalog, sku: string): number => {\n-    const key = sku.trim();\n-    if (key === \"\") return 0;\n-    const stock = catalog.fetch(key);\n-    if (!stock) return 0;\n-    if (!Number.isFinite(stock.onHand) || !Number.isFinite(stock.reserved)) {\n-        throw new Error(\"invalid stock count\");\n-    }\n-    return Math.max(0, stock.onHand - stock.reserved);\n-};\n+import {readAvailable} from \"./read\";\n+export const getAvailableUnits = (catalog: Catalog, sku: string): number => readAvailable(catalog, sku) ?? 0;\ndiff --git a/src/stock/read.ts b/src/stock/read.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/stock/read.ts\n@@ -0,0 +1,11 @@\n+import type {Catalog} from \"./catalog\";\n+export const readAvailable = (catalog: Catalog, sku: string): number | null => {\n+    const key = sku.trim();\n+    if (key === \"\") return null;\n+    const stock = catalog.fetch(key);\n+    if (!stock) return null;\n+    if (!Number.isFinite(stock.onHand) || !Number.isFinite(stock.reserved)) {\n+        throw new Error(\"invalid stock count\");\n+    }\n+    return Math.max(0, stock.onHand - stock.reserved);\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "Share stock lookup validation",
+            "description": "Keep the numeric and caption APIs, including their different missing-item values, while defining stock validation once.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "stock-shared-lookup",
+                "path": "src/stock/caption.ts",
+                "lineStart": 3,
+                "lineEnd": 7,
+                "lens": "maintainability",
+                "mechanism": [
+                    "stockCaption[^\\n]{0,100}(still duplicates|still repeats)[^\\n]{0,80}(validation|lookup)",
+                    "readAvailable[^\\n]{0,100}(one caller|single caller|unused)"
+                ]
+            }
+        ]
+    }
+}

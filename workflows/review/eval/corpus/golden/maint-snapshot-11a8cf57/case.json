@@ -1,0 +1,97 @@
+{
+    "id": "maint-snapshot-11a8cf57",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "development",
+        "snapshot-e081858d3248500df6f0682b5812e4d028a013e072a0bdf8adccd7837bfeb434"
+    ],
+    "category": "golden",
+    "description": "Keep the plain-array encoding check and add a versioned-envelope check with the same input rows. Validate both row preservation and the envelope version.",
+    "changedFiles": [
+        {
+            "path": "src/encoding/checks.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [
+        {
+            "source": "conventions",
+            "finding": {
+                "schema_version": 2,
+                "id": "encoding-fixture-copy",
+                "lens": "conventions",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/encoding/checks.ts",
+                    "line": 30,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/encoding/checks.ts defines the same three nested readings twice."
+                ],
+                "failure_scenario": "verifyEnvelopeRows duplicates the rows fixture from verifyPlainRows. A fixture update now needs two edits. Share the fixture, keeping both envelope formats and the version assertion.",
+                "producing_hunt": "corpus:maintainability",
+                "model_authored_prose": "verifyEnvelopeRows duplicates the rows fixture from verifyPlainRows. A fixture update now needs two edits. Share the fixture, keeping both envelope formats and the version assertion."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "encoding-fixture-copy"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/encoding/checks.ts b/src/encoding/checks.ts\n--- a/src/encoding/checks.ts\n+++ b/src/encoding/checks.ts\n@@ -26,3 +26,32 @@\n     const actual = JSON.parse(encodeRows(rows, {envelope: false}));\n     if (JSON.stringify(actual) !== JSON.stringify(rows)) throw new Error(\"plain rows changed\");\n };\n+\n+export const verifyEnvelopeRows = (): void => {\n+    const rows: Row[] = [\n+        {\n+            id: \"north\",\n+            readings: [\n+                {sensor: \"temperature\", value: 12},\n+                {sensor: \"humidity\", value: 65},\n+            ],\n+        },\n+        {\n+            id: \"south\",\n+            readings: [\n+                {sensor: \"temperature\", value: 21},\n+                {sensor: \"humidity\", value: 40},\n+            ],\n+        },\n+        {\n+            id: \"west\",\n+            readings: [\n+                {sensor: \"temperature\", value: -3},\n+                {sensor: \"humidity\", value: 82},\n+            ],\n+        },\n+    ];\n+    const actual = JSON.parse(encodeRows(rows, {envelope: true}));\n+    if (actual.version !== 1) throw new Error(\"wrong version\");\n+    if (JSON.stringify(actual.rows) !== JSON.stringify(rows)) throw new Error(\"envelope rows changed\");\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "Check the versioned readings envelope",
+            "description": "Keep the plain-array encoding check and add a versioned-envelope check with the same input rows. Validate both row preservation and the envelope version.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "encoding-fixture-copy",
+                "path": "src/encoding/checks.ts",
+                "lineStart": 30,
+                "lineEnd": 58,
+                "lens": "conventions",
+                "mechanism": [
+                    "(verifyEnvelopeRows|verifyPlainRows)[^\\n]{0,140}(cop|duplicat|share|fixture)",
+                    "(rows fixture|fixture data)[^\\n]{0,100}(copied|duplicat|share)"
+                ]
+            }
+        ]
+    }
+}

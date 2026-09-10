@@ -1,0 +1,79 @@
+{
+    "id": "maint-snapshot-ac9ccd96",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "development",
+        "snapshot-856412e21df6e7d99f5c5da47b9215dcd15a770528b2dfdf0878648eb987e9be"
+    ],
+    "category": "clean",
+    "description": "Online delivery sends mail. Preview delivery must return a preview without sending mail, using the same delivery entry point.",
+    "changedFiles": [
+        {
+            "path": "src/delivery.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/online.ts",
+            "status": "added"
+        },
+        {
+            "path": "src/preview.ts",
+            "status": "added"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [],
+        "postedCommentCount": 0
+    },
+    "diff": "diff --git a/src/delivery.ts b/src/delivery.ts\n--- a/src/delivery.ts\n+++ b/src/delivery.ts\n@@ -1,2 +1,2 @@\n-import {sendMail} from \"./mail\";\n-export const deliver = (body: string): string => sendMail(body);\n+export interface Transport {send(body: string): string;}\n+export const deliver = (transport: Transport, body: string): string => transport.send(body);\ndiff --git a/src/online.ts b/src/online.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/online.ts\n@@ -0,0 +1,3 @@\n+import {deliver} from \"./delivery\";\n+import {sendMail} from \"./mail\";\n+export const online = (body: string) => deliver({send: sendMail}, body);\ndiff --git a/src/preview.ts b/src/preview.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/preview.ts\n@@ -0,0 +1,2 @@\n+import {deliver} from \"./delivery\";\n+export const preview = (body: string) => deliver({send: (text) => `preview:${text}`}, body);\n",
+    "live": {
+        "prContext": {
+            "title": "Support non-sending delivery previews",
+            "description": "Online delivery sends mail. Preview delivery must return a preview without sending mail, using the same delivery entry point.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "delivery-real-boundary",
+                "path": "src/delivery.ts",
+                "lineStart": 2,
+                "lineEnd": 2,
+                "lens": "maintainability",
+                "mechanism": [
+                    "(Transport|deliver)[^\\n]{0,140}(one caller|one implementation|no variation|unnecessary wrapper|remove.*interface)"
+                ]
+            }
+        ]
+    }
+}

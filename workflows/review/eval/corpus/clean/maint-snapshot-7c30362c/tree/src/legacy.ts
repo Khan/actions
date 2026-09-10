@@ -1,0 +1,4 @@
+export const oldNormalize = (s: string): string => s.trim().toLowerCase();
+export const otherNormalize = (s: string): string => s.trim().toLowerCase();
+
+export const heading = (s: string): string => s.trim();

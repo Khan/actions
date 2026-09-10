@@ -406,6 +406,33 @@ describe("label-shape lens assignment", () => {
         );
     });
 
+    it("assigns the maintainability lens, so the finding renders with its own label", () => {
+        const out = JSON.stringify({
+            findings: [
+                {
+                    path: "src/util/dates.ts",
+                    line: 4,
+                    label: "suggestion (non-blocking, maintainability)",
+                    subject: "`dateToString` duplicates `formatDate`.",
+                    discussion:
+                        "`formatDate` in src/util/format.ts:12 already does this.",
+                    failure_scenario:
+                        "the next reader has two names for one behavior and picks one at random",
+                },
+            ],
+        });
+        const {candidates} = parseFinderOutput(
+            "maintainability",
+            out,
+            new Set(),
+        );
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0].finding.lens).toBe("maintainability");
+        expect(labelForFinding(candidates[0].finding)).toBe(
+            "suggestion (non-blocking, maintainability)",
+        );
+    });
+
     it("keeps skill-auditor on conventions and everything else on correctness", () => {
         const skill = parseFinderOutput(
             "skill-auditor",

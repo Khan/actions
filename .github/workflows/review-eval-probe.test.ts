@@ -10,7 +10,7 @@ import * as fs from "fs";
 import {describe, expect, it} from "vitest";
 
 const WORKFLOWS: {file: string; spends: string}[] = [
-    {file: "review-eval-ab.yml", spends: "eval/live-ab.ts"},
+    {file: "review-eval-ab.yml", spends: "eval/live-ab-shard-cli.ts run"},
     {file: "review-eval-drift.yml", spends: "eval/live-ab.ts"},
     {file: "review-rereview-sweep.yml", spends: "eval/rereview-sweep.ts"},
 ];
@@ -27,6 +27,21 @@ describe.each(WORKFLOWS)("$file", ({file, spends}) => {
         expect(probeAt).toBeGreaterThan(-1);
         expect(spendAt).toBeGreaterThan(-1);
         expect(probeAt).toBeLessThan(spendAt);
+        if (file === "review-eval-ab.yml") {
+            // Text order alone cannot sequence separate matrix jobs.
+            const shardJob = yml
+                .split("  live-ab:\n")[1]
+                ?.split("  report:\n")[0];
+            expect(shardJob).toContain("needs: prepare");
+            expect(shardJob).toContain(
+                "if: needs.prepare.outputs.enabled == 'true'",
+            );
+            expect(shardJob).toContain(
+                "ref: ${{ needs.prepare.outputs.candidate_sha }}",
+            );
+            expect(shardJob).toContain("fail-fast: false");
+            expect(shardJob).toContain("max-parallel: 4");
+        }
     });
 
     it("gives both the probe and the run the uploaded transcripts dir", () => {

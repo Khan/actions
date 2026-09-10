@@ -1,0 +1,76 @@
+{
+    "id": "maint-snapshot-6e6baac2",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "development",
+        "snapshot-92a8e843e9974aa917727e27460e6e0ad8cf12c760315b534b1746f8cdab84d5"
+    ],
+    "category": "clean",
+    "description": "Submitting should reserve one available slot. Preview should continue to report availability without reserving a slot.",
+    "changedFiles": [
+        {
+            "path": "src/quota.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/submit.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [],
+        "postedCommentCount": 0
+    },
+    "diff": "diff --git a/src/quota.ts b/src/quota.ts\n--- a/src/quota.ts\n+++ b/src/quota.ts\n@@ -1,2 +1,7 @@\n export type Quota = {remaining: number};\n export const hasCapacity = (quota: Quota): boolean => quota.remaining > 0;\n+export const reserveCapacity = (quota: Quota): boolean => {\n+    if (!hasCapacity(quota)) return false;\n+    quota.remaining -= 1;\n+    return true;\n+};\ndiff --git a/src/submit.ts b/src/submit.ts\n--- a/src/submit.ts\n+++ b/src/submit.ts\n@@ -1,2 +1,2 @@\n-import {hasCapacity, type Quota} from \"./quota\";\n-export const submit = (q: Quota) => hasCapacity(q);\n+import {reserveCapacity, type Quota} from \"./quota\";\n+export const submit = (q: Quota) => reserveCapacity(q);\n",
+    "live": {
+        "prContext": {
+            "title": "Reserve quota before submission",
+            "description": "Submitting should reserve one available slot. Preview should continue to report availability without reserving a slot.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "quota-explicit-reservation",
+                "path": "src/quota.ts",
+                "lineStart": 3,
+                "lineEnd": 3,
+                "lens": "maintainability",
+                "mechanism": [
+                    "reserveCapacity[^\\n]{0,100}(mislead|hidden|pure predicate)",
+                    "hasCapacity[^\\n]{0,100}(mutates|decrements|consumes)"
+                ]
+            }
+        ]
+    }
+}

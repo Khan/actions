@@ -1,0 +1,110 @@
+{
+    "id": "maint-snapshot-f5fba079",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "holdout",
+        "reserved-holdout",
+        "snapshot-ef28f3001e4e373bc3be9f11ec5b9559849f75786121834c20db7ad4b0bce409"
+    ],
+    "category": "golden",
+    "description": "Compact exports should collapse whitespace. Standard attachments should preserve whitespace.",
+    "changedFiles": [
+        {
+            "path": "src/attachments/send.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/attachments/encode.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/attachments/render.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/export.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [
+        {
+            "source": "maintainability",
+            "finding": {
+                "schema_version": 2,
+                "id": "attachment-hidden-mode",
+                "lens": "maintainability",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/attachments/send.ts",
+                    "line": 2,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/export.ts passes true. src/attachments/render.ts is the only read of compact."
+                ],
+                "failure_scenario": "The compact boolean is threaded through encodeAttachment before renderAttachment reads it. A reader of sendAttachment(text, true) must open three files to learn that whitespace is collapsed.",
+                "producing_hunt": "corpus:maintainability",
+                "model_authored_prose": "The compact boolean is threaded through encodeAttachment before renderAttachment reads it. A reader of sendAttachment(text, true) must open three files to learn that whitespace is collapsed."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "attachment-hidden-mode"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/attachments/send.ts b/src/attachments/send.ts\n--- a/src/attachments/send.ts\n+++ b/src/attachments/send.ts\n@@ -1,2 +1,2 @@\n import {encodeAttachment} from \"./encode\";\n-export const sendAttachment = (text: string): string => encodeAttachment(text);\n+export const sendAttachment = (text: string, compact = false): string => encodeAttachment(text, compact);\ndiff --git a/src/attachments/encode.ts b/src/attachments/encode.ts\n--- a/src/attachments/encode.ts\n+++ b/src/attachments/encode.ts\n@@ -1,2 +1,2 @@\n import {renderAttachment} from \"./render\";\n-export const encodeAttachment = (text: string): string => renderAttachment(text);\n+export const encodeAttachment = (text: string, compact: boolean): string => renderAttachment(text, compact);\ndiff --git a/src/attachments/render.ts b/src/attachments/render.ts\n--- a/src/attachments/render.ts\n+++ b/src/attachments/render.ts\n@@ -1 +1 @@\n-export const renderAttachment = (text: string): string => text;\n+export const renderAttachment = (text: string, compact: boolean): string => compact ? text.replace(/\\s+/g, \" \") : text;\ndiff --git a/src/export.ts b/src/export.ts\n--- a/src/export.ts\n+++ b/src/export.ts\n@@ -1,2 +1,2 @@\n import {sendAttachment} from \"./attachments/send\";\n-export const exportAttachment = (text: string) => sendAttachment(text);\n+export const exportAttachment = (text: string) => sendAttachment(text, true);\n",
+    "live": {
+        "prContext": {
+            "title": "Add compact attachment exports",
+            "description": "Compact exports should collapse whitespace. Standard attachments should preserve whitespace.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "attachment-hidden-mode",
+                "path": "src/attachments/send.ts",
+                "lineStart": 2,
+                "lineEnd": 2,
+                "lens": "maintainability",
+                "mechanism": [
+                    "(compact|boolean)[^\\n]{0,150}(thread|passed|three|renderAttachment)",
+                    "sendAttachment[^\\n]{0,120}(true|mode)[^\\n]{0,100}(reader|meaning|hidden)"
+                ]
+            }
+        ]
+    }
+}

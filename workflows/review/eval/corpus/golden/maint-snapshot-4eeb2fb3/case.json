@@ -1,0 +1,101 @@
+{
+    "id": "maint-snapshot-4eeb2fb3",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "development",
+        "snapshot-5d8ead86d3986a7bab7f237c5574b242f76457763704798804273ca8ffae3f8f"
+    ],
+    "category": "golden",
+    "description": "Route delivery through a transport object while preserving the current mail output.",
+    "changedFiles": [
+        {
+            "path": "src/delivery.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/transport.ts",
+            "status": "added"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [
+        {
+            "source": "maintainability",
+            "finding": {
+                "schema_version": 2,
+                "id": "delivery-empty-wrapper",
+                "lens": "maintainability",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/transport.ts",
+                    "line": 3,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/delivery.ts constructs the only instance. src/transport.ts forwards unchanged."
+                ],
+                "failure_scenario": "MailTransport only delegates to sendMail and has one caller and one implementation. A reader must open transport.ts to discover that delivery still sends mail without any variation point.",
+                "producing_hunt": "corpus:maintainability",
+                "model_authored_prose": "MailTransport only delegates to sendMail and has one caller and one implementation. A reader must open transport.ts to discover that delivery still sends mail without any variation point."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "delivery-empty-wrapper"
+        ],
+        "postedCommentCount": 1
+    },
+    "diff": "diff --git a/src/delivery.ts b/src/delivery.ts\n--- a/src/delivery.ts\n+++ b/src/delivery.ts\n@@ -1,2 +1,3 @@\n-import {sendMail} from \"./mail\";\n-export const deliver = (body: string): string => sendMail(body);\n+import {MailTransport} from \"./transport\";\n+const transport = new MailTransport();\n+export const deliver = (body: string): string => transport.send(body);\ndiff --git a/src/transport.ts b/src/transport.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/transport.ts\n@@ -0,0 +1,5 @@\n+import {sendMail} from \"./mail\";\n+export interface Transport {send(body: string): string;}\n+export class MailTransport implements Transport {\n+    send(body: string): string {return sendMail(body);}\n+}\n",
+    "live": {
+        "prContext": {
+            "title": "Introduce a delivery transport",
+            "description": "Route delivery through a transport object while preserving the current mail output.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "delivery-empty-wrapper",
+                "path": "src/transport.ts",
+                "lineStart": 3,
+                "lineEnd": 3,
+                "lens": "maintainability",
+                "mechanism": [
+                    "(MailTransport|Transport)[^\\n]{0,150}(one caller|one implementation|single|delegat|indirection)",
+                    "wrapper[^\\n]{0,100}sendMail"
+                ]
+            }
+        ]
+    }
+}

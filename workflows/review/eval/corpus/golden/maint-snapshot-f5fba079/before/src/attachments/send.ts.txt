@@ -1,0 +1,2 @@
+import {encodeAttachment} from "./encode";
+export const sendAttachment = (text: string): string => encodeAttachment(text);

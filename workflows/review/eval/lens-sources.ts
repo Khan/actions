@@ -32,6 +32,7 @@ export const LABEL_SHAPE_REVIEWERS: Readonly<
     },
     conventions: {lens: "conventions", source: "conventions"},
     documentation: {lens: "documentation", source: "documentation"},
+    maintainability: {lens: "maintainability", source: "maintainability"},
 };
 
 /**

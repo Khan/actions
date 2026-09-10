@@ -1,0 +1,72 @@
+{
+    "id": "maint-snapshot-edf4d3d4",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "development",
+        "snapshot-23ab0d654f3e461be192c6cb2272eaf17c8602478d9c1e274a26271aed2bd65f"
+    ],
+    "category": "clean",
+    "description": "The invoice API accepts numeric values. The existing text parser accepts strings and rejects non-finite parses. Those are different contracts.",
+    "changedFiles": [
+        {
+            "path": "src/invoice.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [],
+        "postedCommentCount": 0
+    },
+    "diff": "diff --git a/src/invoice.ts b/src/invoice.ts\n--- a/src/invoice.ts\n+++ b/src/invoice.ts\n@@ -1 +1,3 @@\n-export const invoiceTotal = (amounts: readonly number[]): number => amounts.reduce((sum, amount) => sum + amount, 0);\n+const ledgerCents = (amount: number): number => Math.sign(amount) * Math.round(Math.abs(amount) * 100);\n+\n+export const invoiceTotal = (amounts: readonly number[]): number => amounts.reduce((sum, amount) => sum + ledgerCents(amount), 0);\n",
+    "live": {
+        "prContext": {
+            "title": "Convert invoice preview amounts",
+            "description": "The invoice API accepts numeric values. The existing text parser accepts strings and rejects non-finite parses. Those are different contracts.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "invoice-not-equivalent-types",
+                "path": "src/invoice.ts",
+                "lineStart": 1,
+                "lineEnd": 1,
+                "lens": "maintainability",
+                "mechanism": [
+                    "ledgerCents[^\\n]{0,150}(duplicat|reuse|replace|equivalent)",
+                    "(use|reuse|import)[^\\n]{0,70}(checkedMinorUnits|textMinorUnits|postedMinorUnits)"
+                ]
+            }
+        ]
+    }
+}

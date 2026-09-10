@@ -1,0 +1,246 @@
+{
+    "id": "maint-snapshot-6fb2c92a",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "development",
+        "snapshot-0c70faf8722d46f4a4d2b0f2bf135911fcf01c46840afe1e355d4d7b31912d18"
+    ],
+    "category": "golden",
+    "description": "Support CSV and TSV extensions, use 90-second export links, preserve tenant isolation, count status reads, and return report amounts in minor units.",
+    "changedFiles": [
+        {
+            "path": "src/report.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/access.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/cache.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/format.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/status.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": [
+                    "security-auth"
+                ]
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [
+        {
+            "source": "maintainability",
+            "finding": {
+                "schema_version": 2,
+                "id": "mixed-copy",
+                "lens": "maintainability",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/report.ts",
+                    "line": 1,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/report.ts:1"
+                ],
+                "failure_scenario": "amountToMinor duplicates signedMinorUnits with the same rounding, so the next rounding change needs two edits.",
+                "producing_hunt": "corpus:maintainability",
+                "model_authored_prose": "amountToMinor duplicates signedMinorUnits with the same rounding, so the next rounding change needs two edits."
+            }
+        },
+        {
+            "source": "security-auth",
+            "finding": {
+                "schema_version": 2,
+                "id": "mixed-access",
+                "lens": "security-auth",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/access.ts",
+                    "line": 1,
+                    "side": "RIGHT"
+                },
+                "severity": "blocking",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/access.ts:1"
+                ],
+                "failure_scenario": "The tenant comparison is inverted and allows an export from another tenant while denying the owner.",
+                "producing_hunt": "corpus:maintainability",
+                "model_authored_prose": "The tenant comparison is inverted and allows an export from another tenant while denying the owner."
+            }
+        },
+        {
+            "source": "documentation",
+            "finding": {
+                "schema_version": 2,
+                "id": "mixed-stale-doc",
+                "lens": "documentation",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/cache.ts",
+                    "line": 2,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/cache.ts:2"
+                ],
+                "failure_scenario": "The comment still says 30 seconds while LINK_TTL_SECONDS is 90, misleading a reader calculating expiry.",
+                "producing_hunt": "corpus:maintainability",
+                "model_authored_prose": "The comment still says 30 seconds while LINK_TTL_SECONDS is 90, misleading a reader calculating expiry."
+            }
+        },
+        {
+            "source": "completeness",
+            "finding": {
+                "schema_version": 2,
+                "id": "mixed-format",
+                "lens": "completeness",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/format.ts",
+                    "line": 1,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/format.ts:1"
+                ],
+                "failure_scenario": "The tsv format argument is ignored and extension always returns csv despite the requested TSV support.",
+                "producing_hunt": "corpus:maintainability",
+                "model_authored_prose": "The tsv format argument is ignored and extension always returns csv despite the requested TSV support."
+            }
+        },
+        {
+            "source": "maintainability",
+            "finding": {
+                "schema_version": 2,
+                "id": "mixed-status",
+                "lens": "maintainability",
+                "anchor": {
+                    "type": "line",
+                    "path": "src/status.ts",
+                    "line": 1,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.8,
+                "evidence_trace": [
+                    "src/status.ts:1"
+                ],
+                "failure_scenario": "readStatus increments checks while presenting itself as a read, so a reader polling status changes it.",
+                "producing_hunt": "corpus:maintainability",
+                "model_authored_prose": "readStatus increments checks while presenting itself as a read, so a reader polling status changes it."
+            }
+        }
+    ],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "REQUEST_CHANGES",
+        "mustCatch": [
+            "mixed-copy",
+            "mixed-access",
+            "mixed-stale-doc",
+            "mixed-format",
+            "mixed-status"
+        ],
+        "postedCommentCount": 5
+    },
+    "diff": "diff --git a/src/report.ts b/src/report.ts\n--- a/src/report.ts\n+++ b/src/report.ts\n@@ -1 +1,2 @@\n-export const report = (amount: number): number => amount;\n+const amountToMinor = (amount: number): number => Math.sign(amount) * Math.round(Math.abs(amount) * 100);\n+export const report = (amount: number): number => amountToMinor(amount);\ndiff --git a/src/access.ts b/src/access.ts\n--- a/src/access.ts\n+++ b/src/access.ts\n@@ -1 +1 @@\n-export const mayExport = (actorTenant: string, documentTenant: string): boolean => actorTenant === documentTenant;\n+export const mayExport = (actorTenant: string, documentTenant: string): boolean => actorTenant !== documentTenant;\ndiff --git a/src/cache.ts b/src/cache.ts\n--- a/src/cache.ts\n+++ b/src/cache.ts\n@@ -1,2 +1,2 @@\n // Export links expire after 30 seconds.\n-export const LINK_TTL_SECONDS = 30;\n+export const LINK_TTL_SECONDS = 90;\ndiff --git a/src/format.ts b/src/format.ts\n--- a/src/format.ts\n+++ b/src/format.ts\n@@ -1 +1 @@\n-export const extension = (): string => \".csv\";\n+export const extension = (format: \"csv\" | \"tsv\"): string => \".csv\";\ndiff --git a/src/status.ts b/src/status.ts\n--- a/src/status.ts\n+++ b/src/status.ts\n@@ -1 +1,4 @@\n-export const readStatus = (status: {checks: number}): number => status.checks;\n+export const readStatus = (status: {checks: number}): number => {\n+    status.checks += 1;\n+    return status.checks;\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "Add TSV exports, longer links, and status counting",
+            "description": "Support CSV and TSV extensions, use 90-second export links, preserve tenant isolation, count status reads, and return report amounts in minor units.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustCatchSpecs": [
+            {
+                "key": "mixed-copy",
+                "path": "src/report.ts",
+                "lineStart": 1,
+                "lineEnd": 1,
+                "lens": "maintainability",
+                "mechanism": [
+                    "amountToMinor[^\\n]{0,160}(signedMinorUnits|duplicat|same rounding)"
+                ]
+            },
+            {
+                "key": "mixed-access",
+                "path": "src/access.ts",
+                "lineStart": 1,
+                "lineEnd": 1,
+                "lens": "security-auth",
+                "mechanism": [
+                    "(different|other|cross)[^\\n]{0,80}tenant|tenant[^\\n]{0,80}(inverted|inequal|unauthoriz)"
+                ]
+            },
+            {
+                "key": "mixed-stale-doc",
+                "path": "src/cache.ts",
+                "lineStart": 2,
+                "lineEnd": 2,
+                "lens": "documentation",
+                "mechanism": [
+                    "(30|thirty)[^\\n]{0,80}(90|ninety)|stale[^\\n]{0,50}(comment|expiry)"
+                ]
+            },
+            {
+                "key": "mixed-format",
+                "path": "src/format.ts",
+                "lineStart": 1,
+                "lineEnd": 1,
+                "lens": "completeness",
+                "mechanism": [
+                    "(tsv|format)[^\\n]{0,100}(ignored|csv|always)"
+                ]
+            },
+            {
+                "key": "mixed-status",
+                "path": "src/status.ts",
+                "lineStart": 1,
+                "lineEnd": 1,
+                "lens": "maintainability",
+                "mechanism": [
+                    "readStatus[^\\n]{0,100}(mutat|increment|writes|side effect)"
+                ]
+            }
+        ]
+    }
+}

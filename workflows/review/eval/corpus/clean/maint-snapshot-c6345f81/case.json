@@ -1,0 +1,72 @@
+{
+    "id": "maint-snapshot-c6345f81",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "holdout",
+        "reserved-holdout",
+        "snapshot-5a5a89d46f6eec869dd01a46656f668797141b3b09453fe8682db7f7fff33cfa"
+    ],
+    "category": "clean",
+    "description": "Non-retryable network failures stop. Quota failures wait 60 seconds. Terminal permanent failures use zero as the handoff signal, while retryable permanent failures stop.",
+    "changedFiles": [
+        {
+            "path": "src/retry.ts",
+            "status": "modified"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [],
+        "postedCommentCount": 0
+    },
+    "diff": "diff --git a/src/retry.ts b/src/retry.ts\n--- a/src/retry.ts\n+++ b/src/retry.ts\n@@ -1,6 +1,8 @@\n export type Failure = {kind: \"network\" | \"quota\" | \"permanent\"; retryable: boolean};\n export const retryDelay = (failure: Failure): number | null => {\n-    if (failure.kind === \"permanent\") return null;\n+    if (!failure.retryable && failure.kind === \"network\") return null;\n+    if (failure.kind === \"permanent\" && failure.retryable) return null;\n     if (failure.kind === \"quota\") return 60;\n+    if (!failure.retryable) return 0;\n     return 5;\n };\n",
+    "live": {
+        "prContext": {
+            "title": "Handle terminal failures by kind",
+            "description": "Non-retryable network failures stop. Quota failures wait 60 seconds. Terminal permanent failures use zero as the handoff signal, while retryable permanent failures stop.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "retry-guard-reachable",
+                "path": "src/retry.ts",
+                "lineStart": 6,
+                "lineEnd": 6,
+                "lens": "maintainability",
+                "mechanism": [
+                    "(retryable|retryDelay|later guard|second guard)[^\\n]{0,140}(unreachable|dead|never runs|redundant)"
+                ]
+            }
+        ]
+    }
+}

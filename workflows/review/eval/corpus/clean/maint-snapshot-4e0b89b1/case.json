@@ -1,0 +1,76 @@
+{
+    "id": "maint-snapshot-4e0b89b1",
+    "tags": [
+        "live",
+        "maintainability",
+        "maintainability-expanded",
+        "authored",
+        "development",
+        "snapshot-93367f5b2bbac8f9384ec279d5f99b8547c92bf3c393dcc28b2c5dcd2a0b9b62"
+    ],
+    "category": "clean",
+    "description": "Define the input rows once. Preserve both format checks and the version assertion, and return fresh fixture objects for each caller.",
+    "changedFiles": [
+        {
+            "path": "src/encoding/checks.ts",
+            "status": "modified"
+        },
+        {
+            "path": "src/encoding/fixtures.ts",
+            "status": "added"
+        }
+    ],
+    "routerConfig": {
+        "enabledReviewers": [
+            "holistic",
+            "completeness",
+            "test-adequacy",
+            "first-principles",
+            "conventions",
+            "documentation",
+            "maintainability"
+        ],
+        "maxAiCredits": 2500,
+        "lensRules": [
+            {
+                "pattern": "**",
+                "lenses": []
+            }
+        ],
+        "riskRules": [
+            {
+                "pattern": "**",
+                "tier": "low"
+            }
+        ]
+    },
+    "findings": [],
+    "policyConflicts": [],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [],
+        "postedCommentCount": 0
+    },
+    "diff": "diff --git a/src/encoding/checks.ts b/src/encoding/checks.ts\n--- a/src/encoding/checks.ts\n+++ b/src/encoding/checks.ts\n@@ -1,56 +1,13 @@\n-import {encodeRows, type Row} from \"./encode\";\n+import {encodeRows} from \"./encode\";\n+import {rowFixture} from \"./fixtures\";\n export const verifyPlainRows = (): void => {\n-    const rows: Row[] = [\n-        {\n-            id: \"north\",\n-            readings: [\n-                {sensor: \"temperature\", value: 12},\n-                {sensor: \"humidity\", value: 65},\n-            ],\n-        },\n-        {\n-            id: \"south\",\n-            readings: [\n-                {sensor: \"temperature\", value: 21},\n-                {sensor: \"humidity\", value: 40},\n-            ],\n-        },\n-        {\n-            id: \"west\",\n-            readings: [\n-                {sensor: \"temperature\", value: -3},\n-                {sensor: \"humidity\", value: 82},\n-            ],\n-        },\n-    ];\n+    const rows = rowFixture();\n     const actual = JSON.parse(encodeRows(rows, {envelope: false}));\n     if (JSON.stringify(actual) !== JSON.stringify(rows)) throw new Error(\"plain rows changed\");\n };\n \n export const verifyEnvelopeRows = (): void => {\n-    const rows: Row[] = [\n-        {\n-            id: \"north\",\n-            readings: [\n-                {sensor: \"temperature\", value: 12},\n-                {sensor: \"humidity\", value: 65},\n-            ],\n-        },\n-        {\n-            id: \"south\",\n-            readings: [\n-                {sensor: \"temperature\", value: 21},\n-                {sensor: \"humidity\", value: 40},\n-            ],\n-        },\n-        {\n-            id: \"west\",\n-            readings: [\n-                {sensor: \"temperature\", value: -3},\n-                {sensor: \"humidity\", value: 82},\n-            ],\n-        },\n-    ];\n+    const rows = rowFixture();\n     const actual = JSON.parse(encodeRows(rows, {envelope: true}));\n     if (actual.version !== 1) throw new Error(\"wrong version\");\n     if (JSON.stringify(actual.rows) !== JSON.stringify(rows)) throw new Error(\"envelope rows changed\");\ndiff --git a/src/encoding/fixtures.ts b/src/encoding/fixtures.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/encoding/fixtures.ts\n@@ -0,0 +1,27 @@\n+import type {Row} from \"./encode\";\n+export const rowFixture = (): Row[] => {\n+    const rows: Row[] = [\n+        {\n+            id: \"north\",\n+            readings: [\n+                {sensor: \"temperature\", value: 12},\n+                {sensor: \"humidity\", value: 65},\n+            ],\n+        },\n+        {\n+            id: \"south\",\n+            readings: [\n+                {sensor: \"temperature\", value: 21},\n+                {sensor: \"humidity\", value: 40},\n+            ],\n+        },\n+        {\n+            id: \"west\",\n+            readings: [\n+                {sensor: \"temperature\", value: -3},\n+                {sensor: \"humidity\", value: 82},\n+            ],\n+        },\n+    ];\n+    return rows;\n+};\n",
+    "live": {
+        "prContext": {
+            "title": "Share the readings fixture between encoding checks",
+            "description": "Define the input rows once. Preserve both format checks and the version assertion, and return fresh fixture objects for each caller.",
+            "author": "corpus-author",
+            "baseBranch": "main"
+        },
+        "mustNotFlagSpecs": [
+            {
+                "key": "encoding-shared-fixture",
+                "path": "src/encoding/checks.ts",
+                "lineStart": 9,
+                "lineEnd": 14,
+                "lens": "conventions",
+                "mechanism": [
+                    "verifyEnvelopeRows[^\\n]{0,100}(still duplicates|still copies)[^\\n]{0,80}(rows|fixture)",
+                    "rowFixture[^\\n]{0,100}(one caller|single caller|unused)"
+                ]
+            }
+        ]
+    }
+}

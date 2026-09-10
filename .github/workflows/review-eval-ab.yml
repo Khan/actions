@@ -12,14 +12,16 @@
 # PR's own review.md changes; a merge-base baseline would fold any upstream
 # review.md movement into the PR's measured delta.
 #
-# Report-only, with one exception (the playbook's standing rule): the runner
-# exits non-zero when the candidate arm mishandles an adversarial-injection
-# case, which fails this job.
+# Quality deltas are report-only. Adversarial failures and incomplete shard
+# coverage fail the workflow, preserving partial artifacts for inspection.
 #
 # Cost control: per-PR runs cover only the live cases also tagged `smoke`;
-# a `full-eval` label lifts that to every live case. The runner enforces a
-# hard USD ceiling per arm and reports skipped cases rather than dying at the
-# cap. A new push cancels a superseded run (concurrency below). A
+# a `full-eval` label lifts that to every live development case (reserved
+# holdouts stay excluded). Smoke gets $40 total across both arms, full gets
+# $200 split across four parallel paired shards. Smoke stays single-job.
+# The runner checks each arm's budget between cases, so a dispatch can
+# overshoot its slice. Judge, arbiter, and gate retries add spend outside that
+# budget. A new push cancels a superseded run (concurrency below). A
 # `skip-live-eval` label skips the job entirely (added mid-run, it cancels
 # the in-flight run too, see the concurrency key).
 #
@@ -37,17 +39,18 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - "workflows/review/**"
+      - ".github/workflows/review-eval-ab.yml"
   workflow_dispatch:
     inputs:
       base_ref:
-        description: "Baseline ref for review.md (default: the runner's merge-base fallback; PR runs pass the base-branch tip)"
+        description: "Baseline ref, resolved once before sharding (default: PR base commit or origin/main)"
         required: false
       max_usd:
-        description: "Total hard budget across both arms"
+        description: "Dispatch budget across both arms and all repeats, checked between cases (blank: smoke 40, full 200)"
         required: false
-        default: "40"
+        default: ""
       full:
-        description: "Run every live case (not just the smoke subset)"
+        description: "Run every live development case (not just smoke, reserved holdouts stay excluded)"
         type: boolean
         required: false
         default: false
@@ -58,6 +61,10 @@ on:
         description: "Repeats per arm in this one dispatch; >1 reports pooled pass rates with binomial intervals"
         required: false
         default: "1"
+      shards:
+        description: "Parallel case shards, 1 to 16 (blank: full 4, smoke 1)"
+        required: false
+        default: ""
       force_arms:
         description: "Run both arms even when review.md is byte-identical (wobble control / noise floor)"
         type: boolean
@@ -66,7 +73,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 # A `labeled` event for any label other than `full-eval` runs nothing (every
 # job's `if` skips it), but until this key sent it to its own group it still
@@ -81,8 +87,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  live-ab:
-    name: Live A/B over the eval corpus
+  prepare:
+    name: Pin sources and plan eval shards
     runs-on: ubuntu-latest
     # Drafts wait until ready; the changeset release PR matches the path
     # filter (it bumps workflows/review/package.json) but changes no
@@ -94,6 +100,10 @@ jobs:
        !contains(github.event.pull_request.labels.*.name, 'skip-live-eval') &&
        (github.event.action != 'labeled' ||
         github.event.label.name == 'full-eval'))
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      candidate_sha: ${{ steps.plan.outputs.candidate_sha }}
+      enabled: ${{ steps.plan.outputs.enabled }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -101,7 +111,53 @@ jobs:
           # `git show`, so the full history is needed.
           fetch-depth: 0
       - uses: ./actions/shared-node-cache
+      - name: Plan the live A/B
+        id: plan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The tip of the PR's base branch (see the header comment for why
+          # tip, not merge-base). workflow_dispatch may override it.
+          BASE_REF: ${{ inputs.base_ref || github.event.pull_request.base.sha || 'origin/main' }}
+          MAX_USD: ${{ inputs.max_usd || '' }}
+          FULL_EVAL: ${{ inputs.full == true || contains(github.event.pull_request.labels.*.name, 'full-eval') }}
+          SHARDS: ${{ inputs.shards || '' }}
+          CASES: ${{ inputs.cases || '' }}
+          REPEATS: ${{ inputs.repeats || '1' }}
+          FORCE_ARMS: ${{ inputs.force_arms == true }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY secret not configured; skipping the live A/B." >&2
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          SCOPE=(--smoke-only)
+          DEFAULT_MAX_USD=40
+          if [ "$FULL_EVAL" = "true" ]; then
+            SCOPE=()
+            # Run 34381736297 spent $40.38 on 43 case-arm runs. At that
+            # rate, 66 cases across both arms need $124. The $200 budget
+            # leaves room for the unmeasured tail without raising smoke.
+            DEFAULT_MAX_USD=200
+          fi
+          MAX_USD="${MAX_USD:-$DEFAULT_MAX_USD}"
+          echo "Live A/B: full=$FULL_EVAL, dispatch budget=$MAX_USD USD across both arms and all repeats"
+          EXTRA=()
+          if [ -n "$CASES" ]; then
+            EXTRA+=(--cases "$CASES")
+          fi
+          if [ "$REPEATS" != "1" ]; then
+            EXTRA+=(--repeats "$REPEATS")
+          fi
+          if [ -n "$SHARDS" ]; then
+            EXTRA+=(--shards "$SHARDS")
+          fi
+          if [ "$FORCE_ARMS" = "true" ]; then
+            EXTRA+=(--force-arms)
+          fi
+          pnpm dlx tsx workflows/review/eval/live-ab-shard-cli.ts plan \
+            --base-ref "$BASE_REF" --max-usd "$MAX_USD" "${SCOPE[@]}" "${EXTRA[@]}"
       - name: Prove the read scope bites
+        if: steps.plan.outputs.enabled == 'true'
         # One Haiku call: an in-scope Read must succeed and an out-of-scope
         # Read must be denied, on the SDK version this checkout installs. A
         # runner that lets a reviewer read the corpus produces recall numbers
@@ -116,50 +172,101 @@ jobs:
           fi
           pnpm dlx tsx workflows/review/eval/live-runner.ts --probe-read-scope \
             --transcripts-dir "$RUNNER_TEMP/review-transcripts"
-      - name: Run the live A/B
+      - name: Upload the shard plan
+        if: steps.plan.outputs.enabled == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: live-ab-plan
+          path: out/live-ab-plan.json
+          if-no-files-found: error
+      - name: Upload scope probe transcripts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: live-ab-transcripts-probe
+          path: ${{ runner.temp }}/review-transcripts
+          if-no-files-found: ignore
+
+  live-ab:
+    name: Live A/B shard ${{ matrix.id }}
+    needs: prepare
+    if: needs.prepare.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      # A failed shard must not cancel peers that have already spent money.
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: ./actions/shared-node-cache
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: live-ab-plan
+          path: out
+      - name: Run the paired shard
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # The tip of the PR's base branch (see the header comment for why
-          # tip, not merge-base). workflow_dispatch may override it.
-          BASE_REF: ${{ inputs.base_ref || format('origin/{0}', github.base_ref || 'main') }}
-          MAX_USD: ${{ inputs.max_usd || '40' }}
-          FULL_EVAL: ${{ inputs.full == true || contains(github.event.pull_request.labels.*.name, 'full-eval') }}
-          CASES: ${{ inputs.cases || '' }}
-          REPEATS: ${{ inputs.repeats || '1' }}
-          FORCE_ARMS: ${{ inputs.force_arms == true }}
+          SHARD_ID: ${{ matrix.id }}
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "ANTHROPIC_API_KEY secret not configured; skipping the live A/B." >&2
-            exit 0
-          fi
-          SCOPE="--smoke-only"
-          if [ "$FULL_EVAL" = "true" ]; then
-            SCOPE=""
-          fi
-          EXTRA=""
-          if [ -n "$CASES" ]; then
-            EXTRA="$EXTRA --cases $CASES"
-          fi
-          if [ "$REPEATS" != "1" ]; then
-            EXTRA="$EXTRA --repeats $REPEATS"
-          fi
-          if [ "$FORCE_ARMS" = "true" ]; then
-            EXTRA="$EXTRA --force-arms"
-          fi
-          pnpm dlx tsx workflows/review/eval/live-ab.ts \
-            --base-ref "$BASE_REF" --max-usd "$MAX_USD" $SCOPE $EXTRA \
-            --transcripts-dir "$RUNNER_TEMP/review-transcripts"
+          pnpm dlx tsx workflows/review/eval/live-ab-shard-cli.ts run \
+            --shard "$SHARD_ID" --transcripts-dir "$RUNNER_TEMP/review-transcripts"
+      - name: Upload shard checkpoint and receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: live-ab-shard-${{ matrix.id }}
+          path: out/shards/live-ab-shard-${{ matrix.id }}/
+          if-no-files-found: error
+      - name: Upload shard transcripts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: live-ab-transcripts-${{ matrix.id }}
+          path: ${{ runner.temp }}/review-transcripts
+          if-no-files-found: ignore
+
+  report:
+    name: Merge paired eval shards
+    needs: [prepare, live-ab]
+    if: always() && needs.prepare.result == 'success' && needs.prepare.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+      - uses: ./actions/shared-node-cache
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: live-ab-plan
+          path: out
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: live-ab-shard-*
+          path: out/shards
+      - name: Merge reports and enforce coverage
+        if: always()
+        run: pnpm dlx tsx workflows/review/eval/live-ab-shard-cli.ts merge
       - name: Upload the report artifact
-        # always(): a partial or gate-failing run still uploads what it wrote.
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: live-ab-report
           path: out/live-ab-report.*
-          if-no-files-found: ignore
-      - name: Upload the sub-agent transcripts
-        # One file per dispatch. Read at least one per arm before trusting a
-        # recall or noise delta (eval/README.md, "Reading a report").
+          if-no-files-found: error
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: always()
+        with:
+          pattern: live-ab-transcripts-*
+          path: ${{ runner.temp }}/review-transcripts
+          merge-multiple: true
+      - name: Upload combined transcripts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -181,6 +288,11 @@ jobs:
             const body = `${marker}\n${fs.readFileSync(path, "utf8")}`;
             const {owner, repo} = context.repo;
             const issue_number = context.payload.pull_request.number;
+            const current = await github.rest.pulls.get({owner, repo, pull_number: issue_number});
+            if (current.data.head.sha !== context.payload.pull_request.head.sha) {
+              core.info("superseded run, leaving the current PR comment alone");
+              return;
+            }
             const comments = await github.paginate(
               github.rest.issues.listComments,
               {owner, repo, issue_number, per_page: 100},

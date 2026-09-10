@@ -1,0 +1,1 @@
+export const readStatus = (status: {checks: number}): number => status.checks;

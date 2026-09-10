@@ -1,0 +1,2 @@
+export type Quota = {remaining: number};
+export const hasCapacity = (quota: Quota): boolean => quota.remaining > 0;
