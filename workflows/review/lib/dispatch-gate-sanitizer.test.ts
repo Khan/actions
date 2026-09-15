@@ -54,6 +54,32 @@ const inputFor = (
     };
 };
 
+// Reduced from agent-settings run 34887969288. The agent's payloads matched
+// the plan, but ingest decoded the colon inside a regex and NFKC-folded an
+// ellipsis. Explicit queued strings pin the observed output independently of
+// the runtime used by the gate. The four-backtick fence matches the incident.
+const decodingCases = [
+    {
+        name: "percent-encoded colon in a code fence",
+        planned: [
+            "````",
+            String.raw`pattern: /^\/repos\/Khan\/webapp\/pulls\?head=Khan%3Aagent%2Ffeature&state=open$/,`,
+            "````",
+        ].join("\n"),
+        queued: [
+            "````",
+            String.raw`pattern: /^\/repos\/Khan\/webapp\/pulls\?head=Khan:agent%2Ffeature&state=open$/,`,
+            "````",
+        ].join("\n"),
+    },
+    {
+        name: "compatibility ellipsis in prose",
+        planned:
+            "fields the search-issues response carries (`body`, `title`, `labels`\u2026)",
+        queued: "fields the search-issues response carries (`body`, `title`, `labels`...)",
+    },
+];
+
 describe("rule 7 with the actual pinned sanitizer", () => {
     it.each([undefined, null])(
         "does not load the sanitizer without a staged plan (%s)",
@@ -103,6 +129,55 @@ describe("rule 7 with the actual pinned sanitizer", () => {
                     inputFor(kind, plan, queued.replace("<repo>", "(repo)")),
                 ),
             ).not.toEqual([]);
+        },
+    );
+
+    describe.each(decodingCases)(
+        "ingest decoding: $name",
+        ({planned, queued}) => {
+            it("matches the captured ingest transformation exactly", () => {
+                expect(loadRunnerSanitizer().sanitizeContentCore(planned)).toBe(
+                    queued,
+                );
+            });
+
+            it.each(["review", "inline", "hold"])(
+                "accepts faithful %s text but rejects added prose",
+                (kind) => {
+                    expect(
+                        submissionPlanViolations(
+                            inputFor(kind, planned, queued),
+                        ),
+                    ).toEqual([]);
+                    expect(
+                        submissionPlanViolations(
+                            inputFor(kind, planned, queued + " Added prose."),
+                        ),
+                    ).toEqual([
+                        expect.objectContaining({
+                            code: "submission-plan-mismatch",
+                        }),
+                    ]);
+                },
+            );
+        },
+    );
+
+    it.each(["review", "inline", "hold"])(
+        "does not treat percent decoding as a wildcard in %s code",
+        (kind) => {
+            const {planned, queued} = decodingCases[0];
+            for (const changed of [
+                queued.replace("%2F", "/"),
+                queued.replace("webapp", "actions"),
+                queued.replace("feature", "different-branch"),
+            ]) {
+                expect(
+                    submissionPlanViolations(inputFor(kind, planned, changed)),
+                ).toEqual([
+                    expect.objectContaining({code: "submission-plan-mismatch"}),
+                ]);
+            }
         },
     );
 
