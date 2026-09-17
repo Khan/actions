@@ -466,6 +466,14 @@ export type ReviewBodyInput = {
      * as before — a first review has no prior threads to account for.
      */
     rereviewSection?: string;
+    /**
+     * Whether this COMMENT is a would-be APPROVE demoted by the reduced-depth
+     * clearance (`submission-clearance.ts`'s `approveDemoted`) rather than a
+     * verdict the findings earned. Such a run has zero findings, so the
+     * medium-findings head would tell the author about findings that do not
+     * exist. Ignored for non-`COMMENT` events.
+     */
+    approveDemoted?: boolean;
 };
 
 /**
@@ -543,9 +551,15 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             break;
         case "COMMENT":
             // The middle verdict never has an empty body either: the head is
-            // what tells an author this is deliberately not an approval.
-            head =
-                "**💬 Commented** — medium-importance findings found; nothing blocks.";
+            // what tells an author this is deliberately not an approval. Two
+            // heads, because two different runs land here: a run whose
+            // findings earned the middle verdict, and a reduced-depth run
+            // whose would-be approval was demoted for want of a full roster.
+            // The latter has no findings at all, so the medium-findings head
+            // would name findings the author cannot go look for.
+            head = input.approveDemoted
+                ? "**💬 Commented** — no new findings; approval requires a full review round."
+                : "**💬 Commented** — medium-importance findings found; nothing blocks.";
             break;
         case "HOLD_FOR_HUMAN":
             head = HOLD_HEAD;

@@ -880,6 +880,7 @@ export const runSubmissionCli = (
         event,
         hasInlineComments: inline.length > 0,
         rereviewSection: rereview.section,
+        approveDemoted,
     });
     const stamp = runRereviewStampCli(fs, event, canary);
     // The body minus the attribution footer: the skip below compares THIS
