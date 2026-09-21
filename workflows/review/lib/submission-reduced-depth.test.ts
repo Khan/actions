@@ -291,6 +291,9 @@ describe("the full-roster approval rule", () => {
         expect(plan.event).toBe("COMMENT");
         expect(plan.skipSubmission).toBe(false);
         expect(plan.resolve).toEqual(["t1"]);
+        expect(plan.body).toContain(
+            "**💬 Commented** — no new findings; approval requires a full review round.",
+        );
     });
 
     it("posts (never skips) when a standing block is cleared, resolutions or none", () => {

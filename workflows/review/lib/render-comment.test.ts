@@ -439,6 +439,18 @@ describe("renderReviewBody — the COMMENT verdict", () => {
         expect(body).not.toContain("medium-importance findings found");
     });
 
+    it("points at inline comments when a demoted round posted some", () => {
+        const body = renderReviewBody({
+            event: "COMMENT",
+            hasInlineComments: true,
+            approveDemoted: true,
+        });
+        expect(body).toContain(
+            "**💬 Commented** — see inline comments; approval requires a full review round.",
+        );
+        expect(body).not.toContain("no new findings");
+    });
+
     it("keeps the medium-findings head when the demotion flag is false", () => {
         const body = renderReviewBody({
             event: "COMMENT",

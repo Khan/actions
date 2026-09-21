@@ -555,10 +555,14 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             // heads, because two different runs land here: a run whose
             // findings earned the middle verdict, and a reduced-depth run
             // whose would-be approval was demoted for want of a full roster.
-            // The latter has no findings at all, so the medium-findings head
-            // would name findings the author cannot go look for.
+            // The latter usually has no findings, so the medium-findings head
+            // would name findings the author cannot go look for — but a
+            // demoted approval can still carry advisory inline comments, so
+            // "no new findings" is only claimed when none posted.
             head = input.approveDemoted
-                ? "**💬 Commented** — no new findings; approval requires a full review round."
+                ? input.hasInlineComments
+                    ? "**💬 Commented** — see inline comments; approval requires a full review round."
+                    : "**💬 Commented** — no new findings; approval requires a full review round."
                 : "**💬 Commented** — medium-importance findings found; nothing blocks.";
             break;
         case "HOLD_FOR_HUMAN":
