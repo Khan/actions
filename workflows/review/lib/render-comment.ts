@@ -474,6 +474,14 @@ export type ReviewBodyInput = {
      * exist. Ignored for non-`COMMENT` events.
      */
     approveDemoted?: boolean;
+    /**
+     * Whether findings collapsed into the body's observations fold this run.
+     * A demoted approval can carry advisory findings that a reduced posting
+     * surface collapsed rather than posted inline, so the head must not claim
+     * "no new findings" over a fold that lists some. Ignored except on a
+     * demoted `COMMENT`.
+     */
+    hasCollapsedFindings?: boolean;
 };
 
 /**
@@ -557,11 +565,14 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             // whose would-be approval was demoted for want of a full roster.
             // The latter usually has no findings, so the medium-findings head
             // would name findings the author cannot go look for — but a
-            // demoted approval can still carry advisory inline comments, so
-            // "no new findings" is only claimed when none posted.
+            // demoted approval can still carry advisory findings, inline or
+            // collapsed into the observations fold, so "no new findings" is
+            // only claimed when neither surface has any.
             head = input.approveDemoted
                 ? input.hasInlineComments
                     ? "**💬 Commented** — see inline comments; approval requires a full review round."
+                    : input.hasCollapsedFindings
+                    ? "**💬 Commented** — see the observations below; approval requires a full review round."
                     : "**💬 Commented** — no new findings; approval requires a full review round."
                 : "**💬 Commented** — medium-importance findings found; nothing blocks.";
             break;

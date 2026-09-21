@@ -451,6 +451,19 @@ describe("renderReviewBody — the COMMENT verdict", () => {
         expect(body).not.toContain("no new findings");
     });
 
+    it("points at the observations fold when a demoted round collapsed findings", () => {
+        const body = renderReviewBody({
+            event: "COMMENT",
+            hasInlineComments: false,
+            approveDemoted: true,
+            hasCollapsedFindings: true,
+        });
+        expect(body).toContain(
+            "**💬 Commented** — see the observations below; approval requires a full review round.",
+        );
+        expect(body).not.toContain("no new findings");
+    });
+
     it("keeps the medium-findings head when the demotion flag is false", () => {
         const body = renderReviewBody({
             event: "COMMENT",
