@@ -1,5 +1,6 @@
 ---
 "review": minor
+"autofix": patch
 ---
 
 Move the reviewer roster and the orchestrator from Opus 5 (`claude-opus-5`) to Opus 5.5 (`claude-opus-5-5`): the engine and all 21 Opus sub-agent pins. `pattern-triage` and the clusterer stay on Sonnet 4.6, the prose judge and the refusal-fallback target stay on `claude-opus-4-8`, and `claude-opus-5` stays priced as an `engine:` override candidate.
@@ -15,3 +16,5 @@ Pricing follows the pin, and Opus 5.5 lists below Opus 5 ($4 / $20 per MTok, cac
 `lib/refusal-fallback.ts` maps `claude-opus-5-5` to `claude-opus-4-8`. Without this entry the roster pin would have no fallback, and a refusal would stand. Opus 5.5 adds `bio` and `reasoning_extraction` classifiers beside `cyber`, so the pre-emptive case for the entry is stronger than it was for Opus 5.
 
 Effort: Opus 5.5 defaults to `medium`, one level below Opus 5's `high`. Scripted dispatch is unaffected, because `lib/dispatch-runner.ts` and `lib/judge-prose-runner.ts` already pin `effort: "high"`. The orchestrator (and every sub-agent under `dispatch agent`) has no effort field in gh-aw and so drops to medium. The README roster table and the engine comment record this.
+
+autofix: comment-only. The Opus 4.8 hold comment now names `claude-opus-5-5` as the roster target, and notes the CLI floor and pricing a move to it would need. The pinned model is unchanged.

@@ -193,8 +193,9 @@ network:
 # 5, and the cause is not yet established, so the model stays where it
 # demonstrably works rather than where we want it. Moving to 5.5 also needs the
 # reviewer's `engine.version: "2.1.280"` CLI floor (the API rejects 5.5 from
-# older CLIs) and a `claude-opus-5-5` pricing entry: 5.5 is likewise in no
-# firewall release's curated table, so the investigation below still applies.
+# older CLIs) and a `claude-opus-5-5` pricing entry. The investigation below
+# predates firewall v0.27.44, which does price `claude-opus-5`; 5.5 is in no
+# release's curated table, so for 5.5 it still applies.
 #
 # WHAT WAS OBSERVED. The api-proxy's AI-credits guard rejects an un-priced model
 # with a 400 before the request reaches the model, and `claude-opus-5` is in no

@@ -17,8 +17,10 @@
  *    `default-ai-credits-pricing` fallback stays the backstop for any
  *    toolchain that drops the overlay.
  *
- * DELETE the fallback test (only it) together with the fallback block when
- * the toolchain moves; the coverage test is permanent.
+ * DELETE the two fallback tests (only them) together with the fallback block
+ * when the toolchain moves; the coverage test is permanent. The rate test
+ * already goes quiet once the block is gone, so the presence test is the one
+ * that has to be deleted by hand.
  *
  * The CLI-floor gate at the bottom is the same class of constraint with a
  * harsher failure: a pin the installed Claude Code CLI is too old for 400s
@@ -92,15 +94,23 @@ describe("model pricing coverage (review.md frontmatter)", () => {
         }
     });
 
-    it("sets the credit-guard fallback at the engine pin's list rate", () => {
+    it("sets the credit-guard fallback, while it exists, at the engine pin's list rate", () => {
         // The fallback is $/1M at LIST (see its comment in review.md), and it
         // must follow the engine pin: a stale value meters every un-priced
-        // dispatch at the previous model's price.
+        // dispatch at the previous model's price. Gated on the block itself so
+        // it retires with the block; the presence test above is what keeps
+        // the block from being dropped early.
+        if (!frontmatter.includes("default-ai-credits-pricing:")) {
+            return;
+        }
         const fallback = frontmatter.match(
             /^ {2}default-ai-credits-pricing:\n {4}input: ([\d.]+)\n {4}output: ([\d.]+)$/m,
         );
         const list = ANTHROPIC_LIST_RATES.get(enginePin ?? "");
-        expect(fallback, "default-ai-credits-pricing block").not.toBeNull();
+        expect(
+            fallback,
+            "default-ai-credits-pricing block shape",
+        ).not.toBeNull();
         expect(list, `${enginePin} has no list rate`).toBeDefined();
         expect(Number(fallback?.[1])).toBeCloseTo((list?.input ?? 0) * 1e6, 9);
         expect(Number(fallback?.[2])).toBeCloseTo((list?.output ?? 0) * 1e6, 9);
@@ -108,14 +118,18 @@ describe("model pricing coverage (review.md frontmatter)", () => {
 });
 
 /**
- * The oldest Claude Code CLI the API accepts for a pin (`400 ... does not
- * support this model; version <floor> or newer is required`). A pin with no
- * entry has no known floor. REMOVE the `engine.version` requirement below,
- * not the floor, once a gh-aw release installs a CLI at or above it: the pin
- * in review.md must go then, or it freezes the CLI.
+ * The oldest Claude Code CLI the API accepts for each model review.md pins
+ * (`400 ... does not support this model; version <floor> or newer is
+ * required`), or null for a model checked and found to have no floor above
+ * every CLI this workflow installs. Every pin needs an entry, so pinning a new
+ * model fails CI until someone has looked its floor up. REMOVE the
+ * `engine.version` requirement below, not the floor, once a gh-aw release
+ * installs a CLI at or above it: the pin in review.md must go then, or it
+ * freezes the CLI.
  */
-const CLI_FLOORS: Readonly<Record<string, string>> = {
+const CLI_FLOORS: Readonly<Record<string, string | null>> = {
     "claude-opus-5-5": "2.1.280",
+    "claude-sonnet-4-6": null,
 };
 
 const compareVersions = (a: string, b: string): number => {
@@ -133,11 +147,17 @@ const compareVersions = (a: string, b: string): number => {
 /** The highest CLI floor any model in review.md needs, or undefined. */
 const floor = pins
     .map((pin) => CLI_FLOORS[pin])
-    .filter((version): version is string => version !== undefined)
+    .filter((version): version is string => typeof version === "string")
     .sort(compareVersions)
     .at(-1);
 
 describe("Claude Code CLI floor for the pinned models", () => {
+    it("records a floor (or an explicit null) for every pinned model", () => {
+        // A pin nobody looked up is exactly how the Opus 5.5 move 400'd.
+        const unchecked = pins.filter((pin) => !(pin in CLI_FLOORS));
+        expect(unchecked).toEqual([]);
+    });
+
     it("pins the orchestrator's CLI (engine.version) at or above the floor", () => {
         if (floor === undefined) {
             return;
