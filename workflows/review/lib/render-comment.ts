@@ -470,7 +470,7 @@ export type ReviewBodyInput = {
      * Whether this COMMENT is a would-be APPROVE demoted by the reduced-depth
      * clearance (`submission-clearance.ts`'s `approveDemoted`) rather than a
      * verdict the findings earned. Such a run usually has no findings (see
-     * {@link ReviewBodyInput.hasCollapsedFindings} for the exception), so the
+     * {@link ReviewBodyInput.hasBodyFindings} for the exception), so the
      * medium-findings head would tell the author about findings that do not
      * exist. Ignored for non-`COMMENT` events.
      */
@@ -482,7 +482,7 @@ export type ReviewBodyInput = {
      * "no new findings" over a body that lists some. Ignored except on a
      * demoted `COMMENT`.
      */
-    hasCollapsedFindings?: boolean;
+    hasBodyFindings?: boolean;
 };
 
 /**
@@ -572,7 +572,7 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             head = input.approveDemoted
                 ? input.hasInlineComments
                     ? "**💬 Commented** — see inline comments; approval requires a full review round."
-                    : input.hasCollapsedFindings
+                    : input.hasBodyFindings
                     ? "**💬 Commented** — see the observations below; approval requires a full review round."
                     : "**💬 Commented** — no new findings; approval requires a full review round."
                 : "**💬 Commented** — medium-importance findings found; nothing blocks.";

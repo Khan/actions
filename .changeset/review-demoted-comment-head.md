@@ -1,5 +1,5 @@
 ---
-"review": patch
+"review": minor
 ---
 
 The COMMENT head stops claiming findings on a run that had none.

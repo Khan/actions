@@ -456,7 +456,7 @@ describe("renderReviewBody — the COMMENT verdict", () => {
             event: "COMMENT",
             hasInlineComments: false,
             approveDemoted: true,
-            hasCollapsedFindings: true,
+            hasBodyFindings: true,
         });
         expect(body).toContain(
             "**💬 Commented** — see the observations below; approval requires a full review round.",
