@@ -561,7 +561,7 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
         case "COMMENT":
             // The middle verdict never has an empty body either: the head is
             // what tells an author this is deliberately not an approval. Two
-            // heads, because two different runs land here: a run whose
+            // kinds of head, because two different runs land here: a run whose
             // findings earned the middle verdict, and a reduced-depth run
             // whose would-be approval was demoted for want of a full roster.
             // The latter usually has no findings, so the medium-findings head
