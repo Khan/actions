@@ -291,6 +291,45 @@ describe("the full-roster approval rule", () => {
         expect(plan.event).toBe("COMMENT");
         expect(plan.skipSubmission).toBe(false);
         expect(plan.resolve).toEqual(["t1"]);
+        expect(plan.body).toContain(
+            "**💬 Commented** — no new findings; approval requires a full review round.",
+        );
+    });
+
+    it("does not claim 'no new findings' when a demoted round collapsed findings into the body", () => {
+        const fs = makeFakeFs({
+            ...stagedReduced("fast", {priorVerdict: "APPROVE"}),
+            [`${REVIEW}/routing.json`]: JSON.stringify({
+                reReviewBlockingOnly: true,
+            }),
+            [`${REVIEW}/dispatch-result.json`]: JSON.stringify({
+                depth: "fast",
+                claims: [
+                    {
+                        id: "c1",
+                        source: "correctness-reviewer",
+                        path: "a.ts",
+                        line: 2,
+                        label: "suggestion (non-blocking)",
+                        subject: "a real non-blocking finding",
+                        discussion: "The guard was removed.",
+                        failure_scenario: "f",
+                        confidence: 0.9,
+                    },
+                ],
+                noteLines: [],
+                reconciliation: {resolve: ["t1"], keep: []},
+            }),
+        });
+        const plan = runSubmissionCli(fs);
+        expect(plan.event).toBe("COMMENT");
+        expect(plan.skipSubmission).toBe(false);
+        expect(plan.comments).toEqual([]);
+        expect(plan.body).toContain("a real non-blocking finding");
+        expect(plan.body).not.toContain("no new findings");
+        expect(plan.body).toContain(
+            "**💬 Commented** — see the observations below; approval requires a full review round.",
+        );
     });
 
     it("posts (never skips) when a standing block is cleared, resolutions or none", () => {
@@ -444,6 +483,13 @@ describe("the full-roster approval rule", () => {
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("COMMENT");
         expect(plan.skipSubmission).toBe(false);
+        // The pr-level line is a finding the head must not deny.
+        expect(plan.comments).toEqual([]);
+        expect(plan.body).toContain("**note (non-blocking):** d");
+        expect(plan.body).not.toContain("no new findings");
+        expect(plan.body).toContain(
+            "**💬 Commented** — see the observations below; approval requires a full review round.",
+        );
     });
 
     it("a CHANGES_REQUESTED superseded by a later APPROVED is not standing", () => {

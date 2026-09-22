@@ -426,6 +426,54 @@ describe("renderReviewBody — the COMMENT verdict", () => {
             "**💬 Commented** — medium-importance findings found; nothing blocks.",
         );
     });
+
+    it("names the demotion, not findings, when the clearance demoted an approval", () => {
+        const body = renderReviewBody({
+            event: "COMMENT",
+            hasInlineComments: false,
+            approveDemoted: true,
+        });
+        expect(body).toContain(
+            "**💬 Commented** — no new findings; approval requires a full review round.",
+        );
+        expect(body).not.toContain("medium-importance findings found");
+    });
+
+    it("points at inline comments when a demoted round posted some", () => {
+        const body = renderReviewBody({
+            event: "COMMENT",
+            hasInlineComments: true,
+            approveDemoted: true,
+        });
+        expect(body).toContain(
+            "**💬 Commented** — see inline comments; approval requires a full review round.",
+        );
+        expect(body).not.toContain("no new findings");
+    });
+
+    it("points at the observations fold when a demoted round collapsed findings", () => {
+        const body = renderReviewBody({
+            event: "COMMENT",
+            hasInlineComments: false,
+            approveDemoted: true,
+            hasBodyFindings: true,
+        });
+        expect(body).toContain(
+            "**💬 Commented** — see the observations below; approval requires a full review round.",
+        );
+        expect(body).not.toContain("no new findings");
+    });
+
+    it("keeps the medium-findings head when the demotion flag is false", () => {
+        const body = renderReviewBody({
+            event: "COMMENT",
+            hasInlineComments: true,
+            approveDemoted: false,
+        });
+        expect(body).toContain(
+            "**💬 Commented** — medium-importance findings found; nothing blocks.",
+        );
+    });
 });
 
 describe("renderComment context fold", () => {
