@@ -469,16 +469,17 @@ export type ReviewBodyInput = {
     /**
      * Whether this COMMENT is a would-be APPROVE demoted by the reduced-depth
      * clearance (`submission-clearance.ts`'s `approveDemoted`) rather than a
-     * verdict the findings earned. Such a run has zero findings, so the
+     * verdict the findings earned. Such a run usually has no findings (see
+     * {@link ReviewBodyInput.hasCollapsedFindings} for the exception), so the
      * medium-findings head would tell the author about findings that do not
      * exist. Ignored for non-`COMMENT` events.
      */
     approveDemoted?: boolean;
     /**
-     * Whether findings collapsed into the body's observations fold this run.
-     * A demoted approval can carry advisory findings that a reduced posting
-     * surface collapsed rather than posted inline, so the head must not claim
-     * "no new findings" over a fold that lists some. Ignored except on a
+     * Whether findings rendered into the body this run — collapsed into the
+     * observations fold or as PR-level lines. A demoted approval can carry
+     * advisory findings that never post inline, so the head must not claim
+     * "no new findings" over a body that lists some. Ignored except on a
      * demoted `COMMENT`.
      */
     hasCollapsedFindings?: boolean;

@@ -881,7 +881,7 @@ export const runSubmissionCli = (
         hasInlineComments: inline.length > 0,
         rereviewSection: rereview.section,
         approveDemoted,
-        hasCollapsedFindings: hasCollapsedSection,
+        hasCollapsedFindings: hasCollapsedSection || prLevelLines.length > 0,
     });
     const stamp = runRereviewStampCli(fs, event, canary);
     // The body minus the attribution footer: the skip below compares THIS

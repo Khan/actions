@@ -483,6 +483,13 @@ describe("the full-roster approval rule", () => {
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("COMMENT");
         expect(plan.skipSubmission).toBe(false);
+        // The pr-level line is a finding the head must not deny.
+        expect(plan.comments).toEqual([]);
+        expect(plan.body).toContain("**note (non-blocking):** d");
+        expect(plan.body).not.toContain("no new findings");
+        expect(plan.body).toContain(
+            "**💬 Commented** — see the observations below; approval requires a full review round.",
+        );
     });
 
     it("a CHANGES_REQUESTED superseded by a later APPROVED is not standing", () => {
