@@ -19,11 +19,18 @@
  *
  * DELETE the fallback test (only it) together with the fallback block when
  * the toolchain moves; the coverage test is permanent.
+ *
+ * The CLI-floor gate at the bottom is the same class of constraint with a
+ * harsher failure: a pin the installed Claude Code CLI is too old for 400s
+ * before any work happens, on the orchestrator (gh-aw's engine install) and
+ * on every scripted sub-agent (the agent SDK's bundled CLI) independently.
  */
 import {readFileSync} from "node:fs";
 import {join} from "node:path";
 
 import {describe, it, expect} from "vitest";
+
+import {ANTHROPIC_LIST_RATES} from "./pricing";
 
 const reviewMd = readFileSync(join(__dirname, "..", "review.md"), "utf8");
 
@@ -52,6 +59,14 @@ const priced = new Set(
     ),
 );
 
+/** The frontmatter's `engine:` block, up to the next top-level key. */
+const engineBlock =
+    frontmatter.match(/^engine:\n((?:(?: .*)?\n)*)/m)?.[1] ?? "";
+const enginePin = engineBlock.match(/^ {2}model:\s*(\S+)\s*$/m)?.[1];
+const engineVersion = engineBlock.match(
+    /^ {2}version:\s*"?([\d.]+)"?\s*$/m,
+)?.[1];
+
 describe("model pricing coverage (review.md frontmatter)", () => {
     it("finds the pins and the overlay (guards the extraction itself)", () => {
         // 22 agents plus the engine; a collapse to zero means the regexes
@@ -75,5 +90,99 @@ describe("model pricing coverage (review.md frontmatter)", () => {
         if (pins.includes("claude-opus-5-5")) {
             expect(frontmatter).toContain("default-ai-credits-pricing:");
         }
+    });
+
+    it("sets the credit-guard fallback at the engine pin's list rate", () => {
+        // The fallback is $/1M at LIST (see its comment in review.md), and it
+        // must follow the engine pin: a stale value meters every un-priced
+        // dispatch at the previous model's price.
+        const fallback = frontmatter.match(
+            /^ {2}default-ai-credits-pricing:\n {4}input: ([\d.]+)\n {4}output: ([\d.]+)$/m,
+        );
+        const list = ANTHROPIC_LIST_RATES.get(enginePin ?? "");
+        expect(fallback, "default-ai-credits-pricing block").not.toBeNull();
+        expect(list, `${enginePin} has no list rate`).toBeDefined();
+        expect(Number(fallback?.[1])).toBeCloseTo((list?.input ?? 0) * 1e6, 9);
+        expect(Number(fallback?.[2])).toBeCloseTo((list?.output ?? 0) * 1e6, 9);
+    });
+});
+
+/**
+ * The oldest Claude Code CLI the API accepts for a pin (`400 ... does not
+ * support this model; version <floor> or newer is required`). A pin with no
+ * entry has no known floor. REMOVE the `engine.version` requirement below,
+ * not the floor, once a gh-aw release installs a CLI at or above it: the pin
+ * in review.md must go then, or it freezes the CLI.
+ */
+const CLI_FLOORS: Readonly<Record<string, string>> = {
+    "claude-opus-5-5": "2.1.280",
+};
+
+const compareVersions = (a: string, b: string): number => {
+    const left = a.split(".").map(Number);
+    const right = b.split(".").map(Number);
+    for (let i = 0; i < Math.max(left.length, right.length); i++) {
+        const diff = (left[i] ?? 0) - (right[i] ?? 0);
+        if (diff !== 0) {
+            return diff;
+        }
+    }
+    return 0;
+};
+
+/** The highest CLI floor any model in review.md needs, or undefined. */
+const floor = pins
+    .map((pin) => CLI_FLOORS[pin])
+    .filter((version): version is string => version !== undefined)
+    .sort(compareVersions)
+    .at(-1);
+
+describe("Claude Code CLI floor for the pinned models", () => {
+    it("pins the orchestrator's CLI (engine.version) at or above the floor", () => {
+        if (floor === undefined) {
+            return;
+        }
+        expect(engineVersion, "engine.version in review.md").toBeDefined();
+        expect(
+            compareVersions(engineVersion ?? "0", floor),
+        ).toBeGreaterThanOrEqual(0);
+    });
+
+    it("installs an agent SDK whose bundled CLI meets the floor (scripted dispatch)", () => {
+        if (floor === undefined) {
+            return;
+        }
+        const reviewDir = join(__dirname, "..");
+        const pinned = (
+            JSON.parse(
+                readFileSync(join(reviewDir, "package.json"), "utf8"),
+            ) as {dependencies: Record<string, string>}
+        ).dependencies["@anthropic-ai/claude-agent-sdk"];
+        // Production installs with `npm ci` from this lockfile.
+        const locked = (
+            JSON.parse(
+                readFileSync(join(reviewDir, "package-lock.json"), "utf8"),
+            ) as {packages: Record<string, {version?: string}>}
+        ).packages["node_modules/@anthropic-ai/claude-agent-sdk"]?.version;
+        expect(locked).toBe(pinned);
+        // The SDK publishes the CLI version it bundles as `claudeCodeVersion`.
+        const installed = JSON.parse(
+            readFileSync(
+                join(
+                    reviewDir,
+                    "node_modules",
+                    "@anthropic-ai",
+                    "claude-agent-sdk",
+                    "package.json",
+                ),
+                "utf8",
+            ),
+        ) as {version: string; claudeCodeVersion: string};
+        expect(installed.version, "installed SDK is stale; reinstall").toBe(
+            pinned,
+        );
+        expect(
+            compareVersions(installed.claudeCodeVersion, floor),
+        ).toBeGreaterThanOrEqual(0);
     });
 });
