@@ -12,9 +12,10 @@
  *  - On the stable toolchain (gh-aw v0.83.x -> firewall v0.27.42) the
  *    `providers` block is dropped silently and the api-proxy's credit guard
  *    rejects a model its curated table does not price with a 400 before the
- *    request reaches the model (#266). `claude-opus-5` is not in that table,
- *    so the `default-ai-credits-pricing` fallback is load-bearing for every
- *    dispatch until a gh-aw release defaults the firewall to v0.27.43+.
+ *    request reaches the model (#266). `claude-opus-5-5` is in no released
+ *    curated table (firewall v0.27.44 stops at `claude-opus-5`), so the
+ *    `default-ai-credits-pricing` fallback stays the backstop for any
+ *    toolchain that drops the overlay.
  *
  * DELETE the fallback test (only it) together with the fallback block when
  * the toolchain moves; the coverage test is permanent.
@@ -66,12 +67,12 @@ describe("model pricing coverage (review.md frontmatter)", () => {
         expect(unpriced).toEqual([]);
     });
 
-    it("keeps the stable-toolchain credit-guard fallback while claude-opus-5 is pinned", () => {
-        // Firewall v0.27.42's curated table does not price claude-opus-5;
-        // without `default-ai-credits-pricing` every dispatch 400s on the
-        // stable toolchain. Delete this test with the fallback block once a
-        // gh-aw release defaults the firewall to v0.27.43+.
-        if (pins.includes("claude-opus-5")) {
+    it("keeps the credit-guard fallback while claude-opus-5-5 is pinned", () => {
+        // No released firewall curated table prices claude-opus-5-5; without
+        // `default-ai-credits-pricing` every dispatch 400s on a toolchain
+        // that drops the overlay. Delete this test with the fallback block
+        // once a gh-aw release defaults to a firewall that prices it.
+        if (pins.includes("claude-opus-5-5")) {
             expect(frontmatter).toContain("default-ai-credits-pricing:");
         }
     });
