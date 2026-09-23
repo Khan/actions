@@ -9,8 +9,9 @@ describe("refusalFallbackFor", () => {
         expect(refusalFallbackFor("claude-fable-5")).toBe("claude-opus-4-8");
     });
 
-    it("covers Opus 5 pre-emptively", () => {
+    it("covers Opus 5 and Opus 5.5 pre-emptively", () => {
         expect(refusalFallbackFor("claude-opus-5")).toBe("claude-opus-4-8");
+        expect(refusalFallbackFor("claude-opus-5-5")).toBe("claude-opus-4-8");
     });
 
     it("has no fallback for an unlisted model, so its refusal stays visible", () => {

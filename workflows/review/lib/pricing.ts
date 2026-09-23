@@ -78,6 +78,9 @@ const perMillion = (input: number, output: number): Rates => ({
  */
 export const ANTHROPIC_LIST_RATES: RateCard = new Map([
     ["claude-opus-4-8", perMillion(5, 25)],
+    // Opus 5.5 cache reads list at $0.20/M, 0.05x input rather than the
+    // 0.1x every other model here carries.
+    ["claude-opus-5-5", {...perMillion(4, 20), cacheRead: 0.2 / 1e6}],
     ["claude-opus-5", perMillion(5, 25)],
     ["claude-sonnet-5", perMillion(2, 10)],
     ["claude-haiku-4-5", perMillion(1, 5)],

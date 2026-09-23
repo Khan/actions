@@ -73,13 +73,13 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
             allowedTools,
             permissionMode: "bypassPermissions",
             abortController: abort,
-            // Pinned, not inherited. The SDK already defaults opus-4.6+ to
-            // adaptive thinking at effort high, so this changes nothing
-            // today; it exists because the default was invisible enough that
-            // the Pi harness port (PR #406) disabled thinking entirely
-            // without anyone noticing, including through a full A/B. Every
-            // reviewer runs at high until per-role levels earn their own
-            // measurement.
+            // Pinned, not inherited. It exists because the default was
+            // invisible enough that the Pi harness port (PR #406) disabled
+            // thinking entirely without anyone noticing, including through a
+            // full A/B, and it is now load-bearing: Opus 5.5 (the roster pin)
+            // defaults to effort medium, one level below the high every
+            // earlier Opus defaulted to. Every reviewer runs at high until
+            // per-role levels earn their own measurement.
             effort: "high",
             // gh-aw >= v0.83 sets ANTHROPIC_MAX_RETRIES=0 on the engine step so
             // that a terminal error (403 ai_credits_limit_exceeded) reaches its

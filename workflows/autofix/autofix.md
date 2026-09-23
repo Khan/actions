@@ -187,10 +187,15 @@ network:
     - defaults
     - github
 
-# HELD AT OPUS 4.8. This should be `claude-opus-5`, matching the roster
-# Khan/actions#294 moves the reviewer to. Three live runs on Khan/webapp#41140
-# failed to get there, and the cause is not yet established, so the model stays
-# where it demonstrably works rather than where we want it.
+# HELD AT OPUS 4.8. This should match the reviewer roster, now `claude-opus-5-5`
+# (Khan/actions#437; it was `claude-opus-5` from #294, which is the model the
+# runs below tried). Three live runs on Khan/webapp#41140 failed to get to Opus
+# 5, and the cause is not yet established, so the model stays where it
+# demonstrably works rather than where we want it. Moving to 5.5 also needs the
+# reviewer's `engine.version: "2.1.280"` CLI floor (the API rejects 5.5 from
+# older CLIs) and a `claude-opus-5-5` pricing entry. The investigation below
+# predates firewall v0.27.44, which does price `claude-opus-5`; 5.5 is in no
+# release's curated table, so for 5.5 it still applies.
 #
 # WHAT WAS OBSERVED. The api-proxy's AI-credits guard rejects an un-priced model
 # with a 400 before the request reaches the model, and `claude-opus-5` is in no

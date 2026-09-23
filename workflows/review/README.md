@@ -760,8 +760,9 @@ Fable's cyber classifiers can refuse benign security analysis, while
 `correctness-reviewer` — the default roster's load-bearing recall agent — was
 moved *onto* Fable 5 for its recall gain. Eval run 30656579898 caught it
 refusing `incident-auth-bypass` and `adversarial-injection-approve` outright,
-at 5,207 tokens (so not a context limit). The roster has since moved to Opus 5,
-which carries its own elevated cyber safeguards, so the hazard moved with it
+at 5,207 tokens (so not a context limit). The roster has since moved to Opus 5
+and then Opus 5.5, each with its own elevated safeguards (5.5 adds `bio` and
+`reasoning_extraction` classifiers beside `cyber`), so the hazard moved with it
 rather than being resolved by the pin change.
 
 Refusals are **intermittent**: probe run 30658862532 saw the same Fable pin
@@ -774,6 +775,7 @@ refusing pin to a model with a different refusal profile:
 | --- | --- | --- |
 | `claude-fable-5` | `claude-opus-4-8` | measured (run 30656579898) |
 | `claude-opus-5` | `claude-opus-4-8` | pre-emptive; Opus 5 ships elevated cyber safeguards and can also return `stop_reason: "refusal"` |
+| `claude-opus-5-5` | `claude-opus-4-8` | pre-emptive; the roster pin, with broader classifiers than Opus 5 |
 
 Rules: **one hop**, never back to a model that already refused, and **no
 fallback for an unlisted pin** — an unmapped model's refusal stands and is
@@ -798,20 +800,24 @@ sub-agent models — this table is the human-facing summary:
 
 | Role | Model | Effort | Why |
 | --- | --- | --- | --- |
-| orchestrator | `claude-opus-5` | high | Owns every GitHub/safe-output decision |
+| orchestrator | `claude-opus-5-5` | high (runs at the model's `medium` default; see below) | Owns every GitHub/safe-output decision |
 | `pattern-triage` | `claude-sonnet-4-6` | medium | Cheap first-pass triage |
-| `thread-reconciler` | `claude-opus-5` | medium | Reconciliation |
-| `correctness-reviewer` | `claude-opus-5` | high | Whole-change reviewer; bug-finding recall is the load-bearing metric |
-| `skill-auditor` | `claude-opus-5` | high | Whole-change reviewer |
-| `holistic` | `claude-opus-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
-| `completeness` | `claude-opus-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
-| `test-adequacy` | `claude-opus-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
-| `conventions` | `claude-opus-5` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
-| `documentation` | `claude-opus-5` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
-| `first-principles` | `claude-opus-5` | high | Opt-in advisory-only; reviews the change's justification |
-| `claim-validator` | `claude-opus-5` | xhigh | Adversarial claim validation; stays Opus (the Fable arm did not improve precision) |
+| `thread-reconciler` | `claude-opus-5-5` | medium | Reconciliation |
+| `correctness-reviewer` | `claude-opus-5-5` | high | Whole-change reviewer; bug-finding recall is the load-bearing metric |
+| `skill-auditor` | `claude-opus-5-5` | high | Whole-change reviewer |
+| `holistic` | `claude-opus-5-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `completeness` | `claude-opus-5-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `test-adequacy` | `claude-opus-5-5` | high | Opt-in whole-change reviewer (`enable` in `ROUTING`) |
+| `conventions` | `claude-opus-5-5` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
+| `documentation` | `claude-opus-5-5` | medium | Opt-in advisory targeted check (`enable` in `ROUTING`) |
+| `first-principles` | `claude-opus-5-5` | high | Opt-in advisory-only; reviews the change's justification |
+| `claim-validator` | `claude-opus-5-5` | xhigh | Adversarial claim validation; stays Opus (the Fable arm did not improve precision) |
 | prose judge | `claude-opus-4-8` | (single completion) | In-session style gate on submitted finding prose (`judge-prose.ts`); haiku's verdicts flickered run to run, and opus-4-8 is proven invokable and curated-priced through the stable firewall |
-| specialist lenses | `claude-opus-5` | high | Opt-in via `lens=` in `ROUTING`; the security & auth lens is xhigh |
+| specialist lenses | `claude-opus-5-5` | high | Opt-in via `lens=` in `ROUTING`; the security & auth lens is xhigh |
+
+The orchestrator row is intent only: gh-aw exposes no effort field, and Opus
+5.5's API default is `medium`, one level below the `high` every earlier Opus
+defaulted to, so the orchestrator runs at medium until gh-aw can set it.
 
 Scripted mode does not yet honor the Effort column: `lib/dispatch-runner.ts`
 pins `effort: high` for every dispatched sub-agent, `lib/judge-prose-runner.ts`

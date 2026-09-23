@@ -40,6 +40,7 @@ describe("readOverlayRates", () => {
             "claude-haiku-4-5",
             "claude-opus-4-8",
             "claude-opus-5",
+            "claude-opus-5-5",
             "claude-sonnet-4-6",
             "claude-sonnet-5",
         ]);
@@ -48,6 +49,14 @@ describe("readOverlayRates", () => {
             output: 1.25e-5,
             cacheRead: 2.5e-7,
             cacheWrite: 3.125e-6,
+        });
+        // Opus 5.5 is priced on its own (0.05x cache reads), not as a copy
+        // of the Opus 5 entry.
+        expect(card.get("claude-opus-5-5")).toEqual({
+            input: 2e-6,
+            output: 1e-5,
+            cacheRead: 1e-7,
+            cacheWrite: 2.5e-6,
         });
     });
 

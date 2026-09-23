@@ -40,7 +40,10 @@
  * Fable 5 is measured: it refuses. Opus 5 is listed on #294's own assessment
  * that it "ships elevated cybersecurity safeguards" and can return
  * `stop_reason: "refusal"` — a prediction, not a measurement, so it is here
- * pre-emptively and costs nothing until it fires.
+ * pre-emptively and costs nothing until it fires. Opus 5.5 inherits that
+ * entry with the roster pin, and its classifiers are broader still (`bio`
+ * and `reasoning_extraction` join `cyber`), so it is listed on the same
+ * terms.
  *
  * A model with no entry has no fallback: the refusal stands and is reported.
  * That is deliberate. Silently re-dispatching an unlisted model would hide the
@@ -50,6 +53,7 @@
 export const REFUSAL_FALLBACK: Readonly<Record<string, string>> = {
     "claude-fable-5": "claude-opus-4-8",
     "claude-opus-5": "claude-opus-4-8",
+    "claude-opus-5-5": "claude-opus-4-8",
 };
 
 /**
