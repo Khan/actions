@@ -88,6 +88,7 @@
 
 import {createHash} from "node:crypto";
 
+import {answeredThreadsFromMemory} from "./answered-questions";
 import {
     annotateDiffLineNumbers,
     splitPatchHunks,
@@ -507,14 +508,16 @@ export const runStagePrCli = async (
     // 4. new-scope.json against cache memory's reviewedHunks. A canary run
     // ignores the cache record: its scope is always the whole diff.
     let reviewedHunks: unknown;
+    let answeredQuestions: unknown;
     const cachePath = `${cacheDir}/pr-${prNumber}.json`;
     if (!canary && fs.existsSync(cachePath)) {
         try {
-            reviewedHunks = (
-                JSON.parse(fs.readFileSync(cachePath, "utf8")) as {
-                    reviewedHunks?: unknown;
-                }
-            ).reviewedHunks;
+            const cache = JSON.parse(fs.readFileSync(cachePath, "utf8")) as {
+                reviewedHunks?: unknown;
+                answeredQuestions?: unknown;
+            };
+            reviewedHunks = cache.reviewedHunks;
+            answeredQuestions = cache.answeredQuestions;
         } catch {
             warnings.push(
                 `cache memory unparseable (${cachePath}): whole diff in scope`,
@@ -695,30 +698,9 @@ export const runStagePrCli = async (
             2,
         ),
     );
-    // 5b'. The adjudicated corpus: bot-opened threads a HUMAN resolved, or
-    // whose opening comment a reviewer downvoted. A human resolving a bot
-    // thread is the strongest "this is settled" signal the PR surface
-    // carries, and before this file existed it was also an anti-signal:
-    // resolution removed the thread from threads.json, so the suppression
-    // corpus, so the next run was free to re-derive the same defect with
-    // fresh wording as a brand-new thread (webapp#41290: six resolved
-    // variants of one concern at moderation_helpers.go:135, then a seventh
-    // posted anyway). A 👎 on the opener is the same judgment delivered
-    // through the OTHER feedback channel the bot advertises, and before
-    // this it dead-ended in the retired thumbs sweep's counters. dedup-adjudicated.ts's suppression reads this
-    // file; only non-blocking candidates are suppressed by it, so a genuine
-    // regression re-flag at blocking severity always posts.
-    //
-    // The resolver identity decides resolution membership, not resolution
-    // alone: a thread the BOT resolved (the reconciler, after a code change
-    // addressed it) is a fixed defect, and a fixed defect that reappears is
-    // a fresh finding that must post. `resolvedBy` is "" for an
-    // unattributable resolver (a deleted account), which fails toward
-    // posting a duplicate, never toward suppression on unverifiable
-    // authority. A downvoted thread joins whatever its resolution state:
-    // still-open downvoted threads are also in threads.json, and the
-    // composed suppression attributes a candidate matching both corpora to
-    // the OPEN thread, whose blocking state floors the verdict.
+    // 5b'. Human-resolved or downvoted bot threads suppress non-blocking
+    // re-derivations (webapp#41290). A bot resolution alone contributes
+    // nothing: a fixed defect may regress. Explicit answers are added below.
     const adjudicatedThreads = fetchedThreads.filter(
         (thread) =>
             !canary &&
@@ -728,7 +710,25 @@ export const runStagePrCli = async (
                 !isReviewBotAuthor(thread.resolvedBy)) ||
                 thread.openerDownvotes > 0),
     );
-    write(ADJUDICATED_THREADS_OUT, JSON.stringify(adjudicatedThreads, null, 2));
+    // Resolver identity cannot distinguish a code fix from an answered scope
+    // question. Only an explicit, conversation-bound answer record adds the
+    // latter back after the bot has closed it. Canary history stays empty.
+    const answeredThreads = canary
+        ? []
+        : answeredThreadsFromMemory(
+              fetchedThreads.filter(openedByBot),
+              answeredQuestions,
+          );
+    const adjudicatedById = new Map(
+        [...adjudicatedThreads, ...answeredThreads].map((thread) => [
+            thread.thread_id,
+            thread,
+        ]),
+    );
+    write(
+        ADJUDICATED_THREADS_OUT,
+        JSON.stringify([...adjudicatedById.values()], null, 2),
+    );
     // The reconciler echoes these into `skipLines`, so a thread with no
     // RIGHT-side line (outdated, or file-level) has nothing to contribute and
     // is dropped rather than staged as a line the submission cannot match.

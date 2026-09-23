@@ -163,7 +163,9 @@ you can pick the one that says what you mean:
   nothing, unless it comes back at BLOCKING severity, which always posts (a
   regression worth stopping the PR for must never be silenced by an old
   resolution). Threads the bot resolved itself (because a push fixed them)
-  do not join the corpus; a fixed defect that reappears is a fresh finding.
+  do not join the corpus unless the reconciler explicitly recorded an answered
+  non-blocking scope or follow-up question. A fixed defect that reappears is a
+  fresh finding.
 - **👎 the finding's comment.** Same adjudication as resolving, through the
   reaction channel: a 👎 on a thread's OPENING comment puts its defect in the
   adjudicated corpus whether or not you also resolve. The 👎 alone is what
@@ -178,6 +180,20 @@ you can pick the one that says what you mean:
   nudge reactions never count as adjudication either.
 - **Hide the comment.** Reads as nothing. The reviewer does not see hidden
   state; resolve or 👎 instead.
+
+Answered scope questions have a separate resolution record (`answered` alongside
+`resolve`). Code requires a non-blocking question opened by this bot and a nonempty
+reply from the PR author. The reconciler decides whether that reply actually
+answers the scope question, rather than reporting a code fix. Those questions join
+the adjudicated suppression corpus immediately, even though their threads are
+being resolved. Blocking candidates remain exempt.
+
+The existing per-PR cache retains these answer records after a matching resolution
+is queued. Each record binds to the full reply chain, so later staging can recover
+it from a bot-resolved thread without treating every bot resolution as an answer.
+Changed conversations invalidate the record. Missing cache, older outputs without
+`answered`, or a reconciler that omits the classification can still allow a replay.
+Previously bot-resolved questions are not retroactively classified.
 
 Per-PR opt-out and re-runs are consumer-trigger concerns: repos using the
 stock push trigger skip any PR carrying the `skip-ai-review` label, and
