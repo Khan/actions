@@ -96,7 +96,14 @@ arm's copy of the same case) without anyone noticing. The transcript shows
 which kind a denial was in one line, and the denial message now names the
 checkout and context directories so the recovery is one retry.
 Transcripts are written outside the staging root so no reviewer can read a
-sibling's mid-run.
+sibling's mid-run. Each transcript also carries an `outcome`: completion status,
+wall time, the SDK result subtype, the last assistant stop reason, and a bounded
+error message when available. Cost, turns, and per-model token/cache totals come
+only from an SDK result (including error results). Missing totals mean unavailable,
+not zero. Messages retain their ids, billed models, and raw usage snapshots so a
+failed dispatch can still show context and cache pressure. Don't sum those snapshots:
+the SDK can repeat a message id, and result totals already include its usage. No
+separate reasoning-token count is inferred from output tokens.
 
 Every live workflow starts with `live-runner.ts --probe-read-scope`, one
 Haiku call that reads a staged file, then a planted file outside the case,
