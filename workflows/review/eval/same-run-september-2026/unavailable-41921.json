@@ -1,0 +1,52 @@
+{
+  "pr": 41921,
+  "run": 33785102782,
+  "availability": "Published comments only. The agent artifact records blocking-member rejections, but the out artifact is absent. No original failure_scenario was recovered. These bodies are not dedup input fixtures.",
+  "comments": [
+    {
+      "id": 3927265804,
+      "html_url": "https://github.com/Khan/webapp/pull/41921#discussion_r3927265804",
+      "body": "**issue (blocking):** The new `case shared.ModerationCategoryUnknown: return` skips the shared tail that maintains `HighestModerationScore`, so unknown-only flagged threads never get that indexed property written and become invisible to the score filters this PR adds indexes for.\n\n<details><summary><sub>context</sub></summary>\n\nThe new `case shared.ModerationCategoryUnknown: return` skips the shared tail that maintains `HighestModerationScore`, so unknown-only flagged threads never get that indexed property written and become invisible to the score filters this PR adds indexes for. This defect is introduced by this change. The new `case string(shared.ModerationCategoryUnknown): return` exits the function *before* the shared tail at lines 494-499 that keeps `m.HighestModerationScore` current \u2014 that tail runs for every other case, which all fall out of the switch.\n\nWhat I checked: `grep -rn \"HighestModerationScore\" services/ai-guide --include=*.go` shows `UpdateModerationCategoryScore` is the only production writer of the property (the only other hit is `models/builders_testutil.go`, a test builder). Tracing its single caller, `UpdateThreadModeration` in `services/ai-guide/chat/threads/interactions.go:50`, it is invoked once per newly-appended flag with `getScoreForFlag(details, flag)`.\n\nSo for a thread whose only flag is `\"unknown\"` \u2014 precisely the case this PR creates, since `resolveCategories` (moderation/policy.go:33) now falls back to `[\"unknown\"]` and `_createSyntheticModerationResult([\"unknown\"])` scores it 1.0 \u2014 `highest_moderation_score` is never written and stays a Datastore null. Meanwhile this same PR points the UNKNOWN score filter at exactly that property (`chat/threads/threads.go:1933`) and adds four composite indexes to serve it. A Datastore `>=` inequality against a null-valued property never matches a numeric bound, so:\n\n1. The devadmin filter this PR exists to enable \u2014 category=UNKNOWN plus a minimum score \u2014 returns zero threads in production.\n2. The pre-existing category=None (any category) plus score filter, which also keys on `highest_moderation_score`, now silently drops unknown-only flagged threads. Before this change those threads got `highest_moderation_score = 1.0` because \"unknown\" expanded to 13 categories each scored 1.0, so this is a moderation-queue visibility regression, not just a missing new feature.\n\nBoth new tests mask it: `TestGetFlaggedThreadsForAllUsersFilteredByUnknownScore` uses `AIGuideThreadBuilderForTests().HighestModerationScore(1.0)` to set the property directly rather than going through `UpdateThreadModeration`, and `TestUpdateModerationCategoryScoreUnknownCategory` passes score `0.0` and asserts `Nil(thread.HighestModerationScore)`, which encodes the gap as intended behavior.\n\nThe fix is to let \"unknown\" fall out of the switch (no per-category field to set, but the thread-level highest score must still be maintained) and update that test to pass a non-zero score and assert the score is recorded.\n\nA sketch, not a committable replacement:\n\n````\n--- a/services/ai-guide/models/ai_guide_thread.go\n+++ b/services/ai-guide/models/ai_guide_thread.go\n@@\n \tcase string(shared.ModerationCategoryUnknown):\n-\t\t// A flag with no named category; there is no score field for it.\n-\t\treturn\n+\t\t// A flag with no named category: there is no per-category score\n+\t\t// field to update. Fall through so HighestModerationScore is still\n+\t\t// maintained -- the \"unknown\" score filter queries that property\n+\t\t// (see applyModerationCategoryScoreFilter in chat/threads).\n \tdefault:\n\n````\n\n<sub>found by correctness-reviewer</sub>\n\n</details>",
+      "path": "services/ai-guide/models/ai_guide_thread.go",
+      "original_line": 485,
+      "original_commit_id": "a0615466ffb1ec9ea9ea869c20c642f774593fa1",
+      "pull_request_review_id": 5105174035,
+      "created_at": "2026-09-03T18:00:29Z"
+    },
+    {
+      "id": 3927265812,
+      "html_url": "https://github.com/Khan/webapp/pull/41921#discussion_r3927265812",
+      "body": "**issue (blocking):** The `unknown` case returns before `HighestModerationScore` is updated, so unknown-only threads are invisible to every score filter \u2014 including the new UNKNOWN+score filter this PR adds indexes for.\n\n<details><summary><sub>context</sub></summary>\n\nThe new `case string(shared.ModerationCategoryUnknown): return` exits `UpdateModerationCategoryScore` before the tail of the function that maintains `HighestModerationScore` (lines 494-499). Note that the `default:` branch right below it does *not* return \u2014 it logs and then falls through to that update \u2014 so \"unknown\" is now the only category that leaves the thread's highest score untouched.\n\nThat matters because it is the only writer of the field. `grep -rn \"HighestModerationScore\" --include=*.go services/` (excluding tests) finds only the struct declaration and the assignment inside this function, and `UpdateModerationCategoryScore` has exactly one non-test caller \u2014 `interactions.go:50`, which loops over the thread's flags. For a thread whose only flag is \"unknown\", that loop runs once, hits the early return, and `highest_moderation_score` is never written.\n\nTwo consequences:\n\n1. **The new capability doesn't work.** `threads.go:1933` maps `ModerationCategoryUnknown` to `highest_moderation_score`, and `index.yaml:273-298` / `747-774` add four composite indexes to serve that query. But the field those indexes sort and filter on is exactly the field unknown-only threads never get, so `allAiGuideThreads(moderationCategory: UNKNOWN, moderationScore: 0.6)` returns nothing. The new test at `threads_test.go:1232` passes only because the builder calls `HighestModerationScore(1.0)` directly, bypassing the production write path.\n\n2. **An existing query regresses.** Before this PR, `DetermineValidCategories([\"unknown\"])` expanded to all valid categories, so `interactions.go` called `UpdateModerationCategoryScore` once per real category and `highest_moderation_score` got set. After the change these threads have no score at all, so the pre-existing category-less `allAiGuideThreads(moderationScore: X)` filter (category `None` also maps to `highest_moderation_score`) silently drops threads it used to return.\n\nDropping the `return` \u2014 letting the case fall out of the switch with an empty body, the way Go switches already work \u2014 fixes both: no per-category score field is written, but the thread's highest score still tracks the flag. That does mean flipping the `suite.Require().Nil(thread.HighestModerationScore)` assertion in `ai_guide_thread_test.go:51`.\n\nA sketch, not a committable replacement:\n\n````\n\tcase string(shared.ModerationCategoryUnknown):\n\t\t// A flag with no named category; there is no per-category score\n\t\t// field for it, but it still contributes to the thread's\n\t\t// highest_moderation_score, which is what the UNKNOWN score\n\t\t// filter queries on.\n\n````\n\n<sub>found by api-federation-compat | also flagged by skill-auditor (out-of-lane); test-adequacy; completeness; holistic</sub>\n\n</details>",
+      "path": "services/ai-guide/models/ai_guide_thread.go",
+      "original_line": 485,
+      "original_commit_id": "a0615466ffb1ec9ea9ea869c20c642f774593fa1",
+      "pull_request_review_id": 5105174035,
+      "created_at": "2026-09-03T18:00:29Z"
+    }
+  ],
+  "recordedClustering": {
+    "candidates": 21,
+    "proposed": 3,
+    "clusterMerges": 1,
+    "clusterMerged": 1,
+    "rejected": [
+      {
+        "id": "api-federation-compat-1",
+        "reason": "blocking-member"
+      },
+      {
+        "id": "completeness-1",
+        "reason": "blocking-member"
+      },
+      {
+        "id": "holistic-1",
+        "reason": "blocking-member"
+      },
+      {
+        "id": "correctness-reviewer-1",
+        "reason": "blocking-member"
+      }
+    ]
+  },
+  "telemetrySource": "agent artifact 9906047304, agent-stdio.log, user tool result for toolu_01VCm5bNJuBJtRXQfyDe8Ntt"
+}

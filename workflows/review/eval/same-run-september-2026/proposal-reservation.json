@@ -1,0 +1,658 @@
+{
+  "pr": 42034,
+  "run": 33921953823,
+  "claims": [
+    {
+      "id": "correctness-reviewer-1",
+      "source": "correctness-reviewer",
+      "path": "services/ai-guide/models/langlit_challenge.go",
+      "line": 228,
+      "label": "issue (blocking)",
+      "subject": "Word-pair key is case-sensitive, so the same pair gets two different keys depending on sentence position",
+      "discussion": "Word-pair key is case-sensitive, so the same pair gets two different keys depending on sentence position. Introduced by this change. `ExtractWordPairFromText` builds the canonical key from the raw `token.Form` and `token.Misc.IncorrectForm`. I traced `Form` in `services/ai-guide/models/universal_dependency_types.go` (lines 51-80): it is the literal surface form \u2014 `ReconstructSentence` concatenates `Form` verbatim to rebuild the sentence, and the existing tests in `universal_dependency_types_test.go` use `Form: \"Hello\"` / `IncorrectForm: \"Hallo\"`, i.e. capitalization is preserved exactly as it appears in the sentence.\n\nSo when the confused word lands at the start of a sentence the pair canonicalizes differently from the identical pair mid-sentence, and the ASCII sort makes it worse rather than better: mid-sentence you get `sort(\"accept\",\"except\") = \"accept|except\"`, but sentence-initially you get `sort(\"Except\",\"accept\")` \u2014 'E' (0x45) sorts before 'a' (0x61) \u2014 so `\"Except|accept\"`. Same pair, two keys, and even the operand order flips.\n\nConcrete failure: a student answers an FCW item on accept/except correctly twice, but one of the two sentences began with the word. `_computeCorrectPairs` records `\"accept|except\": 1` and `\"Except|accept\": 1`; neither reaches `_masteryThreshold = 2`, so `ComputeProvenWordPairs` returns nothing and `GetUnseenChallenge` happily serves the mastered pair again \u2014 exactly the repetition this PR exists to prevent. The same mismatch silently defeats the `avoidPairs` check at `langlit_challenge_component.go:1059-1060`, since the freshly generated dependency output is canonicalized the same way.\n\nThis matters more than a normal logic slip because the key is now *persisted*: `CreateLanglitAttempt` writes `WordPair` onto an immutable `WrittenOnceModel`, so mixed-case keys written before a fix stay wrong and would need a re-migration to repair. Worth fixing before this lands.\n\nFix: lowercase both forms before sorting and joining (note `strings` is not currently imported in this file \u2014 the import needs adding).",
+      "failure_scenario": "Word-pair key is case-sensitive, so the same pair gets two different keys depending on sentence position",
+      "suggestion": "\t\tif token.Misc.IncorrectForm != \"\" {\n\t\t\tform := strings.ToLower(token.Form)\n\t\t\tincorrectForm := strings.ToLower(token.Misc.IncorrectForm)\n\t\t\tif form > incorrectForm {\n\t\t\t\tform, incorrectForm = incorrectForm, form\n\t\t\t}\n\t\t\treturn form + \"|\" + incorrectForm\n\t\t}",
+      "confidence": 0.7
+    },
+    {
+      "id": "correctness-reviewer-2",
+      "source": "correctness-reviewer",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 298,
+      "label": "issue (blocking)",
+      "subject": "Assignment-scoped backfill materializes an unbounded set of challenges and rewrites them on the render path",
+      "discussion": "Assignment-scoped backfill materializes an unbounded set of challenges and rewrites them on the render path. Introduced by this change. `_backfillLanglitAttempts` issues `GetMulti` over one key per cold attempt and then `PutMulti` over the same set, with nothing bounding that set on the assignment path. The two scoping branches are asymmetric: the `else` branch at line 211 deliberately caps at `_provenScopeSize = 15` (\"take a bounded recent window\"), but the `assignmentID != \"\"` branch at lines 203-208 appends *every* attempt matching the assignment with no cap. Its input is `previousAttempts` from `GetLanglitAttemptsOrdered`, which I read at handlers.go:433-467 \u2014 it uses `ds_helpers.ReadAllResourcePages`, i.e. the student's entire attempt history with no limit.\n\nI checked the batch limits before claiming a hard failure: `pkg/gcloud/datastore/client.go` splits `PutMulti` at `MaxWriteBatchSize = 500` and `GetMulti` at `batchSize = 200`, so this will not error out on volume. The defect is therefore cost and latency, not a crash \u2014 but it is on the synchronous path that renders a challenge for a student, and it scales with a user-controlled quantity. At 100x the data (a long-running assignment, or an assignment id reused across a course) a single render fans out into hundreds of datastore reads plus hundreds of writes before the student sees anything.\n\nThe expected shape here is the one the `else` branch already uses: cap the assignment-scoped set the same way (or backfill at most one bounded batch per invocation and let repeat visits finish the migration \u2014 the migration is explicitly designed to be lazy and incremental, so processing a bounded slice per request is the fix, not a regression).",
+      "failure_scenario": "Assignment-scoped backfill materializes an unbounded set of challenges and rewrites them on the render path",
+      "suggestion": "\tscoped := make([]*models.LanglitChallengeAttempt, 0, len(attempts))\n\tif assignmentID != \"\" {\n\t\tfor _, attempt := range attempts {\n\t\t\tif attempt.AssignmentID != nil && *attempt.AssignmentID == assignmentID {\n\t\t\t\tscoped = append(scoped, attempt)\n\t\t\t\tif len(scoped) >= _provenScopeSize {\n\t\t\t\t\tbreak\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t} else {",
+      "confidence": 0.7
+    },
+    {
+      "id": "correctness-reviewer-3",
+      "source": "correctness-reviewer",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 228,
+      "label": "issue (blocking)",
+      "subject": "Attempts that can never be warmed are re-classified as cold and re-migrated on every single request",
+      "discussion": "Attempts that can never be warmed are re-classified as cold and re-migrated on every single request. Introduced by this change. The classification switch treats \"cold\" as `default` \u2014 i.e. anything that is neither (`WordPair != \"\" && type matches`) nor (`type set && type differs`). Two categories fall into `default` permanently, so the lazy migration never converges for them:\n\n1. **Challenge missing.** Lines 310-313 skip an attempt whose challenge was deleted or archived and leave it cold by design. On the next request that attempt is `default` again, so its key is re-added to the `GetMulti` at line 298 \u2014 forever, once per render.\n2. **Legitimately empty pair.** An attempt whose `ChallengeType` *equals* `challengeType` but whose `WordPair` is `\"\"` fails case 1 (empty pair) and fails case 2 (types are equal), so it lands in `default`. The backfill then writes it back with `WordPair = \"\"` (line 316/325) and the next request classifies it as cold again \u2014 and this one costs a `PutMulti` write, not just a read, on every render. This is not hypothetical: the doc comment the PR adds at `models/langlit_challenge.go:309-312` states outright that \"a challenge with no IncorrectForm token legitimately yields ''\".\n\nI checked whether case 2 is reachable for freshly generated content: `isValidDependencyOutput` (`langlit_challenge_component.go:536-542`) does require at least one token with a non-empty `IncorrectForm`, so newly generated challenges are safe. That guard does not cover challenges written before it existed, nor the deleted-challenge path, which is unconditional.\n\nEffect: a steady per-request datastore read (and, for category 2, write) amplification that the \"improve in performance over time\" story in the PR description assumes away. The fix is to make \"already attempted migration\" distinguishable from \"never attempted\" \u2014 e.g. treat `ChallengeType != \"\"` as warm regardless of `WordPair`, and record a sentinel (or skip re-queuing) for attempts whose challenge could not be hydrated.",
+      "failure_scenario": "Attempts that can never be warmed are re-classified as cold and re-migrated on every single request",
+      "suggestion": "\t\tswitch {\n\t\tcase attempt.ChallengeType == challengeType:\n\t\t\t// Warm matching attempt; an empty WordPair is a legitimate\n\t\t\t// value (no IncorrectForm token), not a migration signal.\n\t\t\tif attempt.WordPair != \"\" && _attemptAllCorrect(attempt) {\n\t\t\t\tcorrectCounts[attempt.WordPair]++\n\t\t\t}\n\t\tcase attempt.ChallengeType != \"\":\n\t\t\t// Warm attempt of another type \u2014 not part of this type's set.\n\t\tdefault:\n\t\t\t// Cold attempt \u2014 missing challenge_type.\n\t\t\tcold = append(cold, attempt)\n\t\t}",
+      "confidence": 0.7
+    },
+    {
+      "id": "correctness-reviewer-4",
+      "source": "correctness-reviewer",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 211,
+      "label": "suggestion (non-blocking)",
+      "subject": "The 15-attempt recent window is applied before type filtering, so unassigned practice rarely accumulates a proven pair",
+      "discussion": "The 15-attempt recent window is applied before type filtering, so unassigned practice rarely accumulates a proven pair. Introduced by this change. For unassigned practice the scope is `attempts[:min(len, 15)]` taken from `GetLanglitAttemptsOrdered`, which I confirmed at handlers.go:448-451 filters only on `user_kaid` and orders by `-created_at` \u2014 it is *not* type-scoped. Type scoping then happens afterwards, inside the counting loop.\n\nSo the window is 15 attempts across all langlit challenge types. `challengeTypes` in the component covers frequently-confused-words, apostrophe usage, subject-verb agreement, its-vs-its, verb forms and pronoun-antecedent agreement; a student rotating among them contributes only a couple of same-type attempts to any 15-attempt window. Reaching `_masteryThreshold = 2` corrects *on the same pair* within that residue is unlikely, so `ComputeProvenWordPairs` returns empty and the cached-challenge skip at line 411 is a no-op for most unassigned practice \u2014 the very case the constant's comment says it is sizing for.\n\nTaking the most recent 15 attempts *of the requested type* (filter first, then window) would make the bound mean what the comment claims it means, at no extra cost since the full list is already in memory.",
+      "failure_scenario": "The 15-attempt recent window is applied before type filtering, so unassigned practice rarely accumulates a proven pair",
+      "suggestion": "\t} else {\n\t\t// attempts are ordered most-recent-first; take a bounded recent\n\t\t// window of attempts *for this challenge type*, so the window isn't\n\t\t// consumed by other langlit types the student is practising.\n\t\tfor _, attempt := range attempts {\n\t\t\tif attempt.ChallengeType != \"\" && attempt.ChallengeType != challengeType {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tscoped = append(scoped, attempt)\n\t\t\tif len(scoped) >= _provenScopeSize {\n\t\t\t\tbreak\n\t\t\t}\n\t\t}\n\t}",
+      "confidence": 0.7
+    },
+    {
+      "id": "correctness-reviewer-5",
+      "source": "correctness-reviewer",
+      "path": "services/ai-guide/entry_components/langlit_challenge_component.go",
+      "line": 1066,
+      "label": "suggestion (non-blocking)",
+      "subject": "The pair-avoidance regeneration comment claims the avoid list is \"emphasized\", but the retry sends byte-identical prompt inputs",
+      "discussion": "The pair-avoidance regeneration comment claims the avoid list is \"emphasized\", but the retry sends byte-identical prompt inputs. Introduced by this change. The `continue` is commented \"regenerate with the avoid list emphasized\", but I traced every value in the parameter map at lines 966-978 and none of them changes between iterations: `previousSentence`, `previousNouns`, `correctForm`/`incorrectForm` and `themeSteering` are all computed before the loop starts, and `avoidPairs` is computed once at line 836 and never mutated. `pairAvoidRegens` is not passed to the model. The retry is therefore a pure re-roll that relies entirely on sampling nondeterminism, not an escalation.\n\nThat is a defensible design, but the comment asserts behavior the code does not implement, which is the kind of comment that misleads the next reader into thinking the escalation exists. Either drop the \"emphasized\" claim, or actually escalate \u2014 e.g. append the colliding pair to the avoid list for the retry, which costs nothing and makes the second attempt strictly more informed than the first.\n\nWorth noting the cost side too, since it is invisible from the diff: each `continue` re-runs generation, classification and up to three dependency-generation LLM calls, so a collision roughly doubles the model spend for that request.",
+      "failure_scenario": "The pair-avoidance regeneration comment claims the avoid list is \"emphasized\", but the retry sends byte-identical prompt inputs",
+      "suggestion": "\t\tif wordPairType {\n\t\t\tpair := models.ExtractWordPairFromText(dependencyGenerationOutput)\n\t\t\tif len(avoidPairs) == 0 || !slices.Contains(avoidPairs, pair) {\n\t\t\t\tbreak\n\t\t\t}\n\t\t\tif pairAvoidRegens >= pairAvoidMaxRegens {\n\t\t\t\tbreak\n\t\t\t}\n\t\t\t// Escalate: the model picked a listed pair anyway, so make the\n\t\t\t// retry strictly more informed than the attempt that collided.\n\t\t\tavoidPairs = append(avoidPairs, pair)\n\t\t\tcontinue\n\t\t}",
+      "confidence": 0.7
+    },
+    {
+      "id": "correctness-reviewer-6",
+      "source": "correctness-reviewer",
+      "path": "services/ai-guide/entry_components/langlit_challenge_component.go",
+      "line": 964,
+      "label": "suggestion (non-blocking)",
+      "subject": "Two new behavior branches ship with no test coverage: the unassigned recent-window scope and the pair-avoid regeneration loop",
+      "discussion": "Two new behavior branches ship with no test coverage: the unassigned recent-window scope and the pair-avoid regeneration loop. Introduced by this change. The PR adds eight tests, which cover the warm/cold, threshold, assignment-scope and type-scope behavior of `_computeCorrectPairs` well. Two branches are not exercised at all:\n\n1. **The `assignmentID == \"\"` recent-window branch** (`handlers.go:209-213`). Every new test in `handlers_test.go` \u2014 `TestComputeProvenWordPairs_RequiresTwoCorrects`, `_CumulativeAcrossWrongs`, `_AssignmentScope`, `_TypeScoped`, `_LazyBackfill`, `_ApostropheCounted`, and both `ComputeSeenCorrectPairs` tests \u2014 passes a non-empty `assignmentID`. `_provenScopeSize` is never exercised, so neither the truncation nor the `min` boundary is covered, and the type-mixing weakness described in the `window-before-type-filter` finding would not be caught by the suite.\n\n2. **The `pairAvoidRegens` loop** in this file. It is the largest behavioral addition in the diff \u2014 a new outer retry wrapping generation, classification and dependency generation \u2014 and there is no test asserting that a collision triggers exactly one regeneration, that the budget relaxes after `pairAvoidMaxRegens`, or that non-word-pair types break out on the first pass. A regression that turned the `break` at line 1064 into an unbounded loop, or that inverted the `slices.Contains` check, would ship green.\n\nA table test over `_computeCorrectPairs` with an empty `assignmentID` and >15 attempts, plus a component test with a stubbed generator that returns a colliding pair once and a fresh pair on the retry, would close both.",
+      "failure_scenario": "Two new behavior branches ship with no test coverage: the unassigned recent-window scope and the pair-avoid regeneration loop",
+      "confidence": 0.7
+    },
+    {
+      "id": "skill-auditor-1",
+      "source": "skill-auditor",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 332,
+      "label": "issue (blocking, best-practice)",
+      "subject": "Datastore: the lazy backfill writes back attempts that were read from Datastore, which this model's `WrittenOnceModel` policy forbids; copying into a fresh struct hides the check instead of changing the policy.",
+      "discussion": "Datastore: the lazy backfill writes back attempts that were read from Datastore, which this model's `WrittenOnceModel` policy forbids; copying into a fresh struct hides the check instead of changing the policy. `references/entities.md` (Transaction-safety policies) states the contract for this policy: \"`WrittenOnceModel` | Insert-only entities you never read-modify-write (e.g. append-only log rows). | A brand-new entity may be written with no transaction. Writing back an entity that was **read from Datastore** errors (use `WrittenInTransactionModel` if you need that).\"\n\n`LanglitChallengeAttempt.TransactionSafetyPolicy()` still returns `datastore.WrittenOnceModel` (services/ai-guide/models/langlit_challenge.go:316-318, unchanged by this PR), yet the new code does exactly the read-modify-write the policy rules out: the attempts passed to `_backfillLanglitAttempts` come from `GetLanglitAttemptsOrdered` (handlers.go:447-456, a `NewQuery(models.LanglitChallengeAttemptKind)` read \u2014 I traced the call chain `LanglitChallengeComponent` \u2192 `ComputeProvenWordPairs` \u2192 `_computeCorrectPairs` \u2192 `_backfillLanglitAttempts`), and the diff writes them back with `if _, err := ctx.Datastore().PutMulti(ctx, putKeys, putAttempts); err != nil {`. The added comment says the bypass is deliberate: \"Fresh (not read-from-datastore) entities are used because LanglitChallengeAttempt is a WrittenOnceModel, which forbids writing an entity that was read from datastore.\"\n\nThe skill names the remedy for wanting read-modify-write: use `WrittenInTransactionModel` and do the hydrate-and-write inside one `RunInTransaction` (note the skill's warning that the closure must be idempotent, since `dstest` forces a retry). If the write-back isn't worth a transaction, the alternative that keeps the declared policy honest is to drop the persistence and compute the pair from the hydrated challenge in memory. What should not stay is a model that advertises insert-only while the read path mutates it.",
+      "failure_scenario": "Every langlit challenge fetch now re-Puts already-stored `LanglitChallengeAttempt` entities outside any transaction while the model still declares `WrittenOnceModel`, so the wrapper's lost-update protection is disabled for a kind whose declared contract says it is insert-only \u2014 a concurrent or later writer of the same attempt key is silently last-write-wins, and the fresh-struct copy zeroes any attempt property it forgets to carry over.",
+      "skill": "datastore",
+      "confidence": 0.7
+    },
+    {
+      "id": "skill-auditor-2",
+      "source": "skill-auditor",
+      "path": "services/ai-guide/models/langlit_challenge.go",
+      "line": 306,
+      "label": "suggestion (non-blocking, best-practice)",
+      "subject": "Datastore: the new `challenge_type` and `word_pair` attempt properties are never filtered or sorted on, so they should carry `noindex`.",
+      "discussion": "Datastore: the new `challenge_type` and `word_pair` attempt properties are never filtered or sorted on, so they should carry `noindex`. `references/entities.md` (Struct tags) says: \"`noindex` \u2014 store the value without indexing it. Use this for any field you never filter or sort on; indexed properties cost more and are capped in size.\"\n\nThe two new fields are declared without it:\n\n```go\nChallengeType LanglitChallengeType `datastore:\"challenge_type\"`\n...\nWordPair string `datastore:\"word_pair\"`\n```\n\nI checked whether anything queries them: `grep -rn \"word_pair\\|challenge_type\" services/ai-guide` finds exactly one `FilterField(\"challenge_type\", ...)` (handlers.go:362) and it is on the `LanglitChallenge` kind, not on `LanglitChallengeAttempt`; the only `LanglitChallengeAttempt` query is `FilterField(\"user_kaid\", ...).Order(\"-created_at\")`, and `services/ai-guide/index.yaml` has no attempt index mentioning the new properties. All of the new filtering (`_computeCorrectPairs`) is in-memory. Adding `,noindex` to both tags keeps them out of the index while preserving the stored values.",
+      "failure_scenario": "`challenge_type` and `word_pair` are written as indexed properties on every attempt of a high-volume append-only kind (and again on every lazy backfill re-Put), paying extra index-write cost and index storage for properties no query ever filters or sorts on.",
+      "skill": "datastore",
+      "confidence": 0.7
+    },
+    {
+      "id": "skill-auditor-ool-1",
+      "source": "skill-auditor (out-of-lane)",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 230,
+      "label": "question (non-blocking)",
+      "subject": "An attempt whose challenge legitimately yields an empty word pair is re-classified as \"cold\" on every subsequent request and re-hydrated plus re-written forever, because the backfill writes back the same empty `WordPair` that made it look cold.",
+      "discussion": "An attempt whose challenge legitimately yields an empty word pair is re-classified as \"cold\" on every subsequent request and re-hydrated plus re-written forever, because the backfill writes back the same empty `WordPair` that made it look cold.",
+      "failure_scenario": "For a student with an attempt on a same-type challenge whose content carries no `IncorrectForm` token (the model comment admits \"a challenge with no IncorrectForm token legitimately yields ''\"), the `switch` falls to `default` \u2014 the first case requires `attempt.WordPair != \"\"` and the second requires `attempt.ChallengeType != challengeType` \u2014 so every langlit challenge fetch for that student re-runs `GetMulti` on the challenge and `PutMulti` on the attempt, permanently, bumping `backup_timestamp` and re-exporting the row on each fetch instead of converging after one migration. The same never-converges path applies to attempts whose challenge was deleted (`challenge == nil` leaves them cold, so they are re-hydrated on every request).",
+      "confidence": 0.7
+    },
+    {
+      "id": "skill-auditor-ool-2",
+      "source": "skill-auditor (out-of-lane)",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 235,
+      "label": "question (non-blocking)",
+      "subject": "A failure of the opportunistic backfill write aborts the whole challenge-fetch read path instead of degrading to \"no proven pairs\".",
+      "discussion": "A failure of the opportunistic backfill write aborts the whole challenge-fetch read path instead of degrading to \"no proven pairs\".",
+      "failure_scenario": "If `PutMulti` fails transiently (datastore contention or a write outage) during `_backfillLanglitAttempts`, `_computeCorrectPairs` returns the error, `ComputeProvenWordPairs` propagates it, and `LanglitChallengeComponent` returns `nil, err` \u2014 so a student who could have been served a cached challenge gets a hard error instead, because a best-effort migration write failed.",
+      "confidence": 0.7
+    },
+    {
+      "id": "security-auth-ool-1",
+      "source": "security-auth (out-of-lane)",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 332,
+      "label": "question (non-blocking)",
+      "subject": "The lazy backfill PutMulti writes a snapshot of an existing attempt to the deterministic key MakeLanglitChallengeAttemptKey(userKAID, challengeID), outside any transaction and deliberately bypassing the model's WrittenOnceModel transaction-safety policy by staging fresh entities, so it can clobber a concurrent write to the same key.",
+      "discussion": "The lazy backfill PutMulti writes a snapshot of an existing attempt to the deterministic key MakeLanglitChallengeAttemptKey(userKAID, challengeID), outside any transaction and deliberately bypassing the model's WrittenOnceModel transaction-safety policy by staging fresh entities, so it can clobber a concurrent write to the same key.",
+      "failure_scenario": "A student re-submits CreateLanglitChallengeAttempt for a challengeID they already attempted (the mutation accepts any challenge ID from the client and the key is fmt.Sprintf(\"%s:%s\", userKAID, challengeID), so the new attempt overwrites the same entity) while a concurrent LanglitChallengeComponent fetch is backfilling that same cold attempt; the backfill's PutMulti writes the stale Performance/CreatedAt it read earlier, silently reverting the student's new answer record.",
+      "confidence": 0.7
+    },
+    {
+      "id": "test-adequacy-1",
+      "source": "test-adequacy",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 211,
+      "label": "todo (blocking)",
+      "subject": "The unassigned-practice scope (`assignmentID == \"\"`, `_provenScopeSize` recent window) has no test \u2014 every new Compute* test passes a non-empty assignment ID.",
+      "discussion": "The unassigned-practice scope (`assignmentID == \"\"`, `_provenScopeSize` recent window) has no test \u2014 every new Compute* test passes a non-empty assignment ID. `_computeCorrectPairs` has two mutually exclusive scoping branches: the assignment filter (handlers.go:203-208) and the recent-window slice `scoped = attempts[:min(len(attempts), _provenScopeSize)]` (handlers.go:209-213). Grepping every `ComputeProvenWordPairs(`/`ComputeSeenCorrectPairs(` call site in `services/ai-guide/langlit/handlers_test.go` (lines 934, 971, 1009, 1016, 1038, 1089, 1147, 1181, 1229, 1260) shows all ten pass `assignmentID`/`assignment1`/`assignment2` \u2014 never `\"\"` \u2014 so the else branch and the `_provenScopeSize = 15` bound are never executed. `Context.AssignmentID()` returns `\"\"` for non-assignment interactions (services/ai-guide/component/context.go:558, and its doc comment on WithAssignmentID says \"An empty string means the interaction is not part of an assignment\"), so this is a live product path, not a defensive one. It also encodes a second untested assumption the comment states outright \u2014 that `attempts` arrive most-recent-first \u2014 and applies the window *before* type filtering, so a student alternating challenge types can have the whole window consumed by the other type. A test that pins the window boundary would catch both.",
+      "failure_scenario": "A student practicing outside an assignment (componentContext.AssignmentID() == \"\") goes down the recent-window branch; if the window slicing or the ordering assumption is wrong, proven/seen pairs come out empty (or unbounded) and word-pair avoidance silently does nothing for all unassigned practice, with no test failing.",
+      "suggestion": "func (suite *handlersSuite) TestComputeProvenWordPairs_UnassignedRecentWindow() {\n\t// Arrange \u2014 no assignment: scope is the most-recent _provenScopeSize (15)\n\t// attempts. The older pair falls outside the window and is not proven.\n\tctx := suite.KAContext()\n\tattempts := make([]*models.LanglitChallengeAttempt, 0, 17)\n\tfor i := range 15 {\n\t\tattempts = append(attempts, &models.LanglitChallengeAttempt{\n\t\t\tUserKAID: \"kaid_test\", LanglitChallengeID: \"recent_\" + strconv.Itoa(i),\n\t\t\tPerformance:   []int{1},\n\t\t\tChallengeType: models.LanglitChallengeTypeFrequentlyConfusedWords,\n\t\t\tWordPair:      \"accept|except\",\n\t\t})\n\t}\n\tfor i := range 2 {\n\t\tattempts = append(attempts, &models.LanglitChallengeAttempt{\n\t\t\tUserKAID: \"kaid_test\", LanglitChallengeID: \"old_\" + strconv.Itoa(i),\n\t\t\tPerformance:   []int{1},\n\t\t\tChallengeType: models.LanglitChallengeTypeFrequentlyConfusedWords,\n\t\t\tWordPair:      \"affect|effect\",\n\t\t})\n\t}\n\n\t// Act\n\tproven, err := langlit.ComputeProvenWordPairs(\n\t\tctx, attempts, \"\", models.LanglitChallengeTypeFrequentlyConfusedWords,\n\t)\n\n\t// Assert \u2014 only the in-window pair is proven.\n\tsuite.Require().NoError(err)\n\tsuite.Require().Equal([]string{\"accept|except\"}, proven)\n}",
+      "confidence": 0.7
+    },
+    {
+      "id": "test-adequacy-2",
+      "source": "test-adequacy",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 264,
+      "label": "suggestion (non-blocking)",
+      "importance": "medium",
+      "subject": "No test covers a partially-correct multi-slot attempt, the case `_attemptAllCorrect`'s all-1s rule exists for.",
+      "discussion": "No test covers a partially-correct multi-slot attempt, the case `_attemptAllCorrect`'s all-1s rule exists for. `_attemptAllCorrect` (handlers.go:262-269) requires every slot to be 1. Grepping `Performance:` inside the new pair tests in services/ai-guide/langlit/handlers_test.go shows only `[]int{1}` (lines 910, 918, 926, 955, 965, 993, 998, 1003, 1078, 1125, 1140, 1173, 1246, 1252), `[]int{0}` (960, 1133) and `[]int{1, 1}` (1031, 1209, 1215, 1221) \u2014 the mixed `[]int{1, 0}` shape never reaches a Compute* call, even though that shape is real elsewhere in the same file (lines 1355, 1541, 1741). The all-1s rule is the whole definition of \"correct\" for mastery accounting, so it is worth one case.",
+      "failure_scenario": "A multi-slot attempt answered partly wrong (Performance `[]int{1, 0}`) is never exercised, so if `_attemptAllCorrect` were relaxed to \"any slot correct\" a half-wrong attempt would count toward mastery and the student would stop being shown a pair they have not actually learned.",
+      "suggestion": "func (suite *handlersSuite) TestComputeProvenWordPairs_PartiallyCorrectDoesNotCount() {\n\t// Arrange \u2014 two attempts on the same pair, each with one slot wrong.\n\t// An attempt only counts when every correction slot is right.\n\tctx := suite.KAContext()\n\tassignmentID := \"assign_1\"\n\tattempts := []*models.LanglitChallengeAttempt{\n\t\t{\n\t\t\tUserKAID: \"kaid_test\", LanglitChallengeID: \"c1\",\n\t\t\tPerformance: []int{1, 0}, AssignmentID: &assignmentID,\n\t\t\tChallengeType: models.LanglitChallengeTypeFrequentlyConfusedWords,\n\t\t\tWordPair:      \"accept|except\",\n\t\t},\n\t\t{\n\t\t\tUserKAID: \"kaid_test\", LanglitChallengeID: \"c2\",\n\t\t\tPerformance: []int{1, 0}, AssignmentID: &assignmentID,\n\t\t\tChallengeType: models.LanglitChallengeTypeFrequentlyConfusedWords,\n\t\t\tWordPair:      \"accept|except\",\n\t\t},\n\t}\n\n\t// Act\n\tproven, err := langlit.ComputeProvenWordPairs(\n\t\tctx, attempts, assignmentID, models.LanglitChallengeTypeFrequentlyConfusedWords,\n\t)\n\n\t// Assert\n\tsuite.Require().NoError(err)\n\tsuite.Require().Empty(proven)\n}",
+      "confidence": 0.7
+    },
+    {
+      "id": "test-adequacy-3",
+      "source": "test-adequacy",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 310,
+      "label": "suggestion (non-blocking)",
+      "subject": "The deleted-challenge path in `_backfillLanglitAttempts` (`OnlyNotFoundErrors` plus the `challenge == nil` skip) has no test, though the service has a delete handler that makes it reachable.",
+      "discussion": "The deleted-challenge path in `_backfillLanglitAttempts` (`OnlyNotFoundErrors` plus the `challenge == nil` skip) has no test, though the service has a delete handler that makes it reachable. Both new backfill tests (handlers_test.go:1047 `TestComputeProvenWordPairs_LazyBackfill` and 1157 `TestComputeSeenCorrectPairs_LazyBackfill`) `Put` every challenge before calling, so `GetMulti` always succeeds and neither the `datastore.OnlyNotFoundErrors(err)` branch (handlers.go:298-302) nor the `challenge == nil` skip (handlers.go:310-314) is ever executed. This is reachable in production: `DeleteLanglitChallenge` exists in this same package (its tests start at handlers_test.go:1269), and attempts outlive their challenges. One test with a cold attempt pointing at an ID that was never written pins both.",
+      "failure_scenario": "A cold attempt whose challenge has been deleted reaches `_backfillLanglitAttempts`, and if the not-found handling or the nil guard regresses the whole challenge fetch returns an error (or dereferences nil) \u2014 failing the student's entire challenge request instead of quietly skipping one stale attempt.",
+      "suggestion": "func (suite *handlersSuite) TestComputeProvenWordPairs_MissingChallenge_SkipsAttempt() {\n\t// Arrange \u2014 a cold attempt whose challenge no longer exists. The backfill\n\t// must skip it rather than erroring out the whole computation.\n\tctx := suite.KAContext()\n\tuserKAID := \"kaid_test\"\n\tassignmentID := \"assign_1\"\n\n\tattempt := &models.LanglitChallengeAttempt{\n\t\tUserKAID:           userKAID,\n\t\tLanglitChallengeID: \"deleted_challenge\",\n\t\tPerformance:        []int{1},\n\t\tAssignmentID:       &assignmentID,\n\t}\n\tattempt.Key = models.MakeLanglitChallengeAttemptKey(userKAID, \"deleted_challenge\")\n\t_, err := ctx.Datastore().Put(ctx, attempt.Key, attempt)\n\tsuite.Require().NoError(err)\n\n\t// Act\n\tproven, err := langlit.ComputeProvenWordPairs(\n\t\tctx,\n\t\t[]*models.LanglitChallengeAttempt{attempt},\n\t\tassignmentID,\n\t\tmodels.LanglitChallengeTypeFrequentlyConfusedWords,\n\t)\n\n\t// Assert \u2014 no error, and the orphaned attempt contributes nothing.\n\tsuite.Require().NoError(err)\n\tsuite.Require().Empty(proven)\n}",
+      "confidence": 0.7
+    },
+    {
+      "id": "test-adequacy-4",
+      "source": "test-adequacy",
+      "path": "services/ai-guide/entry_components/langlit_challenge_component.go",
+      "line": 1058,
+      "label": "suggestion (non-blocking)",
+      "subject": "The new fresh-generation pair-avoidance loop (`wordPairType` gate + regen-then-relax) is not exercised by any test.",
+      "discussion": "The new fresh-generation pair-avoidance loop (`wordPairType` gate + regen-then-relax) is not exercised by any test. The three new blocks in this file \u2014 the `wordPairType` gate at lines 808-810, the Compute*/plumbing at 812-845, and the regen loop's accept/relax decision at 1058-1067 \u2014 have no coverage. `services/ai-guide/entry_components/langlit_challenge_component_test.go` only tests the pure helpers (`selectBestSentenceFromClassificationResults`, `isValidDependencyOutput`), and `langlit_challenge_component_integration_test.go` has just two cases, both about sentence classification (`TestEnglishPath_UsesBinaryClassifier`, `TestNonEnglishPath_UsesLLMClassifier`) \u2014 neither calls `LanglitChallengeComponent`. I recognize the loop needs generation, classification, and dep-gen clients stubbed, so this may be out of scope for this PR; if so, the cheap partial is to extract the gate into a small predicate (e.g. `_isWordPairChallengeType(input.ChallengeType)`) and table-test it against all langlit config names, which pins the its-vs-its exclusion the comment at 802-807 calls out as load-bearing.",
+      "failure_scenario": "The `wordPairType` gate or the `pairAvoidRegens >= pairAvoidMaxRegens` relax condition regresses \u2014 e.g. the gate stops matching a config name, or the loop stops breaking \u2014 and either avoidance silently never applies to fresh generations or the component burns an extra LLM generation round on every request, with no test detecting it.",
+      "suggestion": "// In langlit_challenge_component.go, extract the gate:\n//\n//\t// _isWordPairChallengeType reports whether a langlit challenge type varies\n//\t// by confused word pair, and so participates in pair avoidance. its-vs-its\n//\t// is excluded: every item is the same it's/its pair.\n//\tfunc _isWordPairChallengeType(challengeType string) bool {\n//\t\treturn challengeType == langlit.FrequentlyConfusedWordsConfigName ||\n//\t\t\tchallengeType == langlit.ApostropheUsageConfigName ||\n//\t\t\tchallengeType == langlit.SubjectVerbAgreementConfigName\n//\t}\n//\n// then in langlit_challenge_component_test.go:\n\nfunc (suite *selectBestSentenceSuite) Test_IsWordPairChallengeType() {\n\tfor _, tc := range []struct {\n\t\tchallengeType string\n\t\texpected      bool\n\t}{\n\t\t{langlit.FrequentlyConfusedWordsConfigName, true},\n\t\t{langlit.ApostropheUsageConfigName, true},\n\t\t{langlit.SubjectVerbAgreementConfigName, true},\n\t\t{langlit.ItsVsItsConfigName, false},\n\t\t{\"\", false},\n\t} {\n\t\tsuite.Require().Equal(\n\t\t\ttc.expected,\n\t\t\t_isWordPairChallengeType(tc.challengeType),\n\t\t\t\"challenge type %q\", tc.challengeType,\n\t\t)\n\t}\n}",
+      "confidence": 0.7
+    },
+    {
+      "id": "completeness-1",
+      "source": "completeness",
+      "path": "services/ai-guide/config/config_files/langlit-frequently-confused-words.json",
+      "line": 83,
+      "label": "question (non-blocking)",
+      "subject": "The three langlit config JSONs silently drop the 30\u201350 \"Practice Items\" options (cap 50 \u2192 25); was this an intended part of the word-pair work, and what happens to assignments already saved at those values?",
+      "discussion": "The three langlit config JSONs silently drop the 30\u201350 \"Practice Items\" options (cap 50 \u2192 25); was this an intended part of the word-pair work, and what happens to assignments already saved at those values? All three `.json` config files in this PR delete the same five `options` entries (30/35/40/45/50) from the `langlit-*-iterations` SINGLE_SELECT \u2014 see the identical hunks at `langlit-frequently-confused-words.json`, `langlit-apostrophe-usage.json`, and `langlit-subject-verb-agreement.json`, each leaving `5, 10, 15, 20, 25`. I read the surrounding block in `services/ai-guide/config/config_files/langlit-frequently-confused-words.json` to confirm the field is the teacher-set \"Practice items required: The number of practice items your student must do to complete this assignment.\"\n\nThe change is plausibly deliberate \u2014 a shorter assignment is easier to satisfy from a finite confused-word pair pool once `provenPairs` starts filtering cached challenges \u2014 but nothing in the description, and nothing in the \"Test plan: Test through ZND\", says the teacher-facing cap is being halved. Note the same tension appears in code: `_provenScopeSize = 15` in `services/ai-guide/langlit/handlers.go` is documented as \"mirroring a typical assignment's item count\", which no longer matches the new 25 maximum.",
+      "failure_scenario": "A teacher opening the Frequently Confused Words / Apostrophe Usage / Subject-Verb Agreement assignment settings can no longer pick 30\u201350 practice items (max is now 25), and any existing assignment already saved at 30/35/40/45/50 now holds a value that is no longer in the option list \u2014 a teacher-facing behavior change the PR description and test plan never mention.",
+      "confidence": 0.7
+    },
+    {
+      "id": "completeness-2",
+      "source": "completeness",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 313,
+      "label": "suggestion (non-blocking)",
+      "importance": "medium",
+      "subject": "Cold attempts whose challenge is missing (or yields an empty word pair) are never written back, so they re-hydrate on every request forever instead of migrating lazily as the description promises.",
+      "discussion": "Cold attempts whose challenge is missing (or yields an empty word pair) are never written back, so they re-hydrate on every request forever instead of migrating lazily as the description promises. The PR description states \"the actual migration is done lazily... we never need to run an actual migration, because the data will be seamlessly upgraded and improve in performance over time.\" Two paths never reach that steady state.\n\n1. In `_backfillLanglitAttempts`, when `challenge == nil` (line 310\u2013313) the attempt is skipped with `continue`, so no key is appended to `putKeys`. Nothing marks the attempt as processed, so `_computeCorrectPairs` classifies it into the `default:` (cold) branch again on the next call and `GetMulti` re-fetches the missing key every time.\n\n2. The `default:` branch at line 228 is also reached for a warm attempt whose `ChallengeType` matches but whose `WordPair` is `\"\"`. `models.ExtractWordPair` returns `\"\"` when no token carries an `IncorrectForm`, and the model comment you added on `WordPair` (langlit_challenge.go:309-312) explicitly acknowledges \"a challenge with no IncorrectForm token legitimately yields ''\". `isValidDependencyOutput` (entry_components/langlit_challenge_component.go:537-541) only guarantees this for newly generated challenges, not for ones cached before that validation existed. Such attempts are re-hydrated and re-written on every request.\n\nA persisted \"migration attempted\" signal (e.g. writing `ChallengeType` alone, or a sentinel `WordPair`) would let both cases settle.",
+      "failure_scenario": "A student whose in-scope attempt points at a challenge that has since been deleted (or at a word-pair-type challenge with no IncorrectForm token) keeps that attempt permanently \"cold\": every subsequent langlit challenge request re-runs the datastore `GetMulti` hydration for it and never writes the fields back, so the \"lazily migrated, improves in performance over time\" claim never comes true for those attempts.",
+      "confidence": 0.7
+    },
+    {
+      "id": "completeness-3",
+      "source": "completeness",
+      "path": "services/ai-guide/entry_components/langlit_challenge_component.go",
+      "line": 1066,
+      "label": "note (non-blocking)",
+      "subject": "The regen `continue` is commented \"regenerate with the avoid list emphasized\", but the retry sends the exact same prompt and the same `avoidPairs` \u2014 nothing is emphasized.",
+      "discussion": "The regen `continue` is commented \"regenerate with the avoid list emphasized\", but the retry sends the exact same prompt and the same `avoidPairs` \u2014 nothing is emphasized. The loop body builds the generation map once (lines 969-979) with `\"avoidPairs\": strings.Join(avoidPairs, \", \")`, and `avoidPairs` is computed before the loop (line 836) and never mutated. So the `continue` at line 1066 re-executes an identical `GetSentenceGenerationResult` call; the only thing that varies between iterations is model sampling. The half-wired part is the comment's promise, not the retry itself \u2014 either drop \"with the avoid list emphasized\", or actually strengthen the instruction on the retry (e.g. pass a separate emphasized template variable, or repeat the violated pair explicitly).",
+      "failure_scenario": "When the model returns a sentence using an avoided pair, the loop re-enters with a byte-identical prompt and identical `avoidPairs`, so the second attempt has no more reason to avoid the pair than the first \u2014 a full generate + classify + dep-gen round trip (up to 3 dep-gen retries) is spent on a plain re-roll, and the trailing comment describes emphasis behavior that isn't implemented.",
+      "confidence": 0.7
+    },
+    {
+      "id": "holistic-1",
+      "source": "holistic",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 222,
+      "label": "issue (blocking)",
+      "subject": "Empty WordPair is used as the \"needs migration\" sentinel, but it is also a legitimate warm value, so those attempts never converge and are re-hydrated and re-written on every request.",
+      "discussion": "Empty WordPair is used as the \"needs migration\" sentinel, but it is also a legitimate warm value, so those attempts never converge and are re-hydrated and re-written on every request. The switch at handlers.go:221-231 has three arms. An attempt with `ChallengeType == challengeType` and `WordPair == \"\"` fails arm 1 (`WordPair != \"\"`) and fails arm 2 (`ChallengeType != challengeType`), so it falls to `default` and is appended to `cold`. `_backfillLanglitAttempts` then hydrates the challenge and writes back `models.ExtractWordPair(challenge)`, which returns \"\" again (models/langlit_challenge.go:224-235 returns \"\" when no token carries an IncorrectForm) \u2014 the attempt is written with the exact same values and is cold again on the next request. The same holds for the `challenge == nil` branch at handlers.go:310-314, which deliberately leaves the attempt cold; `DeleteLanglitChallenge` exists at handlers.go:656, so deleted challenges are reachable.\n\nThis is doubled per request: `LanglitChallengeComponent` calls `ComputeProvenWordPairs` and then `ComputeSeenCorrectPairs`, and both run `_computeCorrectPairs` over the same slice. Warm attempts are deduped only because the first call mutates them in place \u2014 which is exactly what does not happen for this class.\n\nThe PR description's premise is \"the data will be seamlessly upgraded and improve in performance over time\". For this class it does the opposite: a permanent extra datastore read and an idempotent-but-repeated write on the student-facing challenge-fetch path, against a WrittenOnceModel. The models comment at langlit_challenge.go:308-312 already notes that \"\" is ambiguous; the code does not act on that.",
+      "failure_scenario": "A student attempts a word-pair challenge whose content has no IncorrectForm token (or whose challenge is later deleted): the attempt is stored with ChallengeType set but WordPair \"\", so every later challenge fetch re-classifies it as cold and re-issues GetMulti + PutMulti for it \u2014 twice per request, forever.",
+      "suggestion": "\t\tswitch {\n\t\tcase attempt.ChallengeType != \"\":\n\t\t\t// Warm (migrated). Count only matching-type attempts that carry a\n\t\t\t// pair; a matching-type attempt with no pair is warm-and-pairless,\n\t\t\t// not cold, so it must not be re-backfilled.\n\t\t\tif attempt.ChallengeType == challengeType &&\n\t\t\t\tattempt.WordPair != \"\" && _attemptAllCorrect(attempt) {\n\t\t\t\tcorrectCounts[attempt.WordPair]++\n\t\t\t}\n\t\tdefault:\n\t\t\t// Cold attempt \u2014 missing challenge_type.\n\t\t\tcold = append(cold, attempt)\n\t\t}",
+      "confidence": 0.7
+    },
+    {
+      "id": "holistic-2",
+      "source": "holistic",
+      "path": "services/ai-guide/entry_components/langlit_challenge_component.go",
+      "line": 836,
+      "label": "suggestion (non-blocking)",
+      "importance": "medium",
+      "subject": "The same \"pairs to avoid\" concept is implemented at two different thresholds on two paths, and the \u22651 `avoidPairs` set only takes effect on a cache miss \u2014 so the cached path, which returns early, can immediately repeat a pair the student just got right.",
+      "discussion": "The same \"pairs to avoid\" concept is implemented at two different thresholds on two paths, and the \u22651 `avoidPairs` set only takes effect on a cache miss \u2014 so the cached path, which returns early, can immediately repeat a pair the student just got right. `GetUnseenChallenge` is called at langlit_challenge_component.go:854 and returns early whenever any unseen cached challenge exists, before the generation block at :964 that uses `avoidPairs`. So the \u22651 \"seen correct\" avoidance guards only the cache-miss path, while the \u22652 \"proven\" set guards only the cache-hit path. Since the cached path is the common one (it walks every page of matching challenges before falling through), `ComputeSeenCorrectPairs` is dead for most requests, yet it still costs a second full scan of `previousAttempts` and, when it does apply, a regeneration round.\n\nThe PR description sets the rubric at 2 corrects, so the cached path matches stated intent \u2014 but then the \u22651 set is a second, undeclared policy that fires only in the minority case. Either pass `avoidPairs` (or a soft-preference variant) into `GetUnseenChallenge` too, so both paths honor one policy, or drop the \u22651 tier and use `provenPairs` for the prompt as well. As written the two halves of the diff pull in different directions, and a reader cannot tell which threshold is the intended product behavior.\n\nRelated: `ComputeSeenCorrectPairs` is a strict superset of `ComputeProvenWordPairs` over identical counts \u2014 one pass returning both sets would remove the second scan and the implicit dependency on the first call's in-place mutation.",
+      "failure_scenario": "A student answers accept/except correctly once; on the next request `provenPairs` is empty (needs 2 corrects), `GetUnseenChallenge` filters nothing, and a cached unseen challenge using accept|except is returned and served before `avoidPairs` is ever consulted.",
+      "confidence": 0.7
+    },
+    {
+      "id": "holistic-3",
+      "source": "holistic",
+      "path": "services/ai-guide/entry_components/langlit_challenge_component.go",
+      "line": 1066,
+      "label": "suggestion (non-blocking)",
+      "subject": "The pair-avoidance regeneration re-sends an identical prompt, so the retry adds a full extra LLM round trip on a student-facing path with no changed signal \u2014 despite the comment claiming the avoid list is \"emphasized\".",
+      "discussion": "The pair-avoidance regeneration re-sends an identical prompt, so the retry adds a full extra LLM round trip on a student-facing path with no changed signal \u2014 despite the comment claiming the avoid list is \"emphasized\". The `map[string]string` built at langlit_challenge_component.go:968-979 is reconstructed identically on each iteration of the `pairAvoidRegens` loop; `avoidPairs` is computed once before the loop at :836 and never changed. The only per-iteration difference is `GenerateNoise(16)` inside `GetSentenceGenerationResult` (:218). So `continue // regenerate with the avoid list emphasized` at :1066 promises something the code does not do \u2014 nothing is emphasized, and the second attempt is a resample at the same temperature.\n\nEither make the retry actually differ (e.g. append the offending pair to the avoid list passed on the second pass, or add an explicit \"you previously returned X, which is forbidden\" line), or drop the regeneration and rely on the prompt-level instruction alone. Charging every cache-miss request for a coin-flip retry is a meaningful latency cost given the generation path already contains a 3-attempt dependency-generation loop nested inside it.",
+      "failure_scenario": "The model returns a pair on the avoid list; the loop spends a second full generation + classification + up-to-3 dependency-generation round trip on a prompt that is byte-identical apart from the entropy seed, then accepts whatever comes back anyway.",
+      "confidence": 0.7
+    },
+    {
+      "id": "holistic-4",
+      "source": "holistic",
+      "path": "services/ai-guide/config/config_files/langlit-frequently-confused-words.json",
+      "line": 83,
+      "label": "question (non-blocking)",
+      "subject": "Why does this PR also remove the 30\u201350 practice-item options from all three assignment configs \u2014 is that a deliberate product cap tied to pair-pool exhaustion, and what happens to assignments already saved with those values?",
+      "discussion": "Why does this PR also remove the 30\u201350 practice-item options from all three assignment configs \u2014 is that a deliberate product cap tied to pair-pool exhaustion, and what happens to assignments already saved with those values? The same 20-line deletion appears in langlit-apostrophe-usage.json, langlit-frequently-confused-words.json, and langlit-subject-verb-agreement.json, capping the teacher-facing `SINGLE_SELECT` at 25 items. Nothing in the PR description mentions it, and no Go code in the diff reads the iteration count, so the connection to word-pair tracking is not visible from the change itself.\n\nIf the reason is that pair avoidance exhausts the finite grade-level pool past ~25 items, that rationale is worth stating \u2014 especially since the avoidance design already claims to \"degrade into bounded repetition rather than an error\" (langlit_challenge_component.go:955-960), which would argue the cap is not strictly required. If assignments already exist with a stored value of 30\u201350, it is also worth confirming they still render and complete rather than failing validation against an option list that no longer contains their value.\n\nSeparately, `_provenScopeSize = 15` is documented as \"mirroring a typical assignment's item count\" (handlers.go:21-25) while this change makes the maximum 25 \u2014 worth reconciling the two numbers if the cap is intentional.",
+      "failure_scenario": "A teacher who previously assigned 50 practice items opens the assignment picker after this deploys and finds the 30/35/40/45/50 options gone, with no explanation in the PR description or the code.",
+      "confidence": 0.7
+    },
+    {
+      "id": "first-principles-1",
+      "source": "first-principles",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 281,
+      "label": "suggestion (non-blocking)",
+      "subject": "The word_pair/challenge_type denormalization plus lazy backfill may be avoidable: the pair is derivable from the challenge, and the scope is small enough (\u226425 attempts) to just GetMulti the challenges \u2014 is the saved read worth the migration machinery and the read-path write to a WrittenOnceModel?",
+      "discussion": "The word_pair/challenge_type denormalization plus lazy backfill may be avoidable: the pair is derivable from the challenge, and the scope is small enough (\u226425 attempts) to just GetMulti the challenges \u2014 is the saved read worth the migration machinery and the read-path write to a WrittenOnceModel? The stated goal is \"track word pairs\"; the chosen mechanism is denormalizing `challenge_type` + `word_pair` onto `LanglitChallengeAttempt` so the computation can be done \"without hydrating the challenge\" (models/langlit_challenge.go:302-312). But the scope `_computeCorrectPairs` operates on is already bounded and small: assignment-scoped attempts, or `_provenScopeSize = 15` for unassigned practice \u2014 and this PR caps the practice-item config at 25 (langlit-*.json). The same request already does an unconditional `ctx.Datastore().GetMulti` of 5 challenge keys for noun extraction (langlit_challenge_component.go:890), and `_backfillLanglitAttempts` itself does a GetMulti of the cold challenges anyway (handlers.go:298) \u2014 so the warm path saves one batched key-get of \u226425 keys per request. The price is: a new datastore field with a two-state (\"cold\"/\"warm\") meaning, `_computeCorrectPairs`'s three-branch switch and its duplicate counting loop for the backfilled set, and a PutMulti on a GraphQL read/generation path. That write also fights the model's own declared contract: `LanglitChallengeAttempt.TransactionSafetyPolicy()` returns `datastore.WrittenOnceModel` (models/langlit_challenge.go:318), and the backfill only works by constructing fresh entities to clobber the stored ones \u2014 a workaround the code comment at handlers.go:278-280 documents rather than questions. Extracting pairs from a single batched challenge GetMulti over the scoped attempts would produce the same proven/seen sets with no schema change, no migration, no write amplification, and one code path instead of two.",
+      "failure_scenario": "The schema field, the lazy-migration path, and the cold/warm bifurcation are permanent surface area (~200 lines plus a datastore write on a read path) that a single batched key-get would have made unnecessary, and every future reader of the attempt model has to reason about the two-state field.",
+      "suggestion": "Compute pairs by batch-hydrating the scoped attempts' challenges (`models.MakeLanglitChallengeKey` + one `GetMulti`, exactly as `_backfillLanglitAttempts` already does) and calling `models.ExtractWordPair` in memory \u2014 dropping the `ChallengeType`/`WordPair` datastore fields, `_backfillLanglitAttempts`, and the cold/warm branching entirely. Keep the resolver-side write only if a later, larger scope makes the read genuinely expensive.",
+      "confidence": 0.7
+    },
+    {
+      "id": "first-principles-2",
+      "source": "first-principles",
+      "path": "services/ai-guide/entry_components/langlit_challenge_component.go",
+      "line": 836,
+      "label": "question (non-blocking)",
+      "subject": "The avoid list uses \u22651 correct while the stated rubric is 2 corrects \u2014 for a pair first seen on the generation path, doesn't \u22651 make the second correct unreachable and so prevent the pair from ever becoming proven?",
+      "discussion": "The avoid list uses \u22651 correct while the stated rubric is 2 corrects \u2014 for a pair first seen on the generation path, doesn't \u22651 make the second correct unreachable and so prevent the pair from ever becoming proven? The PR body states the rubric plainly: \"we use 2 correct attempts on a word pair as a rubric\", and `_masteryThreshold = 2` (handlers.go:32) encodes it for the cached path. But `ComputeSeenCorrectPairs` passes `1` (handlers.go:177), and that \u22651 list is what feeds `{avoidPairs}` into the generation prompt and the regen check. The code comment at langlit_challenge_component.go:831-835 justifies \u22651 as \"not re-showing a pair the student just got right\" and accounts for one cost (pushing the model to rarer pairs) \u2014 but not for this one: both lists are computed over the *same* scope, so within an assignment a pair with exactly 1 correct is excluded from generation while remaining eligible from cache. The generation path only runs when `GetUnseenChallenge` returns nil (line 865-868), i.e. precisely when no cached challenge is available. So for a pair whose only occurrence came from generation, the second correct required by the rubric can only arrive if the cache happens to hold a matching unseen challenge; otherwise the pair is stuck at 1 forever, never enters `provenPairs`, and the proven filter never fires for it. Was \u22651 vs \u22652 for the avoid list a deliberate split, or should the avoid list also be the \u22652 proven set (which would make the two paths agree and let a pair actually reach mastery)?",
+      "failure_scenario": "A pair a student answers correctly once on the generation path can never earn its second correct there, so it never becomes \"proven\" and the 2-correct mastery signal the whole feature is built on is unreachable for those pairs.",
+      "confidence": 0.7
+    },
+    {
+      "id": "first-principles-3",
+      "source": "first-principles",
+      "path": "services/ai-guide/entry_components/langlit_challenge_component.go",
+      "line": 964,
+      "label": "thought (non-blocking)",
+      "subject": "The one-shot regeneration re-sends an identical prompt after the full dependency-generation chain has already run, so it is a pure re-roll rather than a stronger instruction \u2014 is one extra full pipeline worth it?",
+      "discussion": "The one-shot regeneration re-sends an identical prompt after the full dependency-generation chain has already run, so it is a pure re-roll rather than a stronger instruction \u2014 is one extra full pipeline worth it? The loop comment at lines 955-960 says \"regenerate with the avoid list emphasized\" (line 1066 repeats it), but the second iteration builds the same `map[string]string` with the same `\"avoidPairs\": strings.Join(avoidPairs, \", \")` (line 978) \u2014 nothing is emphasized, escalated, or narrowed. The model already had the avoid list on the first pass and ignored it; an identical prompt gives roughly the same odds again. The cost is not small: the pair is only extractable from `dependencyGenerationOutput` (`ExtractWordPairFromText`, line 1059), so the check at line 1058 sits *after* the inner `depGenMaxRetries = 3` loop, and a regen throws away one sentence generation, one classification, and up to three dependency-generation calls. Either the second pass should differ from the first in a way that actually changes the outcome (e.g. drop the losing pair into a hard exclusion, or shrink the candidate space), or the re-roll could be dropped and the model's first answer accepted \u2014 the code already treats repetition as an acceptable degradation once the budget is spent (line 1063-1065).",
+      "failure_scenario": "A regeneration discards a completed generate + classify + up-to-3-dependency-generation chain and re-runs all of it with a byte-identical prompt, roughly doubling worst-case latency on a student-facing request for a re-roll whose only new information is chance.",
+      "confidence": 0.7
+    },
+    {
+      "id": "conventions-1",
+      "source": "conventions",
+      "path": "services/ai-guide/models/langlit_challenge.go",
+      "line": 224,
+      "label": "suggestion (non-blocking)",
+      "subject": "`ExtractWordPairFromText` reads a `UniversalDependencyText` but is a free function in `langlit_challenge.go`, while that type's other accessors are methods in `universal_dependency_types.go` \u2014 consider `func (s *UniversalDependencyText) WordPair() string` there.",
+      "discussion": "`ExtractWordPairFromText` reads a `UniversalDependencyText` but is a free function in `langlit_challenge.go`, while that type's other accessors are methods in `universal_dependency_types.go` \u2014 consider `func (s *UniversalDependencyText) WordPair() string` there. The type this new function derives its value from already has its derived-value accessors declared as methods, in its own file. From `services/ai-guide/models/universal_dependency_types.go`:\n\n```go\nfunc (s *UniversalDependencyText) ReconstructSentence() string {\nfunc (s *UniversalDependencyText) ReconstructIncorrectSentence() string {\n```\n\nThe new code instead adds, in `services/ai-guide/models/langlit_challenge.go`:\n\n```go\nfunc ExtractWordPairFromText(t *UniversalDependencyText) string {\n```\n\n(and `func ExtractWordPair(c *LanglitChallenge) string` just above it, which is a one-line forward to it).\n\nThe diff itself shows the mismatch: the tests for `ExtractWordPairFromText` were added to `services/ai-guide/models/universal_dependency_types_test.go`, not to a `langlit_challenge_test.go` \u2014 and `ls services/ai-guide/models/` confirms this package pairs each file with its own test file (`waitlist.go`/`waitlist_test.go`, `conversation_entry.go`/`conversation_entry_test.go`, `allowed_urls.go`/`allowed_urls_test.go`, \u2026), so the function's test already lives beside the type rather than beside the function. Declaring it as a method on `UniversalDependencyText` in `universal_dependency_types.go` puts the code where its test and its sibling accessors already are; `ExtractWordPair(c *LanglitChallenge)` can then stay in `langlit_challenge.go` as `c.ChallengeContent.WordPair()`.",
+      "failure_scenario": "A future reader looking for what you can derive from a `UniversalDependencyText` reads `universal_dependency_types.go`, sees only `ReconstructSentence`/`ReconstructIncorrectSentence`, and re-implements pair extraction rather than finding it two files away in `langlit_challenge.go`.",
+      "confidence": 0.7
+    },
+    {
+      "id": "conventions-2",
+      "source": "conventions",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 25,
+      "label": "nitpick (non-blocking)",
+      "subject": "`_provenScopeSize` and its doc comment name only one of the two callers that now depend on it:\n\n```go\n// _provenScopeSize is the recent-window size used for the proven-pair\n// scope when serving unassigned practice (no assignmentID), ...",
+      "discussion": "`_provenScopeSize` and its doc comment name only one of the two callers that now depend on it:\n\n```go\n// _provenScopeSize is the recent-window size used for the proven-pair\n// scope when serving unassigned practice (no assignmentID), ...\n_provenScopeSize = 15\n```\n\nBut the single place it is read is the shared implementation, not the proven-specific one \u2014 `_computeCorrectPairs`, line 211:\n\n```go\nwindow := min(len(attempts), _provenScopeSize)\n```\n\nand `ComputeSeenCorrectPairs` (line 177) routes through the same function: `return _computeCorrectPairs(ctx, attempts, assignmentID, challengeType, 1)`. So the window bounds the seen-correct/avoid-pairs list too.\n\nThe root `CLAUDE.md` states the rule directly: \"Name a function for what it actually does and the scope it covers (a partial helper should say so...)\". The neighbouring constants in the same block are scope-accurate by comparison \u2014 `_pageSize` and `_challengePageSize` each say exactly what they size. Something like `_recentAttemptWindowSize` (or `_correctPairScopeSize`), with the comment covering both callers, would match.",
+      "failure_scenario": "Someone tuning the unassigned-practice window for the avoid-pairs (seen-correct) path greps for the constant governing it, finds only a `_proven`-named one whose doc says \"proven-pair scope\", and either misses it or changes it believing it affects only `ComputeProvenWordPairs` \u2014 silently shifting the fresh-generation avoid list too.",
+      "confidence": 0.7
+    },
+    {
+      "id": "documentation-1",
+      "source": "documentation",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 409,
+      "label": "suggestion (non-blocking, documentation)",
+      "subject": "The new comment claims `provenPairs` is empty for non-FCW types, but the caller populates it for apostrophe usage and subject-verb agreement too.",
+      "discussion": "The new comment claims `provenPairs` is empty for non-FCW types, but the caller populates it for apostrophe usage and subject-verb agreement too. The added comment on the new filter says:\n\n```\n// provenPairs is empty for non-FCW types, so this filter is a\n// no-op there.\n```\n\nBut the only caller (`services/ai-guide/entry_components/langlit_challenge_component.go`) computes it for three types:\n\n```go\nwordPairType := input.ChallengeType == langlit.FrequentlyConfusedWordsConfigName ||\n\tinput.ChallengeType == langlit.ApostropheUsageConfigName ||\n\tinput.ChallengeType == langlit.SubjectVerbAgreementConfigName\n...\nprovenPairs, err = langlit.ComputeProvenWordPairs(...)\n```\n\nso the filter is live for apostrophe usage and subject-verb agreement, and empty only for the types outside that set (e.g. its-vs-its). The accurate sentence is \"provenPairs is empty for challenge types that don't vary by word pair, so this filter is a no-op there.\"",
+      "failure_scenario": "A maintainer debugging why an apostrophe-usage or subject-verb challenge was skipped trusts the comment's claim that the filter is inert for non-FCW types and looks elsewhere for the cause.",
+      "confidence": 0.7
+    },
+    {
+      "id": "documentation-2",
+      "source": "documentation",
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 216,
+      "label": "suggestion (non-blocking, documentation)",
+      "subject": "The counting loop's comments describe it as FCW-specific, but the code branches on the caller-supplied `challengeType`.",
+      "discussion": "The counting loop's comments describe it as FCW-specific, but the code branches on the caller-supplied `challengeType`. The added header comment reads:\n\n```\n// Count cumulative correct answers per candidate pair. Warm FCW attempts\n// are counted directly; warm non-FCW attempts are skipped; cold attempts\n// are hydrated + backfilled, then counted.\n```\n\nand the branch inside carries `// Warm non-FCW attempt \u2014 not part of this type's proven set.` The code, though, never mentions FCW \u2014 it compares against the parameter:\n\n```go\ncase attempt.WordPair != \"\" && attempt.ChallengeType == challengeType:\n...\ncase attempt.ChallengeType != \"\" && attempt.ChallengeType != challengeType:\n```\n\nand the tests in this same diff (`TestComputeProvenWordPairs_ApostropheCounted`, `TestComputeSeenCorrectPairs_SubjectVerbAgreement`) exercise it for apostrophe and SVA. Replacing \"FCW\" with \"matching-type\" / \"other-type\" in both comments makes them true for all three word-pair types.",
+      "failure_scenario": "A reader takes the loop to be frequently-confused-words-specific and misses that it is scoped to whatever `challengeType` the caller passes, including apostrophe usage and subject-verb agreement.",
+      "confidence": 0.7
+    },
+    {
+      "id": "documentation-3",
+      "source": "documentation",
+      "path": "services/ai-guide/entry_components/langlit_challenge_component.go",
+      "line": 1066,
+      "label": "suggestion (non-blocking, documentation)",
+      "subject": "The trailing comment says the regeneration emphasizes the avoid list, but the loop re-runs the identical prompt.",
+      "discussion": "The trailing comment says the regeneration emphasizes the avoid list, but the loop re-runs the identical prompt. The added line is:\n\n```go\ncontinue // regenerate with the avoid list emphasized\n```\n\nThe next iteration calls `GetSentenceGenerationResult` with the same map built at the top of the loop \u2014 `\"avoidPairs\": strings.Join(avoidPairs, \", \")` \u2014 and `avoidPairs` is computed once, before the loop, and never modified. Nothing about the second call emphasizes, re-weights, or re-words the avoid list; it is a plain retry.",
+      "failure_scenario": "A reader looks for the code that emphasizes the avoid list on the second pass, finds nothing, and cannot tell whether the emphasis was dropped or never existed.",
+      "suggestion": "\t\t\tcontinue // regenerate with the same avoid list",
+      "confidence": 0.7
+    },
+    {
+      "id": "documentation-4",
+      "source": "documentation",
+      "path": "services/ai-guide/models/langlit_challenge.go",
+      "line": 310,
+      "label": "suggestion (non-blocking, documentation)",
+      "subject": "The `WordPair` and `ChallengeType` field docs scope the migration semantics to FCW, but the computation that reads them covers apostrophe usage and subject-verb agreement as well.",
+      "discussion": "The `WordPair` and `ChallengeType` field docs scope the migration semantics to FCW, but the computation that reads them covers apostrophe usage and subject-verb agreement as well. The added field comments say:\n\n```go\n// ChallengeType is the type of challenge this attempt targeted, stored\n// on the attempt so the FCW proven-pair computation can be type-scoped\n...\n// WordPair is the canonicalized confused-word pair of the challenge\n// this attempt targeted, stored for the same reason. Empty means\n// \"needs migration\" only for FCW attempts \u2014 a challenge with no\n// IncorrectForm token legitimately yields \"\".\n```\n\nThe consumer, `_computeCorrectPairs` in `services/ai-guide/langlit/handlers.go`, is parameterized by `challengeType` and is called for frequently-confused-words, apostrophe usage, and subject-verb agreement alike (see `wordPairType` in `langlit_challenge_component.go`), and its cold-attempt branch treats an empty `WordPair` as needing migration regardless of type. Dropping \"FCW\" from both sentences \u2014 \"so the proven-pair computation can be type-scoped\", \"Empty means 'needs migration' for any word-pair type\" \u2014 matches what the code does.",
+      "failure_scenario": "A reader reasoning about which stored attempts still need migration concludes empty `word_pair` is only ambiguous for FCW attempts, and misreads the backfill behavior for apostrophe and subject-verb attempts.",
+      "confidence": 0.7
+    }
+  ],
+  "proposals": [
+    {
+      "evidence": "`continue // regenerate with the avoid list emphasized` at line 1066 re-submits an identical params map with the same `avoidPairs` slice computed once before the loop (line 836); nothing is mutated between iterations",
+      "ids": [
+        "correctness-reviewer-5",
+        "holistic-3",
+        "first-principles-3",
+        "documentation-3",
+        "completeness-3"
+      ]
+    },
+    {
+      "evidence": "five `options` entries (30, 35, 40, 45, 50) deleted from the `langlit-*-iterations` SINGLE_SELECT block at line 83 of `langlit-frequently-confused-words.json`",
+      "ids": [
+        "completeness-1",
+        "holistic-4"
+      ]
+    },
+    {
+      "evidence": "`ctx.Datastore().PutMulti(ctx, putKeys, putAttempts)` at line 332 in `_backfillLanglitAttempts` writes entities derived from Datastore-read attempts while `LanglitChallengeAttempt.TransactionSafetyPolicy()` returns `WrittenOnceModel`",
+      "ids": [
+        "skill-auditor-1",
+        "security-auth-ool-1"
+      ]
+    },
+    {
+      "evidence": "`default:` arm in `_computeCorrectPairs` switch at line ~228 catches attempts where `attempt.ChallengeType == challengeType` and `attempt.WordPair == \"\"`, treating legitimate empty-pair warm attempts as permanently cold",
+      "ids": [
+        "holistic-1",
+        "skill-auditor-ool-1"
+      ]
+    },
+    {
+      "evidence": "`_backfillLanglitAttempts` writes `WordPair: \"\"` for challenges with no IncorrectForm token and skips writing any sentinel when `challenge == nil` (line 310-313), leaving both categories permanently in the `default:` (cold) arm on every subsequent call",
+      "ids": [
+        "correctness-reviewer-3",
+        "completeness-2"
+      ]
+    }
+  ],
+  "baselineMerges": [
+    {
+      "survivor": "correctness-reviewer-3",
+      "merged": [
+        {
+          "id": "skill-auditor-ool-1",
+          "source": "skill-auditor (out-of-lane)",
+          "label": "question (non-blocking)",
+          "line": 230
+        }
+      ],
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 228,
+      "via": "similarity"
+    },
+    {
+      "survivor": "correctness-reviewer-5",
+      "merged": [
+        {
+          "id": "completeness-3",
+          "source": "completeness",
+          "label": "note (non-blocking)"
+        },
+        {
+          "id": "holistic-3",
+          "source": "holistic",
+          "label": "suggestion (non-blocking)",
+          "via": "clusterer",
+          "groundedBy": "anchor"
+        },
+        {
+          "id": "first-principles-3",
+          "source": "first-principles",
+          "label": "thought (non-blocking)",
+          "line": 964,
+          "via": "clusterer",
+          "groundedBy": "evidence"
+        },
+        {
+          "id": "documentation-3",
+          "source": "documentation",
+          "label": "suggestion (non-blocking, documentation)",
+          "via": "clusterer",
+          "groundedBy": "anchor"
+        }
+      ],
+      "path": "services/ai-guide/entry_components/langlit_challenge_component.go",
+      "line": 1066,
+      "via": "both",
+      "evidence": "`continue // regenerate with the avoid list emphasized` at line 1066 re-submits an identical params map with the same `avoidPairs` slice computed once before the loop (line 836); nothing is mutated between iterations"
+    },
+    {
+      "survivor": "skill-auditor-1",
+      "merged": [
+        {
+          "id": "security-auth-ool-1",
+          "source": "security-auth (out-of-lane)",
+          "label": "question (non-blocking)"
+        }
+      ],
+      "path": "services/ai-guide/langlit/handlers.go",
+      "line": 332,
+      "via": "similarity"
+    },
+    {
+      "survivor": "completeness-1",
+      "merged": [
+        {
+          "id": "holistic-4",
+          "source": "holistic",
+          "label": "question (non-blocking)"
+        }
+      ],
+      "path": "services/ai-guide/config/config_files/langlit-frequently-confused-words.json",
+      "line": 83,
+      "via": "similarity"
+    }
+  ],
+  "baselineRejections": [
+    {
+      "id": "holistic-1",
+      "reason": "blocking-member"
+    }
+  ],
+  "validator": {
+    "claims": [
+      {
+        "id": "correctness-reviewer-1",
+        "verification": "confirmed",
+        "confidence": 0.75,
+        "reason": "models/universal_dependency_types.go:53-66 shows ReconstructSentence concatenates token.Form verbatim, so Form is the literal (capitalization-preserving) surface form; ExtractWordPairFromText (langlit_challenge.go:224-235) sorts and joins those raw forms, so a sentence-initial confused word yields a different persisted key than the same pair mid-sentence, and langlit_challenge.go:7-16 confirms `strings` is not yet imported."
+      },
+      {
+        "id": "correctness-reviewer-2",
+        "verification": "plausible",
+        "confidence": 0.3,
+        "reason": "Attempts are keyed one-per-(user,challenge) via MakeLanglitChallengeAttemptKey (handlers.go:114), so the assignment-scoped set is bounded by that assignment's distinct challenges \u2014 which this same PR caps at 25 practice items \u2014 and warm attempts skip _backfillLanglitAttempts entirely, making the GetMulti/PutMulti a one-time migration rather than a per-render cost; I could not substantiate the 'hundreds of reads plus writes before the student sees anything' scenario, but the branch asymmetry itself is real.",
+        "corrected": {
+          "label": "suggestion (non-blocking)",
+          "subject": "The assignment-scoped branch has no cap while the unassigned branch caps at 15",
+          "discussion": "The assignment-scoped branch has no cap while the unassigned branch caps at 15. The two scoping branches in `_computeCorrectPairs` are asymmetric: the `else` branch at handlers.go:209-213 deliberately caps at `_provenScopeSize = 15`, while the `assignmentID != \"\"` branch at handlers.go:203-208 appends every attempt matching the assignment with no bound. Its input is `previousAttempts` from `GetLanglitAttemptsOrdered` (handlers.go:447-456), which reads the student's entire attempt history via `ReadAllResourcePages`.\n\nI checked how bad this can get before flagging it, and it is milder than it looks: attempts are keyed one-per-(user, challenge) by `MakeLanglitChallengeAttemptKey` (handlers.go:114), so the per-assignment set is bounded by the distinct challenges in that assignment \u2014 and this same PR caps the teacher-facing practice-item option at 25. Warm attempts also skip `_backfillLanglitAttempts` entirely, so the `GetMulti`/`PutMulti` is a one-time migration per attempt, not a per-render cost. So this is a missing explicit bound on a synchronous render path rather than a demonstrated blow-up.\n\nStill worth a cap for symmetry, since nothing in the code enforces the 25-item assumption the config happens to encode."
+        }
+      },
+      {
+        "id": "correctness-reviewer-3",
+        "verification": "confirmed",
+        "confidence": 0.7,
+        "reason": "Traced both categories: handlers.go:310-313 `continue`s on a nil challenge without appending to putKeys, so that attempt hits `default` at 228 on every later call and is re-GetMulti'd; and an attempt with ChallengeType == challengeType but WordPair == \"\" fails case 1 (222) and case 2 (226) and so is re-Put with the same empty pair every request \u2014 I confirmed isValidDependencyOutput (langlit_challenge_component.go:537-542) only guards freshly generated challenges, and DeleteLanglitChallenge exists at handlers.go:656, making the nil path reachable."
+      },
+      {
+        "id": "correctness-reviewer-4",
+        "verification": "confirmed",
+        "confidence": 0.6,
+        "reason": "handlers.go:209-213 slices `attempts[:window]` before any type filtering, and GetLanglitAttemptsOrdered (handlers.go:447-450) filters only on user_kaid with Order(\"-created_at\"), so the 15-attempt window spans all seven types in `challengeTypes` (langlit_challenge_component.go:34-42; the claim lists six of the seven, omitting parts-of-speech, which does not change the argument)."
+      },
+      {
+        "id": "correctness-reviewer-5",
+        "verification": "confirmed",
+        "confidence": 0.7,
+        "reason": "Read the loop at langlit_challenge_component.go:964-1069: every prompt value (previousSentence, previousNouns, correctForm/incorrectForm, themeSteering) is computed before line 964, avoidPairs is computed once at 836 and never mutated, and pairAvoidRegens is not passed to the model \u2014 so the `continue // regenerate with the avoid list emphasized` at 1066 re-sends byte-identical inputs."
+      },
+      {
+        "id": "correctness-reviewer-6",
+        "verification": "confirmed",
+        "confidence": 0.5,
+        "reason": "Grepped every ComputeProvenWordPairs/ComputeSeenCorrectPairs call site in handlers_test.go (lines 937, 974, 1010, 1017, 1039, 1090, 1148, 1184, 1230, 1261) \u2014 all pass a non-empty assignment ID, so the `_provenScopeSize` branch is unexercised; and langlit_challenge_component_test.go covers only selectBestSentence*/isValidDependencyOutput while the integration test has just the two classification cases, neither calling LanglitChallengeComponent. Overlaps test-adequacy-1 and test-adequacy-4.",
+        "corrected": {
+          "importance": "minor"
+        }
+      },
+      {
+        "id": "skill-auditor-1",
+        "verification": "refuted",
+        "confidence": 0.15,
+        "reason": "The skill rule quoted is real but is not violated: pkg/gcloud/datastore/transaction_safety.go:200-209 shows WrittenOnceModel errors only when `state._readFromDatastore` is set on the entity being written, and pkg/gcloud/datastore/transaction_safety_test.go:679 `TestWrittenOnceModelCanBeClobbered` explicitly asserts that Putting a fresh struct over an existing WrittenOnce key succeeds \u2014 so the fresh-entity write is sanctioned framework behavior, not a hidden bypass. The failure scenario is also wrong on both prongs: WrittenOnceModel never provided lost-update protection (that is WrittenInTransactionModel), and the fresh struct at handlers.go:318-326 carries all seven persisted fields of LanglitChallengeAttempt (models/langlit_challenge.go:283-313)."
+      },
+      {
+        "id": "skill-auditor-2",
+        "verification": "confirmed",
+        "confidence": 0.55,
+        "reason": "The skill rule is verbatim (.claude/skills/datastore/references/entities.md:118) and applies: the only queries on LanglitChallengeAttemptKind are handlers.go:448-450 (user_kaid + Order created_at) and handlers.go:491-498 (user_kaid, assignment_id), services/ai-guide/index.yaml:1149-1157 declares only the user_kaid/created_at index, and neither `challenge_type` nor `word_pair` is filtered or sorted anywhere \u2014 all the new filtering in _computeCorrectPairs is in-memory."
+      },
+      {
+        "id": "skill-auditor-ool-2",
+        "verification": "confirmed",
+        "confidence": 0.6,
+        "reason": "handlers.go:234-237 returns the error from _backfillLanglitAttempts straight out of _computeCorrectPairs, and langlit_challenge_component.go:827-829 / 842-844 return `nil, err` from the component \u2014 so a failed opportunistic PutMulti (handlers.go:332-334) fails the whole challenge fetch rather than degrading to an empty proven/seen set."
+      },
+      {
+        "id": "test-adequacy-1",
+        "verification": "confirmed",
+        "confidence": 0.6,
+        "reason": "All ten Compute* call sites in handlers_test.go (937, 974, 1010, 1017, 1039, 1090, 1148, 1184, 1230, 1261) pass a non-empty assignment ID, so the `else` branch at handlers.go:209-213 and the `_provenScopeSize` bound are never executed; the branch is a live path since componentContext.AssignmentID() is \"\" for non-assignment interactions. Downgraded from blocking: the untested branch is a three-line `min`+slice, and the substantive concern about it (window applied before type filtering) is already raised separately.",
+        "corrected": {
+          "label": "suggestion (non-blocking)"
+        }
+      },
+      {
+        "id": "test-adequacy-2",
+        "verification": "confirmed",
+        "confidence": 0.4,
+        "reason": "Confirmed from the diff that the new pair tests use only Performance []int{1}, []int{0} and []int{1, 1} \u2014 no mixed []int{1, 0} reaches a Compute* call. Stripping the medium tier: `_attemptAllCorrect` (handlers.go:262-269) returns false on the first non-1 element, and the existing []int{0} case already exercises that return, so the mixed-slot case adds little beyond loop iteration.",
+        "corrected": {
+          "importance": "minor"
+        }
+      },
+      {
+        "id": "test-adequacy-3",
+        "verification": "confirmed",
+        "confidence": 0.55,
+        "reason": "Both new backfill tests Put every challenge before calling, so neither the `datastore.OnlyNotFoundErrors` branch (handlers.go:298-302) nor the `challenge == nil` skip (handlers.go:310-314) is executed; DeleteLanglitChallenge at handlers.go:656 makes the orphaned-attempt case reachable in production."
+      },
+      {
+        "id": "test-adequacy-4",
+        "verification": "confirmed",
+        "confidence": 0.55,
+        "reason": "Listed the test functions in the package: langlit_challenge_component_test.go covers only selectBestSentenceFromClassificationResults and isValidDependencyOutput, and langlit_challenge_component_integration_test.go has exactly TestEnglishPath_UsesBinaryClassifier and TestNonEnglishPath_UsesLLMClassifier \u2014 neither calls LanglitChallengeComponent, so the wordPairType gate (808-810) and the regen/relax loop (1058-1067) are unexercised."
+      },
+      {
+        "id": "completeness-1",
+        "verification": "confirmed",
+        "confidence": 0.6,
+        "reason": "Verified in the diff that all three langlit config JSONs delete the identical 30/35/40/45/50 options from the practice-items SINGLE_SELECT, leaving 5-25, and the PR description/test plan never mention it; services/ai-guide/REVIEW.md calls config/prompt-adjacent changes Important, which supports asking the question."
+      },
+      {
+        "id": "completeness-2",
+        "verification": "confirmed",
+        "confidence": 0.65,
+        "reason": "Both paths verified: handlers.go:310-313 skips a nil challenge without appending to putKeys so the attempt stays cold forever, and an attempt with matching ChallengeType but empty WordPair falls through cases 222 and 226 into `default` at 228 and is re-hydrated and re-Put with the same empty value on every request \u2014 the field comment at models/langlit_challenge.go:307-311 does state that an empty pair is legitimate."
+      },
+      {
+        "id": "holistic-1",
+        "verification": "confirmed",
+        "confidence": 0.7,
+        "reason": "The three-arm switch at handlers.go:221-231 does classify a warm attempt with ChallengeType == challengeType and WordPair == \"\" into `default`, and _backfillLanglitAttempts writes back models.ExtractWordPair(challenge) which returns \"\" again (models/langlit_challenge.go:224-235) \u2014 so the attempt is re-Put identically each request; the doubling is real too, since langlit_challenge_component.go:821 and 836 both run _computeCorrectPairs over the same slice."
+      },
+      {
+        "id": "holistic-2",
+        "verification": "confirmed",
+        "confidence": 0.6,
+        "reason": "langlit_challenge_component.go:865-868 returns early on any cached unseen challenge, before avoidPairs is used at 978 \u2014 so the \u22651 seen-correct set only affects the cache-miss path while the \u22652 proven set only filters the cache path, and ComputeSeenCorrectPairs (836) still pays a second full scan of previousAttempts on every request; the stated scenario (one correct \u2192 provenPairs empty \u2192 cached challenge repeats the pair) follows directly."
+      },
+      {
+        "id": "first-principles-1",
+        "verification": "plausible",
+        "confidence": 0.3,
+        "reason": "The design tradeoff is arguable, but two of its supports do not hold up: the 5-key noun-extraction GetMulti at langlit_challenge_component.go:890 sits after the cache-hit early return at 865-868, so it is not 'unconditional' and the cache-hit path would need a new GetMulti under the proposed alternative; and the fresh-entity write is sanctioned framework behavior (pkg/gcloud/datastore/transaction_safety_test.go:679 TestWrittenOnceModelCanBeClobbered), not a policy workaround. The core cost/complexity question is still legitimate, so I kept it with the inaccurate supports removed.",
+        "corrected": {
+          "subject": "Is the word_pair/challenge_type denormalization plus lazy backfill worth it, given the scope is already \u226425 attempts and derivable from the challenge?",
+          "discussion": "Is the word_pair/challenge_type denormalization plus lazy backfill worth it, given the scope is already \u226425 attempts and derivable from the challenge? The stated goal is \"track word pairs\"; the chosen mechanism denormalizes `challenge_type` + `word_pair` onto `LanglitChallengeAttempt` so the computation can run \"without hydrating the challenge\" (models/langlit_challenge.go:302-312). But the scope `_computeCorrectPairs` works over is already bounded and small: assignment-scoped attempts, or `_provenScopeSize = 15` for unassigned practice \u2014 and this PR caps the teacher-facing practice-item option at 25.\n\nThe alternative would be to batch-hydrate the scoped attempts' challenges (`models.MakeLanglitChallengeKey` + one `GetMulti`, exactly what `_backfillLanglitAttempts` already does at handlers.go:293-302) and call `models.ExtractWordPair` in memory. That costs one batched key-get of \u226425 keys per request \u2014 including on the cache-hit path, which today pays nothing. What it buys is dropping the new datastore fields, the two-state cold/warm meaning, the three-branch switch plus its duplicate counting loop, and a `PutMulti` on a read path.\n\nWorth stating explicitly which side of that trade you intended, since the migration machinery is permanent surface area every future reader of the attempt model has to reason about.",
+          "suggestion": "Compute pairs by batch-hydrating the scoped attempts' challenges (`models.MakeLanglitChallengeKey` + one `GetMulti`) and calling `models.ExtractWordPair` in memory \u2014 dropping the `ChallengeType`/`WordPair` datastore fields, `_backfillLanglitAttempts`, and the cold/warm branching entirely. Keep the denormalization only if the \u226425-key get on the cache-hit path is judged too expensive."
+        }
+      },
+      {
+        "id": "first-principles-2",
+        "verification": "refuted",
+        "confidence": 0.15,
+        "reason": "The stated mechanism does not hold: langlit_challenge_component.go:1063-1065 relaxes after `pairAvoidMaxRegens = 1` and accepts a pair that is on the avoid list, so a seen-once pair can still be generated and served on the generation path; and the cached path is unfiltered for it too, since GetUnseenChallenge only skips `provenPairs` (\u22652) at handlers.go:411-414. A pair with exactly one correct is therefore reachable from both paths, so it is not 'stuck at 1 forever' and mastery is not unreachable. (The related, real observation \u2014 that the \u22651 and \u22652 tiers apply to different paths \u2014 is already carried by holistic-2.)"
+      },
+      {
+        "id": "conventions-1",
+        "verification": "confirmed",
+        "confidence": 0.45,
+        "reason": "Verified the placement mismatch: `ReconstructSentence` and `ReconstructIncorrectSentence` are methods on *UniversalDependencyText in models/universal_dependency_types.go:53 and 74, while the new `ExtractWordPairFromText(t *UniversalDependencyText)` is a free function in langlit_challenge.go:224 whose tests were added to universal_dependency_types_test.go. A placement preference, not a rule \u2014 kept as a minor suggestion.",
+        "corrected": {
+          "importance": "minor"
+        }
+      },
+      {
+        "id": "conventions-2",
+        "verification": "confirmed",
+        "confidence": 0.5,
+        "reason": "The constant's only read is handlers.go:211 inside the shared `_computeCorrectPairs`, and ComputeSeenCorrectPairs routes through it at handlers.go:177, so the `_proven`-scoped name and doc comment (handlers.go:21-25) do under-describe what the window governs; the root CLAUDE.md rule quoted (\"Name a function for what it actually does and the scope it covers\") is real, though it is stated for functions rather than constants."
+      },
+      {
+        "id": "documentation-1",
+        "verification": "confirmed",
+        "confidence": 0.75,
+        "reason": "The comment exists verbatim at handlers.go:409-410 (\"provenPairs is empty for non-FCW types, so this filter is a / no-op there.\"), and the only caller computes provenPairs whenever `wordPairType` holds \u2014 FCW, apostrophe usage, or SVA (langlit_challenge_component.go:808-810, 814-826) \u2014 so the filter is live for two of the three types the comment says it is inert for."
+      },
+      {
+        "id": "documentation-2",
+        "verification": "confirmed",
+        "confidence": 0.75,
+        "reason": "Both comments exist verbatim at handlers.go:215-217 and 227 and say FCW/non-FCW, while the code compares against the caller-supplied `challengeType` parameter at 222 and 226; the diff's own tests (TestComputeProvenWordPairs_ApostropheCounted, TestComputeSeenCorrectPairs_SubjectVerbAgreement) exercise the loop for apostrophe and SVA."
+      },
+      {
+        "id": "documentation-4",
+        "verification": "confirmed",
+        "confidence": 0.7,
+        "reason": "The field comments exist verbatim at models/langlit_challenge.go:302-311 and scope both sentences to FCW, but the consumer `_computeCorrectPairs` is parameterized by `challengeType` and its cold branch (handlers.go:228-231) treats an empty WordPair as needing migration for every type, not just FCW."
+      }
+    ]
+  }
+}
