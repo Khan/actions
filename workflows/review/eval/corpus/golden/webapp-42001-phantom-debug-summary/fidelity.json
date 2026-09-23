@@ -1,0 +1,105 @@
+{
+    "provenance": {
+        "repo": "Khan/webapp",
+        "pr": 42001,
+        "reviewId": 5114173827,
+        "commentId": 3934967849,
+        "url": "https://github.com/Khan/webapp/pull/42001#discussion_r3934967849",
+        "reviewedCommit": "5b4a84fbb520c3102467ed549078c72aff3cdd93",
+        "currentCommentCommit": "0af7838ecc750566c59a81f93c9755bc463f5cb5",
+        "baseCommit": "9715852a8971aff2354c4146f867aa6d0a3d8c90",
+        "originalLine": 180,
+        "originalBody": "**suggestion (non-blocking):** `errorToDebugMessage(err)` is passed a guaranteed-nil `err` in the phantom-user branch.\n\n<details><summary><sub>context</sub></summary>\n\n`errorToDebugMessage(err)` on line 180 is always passed a nil `err`. Control flow reaches line 175 only when `ktx.RequestUser()` on line 166 returned a nil error (the non-nil case returns at line 169), and `errorToDebugMessage` (line 157) short-circuits with `if err == nil { return nil }`. So every phantom/not-logged-in rejection returns `UNAUTHORIZED` with `debugMessage: null`, discarding the reason \u2014 while the `errors.Unauthorized()` constructed on line 176 for the log line is thrown away instead of being reused for the client-facing debug message. Introduced by this change; the four new tests all authenticate, so none covers this branch.\n\nA sketch, not a committable replacement:\n\n````\n\tif !acl.IsLoggedIn(ktx, acl.PhantomProhibited) {\n\t\tunauthorizedErr := errors.Unauthorized()\n\t\tktx.Log().Warn(unauthorizedErr)\n\t\treturn _mapErrorToAllClassrooms(\n\t\t\tgraphql.WritingCoachConfigErrorCodeUnauthorized,\n\t\t\t&response,\n\t\t\terrorToDebugMessage(unauthorizedErr),\n\t\t), nil\n\t}\n````\n\n<sub>found by correctness-reviewer</sub>\n\n</details>",
+        "replies": [
+            {
+                "id": 3935009871,
+                "body": "This isn't a suggestion. `errorToDebugMessage` handles `nil` errors."
+            }
+        ],
+        "evidence": [
+            {
+                "path": "services/humanities/resolvers/writing_coach_config.go",
+                "commit": "5b4a84fbb520c3102467ed549078c72aff3cdd93",
+                "startLine": 151,
+                "endLine": 182,
+                "url": "https://github.com/Khan/webapp/blob/5b4a84fbb520c3102467ed549078c72aff3cdd93/services/humanities/resolvers/writing_coach_config.go#L151-L182",
+                "fileSha256": "68d5d6a0af668123d057b8ccd6f640c3a692182650e0b4cc83dec7c038b4a60b",
+                "text": "\t// Prepare the response struct\n\tresponse := mapCreateWritingCoachAssignmentInputGraphQLToResponseGraphQL(*input.Assignment)\n\tif len(input.Assignment.Classrooms) == 0 {\n\t\treturn &response, nil\n\t}\n\n\terrorToDebugMessage := func(err error) *string {\n\t\tif err == nil {\n\t\t\treturn nil\n\t\t}\n\t\tmsg := errors.ErrorPresenter(ktx, err, true).Message\n\t\treturn &msg\n\t}\n\n\t// Request the user and ensure logged in\n\tuser, err := ktx.RequestUser()\n\tif err != nil {\n\t\tktx.Log().Warn(err)\n\t\treturn _mapErrorToAllClassrooms(\n\t\t\tgraphql.WritingCoachConfigErrorCodeUnauthorized,\n\t\t\t&response,\n\t\t\terrorToDebugMessage(err),\n\t\t), nil\n\t}\n\tif !acl.IsLoggedIn(ktx, acl.PhantomProhibited) {\n\t\tktx.Log().Warn(errors.Unauthorized())\n\t\treturn _mapErrorToAllClassrooms(\n\t\t\tgraphql.WritingCoachConfigErrorCodeUnauthorized,\n\t\t\t&response,\n\t\t\terrorToDebugMessage(err),\n\t\t), nil\n\t}"
+            },
+            {
+                "path": "services/humanities/resolvers/writing_coach_config.go",
+                "commit": "5b4a84fbb520c3102467ed549078c72aff3cdd93",
+                "startLine": 490,
+                "endLine": 520,
+                "url": "https://github.com/Khan/webapp/blob/5b4a84fbb520c3102467ed549078c72aff3cdd93/services/humanities/resolvers/writing_coach_config.go#L490-L520",
+                "fileSha256": "68d5d6a0af668123d057b8ccd6f640c3a692182650e0b4cc83dec7c038b4a60b",
+                "text": "\t\tlen(assignmentInput.Classrooms),\n\t)\n\tfor i, classroom := range assignmentInput.Classrooms {\n\t\tclassrooms[i] = &graphql.CreateWritingCoachAssignmentClassroom{\n\t\t\tAssignmentID:        nil,\n\t\t\tClassroomDescriptor: classroom.ClassroomDescriptor,\n\t\t\tStudentKaids:        classroom.StudentKaids,\n\t\t}\n\t}\n\terrors := make([]*graphql.WritingCoachConfigError, len(assignmentInput.Classrooms))\n\n\treturn graphql.CreateWritingCoachAssignmentsResult{\n\t\tClassrooms: classrooms,\n\t\tErrors:     errors,\n\t}\n}\n\nfunc _mapErrorToAllClassrooms(\n\terrorCode graphql.WritingCoachConfigErrorCode,\n\tresult *graphql.CreateWritingCoachAssignmentsResult,\n\tdebugMessage *string,\n) *graphql.CreateWritingCoachAssignmentsResult {\n\tfor i := range result.Errors {\n\t\tif result.Errors[i] == nil {\n\t\t\tresult.Errors[i] = &graphql.WritingCoachConfigError{}\n\t\t}\n\t\tresult.Errors[i].Code = errorCode\n\t\tresult.Errors[i].DebugMessage = debugMessage\n\t}\n\treturn result\n}"
+            },
+            {
+                "path": "services/humanities/resolvers/writing_coach_config.go",
+                "commit": "9715852a8971aff2354c4146f867aa6d0a3d8c90",
+                "startLine": 150,
+                "endLine": 170,
+                "url": "https://github.com/Khan/webapp/blob/9715852a8971aff2354c4146f867aa6d0a3d8c90/services/humanities/resolvers/writing_coach_config.go#L150-L170",
+                "fileSha256": "a2a040290216db2b323ed441b98894f7e7dde8e6f58ff551bca2f586195cd063",
+                "text": "\t_, err := ktx.RequestUser()\n\tif err != nil {\n\t\treturn &graphql.CreateWritingCoachAssignmentsResult{\n\t\t\tClassrooms: []*graphql.CreateWritingCoachAssignmentClassroom{},\n\t\t\tErrors:     []*graphql.WritingCoachConfigError{},\n\t\t}, nil\n\t}\n\n\tif !acl.IsLoggedIn(ktx, acl.PhantomProhibited) {\n\t\treturn &graphql.CreateWritingCoachAssignmentsResult{\n\t\t\tClassrooms: []*graphql.CreateWritingCoachAssignmentClassroom{},\n\t\t\tErrors:     []*graphql.WritingCoachConfigError{},\n\t\t}, nil\n\t}\n\n\t// TODO(LL-1080): Implement resolver\n\n\treturn &graphql.CreateWritingCoachAssignmentsResult{\n\t\tClassrooms: []*graphql.CreateWritingCoachAssignmentClassroom{},\n\t\tErrors:     nil,\n\t}, nil"
+            }
+        ]
+    },
+    "checks": [
+        {
+            "facet": "mainDefect",
+            "surface": "body",
+            "required": [
+                "UNAUTHORIZED",
+                "debugMessage.{0,10}(?:null|nil)|missing debug reason"
+            ],
+            "forbidden": []
+        },
+        {
+            "facet": "proposedFix",
+            "surface": "body",
+            "required": [
+                "(?:reus|Reuse).*?(?:Unauthorized|unauthorized|log)"
+            ],
+            "forbidden": []
+        },
+        {
+            "facet": "supportingAssertions",
+            "surface": "body",
+            "required": [],
+            "forbidden": [
+                "nil (?:argument|err) (?:causes|will cause) a (?:panic|crash)",
+                "bypasses authorization"
+            ]
+        },
+        {
+            "facet": "visibleConsequence",
+            "surface": "visible",
+            "required": [
+                "\\b(?:debug|diagnostic) (?:reason|message)\\b"
+            ],
+            "forbidden": []
+        }
+    ],
+    "originalPass": {
+        "mainDefect": true,
+        "proposedFix": true,
+        "supportingAssertions": true,
+        "visibleConsequence": false
+    },
+    "control": {
+        "kind": "hand-authored validator output, not a model result",
+        "claims": [
+            {
+                "id": "comment-3934967849",
+                "verification": "confirmed",
+                "confidence": 0.7,
+                "reason": "Supported core concern, corrected only the inaccurate details or visible summary.",
+                "corrected": {
+                    "subject": "Phantom-user rejections return UNAUTHORIZED without the debug reason, so reuse the unauthorized error for the message."
+                }
+            }
+        ]
+    }
+}
