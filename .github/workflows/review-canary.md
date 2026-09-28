@@ -15,6 +15,7 @@ on:
     # stop. No opened/reopened/ready_for_review: the canary is an explicit
     # per-PR ask, never ambient.
     types: [labeled, synchronize]
+    max-stack: -1  # run on all pull requests regardless of stack position
   status-comment: false
   # Same rationale as review.md: the fork guard in `if:` is the actor gate.
   # Applying a label additionally requires triage access, so a canary run is
