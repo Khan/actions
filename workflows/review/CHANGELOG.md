@@ -1,5 +1,11 @@
 # review
 
+## 2.0.0
+
+### Major Changes
+
+-   c710dbb: Adjusts so that consumers will have reviewers that check all layers of a stack.
+
 ## 1.26.0
 
 ### Minor Changes
