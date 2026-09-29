@@ -8,7 +8,7 @@ description: >
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    max-stack: -1  # run on all pull requests regardless of stack position
+    max-stack: -1  # KHAN/ACTIONS LOCAL OVERRIDE (until next review release): run on all pull requests regardless of stack position
   # Run automatically on every code push to a PR (`synchronize`) and when a PR
   # leaves draft (`ready_for_review`), not via a slash command. Reviewer requests
   # are gated on draft status in the prompt (Step 8). Do NOT post a "review
