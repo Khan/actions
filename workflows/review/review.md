@@ -8,7 +8,10 @@ description: >
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    max-stack: -1  # run on all pull requests regardless of stack position
+    # Review every PR in a stack, not just the top one (gh-aw's default): lower
+    # levels of a stack carry their own code changes and would otherwise never
+    # be reviewed before merging.
+    max-stack: -1
   # Run automatically on every code push to a PR (`synchronize`) and when a PR
   # leaves draft (`ready_for_review`), not via a slash command. Reviewer requests
   # are gated on draft status in the prompt (Step 8). Do NOT post a "review
