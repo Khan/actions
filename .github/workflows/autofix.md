@@ -13,6 +13,7 @@ on:
   # a value can never mean one thing as a label and another as a command.
   pull_request:
     types: [labeled]
+    max-stack: -1  # run on all pull requests regardless of stack position
   issue_comment:
     types: [created]
   # Acknowledge an `/autofix` comment immediately, the same way the reviewer
