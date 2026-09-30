@@ -1,12 +1,7 @@
 /**
- * Pre-agent staging: everything review.md Steps 1 and 3 used to have the
- * orchestrator fetch, compute, or invoke that never needed model output, run
- * as one deterministic step before the agent starts (slice 1 of the
- * deterministic-orchestrator migration; scoped 07-13 out of John's #246
- * review). The orchestrator wakes with files on disk instead of spending its
- * opening turns on GitHub fetches and CLI invocations, and the dispatch gate
- * (dispatch-gate.ts) stops trusting the orchestrator to have staged its own
- * rule inputs honestly.
+ * Pre-agent staging fetches and computes the review inputs that don't need
+ * model output (review.md Steps 1 and 3). It verifies the pinned sanitizer
+ * before AI spend and stages the files the orchestrator and dispatch gate read.
  *
  * What it stages under /tmp/gh-aw/review/ (the Step 1 contract):
  *
@@ -67,8 +62,8 @@
  * decideReReviewDepth, buildScopedDiff, annotateDiffLineNumbers), so the A/B
  * keeps measuring the production pipeline.
  *
- * Failure stance: the PR metadata, file, and review-thread fetches are hard
- * prerequisites (no staging, no review; the step fails before any AI spend).
+ * Failure stance: the sanitizer preflight and PR metadata, file, and
+ * review-thread fetches are hard prerequisites (no staging, no review).
  * Threads join that list rather than degrading to `[]` because an empty
  * staging is not the conservative direction: it silently drops the flip gate's
  * `keptBlockingCount` to zero, and a reduced-depth re-review may then flip a
@@ -98,6 +93,7 @@ import type {StagedThread} from "./rereview";
 import {stageTicketContext, type TicketFetch} from "./stage-ticket";
 import {runRereviewPlanCli} from "./rereview-mode";
 import {runCli as runRouterCli} from "./router";
+import {verifyRunnerSanitizer} from "./sanitizer-normalize";
 import {
     collectReviewThreads,
     isReviewBotAuthor,
@@ -378,6 +374,10 @@ export const runStagePrCli = async (
     ticketFetch: TicketFetch,
     options: StagePrOptions,
 ): Promise<StagePrResult> => {
+    // gh-aw installs its host scripts before this pre-agent step. Reject a
+    // broken dependency before any paid dispatch, not just at publication.
+    // The post-agent gate still reloads and checks the actual staged text.
+    verifyRunnerSanitizer();
     const {repo, prNumber, repoRoot} = options;
     const env = options.env ?? {};
     const cacheDir = options.cacheMemoryDir ?? CACHE_MEMORY_DIR;

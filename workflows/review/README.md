@@ -114,6 +114,10 @@ artifact keeps the original queue and the gate report for diagnosis. The gate
 proves the reviewer outputs were staged; script-driven dispatch makes skipping
 dispatch structural rather than detected.
 
+For submission-plan matching, the gate loads the consumer's pinned sanitizer from `${RUNNER_TEMP}/gh-aw/actions/sanitize_content_core.cjs`, a host path the agent can only read. It sanitizes the staged text once, but doesn't reparse tags or code spans in the already-sanitized queue. Both sides then receive the documented formatting and host-preserving URL comparison folds. Literal code tags remain distinct from parentheses, while same-host URL paths and queries retain their existing tolerance. Pre-agent staging verifies the loader, exports, and invocation path with fixed text after gh-aw installs its host scripts, so a missing or incompatible runtime fails before paid dispatch. The post-agent gate still reloads the runtime and compares the actual staged text: a missing, incompatible, or throwing sanitizer becomes an explicit blocking violation, with no workspace fallback or permissive legacy comparison. Both paths report only bounded failure categories (`config`, `missing`, `module-load`, `exports`, or `invocation`), never raw exception details or review text. Tests use hash-checked upstream fixtures offline, never as a production fallback.
+
+This comparison isn't a replay of the entire ingest step. Ingest-only mention allowlists, command/ref settings, and bot-mention limits may differ from the host gate's context. Differences outside the documented comparison tolerances still block. The gate doesn't resolve collaborators or teams over the network, or infer settings from agent-writable files.
+
 Most of the run is code rather than model turns. The prompt's Step 3 is one
 CLI invocation (`lib/dispatch.ts`) that runs triage, the reviewer fan-out
 (roster, budget cap, and planned sheds computed from `routing.json`), the
