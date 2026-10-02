@@ -14,8 +14,7 @@
  * matching by construction (that is why it reached the fallback), which the
  * deterministic suite pins as an invariant.
  *
- * Usage (live, requires ANTHROPIC_API_KEY, see lib/anthropic-api.ts; ~10 pairs
- * x samples x ~$0.0006):
+ * Usage (live, requires ANTHROPIC_API_KEY; ~10 pairs x samples x ~$0.0006):
  *
  *   pnpm dlx tsx workflows/review/eval/arbiter-calibration.ts [--samples 3]
  *

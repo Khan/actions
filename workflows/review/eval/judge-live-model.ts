@@ -5,7 +5,7 @@
  * importing that file's CLI entry point. `judge.ts` deliberately ships no API
  * client; this module is its single live implementation.
  *
- * Requires `ANTHROPIC_API_KEY` (see lib/anthropic-api.ts for the token).
+ * Requires `ANTHROPIC_API_KEY`.
  */
 
 import {

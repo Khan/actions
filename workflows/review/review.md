@@ -151,7 +151,8 @@ network:
     - github
     - "*.sentry.io"
     # ai-router, see ANTHROPIC_BASE_URL under engine.env.
-    - ai-router-6fmjyrz2lq-uc.a.run.app
+    # STOPSHIP(boris): ZND host for testing only.
+    - vznd-261002-boris-anthr---ai-router-6fmjyrz2lq-uc.a.run.app
 
 # OpenTelemetry: export the agent's run traces to Sentry over OTLP. Sentry's OTLP intake
 # authenticates with the `x-sentry-auth` header (value `sentry sentry_key=<public-key>`).
@@ -222,7 +223,11 @@ engine:
     # Anthropic traffic ai-router: so ANTHROPIC_API_KEY is an ai-router
     # token now, not an Anthropic key.  Cloud Run URL because Fastly cuts a
     # request off at 60s to first byte.
-    ANTHROPIC_BASE_URL: "https://ai-router-6fmjyrz2lq-uc.a.run.app/api/internal/_ai-router/anthropic"
+    #
+    # STOPSHIP(boris): ZND for testing only.  Swap to the prod Cloud Run URL
+    # (https://ai-router-6fmjyrz2lq-uc.a.run.app/...) once Khan/webapp#42564
+    # deploys, here and in network.allowed below.
+    ANTHROPIC_BASE_URL: "https://vznd-261002-boris-anthr---ai-router-6fmjyrz2lq-uc.a.run.app/api/internal/_ai-router/anthropic"
     ANTHROPIC_CUSTOM_HEADERS: "X-Ka-Ai-Router-Workload: async-prod"
 timeout-minutes: 80
 

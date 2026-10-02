@@ -19,7 +19,7 @@
  *     definitionally zero; that is the mode's cost, not a case failure, and
  *     the table shows it as recall against dollars.
  *
- * CLI (requires ANTHROPIC_API_KEY; see lib/anthropic-api.ts for the token):
+ * CLI (requires ANTHROPIC_API_KEY):
  *
  *   pnpm dlx tsx workflows/review/eval/rereview-sweep.ts
  *     [--modes <m,m,...>]    dial settings to sweep (default all four)

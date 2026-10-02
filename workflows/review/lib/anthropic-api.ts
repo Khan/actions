@@ -27,8 +27,11 @@
 
 // review.md's engine.env carries the same URL; anthropic-api.test.ts fails if
 // the two drift.
+//
+// STOPSHIP(boris): ZND for testing only.  Swap to the prod Cloud Run URL
+// (https://ai-router-6fmjyrz2lq-uc.a.run.app/...) once Khan/webapp#42564 deploys.
 export const AI_ROUTER_ANTHROPIC_URL =
-    "https://ai-router-6fmjyrz2lq-uc.a.run.app/api/internal/_ai-router/anthropic";
+    "https://vznd-261002-boris-anthr---ai-router-6fmjyrz2lq-uc.a.run.app/api/internal/_ai-router/anthropic";
 
 type Env = Record<string, string | undefined>;
 

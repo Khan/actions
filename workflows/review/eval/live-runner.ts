@@ -26,8 +26,7 @@
  * Every dispatch writes a transcript (see transcripts.ts) so the
  * investigation can be read, not just counted.
  *
- * Run one case end to end (requires ANTHROPIC_API_KEY; see
- * lib/anthropic-api.ts for the token):
+ * Run one case end to end (requires ANTHROPIC_API_KEY):
  *
  *   pnpm dlx tsx workflows/review/eval/live-runner.ts --case <case-id>
  *     [--review-md workflows/review/review.md] [--stage-root /tmp/review-live]

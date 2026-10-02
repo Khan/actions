@@ -11,7 +11,7 @@
  * from them.
  *
  * Run with `pnpm dlx tsx workflows/review/eval/live-judge.ts`. Requires
- * `ANTHROPIC_API_KEY` (see lib/anthropic-api.ts for the token). When `GITHUB_STEP_SUMMARY` is set (as in Actions), the
+ * `ANTHROPIC_API_KEY`. When `GITHUB_STEP_SUMMARY` is set (as in Actions), the
  * metrics/gates/judge report is also appended there so scheduled runs are
  * readable without opening the log.
  */
