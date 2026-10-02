@@ -25,6 +25,33 @@ pnpm test --run workflows/review/eval/
 
 ### Live A/B locally (requires `ANTHROPIC_API_KEY`)
 
+Live runs go through ai-router by default, so `ANTHROPIC_API_KEY` is your own
+**ai-router token**, not an Anthropic key. To get one, ask in
+[#khanmigo-infrastructure](https://khanacademy.slack.com/archives/C04SWCU7E9W)
+([how tokens are issued](https://khanacademy.atlassian.net/wiki/spaces/kore/pages/2687271007/Requesting+an+ai-router+token)),
+or mint it yourself from webapp if you have prod datastore access:
+
+```sh
+go run ./services/ai-router/cmd/tokens create --prod \
+  --owner you@khanacademy.org --purpose 'review eval'
+```
+
+Then pick where the calls go:
+
+| Target | `ANTHROPIC_BASE_URL` | `ANTHROPIC_API_KEY` |
+| --- | --- | --- |
+| prod ai-router (default) | unset | your prod ai-router token |
+| ai-router on your laptop | `http://localhost:8134/api/internal/_ai-router/anthropic` | the dev token in webapp's `genfiles/devserver/ai-router/secrets.env` |
+| Anthropic direct | `https://api.anthropic.com` | an Anthropic key |
+
+For the laptop row, run `make start-dev-server WORKING_ON=ai-router` in webapp
+first; it mints the dev token for you. A dev token only works against your
+local ai-router and a prod one only against prod, so the wrong pairing is a
+`403`. To tag your spend, set
+`ANTHROPIC_CUSTOM_HEADERS="X-Ka-Ai-Router-Config-Name: review-eval"`. Both the
+SDK sub-agents and the raw judge/arbiter calls pick up all three variables
+(`lib/anthropic-api.ts`).
+
 ```sh
 pnpm dlx tsx workflows/review/eval/live-ab.ts \
   [--base-ref <ref>]        # baseline review.md source (default: merge-base with origin/main)

@@ -42,17 +42,12 @@ import {
     FIXTURES_41609,
     FIXTURES_RULE2,
 } from "../lib/judge-prose-fixtures";
-
-const API_URL = "https://api.anthropic.com/v1/messages";
+import {messagesHeaders, messagesUrl} from "../lib/anthropic-api";
 
 const callModel = async (prompt: string): Promise<string> => {
-    const response = await fetch(API_URL, {
+    const response = await fetch(messagesUrl(), {
         method: "POST",
-        headers: {
-            "x-api-key": process.env["ANTHROPIC_API_KEY"] ?? "",
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
+        headers: messagesHeaders(),
         body: JSON.stringify({
             model: PINNED_PROSE_JUDGE_MODEL,
             max_tokens: 1024,

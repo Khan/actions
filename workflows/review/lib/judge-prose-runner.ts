@@ -16,6 +16,7 @@
 
 import type {ProseRunner} from "./judge-prose";
 import {usageOfResultMessage, type ModelTokens} from "./pricing";
+import {withRouterDefault} from "./anthropic-api";
 
 /**
  * Per-call ceiling. A judge call is a bounded classification over one
@@ -88,7 +89,7 @@ export const createJudgeRunner = async (
                     // a harness change cannot silently move it again.
                     effort: "high",
                     env: {
-                        ...process.env,
+                        ...withRouterDefault(),
                         ANTHROPIC_MAX_RETRIES: JUDGE_MAX_RETRIES,
                     },
                 },
