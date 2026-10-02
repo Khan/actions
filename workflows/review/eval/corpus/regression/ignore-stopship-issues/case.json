@@ -1,0 +1,148 @@
+{
+  "id": "ignore-stopship-issues",
+  "tags": [
+    "regression",
+    "smoke",
+    "clean",
+    "validation",
+    "live"
+  ],
+  "category": "clean",
+  "description": "AICODE-6 (from Khan/webapp#42105): a PR adds a report type and the author marks both known gaps themselves: `// STOPSHIP: switch to PublishReportDownloadedV2` above a v1 analytics call whose enum lacks the new value, and `// TODO(dev-reports): page this` on the new unpaged store method. The review must not post a blocking comment restating either (production restated the STOPSHIP twice, both downvoted: \"The stopship already blocks the PR. This comment is redundant and distracting\"). Nothing else is wrong, so the PR approves.",
+  "changedFiles": [
+    {
+      "path": "pkg/reports/analytics.go",
+      "status": "modified"
+    },
+    {
+      "path": "pkg/reports/export.go",
+      "status": "modified"
+    },
+    {
+      "path": "pkg/reports/export_test.go",
+      "status": "added"
+    },
+    {
+      "path": "pkg/reports/report_type.go",
+      "status": "modified"
+    },
+    {
+      "path": "pkg/reports/store.go",
+      "status": "modified"
+    }
+  ],
+  "routerConfig": {
+    "enabledReviewers": [
+      "holistic",
+      "completeness",
+      "test-adequacy",
+      "first-principles",
+      "conventions",
+      "documentation"
+    ]
+  },
+  "dimensions": {
+    "correctness": "assessed",
+    "skillSeverity": "assessed",
+    "patternTriage": "assessed"
+  },
+  "findings": [
+    {
+      "source": "correctness",
+      "finding": {
+        "schema_version": 2,
+        "id": "stopship-restated",
+        "lens": "correctness",
+        "anchor": {
+          "type": "line",
+          "path": "pkg/reports/analytics.go",
+          "line": 16,
+          "side": "RIGHT"
+        },
+        "severity": "blocking",
+        "confidence": 0.85,
+        "evidence_trace": [
+          "pkg/reports/analytics.go:16 adds `// STOPSHIP: switch to PublishReportDownloadedV2`",
+          "pkg/analytics/events.go ReportTypeV1 has no ASSESSMENT_PERFORMANCE value"
+        ],
+        "failure_scenario": "An ASSESSMENT_PERFORMANCE export publishes ReportDownloaded v1 with a report_type the v1 enum does not define.",
+        "producing_hunt": "correctness:line-scan",
+        "model_authored_prose": "STOPSHIP: ASSESSMENT_PERFORMANCE is published through the v1 analytics event whose report_type enum has no such value. Hold the merge until the v2 publisher exists."
+      }
+    }
+  ],
+  "validation": [
+    {
+      "id": "stopship-restated",
+      "verification": "refuted"
+    }
+  ],
+  "policyConflicts": [],
+  "diff": "diff --git a/pkg/reports/analytics.go b/pkg/reports/analytics.go\nindex 8ac0222..670fc31 100644\n--- a/pkg/reports/analytics.go\n+++ b/pkg/reports/analytics.go\n@@ -13,6 +13,9 @@ func SendDownloadedEvent(\n \treportType ReportType,\n \trowCount int,\n ) {\n+\t// STOPSHIP: switch to PublishReportDownloadedV2 once the v2 schema with\n+\t// ASSESSMENT_PERFORMANCE is deployed. The v1 report_type enum does not\n+\t// have the new value.\n \tanalytics.PublishReportDownloadedV1(\n \t\tctx,\n \t\tkaid,\ndiff --git a/pkg/reports/export.go b/pkg/reports/export.go\nindex 205ae91..d66aaa5 100644\n--- a/pkg/reports/export.go\n+++ b/pkg/reports/export.go\n@@ -21,6 +21,8 @@ func Export(\n \t\trows, err = store.MasteryClassRows(ctx, kaid)\n \tcase KhanmigoUsage:\n \t\trows, err = store.KhanmigoUsageRows(ctx, kaid)\n+\tcase AssessmentPerformance:\n+\t\trows, err = store.AssessmentPerformanceRows(ctx, kaid)\n \tdefault:\n \t\treturn nil, fmt.Errorf(\"unsupported report type %q\", reportType)\n \t}\ndiff --git a/pkg/reports/export_test.go b/pkg/reports/export_test.go\nnew file mode 100644\nindex 0000000..bfeeac0\n--- /dev/null\n+++ b/pkg/reports/export_test.go\n@@ -0,0 +1,32 @@\n+package reports\n+\n+import (\n+\t\"context\"\n+\t\"reflect\"\n+\t\"testing\"\n+)\n+\n+type fakeStore struct {\n+\tStore\n+\tassessmentRows [][]string\n+}\n+\n+func (s fakeStore) AssessmentPerformanceRows(\n+\tctx context.Context,\n+\tkaid string,\n+) ([][]string, error) {\n+\treturn s.assessmentRows, nil\n+}\n+\n+func TestExportAssessmentPerformance(t *testing.T) {\n+\twant := [][]string{{\"student\", \"score\"}, {\"kaid_1\", \"87\"}}\n+\tstore := fakeStore{assessmentRows: want}\n+\n+\tgot, err := Export(context.Background(), \"kaid_admin\", AssessmentPerformance, store)\n+\tif err != nil {\n+\t\tt.Fatalf(\"Export: %v\", err)\n+\t}\n+\tif !reflect.DeepEqual(got, want) {\n+\t\tt.Errorf(\"Export rows = %v, want %v\", got, want)\n+\t}\n+}\ndiff --git a/pkg/reports/report_type.go b/pkg/reports/report_type.go\nindex 34c6f36..61c9a01 100644\n--- a/pkg/reports/report_type.go\n+++ b/pkg/reports/report_type.go\n@@ -4,7 +4,8 @@ package reports\n type ReportType string\n \n const (\n-\tSkillsProgress ReportType = \"SKILLS_PROGRESS\"\n-\tMasteryClass   ReportType = \"MASTERY_CLASS\"\n-\tKhanmigoUsage  ReportType = \"KHANMIGO_USAGE\"\n+\tSkillsProgress        ReportType = \"SKILLS_PROGRESS\"\n+\tMasteryClass          ReportType = \"MASTERY_CLASS\"\n+\tKhanmigoUsage         ReportType = \"KHANMIGO_USAGE\"\n+\tAssessmentPerformance ReportType = \"ASSESSMENT_PERFORMANCE\"\n )\ndiff --git a/pkg/reports/store.go b/pkg/reports/store.go\nindex 7d4b74c..7c9ae5b 100644\n--- a/pkg/reports/store.go\n+++ b/pkg/reports/store.go\n@@ -7,4 +7,7 @@ type Store interface {\n \tSkillsProgressRows(ctx context.Context, kaid string) ([][]string, error)\n \tMasteryClassRows(ctx context.Context, kaid string) ([][]string, error)\n \tKhanmigoUsageRows(ctx context.Context, kaid string) ([][]string, error)\n+\t// TODO(dev-reports): page this once a district's assessment export\n+\t// passes ~10k rows; today's largest is ~2k.\n+\tAssessmentPerformanceRows(ctx context.Context, kaid string) ([][]string, error)\n }\n",
+  "expected": {
+    "verdict": "APPROVE",
+    "postedCommentCount": 0,
+    "mustNotPost": [
+      "stopship-restated"
+    ]
+  },
+  "live": {
+    "prContext": {
+      "title": "reports: add the ASSESSMENT_PERFORMANCE CSV export",
+      "description": "## Summary:\nAdds the assessment performance report to the CSV export.\n\nIssue: XXX-0000\n\n## Test plan:\ngo test ./pkg/reports/...",
+      "author": "dev-reports",
+      "baseBranch": "main"
+    },
+    "tree": "tree",
+    "mustNotFlagSpecs": [
+      {
+        "key": "stopship-restated",
+        "path": "pkg/reports/analytics.go",
+        "lineStart": 15,
+        "lineEnd": 24,
+        "blockingOnly": true,
+        "altLocations": [
+          {
+            "path": "pkg/reports/export.go",
+            "lineStart": 22,
+            "lineEnd": 34
+          },
+          {
+            "path": "pkg/reports/report_type.go",
+            "lineStart": 6,
+            "lineEnd": 11
+          }
+        ],
+        "mechanism": [
+          "STOPSHIP",
+          "v2 (analytics )?(event|schema)",
+          "ReportTypeV1",
+          "v1.{0,60}(enum|schema|event).{0,80}(no|lacks|missing|without|does not)",
+          "ASSESSMENT_PERFORMANCE.{0,80}(not in|missing from|absent from).{0,40}(v1|enum)",
+          "knowingly unfinished"
+        ]
+      },
+      {
+        "key": "todo-restated",
+        "path": "pkg/reports/store.go",
+        "lineStart": 9,
+        "lineEnd": 13,
+        "blockingOnly": true,
+        "altLocations": [
+          {
+            "path": "pkg/reports/export.go",
+            "lineStart": 22,
+            "lineEnd": 34
+          }
+        ],
+        "mechanism": [
+          "TODO",
+          "pag(e|es|ed|ing|inat)",
+          "unbounded",
+          "(no|without a?) (limit|bound)",
+          "(whole|entire) (export|result|set).{0,40}memory"
+        ]
+      }
+    ]
+  }
+}
