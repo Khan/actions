@@ -1,47 +1,27 @@
 {
-  "id": "regression-stopship-restated",
+  "id": "ignore-stopship-issues",
   "tags": [
     "regression",
-    "incident",
+    "clean",
     "live"
   ],
-  "category": "incident-repro",
-  "description": "Khan/webapp#42105 at 2ce0410 (AICODE-6). Adds the ASSESSMENT_PERFORMANCE CSV report type. The author left two `// STOPSHIP: update to v2` markers on the V1 analytics publish calls; production posted two `todo (blocking)` comments restating them, both downvoted (\"The stopship already blocks the PR. This comment is redundant and distracting\"). The same round caught two real bugs the author fixed: an inverted err check in _shouldUseAssessmentsStagingDB and no ASSESSMENT_PERFORMANCE case in mapInputToConfig. The review must still catch those and must not block on the author's own STOPSHIP markers.",
+  "category": "clean",
+  "description": "AICODE-6 (from Khan/webapp#42105): a PR adds a report type and the author marks the one known gap themselves with `// STOPSHIP: switch to PublishReportDownloadedV2` above a v1 analytics call whose enum lacks the new value. The STOPSHIP already blocks landing, so the review must not post a blocking comment restating it (production posted two, both downvoted: \"The stopship already blocks the PR. This comment is redundant and distracting\"). Nothing else is wrong, so the PR approves.",
   "changedFiles": [
     {
-      "path": "services/districts/models/district_report_config_assessment_performance.go",
-      "status": "added"
-    },
-    {
-      "path": "services/districts/models/district_report_config_test.go",
+      "path": "pkg/reports/analytics.go",
       "status": "modified"
     },
     {
-      "path": "services/districts/models/ephemeral_record_event.go",
+      "path": "pkg/reports/export.go",
       "status": "modified"
     },
     {
-      "path": "services/districts/models/ephemeral_record_event_filters.go",
+      "path": "pkg/reports/report_type.go",
       "status": "modified"
     },
     {
-      "path": "services/districts/reporting/reporting.go",
-      "status": "modified"
-    },
-    {
-      "path": "services/districts/resolvers/csv_export.go",
-      "status": "modified"
-    },
-    {
-      "path": "services/districts/resolvers/csv_export_test.go",
-      "status": "modified"
-    },
-    {
-      "path": "services/districts/resolvers/report.go",
-      "status": "modified"
-    },
-    {
-      "path": "services/districts/schema.graphql",
+      "path": "pkg/reports/store.go",
       "status": "modified"
     }
   ],
@@ -50,187 +30,47 @@
     "skillSeverity": "assessed",
     "patternTriage": "assessed"
   },
-  "findings": [
-    {
-      "source": "correctness",
-      "finding": {
-        "schema_version": 2,
-        "id": "staging-db-inverted-err",
-        "lens": "correctness",
-        "anchor": {
-          "type": "line",
-          "path": "services/districts/resolvers/csv_export.go",
-          "line": 296,
-          "side": "RIGHT"
-        },
-        "severity": "blocking",
-        "confidence": 0.95,
-        "evidence_trace": [
-          "services/districts/resolvers/csv_export.go:296 returns err != nil && cookie != nil && cookie.Value == \"true\"",
-          "RequestCookie returns a nil cookie whenever err is non-nil"
-        ],
-        "failure_scenario": "A request with ax-db-staging=true gets err == nil, so the function returns false and the report runs against the production assessments DB; with the cookie absent err != nil but cookie is nil, so it can never return true.",
-        "producing_hunt": "correctness:line-scan",
-        "model_authored_prose": "`err != nil` should be `err == nil`: as written this can never return true, so the staging-DB cookie is ignored."
-      }
-    },
-    {
-      "source": "correctness",
-      "finding": {
-        "schema_version": 2,
-        "id": "mapinputtoconfig-missing-assessment-case",
-        "lens": "correctness",
-        "anchor": {
-          "type": "line",
-          "path": "services/districts/resolvers/csv_export.go",
-          "line": 298,
-          "side": "RIGHT"
-        },
-        "severity": "blocking",
-        "confidence": 0.9,
-        "evidence_trace": [
-          "services/districts/schema.graphql:4797 adds ASSESSMENT_PERFORMANCE to the public AdminReportType enum",
-          "services/districts/resolvers/csv_export.go:306 mapInputToConfig switches on the report type with no AssessmentPerformance case",
-          "services/districts/resolvers/csv_export.go:387 the default branch returns \"no report config mapping for report type\""
-        ],
-        "failure_scenario": "A requestCSVExport for ASSESSMENT_PERFORMANCE reaches mapInputToConfig, falls through to the default branch and errors, so every request for the new report type fails.",
-        "producing_hunt": "correctness:missing-case",
-        "model_authored_prose": "mapInputToConfig has no ASSESSMENT_PERFORMANCE case, so the live resolver path errors for the new report type. buildConfigFromFilters has the case; this one needs it too."
-      }
-    }
-  ],
+  "findings": [],
   "policyConflicts": [],
-  "diff": "diff --git a/services/districts/models/district_report_config_assessment_performance.go b/services/districts/models/district_report_config_assessment_performance.go\nnew file mode 100644\n--- /dev/null\n+++ b/services/districts/models/district_report_config_assessment_performance.go\n@@ -0,0 +1,110 @@\n+// DistrictReportConfigAssessmentPerformance \u2014 Datastore model holding\n+// ASSESSMENT_PERFORMANCE admin-report filter fields, keyed by the\n+// EphemeralRecordEvent id.\n+package models\n+\n+import (\n+\t\"context\"\n+\n+\t\"github.com/Khan/webapp/pkg/gcloud/datastore\"\n+\t\"github.com/Khan/webapp/pkg/kacontext\"\n+\t\"github.com/Khan/webapp/pkg/lib/timectx\"\n+)\n+\n+var DistrictReportConfigAssessmentPerformanceKind = datastore.RegisterKind(\n+\t\"DistrictReportConfigAssessmentPerformance\",\n+\tnew(DistrictReportConfigAssessmentPerformance),\n+)\n+\n+// DistrictReportConfigAssessmentPerformance persists AssessmentPerformance\n+// admin-report filter fields in Datastore entities keyed by the\n+// EphemeralRecordEvent id for simple loading.\n+type DistrictReportConfigAssessmentPerformance struct {\n+\tdatastore.BaseModel\n+\n+\tDistrictReportConfigBase\n+\n+\t// The students for the matching grades to include in the report.\n+\t// If the grades is empty, it should be all grades in the selected\n+\t// schools.\n+\tGrades []GradeLevel `datastore:\"grades,noindex\"`\n+\n+\t// The ID of the assessment series to include data for. This maps to a set\n+\t// of three individual assessments in the assessments database: one for\n+\t// beginning of year, one for middle, and one for end.\n+\tAssessmentSeriesID string `datastore:\"assessment_series_id,noindex\"`\n+\n+\t// The ID of the school year (as defined by the assessments database) to\n+\t// include data for.\n+\tSchoolYearID string `datastore:\"school_year_id,noindex\"`\n+\n+\t// True if the report is driven by the assessments \"staging\" database,\n+\t// which contains fake assessments and test data.\n+\tUsesStagingDB bool `datastore:\"uses_staging_db,noindex\"`\n+}\n+\n+// MakeDistrictReportConfigAssessmentPerformanceKey creates a datastore NameKey\n+// for DistrictReportConfigAssessmentPerformance with the given id. This must\n+// match the owner's id (an EphemeralRecordEvent or\n+// EphemeralRecordEventSchedule) in order for them to be linked.\n+func MakeDistrictReportConfigAssessmentPerformanceKey(id string) *datastore.Key {\n+\treturn datastore.NameKey(DistrictReportConfigAssessmentPerformanceKind, id, nil)\n+}\n+\n+// DistrictReportConfig interface implementation\n+\n+func (m *DistrictReportConfigAssessmentPerformance) GetReportType() ReportType {\n+\treturn m.ReportType\n+}\n+\n+func (m *DistrictReportConfigAssessmentPerformance) Base() *DistrictReportConfigBase {\n+\treturn &m.DistrictReportConfigBase\n+}\n+\n+// SetOwner keys the config to the owner and inherits its expiration.\n+func (m *DistrictReportConfigAssessmentPerformance) SetOwner(owner ReportConfigOwner) {\n+\tm.Key = MakeDistrictReportConfigAssessmentPerformanceKey(owner.GetID())\n+\tm.ExpiresAt = owner.GetExpiresAt()\n+}\n+\n+// Datastore Interface Implementations\n+\n+func (\n+\tm *DistrictReportConfigAssessmentPerformance,\n+) TransactionSafetyPolicy() datastore.TransactionSafetyOption {\n+\treturn datastore.WrittenInTransactionModel\n+}\n+\n+func (m *DistrictReportConfigAssessmentPerformance) ModelHoldsUserSpecificData() bool {\n+\treturn false\n+}\n+\n+func (m *DistrictReportConfigAssessmentPerformance) Load(ps []datastore.Property) error {\n+\t_deprecatedRecordProps := []string{}\n+\tvalidProps := datastore.RemoveProperties(ps, _deprecatedRecordProps)\n+\terr := datastore.LoadStructAndUnmarshalJSON(m, validProps)\n+\n+\treturn err\n+}\n+\n+func (m *DistrictReportConfigAssessmentPerformance) PreSave(ctx context.Context) error {\n+\tif err := m.BaseModel.PreSave(ctx); err != nil {\n+\t\treturn err\n+\t}\n+\n+\tif err := datastore.CheckTransactionSafetyForPut(m); err != nil {\n+\t\treturn err\n+\t}\n+\n+\tvar ktx timectx.KAContext = kacontext.Upgrade(ctx)\n+\n+\tif m.CreatedAt.IsZero() {\n+\t\tm.CreatedAt = ktx.Time().Now()\n+\t}\n+\n+\treturn nil\n+}\n+\n+func (m *DistrictReportConfigAssessmentPerformance) Save() ([]datastore.Property, error) {\n+\treturn datastore.SaveStructAndMarshalJSON(m)\n+}\ndiff --git a/services/districts/models/district_report_config_test.go b/services/districts/models/district_report_config_test.go\n--- a/services/districts/models/district_report_config_test.go\n+++ b/services/districts/models/district_report_config_test.go\n@@ -119,6 +119,15 @@ func (suite *districtReportConfigSuite) TestDistrictReportConfigFields() {\n \t\t\t\t\"TeacherKaids\": {\"[]string\", \"teacher_kaids,noindex\"},\n \t\t\t},\n \t\t},\n+\t\t\"assessment_performance\": {\n+\t\t\tconfig: &DistrictReportConfigAssessmentPerformance{},\n+\t\t\town: map[string]fieldSpec{\n+\t\t\t\t\"Grades\":             {\"[]models.GradeLevel\", \"grades,noindex\"},\n+\t\t\t\t\"AssessmentSeriesID\": {\"string\", \"assessment_series_id,noindex\"},\n+\t\t\t\t\"SchoolYearID\":       {\"string\", \"school_year_id,noindex\"},\n+\t\t\t\t\"UsesStagingDB\":      {\"bool\", \"uses_staging_db,noindex\"},\n+\t\t\t},\n+\t\t},\n \t}\n \tfor name, tc := range cases {\n \t\tsuite.Run(name, func() {\ndiff --git a/services/districts/models/ephemeral_record_event.go b/services/districts/models/ephemeral_record_event.go\n--- a/services/districts/models/ephemeral_record_event.go\n+++ b/services/districts/models/ephemeral_record_event.go\n@@ -235,6 +235,7 @@ const (\n \tMasteryClass                  ReportType = \"MASTERY_CLASS\"\n \tKhanmigoUsage                 ReportType = \"KHANMIGO_USAGE\"\n \tCourseChallengeSkills         ReportType = \"COURSE_CHALLENGE_SKILLS\"\n+\tAssessmentPerformance         ReportType = \"ASSESSMENT_PERFORMANCE\"\n )\n \n type RollupType string\ndiff --git a/services/districts/models/ephemeral_record_event_filters.go b/services/districts/models/ephemeral_record_event_filters.go\n--- a/services/districts/models/ephemeral_record_event_filters.go\n+++ b/services/districts/models/ephemeral_record_event_filters.go\n@@ -83,6 +83,22 @@ type EphemeralRecordEventFilters struct {\n \t// Only valid for the MAP_DI2 report types.\n \tTestType LearningPathTestType `datastore:\"learning_path_test_type,omitempty\"`\n \n+\t// The ID of the assessment series to include data for. This maps to a set\n+\t// of three individual assessments in the assessments database: one for\n+\t// beginning of year, one for middle, and one for end.\n+\t// Only valid for the ASSESSMENT_PERFORMANCE report type.\n+\tAssessmentSeriesID string `datastore:\"assessment_series_id,omitempty\"`\n+\n+\t// The ID of the school year (as defined by the assessments database) to\n+\t// include data for.\n+\t// Only valid for the ASSESSMENT_PERFORMANCE report type.\n+\tAssessmentsSchoolYearID string `datastore:\"assessments_school_year_id,omitempty\"`\n+\n+\t// True if the report is driven by the assessments \"staging\" database,\n+\t// which contains fake assessments and test data.\n+\t// Only valid for the ASSESSMENT_PERFORMANCE report type.\n+\tUsesAssessmentsStagingDB bool `datastore:\"uses_assessments_staging_db,omitempty\"`\n+\n \tReportType ReportType `datastore:\"report_type,noindex\"`\n \n \t// True if the master reports include units as well as course mastery\ndiff --git a/services/districts/reporting/reporting.go b/services/districts/reporting/reporting.go\n--- a/services/districts/reporting/reporting.go\n+++ b/services/districts/reporting/reporting.go\n@@ -215,6 +215,14 @@ func buildConfigFromFilters(\n \t\t\tCourseIDs:                filters.CourseIDs,\n \t\t\tTeacherKaids:             filters.TeacherKaids,\n \t\t}, nil\n+\tcase models.AssessmentPerformance:\n+\t\treturn &models.DistrictReportConfigAssessmentPerformance{\n+\t\t\tDistrictReportConfigBase: base,\n+\t\t\tGrades:                   filters.Grades,\n+\t\t\tAssessmentSeriesID:       filters.AssessmentSeriesID,\n+\t\t\tSchoolYearID:             filters.AssessmentsSchoolYearID,\n+\t\t\tUsesStagingDB:            filters.UsesAssessmentsStagingDB,\n+\t\t}, nil\n \tdefault:\n \t\treturn nil, errors.Internal(\n \t\t\t\"no report config mapping for report type\",\n@@ -821,6 +829,7 @@ func SendAdminReportAnalyticsEvent(\n \tnumDays := int64(report.EndDate.Sub(report.StartDate).Hours() / 24)\n \n \tif eventKind == AdminReportAnalyticsEventKindDownloaded {\n+\t\t// STOPSHIP: update to v2 with ASSESSMENT_PERFORMANCE report type\n \t\tanalytics_events.PublishDistrictsAdminCSVDownloadedTIV1(\n \t\t\tctx,\n \t\t\treport.Kaid,\n@@ -845,6 +854,7 @@ func SendAdminReportAnalyticsEvent(\n \t} else {\n \t\tcancelled := eventKind == AdminReportAnalyticsEventKindCancelled\n \n+\t\t// STOPSHIP: update to v2 with ASSESSMENT_PERFORMANCE report type\n \t\tanalytics_events.PublishDistrictsAdminCSVRequestedTIV1(\n \t\t\tctx,\n \t\t\treport.Kaid,\ndiff --git a/services/districts/resolvers/csv_export.go b/services/districts/resolvers/csv_export.go\n--- a/services/districts/resolvers/csv_export.go\n+++ b/services/districts/resolvers/csv_export.go\n@@ -11,6 +11,7 @@ import (\n \t\"github.com/Khan/webapp/pkg/lib/errors\"\n \t\"github.com/Khan/webapp/pkg/lib/generic\"\n \t\"github.com/Khan/webapp/pkg/lib/timectx\"\n+\t\"github.com/Khan/webapp/pkg/web\"\n \t\"github.com/Khan/webapp/pkg/web/gqlclient\"\n \t\"github.com/Khan/webapp/services/districts/generated/graphql\"\n \t\"github.com/Khan/webapp/services/districts/models\"\n@@ -24,13 +25,14 @@ func validateAndBuildFilters(\n \t\tdatastore.KAContext\n \t\tgqlclient.KAContext\n \t\ttimectx.KAContext\n+\t\tweb.CookieContext\n \t},\n \tinput graphql.RequestCSVExportInput,\n ) (*models.EphemeralRecordEventFilters, error) {\n \tif err := validateCSVExportInput(ctx, input); err != nil {\n \t\treturn nil, err\n \t}\n-\treturn mapInputToFilters(input), nil\n+\treturn mapInputToFilters(ctx, input), nil\n }\n \n func mapEphemeralRecordToAdminReport(\n@@ -53,37 +55,47 @@ func mapEphemeralRecordToAdminReport(\n \tif record.DomainID != \"\" {\n \t\tdomain = &graphql.Domain{ContentID: record.DomainID, KaLocale: kaLocale}\n \t}\n+\tvar assessmentSeriesID, assessmentsSchoolYearID *string\n+\tvar usesAssessmentsStagingDB *bool\n+\tif record.ReportType == models.AssessmentPerformance {\n+\t\tassessmentSeriesID = &record.AssessmentSeriesID\n+\t\tassessmentsSchoolYearID = &record.AssessmentsSchoolYearID\n+\t\tusesAssessmentsStagingDB = &record.UsesAssessmentsStagingDB\n+\t}\n \n \treturn &graphql.AdminReport{\n-\t\tID:                    record.GetID(),\n-\t\tKaid:                  record.Kaid,\n-\t\tCreatedAt:             &record.CreatedAt,\n-\t\tBlobCreatedAt:         &record.BlobCreatedAt,\n-\t\tBlobExpiresAt:         &record.BlobExpiresAt,\n-\t\tObjectName:            &record.ObjectName,\n-\t\tStatus:                reportStatusFromEphemeralStatus(record.EphemeralStatus),\n-\t\tReportType:            graphql.AdminReportType(record.ReportType),\n-\t\tEndDate:               record.EndDate,\n-\t\tStartDate:             record.StartDate,\n-\t\tSchools:               schools,\n-\t\tGrades:                rostering.CastStrings[string](record.Grades),\n-\t\tGradeLevels:           convertToDistrictGradeInfos(record.Grades, record.SelectedNodeID),\n-\t\tCourseSISValues:       record.CourseSISs,\n-\t\tTeacherKaids:          record.TeacherKaids,\n-\t\tCourse:                course,\n-\t\tCourses:               courses,\n-\t\tGroupBy:               rostering.CastStrings[graphql.AdminReportField](record.GroupBy),\n-\t\tDomain:                domain,\n-\t\tStrandKey:             generic.PointerOrNilIfZero(record.StrandKey),\n-\t\tBands:                 record.Bands,\n-\t\tFileName:              &record.FileName,\n-\t\tFileSize:              &record.FileSize,\n-\t\tNotifyByEmail:         &record.NotifyByEmail,\n-\t\tEphemeralRecordEvent:  record,\n-\t\tTotalSchools:          record.TotalSchools,\n-\t\tNumSchoolsCompleted:   record.FinishedSchools,\n-\t\tTotalDistricts:        record.TotalDistricts,\n-\t\tNumDistrictsCompleted: record.FinishedDistricts,\n+\t\tID:                       record.GetID(),\n+\t\tKaid:                     record.Kaid,\n+\t\tCreatedAt:                &record.CreatedAt,\n+\t\tBlobCreatedAt:            &record.BlobCreatedAt,\n+\t\tBlobExpiresAt:            &record.BlobExpiresAt,\n+\t\tObjectName:               &record.ObjectName,\n+\t\tStatus:                   reportStatusFromEphemeralStatus(record.EphemeralStatus),\n+\t\tReportType:               graphql.AdminReportType(record.ReportType),\n+\t\tEndDate:                  record.EndDate,\n+\t\tStartDate:                record.StartDate,\n+\t\tSchools:                  schools,\n+\t\tGrades:                   rostering.CastStrings[string](record.Grades),\n+\t\tGradeLevels:              convertToDistrictGradeInfos(record.Grades, record.SelectedNodeID),\n+\t\tCourseSISValues:          record.CourseSISs,\n+\t\tTeacherKaids:             record.TeacherKaids,\n+\t\tCourse:                   course,\n+\t\tCourses:                  courses,\n+\t\tGroupBy:                  rostering.CastStrings[graphql.AdminReportField](record.GroupBy),\n+\t\tDomain:                   domain,\n+\t\tStrandKey:                generic.PointerOrNilIfZero(record.StrandKey),\n+\t\tBands:                    record.Bands,\n+\t\tAssessmentSeriesID:       assessmentSeriesID,\n+\t\tAssessmentsSchoolYearID:  assessmentsSchoolYearID,\n+\t\tUsesAssessmentsStagingDb: usesAssessmentsStagingDB,\n+\t\tFileName:                 &record.FileName,\n+\t\tFileSize:                 &record.FileSize,\n+\t\tNotifyByEmail:            &record.NotifyByEmail,\n+\t\tEphemeralRecordEvent:     record,\n+\t\tTotalSchools:             record.TotalSchools,\n+\t\tNumSchoolsCompleted:      record.FinishedSchools,\n+\t\tTotalDistricts:           record.TotalDistricts,\n+\t\tNumDistrictsCompleted:    record.FinishedDistricts,\n \t}\n }\n \n@@ -103,6 +115,13 @@ func mapEphemeralRecordEventScheduleToAdminReportSchedule(\n \tif record.DomainID != \"\" {\n \t\tdomain = &graphql.Domain{ContentID: record.DomainID, KaLocale: kaLocale}\n \t}\n+\tvar assessmentSeriesID, assessmentsSchoolYearID *string\n+\tvar usesAssessmentsStagingDB *bool\n+\tif record.ReportType == models.AssessmentPerformance {\n+\t\tassessmentSeriesID = &record.AssessmentSeriesID\n+\t\tassessmentsSchoolYearID = &record.AssessmentsSchoolYearID\n+\t\tusesAssessmentsStagingDB = &record.UsesAssessmentsStagingDB\n+\t}\n \treturn &graphql.AdminReportSchedule{\n \t\tID:         record.GetID(),\n \t\tKaid:       record.Kaid,\n@@ -117,15 +136,18 @@ func mapEphemeralRecordEventScheduleToAdminReportSchedule(\n \t\t\trecord.Grades,\n \t\t\trecord.SelectedNodeID,\n \t\t),\n-\t\tCourseSISValues: record.CourseSISs,\n-\t\tTeacherKaids:    record.TeacherKaids,\n-\t\tCourses:         courses,\n-\t\tGroupBy:         rostering.CastStrings[graphql.AdminReportField](record.GroupBy),\n-\t\tDomain:          domain,\n-\t\tStrandKey:       generic.PointerOrNilIfZero(record.StrandKey),\n-\t\tBands:           record.Bands,\n-\t\tNotifyByEmail:   &record.NotifyByEmail,\n-\t\tCronSchedule:    record.CronSchedule,\n+\t\tCourseSISValues:          record.CourseSISs,\n+\t\tTeacherKaids:             record.TeacherKaids,\n+\t\tCourses:                  courses,\n+\t\tGroupBy:                  rostering.CastStrings[graphql.AdminReportField](record.GroupBy),\n+\t\tDomain:                   domain,\n+\t\tStrandKey:                generic.PointerOrNilIfZero(record.StrandKey),\n+\t\tBands:                    record.Bands,\n+\t\tAssessmentSeriesID:       assessmentSeriesID,\n+\t\tAssessmentsSchoolYearID:  assessmentsSchoolYearID,\n+\t\tUsesAssessmentsStagingDb: usesAssessmentsStagingDB,\n+\t\tNotifyByEmail:            &record.NotifyByEmail,\n+\t\tCronSchedule:             record.CronSchedule,\n \t}\n }\n \n@@ -229,29 +251,51 @@ func rollupTypeFromGraphQL(rollupType *graphql.AdminRollupType) models.RollupTyp\n \treturn models.RollupType(*rollupType)\n }\n \n-func mapInputToFilters(input graphql.RequestCSVExportInput) *models.EphemeralRecordEventFilters {\n+func mapInputToFilters(\n+\tctx web.CookieContext,\n+\tinput graphql.RequestCSVExportInput,\n+) *models.EphemeralRecordEventFilters {\n \treturn &models.EphemeralRecordEventFilters{\n-\t\tChildIDs:           input.Settings.ChildIDs,\n-\t\tSelectedNodeID:     input.SelectedNodeID,\n-\t\tReportType:         models.ReportType(input.ReportType),\n-\t\tStartDate:          input.StartDate,\n-\t\tEndDate:            input.EndDate,\n-\t\tDuration:           input.EndDate.Sub(input.StartDate),\n-\t\tGrades:             rostering.CastStrings[models.GradeLevel](input.Settings.Grades),\n-\t\tCourseSISs:         input.Settings.CourseSISValues,\n-\t\tTeacherKaids:       input.Settings.TeacherKaids,\n-\t\tCourseIDs:          input.Settings.CourseIDs,\n-\t\tGroupBy:            reporting.GroupByFromCombineByCourse(input.CombineByCourse),\n-\t\tCombineByCourse:    input.CombineByCourse,\n-\t\tDomainID:           generic.Deref(input.Settings.DomainID),\n-\t\tStrandKey:          generic.Deref(input.Settings.StrandKey),\n-\t\tBands:              input.Settings.Bands,\n-\t\tOnlyTeacherCourses: !input.ShowAllWork,\n-\t\tRollupType:         rollupTypeFromGraphQL(input.Settings.RollupType),\n-\t\tTestType:           models.LearningPathTestType(generic.Deref(input.Settings.TestType)),\n+\t\tChildIDs:                 input.Settings.ChildIDs,\n+\t\tSelectedNodeID:           input.SelectedNodeID,\n+\t\tReportType:               models.ReportType(input.ReportType),\n+\t\tStartDate:                input.StartDate,\n+\t\tEndDate:                  input.EndDate,\n+\t\tDuration:                 input.EndDate.Sub(input.StartDate),\n+\t\tGrades:                   rostering.CastStrings[models.GradeLevel](input.Settings.Grades),\n+\t\tCourseSISs:               input.Settings.CourseSISValues,\n+\t\tTeacherKaids:             input.Settings.TeacherKaids,\n+\t\tCourseIDs:                input.Settings.CourseIDs,\n+\t\tGroupBy:                  reporting.GroupByFromCombineByCourse(input.CombineByCourse),\n+\t\tCombineByCourse:          input.CombineByCourse,\n+\t\tDomainID:                 generic.Deref(input.Settings.DomainID),\n+\t\tStrandKey:                generic.Deref(input.Settings.StrandKey),\n+\t\tBands:                    input.Settings.Bands,\n+\t\tOnlyTeacherCourses:       !input.ShowAllWork,\n+\t\tRollupType:               rollupTypeFromGraphQL(input.Settings.RollupType),\n+\t\tTestType:                 models.LearningPathTestType(generic.Deref(input.Settings.TestType)),\n+\t\tAssessmentSeriesID:       generic.Deref(input.Settings.AssessmentSeriesID),\n+\t\tAssessmentsSchoolYearID:  generic.Deref(input.Settings.AssessmentsSchoolYearID),\n+\t\tUsesAssessmentsStagingDB: _shouldUseAssessmentsStagingDB(ctx),\n \t}\n }\n \n+// _assessmentsStagingDBCookieName is the name of the cookie used to determine\n+// whether to use the staging database.\n+const _assessmentsStagingDBCookieName = \"ax-db-staging\"\n+\n+// _shouldUseAssessmentsStagingDB checks whether the generated report should be\n+// driven by the assessments \"staging\" database, which contains fake\n+// assessments and test data. It is sent as a cookie, rather than a field on\n+// the mutation, for consistency with the assessments service and so that it\n+// can be controlled without a UI input.\n+func _shouldUseAssessmentsStagingDB(\n+\tctx web.CookieContext,\n+) bool {\n+\tcookie, err := ctx.RequestCookie(_assessmentsStagingDBCookieName)\n+\treturn err != nil && cookie != nil && cookie.Value == \"true\"\n+}\n+\n // mapInputToConfig maps a CSV export request to the per-report-type config,\n // reading the GraphQL input directly. Returns an error for report types with no\n // config mapping; every report type that can be stored must map to a config.\ndiff --git a/services/districts/resolvers/csv_export_test.go b/services/districts/resolvers/csv_export_test.go\n--- a/services/districts/resolvers/csv_export_test.go\n+++ b/services/districts/resolvers/csv_export_test.go\n@@ -6,13 +6,14 @@ import (\n \t\"time\"\n \n \t\"github.com/Khan/webapp/dev/khantest\"\n+\t\"github.com/Khan/webapp/dev/servicetest\"\n \t\"github.com/Khan/webapp/pkg/lib/generic\"\n \t\"github.com/Khan/webapp/services/districts/generated/graphql\"\n \t\"github.com/Khan/webapp/services/districts/models\"\n \t\"github.com/Khan/webapp/services/districts/rostering\"\n )\n \n-type csvExportSuite struct{ khantest.Suite }\n+type csvExportSuite struct{ servicetest.Suite }\n \n // --- rollupTypeFromGraphQL ---\n \n@@ -217,7 +218,7 @@ func (suite *csvExportSuite) TestMapInputToFilters() {\n \t}\n \tfor _, tt := range tests {\n \t\tsuite.Run(tt.name, func() {\n-\t\t\tgot := mapInputToFilters(tt.input)\n+\t\t\tgot := mapInputToFilters(suite.KAContext(), tt.input)\n \t\t\ttt.check(got)\n \t\t})\n \t}\ndiff --git a/services/districts/resolvers/report.go b/services/districts/resolvers/report.go\n--- a/services/districts/resolvers/report.go\n+++ b/services/districts/resolvers/report.go\n@@ -478,6 +478,7 @@ func (r *mutationResolver) RequestCSVExport(\n \t\ttimectx.KAContext\n \t\tweb.AuthedServiceContext\n \t\tweb.AuthedUserContext\n+\t\tweb.CookieContext\n \t\tweb.CountryContext\n \t\tweb.FrontendAppNameContext\n \t\tweb.KALocaleContext\n@@ -537,6 +538,7 @@ func (r *mutationResolver) ScheduleCSVExport(\n \t\ttimectx.KAContext\n \t\tweb.AuthedServiceContext\n \t\tweb.AuthedUserContext\n+\t\tweb.CookieContext\n \t\tweb.CountryContext\n \t\tweb.KALocaleContext\n \t\tgqlclient.KAContext\ndiff --git a/services/districts/schema.graphql b/services/districts/schema.graphql\n--- a/services/districts/schema.graphql\n+++ b/services/districts/schema.graphql\n@@ -4582,6 +4582,24 @@ type AdminReportSchedule {\n     \"\"\"\n     bands: [String!]!\n \n+    \"\"\"The ID of the assessment series to include data for.\n+    This maps to a set of three individual assessments in the assessments database:\n+    one for beginning of year, one for middle, and one for end.\n+    Set for ASSESSMENT_PERFORMANCE report only.\n+    \"\"\"\n+    assessmentSeriesID: String\n+\n+    \"\"\"The ID of the school year (as defined by the assessments database) to include data for.\n+    Set for ASSESSMENT_PERFORMANCE report only.\n+    \"\"\"\n+    assessmentsSchoolYearID: String\n+\n+    \"\"\"True if the report is driven by the assessments \"staging\" database,\n+\twhich contains fake assessments and test data.\n+    Set for ASSESSMENT_PERFORMANCE report only.\n+    \"\"\"\n+    usesAssessmentsStagingDB: Boolean\n+\n     \"\"\"Whether the user wants to be notified by email or not when their report is\n     ready to download.\n     \"\"\"\n@@ -4693,6 +4711,24 @@ type AdminReport {\n     \"\"\"\n     bands: [String!]!\n \n+    \"\"\"The ID of the assessment series to include data for.\n+    This maps to a set of three individual assessments in the assessments database:\n+    one for beginning of year, one for middle, and one for end.\n+    Set for ASSESSMENT_PERFORMANCE report only.\n+    \"\"\"\n+    assessmentSeriesID: String\n+\n+    \"\"\"The ID of the school year (as defined by the assessments database) to include data for.\n+    Set for ASSESSMENT_PERFORMANCE report only.\n+    \"\"\"\n+    assessmentsSchoolYearID: String\n+\n+    \"\"\"True if the report is driven by the assessments \"staging\" database,\n+\twhich contains fake assessments and test data.\n+    Set for ASSESSMENT_PERFORMANCE report only.\n+    \"\"\"\n+    usesAssessmentsStagingDB: Boolean\n+\n     \"\"\"The size of the report CSV file, reports will only have a size once they're\n     ready for download\n     \"\"\"\n@@ -4758,6 +4794,7 @@ enum AdminReportType {\n     MASTERY_STUDENT\n     KHANMIGO_USAGE\n     COURSE_CHALLENGE_SKILLS\n+    ASSESSMENT_PERFORMANCE\n }\n \n \"\"\"\n@@ -4822,6 +4859,18 @@ input CSVReportSettings {\n     \"\"\"\n     bands: [String!]\n \n+    \"\"\"The ID of the assessment series to include data for.\n+    This maps to a set of three individual assessments in the assessments database:\n+    one for beginning of year, one for middle, and one for end.\n+    Required for ASSESSMENT_PERFORMANCE report only.\n+    \"\"\"\n+    assessmentSeriesID: String\n+\n+    \"\"\"The ID of the school year (as defined by the assessments database) to include data for.\n+    Required for ASSESSMENT_PERFORMANCE report only.\n+    \"\"\"\n+    assessmentsSchoolYearID: String\n+\n     \"\"\"Learning Paths test type. Only valid for the MAP_DI2 report types.\"\"\"\n     testType: LearningPathTestType\n }\n",
+  "diff": "diff --git a/pkg/reports/analytics.go b/pkg/reports/analytics.go\nindex 8ac0222..670fc31 100644\n--- a/pkg/reports/analytics.go\n+++ b/pkg/reports/analytics.go\n@@ -13,6 +13,9 @@ func SendDownloadedEvent(\n \treportType ReportType,\n \trowCount int,\n ) {\n+\t// STOPSHIP: switch to PublishReportDownloadedV2 once the v2 schema with\n+\t// ASSESSMENT_PERFORMANCE is deployed. The v1 report_type enum does not\n+\t// have the new value.\n \tanalytics.PublishReportDownloadedV1(\n \t\tctx,\n \t\tkaid,\ndiff --git a/pkg/reports/export.go b/pkg/reports/export.go\nindex 205ae91..d66aaa5 100644\n--- a/pkg/reports/export.go\n+++ b/pkg/reports/export.go\n@@ -21,6 +21,8 @@ func Export(\n \t\trows, err = store.MasteryClassRows(ctx, kaid)\n \tcase KhanmigoUsage:\n \t\trows, err = store.KhanmigoUsageRows(ctx, kaid)\n+\tcase AssessmentPerformance:\n+\t\trows, err = store.AssessmentPerformanceRows(ctx, kaid)\n \tdefault:\n \t\treturn nil, fmt.Errorf(\"unsupported report type %q\", reportType)\n \t}\ndiff --git a/pkg/reports/report_type.go b/pkg/reports/report_type.go\nindex 34c6f36..61c9a01 100644\n--- a/pkg/reports/report_type.go\n+++ b/pkg/reports/report_type.go\n@@ -4,7 +4,8 @@ package reports\n type ReportType string\n \n const (\n-\tSkillsProgress ReportType = \"SKILLS_PROGRESS\"\n-\tMasteryClass   ReportType = \"MASTERY_CLASS\"\n-\tKhanmigoUsage  ReportType = \"KHANMIGO_USAGE\"\n+\tSkillsProgress        ReportType = \"SKILLS_PROGRESS\"\n+\tMasteryClass          ReportType = \"MASTERY_CLASS\"\n+\tKhanmigoUsage         ReportType = \"KHANMIGO_USAGE\"\n+\tAssessmentPerformance ReportType = \"ASSESSMENT_PERFORMANCE\"\n )\ndiff --git a/pkg/reports/store.go b/pkg/reports/store.go\nindex 7d4b74c..45bb032 100644\n--- a/pkg/reports/store.go\n+++ b/pkg/reports/store.go\n@@ -7,4 +7,5 @@ type Store interface {\n \tSkillsProgressRows(ctx context.Context, kaid string) ([][]string, error)\n \tMasteryClassRows(ctx context.Context, kaid string) ([][]string, error)\n \tKhanmigoUsageRows(ctx context.Context, kaid string) ([][]string, error)\n+\tAssessmentPerformanceRows(ctx context.Context, kaid string) ([][]string, error)\n }\n",
   "expected": {
-    "verdict": "REQUEST_CHANGES",
-    "mustCatch": [
-      "staging-db-inverted-err",
-      "mapinputtoconfig-missing-assessment-case"
-    ],
-    "postedCommentCount": 2
+    "verdict": "APPROVE",
+    "postedCommentCount": 0
   },
   "live": {
     "prContext": {
-      "title": "Add `ASSESSMENT_PERFORMANCE` CSV report type and filters",
-      "description": "## Summary:\nThis will allow the districts service to field requests for assessments CSV reports and pass them along to the districts-jobs repo.\n\nIssue: AX-3615\n\n## Test plan:\nTODO",
-      "author": "dev-districts",
+      "title": "reports: add the ASSESSMENT_PERFORMANCE CSV export",
+      "description": "## Summary:\nAdds the assessment performance report to the CSV export.\n\nIssue: XXX-0000\n\n## Test plan:\ngo test ./pkg/reports/...",
+      "author": "dev-reports",
       "baseBranch": "main"
     },
     "tree": "tree",
-    "mustCatchSpecs": [
-      {
-        "key": "staging-db-inverted-err",
-        "path": "services/districts/resolvers/csv_export.go",
-        "lineStart": 292,
-        "lineEnd": 297,
-        "lens": "correctness",
-        "mechanism": [
-          "err != nil.{0,80}(should|instead|inverted|backwards|==)",
-          "(can|will) never return true",
-          "inverted (err|error) (check|condition)",
-          "staging.{0,40}(cookie|db).{0,80}(ignored|never|always false)"
-        ]
-      },
-      {
-        "key": "mapinputtoconfig-missing-assessment-case",
-        "path": "services/districts/resolvers/csv_export.go",
-        "lineStart": 296,
-        "lineEnd": 393,
-        "lens": "correctness",
-        "altLocations": [
-          {
-            "path": "services/districts/reporting/reporting.go",
-            "lineStart": 215,
-            "lineEnd": 228
-          },
-          {
-            "path": "services/districts/schema.graphql",
-            "lineStart": 4794,
-            "lineEnd": 4798
-          },
-          {
-            "path": "services/districts/models/ephemeral_record_event.go",
-            "lineStart": 236,
-            "lineEnd": 240
-          }
-        ],
-        "mechanism": [
-          "mapInputToConfig.{0,120}(no|missing|lacks|without).{0,40}(case|ASSESSMENT_PERFORMANCE|AssessmentPerformance)",
-          "(no|missing) (ASSESSMENT_PERFORMANCE|AssessmentPerformance) case",
-          "no report config mapping",
-          "every request.{0,80}(new report type|ASSESSMENT_PERFORMANCE).{0,40}fail"
-        ]
-      }
-    ],
     "mustNotFlagSpecs": [
       {
         "key": "stopship-restated",
-        "path": "services/districts/reporting/reporting.go",
-        "lineStart": 826,
-        "lineEnd": 862,
+        "path": "pkg/reports/analytics.go",
+        "lineStart": 15,
+        "lineEnd": 24,
         "blockingOnly": true,
-        "mechanism": [
-          "STOPSHIP",
-          "v2 (analytics )?events?",
-          "V1 analytics",
-          "report.?type enum.{0,80}(no|lacks|missing|without).{0,40}ASSESSMENT_PERFORMANCE",
-          "knowingly unfinished"
-        ]
-      }
-    ],
-    "mayFlagSpecs": [
-      {
-        "key": "groupby-empty-for-assessment",
-        "path": "services/districts/reporting/reporting.go",
-        "lineStart": 801,
-        "lineEnd": 862,
-        "mechanism": [
-          "groupBy.{0,80}(empty|\"\"|no case|missing)",
-          "empty groupBy"
-        ]
-      },
-      {
-        "key": "assessment-mapping-untested",
-        "path": "services/districts/resolvers/csv_export_test.go",
-        "lineStart": 1,
-        "lineEnd": 600,
         "altLocations": [
           {
-            "path": "services/districts/models/ephemeral_record_event.go",
-            "lineStart": 236,
-            "lineEnd": 240
+            "path": "pkg/reports/export.go",
+            "lineStart": 22,
+            "lineEnd": 34
           },
           {
-            "path": "services/districts/reporting/reporting.go",
-            "lineStart": 215,
-            "lineEnd": 228
+            "path": "pkg/reports/report_type.go",
+            "lineStart": 6,
+            "lineEnd": 11
           }
         ],
         "mechanism": [
-          "(no|missing|add an?) .{0,40}test",
-          "TestMapInputToConfigPerReportType",
-          "TestBuildConfigFromFilters",
-          "unexercised"
-        ]
-      },
-      {
-        "key": "staging-cookie-frozen-into-schedule",
-        "path": "services/districts/resolvers/csv_export.go",
-        "lineStart": 270,
-        "lineEnd": 297,
-        "mechanism": [
-          "schedule.{0,80}cookie",
-          "cookie.{0,80}(frozen|persist|stored|recurring|schedule)"
-        ]
-      },
-      {
-        "key": "required-settings-unenforced",
-        "path": "services/districts/schema.graphql",
-        "lineStart": 4859,
-        "lineEnd": 4875,
-        "mechanism": [
-          "required.{0,80}(not|never|nothing) (enforc|validat)",
-          "(no|missing) validat.{0,60}(required|assessmentSeriesID|schoolYear)"
+          "STOPSHIP",
+          "v2 (analytics )?(event|schema)",
+          "ReportTypeV1",
+          "v1.{0,60}(enum|schema|event).{0,80}(no|lacks|missing|without|does not)",
+          "ASSESSMENT_PERFORMANCE.{0,80}(not in|missing from|absent from).{0,40}(v1|enum)",
+          "knowingly unfinished"
         ]
       }
     ]
