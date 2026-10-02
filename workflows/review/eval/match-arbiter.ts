@@ -22,6 +22,7 @@ import type {MatchFallback} from "./live-match";
 import type {RunCandidate} from "./runner";
 import {extractJsonObject} from "./extract-json";
 import {usageOfResponse, type ModelTokens} from "../lib/pricing";
+import {messagesHeaders, messagesUrl} from "../lib/anthropic-api";
 
 /**
  * Pinned snapshot, deliberately at the Haiku tier: the question is a narrow
@@ -29,7 +30,6 @@ import {usageOfResponse, type ModelTokens} from "../lib/pricing";
  */
 export const PINNED_ARBITER_MODEL = "claude-haiku-4-5-20251001";
 
-const API_URL = "https://api.anthropic.com/v1/messages";
 const MAX_ATTEMPTS = 3;
 const BACKOFF_MS = [1_000, 4_000];
 
@@ -105,13 +105,9 @@ export const haikuMatchArbiter = (options?: {
             let response: Awaited<ReturnType<typeof fetch>> | undefined;
             for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
                 try {
-                    response = await fetch(API_URL, {
+                    response = await fetch(messagesUrl(), {
                         method: "POST",
-                        headers: {
-                            "x-api-key": process.env["ANTHROPIC_API_KEY"] ?? "",
-                            "anthropic-version": "2023-06-01",
-                            "content-type": "application/json",
-                        },
+                        headers: messagesHeaders(),
                         body: JSON.stringify({
                             model: PINNED_ARBITER_MODEL,
                             max_tokens: 64,

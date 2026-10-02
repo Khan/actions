@@ -11,6 +11,7 @@
 
 import type {AgentRequest, AgentResult, AgentRunner} from "./dispatch";
 import {usageOfResultMessage, type ModelTokens} from "./pricing";
+import {withRouterDefault} from "./anthropic-api";
 
 /**
  * Anthropic SDK internal retries for a sub-agent subprocess (the SDK's own
@@ -91,7 +92,10 @@ export const createSdkRunner = async (): Promise<AgentRunner> => {
             // sub-agent subprocesses alone. `env` REPLACES the subprocess
             // environment rather than merging, so process.env is spread first:
             // the CLI still needs PATH, HOME, and the proxy's steering vars.
-            env: {...process.env, ANTHROPIC_MAX_RETRIES: SUBAGENT_MAX_RETRIES},
+            env: {
+                ...withRouterDefault(),
+                ANTHROPIC_MAX_RETRIES: SUBAGENT_MAX_RETRIES,
+            },
         };
         // The structured-final channel (trial suggestion h): an in-process
         // MCP tool whose handler runs the same contract parse the collection

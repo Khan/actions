@@ -13,7 +13,7 @@
  * gate flip is retried best-of-three on the flipped cases only (~one case of
  * spend per attempt, recorded in the report) before it fails the run.
  *
- * CLI (requires ANTHROPIC_API_KEY):
+ * CLI (requires ANTHROPIC_API_KEY; see lib/anthropic-api.ts for the token):
  *
  *   pnpm dlx tsx workflows/review/eval/live-ab.ts
  *     [--base-ref <ref>]      baseline review.md source (default: merge-base

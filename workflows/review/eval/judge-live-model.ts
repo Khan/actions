@@ -5,7 +5,7 @@
  * importing that file's CLI entry point. `judge.ts` deliberately ships no API
  * client; this module is its single live implementation.
  *
- * Requires `ANTHROPIC_API_KEY`.
+ * Requires `ANTHROPIC_API_KEY` (see lib/anthropic-api.ts for the token).
  */
 
 import {
@@ -16,8 +16,8 @@ import {
 } from "./judge";
 import {extractJsonObject} from "./extract-json";
 import {usageOfResponse, type ModelTokens} from "../lib/pricing";
+import {messagesHeaders, messagesUrl} from "../lib/anthropic-api";
 
-const API_URL = "https://api.anthropic.com/v1/messages";
 const CONCURRENCY = 4;
 
 /**
@@ -55,13 +55,9 @@ const scoreOne = async (
     let response: Awaited<ReturnType<typeof fetch>> | undefined;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
         try {
-            response = await fetch(API_URL, {
+            response = await fetch(messagesUrl(), {
                 method: "POST",
-                headers: {
-                    "x-api-key": process.env["ANTHROPIC_API_KEY"] ?? "",
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
+                headers: messagesHeaders(),
                 body: JSON.stringify({
                     model: PINNED_JUDGE_MODEL,
                     max_tokens: 512,
