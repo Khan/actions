@@ -44,6 +44,33 @@ which compiles it into their own `review.lock.yml`. At run time, the
 installed workflow checks out this repo's `lib/` at the release tag it pins,
 so prompt and code always move together.
 
+### Where it lives and how updates ship
+
+Khan/actions is Khan's shared GitHub Actions repo: reusable CI actions under
+`actions/`, each versioned with changesets and published as tags so other
+repos can pin them. The reviewer lives here for the same reason: several
+repos run it, and each needs to pin a version and upgrade when it chooses.
+
+Updates don't reach a consumer on their own:
+
+1. **Release.** A merged reviewer change carries a changeset. Release cuts
+   `review-vX.Y.Z` (and moves `review-vX`), and rewrites the lib `ref:`
+   inside `review.md` to that tag.
+2. **Each repo has a copy.** A consumer's `.github/workflows/review.md` is a
+   full copy of the source prompt and frontmatter, pinned to one tag, plus
+   that repo's `LOCAL OVERRIDE` edits. The lib is not copied: the pinned
+   `ref:` fetches it at run time.
+3. **Bump, one PR per repo.** The
+   [`review-consumer-bump`](../../.claude/skills/review-consumer-bump/SKILL.md)
+   skill takes the repo's current tag as the base and the target tag as the
+   new version. It 3-way merges them into the installed copy, which keeps
+   the local overrides. Then it updates `source:`, recompiles the lock file,
+   runs the config checker, and opens the PR. Never use `gh aw update` for
+   this (§9).
+
+So consumers drift until someone bumps them. Webapp is one release behind
+the source, and frontend is many releases behind.
+
 ### The reference configuration
 
 **Khan/webapp's install is the canonical configuration**, the one the shared
