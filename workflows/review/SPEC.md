@@ -32,7 +32,6 @@ any submission that deviates from what the code decided.
 10. [Cost model](#10-cost-model)
 11. [Evaluation](#11-evaluation)
 12. [Known gaps](#12-known-gaps)
-13. [Cleanup candidates](#13-cleanup-candidates)
 
 ## 1. System context
 
@@ -68,8 +67,8 @@ Updates don't reach a consumer on their own:
    runs the config checker, and opens the PR. Never use `gh aw update` for
    this (§9).
 
-So consumers drift until someone bumps them. Webapp is one release behind
-the source, and frontend is many releases behind.
+So consumers drift until someone bumps them. A repo's `source:` line says
+which release it runs.
 
 ### The reference configuration
 
@@ -87,12 +86,11 @@ webapp's.
 | Lens payloads | `correctness`, `security-auth` | none |
 | Credit cap | `max-ai-credits: 2500` | 1000 |
 | `observability:` | on (Sentry) | on |
-| `max-stack` | `-1` (local override until the next release) | `-1` (unreleased) |
 
-Webapp pins `review-v1.25.0`, two releases behind the source (1.26.0). It
-still runs `claude-opus-5`, and its bodies use the pre-1.26 three-fold shape.
-No consumer runs Opus 5.5 yet. §13 lists the code and prompt that exist only
-for configurations webapp doesn't use.
+The table describes webapp's configuration, not its release: its pin can
+lag the source like any consumer's. Code, prompt text or options that serve
+only configurations webapp doesn't use are cleanup candidates rather than
+part of the design.
 
 ```mermaid
 flowchart LR
@@ -104,7 +102,7 @@ flowchart LR
         src --> tag
         lib --> tag
     end
-    subgraph consumer["Consumer repo (webapp, frontend, agent-settings, khan-monitoring, actions itself)"]
+    subgraph consumer["Consumer repo (webapp is the reference; actions installs its own copy)"]
         inst[".github/workflows/review.md<br/>(installed copy + local overrides)"]
         lock["review.lock.yml<br/>(gh aw compile output)"]
         cfg[".github/aw/review/*<br/>(config.md, ROUTING, skills.md, ...)"]
@@ -436,7 +434,7 @@ primary carrier because it survives cache eviction and dismissed reviews. It
 rides as a `<sub>` line because gh-aw's sanitizer deletes HTML comments. The
 cache-memory record is the fallback (and the only carrier pre-stamp bodies
 have); `rereview-plan.json`'s `stampSource` says which carrier won. Every
-body since 1.21.0 carries a stamp, so the fallback rarely binds (§13).
+body since 1.21.0 carries a stamp, so the fallback rarely binds.
 GitHub denies cache writes on `issue_comment` runs. On webapp that affects
 only human `/review` rounds: push rounds save cache normally, but a manual
 full round loses its `reviewedHunks`, `risksPatternsKey` and
@@ -543,7 +541,7 @@ Note: …                                                    ← sheds, depth no
 <details><summary><sub>review details</sub></summary>
 **Lower-confidence observations (N):**                     ← overflow + low-confidence findings
 - `file.ts:12` issue (non-blocking): subject <sub>(source)</sub>
-<sub>review-v1.26.0 | schema 2 | depth full | re-review … | enable …</sub>   ← version/config footer
+<sub>review-vX.Y.Z | schema 2 | depth full | re-review … | enable …</sub>   ← version/config footer
 <sub>pr-reviewer:rereview v=1 …</sub>                      ← fingerprint stamp
 </details>
 <details><summary>review cost</summary> … </details>       ← appended by the post-step
@@ -711,8 +709,7 @@ Khan/webapp):
 | Override | Why |
 | --- | --- |
 | `issue_comment` trigger with `reaction: eyes`, and an `if:` split per event | Human `/review` forces a full round |
-| `max-ai-credits: 2500` (and the `REVIEW_MAX_AI_CREDITS` mirror) | The source's 1000 is too low for the full roster; every live consumer raises it |
-| `max-stack: -1` | Carried until the release containing it is pinned |
+| `max-ai-credits: 2500` (and the `REVIEW_MAX_AI_CREDITS` mirror) | The source's 1000 is too low for the full roster |
 
 **Khan/actions' deviations** (`.github/workflows/review.md` here):
 
@@ -720,13 +717,12 @@ Khan/webapp):
 | --- | --- |
 | Fork guard in `if:` | The repo is public |
 | `observability:` block disabled | No Sentry secrets |
-| `max-ai-credits: 2500`, `max-stack: -1` | As webapp |
+| `max-ai-credits: 2500` | As webapp |
 | `re-review scoped blocking-medium` (ROUTING) | Composite actions run in consumers' CI with their credentials |
 | Canary kept in sync | `review-canary.md` must match the install byte for byte after its preamble (`pnpm run sync-canary`, enforced by `review-canary.test.ts`) |
 
-Khan/agent-settings runs `scoped` with observability disabled. Khan/frontend
-still runs a pre-lib install (gh-aw v0.81.6, no `ROUTING`, so the `full`
-dial).
+Other consumers' deviations live in their own installed `review.md` and
+`ROUTING`.
 
 **Versioning.** Semver is the behavior contract. A behavior change bumps
 major, so consumers pinned to `review-vN` opt in deliberately. A change to
@@ -745,7 +741,7 @@ falls through to list price silently. After any toolchain bump, verify that
 
 | Cap | Value | Enforced by |
 | --- | --- | --- |
-| `max-ai-credits` | 2500 per run on webapp and every other live consumer (the source default is still 1000) | api-proxy (hard) |
+| `max-ai-credits` | 2500 per run on webapp (the source default is 1000) | api-proxy (hard) |
 | `max-daily-ai-credits` | `-1` (off), so a busy PR day never skips reviews | — |
 | `max-turn-cache-misses` | 25 (sized for the cold-start burst of a parallel fan-out) | api-proxy |
 | Run budget | invocations, tool calls, and wall clock by tier (§6) | dispatcher, `lib/investigation-cap.ts` |
@@ -764,8 +760,8 @@ When the invocation cap binds, opt-in reviewers shed in the order
 | `pattern-triage`, `claim-clusterer` | `claude-sonnet-4-6` |
 | Prose judge, refusal fallback | `claude-opus-4-8` |
 
-These are the source pins. Webapp (1.25.0) still runs `claude-opus-5` in
-every Opus role. Scripted dispatch runs every sub-agent at `effort: high`. The orchestrator
+These are the source pins; a consumer runs whatever its pinned release
+pins. Scripted dispatch runs every sub-agent at `effort: high`. The orchestrator
 runs at the model's default (`medium`) because gh-aw exposes no effort knob.
 
 **Measured cost** (Khan/webapp, 80 successful runs, 2026-09):
@@ -786,9 +782,8 @@ multiplier on every stack sync.
   the orchestrator remainder, and a total reconciled against gh-aw's
   `ai_credits`.
 - `cost-report.json` in the agent artifact has the same data.
-- `lib/counters-report.ts` can aggregate run artifacts (including
-  `costByRereviewDepth`), but no consumer runs the scheduled
-  `review-counters.yml` today; webapp deleted it.
+- `lib/counters-report.ts` aggregates run artifacts across runs
+  (including `costByRereviewDepth`) when run by hand.
 
 See README [What a review costs](README.md#what-a-review-costs-the-per-review-cost-report).
 
@@ -837,49 +832,6 @@ runs. See [`eval/README.md`](eval/README.md).
 - **Counters** don't pool per-agent cost yet; acknowledged-thread ids are
   recorded but unused.
 - **`maxUsd` budget targets** are uncalibrated estimates.
-- **Frontend** runs the default `full` dial with no `ROUTING` file, so it
-  pays a full review per layer per stack sync.
-
-## 13. Cleanup candidates
-
-Code, prompt text and docs that exist only for configurations webapp
-doesn't use, or for modes that are already retired. **Dead** means nothing
-live uses it. **Waits on a bump** means it can go once webapp (and
-frontend, where noted) moves to the release that replaces it.
-
-**Dead now:**
-
-| Item | Where | Action |
-| --- | --- | --- |
-| The retired `dispatch` ROUTING line and the `dispatchMode` field | `lib/routing-config.ts`, `lib/router.ts` (still says "`task` when absent"), `router-dispatch-mode.test.ts` | Delete the field, the warning and the tests |
-| "Task mode" / `dispatch agent` / "in this mode" wording | `review.md` frontmatter and Step 3, `lib/dispatch.ts` and `lib/dispatch-runner.ts` headers | Rewrite for the one remaining mode |
-| `reviewer-mapper` described as a running sub-agent; "two roles run Fable 5" roster prose | README "How it works" and "Models and effort per role" | Rewrite; the router replaced the mapper, and the roster table is current |
-| `REVIEW_AUTOMATION_LOGINS` and its `khan-actions-bot` default | `lib/manual-request.ts`, `lib/rereview-mode.ts`, `review.md`, README | Its only poster, webapp's kore shim, was removed. Keep the Bot-type check. |
-| `renderRereviewStamp` (legacy block writer) | `lib/rereview-mode.ts` | Only tests use it; move it to a test helper |
-| Cost report's insert-before-legacy-stamp branch | `lib/cost-report.ts` | The cost report shipped with the one-fold body, so always append |
-| HTML-comment stamp prose | `lib/rereview-mode.ts`, `lib/dispatch-gate.ts`, `review.md` Step 1 | No such stamp ever posted; trim |
-| Orchestrator "recall" step and cache fields `filesReviewed` / `issuesFlagged` | `review.md` Step 1, `lib/cache-record.ts` | Nothing reads them; the orchestrator no longer reviews |
-| Refusal fallback for `claude-fable-5`; `providers` entry for `claude-fable-5` | `lib/refusal-fallback.ts`, `review.md` `models:`, `lib/pricing.ts` | Nothing pins Fable 5 |
-| `default-ai-credits-pricing` fallback | `review.md` `models:` | Every recompiling consumer is on gh-aw v0.85.4, where the overlay is live; as written it silently bills a typo'd model at Opus rates |
-| Counters docs ("`review-counters.yml` stays") | README "Feedback signal: live counters" | No consumer runs it; delete or relabel as a manual tool |
-| Thumbs-sweep remnant comments | `lib/rereview.ts`, `lib/dedup-adjudicated.ts`, `lib/stage-pr.ts`, `review.md` | The sweep was removed in 1.19.0 |
-| Step 7 says it skips `scoped` because "no triage" ran | `review.md` Step 7 | Triage does run at `scoped`; fix the stated reason |
-
-**Waits on a bump:**
-
-| Item | Where | Unblocked when |
-| --- | --- | --- |
-| Legacy standalone `<details>` stamp reader | `lib/rereview-mode.ts` | Webapp is on ≥1.26.0 and its in-flight PRs drain (1.25.0 still emits this form) |
-| `LEGACY_COLLAPSED_SUMMARY_RE` body parsers | `lib/submission-render.ts`, `workflows/autofix/lib/collapsed.ts` | One release after webapp moves to review 1.26.0 and autofix 0.5.1 |
-| Refusal fallback for `claude-opus-5` | `lib/refusal-fallback.ts` | Webapp, actions and agent-settings move to Opus 5.5 |
-| `correctness-checks.md` alias and its warnings | `review.md`, `lib/lens-payloads.ts`, `check-consumer-config.ts` | Frontend's upgrade renames its file (next major) |
-| `stampFromCacheMemory` fallback | `lib/rereview-mode.ts`, `lib/submission.ts`, `lib/dispatch-gate.ts` | `stampSource` in recent run artifacts confirms the body always wins; a miss degrades to `full` |
-| Source `max-ai-credits: 1000` | `review.md` | Raise the source default to 2500 so webapp's override disappears |
-
-**Kept, though webapp doesn't use them:** the `full`, `scoped` and
-`flip-gated` dials (other consumers use `full` and `scoped`, and a human
-`/review flip-gated` reaches the last). The same goes for `non-blocking-budget`, the
-`engine.version` CLI floor (needed for Opus 5.5) and the canary machinery
-(Khan/actions dogfooding). The one unused option that is a reasonable
-deletion is the `blocking-only` modifier: no consumer sets it, and
-`blocking-medium` replaced it.
+- **The source default dial is `full`.** A consumer without a `re-review`
+  line pays a full review per layer per stack sync; the canonical `fast`
+  dial is opt-in.
