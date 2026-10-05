@@ -17,6 +17,10 @@ measurement runs). To run or extend it, start at
 
 ## How it works
 
+The end-to-end architecture (triggers and gating, the gh-aw job layout, the
+agent pipeline, re-review depths, verdict semantics, and the cost model, with
+diagrams) is in [`SPEC.md`](SPEC.md). This section is the short version.
+
 On each run the workflow gathers the PR diff, then delegates the analysis to a set of
 read-only **sub-agents** (it makes every GitHub and comment call itself):
 
