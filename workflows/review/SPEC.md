@@ -8,7 +8,9 @@ consuming repo configures, and what a run costs.
 This is the architecture document. Consumer setup (install, the config files,
 the `ROUTING` reference) lives in the [README](README.md); evaluation lives in
 [`eval/README.md`](eval/README.md). Where those cover a topic in full, this
-spec summarizes and links rather than repeating.
+spec summarizes and links rather than repeating. For engineers adding
+repo-specific knowledge to reviews, the practical guide is
+[`CONTRIBUTING-KNOWLEDGE.md`](CONTRIBUTING-KNOWLEDGE.md).
 
 The design rule that explains most of what follows: **models write words, code
 owns structure.** Model agents read staged files and emit JSON. Deterministic

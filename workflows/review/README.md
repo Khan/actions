@@ -20,6 +20,9 @@ measurement runs). To run or extend it, start at
 The end-to-end architecture (triggers and gating, the gh-aw job layout, the
 agent pipeline, re-review depths, verdict semantics, and the cost model, with
 diagrams) is in [`SPEC.md`](SPEC.md). This section is the short version.
+To teach the reviewer about your repo's code (skills, `REVIEW.md` contracts,
+lens payloads, routing), start at
+[`CONTRIBUTING-KNOWLEDGE.md`](CONTRIBUTING-KNOWLEDGE.md).
 
 On each run the workflow gathers the PR diff, then delegates the analysis to a set of
 read-only **sub-agents** (it makes every GitHub and comment call itself):
