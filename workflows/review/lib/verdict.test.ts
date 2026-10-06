@@ -298,20 +298,20 @@ describe("computeVerdict — purity", () => {
     });
 });
 
-describe("the COMMENT verdict (the PRA-7 middle outcome)", () => {
+describe("medium-importance findings", () => {
     const assessed = {
         correctness: "assessed",
         skillSeverity: "assessed",
         patternTriage: "assessed",
     } as const;
 
-    it("mediums demote a would-be approval to COMMENT, with a reason", () => {
+    it("mediums never demote an approval; they are recorded as a reason", () => {
         const verdict = computeVerdict({
             postedLabels: ["note (non-blocking)"],
             dimensions: assessed,
             mediumCount: 2,
         });
-        expect(verdict.event).toBe("COMMENT");
+        expect(verdict.event).toBe("APPROVE");
         expect(verdict.reasons).toContainEqual({
             code: "medium-importance",
             count: 2,
@@ -339,7 +339,7 @@ describe("the COMMENT verdict (the PRA-7 middle outcome)", () => {
         ).toBe("REQUEST_CHANGES");
     });
 
-    it("the hold outranks COMMENT: a partial assessment must not write a fingerprint, whatever it found", () => {
+    it("the hold still applies with mediums: a partial assessment must not write a fingerprint, whatever it found", () => {
         const verdict = computeVerdict({
             postedLabels: ["note (non-blocking)"],
             dimensions: {...assessed, correctness: "unavailable"},

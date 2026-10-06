@@ -1039,13 +1039,11 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
 The verdict is computed by the plan CLI (Step 3), never by you: REQUEST_CHANGES
 iff a validated posted claim carries a blocking label, plus the reduced-depth
 flip floor over kept blocking threads and the open-thread suppression floor;
-COMMENT when nothing blocks but at least one posted claim carries the medium
-importance tier (a verified finding worth fixing before merge should not ride
-under an approval, and the middle verdict says so without demanding another
-round); APPROVE otherwise — all `lib/verdict.ts` / `lib/submission.ts` rules.
-A fourth outcome exists: HOLD_FOR_HUMAN, when a core review pass
+APPROVE otherwise, medium-importance findings included (they post, and the
+approval head counts them) — all `lib/verdict.ts` / `lib/submission.ts` rules.
+A third outcome exists: HOLD_FOR_HUMAN, when a core review pass
 (`correctness-reviewer` or `skill-auditor`) produced no usable output this
-run and the run would otherwise have auto-approved or commented — the
+run and the run would otherwise have auto-approved — the
 automation never approves a change its core passes did not look at, and it
 never writes a fingerprint from a partial assessment either (a blocking
 finding still wins: it is actionable on its own; medium findings fold into
@@ -1054,10 +1052,8 @@ full-roster statement, so only full/scoped depth may resolve to APPROVE (at
 flip-gated/fast a would-be APPROVE demotes to COMMENT); and a stale block the
 author's fixes already earned back must not survive on a technicality, since
 GitHub only moves a reviewer's state on APPROVE or REQUEST_CHANGES. At
-full/scoped that means a COMMENT that would leave this workflow's own prior
-REQUEST_CHANGES standing upgrades to APPROVE with a note; at flip-gated/fast
-the plan CLI stages a dismissal decision instead
-(`out/dismiss-decision.json`), and the deterministic post-step dismisses the
+full/scoped the APPROVE itself clears it; at flip-gated/fast the plan CLI
+stages a dismissal decision (`out/dismiss-decision.json`), and the deterministic post-step dismisses the
 standing review after the run. The plan's `event` IS the
 verdict; never recompute, second-guess, or override it. (The blocking-label
 vocabulary and the concrete-failing-scenario bar live in the sub-agent
@@ -1314,9 +1310,7 @@ fully explained by a common pattern above:
 ## Step 8: On Approval or Comment — Request the Owning Teams as Reviewers
 
 **Run this step when the verdict is APPROVE or COMMENT; skip it entirely on
-REQUEST_CHANGES.** A COMMENT run routes the owning teams too, deliberately: it
-found something worth a human's eyes and, unlike REQUEST_CHANGES, forces no
-later run that would route them. Also skip it entirely when `correctness-reviewer` did not run
+REQUEST_CHANGES.** Also skip it entirely when `correctness-reviewer` did not run
 this run (a `flip-gated` or `fast` re-review depth, Step 3): there are no fresh
 risk classifications to route on, and the anchoring full review already requested
 the owning teams.
@@ -1512,8 +1506,8 @@ the diff's `NNN| ` prefix, never counted), `file` (with
 defect in your domain, `medium` for a verified non-blocking defect or gap in code
 this PR adds that a reasonable author would fix before merge, and `advisory`
 otherwise (or as the matched skill declares). `medium` can never force
-REQUEST_CHANGES (it decides posting surface, and a run whose findings are at
-most medium submits a COMMENT review instead of an approval), and the
+REQUEST_CHANGES (it decides posting surface, and an approval's head counts
+the run's medium findings), and the
 claim-validator strips it from any claim it cannot confirm, so mark it only
 where your evidence already makes the case;
 `confidence` is a number in [0,1]; `evidence_trace` has at least one non-empty
@@ -2264,8 +2258,8 @@ set `corrected.importance` in either direction: `"minor"` strips a marking
 whose evidence does not meet that bar, `"medium"` grants it to an unmarked
 claim whose evidence clearly does. This is not the never-raise rule's
 territory: importance can never force REQUEST_CHANGES; it decides which
-non-blocking findings post inline, and whether the run submits a COMMENT
-review instead of an approval. A `plausible` or `refuted`
+non-blocking findings post inline, and the approval head counts them. A
+`plausible` or `refuted`
 claim needs no importance call from you; code strips the tier from every
 claim you verify as plausible or refute (a claim your output never mentions
 keeps whatever it arrived with, per the missing-output rule).

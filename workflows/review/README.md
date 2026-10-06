@@ -2,8 +2,8 @@
 
 A [GitHub Agentic Workflow](https://github.github.com/gh-aw/) that reviews pull
 request changes for correctness, conventions, and risk on every push. It leaves
-per-line Conventional Comments; on approval it posts a risk/patterns summary
-comment, and on approval or comment it requests the owning teams as reviewers.
+per-line Conventional Comments, and on approval posts a risk/patterns summary
+comment and requests the owning teams as reviewers.
 
 The flow here is **generic**; everything repo-specific (risk file patterns, the
 best-practice skill catalog, the CI-tooling exclusions, and the reviewer team
@@ -73,11 +73,12 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
    amplifies its consequence and the finding says so.
 
 The workflow then posts the per-line Conventional Comments that survived validation
-and submits an approve, comment, or request-changes review: changes are requested
-iff a blocking finding survived, the run comments (without approving) when its
-findings top out at the medium importance tier, and it approves only when it found
-nothing worth fixing before merge. On approval it also posts the risk/patterns
-summary; on approval or comment it requests the owning teams. The config files below feed these sub-agents.
+and submits an approve or request-changes review: changes are requested iff a
+blocking finding survived, and otherwise it approves, with the approval head
+counting any medium-importance findings (worth fixing before merge, never
+blocking). A reduced-depth round whose would-be approval needs a full roster
+submits a comment instead. On approval it also posts the risk/patterns summary
+and requests the owning teams. The config files below feed these sub-agents.
 
 A mechanical gate and a budget guardrail sit between the reviewers and the PR. The
 **change-provenance gate** (enforced in code against the diff's parsed changed-line

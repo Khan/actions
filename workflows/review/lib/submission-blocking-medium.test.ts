@@ -4,7 +4,7 @@ import {runSubmissionCli, type SubmissionFs} from "./submission";
 
 /**
  * The ROUTING `re-review <mode> blocking-medium` modifier's posting surface
- * and the medium tier's submission-side mechanics (PRA-7), in their own file
+ * and the medium tier's submission-side mechanics, in their own file
  * per the submission-blocking-only precedent (max-lines budget).
  *
  * What these pin: at a reduced executed depth with `routing.json`'s
@@ -99,11 +99,9 @@ describe("runSubmissionCli: re-review blocking-medium", () => {
             }),
         );
         const plan = runSubmissionCli(fs);
-        // A posted medium demotes the would-be approval to the middle
-        // verdict (PRA-7): the run neither vouches nor demands a round.
-        expect(plan.event).toBe("COMMENT");
+        expect(plan.event).toBe("APPROVE");
         expect(plan.body).toContain(
-            "**💬 Commented** — medium-importance findings found; nothing blocks.",
+            "**✅ Approved** — nothing blocks; 1 finding worth fixing before merge (see inline comments).",
         );
         expect(plan.comments).toHaveLength(1);
         expect(plan.comments[0].line).toBe(2);
@@ -296,10 +294,10 @@ describe("the veto's diff sources", () => {
     });
 });
 
-describe("the COMMENT verdict", () => {
-    it("a vetoed medium does not demote the approval", () => {
-        // Line 40 is outside the diff: the tier is stripped, the medium
-        // count is 0, and the verdict stays APPROVE.
+describe("medium findings and the verdict", () => {
+    it("a vetoed medium is not counted in the approval head", () => {
+        // Line 40 is outside the diff: the tier is stripped and the medium
+        // count is 0.
         const fs = makeFakeFs(
             staged({
                 depth: "scoped",
@@ -308,13 +306,12 @@ describe("the COMMENT verdict", () => {
                 ],
             }),
         );
-        expect(runSubmissionCli(fs).event).toBe("APPROVE");
+        const plan = runSubmissionCli(fs);
+        expect(plan.event).toBe("APPROVE");
+        expect(plan.body).not.toContain("worth fixing before merge");
     });
 
-    it("a collapsed medium still demotes (the verdict follows what the run found)", () => {
-        // Strict blocking-only collapses the medium's surface, but the
-        // finding was verified and anchored: the verdict comments anyway,
-        // same invariant that keeps a collapsed blocking claim blocking.
+    it("a collapsed medium approves and the head points at the fold", () => {
         const fs = makeFakeFs(
             staged(
                 {
@@ -326,7 +323,10 @@ describe("the COMMENT verdict", () => {
         );
         const plan = runSubmissionCli(fs);
         expect(plan.comments).toHaveLength(0);
-        expect(plan.event).toBe("COMMENT");
+        expect(plan.event).toBe("APPROVE");
+        expect(plan.body).toContain(
+            "**✅ Approved** — nothing blocks; 1 finding worth fixing before merge (see the observations below).",
+        );
     });
 
     it("blocking still outranks medium", () => {
@@ -347,11 +347,8 @@ describe("the COMMENT verdict", () => {
     });
 });
 
-describe("the COMMENT verdict's prior-state guard", () => {
-    it("upgrades COMMENT to APPROVE over a prior REQUEST_CHANGES stamp", () => {
-        // GitHub state only moves on APPROVE or REQUEST_CHANGES: a COMMENT
-        // would leave the bot's own prior block standing after the author
-        // fixed every blocking objection.
+describe("a medium approval over a prior REQUEST_CHANGES stamp", () => {
+    it("approves directly, clearing the bot's own prior block", () => {
         const files = staged({
             depth: "scoped",
             claims: [claim({id: "medium", importance: "medium"})],
@@ -364,8 +361,6 @@ describe("the COMMENT verdict's prior-state guard", () => {
         });
         const plan = runSubmissionCli(makeFakeFs(files));
         expect(plan.event).toBe("APPROVE");
-        expect(plan.notes).toContainEqual(
-            "COMMENT verdict upgraded to APPROVE: a comment cannot clear the prior request-changes state, and every blocking objection is resolved",
-        );
+        expect(plan.notes.join(" ")).not.toContain("upgraded");
     });
 });

@@ -449,8 +449,8 @@ export const evaluateDispatchConformance = (
     }
     // Rule 4: neither an APPROVE nor a COMMENT can carry a blocking inline
     // comment (Step 4 is a mechanical function of the labels: a surviving
-    // validated blocking finding means REQUEST_CHANGES at every depth; the
-    // COMMENT verdict exists only for the medium-and-below population). The
+    // validated blocking finding means REQUEST_CHANGES at every depth; a
+    // COMMENT is only ever a demoted approval or a canary). The
     // inverse direction is legitimate (a REQUEST_CHANGES may ride entirely
     // on kept prior threads), so only the non-blocking verdicts are checked.
     if (

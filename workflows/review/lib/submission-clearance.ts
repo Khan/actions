@@ -16,15 +16,6 @@
  * unreviewed reduced-depth approval looks like when the reconciler is
  * wrong).
  *
- * A COMMENT cannot clear this workflow's own prior REQUEST_CHANGES:
- * GitHub derives a reviewer's state only from its latest APPROVE or
- * REQUEST_CHANGES. So when the prior stamped verdict is REQUEST_CHANGES
- * and this run's blocking objections are all resolved (a COMMENT verdict
- * implies exactly that: zero blocking labels AND zero kept blocking
- * threads), a full-roster run approves instead, or the author stays
- * blocked by a stale state their fixes already earned back. A
- * reduced-depth run keeps the COMMENT and stages the dismissal decision.
- *
  * Determinism boundary: a pure function of the verdict, the depth, and the
  * staged prior reviews; the caller does the writes. No model call, no
  * prose about the code under review.
@@ -67,9 +58,7 @@ export const DISMISSAL_MESSAGE =
  *     something we have verified in both directions, so the direction is
  *     chosen on asymmetric costs: if it does resurface and we reset, an
  *     author stays stranded behind a block no round clears; if it does
- *     not and we stand, the worst outcomes are a full-roster COMMENT
- *     round (zero blocking findings by construction) upgrading to the
- *     APPROVE that same roster stands behind, and a reduced round
+ *     not and we stand, the worst outcome is a reduced round
  *     dismissing an inert review, which changes nothing.
  *
  * Entries without `id`/`state`/`body` (pre-upgrade staging) do not count.
@@ -100,7 +89,7 @@ export const standingChangesRequestedIds = (
 
 export type ClearanceInput = {
     /** computeVerdict's event (the hold path returns before this runs). */
-    verdictEvent: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
+    verdictEvent: "APPROVE" | "REQUEST_CHANGES";
     /** The executed depth (dispatch-result.json). */
     depth: string;
     /** The most recent stamped fingerprint, or null. */
@@ -172,26 +161,15 @@ export const decideEventAndClearance = (
     // The stamp alone is not enough: a reduced round's demoted COMMENT
     // stamps its own verdict inside the agent step, before the best-effort
     // dismissal post-step runs, so a failed dismissal would otherwise erase
-    // the one signal that retries the clearance (or upgrades at full depth)
-    // while the block still stands on GitHub. The live review state joins
-    // the stamp; after a successful dismissal the entry reads DISMISSED and
-    // the stamp is again the only carrier.
+    // the one signal that retries the clearance while the block still
+    // stands on GitHub. The live review state joins the stamp; after a
+    // successful dismissal the entry reads DISMISSED and the stamp is again
+    // the only carrier.
     const standingRcIds = standingChangesRequestedIds(input.priorReviewsRaw);
     const priorRcStands =
         (input.priorStamp !== null &&
             input.priorStamp.verdict === "REQUEST_CHANGES") ||
         standingRcIds.length > 0;
-
-    const commentWouldStrandPriorRc =
-        !input.canary &&
-        input.verdictEvent === "COMMENT" &&
-        priorRcStands &&
-        fullRoster;
-    if (commentWouldStrandPriorRc) {
-        notes.push(
-            "COMMENT verdict upgraded to APPROVE: a comment cannot clear the prior request-changes state, and every blocking objection is resolved",
-        );
-    }
     const approveDemoted = !fullRoster && input.verdictEvent === "APPROVE";
     if (approveDemoted) {
         notes.push(
@@ -202,11 +180,10 @@ export const decideEventAndClearance = (
         ? "COMMENT"
         : input.verdictEvent === "REQUEST_CHANGES"
         ? "REQUEST_CHANGES"
-        : approveDemoted ||
-          (input.verdictEvent === "COMMENT" && !commentWouldStrandPriorRc)
+        : approveDemoted
         ? "COMMENT"
         : "APPROVE";
-    if (input.canary && input.verdictEvent !== "COMMENT") {
+    if (input.canary) {
         notes.push(
             `canary run: ${input.verdictEvent} submitted as COMMENT (a canary never moves the bot's review state)`,
         );
@@ -214,7 +191,7 @@ export const decideEventAndClearance = (
 
     let bodyNote: string | null = null;
     let dismissal: ClearanceResult["dismissal"] = null;
-    if (input.canary && input.verdictEvent !== "COMMENT") {
+    if (input.canary) {
         // The would-be verdict is review content a human reading the canary
         // output needs, so it posts in the body, not just the artifact.
         bodyNote = `Note: canary run. The verdict would have been ${input.verdictEvent}; a canary always submits COMMENT so it never moves the bot's review state.`;

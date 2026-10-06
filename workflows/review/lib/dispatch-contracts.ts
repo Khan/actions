@@ -691,8 +691,8 @@ export type Claim = {
      * never force REQUEST_CHANGES (the label carries blocking-ness); the
      * posting surface (submission.ts) ranks medium claims ahead of minor
      * ones for the non-blocking inline budget and posts them inline on
-     * `blocking-medium` re-reviews, and a nonzero post-veto medium count
-     * demotes a would-be APPROVE to COMMENT (verdict.ts). The claim-validator adjudicates it (`corrected.importance`
+     * `blocking-medium` re-reviews, and the approval head counts the
+     * post-veto mediums (render-comment.ts). The claim-validator adjudicates it (`corrected.importance`
      * both directions), a `plausible` verification strips it (unconfirmed
      * fails the tier's "verified" test), and {@link applyMediumVeto} strips
      * it from any claim not anchored on a line this PR added.
