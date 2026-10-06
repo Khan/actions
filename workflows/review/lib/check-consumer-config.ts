@@ -65,6 +65,7 @@ import type {
 } from "./routing-config";
 import type {Lens} from "./finding-schema";
 import {renderReport} from "./check-consumer-config-report";
+import {BETA_WORKFLOW_PATH, betaInstallIssues} from "./beta-install";
 
 /* -------------------------------------------------------------------------- */
 /* Paths the install contract fixes                                          */
@@ -636,6 +637,18 @@ export const checkConsumerConfig = (
             );
         }
     }
+
+    /* --- beta install ------------------------------------------------------ */
+
+    issues.push(
+        ...betaInstallIssues(
+            fs,
+            at,
+            workflowPath === BETA_WORKFLOW_PATH
+                ? {path: INSTALLED_WORKFLOW_PATH, lockPath: INSTALLED_LOCK_PATH}
+                : {path: workflowPath, lockPath},
+        ),
+    );
 
     /* --- reviewer routing (config.md) -------------------------------------- */
 
