@@ -908,7 +908,8 @@ roster it dispatches and the diff surfaces it stages are depth-dependent), and
 the plan CLI renders the depth and tripwire notes into the review body; none of
 it is yours to adjust. One depth change is the dispatcher's, never yours: a
 `fast` round on a non-draft PR with a standing request-changes review runs the
-`thread-reconciler` first, and when it resolves every blocking thread the
+`thread-reconciler` first, and when it resolves every blocking thread (or
+when no bot thread is left open, because a person resolved them all) the
 dispatcher continues as a `full` round (reason `clearance-escalation`) and
 rewrites `rereview-plan.json` to say so, because only a full round may approve
 the fix. If that full round loses its correctness or skill pass, the dispatcher

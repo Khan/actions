@@ -615,15 +615,17 @@ everything, whatever the mode:
 
 **The clearance escalation.** A `fast` round on a ready PR whose own
 REQUEST_CHANGES still stands runs the thread reconciler first. When the
-reconciler resolves every blocking thread, the same run continues as a `full`
-round over the whole diff (plan reason `clearance-escalation`, rewritten into
+reconciler resolves every blocking thread, or when no bot thread is left open
+because a person resolved them all, the same run continues as a `full` round
+over the whole diff (plan reason `clearance-escalation`, rewritten into
 `rereview-plan.json`; `lib/dispatch-escalation.ts`). That round can approve,
 so the author gets the approval their fix earned, along with the guidance
 comment and the owning-team requests a first full review would post. It posts
 blocking findings only: the code under it was already fully reviewed, and a
-new blocker in the fix still requests changes. When any blocking thread is
-kept, unaccounted for, or the reconciler output is unusable, the round stays
-`fast`. If the escalated round loses its correctness or skill pass (which
+new blocker in the fix still requests changes. The full round re-judges the whole diff, so an
+issue behind a wrongly resolved thread is found again and blocks. When any
+blocking thread is kept, unaccounted for, or the reconciler output is
+unusable, or the thread staging is missing, the round stays `fast`. If the escalated round loses its correctness or skill pass (which
 would otherwise hold it and post nothing), the dispatcher restores the fast
 plan and the round dismisses the block as before, with a note saying why.
 Drafts and canary runs never escalate; a draft keeps the dismissal, and its

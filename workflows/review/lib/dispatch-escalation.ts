@@ -1,7 +1,9 @@
 /**
- * The clearance escalation: a `fast` round whose reconciler resolved every
- * blocking thread behind a standing REQUEST_CHANGES continues, in the same
- * dispatch, as a full-roster round. Only a full roster may approve
+ * The clearance escalation: a `fast` round with no blocking thread left
+ * open behind a standing REQUEST_CHANGES (the reconciler resolved each one,
+ * or a person resolved them all before the round) continues, in the same
+ * dispatch, as a full-roster round. The full round re-judges the whole diff,
+ * so an issue behind a wrongly resolved thread is found again and blocks. Only a full roster may approve
  * (submission-clearance.ts), so without this the round could only dismiss
  * the block and the author would wait on a later full round for the
  * approval their fix earned.
@@ -167,20 +169,34 @@ export type EscalationOutcome = {
 
 /**
  * Run the reconciler ahead of the fan-out when the round is eligible, and
- * escalate the plan when it cleared every blocking thread. Undefined when
- * the round is not eligible (the dispatcher then reconciles in Phase 2 as
- * usual); otherwise the reconciler has run and Phase 2 must not repeat it.
+ * escalate the plan when it cleared every blocking thread, or straight away
+ * when no bot thread is left open to judge. Undefined when the round is not
+ * eligible (the dispatcher then reconciles in Phase 2 as usual); otherwise
+ * the reconciler has run, or had nothing to run on, and Phase 2 must not
+ * repeat it.
  */
 export const reconcileForEscalation = async (
     staged: {fs: DispatchFs; depth: string; threads: unknown; canary: boolean},
     reconcile: boolean,
     runReconciler: () => Promise<Record<string, unknown> | null>,
 ): Promise<EscalationOutcome | undefined> => {
-    if (
-        !reconcile ||
-        !escalationEligible(staged.fs, staged.depth, staged.canary)
-    ) {
+    if (!escalationEligible(staged.fs, staged.depth, staged.canary)) {
         return undefined;
+    }
+    if (!reconcile) {
+        // Only a staged empty list proves no blocking thread is open: the
+        // staging lists every unresolved bot thread, so a person resolved
+        // them all. A missing or malformed staging never escalates.
+        if (!Array.isArray(staged.threads) || staged.threads.length > 0) {
+            return undefined;
+        }
+        const fastPlan = escalatePlanToFull(staged.fs);
+        return {
+            reconciliation: undefined,
+            escalatedFrom: "fast",
+            skipped: [],
+            fastPlan,
+        };
     }
     const parsed = await runReconciler();
     if (parsed === null) {

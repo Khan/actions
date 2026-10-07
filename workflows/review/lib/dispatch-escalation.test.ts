@@ -364,6 +364,65 @@ describe("the clearance escalation", () => {
     });
 });
 
+describe("the clearance escalation when a person resolved every thread", () => {
+    const humanResolved = (
+        overrides: Parameters<typeof staging>[0] = {},
+    ): Record<string, string> => ({
+        ...staging(overrides),
+        [`${REVIEW}/threads.json`]: JSON.stringify([]),
+    });
+
+    it("escalates with no reconciler pass when no bot thread is left open", async () => {
+        const fs = makeFakeFs(humanResolved());
+        const runner = stubRunner(outputs(CLEARED));
+        const result = await run(fs, runner);
+        expect(result.depth).toBe("full");
+        expect(result.escalatedFrom).toBe("fast");
+        expect(result.reconciliation).toBeUndefined();
+        expect(runner.calls).not.toContain("thread-reconciler");
+        expect(runner.calls[0]).toBe("pattern-triage");
+        expect(
+            JSON.parse(fs.files[`${REVIEW}/rereview-plan.json`]).reasons,
+        ).toEqual(["mode-fast", CLEARANCE_ESCALATION_REASON]);
+    });
+
+    it("never escalates when the thread staging is missing", async () => {
+        const staged = staging();
+        delete staged[`${REVIEW}/threads.json`];
+        const runner = stubRunner(outputs(CLEARED));
+        const result = await run(makeFakeFs(staged), runner);
+        expect(result.depth).toBe("fast");
+        expect(result.escalatedFrom).toBeUndefined();
+        expect(runner.calls).toEqual([]);
+    });
+
+    it("never escalates without a standing block", async () => {
+        const runner = stubRunner(outputs(CLEARED));
+        const result = await run(
+            makeFakeFs(
+                humanResolved({
+                    priorVerdict: "APPROVE",
+                    priorState: "APPROVED",
+                }),
+            ),
+            runner,
+        );
+        expect(result.depth).toBe("fast");
+        expect(runner.calls).toEqual([]);
+    });
+
+    it("falls back to the fast round when the escalated round loses a core reviewer", async () => {
+        const fs = makeFakeFs(humanResolved());
+        const runner = stubRunner(outputs(CLEARED), ["skill-auditor"]);
+        const result = await run(fs, runner);
+        expect(result.depth).toBe("fast");
+        expect(result.escalationFellBack).toEqual(["skill-auditor"]);
+        expect(JSON.parse(fs.files[`${REVIEW}/rereview-plan.json`])).toEqual(
+            FAST_PLAN,
+        );
+    });
+});
+
 describe("everyBlockingThreadResolved: the fail-closed rule", () => {
     const opened = (body: unknown): unknown[] => [
         {thread_id: "t1", comments: [{author: "github-actions[bot]", body}]},
