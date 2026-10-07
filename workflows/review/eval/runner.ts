@@ -471,9 +471,14 @@ export const runCase = (
     });
 
     // 5. Render the review body + the comments that would be posted.
+    const mediumCount = postedCandidates.filter(
+        (candidate) => candidate.finding.severity === "medium",
+    ).length;
     const reviewBody = renderReviewBody({
         event: verdict.event,
         hasInlineComments: postedCandidates.length > 0,
+        mediumCount,
+        mediumInlineCount: mediumCount,
         ...(rereviewSection !== undefined ? {rereviewSection} : {}),
         skippedDimensions: skippedDimensions(corpusCase.dimensions),
     });
