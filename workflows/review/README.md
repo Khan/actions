@@ -1304,3 +1304,18 @@ stable gate skips the testers' PRs and nothing reviews them.
 
 Dropping a candidate instead is the same two steps, except step 2 only
 deletes `review-beta.md` and its lock.
+
+**Validate** both installs. Run the checker from a checkout of the candidate
+tag against the beta install, and from the stable tag against `review.md`:
+
+```sh
+npx -y tsx workflows/review/lib/check-consumer-config.ts --repo <consumer> \
+    --workflow .github/workflows/review-beta.md
+```
+
+Whenever `.github/workflows/review-beta.md` exists, either run also checks the
+pair: each install gates on `REVIEW_BETA_AUTHORS` with opposite polarity, with
+the `|| '[]'` guard, and on the `issue.user.login` fallback when the install
+has an `issue_comment` trigger; the two lock names differ; and both locks
+are present. A beta pinned to the same tag as stable is a warning. The checker
+cannot see the variable's value, so the graduation order above is on you.
