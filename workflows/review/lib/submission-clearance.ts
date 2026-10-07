@@ -109,6 +109,12 @@ export type ClearanceInput = {
     priorReviewsRaw: unknown;
     /** `rereview.json`'s keptBlockingCount. */
     keptBlockingCount: number;
+    /**
+     * `rereview.json`'s unresolvedBlockingCount: staged blocking threads the
+     * reconciler did not resolve, including every one when it produced no
+     * usable output. A dismissal requires zero.
+     */
+    unresolvedBlockingCount: number;
     /** Blocking suppressions matched to blocking threads (submission.ts). */
     suppressedBlocking: number;
     /**
@@ -226,7 +232,11 @@ export const decideEventAndClearance = (
         event === "COMMENT" &&
         input.keptBlockingCount === 0 &&
         input.suppressedBlocking === 0;
-    if (wantsRcDismissal) {
+    if (wantsRcDismissal && input.unresolvedBlockingCount > 0) {
+        notes.push(
+            `prior request-changes stands: the reconciler did not resolve ${input.unresolvedBlockingCount} blocking thread(s)`,
+        );
+    } else if (wantsRcDismissal) {
         const dismissIds = standingRcIds;
         if (dismissIds.length > 0) {
             dismissal = {reviewIds: dismissIds, message: DISMISSAL_MESSAGE};

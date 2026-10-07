@@ -549,8 +549,33 @@ describe("runRereviewCli", () => {
             acknowledged: [],
             acknowledgedCount: 0,
             keptBlockingCount: 0,
+            unresolvedBlockingCount: 0,
         });
         expect(JSON.parse(written[RESULT])).toEqual(result);
+    });
+
+    it("counts every staged blocking thread unresolved when the reconciler output is missing", () => {
+        const {fs} = makeFs({
+            [THREADS]: JSON.stringify([
+                {
+                    thread_id: "t1",
+                    path: "a.ts",
+                    comments: [
+                        {author: "bot", body: "**issue (blocking):** broken"},
+                    ],
+                },
+                {
+                    thread_id: "t2",
+                    path: "a.ts",
+                    comments: [
+                        {author: "bot", body: "**nitpick (non-blocking):** x"},
+                    ],
+                },
+            ]),
+        });
+        const result = runRereviewCli(fs);
+        expect(result.keptBlockingCount).toBe(0);
+        expect(result.unresolvedBlockingCount).toBe(1);
     });
 
     it("fails open when the reconciler output is unparseable", () => {

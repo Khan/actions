@@ -150,6 +150,23 @@ const stagedReduced = (
     }),
 });
 
+/**
+ * A staging whose blocking thread t1 was resolved by an earlier round:
+ * resolved threads are never staged, so only the non-blocking t2 remains.
+ */
+const withoutBlockingThread = (
+    staged: Record<string, string>,
+): Record<string, string> => ({
+    ...staged,
+    [`${REVIEW}/threads.json`]: JSON.stringify(
+        (
+            JSON.parse(staged[`${REVIEW}/threads.json`]) as {
+                thread_id: string;
+            }[]
+        ).filter((thread) => thread.thread_id !== "t1"),
+    ),
+});
+
 describe("the full-roster approval rule", () => {
     it("demotes a would-be APPROVE to COMMENT at fast depth and stages the dismissal decision", () => {
         // Prior REQUEST_CHANGES, the reconciler resolved the blocking
@@ -253,6 +270,31 @@ describe("the full-roster approval rule", () => {
         expect(fs.files[`${REVIEW}/out/dismiss-decision.json`]).toBe(undefined);
     });
 
+    it("keeps the block standing when the reconciler produced no usable output", () => {
+        const staged = stagedReduced("fast");
+        staged[`${REVIEW}/out/thread-reconciler.json`] = JSON.stringify({
+            error: "run failed",
+        });
+        staged[`${REVIEW}/dispatch-result.json`] = JSON.stringify({
+            depth: "fast",
+            claims: [],
+            noteLines: [],
+        });
+        const fs = makeFakeFs(staged);
+        const plan = runSubmissionCli(fs);
+        expect(fs.files[`${REVIEW}/out/dismiss-decision.json`]).toBe(undefined);
+        expect(plan.body).not.toContain("dismissed rather than approved");
+    });
+
+    it("keeps the block standing when the reconciler accounted for no blocking thread", () => {
+        const fs = makeFakeFs(
+            stagedReduced("fast", {resolve: ["t2"], keep: []}),
+        );
+        const plan = runSubmissionCli(fs);
+        expect(fs.files[`${REVIEW}/out/dismiss-decision.json`]).toBe(undefined);
+        expect(plan.body).not.toContain("dismissed rather than approved");
+    });
+
     it("skips the dismissal when prior-reviews.json carries no review id (older staging)", () => {
         const fs = makeFakeFs(
             stagedReduced("fast", {
@@ -337,7 +379,9 @@ describe("the full-roster approval rule", () => {
         // objections were already resolved earlier): the dismissal still
         // stages, and the COMMENT carrying its explanatory note must post
         // (the !priorRcStands guard on the skip).
-        const fs = makeFakeFs(stagedReduced("fast", {resolve: []}));
+        const fs = makeFakeFs(
+            withoutBlockingThread(stagedReduced("fast", {resolve: []})),
+        );
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("COMMENT");
         expect(plan.skipSubmission).toBe(false);
@@ -392,21 +436,23 @@ describe("the full-roster approval rule", () => {
         // state (prior-reviews.json) keeps priorRcStands true, so this
         // round retries the clearance instead of skipping past it.
         const fs = makeFakeFs(
-            stagedReduced("fast", {
-                resolve: [],
-                priorReviews: [
-                    {
-                        body: stampedBody("REQUEST_CHANGES", "r1"),
-                        id: 3001,
-                        state: "CHANGES_REQUESTED",
-                    },
-                    {
-                        body: stampedBody("COMMENT", "r2"),
-                        id: 3002,
-                        state: "COMMENTED",
-                    },
-                ],
-            }),
+            withoutBlockingThread(
+                stagedReduced("fast", {
+                    resolve: [],
+                    priorReviews: [
+                        {
+                            body: stampedBody("REQUEST_CHANGES", "r1"),
+                            id: 3001,
+                            state: "CHANGES_REQUESTED",
+                        },
+                        {
+                            body: stampedBody("COMMENT", "r2"),
+                            id: 3002,
+                            state: "COMMENTED",
+                        },
+                    ],
+                }),
+            ),
         );
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("COMMENT");
@@ -533,6 +579,7 @@ describe("decideEventAndClearance (the pure decision)", () => {
         depth: "full",
         priorStamp: null,
         keptBlockingCount: 0,
+        unresolvedBlockingCount: 0,
         suppressedBlocking: 0,
         canary: false,
     };
