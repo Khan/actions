@@ -1243,6 +1243,12 @@ so the 3-way merge flow keeps them:
 2. A frontmatter `name:` that differs from the stable install's, e.g.
    `name: PR Reviewer (beta)`.
 
+GitHub runs the compiled lock, not the `.md`, so every edit here (to either
+install) lands with a `gh aw compile` of the edited workflow and its updated
+`.lock.yml`. The bump flow in `review-consumer-bump` finds only
+`review.md`, so bump a beta install by hand, and graduate or drop a beta
+rather than leave it running on a release nothing updates.
+
 Why each piece is shaped this way:
 
 - **The name must differ.** Both locks put the run in the concurrency group
