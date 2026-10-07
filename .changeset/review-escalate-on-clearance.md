@@ -1,0 +1,5 @@
+---
+"review": minor
+---
+
+A fast re-review that clears the last blocking thread now ends in an approval. Before, a `fast` round whose reconciler resolved every blocking thread could only dismiss the standing request-changes review, because approval requires a full-roster round. The author then waited on a later full round, or commented `/review`, for an approval their fix had already earned. Now the dispatcher runs the reconciler first on a ready PR with a standing block. When every blocking thread is resolved, the same run continues as a full round over the whole diff (plan reason `clearance-escalation`). That round posts blocking findings only and approves unless the fix introduced a new blocker. Its approval also posts the guidance comment and requests the owning teams, which a once-blocked PR never got before. Drafts, canary runs, `flip-gated`, and rounds that keep or lose track of a blocking thread don't escalate.

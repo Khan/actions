@@ -10,6 +10,7 @@
  * rather than whatever the file says.
  */
 
+import {CLEARANCE_ESCALATION_REASON} from "./dispatch-escalation";
 import {RE_REVIEW_MODES} from "./routing-config";
 import type {ReReviewMode} from "./routing-config";
 
@@ -41,6 +42,7 @@ const asMode = (value: unknown): ReReviewMode | null =>
  *   the planner's last reason code, so the human can tell a guard (say,
  *   `no-prior-fingerprint`) from the below-dial rule; a token that named no
  *   mode is never recorded and gets no note.
+ * - A clearance escalation says why a fast round ran at full depth.
  * - A re-armed tripwire reports its unreviewed share.
  */
 export const renderDepthNotes = (
@@ -53,7 +55,16 @@ export const renderDepthNotes = (
     }
     const notes: string[] = [];
     const asked = asMode(plan.manualDepth);
-    if (depth !== "full") {
+    const reasons = Array.isArray(plan.reasons)
+        ? plan.reasons.filter((r): r is string => typeof r === "string")
+        : [];
+    if (depth === "full" && reasons.includes(CLEARANCE_ESCALATION_REASON)) {
+        notes.push(
+            `Note: every blocking thread is resolved, so this re-review ran at full depth to decide approval (re-review mode ${
+                asMode(plan.mode) ?? "fast"
+            }, blocking-only).`,
+        );
+    } else if (depth !== "full") {
         const mode = asMode(plan.mode) ?? "full";
         const ask = asked === null ? "" : `requested by /review ${asked}, `;
         const dial = posting.blockingOnly
@@ -65,9 +76,6 @@ export const renderDepthNotes = (
             `Note: re-review ran at ${depth} depth (${ask}re-review mode ${mode}${dial}).`,
         );
     } else if (asked !== null) {
-        const reasons = Array.isArray(plan.reasons)
-            ? plan.reasons.filter((r): r is string => typeof r === "string")
-            : [];
         const raw = reasons[reasons.length - 1];
         // Fixed-format decision codes only (ReReviewPlan.reasons): the same
         // agent-writable boundary asMode guards for the two mode fields.

@@ -87,6 +87,11 @@ import {
 import type {ModelTokens} from "./pricing";
 
 import {computeRoster, TRIAGE_DIMENSION} from "./dispatch-roster";
+import {
+    reconcileForEscalation,
+    toReconciliation,
+    type Reconciliation,
+} from "./dispatch-escalation";
 import type {RosterShed} from "./dispatch-roster";
 import {refusalFallbackFor} from "./refusal-fallback";
 import {
@@ -217,6 +222,7 @@ export type DispatchSkippedDimension = {
 
 export type DispatchResult = {
     depth: string;
+    escalatedFrom?: "fast";
     /** Finding producers planned / dispatched / shed (the gate's rule 3). */
     planned: string[];
     dispatched: string[];
@@ -248,7 +254,7 @@ export type DispatchResult = {
     /** Set when every staged thread failed the filter (see dedup.ts). */
     threadSuppressionUnavailable?: {unusableThreads: number; warning: string};
     /** The reconciler's decision, when it ran and parsed. */
-    reconciliation?: {resolve: string[]; keep: string[]; skipLines: unknown};
+    reconciliation?: Reconciliation;
     /**
      * The prose judge's verdicts (judge-prose.ts), present when the run had
      * a prose runner. Also staged standalone as judge-prose-verdicts.json;
@@ -283,6 +289,7 @@ export type DispatchOptions = {
      * default as every other optional model surface here.
      */
     proseRunner?: ProseRunner;
+    canary?: boolean;
 };
 
 const noteLine = {
@@ -321,14 +328,14 @@ export const runDispatch = async (
     const plan = readJson(fs, `${REVIEW_DIR}/rereview-plan.json`) as
         | {depth?: unknown}
         | undefined;
-    const depth = typeof plan?.depth === "string" ? plan.depth : "full";
+    let depth = typeof plan?.depth === "string" ? plan.depth : "full";
     // The unresolved bot threads, staged by code before the agent started
     // (stage-pr.ts). `hasThreads` gates the reconciler dispatch, so it changes
     // the roster: a first review with no prior threads dispatches none.
     const threads = readJson(fs, `${REVIEW_DIR}/threads.json`);
     const hasThreads = Array.isArray(threads) && threads.length > 0;
 
-    const roster = computeRoster(depth, routing, hasThreads);
+    let roster = computeRoster(depth, routing, hasThreads);
     const lensNames = Array.isArray(routing.lensesToSpawn)
         ? routing.lensesToSpawn
         : [];
@@ -514,6 +521,24 @@ export const runDispatch = async (
         }
     };
 
+    const pre = await reconcileForEscalation(
+        {fs, depth, threads, canary: options.canary === true},
+        roster.reconcile,
+        async () => {
+            const output = await dispatchAgent(RECONCILER);
+            return output === null
+                ? null
+                : parseWithRetry(RECONCILER, output, parseJsonObject);
+        },
+    );
+    let reconciliation = pre?.reconciliation;
+    if (pre !== undefined) {
+        // The reconciler already ran: Phase 2 must not dispatch it again.
+        skippedDimensions.push(...pre.skipped);
+        depth = pre.escalatedFrom === undefined ? depth : "full";
+        roster = computeRoster(depth, routing, false);
+    }
+
     // Phase 1: triage (full/scoped), staging pr.diff and review-files.json.
     let excludedFiles: string[] | undefined;
     let patterns: unknown;
@@ -617,7 +642,6 @@ export const runDispatch = async (
     const usedIds = new Set<string>();
     const candidates: Candidate[] = [];
     let riskFiles: unknown;
-    let reconciliation: DispatchResult["reconciliation"];
     const wave = [
         ...finders.map((name) => ({name, kind: "finder" as const})),
         ...(roster.reconcile
@@ -652,19 +676,7 @@ export const runDispatch = async (
                 shedDimension();
                 continue;
             }
-            reconciliation = {
-                resolve: Array.isArray(parsed["resolve"])
-                    ? parsed["resolve"].filter(
-                          (v): v is string => typeof v === "string",
-                      )
-                    : [],
-                keep: Array.isArray(parsed["keep"])
-                    ? parsed["keep"].filter(
-                          (v): v is string => typeof v === "string",
-                      )
-                    : [],
-                skipLines: parsed["skipLines"] ?? [],
-            };
+            reconciliation = toReconciliation(parsed);
         } else {
             const parsed = await parseWithRetry(entry.name, output, (raw) =>
                 parseFinderOutput(
@@ -894,6 +906,7 @@ export const runDispatch = async (
 
     const result: DispatchResult = {
         depth,
+        escalatedFrom: pre?.escalatedFrom,
         planned: [...roster.finders, ...roster.shed.map((shed) => shed.name)],
         dispatched,
         shed: roster.shed,
@@ -958,6 +971,7 @@ if (typeof require !== "undefined" && require.main === module) {
             runner,
             repoRoot,
             ...(proseRunner === undefined ? {} : {proseRunner}),
+            canary: process.env.REVIEW_CANARY === "1",
         });
         // eslint-disable-next-line no-console
         console.log(

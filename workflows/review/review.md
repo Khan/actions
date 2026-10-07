@@ -906,7 +906,13 @@ overflow or a missing input forces `full`, and the divergence tripwire re-arms
 `full` when too much of the diff is unreviewed. The dispatcher implements each depth (the
 roster it dispatches and the diff surfaces it stages are depth-dependent), and
 the plan CLI renders the depth and tripwire notes into the review body; none of
-it is yours to adjust.
+it is yours to adjust. One depth change is the dispatcher's, never yours: a
+`fast` round on a non-draft PR with a standing request-changes review runs the
+`thread-reconciler` first, and when it resolves every blocking thread the
+dispatcher continues as a `full` round (reason `clearance-escalation`) and
+rewrites `rereview-plan.json` to say so, because only a full round may approve
+the fix. Every later step reads the depth from the rewritten plan or
+`dispatch-result.json`, never from what you read here.
 
 **The review threads are already staged (deterministic code).** The pre-agent
 staging step fetched every unresolved review thread on this PR and split it into
@@ -1109,7 +1115,7 @@ review, posts inline comments, resolves threads, or drops the comment.
 
 **Only run this step when the verdict is APPROVE.** On REQUEST_CHANGES or
 COMMENT, skip it entirely and post no comment. Also skip it entirely on a reduced re-review
-depth (`scoped`, `flip-gated`, `fast`; Step 3): the reduced run computed no triage
+depth (`scoped`, `flip-gated`, `fast`; Step 3, read after the dispatcher returns): the reduced run computed no triage
 or risk data to compare, so the existing comment stands and `risksPatternsKey`
 carries forward unchanged (Step 9).
 

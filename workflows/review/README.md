@@ -611,7 +611,21 @@ everything, whatever the mode:
 | `full` | The whole roster over the whole diff (today's behavior). **Default.** | Until the live A/B has priced a cheaper mode for the repo. |
 | `scoped` | The whole roster, staged only the hunks that are new since the last fully-reviewed fingerprint (`scoped.diff`); comments stay scoped to those hunks. | The recommended first step down: measured lifecycles caught fresh seeded defects on re-review pushes, which a reconcile-only path would miss. |
 | `flip-gated` | Thread reconciliation plus the correctness pass over the new hunks. Reduced depths never approve (approval requires a full-roster round): a standing REQUEST_CHANGES whose blocking objections are all resolved is cleared by dismissing it, and any validated blocking finding from the pass vetoes that clearance. | Cheap re-reviews that still cannot clear a standing block over a fresh validated defect. |
-| `fast` | Thread reconciliation only. | Maximum savings; fresh code on a re-push is guarded only by the tripwire below. |
+| `fast` | Thread reconciliation only, unless that clears the block (see the clearance escalation below). | Maximum savings; fresh code on a re-push is guarded only by the tripwire below. |
+
+**The clearance escalation.** A `fast` round on a ready PR whose own
+REQUEST_CHANGES still stands runs the thread reconciler first. When the
+reconciler resolves every blocking thread, the same run continues as a `full`
+round over the whole diff (plan reason `clearance-escalation`, rewritten into
+`rereview-plan.json`; `lib/dispatch-escalation.ts`). That round can approve,
+so the author gets the approval their fix earned, along with the guidance
+comment and the owning-team requests a first full review would post. It posts
+blocking findings only: the code under it was already fully reviewed, and a
+new blocker in the fix still requests changes. When any blocking thread is
+kept, unaccounted for, or the reconciler output is unusable, the round stays
+`fast`. Drafts and canary runs never escalate; a draft keeps the dismissal,
+and its ready-for-review round is full anyway. `flip-gated` does not
+escalate.
 
 The dial governs push-shaped triggers. A bare `/review` comment a human posts
 on a consumer that keeps the comment trigger plans `full` (reason

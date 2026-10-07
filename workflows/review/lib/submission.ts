@@ -322,6 +322,7 @@ export const runSubmissionCli = (
               noteLines?: unknown;
               reconciliation?: {resolve?: unknown; skipLines?: unknown};
               depth?: unknown;
+              escalatedFrom?: unknown;
               threadSuppressions?: unknown;
               riskFiles?: unknown;
               patterns?: unknown;
@@ -390,8 +391,12 @@ export const runSubmissionCli = (
     // revisit is to key on plan presence, not to widen this condition
     // quietly — that trade (filtering a run built on distrusted state)
     // deserves its own change and its own eval.
+    // A clearance escalation (dispatch-escalation.ts) re-reviews code a full
+    // round already reviewed, so it posts blocking findings only, whatever
+    // the modifier says.
     const blockingOnly =
-        depth !== "full" && routing?.reReviewBlockingOnly === true;
+        dispatch.escalatedFrom === "fast" ||
+        (depth !== "full" && routing?.reReviewBlockingOnly === true);
     // The `blocking-medium` sibling modifier: same reduced surface, but
     // medium-importance claims keep posting inline (spending the
     // non-blocking budget) while minor claims collapse. Same executed-depth
