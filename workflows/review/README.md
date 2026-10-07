@@ -627,7 +627,8 @@ issue behind a wrongly resolved thread is found again and blocks. When any
 blocking thread is kept, unaccounted for, or the reconciler output is
 unusable, or the thread staging is missing, the round stays `fast`. If the escalated round loses its correctness or skill pass (which
 would otherwise hold it and post nothing), the dispatcher restores the fast
-plan and the round dismisses the block as before, with a note saying why.
+plan, and the round dismisses the block as before (unless the surviving pass
+found a new blocker, which requests changes), with a note saying why.
 Drafts and canary runs never escalate; a draft keeps the dismissal, and its
 ready-for-review round is full anyway. `flip-gated` does not escalate.
 

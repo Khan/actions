@@ -913,7 +913,8 @@ when no bot thread is left open, because a person resolved them all) the
 dispatcher continues as a `full` round (reason `clearance-escalation`) and
 rewrites `rereview-plan.json` to say so, because only a full round may approve
 the fix. If that full round loses its correctness or skill pass, the dispatcher
-restores the fast plan, and the round clears the block by dismissal as before.
+restores the fast plan, and the round clears the block by dismissal as before
+unless the surviving pass found a new blocker.
 Every later step reads the depth from the rewritten plan or
 `dispatch-result.json`, never from what you read here.
 

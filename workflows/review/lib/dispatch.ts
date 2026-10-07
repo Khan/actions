@@ -507,7 +507,8 @@ export const runDispatch = async (
     );
     let reconciliation = pre?.reconciliation;
     if (pre !== undefined) {
-        // The reconciler already ran: Phase 2 must not dispatch it again.
+        // The reconciler already ran, or had no thread to judge: Phase 2
+        // must not dispatch it.
         skippedDimensions.push(...pre.skipped);
         depth = pre.escalatedFrom === undefined ? depth : "full";
         roster = computeRoster(depth, routing, false);
@@ -681,6 +682,8 @@ export const runDispatch = async (
     if (lostCore.length > 0) {
         depth = "fast";
         roster = computeRoster(depth, routing, false);
+        // Every record so far belongs to the abandoned full roster, which a
+        // fast round never plans; the fallback note discloses the lost pass.
         skippedDimensions.splice(0, skippedDimensions.length);
     }
 

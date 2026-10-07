@@ -345,6 +345,43 @@ describe("the clearance escalation", () => {
         }
     });
 
+    it("keeps the surviving pass's findings when it falls back", async () => {
+        const fs = makeFakeFs(staging());
+        const runner = stubRunner(
+            {
+                ...outputs(CLEARED),
+                "skill-auditor": JSON.stringify({
+                    findings: [
+                        {
+                            path: "a.ts",
+                            line: 2,
+                            label: "issue (blocking)",
+                            subject: "The fix drops the guard.",
+                            discussion: "The guard was removed.",
+                            failure_scenario: "nil deref on empty input",
+                        },
+                    ],
+                }),
+                "claim-validator": JSON.stringify({
+                    claims: [
+                        {
+                            id: "skill-auditor-1",
+                            verification: "confirmed",
+                            confidence: 0.9,
+                        },
+                    ],
+                }),
+            },
+            ["correctness-reviewer"],
+        );
+        const result = await run(fs, runner);
+        expect(result.depth).toBe("fast");
+        expect(result.escalationFellBack).toEqual(["correctness-reviewer"]);
+        expect(result.claims.map((claim) => claim.label)).toEqual([
+            "issue (blocking)",
+        ]);
+    });
+
     it("records the escalated roster's budget sheds", async () => {
         const staged = staging();
         staged[`${REVIEW}/routing.json`] = JSON.stringify({
