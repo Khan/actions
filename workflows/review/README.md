@@ -1217,7 +1217,9 @@ reviews each PR:
 `REVIEW_BETA_AUTHORS` is a repo variable holding a JSON array of logins
 (`["octocat","hubot"]`). Adding or removing a tester is a variable edit, not a
 PR. Matching is exact per login (and case-insensitive, like all Actions string
-comparisons).
+comparisons). Land `review-beta.md` before setting the variable: listed authors
+are skipped by stable as soon as it is set, and with no beta install nothing
+reviews their PRs or says why.
 
 **The stable gate ships in `review.md`.** Its `if:` ends with:
 
@@ -1231,9 +1233,11 @@ trigger, say) must carry the same clause in its override, in every branch of
 the condition. So must a stable install pinned to a release that predates the
 clause, as a local override until its next bump.
 
-**The beta install is a copy of the candidate release with two local
-overrides**, each marked as a LOCAL OVERRIDE so the 3-way merge flow keeps
-them:
+**The beta install is a copy of the candidate release carrying the stable
+install's local overrides** (a disabled `observability:` block, a raised
+credit ceiling, a comment trigger, and so on), so the trial differs from
+stable only in the release. It adds two more, each marked as a LOCAL OVERRIDE
+so the 3-way merge flow keeps them:
 
 1. The gate's polarity flips: the same clause without the leading `!`.
 2. A frontmatter `name:` that differs from the stable install's, e.g.
@@ -1255,8 +1259,11 @@ Why each piece is shaped this way:
   so a collaborator pushing to or commenting on a tester's PR stays with the
   tester's install.
 - **`|| '[]'` is required.** `fromJSON('')` is an expression error, which
-  would fail every review run in a repo with the variable unset. A malformed
-  value fails the same way, loudly, until it is fixed.
+  would fail every review run in a repo with the variable unset. A value
+  that isn't valid JSON fails every review run the same way, for every
+  author, not only the listed ones, until it is fixed. Valid JSON of the
+  wrong shape is quieter: a bare string makes `contains` a substring match.
+  Check the value is a JSON array before saving it.
 
 **Both installs share the consumer config** (`.github/aw/review/`). While a
 beta runs, a config change must be safe for the stable install as well, e.g.
