@@ -1316,6 +1316,6 @@ npx -y tsx workflows/review/lib/check-consumer-config.ts --repo <consumer> \
 Whenever `.github/workflows/review-beta.md` exists, either run also checks the
 pair: each install gates on `REVIEW_BETA_AUTHORS` with opposite polarity, with
 the `|| '[]'` guard, and on the `issue.user.login` fallback when the install
-has an `issue_comment` trigger; the two lock names differ; and the beta lock
-is present. A beta pinned to the same tag as stable is a warning. The checker
+has an `issue_comment` trigger; the two lock names differ; and both locks
+are present. A beta pinned to the same tag as stable is a warning. The checker
 cannot see the variable's value, so the graduation order above is on you.

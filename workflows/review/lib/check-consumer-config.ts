@@ -647,6 +647,7 @@ export const checkConsumerConfig = (
             workflowPath === BETA_WORKFLOW_PATH
                 ? {path: INSTALLED_WORKFLOW_PATH, lockPath: INSTALLED_LOCK_PATH}
                 : {path: workflowPath, lockPath},
+            workflowPath,
         ),
     );
 

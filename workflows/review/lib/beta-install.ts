@@ -185,6 +185,7 @@ export const betaInstallIssues = (
     fs: ConsumerConfigFs,
     at: (p: string) => string,
     stablePaths: {path: string; lockPath: string},
+    checkedPath: string,
 ): ConfigIssue[] => {
     const beta = readInstall(fs, at, BETA_WORKFLOW_PATH, BETA_LOCK_PATH);
     if (beta === undefined) {
@@ -203,11 +204,23 @@ export const betaInstallIssues = (
         issues.push(...gateIssues(stable, "stable"));
     }
     issues.push(...gateIssues(beta, "beta"));
-    if (!beta.lockPresent) {
+    if (!beta.lockPresent && checkedPath !== BETA_WORKFLOW_PATH) {
         issues.push({
             severity: "error",
             code: "beta-lock-missing",
             message: `${BETA_LOCK_PATH} is missing, so the beta install never runs and beta authors' PRs go unreviewed.`,
+            fix: "Run `gh aw compile` and commit the lock.",
+        });
+    }
+    if (
+        stable !== undefined &&
+        !stable.lockPresent &&
+        checkedPath !== stablePaths.path
+    ) {
+        issues.push({
+            severity: "error",
+            code: "stable-lock-missing",
+            message: `${stablePaths.lockPath} is missing, so the stable install never runs and only beta authors' PRs are reviewed.`,
             fix: "Run `gh aw compile` and commit the lock.",
         });
     }

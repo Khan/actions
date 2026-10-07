@@ -52,14 +52,22 @@ const pair = (): Record<string, string> => ({
     [BETA_LOCK_PATH]: lock("PR Reviewer (beta)"),
 });
 
-const run = (inputs: Record<string, string>) =>
-    betaInstallIssues(fakeFs(inputs), (p) => p, {
-        path: INSTALLED_WORKFLOW_PATH,
-        lockPath: INSTALLED_LOCK_PATH,
-    });
+const run = (
+    inputs: Record<string, string>,
+    checkedPath = INSTALLED_WORKFLOW_PATH,
+) =>
+    betaInstallIssues(
+        fakeFs(inputs),
+        (p) => p,
+        {path: INSTALLED_WORKFLOW_PATH, lockPath: INSTALLED_LOCK_PATH},
+        checkedPath,
+    );
 
-const codes = (inputs: Record<string, string>): string[] =>
-    run(inputs).map((issue) => `${issue.severity}:${issue.code}`);
+const codes = (
+    inputs: Record<string, string>,
+    checkedPath = INSTALLED_WORKFLOW_PATH,
+): string[] =>
+    run(inputs, checkedPath).map((issue) => `${issue.severity}:${issue.code}`);
 
 describe("workflowCondition", () => {
     it("joins a folded block scalar", () => {
@@ -169,10 +177,37 @@ describe("betaInstallIssues", () => {
         expect(codes(inputs)).toEqual(["error:beta-name-collision"]);
     });
 
+    it("flags a gate that tests someone other than the PR author", () => {
+        const inputs = pair();
+        inputs[INSTALLED_WORKFLOW_PATH] = workflow(
+            "!contains(fromJSON(vars.REVIEW_BETA_AUTHORS || '[]'), github.actor)",
+            "review-v1.26.0",
+        );
+        expect(codes(inputs)).toEqual(["error:beta-gate-author"]);
+    });
+
     it("flags a missing beta lock", () => {
         const inputs = pair();
         delete inputs[BETA_LOCK_PATH];
         expect(codes(inputs)).toEqual(["error:beta-lock-missing"]);
+    });
+
+    it("flags a missing stable lock when checking from the beta", () => {
+        const inputs = pair();
+        delete inputs[INSTALLED_LOCK_PATH];
+        expect(codes(inputs, BETA_WORKFLOW_PATH)).toEqual([
+            "error:stable-lock-missing",
+        ]);
+    });
+
+    it("leaves the checked install's own lock to the main checker", () => {
+        const inputs = pair();
+        delete inputs[INSTALLED_LOCK_PATH];
+        delete inputs[BETA_LOCK_PATH];
+        expect(codes(inputs)).toEqual(["error:beta-lock-missing"]);
+        expect(codes(inputs, BETA_WORKFLOW_PATH)).toEqual([
+            "error:stable-lock-missing",
+        ]);
     });
 
     it("flags a beta with no stable install", () => {
