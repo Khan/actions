@@ -194,6 +194,9 @@ describe("the full-roster approval rule", () => {
                 .reviewIds,
         ).toEqual([3001]);
         expect(plan.resolve).toEqual(["t1"]);
+        expect(plan.body).toContain(
+            "Note: re-review ran at fast depth (re-review mode fast, blocking-only from the clearance escalation).",
+        );
     });
 
     it("stages the dismissal at flip-gated depth too", () => {

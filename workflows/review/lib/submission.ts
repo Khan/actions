@@ -618,6 +618,7 @@ export const runSubmissionCli = (
     const depthNotes = renderDepthNotes(plan, depth, {
         blockingOnly,
         blockingMedium,
+        escalated: dispatch.escalatedFrom === "fast",
     });
 
     // The hold path (computeVerdict's core-dimension gate): a run whose

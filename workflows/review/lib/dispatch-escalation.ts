@@ -220,7 +220,8 @@ export const reconcileForEscalation = async (
  * When an escalated round lost a core reviewer, restore the fast plan and
  * return the lost names. A full round missing a core pass holds rather than
  * approves, and a hold posts no review, so without this the block the
- * reconciler cleared would stand; the fast round's dismissal still applies.
+ * reconciler cleared would stand. The fast round dismisses it unless the
+ * surviving pass found a new blocker, which still requests changes.
  */
 export const fallBackToFast = (
     fs: DispatchFs,

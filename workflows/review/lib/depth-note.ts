@@ -48,7 +48,11 @@ const asMode = (value: unknown): ReReviewMode | null =>
 export const renderDepthNotes = (
     plan: DepthNotePlan | undefined,
     depth: string,
-    posting: {blockingOnly: boolean; blockingMedium: boolean},
+    posting: {
+        blockingOnly: boolean;
+        blockingMedium: boolean;
+        escalated: boolean;
+    },
 ): string[] => {
     if (plan === undefined) {
         return [];
@@ -69,7 +73,9 @@ export const renderDepthNotes = (
     } else if (depth !== "full") {
         const mode = asMode(plan.mode) ?? "full";
         const ask = asked === null ? "" : `requested by /review ${asked}, `;
-        const dial = posting.blockingOnly
+        const dial = posting.escalated
+            ? ", blocking-only from the clearance escalation"
+            : posting.blockingOnly
             ? ", blocking-only"
             : posting.blockingMedium
             ? ", blocking-medium"
