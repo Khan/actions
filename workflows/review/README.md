@@ -997,6 +997,10 @@ Optional:
   human ones, which puts their lines in `skipLines` and DROPS fresh findings
   there. Either spelling works (`name` or `name[bot]`); the comparison strips
   the suffix.
+- `REVIEW_BETA_AUTHORS` (repo **variable**) — a JSON array of PR author
+  logins, e.g. `["octocat","hubot"]`, whose PRs a second, candidate install
+  reviews instead of this one. Unset or empty, it does nothing. See
+  [Beta testers](#beta-testers-a-candidate-version-for-named-authors).
 - `REVIEW_AUTOMATION_LOGINS` — comma-separated logins whose `/review`
   comments are automation, not a manual ask, default `khan-actions-bot`. Set
   it in the same workflow-level `env:` block as `REVIEW_BOT_LOGIN` (the plan
@@ -1199,3 +1203,105 @@ pins are held in sync with the installed `review.md` by
 canary preamble, same `source:` line), so a release bump PR that updates the
 install must re-derive the canary body and recompile its lock in the same
 change.
+
+### Beta testers (a candidate version for named authors)
+
+A consumer can trial a new reviewer version on a few authors' PRs before
+moving everyone to it. Two installs sit side by side, and exactly one of them
+reviews each PR:
+
+| Install | File | Pin | Reviews PRs whose author is |
+|---|---|---|---|
+| stable | `.github/workflows/review.md` | the current `review-v*` tag | not in `REVIEW_BETA_AUTHORS` |
+| beta | `.github/workflows/review-beta.md` | the candidate `review-v*` tag | in `REVIEW_BETA_AUTHORS` |
+
+`REVIEW_BETA_AUTHORS` is a repo variable holding a JSON array of logins
+(`["octocat","hubot"]`). Adding or removing a tester is a variable edit, not a
+PR. Matching is exact per login (and case-insensitive, like all Actions string
+comparisons). Land `review-beta.md` before setting the variable: listed authors
+are skipped by stable as soon as it is set, and with no beta install nothing
+reviews their PRs or says why. Also confirm the stable install carries the
+skip clause (a release with it, or the local override below): if it doesn't,
+listed authors' PRs get reviewed by both installs.
+
+**The stable gate ships in `review.md`.** Its `if:` ends with:
+
+```yaml
+!contains(fromJSON(vars.REVIEW_BETA_AUTHORS || '[]'), github.event.pull_request.user.login || github.event.issue.user.login)
+```
+
+With the variable unset this is always true, so a repo that never runs a beta
+is unaffected. A consumer that overrides `if:` locally (a `/review` comment
+trigger, say) must carry the same clause in its override, in every branch of
+the condition. So must a stable install pinned to a release that predates the
+clause, as a local override until its next bump.
+
+**The beta install is a copy of the candidate release carrying the stable
+install's local overrides** (a disabled `observability:` block, a raised
+credit ceiling, a comment trigger, and so on), so the trial differs from
+stable only in the release. It adds two more, each marked as a LOCAL OVERRIDE
+so the 3-way merge flow keeps them:
+
+1. The gate's polarity flips: the same clause without the leading `!`.
+2. A frontmatter `name:` that differs from the stable install's, e.g.
+   `name: PR Reviewer (beta)`.
+
+GitHub runs the compiled lock, not the `.md`, so every edit here (to either
+install) lands with a `gh aw compile` of the edited workflow and its updated
+`.lock.yml`. The bump flow in `review-consumer-bump` finds only
+`review.md`, so bump a beta install by hand, and graduate or drop a beta
+rather than leave it running on a release nothing updates.
+
+Why each piece is shaped this way:
+
+- **The name must differ.** Both locks put the run in the concurrency group
+  `gh-aw-${{ github.workflow }}-<PR number>` with `cancel-in-progress: true`,
+  and `github.workflow` is the workflow name. Concurrency applies before any
+  job `if:` runs, so with equal names the install that is about to skip joins
+  the same group as the live run and cancels it. File-derived identifiers (the
+  cache-memory key, the conclusion job's group) already differ, because the
+  file names differ.
+- **The author is `pull_request.user.login || issue.user.login`.** On an
+  `issue_comment` event (`/review`), `github.event.pull_request` is absent, so
+  a gate on `pull_request.user.login` alone would let the stable install
+  review a beta author's PR on every comment. Both terms name the PR author,
+  so a collaborator pushing to or commenting on a tester's PR stays with the
+  tester's install.
+- **`|| '[]'` is required.** `fromJSON('')` is an expression error, which
+  would fail every review run in a repo with the variable unset. A value
+  that isn't valid JSON fails every review run the same way, for every
+  author, not only the listed ones, until it is fixed. Valid JSON of the
+  wrong shape is quieter: a bare string makes `contains` a substring match.
+  Check the value is a JSON array before saving it.
+
+**Both installs share the consumer config** (`.github/aw/review/`). While a
+beta runs, a config change must be safe for the stable install as well, e.g.
+keep a file the stable version imports even when the candidate has moved it.
+Config the candidate needs and stable does not understand waits for
+graduation.
+
+**Handoffs.** Both installs post as the same bot account and treat every
+review and thread that account posted as their own history. That is the
+point: the beta is the reviewer of record for its PRs, unlike the
+[canary](#the-canary-reviewer-dogfooding-an-unreleased-reviewer-khanactions-only),
+which runs in addition to production and is history-blind. Because the gate
+keys on the PR author, a PR only ever sees one install, unless
+`REVIEW_BETA_AUTHORS` changes while the author has an open PR. Then that PR's
+next run belongs to the other install, which reads the first one's reviews as
+its own, once. **Change the variable only when the authors being added or
+removed have no open PRs.**
+
+**Graduating** the candidate to everyone is a deliberate decision by the
+repo's owner, made after the testers have run on the beta long enough to
+vouch for it. Nothing promotes it automatically. When the owner decides:
+
+1. Empty `REVIEW_BETA_AUTHORS` (testers fall back to stable for the moment).
+2. In one PR, replace `review.md` with the beta install minus its two beta
+   overrides, delete `review-beta.md` and its lock, and land any config moves
+   that waited for graduation.
+
+Do it in that order. With the variable still set and no beta install, the
+stable gate skips the testers' PRs and nothing reviews them.
+
+Dropping a candidate instead is the same two steps, except step 2 only
+deletes `review-beta.md` and its lock.
