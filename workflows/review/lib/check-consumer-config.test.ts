@@ -789,3 +789,47 @@ describe("parseArgs", () => {
         expect(() => parseArgs(["--nope"])).toThrow("unknown argument: --nope");
     });
 });
+
+describe("a beta install beside the stable one", () => {
+    const gate =
+        "contains(fromJSON(vars.REVIEW_BETA_AUTHORS || '[]'), github.event.pull_request.user.login || github.event.issue.user.login)";
+    const withIf = (condition: string, ref: string): string =>
+        WORKFLOW_MD.replace(
+            "permissions:",
+            `if: >-\n  ${condition}\npermissions:`,
+        ).replace("review-v1.11.0", ref);
+    const betaPair = (): Record<string, string> => ({
+        ...validInstall(),
+        [INSTALLED_WORKFLOW_PATH]: withIf(`!${gate}`, "review-v1.11.0"),
+        [INSTALLED_LOCK_PATH]: 'name: "PR Reviewer"\n',
+        ".github/workflows/review-beta.md": withIf(gate, "review-v1.12.0"),
+        ".github/workflows/review-beta.lock.yml":
+            'name: "PR Reviewer (beta)"\n',
+    });
+
+    it("passes a correctly gated pair from either install", () => {
+        expect(codes(check(betaPair()), "error")).toEqual([]);
+        expect(
+            codes(
+                check(betaPair(), {
+                    workflowPath: ".github/workflows/review-beta.md",
+                }),
+                "error",
+            ),
+        ).toEqual([]);
+    });
+
+    it("reports a pairing error whichever install is checked", () => {
+        const inputs = betaPair();
+        inputs[INSTALLED_WORKFLOW_PATH] = WORKFLOW_MD;
+        expect(codes(check(inputs), "error")).toContain("beta-gate-missing");
+        expect(
+            codes(
+                check(inputs, {
+                    workflowPath: ".github/workflows/review-beta.md",
+                }),
+                "error",
+            ),
+        ).toContain("beta-gate-missing");
+    });
+});
