@@ -1219,7 +1219,9 @@ reviews each PR:
 PR. Matching is exact per login (and case-insensitive, like all Actions string
 comparisons). Land `review-beta.md` before setting the variable: listed authors
 are skipped by stable as soon as it is set, and with no beta install nothing
-reviews their PRs or says why.
+reviews their PRs or says why. Also confirm the stable install carries the
+skip clause (a release with it, or the local override below): if it doesn't,
+listed authors' PRs get reviewed by both installs.
 
 **The stable gate ships in `review.md`.** Its `if:` ends with:
 
