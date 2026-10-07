@@ -1,3 +1,17 @@
+/**
+ * Pairing checks for a beta install: a second copy of the reviewer at
+ * `.github/workflows/review-beta.md`, pinned to a candidate release, that
+ * reviews only PRs whose author is in the `REVIEW_BETA_AUTHORS` repo variable
+ * while the stable install reviews everyone else (README, "Beta testers").
+ * Split out of `check-consumer-config.ts` because it reads two installs at
+ * once, where the rest of the checker validates one.
+ *
+ * Every failure here is silent until a PR hits it: an ungated install
+ * double-reviews, an unguarded `fromJSON` fails every run while the variable
+ * is unset, and equal workflow names share one concurrency group, where the
+ * run about to skip cancels the live one. The variable's value is not
+ * visible from a checkout, so only the expressions are checked.
+ */
 import type {ConfigIssue, ConsumerConfigFs} from "./check-consumer-config";
 import {
     frontmatterBlock,
