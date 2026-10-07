@@ -28,6 +28,7 @@ import type {PriorReview} from "./rereview-mode";
 import {standingChangesRequestedIds} from "./submission-clearance";
 import {isRecord} from "./dispatch-contracts";
 import {readJson, type DispatchFs} from "./dispatch-agents";
+import {DEFAULT_FINDERS} from "./dispatch-roster";
 
 const REVIEW_DIR = "/tmp/gh-aw/review";
 const PLAN_PATHS = [
@@ -123,8 +124,10 @@ export const escalationEligible = (
 /**
  * Rewrite both staged copies of the plan to a full round, re-anchored on the
  * current signature (computed from the same unswapped diff the planner read).
+ * Returns the fast plan's text so a fallback can restore it.
  */
-export const escalatePlanToFull = (fs: DispatchFs): void => {
+export const escalatePlanToFull = (fs: DispatchFs): string => {
+    const fastPlan = fs.readFileSync(PLAN_PATHS[0], "utf8");
     const plan = readJson(fs, PLAN_PATHS[0]);
     const base = isRecord(plan) ? plan : {};
     const strippedPath = `${REVIEW_DIR}/full-stripped.diff`;
@@ -151,12 +154,15 @@ export const escalatePlanToFull = (fs: DispatchFs): void => {
     for (const path of PLAN_PATHS) {
         fs.writeFileSync(path, serialized);
     }
+    return fastPlan;
 };
 
 export type EscalationOutcome = {
     reconciliation: Reconciliation | undefined;
     escalatedFrom: "fast" | undefined;
     skipped: {dimension: string; cause: "unavailable"}[];
+    /** The plan as staged before escalation, for {@link fallBackToFast}. */
+    fastPlan?: string;
 };
 
 /**
@@ -190,6 +196,43 @@ export const reconcileForEscalation = async (
     if (!everyBlockingThreadResolved(staged.threads, reconciliation.resolve)) {
         return {reconciliation, escalatedFrom: undefined, skipped: []};
     }
-    escalatePlanToFull(staged.fs);
-    return {reconciliation, escalatedFrom: "fast", skipped: []};
+    const fastPlan = escalatePlanToFull(staged.fs);
+    return {reconciliation, escalatedFrom: "fast", skipped: [], fastPlan};
 };
+
+/**
+ * When an escalated round lost a core reviewer, restore the fast plan and
+ * return the lost names. A full round missing a core pass holds rather than
+ * approves, and a hold posts no review, so without this the block the
+ * reconciler cleared would stand; the fast round's dismissal still applies.
+ */
+export const fallBackToFast = (
+    fs: DispatchFs,
+    outcome: EscalationOutcome | undefined,
+    skipped: readonly {dimension: string; cause: string}[],
+): string[] => {
+    if (outcome?.fastPlan === undefined) {
+        return [];
+    }
+    const lost = skipped
+        .filter(
+            (entry) =>
+                entry.cause === "unavailable" &&
+                (DEFAULT_FINDERS as readonly string[]).includes(
+                    entry.dimension,
+                ),
+        )
+        .map((entry) => entry.dimension);
+    if (lost.length > 0) {
+        for (const path of PLAN_PATHS) {
+            fs.writeFileSync(path, outcome.fastPlan);
+        }
+    }
+    return lost;
+};
+
+/** The body note for {@link fallBackToFast}. */
+export const fallbackNoteLine = (lost: readonly string[]): string =>
+    `Note: the full round to decide approval lost its ${lost.join(
+        " and ",
+    )} output, so this re-review stayed at fast depth.`;

@@ -59,6 +59,8 @@ export const renderDepthNotes = (
         ? plan.reasons.filter((r): r is string => typeof r === "string")
         : [];
     if (depth === "full" && reasons.includes(CLEARANCE_ESCALATION_REASON)) {
+        // The escalation arms blocking-only itself (submission.ts), whatever
+        // `posting` says the ROUTING modifier is.
         notes.push(
             `Note: every blocking thread is resolved, so this re-review ran at full depth to decide approval (re-review mode ${
                 asMode(plan.mode) ?? "fast"

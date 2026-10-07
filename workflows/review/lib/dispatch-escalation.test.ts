@@ -1,7 +1,10 @@
 import {describe, it, expect} from "vitest";
 
 import {runDispatch, type AgentRunner, type DispatchFs} from "./dispatch";
-import {CLEARANCE_ESCALATION_REASON} from "./dispatch-escalation";
+import {
+    CLEARANCE_ESCALATION_REASON,
+    everyBlockingThreadResolved,
+} from "./dispatch-escalation";
 import {computeDiffProvenance} from "./provenance";
 import {
     computeHunkSignature,
@@ -319,5 +322,84 @@ describe("the clearance escalation", () => {
         const result = await run(makeFakeFs(staged), runner);
         expect(result.escalatedFrom).toBeUndefined();
         expect(runner.calls[0]).toBe("pattern-triage");
+    });
+
+    it("falls back to the fast round when the escalated round loses a core reviewer", async () => {
+        const fs = makeFakeFs(staging());
+        const runner = stubRunner(outputs(CLEARED), ["correctness-reviewer"]);
+        const result = await run(fs, runner);
+
+        expect(result.depth).toBe("fast");
+        expect(result.escalatedFrom).toBe("fast");
+        expect(result.escalationFellBack).toEqual(["correctness-reviewer"]);
+        expect(result.skippedDimensions).toEqual([]);
+        expect(result.reconciliation?.resolve).toEqual(["t1"]);
+        expect(result.noteLines).toContain(
+            "Note: the full round to decide approval lost its correctness-reviewer output, so this re-review stayed at fast depth.",
+        );
+        for (const path of [
+            `${REVIEW}/rereview-plan.json`,
+            `${REVIEW}/out/rereview-plan.json`,
+        ]) {
+            expect(JSON.parse(fs.files[path])).toEqual(FAST_PLAN);
+        }
+    });
+
+    it("records the escalated roster's budget sheds", async () => {
+        const staged = staging();
+        staged[`${REVIEW}/routing.json`] = JSON.stringify({
+            enabledReviewers: ["holistic"],
+            lensesToSpawn: [],
+            runBudget: {maxReviewerInvocations: 2, tier: "Low"},
+        });
+        const result = await run(
+            makeFakeFs(staged),
+            stubRunner(outputs(CLEARED)),
+        );
+        expect(result.depth).toBe("full");
+        expect(result.skippedDimensions).toContainEqual({
+            dimension: "holistic",
+            cause: "budget",
+        });
+    });
+});
+
+describe("everyBlockingThreadResolved: the fail-closed rule", () => {
+    const opened = (body: unknown): unknown[] => [
+        {thread_id: "t1", comments: [{author: "github-actions[bot]", body}]},
+    ];
+
+    it("counts a thread whose opener label does not parse as blocking", () => {
+        expect(
+            everyBlockingThreadResolved(opened("Plain reply text."), []),
+        ).toBe(false);
+        expect(
+            everyBlockingThreadResolved(opened("Plain reply text."), ["t1"]),
+        ).toBe(true);
+    });
+
+    it("counts a thread with no usable opener as blocking", () => {
+        expect(
+            everyBlockingThreadResolved([{thread_id: "t1", comments: []}], []),
+        ).toBe(false);
+        expect(everyBlockingThreadResolved(opened(42), [])).toBe(false);
+    });
+
+    it("never clears a thread it cannot identify", () => {
+        expect(everyBlockingThreadResolved([{comments: []}], ["t1"])).toBe(
+            false,
+        );
+        expect(everyBlockingThreadResolved(["not-a-thread"], ["t1"])).toBe(
+            false,
+        );
+    });
+
+    it("leaves a parsed non-blocking thread out of the requirement", () => {
+        expect(
+            everyBlockingThreadResolved(
+                opened("**suggestion (non-blocking):** x"),
+                [],
+            ),
+        ).toBe(true);
     });
 });

@@ -623,9 +623,11 @@ comment and the owning-team requests a first full review would post. It posts
 blocking findings only: the code under it was already fully reviewed, and a
 new blocker in the fix still requests changes. When any blocking thread is
 kept, unaccounted for, or the reconciler output is unusable, the round stays
-`fast`. Drafts and canary runs never escalate; a draft keeps the dismissal,
-and its ready-for-review round is full anyway. `flip-gated` does not
-escalate.
+`fast`. If the escalated round loses its correctness or skill pass (which
+would otherwise hold it and post nothing), the dispatcher restores the fast
+plan and the round dismisses the block as before, with a note saying why.
+Drafts and canary runs never escalate; a draft keeps the dismissal, and its
+ready-for-review round is full anyway. `flip-gated` does not escalate.
 
 The dial governs push-shaped triggers. A bare `/review` comment a human posts
 on a consumer that keeps the comment trigger plans `full` (reason
@@ -685,7 +687,9 @@ collapse to one line each in a `<details>` block in the review body, and the
 depth note names the modifier. It applies exactly when the run executes at a
 reduced depth, so the first full review of a ready PR, a divergence-tripwire
 re-arm, and every guard that resolves to `full` still post everything (which
-is also why `full blocking-only` warns: it can never apply). The verdict is
+is also why `full blocking-only` warns: it can never apply). The one full-depth
+round that posts blocking-only is the clearance escalation, which the
+dispatcher arms whatever the modifier says. The verdict is
 computed from every validated claim either way, so the modifier can never
 flip an outcome; it only moves non-blocking feedback off the inline surface.
 Use it when re-review chatter is the complaint but whole-change coverage

@@ -74,6 +74,7 @@ import {
     readJson,
     type AgentRunner,
     type DispatchFs,
+    type PerAgentReport,
 } from "./dispatch-agents";
 import {
     buildProseJudgeArtifact,
@@ -84,10 +85,11 @@ import {
     type ProseJudgeArtifact,
     type ProseRunner,
 } from "./judge-prose";
-import type {ModelTokens} from "./pricing";
 
 import {computeRoster, TRIAGE_DIMENSION} from "./dispatch-roster";
 import {
+    fallBackToFast,
+    fallbackNoteLine,
     reconcileForEscalation,
     toReconciliation,
     type Reconciliation,
@@ -154,6 +156,7 @@ export {
     type AgentRequest,
     type AgentResult,
     type AgentRunner,
+    type PerAgentReport,
 } from "./dispatch-agents";
 
 /* -------------------------------------------------------------------------- */
@@ -185,36 +188,6 @@ const VALIDATOR = "claim-validator";
 /* The dispatch run                                                           */
 /* -------------------------------------------------------------------------- */
 
-export type PerAgentReport = {
-    name: string;
-    model: string;
-    /** The SDK's own meter, list price (see cost-report.ts for Khan's rate). */
-    usd: number;
-    turns: number;
-    wallMs: number;
-    /** Tokens per model behind `usd`, when the runner delivered a result record. */
-    usage?: ModelTokens[];
-    /** Tool calls the agent made, when the runner counts them. */
-    toolCalls?: number;
-    /**
-     * Tokens the prose judge spent gating this agent's submissions. The
-     * judge runs its own SDK sessions inside the agent's submit_result path,
-     * so this is not inside `usage` and would otherwise be invisible.
-     */
-    judgeUsage?: ModelTokens[];
-    /** This entry is the one malformed-output retry of the same agent. */
-    retried?: boolean;
-    /**
-     * The pinned model refused under the provider's usage policy and this
-     * dispatch ran on the fallback instead. Recorded, never silent: the whole
-     * failure mode is invisibility, and a hidden model swap would just move it.
-     */
-    fellBackTo?: string;
-    /** The result arrived via the structured-final tool (pre-validated). */
-    structuredFinal?: boolean;
-    failed?: string;
-};
-
 export type DispatchSkippedDimension = {
     dimension: string;
     cause: "budget" | "unavailable";
@@ -223,6 +196,7 @@ export type DispatchSkippedDimension = {
 export type DispatchResult = {
     depth: string;
     escalatedFrom?: "fast";
+    escalationFellBack?: string[];
     /** Finding producers planned / dispatched / shed (the gate's rule 3). */
     planned: string[];
     dispatched: string[];
@@ -537,6 +511,12 @@ export const runDispatch = async (
         skippedDimensions.push(...pre.skipped);
         depth = pre.escalatedFrom === undefined ? depth : "full";
         roster = computeRoster(depth, routing, false);
+        skippedDimensions.push(
+            ...roster.shed.map((shed) => ({
+                dimension: shed.name,
+                cause: "budget" as const,
+            })),
+        );
     }
 
     // Phase 1: triage (full/scoped), staging pr.diff and review-files.json.
@@ -695,6 +675,13 @@ export const runDispatch = async (
                 riskFiles = parsed.riskFiles;
             }
         }
+    }
+
+    const lostCore = fallBackToFast(fs, pre, skippedDimensions);
+    if (lostCore.length > 0) {
+        depth = "fast";
+        roster = computeRoster(depth, routing, false);
+        skippedDimensions.splice(0, skippedDimensions.length);
     }
 
     // The change-provenance gate (code-computed), with its artifact records.
@@ -892,6 +879,7 @@ export const runDispatch = async (
                         : skip.dimension,
                 ),
             ),
+        ...(lostCore.length > 0 ? [fallbackNoteLine(lostCore)] : []),
         ...(provenanceSkipped
             ? [
                   "Note: change-provenance gate skipped this run (diff staging unparseable).",
@@ -907,6 +895,7 @@ export const runDispatch = async (
     const result: DispatchResult = {
         depth,
         escalatedFrom: pre?.escalatedFrom,
+        ...(lostCore.length > 0 ? {escalationFellBack: lostCore} : {}),
         planned: [...roster.finders, ...roster.shed.map((shed) => shed.name)],
         dispatched,
         shed: roster.shed,

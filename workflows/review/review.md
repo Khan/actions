@@ -889,8 +889,8 @@ executed depth and the cost counters can price the mode dial), plus
 in which case the staging step ALSO already overwrote `full-stripped.diff` with
 the scoped contents and refreshed its annotated sibling, so the whole-change
 surfaces you and the sub-agents read are pre-shrunk to the unseen hunks.
-Read the plan; it is deterministic and final: never deepen or shallow it yourself,
-and never run the CLI yourself. A comment-triggered run whose `/review` a
+Read the plan; it is deterministic, and only code changes it (the one case is
+below): never deepen or shallow it yourself, and never run the CLI yourself. A comment-triggered run whose `/review` a
 human posted plans `full` (reason `manual-review-request`), whatever the
 mode dial says, unless the comment named a depth (`/review scoped`, or its
 synonyms `delta`, `diff`, `diff-only`; also `flip-gated`, `fast`), which sets
@@ -911,7 +911,9 @@ it is yours to adjust. One depth change is the dispatcher's, never yours: a
 `thread-reconciler` first, and when it resolves every blocking thread the
 dispatcher continues as a `full` round (reason `clearance-escalation`) and
 rewrites `rereview-plan.json` to say so, because only a full round may approve
-the fix. Every later step reads the depth from the rewritten plan or
+the fix. If that full round loses its correctness or skill pass, the dispatcher
+restores the fast plan, and the round clears the block by dismissal as before.
+Every later step reads the depth from the rewritten plan or
 `dispatch-result.json`, never from what you read here.
 
 **The review threads are already staged (deterministic code).** The pre-agent
@@ -1317,7 +1319,7 @@ fully explained by a common pattern above:
 
 **Run this step only when the verdict is APPROVE; skip it entirely on
 REQUEST_CHANGES or COMMENT.** Also skip it entirely when `correctness-reviewer` did not run
-this run (a `flip-gated` or `fast` re-review depth, Step 3): there are no fresh
+this run (a `flip-gated` or `fast` re-review depth, Step 3, read after the dispatcher returns): there are no fresh
 risk classifications to route on, and the anchoring full review already requested
 the owning teams.
 

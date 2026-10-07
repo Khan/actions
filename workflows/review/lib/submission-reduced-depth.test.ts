@@ -179,6 +179,23 @@ describe("the full-roster approval rule", () => {
         expect(plan.skipSubmission).toBe(false);
     });
 
+    it("still stages the dismissal when a clearance escalation fell back to fast", () => {
+        const staged = stagedReduced("fast");
+        staged[`${REVIEW}/dispatch-result.json`] = JSON.stringify({
+            ...JSON.parse(staged[`${REVIEW}/dispatch-result.json`]),
+            escalatedFrom: "fast",
+            escalationFellBack: ["correctness-reviewer"],
+        });
+        const fs = makeFakeFs(staged);
+        const plan = runSubmissionCli(fs);
+        expect(plan.event).toBe("COMMENT");
+        expect(
+            JSON.parse(fs.files[`${REVIEW}/out/dismiss-decision.json`])
+                .reviewIds,
+        ).toEqual([3001]);
+        expect(plan.resolve).toEqual(["t1"]);
+    });
+
     it("stages the dismissal at flip-gated depth too", () => {
         const fs = makeFakeFs(stagedReduced("flip-gated"));
         const plan = runSubmissionCli(fs);
