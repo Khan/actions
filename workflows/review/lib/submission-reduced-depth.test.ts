@@ -496,7 +496,7 @@ describe("the full-roster approval rule", () => {
         // GitHub derives the effective state from the latest decisive
         // review: the [blocked, then cleared] history every approved PR
         // carries must not read as a standing block (it would re-stage
-        // dismissals and upgrade full-round COMMENTs on stale evidence).
+        // dismissals on stale evidence).
         // The latest body stamp (APPROVE) also anchors the prior verdict.
         const fs = makeFakeFs(
             stagedReduced("fast", {
@@ -521,15 +521,13 @@ describe("the full-roster approval rule", () => {
         expect(fs.files[`${REVIEW}/out/dismiss-decision.json`]).toBe(undefined);
     });
 
-    // The scoped-depth COMMENT-to-APPROVE upgrade (the full-roster path
-    // the rule deliberately keeps) is pinned in
-    // submission-blocking-medium.test.ts ("the COMMENT verdict's
-    // prior-state guard").
+    // A scoped-depth approval with medium findings over a prior block is
+    // pinned in submission-blocking-medium.test.ts.
 });
 
 describe("decideEventAndClearance (the pure decision)", () => {
     const base = {
-        verdictEvent: "COMMENT" as const,
+        verdictEvent: "APPROVE" as const,
         depth: "full",
         priorStamp: null,
         keptBlockingCount: 0,
@@ -552,14 +550,10 @@ describe("decideEventAndClearance (the pure decision)", () => {
             );
             expect(result.notes.join(" ")).toContain("canary run");
         }
-        // A genuine COMMENT verdict needs no note: nothing was demoted.
-        const comment = decideEventAndClearance({...base, canary: true});
-        expect(comment.event).toBe("COMMENT");
-        expect(comment.bodyNote).toBeNull();
     });
 
     it("canary: never stages a dismissal of a standing block, even at reduced depth", () => {
-        // Degenerate like the upgrade case below (the canary plans full
+        // Degenerate like the approval case below (the canary plans full
         // depth and stages empty priors), but the dismissal moves review
         // state, so the pure function must refuse it on any input.
         const result = decideEventAndClearance({
@@ -578,9 +572,9 @@ describe("decideEventAndClearance (the pure decision)", () => {
         expect(result.dismissal).toBeNull();
     });
 
-    it("canary: never takes the COMMENT-to-APPROVE upgrade over a standing block", () => {
+    it("canary: never approves over a standing block", () => {
         // Degenerate by construction (canary staging writes priors empty),
-        // but the pure function must not upgrade to APPROVE on any input.
+        // but the pure function must not submit APPROVE on any input.
         const result = decideEventAndClearance({
             ...base,
             canary: true,
@@ -595,7 +589,7 @@ describe("decideEventAndClearance (the pure decision)", () => {
         expect(result.event).toBe("COMMENT");
     });
 
-    it("upgrades a full-round COMMENT over a live standing block (failed-dismissal recovery)", () => {
+    it("a full-round APPROVE over a live standing block approves (failed-dismissal recovery)", () => {
         const result = decideEventAndClearance({
             ...base,
             priorReviewsRaw: [
@@ -611,7 +605,7 @@ describe("decideEventAndClearance (the pure decision)", () => {
         expect(result.dismissal).toBe(null);
     });
 
-    it("keeps a full-round COMMENT when a later APPROVED superseded the block", () => {
+    it("a later APPROVED supersedes the block for a full-round approval", () => {
         const result = decideEventAndClearance({
             ...base,
             priorReviewsRaw: [
@@ -623,7 +617,7 @@ describe("decideEventAndClearance (the pure decision)", () => {
                 {body: stampedBody("APPROVE"), id: 3005, state: "APPROVED"},
             ],
         });
-        expect(result.event).toBe("COMMENT");
+        expect(result.event).toBe("APPROVE");
         expect(result.priorRcStands).toBe(false);
         expect(result.dismissal).toBe(null);
     });

@@ -789,7 +789,7 @@ describe("stampFromCacheMemory", () => {
         });
     });
 
-    it("accepts a COMMENT verdict record (the PRA-7 middle verdict)", () => {
+    it("accepts a COMMENT verdict record (a demoted approval)", () => {
         const stamp = stampFromCacheMemory(
             JSON.parse(cacheRecord({verdict: "COMMENT"})),
         );

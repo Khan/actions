@@ -602,10 +602,6 @@ export const runSubmissionCli = (
             patternTriage: dimensionStatus(TRIAGE_DIMENSION),
         },
         keptBlockingCount: keptBlockingFloor + suppressedBlocking,
-        // The middle verdict's signal (PRA-7): post-veto mediums, the same
-        // count the notes line records. Collapsed mediums count too; the
-        // verdict follows what the run FOUND, not which surface showed it
-        // (the same invariant that keeps a 21st blocking claim blocking).
         mediumCount,
     });
 
@@ -880,6 +876,10 @@ export const runSubmissionCli = (
         event,
         hasInlineComments: inline.length > 0,
         rereviewSection: rereview.section,
+        mediumCount,
+        mediumInlineCount: inlineList.filter(
+            (claim) => claim.importance === "medium",
+        ).length,
         approveDemoted,
         hasBodyFindings: hasCollapsedSection || prLevelLines.length > 0,
     });

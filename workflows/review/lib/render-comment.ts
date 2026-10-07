@@ -22,10 +22,10 @@ import type {Anchor, Finding, Lens} from "./finding-schema";
 
 /**
  * The review-outcome vocabulary. `APPROVE` / `REQUEST_CHANGES` are #194's
- * mechanical events. `COMMENT` is the middle verdict (PRA-7): the run found
- * medium-importance findings and nothing blocking, so it neither vouches for
- * the change nor demands another round; it IS a GitHub review event, and the
- * findings post exactly as they would on an approval. `HOLD_FOR_HUMAN` is
+ * mechanical events. `COMMENT` never comes out of the verdict itself: the
+ * clearance (`submission-clearance.ts`) submits it for a reduced-depth round
+ * whose would-be approval needs a full roster, and for a canary run, which
+ * must never move the bot's review state. `HOLD_FOR_HUMAN` is
  * the coverage outcome (missing-core dimension gate + policy-named
  * conflicts); it is NOT a GitHub review event, so the orchestrator surfaces
  * a hold by pulling in a human rather than auto-submitting anything.
@@ -140,9 +140,8 @@ const DOCUMENTATION_LENSES: ReadonlySet<Lens> = new Set<Lens>([
  * rows above). That is the tier's design invariant, not an omission:
  * keeping medium out of the label vocabulary is what leaves the label-keyed
  * machinery (the recap parser, dedup's blocking guards, the flip gate)
- * untouched. The verdict DOES read the tier, but directly (`verdict.ts`
- * consumes the post-veto medium count and demotes a would-be APPROVE to
- * COMMENT), never through labels.
+ * untouched. The tier never changes the verdict; the approval head counts
+ * it directly (`renderReviewBody`'s `mediumCount`), never through labels.
  *
  * There is deliberately **no blocking documentation variant**. The
  * documentation reviewer is advisory-only (its definition permits it one
@@ -466,13 +465,14 @@ export type ReviewBodyInput = {
      * as before — a first review has no prior threads to account for.
      */
     rereviewSection?: string;
+    mediumCount?: number;
+    mediumInlineCount?: number;
     /**
      * Whether this COMMENT is a would-be APPROVE demoted by the reduced-depth
      * clearance (`submission-clearance.ts`'s `approveDemoted`) rather than a
-     * verdict the findings earned. Such a run usually has no findings (see
-     * {@link ReviewBodyInput.hasBodyFindings} for the exception), so the
-     * medium-findings head would tell the author about findings that do not
-     * exist. Ignored for non-`COMMENT` events.
+     * canary run. Such a run usually has no findings (see
+     * {@link ReviewBodyInput.hasBodyFindings} for the exception), so its head
+     * says why the run is not an approval. Ignored for non-`COMMENT` events.
      */
     approveDemoted?: boolean;
     /**
@@ -509,6 +509,22 @@ export const HOLD_UNSTUCK_LINES = [
         "automated review.",
 ] as const;
 
+const mediumClause = (input: ReviewBodyInput): string | null => {
+    const count = input.mediumCount ?? 0;
+    if (count <= 0) {
+        return null;
+    }
+    const inline = Math.min(input.mediumInlineCount ?? 0, count);
+    const where =
+        inline === count
+            ? "see inline comments"
+            : inline === 0
+            ? "see the observations below"
+            : "see inline comments and the observations below";
+    const findings = count === 1 ? "1 finding" : `${count} findings`;
+    return `${findings} worth fixing before merge (${where})`;
+};
+
 /**
  * Render the review body for a verdict. Mirrors `review.md` Step 6 exactly for
  * APPROVE/REQUEST_CHANGES, and renders a self-explanatory hold-for-human body
@@ -534,6 +550,7 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
     switch (input.event) {
         case "APPROVE": {
             const obligations = input.obligationCount ?? 0;
+            const mediums = mediumClause(input);
             if (obligations > 0) {
                 // Conditional approval: the body must say the approval is
                 // conditional on the separately-posted pre-merge obligations
@@ -542,6 +559,11 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
                     obligations === 1
                         ? "**✅ Approved** with 1 pre-merge obligation — see the pre-merge obligations comment."
                         : `**✅ Approved** with ${obligations} pre-merge obligations — see the pre-merge obligations comment.`;
+                if (mediums !== null) {
+                    head += ` Nothing else blocks; ${mediums}.`;
+                }
+            } else if (mediums !== null) {
+                head = `**✅ Approved** — nothing blocks; ${mediums}.`;
             } else {
                 // With inline comments, the comments make the review non-empty;
                 // the one-line body exists only to keep a comment-less approval
@@ -559,23 +581,20 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             head = "**⛔ Changes requested** — see inline comments.";
             break;
         case "COMMENT":
-            // The middle verdict never has an empty body either: the head is
-            // what tells an author this is deliberately not an approval. Two
-            // kinds of head, because two different runs land here: a run whose
-            // findings earned the middle verdict, and a reduced-depth run
-            // whose would-be approval was demoted for want of a full roster.
-            // The latter usually has no findings, so the medium-findings head
-            // would name findings the author cannot go look for — but a
-            // demoted approval can still carry advisory findings, inline or
-            // collapsed into the observations fold, so "no new findings" is
-            // only claimed when neither surface has any.
+            // A COMMENT never has an empty body either: the head is what
+            // tells an author this is deliberately not an approval. Two runs
+            // land here: a reduced-depth run whose would-be approval was
+            // demoted for want of a full roster, and a canary. A demoted
+            // approval usually has no findings but can still carry advisory
+            // ones, inline or collapsed into the observations fold, so "no
+            // new findings" is only claimed when neither surface has any.
             head = input.approveDemoted
                 ? input.hasInlineComments
                     ? "**💬 Commented** — see inline comments; approval requires a full review round."
                     : input.hasBodyFindings
                     ? "**💬 Commented** — see the observations below; approval requires a full review round."
                     : "**💬 Commented** — no new findings; approval requires a full review round."
-                : "**💬 Commented** — medium-importance findings found; nothing blocks.";
+                : "**💬 Commented** — canary run; see the note below.";
             break;
         case "HOLD_FOR_HUMAN":
             head = HOLD_HEAD;

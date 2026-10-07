@@ -384,15 +384,15 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
         expect(result.violations.map((v) => v.code)).toEqual([
             "approve-with-blocking-comment",
         ]);
-        // The COMMENT verdict is checked the same way: it exists for the
-        // medium-and-below population, never for blocking findings.
+        // A COMMENT is checked the same way: it is only ever a demoted
+        // approval or a canary, never a carrier for blocking findings.
         const comment = evaluate({
             ...conforming(),
             items: [
                 commentItem(2, "**issue (blocking):** guard removed"),
                 submitItem(
                     "COMMENT",
-                    "Commented — medium-importance findings found; nothing blocks.",
+                    "Commented — no new findings; approval requires a full review round.",
                 ),
             ],
         });
@@ -432,7 +432,7 @@ describe("verdict and resolution chokepoints (slice 3)", () => {
             items: [
                 submitItem(
                     "COMMENT",
-                    "Commented — medium-importance findings found; nothing blocks.",
+                    "Commented — no new findings; approval requires a full review round.",
                 ),
             ],
             plan: {depth: "fast"},

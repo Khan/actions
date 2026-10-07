@@ -202,7 +202,7 @@ describe("runCacheRecordCli", () => {
         });
     });
 
-    it("records a COMMENT verdict like any submittable event (the PRA-7 middle verdict)", () => {
+    it("records a COMMENT verdict like any submittable event (a demoted approval)", () => {
         const fs = makeFakeFs(
             staged({
                 [`${REVIEW}/submission-plan.json`]: JSON.stringify({

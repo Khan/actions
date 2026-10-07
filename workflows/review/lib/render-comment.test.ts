@@ -417,13 +417,13 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
 });
 
 describe("renderReviewBody — the COMMENT verdict", () => {
-    it("always carries the middle verdict's head", () => {
+    it("names the canary when the clearance did not demote an approval", () => {
         const body = renderReviewBody({
             event: "COMMENT",
             hasInlineComments: true,
         });
         expect(body).toContain(
-            "**💬 Commented** — medium-importance findings found; nothing blocks.",
+            "**💬 Commented** — canary run; see the note below.",
         );
     });
 
@@ -436,7 +436,7 @@ describe("renderReviewBody — the COMMENT verdict", () => {
         expect(body).toContain(
             "**💬 Commented** — no new findings; approval requires a full review round.",
         );
-        expect(body).not.toContain("medium-importance findings found");
+        expect(body).not.toContain("canary");
     });
 
     it("points at inline comments when a demoted round posted some", () => {
@@ -463,16 +463,70 @@ describe("renderReviewBody — the COMMENT verdict", () => {
         );
         expect(body).not.toContain("no new findings");
     });
+});
 
-    it("keeps the medium-findings head when the demotion flag is false", () => {
-        const body = renderReviewBody({
-            event: "COMMENT",
-            hasInlineComments: true,
-            approveDemoted: false,
-        });
-        expect(body).toContain(
-            "**💬 Commented** — medium-importance findings found; nothing blocks.",
+describe("renderReviewBody — an approval with medium findings", () => {
+    it("counts one medium posted inline", () => {
+        expect(
+            renderReviewBody({
+                event: "APPROVE",
+                hasInlineComments: true,
+                mediumCount: 1,
+                mediumInlineCount: 1,
+            }),
+        ).toBe(
+            "**✅ Approved** — nothing blocks; 1 finding worth fixing before merge (see inline comments).",
         );
+    });
+
+    it("counts several mediums collapsed into the fold", () => {
+        expect(
+            renderReviewBody({
+                event: "APPROVE",
+                hasInlineComments: false,
+                mediumCount: 2,
+                mediumInlineCount: 0,
+            }),
+        ).toBe(
+            "**✅ Approved** — nothing blocks; 2 findings worth fixing before merge (see the observations below).",
+        );
+    });
+
+    it("points at both surfaces when mediums split across them", () => {
+        expect(
+            renderReviewBody({
+                event: "APPROVE",
+                hasInlineComments: true,
+                mediumCount: 3,
+                mediumInlineCount: 2,
+            }),
+        ).toBe(
+            "**✅ Approved** — nothing blocks; 3 findings worth fixing before merge (see inline comments and the observations below).",
+        );
+    });
+
+    it("appends the medium clause to a conditional approval", () => {
+        expect(
+            renderReviewBody({
+                event: "APPROVE",
+                hasInlineComments: true,
+                obligationCount: 1,
+                mediumCount: 1,
+                mediumInlineCount: 1,
+            }),
+        ).toBe(
+            "**✅ Approved** with 1 pre-merge obligation — see the pre-merge obligations comment. Nothing else blocks; 1 finding worth fixing before merge (see inline comments).",
+        );
+    });
+
+    it("keeps the empty head with inline comments when no medium posted", () => {
+        expect(
+            renderReviewBody({
+                event: "APPROVE",
+                hasInlineComments: true,
+                mediumCount: 0,
+            }),
+        ).toBe("");
     });
 });
 
