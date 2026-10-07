@@ -89,7 +89,7 @@ export const everyBlockingThreadResolved = (
 
 /**
  * Whether this fast round may escalate once its reconciler clears the block:
- * a non-draft, non-canary PR whose prior REQUEST_CHANGES still stands (the
+ * a non-canary PR, draft or ready, whose prior REQUEST_CHANGES still stands (the
  * stamp, or a live standing review, the same derivation the clearance uses).
  */
 export const escalationEligible = (
@@ -101,7 +101,7 @@ export const escalationEligible = (
         return false;
     }
     const prContext = readJson(fs, `${REVIEW_DIR}/pr-context.json`);
-    if (!isRecord(prContext) || prContext["isDraft"] !== false) {
+    if (!isRecord(prContext) || typeof prContext["isDraft"] !== "boolean") {
         return false;
     }
     const priorRaw = readJson(fs, `${REVIEW_DIR}/prior-reviews.json`);

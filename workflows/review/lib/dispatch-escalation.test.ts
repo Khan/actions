@@ -273,7 +273,6 @@ describe("the clearance escalation", () => {
     });
 
     it.each([
-        ["a draft", {isDraft: true}, false],
         [
             "a PR with no standing block",
             {priorVerdict: "APPROVE", priorState: "APPROVED"},
@@ -287,6 +286,16 @@ describe("the clearance escalation", () => {
         expect(result.depth).toBe("fast");
         expect(result.escalatedFrom).toBeUndefined();
         expect(runner.calls).toEqual(["thread-reconciler"]);
+    });
+
+    it("escalates on a draft, anchoring the stamp as a draft", async () => {
+        const fs = makeFakeFs(staging({isDraft: true}));
+        const result = await run(fs, stubRunner(outputs(CLEARED)));
+        expect(result.escalatedFrom).toBe("fast");
+        expect(
+            JSON.parse(fs.files[`${REVIEW}/rereview-plan.json`])
+                .stampAnchorDraft,
+        ).toBe(true);
     });
 
     it("escalates when the stamp moved on but the block still stands live", async () => {

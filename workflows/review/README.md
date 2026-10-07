@@ -613,7 +613,7 @@ everything, whatever the mode:
 | `flip-gated` | Thread reconciliation plus the correctness pass over the new hunks. Reduced depths never approve (approval requires a full-roster round): a standing REQUEST_CHANGES whose blocking objections are all resolved is cleared by dismissing it, and any validated blocking finding from the pass vetoes that clearance. | Cheap re-reviews that still cannot clear a standing block over a fresh validated defect. |
 | `fast` | Thread reconciliation only, unless that clears the block (see the clearance escalation below). | Maximum savings; fresh code on a re-push is guarded only by the tripwire below. |
 
-**The clearance escalation.** A `fast` round on a ready PR whose own
+**The clearance escalation.** A `fast` round on a PR, draft or ready, whose own
 REQUEST_CHANGES still stands runs the thread reconciler first. When the
 reconciler resolves every blocking thread, or when no bot thread is left open
 because a person resolved them all, the same run continues as a `full` round
@@ -629,8 +629,10 @@ unusable, or the thread staging is missing, the round stays `fast`. If the escal
 would otherwise hold it and post nothing), the dispatcher restores the fast
 plan, and the round dismisses the block as before (unless the surviving pass
 found a new blocker, which requests changes), with a note saying why.
-Drafts and canary runs never escalate; a draft keeps the dismissal, and its
-ready-for-review round is full anyway. `flip-gated` does not escalate.
+A draft escalates too, so an author can have the approval before publishing;
+its stamp records the draft anchor, so the ready-for-review guard still
+applies on publish. Canary runs never escalate. `flip-gated` does not
+escalate.
 
 The dial governs push-shaped triggers. A bare `/review` comment a human posts
 on a consumer that keeps the comment trigger plans `full` (reason
