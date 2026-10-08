@@ -1,4 +1,4 @@
-# Review Bot — Architecture Overview
+# Review Bot — Architecture
 
 ## 1. What it does
 
