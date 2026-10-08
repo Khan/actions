@@ -300,3 +300,43 @@ describe("the collapsed section's pr-level entries", () => {
         );
     });
 });
+
+describe("runSubmissionCli: the clearance escalation", () => {
+    const escalated = (claims: unknown[]): Record<string, string> => ({
+        ...staged({depth: "full", escalatedFrom: "fast", claims}, false),
+        [`${REVIEW}/rereview-plan.json`]: JSON.stringify({
+            depth: "full",
+            mode: "fast",
+            reasons: ["mode-fast", "clearance-escalation"],
+            escalatedFrom: "fast",
+            stampAnchorDraft: false,
+            stampHunks: {},
+        }),
+    });
+
+    it("posts only blocking findings inline and says why it ran full", () => {
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                escalated([
+                    claim({
+                        id: "nit",
+                        label: "suggestion (non-blocking)",
+                        subject: "Rename the helper.",
+                    }),
+                ]),
+            ),
+        );
+        expect(plan.event).toBe("APPROVE");
+        expect(plan.comments).toHaveLength(0);
+        expect(plan.body).toContain("**Non-blocking observations (1):**");
+        expect(plan.body).toContain(
+            "Note: every blocking thread is resolved, so this re-review ran at full depth to decide approval (re-review mode fast, blocking-only).",
+        );
+    });
+
+    it("still requests changes on a new blocking finding", () => {
+        const plan = runSubmissionCli(makeFakeFs(escalated([claim()])));
+        expect(plan.event).toBe("REQUEST_CHANGES");
+        expect(plan.comments).toHaveLength(1);
+    });
+});

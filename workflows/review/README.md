@@ -611,7 +611,33 @@ everything, whatever the mode:
 | `full` | The whole roster over the whole diff (today's behavior). **Default.** | Until the live A/B has priced a cheaper mode for the repo. |
 | `scoped` | The whole roster, staged only the hunks that are new since the last fully-reviewed fingerprint (`scoped.diff`); comments stay scoped to those hunks. | The recommended first step down: measured lifecycles caught fresh seeded defects on re-review pushes, which a reconcile-only path would miss. |
 | `flip-gated` | Thread reconciliation plus the correctness pass over the new hunks. Reduced depths never approve (approval requires a full-roster round): a standing REQUEST_CHANGES whose blocking objections are all resolved is cleared by dismissing it, and any validated blocking finding from the pass vetoes that clearance. | Cheap re-reviews that still cannot clear a standing block over a fresh validated defect. |
-| `fast` | Thread reconciliation only. | Maximum savings; fresh code on a re-push is guarded only by the tripwire below. |
+| `fast` | Thread reconciliation only, unless that clears the block (see the clearance escalation below). | Maximum savings; fresh code on a re-push is guarded only by the tripwire below. |
+
+**The clearance escalation.** A `fast` round on a PR, draft or ready, whose own
+REQUEST_CHANGES still stands runs the thread reconciler first. When the
+reconciler resolves every blocking thread, or when no bot thread is left open
+because a person resolved them all, the same run continues as a `full` round
+over the whole diff (plan reason `clearance-escalation`, rewritten into
+`rereview-plan.json`; `lib/dispatch-escalation.ts`). That round can approve,
+so the author gets the approval their fix earned, along with the guidance
+comment a first full review would post, and on a ready PR the owning-team
+requests (on a draft, teams are requested when the PR is published). It posts
+blocking findings only: the code under it was already fully reviewed, and a
+new blocker in the fix still requests changes. The full round re-judges the whole diff, so an
+issue behind a wrongly resolved thread is found again and blocks. When any
+blocking thread is kept, unaccounted for, or the reconciler output is
+unusable, or the thread staging is missing, the round stays `fast`. Either way
+the clearance needs positive evidence: at least one blocking thread actually
+cleared (by the reconciler this round, or by a person), and no pr-level
+blocking claim in the latest REQUEST_CHANGES body. A pr-level claim has no
+thread to resolve, so a block it holds never escalates. If the escalated round loses its correctness or skill pass (which
+would otherwise hold it and post nothing), the dispatcher restores the fast
+plan, and the round dismisses the block as before (unless the surviving pass
+found a new blocker, which requests changes), with a note saying why.
+A draft escalates too, so an author can have the approval before publishing;
+its stamp records the draft anchor, so the ready-for-review guard still
+applies on publish. Canary runs never escalate. `flip-gated` does not
+escalate.
 
 The dial governs push-shaped triggers. A bare `/review` comment a human posts
 on a consumer that keeps the comment trigger plans `full` (reason
@@ -671,7 +697,9 @@ collapse to one line each in a `<details>` block in the review body, and the
 depth note names the modifier. It applies exactly when the run executes at a
 reduced depth, so the first full review of a ready PR, a divergence-tripwire
 re-arm, and every guard that resolves to `full` still post everything (which
-is also why `full blocking-only` warns: it can never apply). The verdict is
+is also why `full blocking-only` warns: it can never apply). The one full-depth
+round that posts blocking-only is the clearance escalation, which the
+dispatcher arms whatever the modifier says. The verdict is
 computed from every validated claim either way, so the modifier can never
 flip an outcome; it only moves non-blocking feedback off the inline surface.
 Use it when re-review chatter is the complaint but whole-change coverage

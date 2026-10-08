@@ -889,8 +889,8 @@ executed depth and the cost counters can price the mode dial), plus
 in which case the staging step ALSO already overwrote `full-stripped.diff` with
 the scoped contents and refreshed its annotated sibling, so the whole-change
 surfaces you and the sub-agents read are pre-shrunk to the unseen hunks.
-Read the plan; it is deterministic and final: never deepen or shallow it yourself,
-and never run the CLI yourself. A comment-triggered run whose `/review` a
+Read the plan; it is deterministic, and only code changes it (the one case is
+below): never deepen or shallow it yourself, and never run the CLI yourself. A comment-triggered run whose `/review` a
 human posted plans `full` (reason `manual-review-request`), whatever the
 mode dial says, unless the comment named a depth (`/review scoped`, or its
 synonyms `delta`, `diff`, `diff-only`; also `flip-gated`, `fast`), which sets
@@ -906,7 +906,17 @@ overflow or a missing input forces `full`, and the divergence tripwire re-arms
 `full` when too much of the diff is unreviewed. The dispatcher implements each depth (the
 roster it dispatches and the diff surfaces it stages are depth-dependent), and
 the plan CLI renders the depth and tripwire notes into the review body; none of
-it is yours to adjust.
+it is yours to adjust. One depth change is the dispatcher's, never yours: a
+`fast` round, on a draft or a ready PR, with a standing request-changes review runs the
+`thread-reconciler` first, and when it resolves every blocking thread (or
+when no bot thread is left open, because a person resolved them all) the
+dispatcher continues as a `full` round (reason `clearance-escalation`) and
+rewrites `rereview-plan.json` to say so, because only a full round may approve
+the fix. If that full round loses its correctness or skill pass, the dispatcher
+restores the fast plan, and the round clears the block by dismissal as before
+unless the surviving pass found a new blocker.
+Every later step reads the depth from the rewritten plan or
+`dispatch-result.json`, never from what you read here.
 
 **The review threads are already staged (deterministic code).** The pre-agent
 staging step fetched every unresolved review thread on this PR and split it into
@@ -1109,7 +1119,7 @@ review, posts inline comments, resolves threads, or drops the comment.
 
 **Only run this step when the verdict is APPROVE.** On REQUEST_CHANGES or
 COMMENT, skip it entirely and post no comment. Also skip it entirely on a reduced re-review
-depth (`scoped`, `flip-gated`, `fast`; Step 3): the reduced run computed no triage
+depth (`scoped`, `flip-gated`, `fast`; Step 3, read after the dispatcher returns): the reduced run computed no triage
 or risk data to compare, so the existing comment stands and `risksPatternsKey`
 carries forward unchanged (Step 9).
 
@@ -1311,7 +1321,7 @@ fully explained by a common pattern above:
 
 **Run this step only when the verdict is APPROVE; skip it entirely on
 REQUEST_CHANGES or COMMENT.** Also skip it entirely when `correctness-reviewer` did not run
-this run (a `flip-gated` or `fast` re-review depth, Step 3): there are no fresh
+this run (a `flip-gated` or `fast` re-review depth, Step 3, read after the dispatcher returns): there are no fresh
 risk classifications to route on, and the anchoring full review already requested
 the owning teams.
 
