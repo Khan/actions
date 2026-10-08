@@ -616,10 +616,7 @@ everything, whatever the mode:
 **The clearance escalation.** A `fast` round on a PR, draft or ready, whose own
 REQUEST_CHANGES still stands runs the thread reconciler first. When the
 reconciler resolves every blocking thread, or when no bot thread is left open
-because a person resolved them all (at least one human-resolved blocking
-thread on record, and no pr-level blocking claim in the latest
-REQUEST_CHANGES body: a block held only by a pr-level claim has no thread to
-resolve, so it never escalates), the same run continues as a `full` round
+because a person resolved them all, the same run continues as a `full` round
 over the whole diff (plan reason `clearance-escalation`, rewritten into
 `rereview-plan.json`; `lib/dispatch-escalation.ts`). That round can approve,
 so the author gets the approval their fix earned, along with the guidance
@@ -629,7 +626,11 @@ blocking findings only: the code under it was already fully reviewed, and a
 new blocker in the fix still requests changes. The full round re-judges the whole diff, so an
 issue behind a wrongly resolved thread is found again and blocks. When any
 blocking thread is kept, unaccounted for, or the reconciler output is
-unusable, or the thread staging is missing, the round stays `fast`. If the escalated round loses its correctness or skill pass (which
+unusable, or the thread staging is missing, the round stays `fast`. Either way
+the clearance needs positive evidence: at least one blocking thread actually
+cleared (by the reconciler this round, or by a person), and no pr-level
+blocking claim in the latest REQUEST_CHANGES body. A pr-level claim has no
+thread to resolve, so a block it holds never escalates. If the escalated round loses its correctness or skill pass (which
 would otherwise hold it and post nothing), the dispatcher restores the fast
 plan, and the round dismisses the block as before (unless the surviving pass
 found a new blocker, which requests changes), with a note saying why.

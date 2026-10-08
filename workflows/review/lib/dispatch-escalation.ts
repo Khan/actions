@@ -135,33 +135,12 @@ const isBlockingOpener = (thread: unknown): boolean => {
 };
 
 /**
- * Whether a block with no open bot thread was cleared by people resolving
- * its threads. All three must hold: the staged open-thread list is empty (a
- * missing or malformed staging never counts); a human resolved at least one
- * of this bot's blocking threads (`adjudicated-threads.json`); and the latest
- * REQUEST_CHANGES body carries no pr-level blocking claim, which renders as a
- * line-leading label there and has no thread to resolve. Without the last
- * check, a block held only by a pr-level claim would escalate on every push.
+ * Whether the latest REQUEST_CHANGES body carries a pr-level blocking claim,
+ * which renders there as a line-leading label and has no thread to resolve.
+ * No stamped REQUEST_CHANGES body to read counts as held: it cannot be ruled
+ * out.
  */
-export const blockClearedByHumanResolution = (
-    fs: DispatchFs,
-    threads: unknown,
-): boolean => {
-    if (!Array.isArray(threads) || threads.length > 0) {
-        return false;
-    }
-    const adjudicated = readJson(fs, `${REVIEW_DIR}/adjudicated-threads.json`);
-    const humanResolvedBlocking = (
-        Array.isArray(adjudicated) ? adjudicated : []
-    ).some(
-        (thread) =>
-            isRecord(thread) &&
-            thread["resolved"] === true &&
-            isBlockingOpener(thread),
-    );
-    if (!humanResolvedBlocking) {
-        return false;
-    }
+export const blockHeldByPrLevelClaim = (fs: DispatchFs): boolean => {
     const priorRaw = readJson(fs, `${REVIEW_DIR}/prior-reviews.json`);
     const latestRc = (Array.isArray(priorRaw) ? priorRaw : [])
         .filter(
@@ -176,12 +155,51 @@ export const blockClearedByHumanResolution = (
         )
         .pop();
     if (latestRc === undefined) {
-        return false;
+        return true;
     }
-    return !latestRc.body.split("\n").some((line) => {
+    return latestRc.body.split("\n").some((line) => {
         const label = parseLeadingLabel(line.trim());
         return label !== null && isBlockingLabel(label);
     });
+};
+
+/**
+ * Whether the standing block is cleared, on positive evidence. All of: the
+ * open-thread staging is a list (a missing or malformed one never counts);
+ * every open blocking thread is in `resolve`; at least one blocking thread
+ * was actually cleared, by the reconciler this round or by a person
+ * (`adjudicated-threads.json`), so a list with no blocking thread is never
+ * read as a clearance; and the block is not held by a pr-level claim, which
+ * no thread resolution can clear and which would otherwise escalate every
+ * push.
+ */
+export const blockCleared = (
+    fs: DispatchFs,
+    threads: unknown,
+    resolve: readonly string[],
+): boolean => {
+    if (!Array.isArray(threads)) {
+        return false;
+    }
+    if (!everyBlockingThreadResolved(threads, resolve)) {
+        return false;
+    }
+    const resolved = new Set(resolve);
+    const reconcilerCleared = threads.some(
+        (thread) =>
+            isRecord(thread) &&
+            typeof thread["thread_id"] === "string" &&
+            resolved.has(thread["thread_id"]) &&
+            isBlockingOpener(thread),
+    );
+    const adjudicated = readJson(fs, `${REVIEW_DIR}/adjudicated-threads.json`);
+    const humanCleared = (Array.isArray(adjudicated) ? adjudicated : []).some(
+        (thread) =>
+            isRecord(thread) &&
+            thread["resolved"] === true &&
+            isBlockingOpener(thread),
+    );
+    return (reconcilerCleared || humanCleared) && !blockHeldByPrLevelClaim(fs);
 };
 
 /**
@@ -245,7 +263,11 @@ export const reconcileForEscalation = async (
         return undefined;
     }
     if (!reconcile) {
-        if (!blockClearedByHumanResolution(staged.fs, staged.threads)) {
+        if (
+            !Array.isArray(staged.threads) ||
+            staged.threads.length > 0 ||
+            !blockCleared(staged.fs, staged.threads, [])
+        ) {
             return undefined;
         }
         const fastPlan = escalatePlanToFull(staged.fs);
@@ -267,7 +289,7 @@ export const reconcileForEscalation = async (
         };
     }
     const reconciliation = toReconciliation(parsed);
-    if (!everyBlockingThreadResolved(staged.threads, reconciliation.resolve)) {
+    if (!blockCleared(staged.fs, staged.threads, reconciliation.resolve)) {
         return {reconciliation, escalatedFrom: undefined, skipped: []};
     }
     const fastPlan = escalatePlanToFull(staged.fs);
@@ -299,8 +321,19 @@ export const fallBackToFast = (
         )
         .map((entry) => entry.dimension);
     if (lost.length > 0) {
+        // Marked so cost accounting can tell a fallback, which paid for a
+        // full roster, from an ordinary fast round.
+        const restored = JSON.parse(outcome.fastPlan) as unknown;
+        const marked = JSON.stringify(
+            {
+                ...(isRecord(restored) ? restored : {}),
+                escalationFellBack: lost,
+            },
+            null,
+            2,
+        );
         for (const path of PLAN_PATHS) {
-            fs.writeFileSync(path, outcome.fastPlan);
+            fs.writeFileSync(path, marked);
         }
     }
     return lost;

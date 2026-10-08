@@ -251,6 +251,39 @@ describe("the clearance escalation", () => {
         );
     });
 
+    it("stays fast on the reconciler path when the block is held by a pr-level claim", async () => {
+        const staged = staging();
+        staged[`${REVIEW}/threads.json`] = JSON.stringify([
+            thread("t2", "suggestion (non-blocking)"),
+        ]);
+        staged[`${REVIEW}/prior-reviews.json`] = JSON.stringify([
+            {
+                body: `**issue (blocking):** The migration drops a column old pods still read.\n${stamped(
+                    "REQUEST_CHANGES",
+                )}`,
+                id: 3001,
+                state: "CHANGES_REQUESTED",
+                submittedAt: "2026-10-01T00:00:00Z",
+            },
+        ]);
+        const runner = stubRunner(outputs({resolve: ["t2"], keep: []}));
+        const result = await run(makeFakeFs(staged), runner);
+        expect(result.depth).toBe("fast");
+        expect(result.escalatedFrom).toBeUndefined();
+        expect(runner.calls).toEqual(["thread-reconciler"]);
+    });
+
+    it("stays fast when no blocking thread was cleared at all", async () => {
+        const staged = staging();
+        staged[`${REVIEW}/threads.json`] = JSON.stringify([
+            thread("t2", "suggestion (non-blocking)"),
+        ]);
+        const runner = stubRunner(outputs({resolve: ["t2"], keep: []}));
+        const result = await run(makeFakeFs(staged), runner);
+        expect(result.escalatedFrom).toBeUndefined();
+        expect(runner.calls).toEqual(["thread-reconciler"]);
+    });
+
     it("stays fast when the reconciler leaves a blocking thread out of both lists", async () => {
         const fs = makeFakeFs(staging());
         const runner = stubRunner(outputs({resolve: ["t2"], keep: []}));
@@ -350,7 +383,10 @@ describe("the clearance escalation", () => {
             `${REVIEW}/rereview-plan.json`,
             `${REVIEW}/out/rereview-plan.json`,
         ]) {
-            expect(JSON.parse(fs.files[path])).toEqual(FAST_PLAN);
+            expect(JSON.parse(fs.files[path])).toEqual({
+                ...FAST_PLAN,
+                escalationFellBack: ["correctness-reviewer"],
+            });
         }
     });
 
@@ -528,9 +564,10 @@ describe("the clearance escalation when a person resolved every thread", () => {
         const result = await run(fs, runner);
         expect(result.depth).toBe("fast");
         expect(result.escalationFellBack).toEqual(["skill-auditor"]);
-        expect(JSON.parse(fs.files[`${REVIEW}/rereview-plan.json`])).toEqual(
-            FAST_PLAN,
-        );
+        expect(JSON.parse(fs.files[`${REVIEW}/rereview-plan.json`])).toEqual({
+            ...FAST_PLAN,
+            escalationFellBack: ["skill-auditor"],
+        });
     });
 });
 
