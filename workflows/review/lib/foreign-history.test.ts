@@ -1,4 +1,4 @@
-import {describe, it, expect} from "vitest";
+import {describe, it, expect, vi} from "vitest";
 
 import {
     currentIdentity,
@@ -169,5 +169,29 @@ describe("thread identity", () => {
             ),
         ).toBeNull();
         expect(sameIdentity(null, me)).toBe(false);
+    });
+});
+
+describe("runIdentity", () => {
+    it("reads this checkout's release major and the runner's workflow ref", async () => {
+        vi.resetModules();
+        process.env.GITHUB_WORKFLOW_REF =
+            "o/r/.github/workflows/review-beta.lock.yml@refs/pull/1/merge";
+        try {
+            const {runIdentity} = await import("./foreign-history.ts");
+            const {readFileSync} = await import("node:fs");
+            const major = Number(
+                JSON.parse(
+                    readFileSync(
+                        new URL("../package.json", import.meta.url),
+                        "utf8",
+                    ),
+                ).version.split(".")[0],
+            );
+            expect(runIdentity()).toEqual({major, install: "review-beta"});
+        } finally {
+            delete process.env.GITHUB_WORKFLOW_REF;
+            vi.resetModules();
+        }
     });
 });

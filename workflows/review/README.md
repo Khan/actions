@@ -673,8 +673,8 @@ never opened, dismiss a block it never raised. Staging compares the newest
 bot review's footer with this run's. A different install, a different major
 version, or a footer that doesn't parse (including every review posted
 before the `install` segment existed) makes the history foreign, and the run
-stages a first encounter: no prior reviews, no bot threads, no cache-memory
-anchor, and a full review (plan reason `foreign-history`). Threads are judged
+stages a first encounter: no prior reviews, no cache-memory anchor, and a
+full review (plan reason `foreign-history`). Threads are judged
 one by one: every inline comment's attribution line carries
 `install <workflow>@v<major>`, and a bot thread is this reviewer's own only
 when its opening comment names this install and major. That holds on every

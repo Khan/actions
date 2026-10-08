@@ -249,11 +249,20 @@ describe("foreign reviewer history", () => {
     ])(
         "stages a first encounter when the latest review came from %s",
         async (_label, body, detail) => {
-            const {fs, result, plan} = await stage(body, {
-                major: 2,
-                install:
-                    _label === "another install" ? "review-beta" : "review",
-            });
+            const {fs, result, plan} = await stage(
+                body,
+                {
+                    major: 2,
+                    install:
+                        _label === "another install" ? "review-beta" : "review",
+                },
+                renderAttributionFooter(
+                    "correctness-reviewer",
+                    [],
+                    undefined,
+                    null,
+                ),
+            );
             expect(
                 JSON.parse(fs.files[`${REVIEW}/prior-reviews.json`]),
             ).toEqual([]);
@@ -276,6 +285,18 @@ describe("foreign reviewer history", () => {
             expect(result.warnings.join(" ")).toContain(detail);
         },
     );
+
+    it("keeps this reviewer's own threads when the newest review is foreign", async () => {
+        const {fs, result, plan} = await stage(reviewBody("1.26.0", "review"), {
+            major: 2,
+            install: "review",
+        });
+        expect(plan.reasons).toEqual(["foreign-history"]);
+        expect(JSON.parse(fs.files[`${REVIEW}/prior-reviews.json`])).toEqual(
+            [],
+        );
+        expect(result.botThreadCount).toBe(1);
+    });
 
     it("fails closed when this run's identity is unknown", async () => {
         const {result, plan} = await stage(reviewBody("2.0.0", "review"), null);

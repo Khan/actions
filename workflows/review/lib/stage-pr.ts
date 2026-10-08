@@ -608,7 +608,7 @@ export const runStagePrCli = async (
             : foreignHistoryReason(priorReviews, options.identity);
     if (foreign !== null) {
         warnings.push(
-            `foreign reviewer history (${foreign}): prior bot reviews, bot threads, and cache memory staged empty; depth full`,
+            `foreign reviewer history (${foreign}): prior bot reviews and cache memory staged empty, other installs' threads left out; depth full`,
         );
         priorReviews = [];
         write(NEW_SCOPE_OUT, JSON.stringify(computeNewScope(files, undefined)));
@@ -701,12 +701,11 @@ export const runStagePrCli = async (
             parseThreadIdentity(thread.comments[0]?.body ?? ""),
             options.identity,
         );
-    const botThreads =
-        canary || foreign !== null
-            ? []
-            : allThreads.filter(
-                  (thread) => openedByBot(thread) && ownThread(thread),
-              );
+    const botThreads = canary
+        ? []
+        : allThreads.filter(
+              (thread) => openedByBot(thread) && ownThread(thread),
+          );
     write(
         THREADS_OUT,
         JSON.stringify(
