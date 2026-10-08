@@ -69,6 +69,7 @@ import {
     writeTranscript,
     type TranscriptMessage,
 } from "./transcripts";
+import {withRouterDefault} from "../lib/anthropic-api";
 
 /** Read-only investigation tools; see the module doc for the rationale. */
 const ALLOWED_TOOLS = [...READ_TOOLS];
@@ -188,6 +189,7 @@ const runOnce = async (
                 // against, so its reasoning budget must not drift from what
                 // production dispatch runs.
                 effort: "high",
+                env: withRouterDefault(),
             },
         });
         let output = "";

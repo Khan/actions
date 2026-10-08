@@ -953,7 +953,8 @@ Two known interactions:
 
 ### Required secrets / variables
 
-- `ANTHROPIC_API_KEY` — used by the `claude` engine.
+- `ANTHROPIC_API_KEY` — an **ai-router token**, not an Anthropic key (see
+  [Model traffic goes through ai-router](#model-traffic-goes-through-ai-router)).
 - `KHAN_ACTIONS_BOT_TOKEN` — referenced by `config.md`'s `add-reviewer` (the default
   `GITHUB_TOKEN` cannot request organization teams as reviewers).
 - `GH_AW_OTEL_SENTRY_ENDPOINT` and `GH_AW_OTEL_SENTRY_AUTHORIZATION` — the Sentry
@@ -1004,6 +1005,46 @@ Optional:
   posts under a different classic-PAT account. The list REPLACES the default
   (an empty value restores it), the comparison is case-folded, and Bot-type
   authors are treated as automation regardless of the list.
+
+### Model traffic goes through ai-router
+
+The agent job's model calls (the orchestrator, the sub-agents, the prose
+judge) go to ai-router's Anthropic route, which forwards to OpenRouter pinned
+to Anthropic, instead of straight to `api.anthropic.com`
+([AICODE-31](https://khanacademy.atlassian.net/browse/AICODE-31)). That Allows us to track spend using our AI Router token.
+
+It's three lines in `review.md`'s frontmatter:
+
+```yaml
+engine:
+  env:
+    ANTHROPIC_BASE_URL: "https://ai-router-6fmjyrz2lq-uc.a.run.app/api/internal/_ai-router/anthropic"
+    ANTHROPIC_CUSTOM_HEADERS: "X-Ka-Ai-Router-Config-Name: review-bot\nX-Ka-Ai-Router-Workload: async-test"
+network:
+  allowed:
+    - ai-router-6fmjyrz2lq-uc.a.run.app
+```
+
+- gh-aw turns `ANTHROPIC_BASE_URL` into the firewall api-proxy's target host
+  and base path, so the proxy still adds the key, meters credits and enforces
+  the caps. The proxy sends the key as `x-api-key`, which ai-router accepts.
+- **`ANTHROPIC_API_KEY` must be an ai-router token.** Ask in
+  [#khanmigo-infrastructure](https://khanacademy.slack.com/archives/C04SWCU7E9W)
+  ([how tokens are issued](https://khanacademy.atlassian.net/wiki/spaces/kore/pages/2687271007/Requesting+an+ai-router+token)).
+  With the old Anthropic key every call comes back `403 Forbidden`.
+- The Cloud Run URL rather than `www.khanacademy.org`: Fastly cuts a request
+  off at 60s to first byte.
+- `review-bot` is the `configName` on ai-router's completion records, so
+  `WHERE configName = 'review-bot'` gets you review spend.
+
+To go back to Anthropic direct (e.g. ai-router is down), delete the two env
+lines and the `network` entry from your installed `review.md`, put the
+Anthropic key back in `ANTHROPIC_API_KEY`, and recompile.
+
+The live evals default to the same URL (`lib/anthropic-api.ts`), so they
+need an ai-router token too. Running them locally, against your laptop's
+ai-router, or straight at Anthropic is in
+[the eval README](eval/README.md#live-ab-locally-requires-anthropic_api_key).
 
 ## Versioning
 
