@@ -99,6 +99,36 @@ flowchart LR
 - All specialist instructions live in one very large file (~3,800 lines).
 - Code comments often record history and past incidents rather than explaining the design.
 
+---
+
+# Part 2 — Mechanisms
+
+## 2.1 One review, mapped to files
+
+Each step from section 3 is one script in `lib/`. The scripts don't call each
+other: each one reads files on disk (under `/tmp/gh-aw/review/`) and writes new
+files for the next step to read.
+
+```mermaid
+flowchart TD
+  A["stage-pr.ts<br/><i>runStagePrCli</i>"] -->|PR data, diffs, threads| B
+  B["router.ts<br/><i>route</i>"] -->|routing.json| C
+  C["dispatch.ts<br/><i>runDispatch</i>"] -->|dispatch-result.json| D
+  D["submission.ts<br/><i>runSubmissionCli</i>"] -->|submission-plan.json| E
+  E[Lead AI posts the plan] --> F
+  F["cache-record.ts"] -->|PR memory| G[(cache)]
+  E --> H["dispatch-gate.ts<br/>checks the queue"]
+```
+
+| Step | File | Writes |
+|---|---|---|
+| Gather the PR | `stage-pr.ts` (also runs the router once) | `pr-context.json`, `full.diff`, `threads.json`, … |
+| Decide reviewers | `router.ts` | `routing.json` |
+| Find and clean up problems | `dispatch.ts` | `dispatch-result.json` |
+| Pick verdict, write review | `submission.ts` | `submission-plan.json` |
+| Check before posting | `dispatch-gate.ts` | pass/fail (strips the queue on fail) |
+| Remember | `cache-record.ts` | `cache-memory/pr-*.json` |
+
 ## Next sections (to be written)
 
 Each will go one level deeper into a section above: preparing the PR, routing,
