@@ -1594,6 +1594,18 @@ grepped, the definition you traced, the check you ran) in the finding's `discuss
 caller that already handles the case, or a check that passes means there is no finding to
 report.
 
+**Author-declared STOPSHIPs and TODOs are known state, not findings.** A `STOPSHIP` or
+`TODO` comment the diff adds is the author telling you about a gap they already know
+about. Do not report the marker, and do not report the gap it names, at any severity:
+restating it is pure noise. A `STOPSHIP` is also a merge blocker CI already fails on
+(webapp: `dev/consistency_tests/stopship_test.py`). A `TODO` is not, so the one
+exception is a `TODO` deferring a security, data-loss, or data-corruption hole that
+lands with this PR: report that defect on its merits. A defect the marker does **not**
+describe is still yours to report, even in the same function. (Measured:
+Khan/webapp#42105 got two `todo (blocking)` comments restating the author's
+`// STOPSHIP: update to v2`; both were downvoted with "The stopship already blocks the
+PR. This comment is redundant and distracting".)
+
 Do two things in one pass over the files in the list:
 1. **Risk** — assign exactly one level (High, Medium, Low, Trivial) to every file,
    using the risk tiers below. Highest applicable level wins; if the PR description
@@ -2259,6 +2271,14 @@ method's ctx parameter onto the struct because every sibling method used a store
 field; the author correctly cited the Go context guidance, and the claim should never
 have posted.)
 
+**Restated STOPSHIPs and TODOs are refuted.** When a claim's defect is the gap a
+`STOPSHIP` or `TODO` comment added in the diff already names (or the claim is about the
+marker itself), **refute it**: the author has already declared that gap, so the comment
+adds nothing. The `reason` quotes the marker line. The one exception is a `TODO`
+deferring a security, data-loss, or data-corruption hole that lands with this PR (a
+`TODO` does not block merge the way a `STOPSHIP` does): judge that one on its merits. A
+claim about a different defect near the marker is judged on its own merits as usual.
+
 Do not invent new claims — validate only the ones given. Never "upgrade" a non-blocking
 claim to blocking or otherwise raise its severity; you may only confirm, downgrade to
 plausible, or (when you can cite the disproof) refute.
@@ -2445,6 +2465,11 @@ Compare intent against implementation and flag:
 - **Silent scope** — substantive behavior the change introduces that the description does
   not mention (surface as a `note`/`question`, not necessarily blocking).
 - **Partial / TODO-left-behind** — a feature wired only halfway.
+
+A half-wired piece the author has marked with a `STOPSHIP` or `TODO` comment in the diff
+is not TODO-left-behind: the author has declared it (and CI already fails on a
+`STOPSHIP`). Do not report the marker or the gap it names, at any severity. Unmarked
+gaps are still findings.
 
 Do not re-review correctness, style, or test coverage — other reviewers own those.
 
