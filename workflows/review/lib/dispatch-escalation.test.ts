@@ -416,6 +416,71 @@ describe("the clearance escalation when a person resolved every thread", () => {
     ): Record<string, string> => ({
         ...staging(overrides),
         [`${REVIEW}/threads.json`]: JSON.stringify([]),
+        [`${REVIEW}/adjudicated-threads.json`]: JSON.stringify([
+            {
+                ...thread("t1", "issue (blocking)"),
+                resolved: true,
+                resolvedBy: "author",
+            },
+        ]),
+    });
+
+    /** A standing REQUEST_CHANGES whose blocker is a pr-level claim in the body. */
+    const prLevelBlock = (adjudicated: unknown[]): Record<string, string> => ({
+        ...staging(),
+        [`${REVIEW}/threads.json`]: JSON.stringify([]),
+        [`${REVIEW}/adjudicated-threads.json`]: JSON.stringify(adjudicated),
+        [`${REVIEW}/prior-reviews.json`]: JSON.stringify([
+            {
+                body: `**⛔ Changes requested** — see inline comments.\n**issue (blocking):** The migration drops a column old pods still read.\n${stamped(
+                    "REQUEST_CHANGES",
+                )}`,
+                id: 3001,
+                state: "CHANGES_REQUESTED",
+                submittedAt: "2026-10-01T00:00:00Z",
+            },
+        ]),
+    });
+
+    it("never escalates a block held only by a pr-level claim, which has no thread", async () => {
+        const runner = stubRunner(outputs(CLEARED));
+        const result = await run(makeFakeFs(prLevelBlock([])), runner);
+        expect(result.depth).toBe("fast");
+        expect(result.escalatedFrom).toBeUndefined();
+        expect(runner.calls).toEqual([]);
+    });
+
+    it("never escalates when the latest block carries a pr-level claim, even after a person resolved older blocking threads", async () => {
+        const runner = stubRunner(outputs(CLEARED));
+        const result = await run(
+            makeFakeFs(
+                prLevelBlock([
+                    {
+                        ...thread("t0", "issue (blocking)"),
+                        resolved: true,
+                        resolvedBy: "author",
+                    },
+                ]),
+            ),
+            runner,
+        );
+        expect(result.escalatedFrom).toBeUndefined();
+        expect(runner.calls).toEqual([]);
+    });
+
+    it("never escalates on an empty list with no human-resolved blocking thread on record", async () => {
+        const staged = humanResolved();
+        staged[`${REVIEW}/adjudicated-threads.json`] = JSON.stringify([
+            {
+                ...thread("t2", "suggestion (non-blocking)"),
+                resolved: true,
+                resolvedBy: "author",
+            },
+        ]);
+        const runner = stubRunner(outputs(CLEARED));
+        const result = await run(makeFakeFs(staged), runner);
+        expect(result.escalatedFrom).toBeUndefined();
+        expect(runner.calls).toEqual([]);
     });
 
     it("escalates with no reconciler pass when no bot thread is left open", async () => {

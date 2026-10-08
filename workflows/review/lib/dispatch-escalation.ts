@@ -24,6 +24,7 @@ import {parseLeadingLabel} from "./rereview";
 import {
     computeHunkSignature,
     findLatestStamp,
+    parseRereviewStamp,
     stampFromCacheMemory,
 } from "./rereview-mode";
 import type {PriorReview} from "./rereview-mode";
@@ -123,6 +124,66 @@ export const escalationEligible = (
     );
 };
 
+const isBlockingOpener = (thread: unknown): boolean => {
+    if (!isRecord(thread) || !Array.isArray(thread["comments"])) {
+        return false;
+    }
+    const opener = thread["comments"][0];
+    const body = isRecord(opener) ? opener["body"] : undefined;
+    const label = typeof body === "string" ? parseLeadingLabel(body) : null;
+    return label !== null && isBlockingLabel(label);
+};
+
+/**
+ * Whether a block with no open bot thread was cleared by people resolving
+ * its threads. All three must hold: the staged open-thread list is empty (a
+ * missing or malformed staging never counts); a human resolved at least one
+ * of this bot's blocking threads (`adjudicated-threads.json`); and the latest
+ * REQUEST_CHANGES body carries no pr-level blocking claim, which renders as a
+ * line-leading label there and has no thread to resolve. Without the last
+ * check, a block held only by a pr-level claim would escalate on every push.
+ */
+export const blockClearedByHumanResolution = (
+    fs: DispatchFs,
+    threads: unknown,
+): boolean => {
+    if (!Array.isArray(threads) || threads.length > 0) {
+        return false;
+    }
+    const adjudicated = readJson(fs, `${REVIEW_DIR}/adjudicated-threads.json`);
+    const humanResolvedBlocking = (
+        Array.isArray(adjudicated) ? adjudicated : []
+    ).some(
+        (thread) =>
+            isRecord(thread) &&
+            thread["resolved"] === true &&
+            isBlockingOpener(thread),
+    );
+    if (!humanResolvedBlocking) {
+        return false;
+    }
+    const priorRaw = readJson(fs, `${REVIEW_DIR}/prior-reviews.json`);
+    const latestRc = (Array.isArray(priorRaw) ? priorRaw : [])
+        .filter(
+            (entry): entry is PriorReview =>
+                isRecord(entry) &&
+                typeof entry["body"] === "string" &&
+                parseRereviewStamp(entry["body"])?.verdict ===
+                    "REQUEST_CHANGES",
+        )
+        .sort((a, b) =>
+            (a.submittedAt ?? "") < (b.submittedAt ?? "") ? -1 : 1,
+        )
+        .pop();
+    if (latestRc === undefined) {
+        return false;
+    }
+    return !latestRc.body.split("\n").some((line) => {
+        const label = parseLeadingLabel(line.trim());
+        return label !== null && isBlockingLabel(label);
+    });
+};
+
 /**
  * Rewrite both staged copies of the plan to a full round, re-anchored on the
  * current signature (computed from the same unswapped diff the planner read).
@@ -184,10 +245,7 @@ export const reconcileForEscalation = async (
         return undefined;
     }
     if (!reconcile) {
-        // Only a staged empty list proves no blocking thread is open: the
-        // staging lists every unresolved bot thread, so a person resolved
-        // them all. A missing or malformed staging never escalates.
-        if (!Array.isArray(staged.threads) || staged.threads.length > 0) {
+        if (!blockClearedByHumanResolution(staged.fs, staged.threads)) {
             return undefined;
         }
         const fastPlan = escalatePlanToFull(staged.fs);

@@ -616,11 +616,15 @@ everything, whatever the mode:
 **The clearance escalation.** A `fast` round on a PR, draft or ready, whose own
 REQUEST_CHANGES still stands runs the thread reconciler first. When the
 reconciler resolves every blocking thread, or when no bot thread is left open
-because a person resolved them all, the same run continues as a `full` round
+because a person resolved them all (at least one human-resolved blocking
+thread on record, and no pr-level blocking claim in the latest
+REQUEST_CHANGES body: a block held only by a pr-level claim has no thread to
+resolve, so it never escalates), the same run continues as a `full` round
 over the whole diff (plan reason `clearance-escalation`, rewritten into
 `rereview-plan.json`; `lib/dispatch-escalation.ts`). That round can approve,
 so the author gets the approval their fix earned, along with the guidance
-comment and the owning-team requests a first full review would post. It posts
+comment a first full review would post, and on a ready PR the owning-team
+requests (on a draft, teams are requested when the PR is published). It posts
 blocking findings only: the code under it was already fully reviewed, and a
 new blocker in the fix still requests changes. The full round re-judges the whole diff, so an
 issue behind a wrongly resolved thread is found again and blocks. When any
