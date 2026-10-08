@@ -1087,7 +1087,7 @@ comment, which has no tail fold to ride, ends with the standalone wrapped block:
 
 `install` is the workflow file that ran (`review`, `review-beta`, from
 `GITHUB_WORKFLOW_REF`), which the next run reads to tell this reviewer's
-history from another install's (see "Another reviewer's history" below);
+history from another install's (see "Another reviewer's history" above);
 `schema` is the finding-schema version (`FINDING_SCHEMA_VERSION` in
 `lib/finding-schema.ts`) the run was on; `depth` is the EXECUTED re-review depth;
 the `re-review`, `enable`, and `non-blocking-budget` segments echo the repo's

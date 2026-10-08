@@ -99,6 +99,37 @@ const botThread = (): GhGraphql => () =>
                         pageInfo: {hasNextPage: false},
                         nodes: [
                             {
+                                id: "PRRT_human",
+                                isResolved: false,
+                                path: "a.ts",
+                                line: 3,
+                                comments: {
+                                    nodes: [
+                                        {
+                                            author: {login: "octo"},
+                                            body: "human question",
+                                            url: "https://github.com/o/r/pull/7#discussion_r2",
+                                        },
+                                    ],
+                                },
+                            },
+                            {
+                                id: "PRRT_adjudicated",
+                                isResolved: true,
+                                resolvedBy: {login: "octo"},
+                                path: "a.ts",
+                                line: 4,
+                                comments: {
+                                    nodes: [
+                                        {
+                                            author: {login: "github-actions"},
+                                            body: "**nit (non-blocking):** settled",
+                                            url: "https://github.com/o/r/pull/7#discussion_r3",
+                                        },
+                                    ],
+                                },
+                            },
+                            {
                                 id: "PRRT_bot",
                                 isResolved: false,
                                 path: "a.ts",
@@ -199,7 +230,12 @@ describe("foreign reviewer history", () => {
             expect(JSON.parse(fs.files[`${REVIEW}/threads.json`])).toEqual([]);
             expect(
                 JSON.parse(fs.files[`${REVIEW}/human-threads.json`]),
-            ).toEqual([]);
+            ).toEqual([{path: "a.ts", line: 3}]);
+            expect(
+                JSON.parse(fs.files[`${REVIEW}/adjudicated-threads.json`]).map(
+                    (thread: {thread_id: string}) => thread.thread_id,
+                ),
+            ).toEqual(["PRRT_adjudicated"]);
             expect(JSON.parse(fs.files[`${REVIEW}/new-scope.json`])).toEqual({
                 priorReview: false,
                 inScope: {},

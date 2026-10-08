@@ -604,7 +604,12 @@ export const decideReReviewDepth = (
     if (input.foreignHistory === true) {
         const lead =
             input.manualRequest === true ? ["manual-review-request"] : [];
-        return fullPlan(input, [...lead, "foreign-history"], null, false);
+        return {
+            ...fullPlan(input, [...lead, "foreign-history"], null, false),
+            ...(lead.length > 0 && input.manualDepth !== undefined
+                ? {manualDepth: input.manualDepth}
+                : {}),
+        };
     }
     if (input.manualRequest !== true) {
         return decideFromDial(input, input.mode, false);

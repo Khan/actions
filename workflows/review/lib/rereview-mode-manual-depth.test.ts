@@ -384,6 +384,7 @@ describe("decideReReviewDepth with foreign history", () => {
             "manual-review-request",
             "foreign-history",
         ]);
+        expect(plan.manualDepth).toBe("scoped");
         expect(plan.stampHunks).toEqual(CURRENT);
         expect(
             decideReReviewDepth({

@@ -260,7 +260,7 @@ describe("runVersionFooterCli", () => {
 
     it("composes from the staged files and stages the footer file", () => {
         const fs = makeFakeFs(fullStaging());
-        const footer = runVersionFooterCli(fs, LIB);
+        const footer = runVersionFooterCli(fs, LIB, {}, {});
         expect(footer).toBe(
             wrapped(
                 `review-v1.13.0 | schema ${FINDING_SCHEMA_VERSION} | depth scoped | re-review scoped blocking-only | enable holistic,documentation`,
@@ -314,7 +314,7 @@ describe("runVersionFooterCli", () => {
         const fs = makeFakeFs({
             [`${REVIEW}/routing.json`]: "not json",
         });
-        expect(runVersionFooterCli(fs, LIB)).toBe(
+        expect(runVersionFooterCli(fs, LIB, {}, {})).toBe(
             wrapped(`schema ${FINDING_SCHEMA_VERSION}`),
         );
     });

@@ -494,9 +494,18 @@ export const runSubmissionCli = (
                   typeof (entry as {body?: unknown}).body === "string",
           )
         : [];
+    const planReasons = (
+        readJson(fs, `${REVIEW_DIR}/rereview-plan.json`) as
+            | {reasons?: unknown}
+            | undefined
+    )?.reasons;
+    const foreignHistory =
+        Array.isArray(planReasons) && planReasons.includes("foreign-history");
     const priorStamp =
         findLatestStamp(priors) ??
-        stampFromCacheMemory(readCacheMemoryRecord(fs));
+        (foreignHistory
+            ? null
+            : stampFromCacheMemory(readCacheMemoryRecord(fs)));
 
     // The reduced-depth flip floor (Step 4): only over a prior
     // REQUEST_CHANGES stamp at flip-gated/fast depth.
