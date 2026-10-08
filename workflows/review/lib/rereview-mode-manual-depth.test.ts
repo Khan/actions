@@ -367,3 +367,32 @@ describe("runRereviewPlanCli with a /review <depth> comment", () => {
         expect(plan.manualDepth).toBeUndefined();
     });
 });
+
+describe("decideReReviewDepth with foreign history", () => {
+    it("plans full over any dial, any anchor, and a manual named depth", () => {
+        const plan = decideReReviewDepth({
+            mode: "fast",
+            isDraft: false,
+            priorStamp: stampOf(),
+            currentSignature: CURRENT,
+            manualRequest: true,
+            manualDepth: "scoped",
+            foreignHistory: true,
+        });
+        expect(plan.depth).toBe("full");
+        expect(plan.reasons).toEqual([
+            "manual-review-request",
+            "foreign-history",
+        ]);
+        expect(plan.stampHunks).toEqual(CURRENT);
+        expect(
+            decideReReviewDepth({
+                mode: "fast",
+                isDraft: false,
+                priorStamp: stampOf(),
+                currentSignature: CURRENT,
+                foreignHistory: true,
+            }).reasons,
+        ).toEqual(["foreign-history"]);
+    });
+});

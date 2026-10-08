@@ -159,6 +159,22 @@ describe("runVersionFooterCli", () => {
         }),
     });
 
+    it("names the install from GITHUB_WORKFLOW_REF, right after the version", () => {
+        const fs = makeFakeFs(fullStaging());
+        expect(
+            runVersionFooterCli(
+                fs,
+                LIB,
+                {},
+                {
+                    GITHUB_WORKFLOW_REF:
+                        "o/r/.github/workflows/review-beta.lock.yml@refs/pull/7/merge",
+                },
+            ),
+        ).toMatch(/review-v[^|]+ \| install review-beta \| schema /);
+        expect(runVersionFooterCli(fs, LIB, {}, {})).not.toContain("install");
+    });
+
     it("stamps the canary sha after the version segment (REVIEW_CANARY_SHA)", () => {
         expect(
             renderVersionFooter({

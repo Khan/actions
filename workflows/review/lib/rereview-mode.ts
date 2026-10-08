@@ -510,6 +510,7 @@ export type ReReviewDecisionInput = {
      * anchor, overflow, tripwire) and falls back to full when one trips.
      */
     manualDepth?: ReReviewMode;
+    foreignHistory?: boolean;
 };
 
 /** Which sub-agents a depth dispatches (the prompt maps this to the roster). */
@@ -600,6 +601,11 @@ const depthRank = (mode: ReReviewMode): number =>
 export const decideReReviewDepth = (
     input: ReReviewDecisionInput,
 ): ReReviewPlan => {
+    if (input.foreignHistory === true) {
+        const lead =
+            input.manualRequest === true ? ["manual-review-request"] : [];
+        return fullPlan(input, [...lead, "foreign-history"], null, false);
+    }
     if (input.manualRequest !== true) {
         return decideFromDial(input, input.mode, false);
     }
@@ -772,6 +778,7 @@ export const runRereviewPlanCli = (
     eventName: string | undefined = process.env.GITHUB_EVENT_NAME,
     eventPath: string | undefined = process.env.GITHUB_EVENT_PATH,
     canary: boolean = process.env.REVIEW_CANARY === "1",
+    foreignHistory = false,
 ): RereviewPlanCliResult => {
     const warnings: string[] = [];
 
@@ -841,6 +848,7 @@ export const runRereviewPlanCli = (
     // workflow also disabling cache memory.
     if (
         !canary &&
+        !foreignHistory &&
         priorStamp === null &&
         typeof prContext?.number === "number"
     ) {
@@ -873,6 +881,7 @@ export const runRereviewPlanCli = (
         currentSignature,
         manualRequest,
         ...(manualDepth === null ? {} : {manualDepth}),
+        foreignHistory,
     });
 
     fs.mkdirSync(REVIEW_DIR, {recursive: true});
