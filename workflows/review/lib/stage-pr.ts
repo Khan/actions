@@ -97,7 +97,11 @@ import {runProvenanceCli} from "./provenance";
 import type {StagedThread} from "./rereview";
 import {stageTicketContext, type TicketFetch} from "./stage-ticket";
 import {runRereviewPlanCli} from "./rereview-mode";
-import {foreignHistoryReason} from "./foreign-history";
+import {
+    foreignHistoryReason,
+    parseThreadIdentity,
+    sameIdentity,
+} from "./foreign-history";
 import type {ReviewerIdentity} from "./foreign-history";
 import {runCli as runRouterCli} from "./router";
 import {
@@ -691,8 +695,18 @@ export const runStagePrCli = async (
         const author = openerAuthor(thread);
         return author !== undefined && !isReviewBotAuthor(author);
     };
+    const ownThread = (thread: StagedThread): boolean =>
+        options.identity === undefined ||
+        sameIdentity(
+            parseThreadIdentity(thread.comments[0]?.body ?? ""),
+            options.identity,
+        );
     const botThreads =
-        canary || foreign !== null ? [] : allThreads.filter(openedByBot);
+        canary || foreign !== null
+            ? []
+            : allThreads.filter(
+                  (thread) => openedByBot(thread) && ownThread(thread),
+              );
     write(
         THREADS_OUT,
         JSON.stringify(

@@ -85,3 +85,46 @@ export const foreignHistoryReason = (
     }
     return null;
 };
+
+export const sameIdentity = (
+    a: ReviewerIdentity | null,
+    b: ReviewerIdentity | null,
+): boolean =>
+    a !== null && b !== null && a.major === b.major && a.install === b.install;
+
+export const threadIdentitySegment = (identity: ReviewerIdentity): string =>
+    `install ${identity.install}@v${identity.major}`;
+
+const THREAD_RE = /<sub>[^<]*\binstall ([A-Za-z0-9._-]+)@v(\d+)\b[^<]*<\/sub>/g;
+
+export const parseThreadIdentity = (body: string): ReviewerIdentity | null => {
+    let identity: ReviewerIdentity | null = null;
+    for (const match of body.matchAll(THREAD_RE)) {
+        identity = {major: Number(match[2]), install: match[1]};
+    }
+    return identity;
+};
+
+let cachedRunIdentity: ReviewerIdentity | null | undefined;
+
+export const runIdentity = (): ReviewerIdentity | null => {
+    if (cachedRunIdentity === undefined) {
+        let version: string | undefined;
+        try {
+            /* eslint-disable-next-line no-undef */
+            const fs = require("node:fs") as {
+                readFileSync: (p: string, enc: "utf8") => string;
+            };
+            version = JSON.parse(
+                fs.readFileSync(`${__dirname}/../package.json`, "utf8"),
+            ).version;
+        } catch {
+            version = undefined;
+        }
+        cachedRunIdentity = currentIdentity(
+            version,
+            process.env.GITHUB_WORKFLOW_REF,
+        );
+    }
+    return cachedRunIdentity;
+};

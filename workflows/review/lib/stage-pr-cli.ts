@@ -4,7 +4,7 @@
  * documented invocation stays `npx -y tsx workflows/review/lib/stage-pr.ts`:
  * that module keeps the require.main guard and calls {@link runCli}.
  */
-import {currentIdentity} from "./foreign-history";
+import {runIdentity} from "./foreign-history";
 import {runStagePrCli} from "./stage-pr";
 import type {GhGet, StagePrFs} from "./stage-pr";
 import {withGraphqlRateLimitRetry, type GhGraphql} from "./threads";
@@ -125,20 +125,12 @@ export const runCli = (): void => {
             json: await response.json().catch(() => null),
         };
     };
-    let version: string | undefined;
-    try {
-        version = JSON.parse(
-            nodeFs.readFileSync(`${__dirname}/../package.json`, "utf8"),
-        ).version;
-    } catch {
-        version = undefined;
-    }
     void runStagePrCli(nodeFs, ghGet, ghGraphql, ticketFetch, {
         repo,
         prNumber,
         repoRoot,
         env: process.env,
-        identity: currentIdentity(version, process.env.GITHUB_WORKFLOW_REF),
+        identity: runIdentity(),
     })
         .then((result) => {
             // eslint-disable-next-line no-console

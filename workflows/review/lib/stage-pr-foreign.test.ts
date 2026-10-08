@@ -1,5 +1,6 @@
 import {describe, it, expect} from "vitest";
 
+import {renderAttributionFooter} from "./attribution";
 import {
     buildUnifiedDiff,
     hashHunkAddedLines,
@@ -90,70 +91,80 @@ const reviewBody = (version: string, install: string | null): string =>
         ),
     })}\n</details>`;
 
-const botThread = (): GhGraphql => () =>
-    Promise.resolve({
-        data: {
-            repository: {
-                pullRequest: {
-                    reviewThreads: {
-                        pageInfo: {hasNextPage: false},
-                        nodes: [
-                            {
-                                id: "PRRT_human",
-                                isResolved: false,
-                                path: "a.ts",
-                                line: 3,
-                                comments: {
-                                    nodes: [
-                                        {
-                                            author: {login: "octo"},
-                                            body: "human question",
-                                            url: "https://github.com/o/r/pull/7#discussion_r2",
-                                        },
-                                    ],
+const botThread =
+    (opener = ""): GhGraphql =>
+    () =>
+        Promise.resolve({
+            data: {
+                repository: {
+                    pullRequest: {
+                        reviewThreads: {
+                            pageInfo: {hasNextPage: false},
+                            nodes: [
+                                {
+                                    id: "PRRT_human",
+                                    isResolved: false,
+                                    path: "a.ts",
+                                    line: 3,
+                                    comments: {
+                                        nodes: [
+                                            {
+                                                author: {login: "octo"},
+                                                body: "human question",
+                                                url: "https://github.com/o/r/pull/7#discussion_r2",
+                                            },
+                                        ],
+                                    },
                                 },
-                            },
-                            {
-                                id: "PRRT_adjudicated",
-                                isResolved: true,
-                                resolvedBy: {login: "octo"},
-                                path: "a.ts",
-                                line: 4,
-                                comments: {
-                                    nodes: [
-                                        {
-                                            author: {login: "github-actions"},
-                                            body: "**nit (non-blocking):** settled",
-                                            url: "https://github.com/o/r/pull/7#discussion_r3",
-                                        },
-                                    ],
+                                {
+                                    id: "PRRT_adjudicated",
+                                    isResolved: true,
+                                    resolvedBy: {login: "octo"},
+                                    path: "a.ts",
+                                    line: 4,
+                                    comments: {
+                                        nodes: [
+                                            {
+                                                author: {
+                                                    login: "github-actions",
+                                                },
+                                                body: "**nit (non-blocking):** settled",
+                                                url: "https://github.com/o/r/pull/7#discussion_r3",
+                                            },
+                                        ],
+                                    },
                                 },
-                            },
-                            {
-                                id: "PRRT_bot",
-                                isResolved: false,
-                                path: "a.ts",
-                                line: 2,
-                                comments: {
-                                    nodes: [
-                                        {
-                                            author: {login: "github-actions"},
-                                            body: "**issue (blocking):** old finding",
-                                            url: "https://github.com/o/r/pull/7#discussion_r1",
-                                        },
-                                    ],
+                                {
+                                    id: "PRRT_bot",
+                                    isResolved: false,
+                                    path: "a.ts",
+                                    line: 2,
+                                    comments: {
+                                        nodes: [
+                                            {
+                                                author: {
+                                                    login: "github-actions",
+                                                },
+                                                body: `**issue (blocking):** old finding\n${opener}`,
+                                                url: "https://github.com/o/r/pull/7#discussion_r1",
+                                            },
+                                        ],
+                                    },
                                 },
-                            },
-                        ],
+                            ],
+                        },
                     },
                 },
             },
-        },
-    });
+        });
 
 const stage = async (
     body: string,
     identity: {major: number; install: string} | null | undefined,
+    opener = renderAttributionFooter("correctness-reviewer", [], undefined, {
+        major: 2,
+        install: "review",
+    }),
 ) => {
     const fs = makeFakeFs({
         "/tmp/gh-aw/cache-memory/pr-7.json": JSON.stringify({
@@ -180,7 +191,7 @@ const stage = async (
                 },
             ],
         }),
-        botThread(),
+        botThread(opener),
         noTicket(),
         {
             repo: "o/r",
@@ -206,6 +217,25 @@ describe("foreign reviewer history", () => {
         expect(plan.depth).toBe("fast");
         expect(plan.stampSource).toBe("review-body");
         expect(result.warnings.join(" ")).not.toContain("foreign");
+    });
+
+    it("keeps another reviewer's thread out even when the newest review is this reviewer's own", async () => {
+        const {fs, result, plan} = await stage(
+            reviewBody("2.0.0", "review"),
+            {major: 2, install: "review"},
+            renderAttributionFooter(
+                "correctness-reviewer",
+                [],
+                undefined,
+                null,
+            ),
+        );
+        expect(plan.depth).toBe("fast");
+        expect(result.botThreadCount).toBe(0);
+        expect(JSON.parse(fs.files[`${REVIEW}/threads.json`])).toEqual([]);
+        expect(JSON.parse(fs.files[`${REVIEW}/human-threads.json`])).toEqual([
+            {path: "a.ts", line: 3},
+        ]);
     });
 
     it.each([

@@ -140,3 +140,34 @@ describe("foreignHistoryReason", () => {
         ).toContain("unknown");
     });
 });
+
+describe("thread identity", () => {
+    it("round-trips through the attribution footer and requires both halves to match", async () => {
+        const {renderAttributionFooter} = await import("./attribution.ts");
+        const {parseThreadIdentity, sameIdentity} = await import(
+            "./foreign-history.ts"
+        );
+        const me = {major: 2, install: "review-beta"};
+        const body = `**nit:** x\n${renderAttributionFooter(
+            "holistic",
+            [],
+            undefined,
+            me,
+        )}`;
+        expect(body).toContain("found by holistic | install review-beta@v2");
+        expect(parseThreadIdentity(body)).toEqual(me);
+        expect(sameIdentity(parseThreadIdentity(body), me)).toBe(true);
+        expect(
+            sameIdentity(parseThreadIdentity(body), {
+                major: 3,
+                install: "review-beta",
+            }),
+        ).toBe(false);
+        expect(
+            parseThreadIdentity(
+                renderAttributionFooter("holistic", [], undefined, null),
+            ),
+        ).toBeNull();
+        expect(sameIdentity(null, me)).toBe(false);
+    });
+});
