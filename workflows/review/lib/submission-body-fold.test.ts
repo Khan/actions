@@ -232,3 +232,30 @@ describe("the review body's review-details fold", () => {
         ).toBe("Body.");
     });
 });
+
+describe("foreign reviewer history", () => {
+    const run = (reasons: string[]) => {
+        const files = {
+            ...staged({depth: "full", claims: []}),
+            ...priorApprove(),
+        };
+        files[`${REVIEW}/rereview-plan.json`] = JSON.stringify({
+            depth: "full",
+            mode: "fast",
+            reasons,
+            stampAnchorDraft: false,
+            stampHunks: {},
+        });
+        return runSubmissionCli(makeFakeFs(files));
+    };
+
+    it("skips a bare re-approval over this reviewer's own cached APPROVE", () => {
+        expect(run(["mode-full"]).skipSubmission).toBe(true);
+    });
+
+    it("never reads another reviewer's cached APPROVE as its own", () => {
+        const plan = run(["foreign-history"]);
+        expect(plan.event).toBe("APPROVE");
+        expect(plan.skipSubmission).toBe(false);
+    });
+});

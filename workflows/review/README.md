@@ -664,6 +664,29 @@ Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministi
   rewrite-after-approval and sparse-PR-then-payload
   (`eval/lifecycle/`, replayed in `eval/lifecycle.test.ts`).
 
+**Another reviewer's history** (`lib/foreign-history.ts`). Every install
+posts as the same bot account, so a PR that moves between installs (a beta
+and a stable install side by side) or across a major release would otherwise
+read the other reviewer's reviews, fingerprint, and threads as its own:
+anchor a cheap round on a fingerprint it never took, resolve threads it
+never opened, dismiss a block it never raised. Staging compares the newest
+bot review's footer with this run's. A different install, a different major
+version, or a footer that doesn't parse (including every review posted
+before the `install` segment existed) makes the history foreign, and the run
+stages a first encounter: no prior reviews, no cache-memory anchor, and a
+full review (plan reason `foreign-history`). Threads are judged
+one by one: every inline comment's attribution line carries
+`install <workflow>@v<major>`, and a bot thread is this reviewer's own only
+when its opening comment names this install and major. That holds on every
+run, not just the first, so after its own full review this reviewer still
+never adopts the other one's threads (or any thread posted before the segment
+existed). Those threads go in neither partition: never resolved, never
+counted toward the verdict, and never `skipLines`, so the full review can
+re-flag a defect that is still there. A human closes them. Its standing
+request for changes clears when this reviewer approves, which GitHub does
+for the shared account. A minor or patch bump of the same install keeps its
+history. A major bump costs one full review per open PR, at its next push.
+
 **The `blocking-only` modifier** (`re-review scoped blocking-only`) composes
 with any mode: the depth's roster and staging are unchanged, but a repeat
 review posts only blocking findings inline; validated non-blocking findings
@@ -1063,10 +1086,13 @@ comment, which has no tail fold to ride, ends with the standalone wrapped block:
 
 ```
 <details><summary><sub>review details</sub></summary>
-<sub>review-v<major>.<minor>.<patch> | schema <n> | depth <depth> | re-review <mode> [blocking-only|blocking-medium] | enable <reviewer,...> | non-blocking-budget <n></sub>
+<sub>review-v<major>.<minor>.<patch> | install <workflow> | schema <n> | depth <depth> | re-review <mode> [blocking-only|blocking-medium] | enable <reviewer,...> | non-blocking-budget <n></sub>
 </details>
 ```
 
+`install` is the workflow file that ran (`review`, `review-beta`, from
+`GITHUB_WORKFLOW_REF`), which the next run reads to tell this reviewer's
+history from another install's (see "Another reviewer's history" above);
 `schema` is the finding-schema version (`FINDING_SCHEMA_VERSION` in
 `lib/finding-schema.ts`) the run was on; `depth` is the EXECUTED re-review depth;
 the `re-review`, `enable`, and `non-blocking-budget` segments echo the repo's

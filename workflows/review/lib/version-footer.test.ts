@@ -159,6 +159,22 @@ describe("runVersionFooterCli", () => {
         }),
     });
 
+    it("names the install from GITHUB_WORKFLOW_REF, right after the version", () => {
+        const fs = makeFakeFs(fullStaging());
+        expect(
+            runVersionFooterCli(
+                fs,
+                LIB,
+                {},
+                {
+                    GITHUB_WORKFLOW_REF:
+                        "o/r/.github/workflows/review-beta.lock.yml@refs/pull/7/merge",
+                },
+            ),
+        ).toMatch(/review-v[^|]+ \| install review-beta \| schema /);
+        expect(runVersionFooterCli(fs, LIB, {}, {})).not.toContain("install");
+    });
+
     it("stamps the canary sha after the version segment (REVIEW_CANARY_SHA)", () => {
         expect(
             renderVersionFooter({
@@ -244,7 +260,7 @@ describe("runVersionFooterCli", () => {
 
     it("composes from the staged files and stages the footer file", () => {
         const fs = makeFakeFs(fullStaging());
-        const footer = runVersionFooterCli(fs, LIB);
+        const footer = runVersionFooterCli(fs, LIB, {}, {});
         expect(footer).toBe(
             wrapped(
                 `review-v1.13.0 | schema ${FINDING_SCHEMA_VERSION} | depth scoped | re-review scoped blocking-only | enable holistic,documentation`,
@@ -298,7 +314,7 @@ describe("runVersionFooterCli", () => {
         const fs = makeFakeFs({
             [`${REVIEW}/routing.json`]: "not json",
         });
-        expect(runVersionFooterCli(fs, LIB)).toBe(
+        expect(runVersionFooterCli(fs, LIB, {}, {})).toBe(
             wrapped(`schema ${FINDING_SCHEMA_VERSION}`),
         );
     });
