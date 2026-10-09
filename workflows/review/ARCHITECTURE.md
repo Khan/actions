@@ -129,6 +129,62 @@ flowchart TD
 | Check before posting | `dispatch-gate.ts` | pass/fail (strips the queue on fail) |
 | Remember | `cache-record.ts` | `cache-memory/pr-*.json` |
 
+## 2.2 How reviewers are prompted
+
+Every reviewer's prompt is built from three places: text written into the bot's
+`review.md`, files staged by code during the run, and files the repo using the
+bot provides. gh-aw extracts each `## agent: <name>` section of `review.md` into
+`.claude/agents/`, filling in the repo's files (`{{#runtime-import …}}`) along
+the way, and `dispatch.ts` runs each one.
+
+```mermaid
+flowchart LR
+  subgraph Bot["Owned by the bot (review.md)"]
+    D[Shared disciplines<br/>one copy, staged to disciplines.md]
+    R[Per-specialist rules + hunts<br/>written into each agent section]
+  end
+  subgraph Repo["Owned by the repo (.github/aw/review/)"]
+    S[skills.md index<br/>+ the skill files it lists]
+    L["lenses/&lt;lens&gt;.md<br/>extra rules for one specialist"]
+    O[risk-classification.md,<br/>ci-tooling.md, …]
+  end
+  D --> P[Specialist prompt]
+  R --> P
+  S --> P
+  L --> P
+  O --> C[Correctness / whole-change<br/>reviewer prompts]
+  S --> C
+```
+
+### Three kinds of rules
+
+| | Specialist rules | Repo lens files | Repo skills |
+|---|---|---|---|
+| Written by | bot authors | repo team | repo team |
+| Lives in | `review.md` | `lenses/<lens>.md` | skill files listed in `skills.md` |
+| Reaches the prompt | always, built in | pasted in if the file exists | reviewer reads the index, then opens relevant files |
+| How strictly applied | reviewer judgment | same as specialist rules | exact rule + exact line must be quoted |
+| Severity from | reviewer | reviewer | the skill file (`must` / `should`) |
+| Checked by | that specialist | that specialist | owning specialist if running, else `skill-auditor` |
+
+Lens files that no reviewer will ever load are caught by `lens-payloads.ts` and
+shown as notes on the review.
+
+### Room to consolidate
+
+- **Lens files and skills overlap.** Both are repo-written rules for a domain;
+  they differ only in how strictly they're applied. Lens files could become skills
+  tagged with a specialist, giving the repo one place for rules.
+- **Specialist rules could ship as built-in skills.** The bot's own domain rules
+  could use the same format as the repo's, with one loading path and one strictness model.
+- **The skills index is pasted into ~14 prompts.** It could be staged once, as
+  `disciplines.md` already is.
+- **The disciplines text is still copied.** Specialists share one copy, but the
+  whole-change reviewers (e.g. `skill-auditor`) each carry their own edited copy.
+- **The specialist sections all have the same shape** (rules, hunts, repo add-ons,
+  output), so they could be generated from data instead of ~1,000 lines of
+  near-duplicate prose.
+
 ## Next sections (to be written)
 
 Each will go one level deeper into a section above: preparing the PR, routing,
