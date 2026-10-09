@@ -52,7 +52,7 @@ for which files need which specialists and how risky each area is.
 ```mermaid
 flowchart LR
   Change[Changed files] --> Rules{Repo's routing rules}
-  Rules --> Always[Always: correctness,<br/>best-practice checks]
+  Rules --> Always[Always: correctness,<br/>best-practice skills]
   Rules --> Some[Only if relevant:<br/>security, data migrations,<br/>caching, concurrency, …]
   Rules --> Teams[Owning teams<br/>to request as reviewers]
 ```
@@ -73,15 +73,17 @@ flowchart LR
 
 ## 6. Later pushes are reviewed more cheaply
 
-The bot remembers what it has already reviewed. On later pushes it can look at
-only the new parts, and it checks whether its earlier comments have been addressed.
+The bot remembers what it has already reviewed. By default every push gets a full
+review; a repo can opt in to cheaper modes that look at only the new parts. Either
+way, it checks whether its earlier comments have been addressed.
 
 ```mermaid
 flowchart LR
-  Push[New push] --> Seen{Already reviewed<br/>most of this?}
-  Seen -->|no| Full[Full review]
-  Seen -->|yes| Partial[Review only new parts]
-  Partial --> Old[Resolve earlier comments<br/>that are now fixed]
+  Push[New push] --> Mode{Repo opted in to<br/>a cheaper mode?}
+  Mode -->|no, default| Full[Full review]
+  Mode -->|yes| Partial[Review only new parts]
+  Full --> Old[Resolve earlier comments<br/>that are now fixed]
+  Partial --> Old
 ```
 
 ## 7. Where things live
@@ -95,7 +97,7 @@ flowchart LR
 
 ## 8. Known messiness
 
-- An older way of running the specialists is still described but looks unused.
+- Only one way of running the specialists exists in code ("scripted"), but comments still describe a removed "agent" mode.
 - All specialist instructions live in one very large file (~3,800 lines).
 - Code comments often record history and past incidents rather than explaining the design.
 
@@ -105,9 +107,9 @@ flowchart LR
 
 ## 2.1 One review, mapped to files
 
-Each step from section 3 is one script in `lib/`. The scripts don't call each
-other: each one reads files on disk (under `/tmp/gh-aw/review/`) and writes new
-files for the next step to read.
+Each step from section 3 is one script in `lib/`. The scripts pass work along as
+files on disk (under `/tmp/gh-aw/review/`): each reads what the previous step
+wrote. The one direct call is `stage-pr.ts` running the router's first pass.
 
 ```mermaid
 flowchart TD
@@ -133,9 +135,9 @@ flowchart TD
 
 Every reviewer's prompt is built from three places: text written into the bot's
 `review.md`, files staged by code during the run, and files the repo using the
-bot provides. gh-aw extracts each `## agent: <name>` section of `review.md` into
-`.claude/agents/`, filling in the repo's files (`{{#runtime-import …}}`) along
-the way, and `dispatch.ts` runs each one.
+bot provides. Each `## agent: <name>` section of `review.md` is extracted by gh-aw
+into `.claude/agents/`, which `dispatch.ts` loads and runs. The repo's files are
+pulled in by `{{#runtime-import …}}` lines, which resolve when the workflow runs.
 
 ```mermaid
 flowchart LR
@@ -167,8 +169,8 @@ flowchart LR
 | Severity from | reviewer | reviewer | the skill file (`must` / `should`) |
 | Checked by | that specialist | that specialist | owning specialist if running, else `skill-auditor` |
 
-Lens files that no reviewer will ever load are caught by `lens-payloads.ts` and
-shown as notes on the review.
+The strictness and severity rows are instructions in the prompts, not checks in
+code. `lens-payloads.ts` flags lens files that no reviewer will ever load.
 
 ### Room to consolidate
 
@@ -177,13 +179,20 @@ shown as notes on the review.
   tagged with a specialist, giving the repo one place for rules.
 - **Specialist rules could ship as built-in skills.** The bot's own domain rules
   could use the same format as the repo's, with one loading path and one strictness model.
-- **The skills index is pasted into ~14 prompts.** It could be staged once, as
+- **The skills index is pasted into 13 prompts.** It could be staged once, as
   `disciplines.md` already is.
 - **The disciplines text is still copied.** Specialists share one copy, but the
   whole-change reviewers (e.g. `skill-auditor`) each carry their own edited copy.
 - **The specialist sections all have the same shape** (rules, hunts, repo add-ons,
-  output), so they could be generated from data instead of ~1,000 lines of
-  near-duplicate prose.
+  output), so the 11 specialist sections (~840 lines) could be generated from data
+  instead of near-duplicate prose.
+
+### Open questions
+
+- Lens-file and ROUTING warnings land in `routing.json`, and the prompt tells the
+  lead AI to show them on the review. But `submission.ts` (which writes the review
+  body the lead AI must post exactly) doesn't appear to read them, so they may
+  never reach the PR.
 
 ## Next sections (to be written)
 
