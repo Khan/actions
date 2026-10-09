@@ -1,0 +1,48 @@
+{
+    "run": "https://github.com/Khan/webapp/actions/runs/34244923354",
+    "thread": {
+        "thread_id": "PRRT_kwDOAJgNW86gTAuv",
+        "path": "services/progress/cross_service/learnable_content.go",
+        "line": 479,
+        "url": "https://github.com/Khan/webapp/pull/42048#discussion_r3959378174",
+        "comments": [
+            {
+                "author": "github-actions",
+                "body": "**question (non-blocking):** This removes the last consumer of `Course.masterableExercisesWithoutCovered` \u2014 is a follow-up tracked to delete the field, resolver, and gqlgen mapping, since the stated goal of not maintaining two filtering paths isn't reached until then?\n\n<details><summary><sub>context</sub></summary>\n\nThis removes the last consumer of `Course.masterableExercisesWithoutCovered` \u2014 is a follow-up tracked to delete the field, resolver, and gqlgen mapping, since the stated goal of not maintaining two filtering paths isn't reached until then? Grepping the whole checkout for `masterableExercisesWithoutCovered` after this change leaves only the content service's own definition and plumbing: `services/content/course.graphql:184` (already `@deprecated(reason:\"Internal use only\")`), `services/content/gqlgen.yml:283`, the resolver at `services/content/resolvers/course.go:467`, and `services/content/resolvers/course_test.go`. No client query text references it anywhere \u2014 this PR removed the only one. I verified the two paths are currently equivalent, which is why the swap is safe: `MasterableExercises` maps the schema default `masteryMechanicFilter: ANY` to a nil mechanic (`_mapMasteryMechanicFilterToMasteryMechanic`, course.go:689) and, with `excludeCovered` true, calls `GetMasterableExercisesWithoutCoveredForCourse` with `includeDuplicates: true` \u2014 the same getter and arguments the deprecated resolver hardcodes. That equivalence is exactly what will rot once nothing exercises the deprecated field end to end.\n\n<sub>found by holistic</sub>\n\n</details>"
+            },
+            {
+                "author": "Bcdirito",
+                "body": "Yes, this work is already ticketed."
+            }
+        ],
+        "resolved": false
+    },
+    "candidate": {
+        "id": "holistic-1",
+        "source": "holistic",
+        "path": "services/progress/cross_service/learnable_content.go",
+        "line": 475,
+        "label": "question (non-blocking)",
+        "subject": "This removes the last consumer of `Course.masterableExercisesWithoutCovered` repo-wide, but the field and its resolver stay \u2014 is there a follow-up to delete them, and can it be linked here?",
+        "discussion": "This removes the last in-repo consumer of the `Course.masterableExercisesWithoutCovered` GraphQL field, but the field and its resolver stay \u2014 is there a follow-up to delete them, and can it be linked here?\n\nAfter this diff, `grep -rn masterableExercisesWithoutCovered .` hits only: `services/content/` (the schema field at `course.graphql:184`, `courseResolver.MasterableExercisesWithoutCovered` in `resolvers/course.go`, `getters.GetMasterableExercisesWithoutCoveredForCourse`, and their tests); the generated composed schemas (`gengraphql/composed_schema.graphql`, `dev/graphqltools/testdata/`); and `services/content-editing/publish/` (`models/course.go:55`, `models/shared/mastery_enabled.go:241`) \u2014 the latter is the published-content JSON field the getter reads, so it has to stay. The GraphQL field itself now has zero callers.\n\nThe substitution is right: `masterableExercisesWithoutCovered` resolves to `GetMasterableExercisesWithoutCoveredForCourse(ktx, locale, course, true, nil)`, and `masterableExercises(includeDuplicates: true, excludeCovered: true)` reaches the same call because `masteryMechanicFilter` defaults to `ANY` and `_mapMasteryMechanicFilterToMasteryMechanic` maps `ANY` to `nil` (`resolvers/course.go:689-690`).\n\nDeleting a schema field in the same deploy as its last consumer isn't safe, so leaving the server side in place here is the correct call \u2014 the ask is just that the diff record the intent, since the PR description states the goal as reducing filtering maintained \"over two different resolvers\" and both resolvers still exist after it lands. A one-line TODO next to the query, or the follow-up ticket in the description, is enough.",
+        "failure_scenario": "With no consumers left, `Course.masterableExercisesWithoutCovered` and its resolver stay live indefinitely, so the next change to covered-exercise filtering still has to be made in two places \u2014 the duplication this PR set out to remove.",
+        "confidence": 0.6,
+        "also_flagged_by": [
+            {
+                "source": "first-principles",
+                "line": 479,
+                "subject": "This looks like the last in-repo consumer of `masterableExercisesWithoutCovered` \u2014 does the stack also delete the field and its resolver, or does the duplication this PR aims to remove just stay?"
+            }
+        ]
+    },
+    "reconciliation": {
+        "resolve": [
+            "PRRT_kwDOAJgNW86gTAuo",
+            "PRRT_kwDOAJgNW86gTAuv"
+        ],
+        "keep": [
+            "PRRT_kwDOAJgNW86gTAui"
+        ],
+        "skipLines": []
+    }
+}

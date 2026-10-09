@@ -39,6 +39,11 @@
  * note lines) is pure code. No prose about the code under review.
  */
 
+import {
+    includeAnsweredQuestions,
+    parseReconciliation,
+    type Reconciliation,
+} from "./answered-questions";
 import {dedupeClaims, type ClaimMerge} from "./dedup";
 import {type ThreadSuppression} from "./dedup-threads";
 import {
@@ -248,7 +253,7 @@ export type DispatchResult = {
     /** Set when every staged thread failed the filter (see dedup.ts). */
     threadSuppressionUnavailable?: {unusableThreads: number; warning: string};
     /** The reconciler's decision, when it ran and parsed. */
-    reconciliation?: {resolve: string[]; keep: string[]; skipLines: unknown};
+    reconciliation?: Reconciliation;
     /**
      * The prose judge's verdicts (judge-prose.ts), present when the run had
      * a prose runner. Also staged standalone as judge-prose-verdicts.json;
@@ -652,19 +657,7 @@ export const runDispatch = async (
                 shedDimension();
                 continue;
             }
-            reconciliation = {
-                resolve: Array.isArray(parsed["resolve"])
-                    ? parsed["resolve"].filter(
-                          (v): v is string => typeof v === "string",
-                      )
-                    : [],
-                keep: Array.isArray(parsed["keep"])
-                    ? parsed["keep"].filter(
-                          (v): v is string => typeof v === "string",
-                      )
-                    : [],
-                skipLines: parsed["skipLines"] ?? [],
-            };
+            reconciliation = parseReconciliation(parsed);
         } else {
             const parsed = await parseWithRetry(entry.name, output, (raw) =>
                 parseFinderOutput(
@@ -800,7 +793,8 @@ export const runDispatch = async (
     // resolving its thread (webapp#41290: six resolved variants of one
     // concern, then a seventh posted anyway), is not re-validated or
     // re-posted at a new anchor. Threads the reconciler resolves this run are
-    // exempt from the open corpus; blocking candidates are exempt from the
+    // exempt from the open corpus. Explicitly answered scope questions join
+    // the adjudicated corpus instead. Blocking candidates are exempt from the
     // adjudicated one (a closed thread floors nothing, so a regression
     // re-flag at blocking severity must stay visible). Every filter and guard
     // lives in dedup.ts / dedup-adjudicated.ts beside the rules it enforces;
@@ -811,7 +805,12 @@ export const runDispatch = async (
     const dedupStep = suppressThenMergeCrossFile(
         claims,
         threads,
-        readJson(fs, `${REVIEW_DIR}/adjudicated-threads.json`),
+        includeAnsweredQuestions(
+            readJson(fs, `${REVIEW_DIR}/adjudicated-threads.json`),
+            threads,
+            reconciliation,
+            readJson(fs, `${REVIEW_DIR}/pr-context.json`),
+        ),
         new Set(reconciliation?.resolve ?? []),
         readJson(fs, `${REVIEW_DIR}/files.json`),
     );
