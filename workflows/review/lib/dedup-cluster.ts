@@ -38,8 +38,9 @@ import {type Claim, type ProposedCluster} from "./dispatch-contracts";
 import {isBlockingLabel} from "./render-comment";
 
 /**
- * One member a proposed cluster named that did NOT merge, with the rule that
- * rejected it. Recorded per run because an empty rejection list and an empty
+ * One named member that could not participate in its tier-2 proposal, with
+ * the rule that stopped it. It may still have merged under tier 1 or another
+ * proposal. Recorded per run because an empty rejection list and an empty
  * proposal list mean opposite things, and the module has already been burned
  * by that ambiguity once (see `dedup-threads.ts`'s `stagedThreadShapeFailure`):
  * a clusterer naming ids that do not exist is a prompt or staging failure, and
@@ -55,6 +56,7 @@ export type ClusterRejection = {
         | "blocking-member"
         | "ungrounded"
         | "already-clustered"
+        | "head-reserved"
         | "cluster-collapsed";
 };
 

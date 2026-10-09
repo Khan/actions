@@ -75,7 +75,7 @@ export type DispatchClustering = {
      * that graduated the tier cannot be compared and found to disagree.
      */
     clusterMerged: number;
-    /** Proposed members that did not merge, with the rule that stopped them. */
+    /** Members unable to join their tier-2 proposal (not a unique-claim count). */
     rejected: ClusterRejection[];
     /** The clusterer ran and returned nothing usable (tier 1 only this run). */
     unavailable?: boolean;
