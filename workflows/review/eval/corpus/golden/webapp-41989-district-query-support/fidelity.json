@@ -1,0 +1,145 @@
+{
+    "provenance": {
+        "repo": "Khan/webapp",
+        "pr": 41989,
+        "reviewId": 5104057240,
+        "commentId": 3926287619,
+        "url": "https://github.com/Khan/webapp/pull/41989#discussion_r3926287619",
+        "reviewedCommit": "ec472f1619848fa78e8383b64ebb0d73a67a3756",
+        "currentCommentCommit": "34cd7c40497a2520a9be18e89bc9e2c6e125d88d",
+        "baseCommit": "a39ee0cc4a71ea97b81d0a10a95d9601994410ed",
+        "originalLine": 1857,
+        "originalBody": "**suggestion (non-blocking):** This new `crud.GetAll[models.District]` has no `.Limit()`, so it materializes every district in the country including the ineligible ones it then discards in memory \u2014 push the eligibility predicates into the query, or page it.\n\n<details><summary><sub>context</sub></summary>\n\nThis new `crud.GetAll[models.District]` has no `.Limit()`, so it materializes every district in the country including the ineligible ones it then discards in memory \u2014 push the eligibility predicates into the query, or page it. Introduced by this change. Before this diff the district-side read was `crud.GetMulti[models.District]` over keys derived from the admin UDIs that had already been found (removed at old line 1753), so it was bounded by the admin-UDI set; now it is bounded only by how many District entities exist with that country_code, and the eligibility filter runs afterwards in memory at lines 1862-1874. District is a wide model (61 `datastore:` properties in services/districts/models/district.go) and the whole entity is loaded, not a projection. The predicates being filtered in memory are stored, indexable properties \u2014 `District.EligibleForKADEmails()` at services/districts/models/district.go:451 is just `SendKADEmails() && m.RosterSyncingEnabled` over `dont_send_kad_emails`/`roster_syncing_enabled`, and `IsTest` is `is_test` \u2014 so adding them as equality filters on the query (and the matching index.yaml entry), or paging with `.Limit()` plus a cursor and handling one page per invocation, would bound the read. I traced both callers (monthly_admin_email_batch.go:444 and kad_email_subscriptions.go:529) and neither is in a transaction and neither bounds the result before this point, so nothing upstream or downstream caps it.\n\n<sub>found by correctness-reviewer | also flagged by skill-auditor</sub>\n\n</details>",
+        "replies": [
+            {
+                "id": 3927446113,
+                "body": "pushed eligibility to the query."
+            }
+        ],
+        "evidence": [
+            {
+                "path": "services/districts/models/district.go",
+                "commit": "ec472f1619848fa78e8383b64ebb0d73a67a3756",
+                "startLine": 86,
+                "endLine": 92,
+                "url": "https://github.com/Khan/webapp/blob/ec472f1619848fa78e8383b64ebb0d73a67a3756/services/districts/models/district.go#L86-L92",
+                "fileSha256": "71585cb4fcf61eb73fbc295f1f2f33ac2fc898a14d2e14bed010ce1d6c639f9b",
+                "text": "\t// When this is true, we won't send KAD emails (e.g. monthly admin progress\n\t// emails) for this district. Zero value is false so existing districts\n\t// keep receiving KAD emails until explicitly opted out.\n\t// Note negative logic is confusing so use the SendKADEmails() and\n\t// SetSendKADEmails() funcs instead. District-wide send eligibility also\n\t// requires roster syncing; use EligibleForKADEmails() for that check.\n\tDontSendKADEmails bool `datastore:\"dont_send_kad_emails,noindex\"`"
+            },
+            {
+                "path": "services/districts/models/district.go",
+                "commit": "ec472f1619848fa78e8383b64ebb0d73a67a3756",
+                "startLine": 111,
+                "endLine": 114,
+                "url": "https://github.com/Khan/webapp/blob/ec472f1619848fa78e8383b64ebb0d73a67a3756/services/districts/models/district.go#L111-L114",
+                "fileSha256": "71585cb4fcf61eb73fbc295f1f2f33ac2fc898a14d2e14bed010ce1d6c639f9b",
+                "text": "\t// all entities inside of this entity group is also test data. Tracking\n\t// test data accurately helps Product Analytics filter out test data in\n\t// weekly backups.\n\tIsTest bool `datastore:\"is_test\"`"
+            },
+            {
+                "path": "services/districts/models/district.go",
+                "commit": "ec472f1619848fa78e8383b64ebb0d73a67a3756",
+                "startLine": 139,
+                "endLine": 143,
+                "url": "https://github.com/Khan/webapp/blob/ec472f1619848fa78e8383b64ebb0d73a67a3756/services/districts/models/district.go#L139-L143",
+                "fileSha256": "71585cb4fcf61eb73fbc295f1f2f33ac2fc898a14d2e14bed010ce1d6c639f9b",
+                "text": "\t//\n\t// This can be useful for waiting to sync until our customers have finished\n\t// setup, or shutting off syncing in case of emergency.\n\t// \"required\" in python\n\tRosterSyncingEnabled bool `datastore:\"roster_syncing_enabled\"`"
+            },
+            {
+                "path": "services/districts/models/district.go",
+                "commit": "ec472f1619848fa78e8383b64ebb0d73a67a3756",
+                "startLine": 438,
+                "endLine": 452,
+                "url": "https://github.com/Khan/webapp/blob/ec472f1619848fa78e8383b64ebb0d73a67a3756/services/districts/models/district.go#L438-L452",
+                "fileSha256": "71585cb4fcf61eb73fbc295f1f2f33ac2fc898a14d2e14bed010ce1d6c639f9b",
+                "text": "func (m *District) SendKADEmails() bool {\n\treturn !m.DontSendKADEmails\n}\n\nfunc (m *District) SetSendKADEmails(enable bool) {\n\tm.DontSendKADEmails = !enable\n}\n\n// EligibleForKADEmails reports whether this district may receive KAD emails\n// (e.g. monthly admin progress emails).\n//\n// A district is ineligible if it has opted out via DontSendKADEmails or if\n// roster syncing is turned off.\nfunc (m *District) EligibleForKADEmails() bool {\n\treturn m.SendKADEmails() && m.RosterSyncingEnabled"
+            },
+            {
+                "path": "services/districts/emails/send_monthly_admin_email.go",
+                "commit": "ec472f1619848fa78e8383b64ebb0d73a67a3756",
+                "startLine": 1719,
+                "endLine": 1735,
+                "url": "https://github.com/Khan/webapp/blob/ec472f1619848fa78e8383b64ebb0d73a67a3756/services/districts/emails/send_monthly_admin_email.go#L1719-L1735",
+                "fileSha256": "44aaef0e034e7fc64e0023fcb3ada341356069417f8d1e8badc2fab341fa531b",
+                "text": "\trosterSource models.RosterSource,\n) ([]*models.UserDistrictInfo, error) {\n\tif countryCode == \"\" {\n\t\treturn nil, errors.InvalidInput(\"countryCode is required\")\n\t}\n\trosterSource, err := NormalizeKADEmailRosterSourceFilter(rosterSource)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\n\tdistricts, err := getEmailableDistrictsByCountry(ctx, countryCode, testDistrictsOnly)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\n\tallAdminUDIs, err := getAdminUDIsByDistricts(ctx, districts)\n\tif err != nil {"
+            },
+            {
+                "path": "services/districts/emails/send_monthly_admin_email.go",
+                "commit": "ec472f1619848fa78e8383b64ebb0d73a67a3756",
+                "startLine": 1838,
+                "endLine": 1875,
+                "url": "https://github.com/Khan/webapp/blob/ec472f1619848fa78e8383b64ebb0d73a67a3756/services/districts/emails/send_monthly_admin_email.go#L1838-L1875",
+                "fileSha256": "44aaef0e034e7fc64e0023fcb3ada341356069417f8d1e8badc2fab341fa531b",
+                "text": "// getEmailableDistrictsByCountry gets the districts in a country that are\n// eligible to receive KAD emails. Can be filtered to only test districts\n// or only non-test districts.\nfunc getEmailableDistrictsByCountry(\n\tctx interface {\n\t\tkacontext.Base\n\t\tdatastore.KAContext\n\t\tlog.KAContext\n\t},\n\tcountryCode string,\n\ttestDistrictsOnly bool,\n) ([]*models.District, error) {\n\tctx.Log().Info(\n\t\t\"Querying all districts in country\",\n\t\tlog.Fields{\"countryCode\": countryCode},\n\t)\n\n\tquery := datastore.NewQuery(models.DistrictKind).\n\t\tFilterField(\"country_code\", \"=\", countryCode)\n\tdistricts, err := crud.GetAll[models.District](ctx, query)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\n\tvar emailable []*models.District\n\tfor _, d := range districts {\n\t\tif d.IsTest != testDistrictsOnly {\n\t\t\tcontinue\n\t\t}\n\t\t// Skip districts that have opted out of KAD emails or have roster\n\t\t// syncing turned off.\n\t\tif !d.EligibleForKADEmails() {\n\t\t\tcontinue\n\t\t}\n\n\t\temailable = append(emailable, d)\n\t}\n\treturn emailable, nil"
+            },
+            {
+                "path": "services/districts/emails/send_monthly_admin_email.go",
+                "commit": "a39ee0cc4a71ea97b81d0a10a95d9601994410ed",
+                "startLine": 1735,
+                "endLine": 1762,
+                "url": "https://github.com/Khan/webapp/blob/a39ee0cc4a71ea97b81d0a10a95d9601994410ed/services/districts/emails/send_monthly_admin_email.go#L1735-L1762",
+                "fileSha256": "bf5d8184cc7ac15d087491fd20e779bd575944f68497e9362319d4231d4e9514",
+                "text": "\t\treturn nil, err\n\t}\n\n\tallAdminUDIs = excludeNonDeletedAdminUDIs(allAdminUDIs)\n\n\tuniqueDistrictKeys := map[string]*datastore.Key{}\n\tfor _, udi := range allAdminUDIs {\n\t\tuniqueDistrictKeys[udi.GetDistrictID()] = udi.DistrictKey\n\t}\n\tdistrictKeys := slices.Collect(maps.Values(uniqueDistrictKeys))\n\n\tctx.Log().Info(\n\t\t\"Fetched admin UDIs; batch fetching their districts\",\n\t\tlog.Fields{\n\t\t\t\"adminUDICount\": len(allAdminUDIs),\n\t\t\t\"districtCount\": len(districtKeys),\n\t\t},\n\t)\n\tfetchedDistricts, err := crud.GetMulti[models.District](ctx, districtKeys)\n\tif err != nil {\n\t\treturn nil, errors.Wrap(err, \"action\", \"batch fetching districts\")\n\t}\n\tdistrictByID := indexDistrictsByID(fetchedDistricts)\n\n\tctx.Log().Info(\n\t\t\"Filtering admin UDIs by country, test, roster source, KAD-email eligibility, and activation status\",\n\t\tlog.Fields{\n\t\t\t\"countryCode\":        countryCode,"
+            }
+        ]
+    },
+    "checks": [
+        {
+            "facet": "mainDefect",
+            "surface": "body",
+            "required": [
+                "GetAll|country.*(?:read|query)",
+                "(?:materializ|loads every district)"
+            ],
+            "forbidden": []
+        },
+        {
+            "facet": "proposedFix",
+            "surface": "body",
+            "required": [
+                "pag(?:e|ing).*(?:cursor|read)|cursor.*pag"
+            ],
+            "forbidden": [
+                "adding them as equality filters",
+                "index.yaml alone (?:enables|makes)"
+            ]
+        },
+        {
+            "facet": "supportingAssertions",
+            "surface": "body",
+            "required": [],
+            "forbidden": [
+                "stored, indexable properties",
+                "dont_send_kad_emails.{0,60}(?:is|remains) indexable"
+            ]
+        },
+        {
+            "facet": "visibleConsequence",
+            "surface": "visible",
+            "required": [
+                "(?:materializ|loads every district)"
+            ],
+            "forbidden": []
+        }
+    ],
+    "originalPass": {
+        "mainDefect": true,
+        "proposedFix": false,
+        "supportingAssertions": false,
+        "visibleConsequence": true
+    },
+    "control": {
+        "kind": "hand-authored validator output, not a model result",
+        "claims": [
+            {
+                "id": "comment-3926287619",
+                "verification": "confirmed",
+                "confidence": 0.7,
+                "reason": "Supported core concern, corrected only the inaccurate details or visible summary.",
+                "corrected": {
+                    "subject": "The country query loads every district before filtering, so page the read without dropping eligible recipients.",
+                    "discussion": "The new country-wide District read materializes ineligible entities before filtering, with no page bound. Page the country query with a limit and cursor, processing one page per invocation while retaining the eligibility checks. Do not silently truncate eligible recipients. DontSendKADEmails is stored with noindex, so adding index.yaml alone cannot enable that equality filter. Indexed is_test and roster_syncing_enabled filters can reduce the result set but do not bound its size."
+                }
+            }
+        ]
+    }
+}
