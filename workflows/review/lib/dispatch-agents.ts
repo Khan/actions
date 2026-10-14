@@ -209,3 +209,33 @@ export const meterFields = (
         ? {}
         : {judgeUsage: mergeUsage(judgeUsage)}),
 });
+
+export type PerAgentReport = {
+    name: string;
+    model: string;
+    /** The SDK's own meter, list price (see cost-report.ts for Khan's rate). */
+    usd: number;
+    turns: number;
+    wallMs: number;
+    /** Tokens per model behind `usd`, when the runner delivered a result record. */
+    usage?: ModelTokens[];
+    /** Tool calls the agent made, when the runner counts them. */
+    toolCalls?: number;
+    /**
+     * Tokens the prose judge spent gating this agent's submissions. The
+     * judge runs its own SDK sessions inside the agent's submit_result path,
+     * so this is not inside `usage` and would otherwise be invisible.
+     */
+    judgeUsage?: ModelTokens[];
+    /** This entry is the one malformed-output retry of the same agent. */
+    retried?: boolean;
+    /**
+     * The pinned model refused under the provider's usage policy and this
+     * dispatch ran on the fallback instead. Recorded, never silent: the whole
+     * failure mode is invisibility, and a hidden model swap would just move it.
+     */
+    fellBackTo?: string;
+    /** The result arrived via the structured-final tool (pre-validated). */
+    structuredFinal?: boolean;
+    failed?: string;
+};
