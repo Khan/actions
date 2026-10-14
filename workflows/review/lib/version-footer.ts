@@ -27,9 +27,12 @@
 
 import {canarySegment, renderCollapsedFooter} from "./attribution";
 import {FINDING_SCHEMA_VERSION} from "./finding-schema";
+import {installFromWorkflowRef} from "./foreign-history";
 import {DEFAULT_NON_BLOCKING_INLINE_BUDGET} from "./routing-config";
 
 const REVIEW_DIR = "/tmp/gh-aw/review";
+
+type FooterEnv = {REVIEW_CANARY_SHA?: string; GITHUB_WORKFLOW_REF?: string};
 
 /** Where the CLI stages the rendered footer for review.md Step 7 to paste. */
 export const FOOTER_OUT = `${REVIEW_DIR}/version-footer.txt`;
@@ -44,6 +47,7 @@ export type VersionFooterFs = {
 export type VersionFooterInputs = {
     /** The `version` field of workflows/review/package.json (the pinned release). */
     version: string | null;
+    install?: string | null;
     /** FINDING_SCHEMA_VERSION the run executed. */
     schemaVersion: number;
     /** The EXECUTED re-review depth (dispatch result, not the configured mode). */
@@ -75,6 +79,9 @@ const footerSegments = (inputs: VersionFooterInputs): string => {
     const segments: string[] = [];
     if (inputs.version !== null && inputs.version !== "") {
         segments.push(`review-v${inputs.version}`);
+    }
+    if (typeof inputs.install === "string" && inputs.install !== "") {
+        segments.push(`install ${inputs.install}`);
     }
     if (typeof inputs.canarySha === "string" && inputs.canarySha !== "") {
         segments.push(canarySegment(inputs.canarySha));
@@ -170,7 +177,8 @@ const readJson = (fs: VersionFooterFs, path: string): unknown => {
  *   - `routing.json` for the re-review mode, the blocking-only modifier,
  *     and the enable list;
  *   - the env (injectable; production reads `process.env`) for
- *     `REVIEW_CANARY_SHA`, the canary workflow's head-sha stamp.
+ *     `REVIEW_CANARY_SHA`, the canary workflow's head-sha stamp, and
+ *     `GITHUB_WORKFLOW_REF`, whose workflow file names the install.
  *
  * Every read fails toward omission: a missing or malformed file drops its
  * segments and the footer still renders (schema is a compile-time constant,
@@ -180,7 +188,7 @@ export const runVersionFooterCli = (
     fs: VersionFooterFs,
     libDir: string = __dirname,
     overrides: {depth?: string | null} = {},
-    env: {REVIEW_CANARY_SHA?: string} = process.env,
+    env: FooterEnv = process.env,
 ): string => {
     const footer = renderVersionFooter(
         readVersionFooterInputs(fs, libDir, overrides, env),
@@ -203,7 +211,7 @@ export const runVersionFooterLineCli = (
     fs: VersionFooterFs,
     libDir: string = __dirname,
     overrides: {depth?: string | null} = {},
-    env: {REVIEW_CANARY_SHA?: string} = process.env,
+    env: FooterEnv = process.env,
 ): string => {
     const inputs = readVersionFooterInputs(fs, libDir, overrides, env);
     fs.writeFileSync(FOOTER_OUT, renderVersionFooter(inputs));
@@ -215,7 +223,7 @@ const readVersionFooterInputs = (
     fs: VersionFooterFs,
     libDir: string,
     overrides: {depth?: string | null},
-    env: {REVIEW_CANARY_SHA?: string},
+    env: FooterEnv,
 ): VersionFooterInputs => {
     const pkg = readJson(fs, `${libDir}/../package.json`) as
         | {version?: unknown}
@@ -234,6 +242,7 @@ const readVersionFooterInputs = (
         | undefined;
     return {
         version: typeof pkg?.version === "string" ? pkg.version : null,
+        install: installFromWorkflowRef(env.GITHUB_WORKFLOW_REF),
         schemaVersion: FINDING_SCHEMA_VERSION,
         depth:
             overrides.depth !== undefined
