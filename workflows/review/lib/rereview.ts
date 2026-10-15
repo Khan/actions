@@ -153,6 +153,15 @@ export type RereviewSection = {
      * time.
      */
     keptBlockingCount: number;
+    /**
+     * How many staged blocking threads (same classification as
+     * keptBlockingCount, unknown labels included) the reconciler did NOT
+     * resolve: kept, omitted from both lists, or left unjudged because the
+     * reconciler produced no usable output. keptBlockingCount alone reads
+     * zero in the last two cases; the reduced-depth dismissal needs the
+     * positive fact that every blocking objection was resolved.
+     */
+    unresolvedBlockingCount: number;
 };
 
 /**
@@ -248,6 +257,25 @@ type KeptEntry = {
     excerpt: string;
 };
 
+const openerLabel = (thread: StagedThread): string =>
+    parseLeadingLabel(thread.comments[0]?.body ?? "") ?? "unknown";
+
+const isBlockingOpenerLabel = (label: string): boolean =>
+    label === "unknown" || isBlockingLabel(label);
+
+/** Staged blocking threads whose id is not in the reconciler's resolve list. */
+export const countUnresolvedBlocking = (
+    threads: readonly StagedThread[],
+    resolve: readonly string[],
+): number => {
+    const resolved = new Set(resolve);
+    return threads.filter(
+        (thread) =>
+            !resolved.has(thread.thread_id) &&
+            isBlockingOpenerLabel(openerLabel(thread)),
+    ).length;
+};
+
 const keptEntryFor = (
     threadId: string,
     threads: readonly StagedThread[],
@@ -269,7 +297,7 @@ const keptEntryFor = (
         };
     }
     const opener = thread.comments[0]?.body ?? "";
-    const label = parseLeadingLabel(opener) ?? "unknown";
+    const label = openerLabel(thread);
     return {
         threadId,
         anchor:
@@ -287,7 +315,7 @@ const keptEntryFor = (
         // of failing closed is a hand-edited or pre-labels-era thread keeping
         // REQUEST_CHANGES until a full-depth review re-judges it, which is
         // noise, not a wrongly-permitted approval.
-        blocking: label === "unknown" || isBlockingLabel(label),
+        blocking: isBlockingOpenerLabel(label),
         acknowledged: acknowledgedIds.has(threadId),
         excerpt: excerptOpeningComment(opener),
     };
@@ -405,6 +433,10 @@ export const renderRereviewSection = (
     );
     const acknowledged = [...acknowledgedIds].sort();
     const acknowledgedCount = acknowledged.length;
+    const unresolvedBlockingCount = countUnresolvedBlocking(
+        input.threads,
+        input.reconciler.resolve,
+    );
 
     if (total === 0) {
         return {
@@ -414,6 +446,7 @@ export const renderRereviewSection = (
             acknowledged: [],
             acknowledgedCount: 0,
             keptBlockingCount: 0,
+            unresolvedBlockingCount,
         };
     }
 
@@ -429,6 +462,7 @@ export const renderRereviewSection = (
             acknowledged: [],
             acknowledgedCount: 0,
             keptBlockingCount: 0,
+            unresolvedBlockingCount,
         };
     }
 
@@ -507,6 +541,7 @@ export const renderRereviewSection = (
         // past the still-open blocking thread (the code change is what
         // resolves it, through the reconciler).
         keptBlockingCount: blocking.length,
+        unresolvedBlockingCount,
     };
 };
 
@@ -632,6 +667,7 @@ export const runRereviewCli = (fs: RereviewCliFs): RereviewSection => {
             acknowledged: [],
             acknowledgedCount: 0,
             keptBlockingCount: 0,
+            unresolvedBlockingCount: countUnresolvedBlocking(threads, []),
         };
     } else {
         const prContext = readJson(fs, PR_CONTEXT_PATH);
