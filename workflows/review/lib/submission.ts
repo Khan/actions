@@ -39,11 +39,8 @@
  *     fed from the dispatcher's `skippedDimensions`). A hold is not a
  *     review event: the plan's body posts as one standalone PR comment,
  *     nothing else queues, and no fingerprint stamp is written, so the
- *     next run reviews in full. The production shape this closes:
- *     Khan/actions#328's re-run (31124365377 attempt 2), where every core
- *     lens died on an API auth error and the run still submitted
- *     "Approved — no blocking issues found" over seven "not assessed"
- *     note lines.
+ *     next run reviews in full. This closes Khan/actions#328's re-run,
+ *     where every core lens died on an auth error and the run still approved.
  *   - The reduced-depth flip rule: at flip-gated/fast depth over a prior
  *     REQUEST_CHANGES stamp, `rereview.json`'s keptBlockingCount floors the
  *     verdict at REQUEST_CHANGES.
