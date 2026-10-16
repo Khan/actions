@@ -36,6 +36,41 @@ describe("resolveRef", () => {
         expect(result).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     });
 
+    it("picks the exact branch when the name also matches a nested branch", () => {
+        // Arrange
+        const execSyncImpl = vi
+            .fn()
+            .mockReturnValueOnce("")
+            .mockReturnValueOnce(
+                [
+                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\trefs/heads/release/main",
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/main",
+                ].join("\n"),
+            );
+
+        // Act
+        const result = resolveRef("owner/repo", "main", execSyncImpl as never);
+
+        // Assert
+        expect(result).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    });
+
+    it("returns null when only a nested branch matches the name", () => {
+        // Arrange
+        const execSyncImpl = vi
+            .fn()
+            .mockReturnValueOnce("")
+            .mockReturnValueOnce(
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\trefs/heads/release/main",
+            );
+
+        // Act
+        const result = resolveRef("owner/repo", "main", execSyncImpl as never);
+
+        // Assert
+        expect(result).toBe(null);
+    });
+
     it("returns null when no tag or branch matches", () => {
         // Arrange
         const execSyncImpl = vi

@@ -52,7 +52,11 @@ export const resolveRef = (
     }).trim();
 
     if (branchOutput) {
-        return branchOutput.split(/\s+/)[0] ?? null;
+        const exact = branchOutput
+            .split("\n")
+            .map((line) => line.split(/\s+/))
+            .find(([, name]) => name === `refs/heads/${ref}`);
+        return exact?.[0] ?? null;
     }
 
     return null;
