@@ -238,16 +238,17 @@ describe("the approval's visible verdict head", () => {
     const head = (body: string) => body.split("\n")[0];
 
     it("leads a minor-findings approval above the fold", () => {
-        const body = runSubmissionCli(
+        const plan = runSubmissionCli(
             makeFakeFs(
                 staged({
                     depth: "full",
                     claims: [claim({label: "suggestion (non-blocking)"})],
                 }),
             ),
-        ).body;
-        expect(head(body)).toBe("**✅ Approved** — nothing blocks.");
-        expect(body).toContain(STAMP_MARKER);
+        );
+        expect(plan.comments).toHaveLength(1);
+        expect(head(plan.body)).toBe("**✅ Approved** — nothing blocks.");
+        expect(plan.body).toContain(STAMP_MARKER);
     });
 
     it("leads a collapsed-only approval above the fold's observations", () => {

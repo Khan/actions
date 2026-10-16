@@ -453,8 +453,7 @@ export type ReviewBodyInput = {
      * conditional on the separately-posted pre-merge obligations comment
      * ({@link renderObligationsComment}). Ignored for non-`APPROVE` events — an
      * obligation only rides alongside an approval; a `REQUEST_CHANGES` /
-     * `HOLD_FOR_HUMAN` already routes the change back to the author. Absent or
-     * `0` leaves the APPROVE body exactly as #194 rendered it.
+     * `HOLD_FOR_HUMAN` already routes the change back to the author.
      */
     obligationCount?: number;
     /**
@@ -517,8 +516,9 @@ export const HOLD_UNSTUCK_LINES = [
  * inline or into the body, plus the obligations line on a conditional
  * approval. A REQUEST_CHANGES body is always non-empty too, because GitHub
  * rejects the event with an empty body and the safe-output flow posts the
- * inline comments separately, so they do not make the event non-empty. Skipped-dimension notes append to
- * every verdict, and HOLD_FOR_HUMAN also explains how to proceed.
+ * inline comments separately, so they do not make the event non-empty.
+ * Skipped-dimension notes append to every verdict, and HOLD_FOR_HUMAN also
+ * explains how to proceed.
  *
  * The verdict phrase is bold with a verdict emoji: the head used
  * to be a bare sentence of the same visual weight as the PR-wide feedback
@@ -528,6 +528,7 @@ export const HOLD_UNSTUCK_LINES = [
  */
 export const renderReviewBody = (input: ReviewBodyInput): string => {
     let head: string;
+    let conditional = "";
     switch (input.event) {
         case "APPROVE": {
             const obligations = input.obligationCount ?? 0;
@@ -536,10 +537,10 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
                 // Conditional approval: the body must say the approval is
                 // conditional on the separately-posted pre-merge obligations
                 // comment. The count is code-computed; no prose about the code.
-                head +=
+                conditional =
                     obligations === 1
-                        ? "\nApproval is conditional on 1 pre-merge obligation — see the pre-merge obligations comment."
-                        : `\nApproval is conditional on ${obligations} pre-merge obligations — see the pre-merge obligations comment.`;
+                        ? "Approval is conditional on 1 pre-merge obligation — see the pre-merge obligations comment."
+                        : `Approval is conditional on ${obligations} pre-merge obligations — see the pre-merge obligations comment.`;
             }
             break;
         }
@@ -580,7 +581,7 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             `Note: ${dimension} not assessed this run (${subAgent} output unavailable).`,
     );
 
-    const lines = [head, input.rereviewSection ?? "", ...notes];
+    const lines = [head, conditional, input.rereviewSection ?? "", ...notes];
 
     if (input.event === "HOLD_FOR_HUMAN") {
         lines.push(
