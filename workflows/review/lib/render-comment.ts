@@ -518,25 +518,20 @@ export const HOLD_UNSTUCK_LINES = [
         "automated review.",
 ] as const;
 
-/** Where `count` findings, `inline` of them posted inline, can be read. */
-const findingsWhere = (inline: number, count: number): string =>
-    inline >= count
-        ? "see inline comments"
-        : inline <= 0
-        ? "see the observations below"
-        : "see inline comments and the observations below";
-
 const mediumClause = (input: ReviewBodyInput): string | null => {
     const count = input.mediumCount ?? 0;
     if (count <= 0) {
         return null;
     }
     const inline = Math.min(input.mediumInlineCount ?? 0, count);
+    const where =
+        inline === count
+            ? "see inline comments"
+            : inline === 0
+            ? "see the observations below"
+            : "see inline comments and the observations below";
     const findings = count === 1 ? "1 finding" : `${count} findings`;
-    return `${findings} worth fixing before merge (${findingsWhere(
-        inline,
-        count,
-    )})`;
+    return `${findings} worth fixing before merge (${where})`;
 };
 
 /**
@@ -568,8 +563,8 @@ const minorClause = (input: ReviewBodyInput): string | null => {
  *
  * The body convention: every verdict renders a visible head, so a review is
  * never only folds. An APPROVE head says nothing blocks and, when the run had
- * findings, counts them and says where they are (inline, in the observations
- * fold, or both); the bare "nothing blocks." is the comment-less, finding-less
+ * findings, counts them and says where they are (inline, listed below in the
+ * body, or both); the bare "nothing blocks." is the comment-less, finding-less
  * approval. A REQUEST_CHANGES body is always non-empty too, because GitHub
  * rejects the event with an empty body and the safe-output flow posts the
  * inline comments separately, so they do not make the event non-empty.
