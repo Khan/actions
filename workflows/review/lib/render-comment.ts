@@ -140,8 +140,7 @@ const DOCUMENTATION_LENSES: ReadonlySet<Lens> = new Set<Lens>([
  * rows above). That is the tier's design invariant, not an omission:
  * keeping medium out of the label vocabulary is what leaves the label-keyed
  * machinery (the recap parser, dedup's blocking guards, the flip gate)
- * untouched. The tier never changes the verdict or the approval head; it
- * only ranks a finding for the posting surface (submission.ts).
+ * untouched. The tier never changes the verdict.
  *
  * There is deliberately **no blocking documentation variant**. The
  * documentation reviewer is advisory-only (its definition permits it one
