@@ -100,8 +100,8 @@ describe("runSubmissionCli: re-review blocking-medium", () => {
         );
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("APPROVE");
-        expect(plan.body).toContain(
-            "**✅ Approved** — nothing blocks; 1 finding worth fixing before merge (see inline comments).",
+        expect(plan.body.split("\n")[0]).toBe(
+            "**✅ Approved** — nothing blocks.",
         );
         expect(plan.comments).toHaveLength(1);
         expect(plan.comments[0].line).toBe(2);
@@ -295,7 +295,7 @@ describe("the veto's diff sources", () => {
 });
 
 describe("medium findings and the verdict", () => {
-    it("a vetoed medium is not counted in the approval head", () => {
+    it("a vetoed medium leaves the medium count at 0", () => {
         // Line 40 is outside the diff: the tier is stripped and the medium
         // count is 0.
         const fs = makeFakeFs(
@@ -308,10 +308,12 @@ describe("medium findings and the verdict", () => {
         );
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("APPROVE");
-        expect(plan.body).not.toContain("worth fixing before merge");
+        expect(plan.notes).toContainEqual(
+            "medium-importance claims this run: 0",
+        );
     });
 
-    it("a collapsed medium approves and the head points at the fold", () => {
+    it("a collapsed medium approves with the bare head", () => {
         const fs = makeFakeFs(
             staged(
                 {
@@ -324,9 +326,10 @@ describe("medium findings and the verdict", () => {
         const plan = runSubmissionCli(fs);
         expect(plan.comments).toHaveLength(0);
         expect(plan.event).toBe("APPROVE");
-        expect(plan.body).toContain(
-            "**✅ Approved** — nothing blocks; 1 finding worth fixing before merge (see the observations below).",
+        expect(plan.body.split("\n")[0]).toBe(
+            "**✅ Approved** — nothing blocks.",
         );
+        expect(plan.body).toContain("observations (1):**");
     });
 
     it("blocking still outranks medium", () => {

@@ -376,11 +376,11 @@ describe("renderReviewBody with a re-review section", () => {
             event: "APPROVE",
             hasInlineComments: false,
         });
-        expect(withEmpty).toBe("**✅ Approved** — no blocking issues found.");
+        expect(withEmpty).toBe("**✅ Approved** — nothing blocks.");
         expect(withEmpty).toBe(without);
     });
 
-    it("makes an otherwise-empty body carry the accounting", () => {
+    it("makes the approval carry the accounting under its head", () => {
         // Run 3 of the lifecycle approved with an empty body while resolving
         // 11 threads; with the section, that approval says so.
         const body = renderReviewBody({
@@ -388,7 +388,12 @@ describe("renderReviewBody with a re-review section", () => {
             hasInlineComments: true,
             rereviewSection: "All 11 prior review threads are resolved.",
         });
-        expect(body).toBe("All 11 prior review threads are resolved.");
+        expect(body).toBe(
+            [
+                "**✅ Approved** — nothing blocks.",
+                "All 11 prior review threads are resolved.",
+            ].join("\n"),
+        );
     });
 });
 

@@ -46,14 +46,13 @@
  *     verdict at REQUEST_CHANGES.
  *   - Full-roster approval and reduced-depth clearance: submission-clearance.ts.
  *
- * Body rules encoded (review.md Step 6): the verdict head (empty-body
- * APPROVE with comments; the fixed REQUEST_CHANGES line), the code-rendered
- * accountability section spliced verbatim, one note line per shed / skipped
- * dimension / depth reduction (the dispatcher already rendered those), any
- * PR-level claims folded into the body (the inline-comment safe output needs
- * a path and line), and ONE collapsed `review details` fold as the final
- * block, carrying the observations, the version/config line, and the
- * fingerprint stamp line (sanitizer-surviving).
+ * Body rules encoded (review.md Step 6): the always-visible verdict head,
+ * the code-rendered accountability section spliced verbatim, one note line
+ * per shed / skipped dimension / depth reduction (the dispatcher already
+ * rendered those), any PR-level claims folded into the body (the
+ * inline-comment safe output needs a path and line), and ONE collapsed
+ * `review details` fold as the final block: the observations, the
+ * version/config line, and the fingerprint stamp line (sanitizer-surviving).
  *
  * Determinism boundary: pure composition of staged files through the same
  * lib functions the eval runner uses; no model call, no prose about the code
@@ -888,10 +887,6 @@ export const runSubmissionCli = (
         event,
         hasInlineComments: inline.length > 0,
         rereviewSection: rereview.section,
-        mediumCount,
-        mediumInlineCount: inlineList.filter(
-            (claim) => claim.importance === "medium",
-        ).length,
         approveDemoted,
         hasBodyFindings: hasCollapsedSection || prLevelLines.length > 0,
     });

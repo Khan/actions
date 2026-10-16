@@ -140,8 +140,7 @@ const DOCUMENTATION_LENSES: ReadonlySet<Lens> = new Set<Lens>([
  * rows above). That is the tier's design invariant, not an omission:
  * keeping medium out of the label vocabulary is what leaves the label-keyed
  * machinery (the recap parser, dedup's blocking guards, the flip gate)
- * untouched. The tier never changes the verdict; the approval head counts
- * it directly (`renderReviewBody`'s `mediumCount`), never through labels.
+ * untouched. The tier never changes the verdict.
  *
  * There is deliberately **no blocking documentation variant**. The
  * documentation reviewer is advisory-only (its definition permits it one
@@ -454,8 +453,7 @@ export type ReviewBodyInput = {
      * conditional on the separately-posted pre-merge obligations comment
      * ({@link renderObligationsComment}). Ignored for non-`APPROVE` events — an
      * obligation only rides alongside an approval; a `REQUEST_CHANGES` /
-     * `HOLD_FOR_HUMAN` already routes the change back to the author. Absent or
-     * `0` leaves the APPROVE body exactly as #194 rendered it.
+     * `HOLD_FOR_HUMAN` already routes the change back to the author.
      */
     obligationCount?: number;
     /**
@@ -465,8 +463,6 @@ export type ReviewBodyInput = {
      * as before — a first review has no prior threads to account for.
      */
     rereviewSection?: string;
-    mediumCount?: number;
-    mediumInlineCount?: number;
     /**
      * Whether this COMMENT is a would-be APPROVE demoted by the reduced-depth
      * clearance (`submission-clearance.ts`'s `approveDemoted`) rather than a
@@ -509,35 +505,20 @@ export const HOLD_UNSTUCK_LINES = [
         "automated review.",
 ] as const;
 
-const mediumClause = (input: ReviewBodyInput): string | null => {
-    const count = input.mediumCount ?? 0;
-    if (count <= 0) {
-        return null;
-    }
-    const inline = Math.min(input.mediumInlineCount ?? 0, count);
-    const where =
-        inline === count
-            ? "see inline comments"
-            : inline === 0
-            ? "see the observations below"
-            : "see inline comments and the observations below";
-    const findings = count === 1 ? "1 finding" : `${count} findings`;
-    return `${findings} worth fixing before merge (${where})`;
-};
-
 /**
  * Render the review body for a verdict. Mirrors `review.md` Step 6 exactly for
  * APPROVE/REQUEST_CHANGES, and renders a self-explanatory hold-for-human body
  * for the third event.
  *
- * The body convention (matching `review.md`): on APPROVE with inline comments
- * the comments ARE the review, so the body stays empty; a REQUEST_CHANGES body
- * is always non-empty, because GitHub rejects the event with an empty body and
- * the safe-output flow posts the inline comments separately, so they do not
- * make the event non-empty. Additional body text appears for a comment-less
- * approval, for skipped-dimension notes (appended to every verdict, and
- * forming the entire body when the head is empty), and for HOLD_FOR_HUMAN,
- * which must always explain itself and how to proceed.
+ * The body convention: every verdict renders a visible head, so a review is
+ * never only folds. The head reports only blockers: every APPROVE reads
+ * "nothing blocks.", whatever non-blocking findings (medium or minor) rode
+ * inline or into the body, plus the obligations line on a conditional
+ * approval. A REQUEST_CHANGES body is always non-empty too, because GitHub
+ * rejects the event with an empty body and the safe-output flow posts the
+ * inline comments separately, so they do not make the event non-empty.
+ * Skipped-dimension notes append to every verdict, and HOLD_FOR_HUMAN also
+ * explains how to proceed.
  *
  * The verdict phrase is bold with a verdict emoji: the head used
  * to be a bare sentence of the same visual weight as the PR-wide feedback
@@ -547,30 +528,19 @@ const mediumClause = (input: ReviewBodyInput): string | null => {
  */
 export const renderReviewBody = (input: ReviewBodyInput): string => {
     let head: string;
+    let conditional = "";
     switch (input.event) {
         case "APPROVE": {
             const obligations = input.obligationCount ?? 0;
-            const mediums = mediumClause(input);
+            head = "**✅ Approved** — nothing blocks.";
             if (obligations > 0) {
                 // Conditional approval: the body must say the approval is
                 // conditional on the separately-posted pre-merge obligations
                 // comment. The count is code-computed; no prose about the code.
-                head =
+                conditional =
                     obligations === 1
-                        ? "**✅ Approved** with 1 pre-merge obligation — see the pre-merge obligations comment."
-                        : `**✅ Approved** with ${obligations} pre-merge obligations — see the pre-merge obligations comment.`;
-                if (mediums !== null) {
-                    head += ` Nothing else blocks; ${mediums}.`;
-                }
-            } else if (mediums !== null) {
-                head = `**✅ Approved** — nothing blocks; ${mediums}.`;
-            } else {
-                // With inline comments, the comments make the review non-empty;
-                // the one-line body exists only to keep a comment-less approval
-                // submittable.
-                head = input.hasInlineComments
-                    ? ""
-                    : "**✅ Approved** — no blocking issues found.";
+                        ? "Approval is conditional on 1 pre-merge obligation — see the pre-merge obligations comment."
+                        : `Approval is conditional on ${obligations} pre-merge obligations — see the pre-merge obligations comment.`;
             }
             break;
         }
@@ -611,7 +581,7 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             `Note: ${dimension} not assessed this run (${subAgent} output unavailable).`,
     );
 
-    const lines = [head, input.rereviewSection ?? "", ...notes];
+    const lines = [head, conditional, input.rereviewSection ?? "", ...notes];
 
     if (input.event === "HOLD_FOR_HUMAN") {
         lines.push(
