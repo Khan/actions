@@ -515,10 +515,9 @@ export const HOLD_UNSTUCK_LINES = [
  * never only folds. The head reports only blockers: every APPROVE reads
  * "nothing blocks.", whatever non-blocking findings (medium or minor) rode
  * inline or into the body, plus the obligations line on a conditional
- * approval. A REQUEST_CHANGES
- * body is always non-empty too, because GitHub rejects the event with an
- * empty body and the safe-output flow posts the inline comments separately,
- * so they do not make the event non-empty. Skipped-dimension notes append to
+ * approval. A REQUEST_CHANGES body is always non-empty too, because GitHub
+ * rejects the event with an empty body and the safe-output flow posts the
+ * inline comments separately, so they do not make the event non-empty. Skipped-dimension notes append to
  * every verdict, and HOLD_FOR_HUMAN also explains how to proceed.
  *
  * The verdict phrase is bold with a verdict emoji: the head used
