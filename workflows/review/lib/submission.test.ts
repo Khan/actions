@@ -147,7 +147,7 @@ describe("runSubmissionCli", () => {
         ).toBe("REQUEST_CHANGES");
     });
 
-    it("plans a counted APPROVE head when only non-blocking claims post", () => {
+    it("plans the bare APPROVE head when only non-blocking claims post", () => {
         const fs = makeFakeFs(
             staged({
                 depth: "full",
@@ -159,7 +159,7 @@ describe("runSubmissionCli", () => {
         );
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("APPROVE");
-        expect(plan.body).toContain("1 minor finding (see inline comments).");
+        expect(plan.body.startsWith(`${APPROVE_HEAD}\n`)).toBe(true);
         expect(plan.body).toContain("holistic not assessed this run");
     });
 

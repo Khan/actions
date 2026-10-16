@@ -236,25 +236,26 @@ describe("the review body's review-details fold", () => {
 });
 
 describe("the approval's visible verdict head", () => {
-    const minor = claim({label: "suggestion (non-blocking)"});
+    const head = (body: string) => body.split("\n")[0];
 
     it("leads a minor-findings approval above the fold", () => {
         const body = runSubmissionCli(
-            makeFakeFs(staged({depth: "full", claims: [minor]})),
+            makeFakeFs(
+                staged({
+                    depth: "full",
+                    claims: [claim({label: "suggestion (non-blocking)"})],
+                }),
+            ),
         ).body;
-        expect(body.split("\n")[0]).toBe(
-            "**✅ Approved** — nothing blocks; 1 minor finding (see inline comments).",
-        );
+        expect(head(body)).toBe("**✅ Approved** — nothing blocks.");
         expect(body).toContain(STAMP_MARKER);
     });
 
-    it("points at the fold when the findings collapsed, and autofix still reads them", () => {
+    it("leads a collapsed-only approval, and autofix still reads the fold", () => {
         const body = runSubmissionCli(
             makeFakeFs(staged({depth: "full", claims: [weak()]})),
         ).body;
-        expect(body.split("\n")[0]).toBe(
-            "**✅ Approved** — nothing blocks; 1 minor finding (listed below).",
-        );
+        expect(head(body)).toBe("**✅ Approved** — nothing blocks.");
         expect(parseCollapsedObservations([{body}])).toEqual([
             {
                 path: "a.ts",
@@ -264,34 +265,6 @@ describe("the approval's visible verdict head", () => {
                 source: "correctness-reviewer",
             },
         ]);
-    });
-
-    it("counts a pr-level finding as listed below, not as an observation", () => {
-        // A pr-level line renders under the head, outside the fold, so a
-        // pointer naming the observations section would send the author to
-        // a fold that has none.
-        const prLevel = claim({
-            id: "pr",
-            path: undefined,
-            line: undefined,
-            label: "note (non-blocking)",
-            subject: "A cross-file observation.",
-            discussion: "A cross-file observation.",
-        });
-        const body = runSubmissionCli(
-            makeFakeFs(staged({depth: "full", claims: [minor, prLevel]})),
-        ).body;
-        expect(body.split("\n")[0]).toBe(
-            "**✅ Approved** — nothing blocks; 2 minor findings (1 inline, 1 listed below).",
-        );
-        expect(body).not.toContain("observations (");
-    });
-
-    it("renders the bare head when nothing was found", () => {
-        const body = runSubmissionCli(
-            makeFakeFs(staged({depth: "full", claims: []})),
-        ).body;
-        expect(body.split("\n")[0]).toBe("**✅ Approved** — nothing blocks.");
     });
 });
 

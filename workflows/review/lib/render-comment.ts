@@ -471,27 +471,18 @@ export type ReviewBodyInput = {
      * Whether this COMMENT is a would-be APPROVE demoted by the reduced-depth
      * clearance (`submission-clearance.ts`'s `approveDemoted`) rather than a
      * canary run. Such a run usually has no findings (see
-     * {@link ReviewBodyInput.bodyFindingCount} for the exception), so its head
+     * {@link ReviewBodyInput.hasBodyFindings} for the exception), so its head
      * says why the run is not an approval. Ignored for non-`COMMENT` events.
      */
     approveDemoted?: boolean;
     /**
-     * How many findings posted as inline comments this run. With
-     * {@link ReviewBodyInput.bodyFindingCount}, sizes and points the
-     * APPROVE head's minor-findings count. Absent counts as `0`.
+     * Whether findings rendered into the body this run — collapsed into the
+     * observations fold or as PR-level lines. A demoted approval can carry
+     * advisory findings that never post inline, so the head must not claim
+     * "no new findings" over a body that lists some. Ignored except on a
+     * demoted `COMMENT`.
      */
-    inlineFindingCount?: number;
-    /**
-     * How many findings rendered into the body this run — collapsed into the
-     * observations fold or as PR-level lines under the head (two surfaces, so
-     * the minor-findings pointer says "listed below", never naming the
-     * observations section a PR-level-only body lacks). Feeds the APPROVE head's
-     * minor-findings count, and on a demoted `COMMENT` keeps the head from
-     * claiming "no new findings" over a body that lists some (a demoted
-     * approval can carry advisory findings that never post inline). Absent
-     * counts as `0`.
-     */
-    bodyFindingCount?: number;
+    hasBodyFindings?: boolean;
 };
 
 /**
@@ -535,41 +526,18 @@ const mediumClause = (input: ReviewBodyInput): string | null => {
 };
 
 /**
- * The count of an approval's non-medium findings ("minor", the
- * claim-validator's name for that tier), for a head with no medium clause.
- */
-const minorClause = (input: ReviewBodyInput): string | null => {
-    const inline = input.inlineFindingCount ?? 0;
-    const body = input.bodyFindingCount ?? 0;
-    const count = inline + body;
-    if (count <= 0) {
-        return null;
-    }
-    const findings =
-        count === 1 ? "1 minor finding" : `${count} minor findings`;
-    const where =
-        body <= 0
-            ? "see inline comments"
-            : inline <= 0
-            ? "listed below"
-            : `${inline} inline, ${body} listed below`;
-    return `${findings} (${where})`;
-};
-
-/**
  * Render the review body for a verdict. Mirrors `review.md` Step 6 exactly for
  * APPROVE/REQUEST_CHANGES, and renders a self-explanatory hold-for-human body
  * for the third event.
  *
  * The body convention: every verdict renders a visible head, so a review is
- * never only folds. An APPROVE head says nothing blocks and, when the run had
- * findings, counts them and says where they are (inline, listed below in the
- * body, or both); the bare "nothing blocks." is the comment-less, finding-less
- * approval. A REQUEST_CHANGES body is always non-empty too, because GitHub
- * rejects the event with an empty body and the safe-output flow posts the
- * inline comments separately, so they do not make the event non-empty.
- * Skipped-dimension notes append to every verdict, and HOLD_FOR_HUMAN also
- * explains how to proceed.
+ * never only folds. The head reports only what blocks or is worth fixing
+ * before merge: an APPROVE with no medium findings reads "nothing blocks."
+ * whatever minor findings rode inline or into the body. A REQUEST_CHANGES
+ * body is always non-empty too, because GitHub rejects the event with an
+ * empty body and the safe-output flow posts the inline comments separately,
+ * so they do not make the event non-empty. Skipped-dimension notes append to
+ * every verdict, and HOLD_FOR_HUMAN also explains how to proceed.
  *
  * The verdict phrase is bold with a verdict emoji: the head used
  * to be a bare sentence of the same visual weight as the PR-wide feedback
@@ -597,15 +565,7 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             } else if (mediums !== null) {
                 head = `**✅ Approved** — nothing blocks; ${mediums}.`;
             } else {
-                // Never empty, even with inline comments: the head is the
-                // review's only visible verdict above the folds.
-                const minors = minorClause(input);
-                head =
-                    minors !== null
-                        ? `**✅ Approved** — nothing blocks; ${minors}.`
-                        : input.hasInlineComments
-                        ? "**✅ Approved** — nothing blocks; see inline comments."
-                        : "**✅ Approved** — nothing blocks.";
+                head = "**✅ Approved** — nothing blocks.";
             }
             break;
         }
@@ -626,7 +586,7 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
             head = input.approveDemoted
                 ? input.hasInlineComments
                     ? "**💬 Commented** — see inline comments; approval requires a full review round."
-                    : (input.bodyFindingCount ?? 0) > 0
+                    : input.hasBodyFindings
                     ? "**💬 Commented** — see the observations below; approval requires a full review round."
                     : "**💬 Commented** — no new findings; approval requires a full review round."
                 : "**💬 Commented** — canary run; see the note below.";

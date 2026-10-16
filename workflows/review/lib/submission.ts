@@ -892,8 +892,7 @@ export const runSubmissionCli = (
             (claim) => claim.importance === "medium",
         ).length,
         approveDemoted,
-        inlineFindingCount: inline.length,
-        bodyFindingCount: collapsed.length + prLevelLines.length,
+        hasBodyFindings: hasCollapsedSection || prLevelLines.length > 0,
     });
     const stamp = runRereviewStampCli(fs, event, canary);
     // The body minus the attribution footer: the skip below compares THIS

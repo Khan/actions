@@ -479,7 +479,6 @@ export const runCase = (
         hasInlineComments: postedCandidates.length > 0,
         mediumCount,
         mediumInlineCount: mediumCount,
-        inlineFindingCount: postedCandidates.length,
         ...(rereviewSection !== undefined ? {rereviewSection} : {}),
         skippedDimensions: skippedDimensions(corpusCase.dimensions),
     });

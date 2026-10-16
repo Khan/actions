@@ -390,7 +390,7 @@ describe("renderReviewBody with a re-review section", () => {
         });
         expect(body).toBe(
             [
-                "**✅ Approved** — nothing blocks; see inline comments.",
+                "**✅ Approved** — nothing blocks.",
                 "All 11 prior review threads are resolved.",
             ].join("\n"),
         );

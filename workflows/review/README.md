@@ -76,8 +76,7 @@ The workflow then posts the per-line Conventional Comments that survived validat
 and submits an approve or request-changes review: changes are requested iff a
 blocking finding survived, and otherwise it approves, with the approval head
 counting any medium-importance findings (worth fixing before merge, never
-blocking), or, when there are none, counting the minor findings and saying
-where they are (inline comments or listed below). Every approval opens with
+blocking), or otherwise reading "nothing blocks." Every approval opens with
 that visible verdict line. A reduced-depth round whose would-be approval needs a full roster
 submits a comment instead. On approval it also posts the risk/patterns summary
 and requests the owning teams. The config files below feed these sub-agents.
