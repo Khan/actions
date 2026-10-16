@@ -1,6 +1,5 @@
 import {describe, it, expect} from "vitest";
 
-import {parseCollapsedObservations} from "../../autofix/lib/collapsed.ts";
 import {renderCollapsedFooter, stripFooters} from "./attribution";
 import {STAMP_MARKER} from "./rereview-mode";
 import {runSubmissionCli, type SubmissionFs} from "./submission";
@@ -251,20 +250,12 @@ describe("the approval's visible verdict head", () => {
         expect(body).toContain(STAMP_MARKER);
     });
 
-    it("leads a collapsed-only approval, and autofix still reads the fold", () => {
+    it("leads a collapsed-only approval above the fold's observations", () => {
         const body = runSubmissionCli(
             makeFakeFs(staged({depth: "full", claims: [weak()]})),
         ).body;
         expect(head(body)).toBe("**✅ Approved** — nothing blocks.");
-        expect(parseCollapsedObservations([{body}])).toEqual([
-            {
-                path: "a.ts",
-                line: 2,
-                label: "thought (non-blocking)",
-                subject: "a hunch",
-                source: "correctness-reviewer",
-            },
-        ]);
+        expect(body).toContain("`a.ts:2` thought (non-blocking): a hunch");
     });
 });
 
