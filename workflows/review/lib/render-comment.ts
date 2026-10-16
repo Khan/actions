@@ -483,7 +483,9 @@ export type ReviewBodyInput = {
     inlineFindingCount?: number;
     /**
      * How many findings rendered into the body this run — collapsed into the
-     * observations fold or as PR-level lines. Feeds the APPROVE head's
+     * observations fold or as PR-level lines under the head (two surfaces, so
+     * the minor-findings pointer says "listed below", never naming the
+     * observations section a PR-level-only body lacks). Feeds the APPROVE head's
      * minor-findings count, and on a demoted `COMMENT` keeps the head from
      * claiming "no new findings" over a body that lists some (a demoted
      * approval can carry advisory findings that never post inline). Absent
@@ -543,13 +545,20 @@ const mediumClause = (input: ReviewBodyInput): string | null => {
  */
 const minorClause = (input: ReviewBodyInput): string | null => {
     const inline = input.inlineFindingCount ?? 0;
-    const count = inline + (input.bodyFindingCount ?? 0);
+    const body = input.bodyFindingCount ?? 0;
+    const count = inline + body;
     if (count <= 0) {
         return null;
     }
     const findings =
         count === 1 ? "1 minor finding" : `${count} minor findings`;
-    return `${findings} (${findingsWhere(inline, count)})`;
+    const where =
+        body <= 0
+            ? "see inline comments"
+            : inline <= 0
+            ? "listed below"
+            : `${inline} inline, ${body} listed below`;
+    return `${findings} (${where})`;
 };
 
 /**

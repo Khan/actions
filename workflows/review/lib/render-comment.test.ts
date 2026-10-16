@@ -303,7 +303,7 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
             "**✅ Approved** — nothing blocks; 1 minor finding (see inline comments).",
         );
         expect(body({bodyFindingCount: 2})).toBe(
-            "**✅ Approved** — nothing blocks; 2 minor findings (see the observations below).",
+            "**✅ Approved** — nothing blocks; 2 minor findings (listed below).",
         );
         expect(
             body({
@@ -312,7 +312,7 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
                 bodyFindingCount: 2,
             }),
         ).toBe(
-            "**✅ Approved** — nothing blocks; 5 minor findings (see inline comments and the observations below).",
+            "**✅ Approved** — nothing blocks; 5 minor findings (3 inline, 2 listed below).",
         );
     });
 

@@ -1,6 +1,6 @@
 import {describe, it, expect} from "vitest";
 
-import {parseCollapsedObservations} from "../../autofix/lib/collapsed";
+import {parseCollapsedObservations} from "../../autofix/lib/collapsed.ts";
 import {renderCollapsedFooter, stripFooters} from "./attribution";
 import {STAMP_MARKER} from "./rereview-mode";
 import {runSubmissionCli, type SubmissionFs} from "./submission";
@@ -253,7 +253,7 @@ describe("the approval's visible verdict head", () => {
             makeFakeFs(staged({depth: "full", claims: [weak()]})),
         ).body;
         expect(body.split("\n")[0]).toBe(
-            "**✅ Approved** — nothing blocks; 1 minor finding (see the observations below).",
+            "**✅ Approved** — nothing blocks; 1 minor finding (listed below).",
         );
         expect(parseCollapsedObservations([{body}])).toEqual([
             {
@@ -264,6 +264,27 @@ describe("the approval's visible verdict head", () => {
                 source: "correctness-reviewer",
             },
         ]);
+    });
+
+    it("counts a pr-level finding as listed below, not as an observation", () => {
+        // A pr-level line renders under the head, outside the fold, so a
+        // pointer naming the observations section would send the author to
+        // a fold that has none.
+        const prLevel = claim({
+            id: "pr",
+            path: undefined,
+            line: undefined,
+            label: "note (non-blocking)",
+            subject: "A cross-file observation.",
+            discussion: "A cross-file observation.",
+        });
+        const body = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims: [minor, prLevel]})),
+        ).body;
+        expect(body.split("\n")[0]).toBe(
+            "**✅ Approved** — nothing blocks; 2 minor findings (1 inline, 1 listed below).",
+        );
+        expect(body).not.toContain("observations (");
     });
 
     it("renders the bare head when nothing was found", () => {
