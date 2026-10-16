@@ -140,8 +140,8 @@ const DOCUMENTATION_LENSES: ReadonlySet<Lens> = new Set<Lens>([
  * rows above). That is the tier's design invariant, not an omission:
  * keeping medium out of the label vocabulary is what leaves the label-keyed
  * machinery (the recap parser, dedup's blocking guards, the flip gate)
- * untouched. The tier never changes the verdict; the approval head counts
- * it directly (`renderReviewBody`'s `mediumCount`), never through labels.
+ * untouched. The tier never changes the verdict or the approval head; it
+ * only ranks a finding for the posting surface (submission.ts).
  *
  * There is deliberately **no blocking documentation variant**. The
  * documentation reviewer is advisory-only (its definition permits it one
@@ -465,8 +465,6 @@ export type ReviewBodyInput = {
      * as before — a first review has no prior threads to account for.
      */
     rereviewSection?: string;
-    mediumCount?: number;
-    mediumInlineCount?: number;
     /**
      * Whether this COMMENT is a would-be APPROVE demoted by the reduced-depth
      * clearance (`submission-clearance.ts`'s `approveDemoted`) rather than a
@@ -509,31 +507,16 @@ export const HOLD_UNSTUCK_LINES = [
         "automated review.",
 ] as const;
 
-const mediumClause = (input: ReviewBodyInput): string | null => {
-    const count = input.mediumCount ?? 0;
-    if (count <= 0) {
-        return null;
-    }
-    const inline = Math.min(input.mediumInlineCount ?? 0, count);
-    const where =
-        inline === count
-            ? "see inline comments"
-            : inline === 0
-            ? "see the observations below"
-            : "see inline comments and the observations below";
-    const findings = count === 1 ? "1 finding" : `${count} findings`;
-    return `${findings} worth fixing before merge (${where})`;
-};
-
 /**
  * Render the review body for a verdict. Mirrors `review.md` Step 6 exactly for
  * APPROVE/REQUEST_CHANGES, and renders a self-explanatory hold-for-human body
  * for the third event.
  *
  * The body convention: every verdict renders a visible head, so a review is
- * never only folds. The head reports only what blocks or is worth fixing
- * before merge: an APPROVE with no medium findings reads "nothing blocks."
- * whatever minor findings rode inline or into the body. A REQUEST_CHANGES
+ * never only folds. The head reports only blockers: every APPROVE reads
+ * "nothing blocks.", whatever non-blocking findings (medium or minor) rode
+ * inline or into the body, plus the obligations line on a conditional
+ * approval. A REQUEST_CHANGES
  * body is always non-empty too, because GitHub rejects the event with an
  * empty body and the safe-output flow posts the inline comments separately,
  * so they do not make the event non-empty. Skipped-dimension notes append to
@@ -550,22 +533,15 @@ export const renderReviewBody = (input: ReviewBodyInput): string => {
     switch (input.event) {
         case "APPROVE": {
             const obligations = input.obligationCount ?? 0;
-            const mediums = mediumClause(input);
+            head = "**✅ Approved** — nothing blocks.";
             if (obligations > 0) {
                 // Conditional approval: the body must say the approval is
                 // conditional on the separately-posted pre-merge obligations
                 // comment. The count is code-computed; no prose about the code.
-                head =
+                head +=
                     obligations === 1
-                        ? "**✅ Approved** with 1 pre-merge obligation — see the pre-merge obligations comment."
-                        : `**✅ Approved** with ${obligations} pre-merge obligations — see the pre-merge obligations comment.`;
-                if (mediums !== null) {
-                    head += ` Nothing else blocks; ${mediums}.`;
-                }
-            } else if (mediums !== null) {
-                head = `**✅ Approved** — nothing blocks; ${mediums}.`;
-            } else {
-                head = "**✅ Approved** — nothing blocks.";
+                        ? "\nApproval is conditional on 1 pre-merge obligation — see the pre-merge obligations comment."
+                        : `\nApproval is conditional on ${obligations} pre-merge obligations — see the pre-merge obligations comment.`;
             }
             break;
         }

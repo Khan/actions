@@ -887,10 +887,6 @@ export const runSubmissionCli = (
         event,
         hasInlineComments: inline.length > 0,
         rereviewSection: rereview.section,
-        mediumCount,
-        mediumInlineCount: inlineList.filter(
-            (claim) => claim.importance === "medium",
-        ).length,
         approveDemoted,
         hasBodyFindings: hasCollapsedSection || prLevelLines.length > 0,
     });

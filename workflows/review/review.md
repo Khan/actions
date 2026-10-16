@@ -1049,8 +1049,8 @@ cd gh-aw-review-lib && npx -y tsx workflows/review/lib/submission.ts
 The verdict is computed by the plan CLI (Step 3), never by you: REQUEST_CHANGES
 iff a validated posted claim carries a blocking label, plus the reduced-depth
 flip floor over kept blocking threads and the open-thread suppression floor;
-APPROVE otherwise, medium-importance findings included (they post, and the
-approval head counts them) — all `lib/verdict.ts` / `lib/submission.ts` rules.
+APPROVE otherwise, medium-importance findings included (they post inline;
+the approval head reads "nothing blocks") — all `lib/verdict.ts` / `lib/submission.ts` rules.
 A third outcome exists: HOLD_FOR_HUMAN, when a core review pass
 (`correctness-reviewer` or `skill-auditor`) produced no usable output this
 run and the run would otherwise have auto-approved — the
@@ -1728,8 +1728,8 @@ non-blocking finding that is a verified defect or gap in code this PR adds, one
 a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
 what it does is decide which non-blocking findings post inline rather than
 collapse, keep a finding visible on re-reviews under the `blocking-medium`
-dial, and count in the approval head (a medium never changes the verdict; the
-run approves and says the finding is worth fixing before merge). The claim-validator checks the
+dial (a medium never changes the verdict or the approval head; the run
+approves and the finding posts inline ahead of minor ones). The claim-validator checks the
 marking and strips any it cannot confirm, and code strips it from any finding
 not anchored on a changed line of this PR, so an evidence-free medium costs
 the finding its prominence and buys nothing.
@@ -1877,8 +1877,8 @@ non-blocking finding that is a verified defect or gap in code this PR adds, one
 a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
 what it does is decide which non-blocking findings post inline rather than
 collapse, keep a finding visible on re-reviews under the `blocking-medium`
-dial, and count in the approval head (a medium never changes the verdict; the
-run approves and says the finding is worth fixing before merge). The claim-validator checks the
+dial (a medium never changes the verdict or the approval head; the run
+approves and the finding posts inline ahead of minor ones). The claim-validator checks the
 marking and strips any it cannot confirm, and code strips it from any finding
 not anchored on a changed line of this PR, so an evidence-free medium costs
 the finding its prominence and buys nothing.
@@ -2268,7 +2268,7 @@ set `corrected.importance` in either direction: `"minor"` strips a marking
 whose evidence does not meet that bar, `"medium"` grants it to an unmarked
 claim whose evidence clearly does. This is not the never-raise rule's
 territory: importance can never force REQUEST_CHANGES; it decides which
-non-blocking findings post inline, and the approval head counts them. A
+non-blocking findings post inline ahead of the rest. A
 `plausible` or `refuted`
 claim needs no importance call from you; code strips the tier from every
 claim you verify as plausible or refute (a claim your output never mentions
@@ -2387,8 +2387,8 @@ non-blocking finding that is a verified defect or gap in code this PR adds, one
 a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
 what it does is decide which non-blocking findings post inline rather than
 collapse, keep a finding visible on re-reviews under the `blocking-medium`
-dial, and count in the approval head (a medium never changes the verdict; the
-run approves and says the finding is worth fixing before merge). The claim-validator checks the
+dial (a medium never changes the verdict or the approval head; the run
+approves and the finding posts inline ahead of minor ones). The claim-validator checks the
 marking and strips any it cannot confirm, and code strips it from any finding
 not anchored on a changed line of this PR, so an evidence-free medium costs
 the finding its prominence and buys nothing.
@@ -2473,8 +2473,8 @@ non-blocking finding that is a verified defect or gap in code this PR adds, one
 a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
 what it does is decide which non-blocking findings post inline rather than
 collapse, keep a finding visible on re-reviews under the `blocking-medium`
-dial, and count in the approval head (a medium never changes the verdict; the
-run approves and says the finding is worth fixing before merge). The claim-validator checks the
+dial (a medium never changes the verdict or the approval head; the run
+approves and the finding posts inline ahead of minor ones). The claim-validator checks the
 marking and strips any it cannot confirm, and code strips it from any finding
 not anchored on a changed line of this PR, so an evidence-free medium costs
 the finding its prominence and buys nothing.
@@ -2549,8 +2549,8 @@ non-blocking finding that is a verified defect or gap in code this PR adds, one
 a reasonable author would fix before merge. It can never force REQUEST_CHANGES;
 what it does is decide which non-blocking findings post inline rather than
 collapse, keep a finding visible on re-reviews under the `blocking-medium`
-dial, and count in the approval head (a medium never changes the verdict; the
-run approves and says the finding is worth fixing before merge). The claim-validator checks the
+dial (a medium never changes the verdict or the approval head; the run
+approves and the finding posts inline ahead of minor ones). The claim-validator checks the
 marking and strips any it cannot confirm, and code strips it from any finding
 not anchored on a changed line of this PR, so an evidence-free medium costs
 the finding its prominence and buys nothing.

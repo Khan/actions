@@ -169,8 +169,8 @@ export const DEFAULT_BLOCKING_THRESHOLD = 1;
  *      anchoring a reduced re-review on a partial assessment; medium
  *      findings still reach the author as folded claim lines in the hold
  *      comment.
- *   3. Otherwise -> APPROVE, medium findings included: they post, and the
- *      approval head counts them.
+ *   3. Otherwise -> APPROVE, medium findings included: they post inline,
+ *      and the approval head reads "nothing blocks" like any other.
  *
  * The hold therefore only ever replaces what would otherwise have been an
  * auto-approval; it never sits in front of blocking feedback.
