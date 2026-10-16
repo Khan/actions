@@ -79,7 +79,8 @@ the same visible verdict line, "nothing blocks."; medium-importance findings
 (worth fixing before merge, never blocking) post inline ahead of minor ones
 rather than being counted in that line. A reduced-depth round whose would-be
 approval needs a full roster submits a comment instead. On approval it also
-posts the risk/patterns summary and requests the owning teams. The config files below feed these sub-agents.
+posts the risk/patterns summary and requests the owning teams. The config
+files below feed these sub-agents.
 
 A mechanical gate and a budget guardrail sit between the reviewers and the PR. The
 **change-provenance gate** (enforced in code against the diff's parsed changed-line

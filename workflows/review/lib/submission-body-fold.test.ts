@@ -108,6 +108,24 @@ describe("the fold's content blocks the submission skips", () => {
         expect(plan.skipSubmission).toBe(false);
     });
 
+    it("refuses the redundant-approval skip when inline comments posted", () => {
+        // The approval head is the same with or without inline comments, so
+        // the core body equals the bare approve line here and the inline
+        // count is the only thing holding the skip off.
+        const plan = runSubmissionCli(
+            makeFakeFs({
+                ...staged({
+                    depth: "full",
+                    claims: [claim({label: "suggestion (non-blocking)"})],
+                }),
+                ...priorApprove(),
+            }),
+        );
+        expect(plan.event).toBe("APPROVE");
+        expect(plan.comments).toHaveLength(1);
+        expect(plan.skipSubmission).toBe(false);
+    });
+
     it("refuses the demoted-COMMENT skip when the fold carries observations", () => {
         // Pins `bodyCarriesOnlyDepthNote`: a fast round demotes its
         // would-be APPROVE, so the core body is head plus depth note and
