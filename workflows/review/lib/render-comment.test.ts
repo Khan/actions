@@ -270,9 +270,7 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
     it("APPROVE without inline comments", () => {
         expect(
             body({event: "APPROVE", hasInlineComments: false}),
-        ).toMatchInlineSnapshot(
-            `"**✅ Approved** — no blocking issues found."`,
-        );
+        ).toMatchInlineSnapshot(`"**✅ Approved** — nothing blocks."`);
     });
 
     it("a conditional approval names its obligation count, singular and plural", () => {
@@ -292,8 +290,30 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
         );
     });
 
-    it("APPROVE with inline comments has an empty body (the comments ARE the review)", () => {
-        expect(body({event: "APPROVE", hasInlineComments: true})).toBe("");
+    it("APPROVE with inline comments still leads with the verdict", () => {
+        // Inline comments do not stand in for the head: without it, a
+        // minor-findings approval posts a body of folds alone.
+        expect(body({event: "APPROVE", hasInlineComments: true})).toBe(
+            "**✅ Approved** — nothing blocks; see inline comments.",
+        );
+    });
+
+    it("counts an approval's minor findings and says where they are", () => {
+        expect(body({hasInlineComments: true, inlineFindingCount: 1})).toBe(
+            "**✅ Approved** — nothing blocks; 1 minor finding (see inline comments).",
+        );
+        expect(body({bodyFindingCount: 2})).toBe(
+            "**✅ Approved** — nothing blocks; 2 minor findings (see the observations below).",
+        );
+        expect(
+            body({
+                hasInlineComments: true,
+                inlineFindingCount: 3,
+                bodyFindingCount: 2,
+            }),
+        ).toBe(
+            "**✅ Approved** — nothing blocks; 5 minor findings (see inline comments and the observations below).",
+        );
     });
 
     it("REQUEST_CHANGES always carries the pointer line (GitHub rejects an empty body)", () => {
@@ -360,7 +380,7 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
                 hasInlineComments: true,
                 policyConflicts: [{policy: "p", detail: "d"}],
             }),
-        ).toBe("");
+        ).toBe("**✅ Approved** — nothing blocks; see inline comments.");
     });
 
     it("a comment-less review always has a non-empty body (GitHub requires one)", () => {
@@ -378,7 +398,7 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
         }
     });
 
-    it("skipped-dimension notes form the entire body when the head is empty", () => {
+    it("skipped-dimension notes follow the head when inline comments posted", () => {
         expect(
             body({
                 event: "APPROVE",
@@ -388,7 +408,10 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
                 ],
             }),
         ).toBe(
-            "Note: patterns not assessed this run (pattern-triage output unavailable).",
+            [
+                "**✅ Approved** — nothing blocks; see inline comments.",
+                "Note: patterns not assessed this run (pattern-triage output unavailable).",
+            ].join("\n"),
         );
     });
 
@@ -409,7 +432,7 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
                 ],
             }),
         ).toMatchInlineSnapshot(`
-          "**✅ Approved** — no blocking issues found.
+          "**✅ Approved** — nothing blocks.
           Note: correctness not assessed this run (correctness-reviewer output unavailable).
           Note: claim validation not assessed this run (claim-validator output unavailable)."
         `);
@@ -456,7 +479,7 @@ describe("renderReviewBody — the COMMENT verdict", () => {
             event: "COMMENT",
             hasInlineComments: false,
             approveDemoted: true,
-            hasBodyFindings: true,
+            bodyFindingCount: 2,
         });
         expect(body).toContain(
             "**💬 Commented** — see the observations below; approval requires a full review round.",
@@ -519,14 +542,32 @@ describe("renderReviewBody — an approval with medium findings", () => {
         );
     });
 
-    it("keeps the empty head with inline comments when no medium posted", () => {
+    it("counts minor findings instead when no medium posted", () => {
         expect(
             renderReviewBody({
                 event: "APPROVE",
                 hasInlineComments: true,
                 mediumCount: 0,
+                inlineFindingCount: 2,
             }),
-        ).toBe("");
+        ).toBe(
+            "**✅ Approved** — nothing blocks; 2 minor findings (see inline comments).",
+        );
+    });
+
+    it("leaves minor findings out of the medium head", () => {
+        expect(
+            renderReviewBody({
+                event: "APPROVE",
+                hasInlineComments: true,
+                mediumCount: 1,
+                mediumInlineCount: 1,
+                inlineFindingCount: 4,
+                bodyFindingCount: 2,
+            }),
+        ).toBe(
+            "**✅ Approved** — nothing blocks; 1 finding worth fixing before merge (see inline comments).",
+        );
     });
 });
 

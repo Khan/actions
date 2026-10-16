@@ -22,7 +22,7 @@ import {
  */
 
 const REVIEW = "/tmp/gh-aw/review";
-const APPROVE_HEAD = "**✅ Approved** — no blocking issues found.";
+const APPROVE_HEAD = "**✅ Approved** — nothing blocks.";
 
 const makeFakeFs = (
     files: Record<string, string> = {},
@@ -147,7 +147,7 @@ describe("runSubmissionCli", () => {
         ).toBe("REQUEST_CHANGES");
     });
 
-    it("plans an empty-head APPROVE when only non-blocking claims post", () => {
+    it("plans a counted APPROVE head when only non-blocking claims post", () => {
         const fs = makeFakeFs(
             staged({
                 depth: "full",
@@ -159,9 +159,8 @@ describe("runSubmissionCli", () => {
         );
         const plan = runSubmissionCli(fs);
         expect(plan.event).toBe("APPROVE");
-        // Empty verdict head with inline comments; the note + stamp remain.
+        expect(plan.body).toContain("1 minor finding (see inline comments).");
         expect(plan.body).toContain("holistic not assessed this run");
-        expect(plan.body).not.toContain(APPROVE_HEAD);
     });
 
     it("plans the comment-less APPROVE body when nothing posts", () => {

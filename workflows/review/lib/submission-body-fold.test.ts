@@ -1,6 +1,8 @@
 import {describe, it, expect} from "vitest";
 
+import {parseCollapsedObservations} from "../../autofix/lib/collapsed";
 import {renderCollapsedFooter, stripFooters} from "./attribution";
+import {STAMP_MARKER} from "./rereview-mode";
 import {runSubmissionCli, type SubmissionFs} from "./submission";
 
 /**
@@ -230,6 +232,45 @@ describe("the review body's review-details fold", () => {
                 ].join("\n"),
             ).trim(),
         ).toBe("Body.");
+    });
+});
+
+describe("the approval's visible verdict head", () => {
+    const minor = claim({label: "suggestion (non-blocking)"});
+
+    it("leads a minor-findings approval above the fold", () => {
+        const body = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims: [minor]})),
+        ).body;
+        expect(body.split("\n")[0]).toBe(
+            "**✅ Approved** — nothing blocks; 1 minor finding (see inline comments).",
+        );
+        expect(body).toContain(STAMP_MARKER);
+    });
+
+    it("points at the fold when the findings collapsed, and autofix still reads them", () => {
+        const body = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims: [weak()]})),
+        ).body;
+        expect(body.split("\n")[0]).toBe(
+            "**✅ Approved** — nothing blocks; 1 minor finding (see the observations below).",
+        );
+        expect(parseCollapsedObservations([{body}])).toEqual([
+            {
+                path: "a.ts",
+                line: 2,
+                label: "thought (non-blocking)",
+                subject: "a hunch",
+                source: "correctness-reviewer",
+            },
+        ]);
+    });
+
+    it("renders the bare head when nothing was found", () => {
+        const body = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims: []})),
+        ).body;
+        expect(body.split("\n")[0]).toBe("**✅ Approved** — nothing blocks.");
     });
 });
 
