@@ -90,8 +90,8 @@
  * e.g. Khan/actions#272), `pattern-triage` itself, and the router having run
  * (a routerless freelancing run is already caught by rule 1).
  *
- * Determinism boundary: pure functions of the queued items and the staged
- * files; no model call, no clock, no prose about the code under review.
+ * Determinism boundary: queued items, staged files and the pinned sanitizer.
+ * No model call, clock, network request, or prose judgment about reviewed code.
  */
 
 import {extractJsonValue} from "./agent-json";
